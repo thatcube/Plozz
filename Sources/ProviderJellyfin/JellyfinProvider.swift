@@ -78,6 +78,11 @@ public struct JellyfinProvider: MediaProvider {
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {
         try await client.reportPlaybackProgress(progress, event: event)
+        // On stop, also release any server-side transcode job for this session.
+        // Best-effort: cleanup failure must not surface as a playback error.
+        if event == .stop, let playSessionID = progress.playSessionID, !playSessionID.isEmpty {
+            try? await client.stopActiveEncoding(playSessionID: playSessionID)
+        }
     }
 
     public func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? {

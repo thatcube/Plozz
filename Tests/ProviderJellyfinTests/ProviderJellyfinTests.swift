@@ -124,6 +124,34 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertFalse(url.contains("static=true"))
     }
 
+    func testStopReleasesActiveEncoding() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Sessions/Playing/Stopped", json: "{}")
+        stub.stub(pathSuffix: "/Videos/ActiveEncodings", json: "")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.reportPlayback(
+            PlaybackProgress(itemID: "i1", playSessionID: "ps1", positionSeconds: 120, isPaused: true),
+            event: .stop
+        )
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Sessions/Playing/Stopped") })
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Videos/ActiveEncodings") })
+    }
+
+    func testProgressDoesNotReleaseActiveEncoding() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Sessions/Playing/Progress", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.reportPlayback(
+            PlaybackProgress(itemID: "i1", playSessionID: "ps1", positionSeconds: 30, isPaused: false),
+            event: .progress
+        )
+
+        XCTAssertFalse(stub.sentPaths.contains { $0.hasSuffix("/Videos/ActiveEncodings") })
+    }
+
     func testPlaybackInfoSendsDeviceProfile() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """

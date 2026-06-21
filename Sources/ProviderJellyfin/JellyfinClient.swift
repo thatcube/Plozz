@@ -210,7 +210,22 @@ public struct JellyfinClient: Sendable {
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
-    // MARK: Images
+    /// Tells the server to tear down any active transcode/remux job for this
+    /// play session. Harmless for direct-play sessions (no encoding exists), but
+    /// essential for transcoded HLS so an ffmpeg job isn't left running on the
+    /// server until it times out.
+    func stopActiveEncoding(playSessionID: String) async throws {
+        let endpoint = Endpoint(
+            method: .delete,
+            path: "/Videos/ActiveEncodings",
+            queryItems: [
+                URLQueryItem(name: "deviceId", value: deviceProfile.deviceID),
+                URLQueryItem(name: "playSessionId", value: playSessionID)
+            ],
+            headers: authHeaders
+        )
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
 
     /// Builds an absolute image URL. Token is *not* required for images; the
     /// item id + image type is enough.

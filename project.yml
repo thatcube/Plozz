@@ -42,9 +42,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz
         PRODUCT_NAME: Plozz
-        # NOTE: A tvOS "Brand Assets" app icon (layered image stacks) should be
-        # added before App Store submission. Omitted here so the MVP builds for
-        # the simulator without placeholder art. See README "Roadmap".
+        # tvOS "Brand Assets" providing the layered app icon and Top Shelf
+        # images (required by App Store Connect for any upload, incl. TestFlight).
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
       - package: Plozz

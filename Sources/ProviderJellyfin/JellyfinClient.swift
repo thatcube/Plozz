@@ -172,23 +172,41 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
-    /// One page of a container's direct children. Requests only `limit` items
-    /// from `startIndex` and relies on `TotalRecordCount` so large libraries
-    /// load a screenful quickly instead of fetching everything (which would
-    /// time out). Non-recursive: returns the container's direct children, which
-    /// is correct for flat libraries, folders, and collections.
-    func items(userID: String, parentID: String, startIndex: Int, limit: Int) async throws -> ItemsResponse {
-        let endpoint = Endpoint(
-            path: "/Users/\(userID)/Items",
-            queryItems: [
-                URLQueryItem(name: "ParentId", value: parentID),
-                URLQueryItem(name: "StartIndex", value: String(startIndex)),
-                URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "SortBy", value: "SortName"),
-                URLQueryItem(name: "Fields", value: "Overview")
-            ],
-            headers: authHeaders
-        )
+    /// One page of a container's items for library browsing.
+    ///
+    /// For typed libraries (movies/series) this uses Jellyfin's **recursive,
+    /// indexed** item query (`Recursive=true` + `IncludeItemTypes`), which is the
+    /// fast path the official clients use and which paginates server-side. A
+    /// plain `ParentId` folder enumeration over a large library is slow enough to
+    /// exceed the request timeout even with a `Limit`, because the server still
+    /// walks/sorts the whole folder before applying it. For untyped containers
+    /// (folders/collections) it falls back to direct, non-recursive children.
+    func items(
+        userID: String,
+        parentID: String,
+        includeItemTypes: [String],
+        recursive: Bool,
+        startIndex: Int,
+        limit: Int
+    ) async throws -> ItemsResponse {
+        var queryItems = [
+            URLQueryItem(name: "ParentId", value: parentID),
+            URLQueryItem(name: "StartIndex", value: String(startIndex)),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "SortBy", value: "SortName"),
+            URLQueryItem(name: "SortOrder", value: "Ascending"),
+            // Minimal fields keep the first-page payload small for a fast grid.
+            URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio"),
+            URLQueryItem(name: "ImageTypeLimit", value: "1"),
+            URLQueryItem(name: "EnableTotalRecordCount", value: "true")
+        ]
+        if recursive {
+            queryItems.append(URLQueryItem(name: "Recursive", value: "true"))
+        }
+        if !includeItemTypes.isEmpty {
+            queryItems.append(URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")))
+        }
+        let endpoint = Endpoint(path: "/Users/\(userID)/Items", queryItems: queryItems, headers: authHeaders)
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
     }
 

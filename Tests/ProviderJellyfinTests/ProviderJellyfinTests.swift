@@ -87,7 +87,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
-        let page = try await provider.items(in: "lib1", page: PageRequest(startIndex: 60, limit: 60))
+        let page = try await provider.items(in: "lib1", kind: .movie, page: PageRequest(startIndex: 60, limit: 60))
 
         XCTAssertEqual(page.items.map(\.title), ["Alien", "Aliens"])
         XCTAssertEqual(page.items.first?.kind, .movie)
@@ -100,6 +100,34 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "StartIndex" })?.value, "60")
         XCTAssertEqual(query.first(where: { $0.name == "Limit" })?.value, "60")
         XCTAssertEqual(query.first(where: { $0.name == "SortBy" })?.value, "SortName")
+        // Movie libraries use the fast recursive/indexed query path.
+        XCTAssertEqual(query.first(where: { $0.name == "Recursive" })?.value, "true")
+        XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Movie")
+    }
+
+    func testItemsPageUsesSeriesTypeForTVLibrary() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        _ = try await provider.items(in: "lib2", kind: .series, page: PageRequest())
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertEqual(query.first(where: { $0.name == "Recursive" })?.value, "true")
+        XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Series")
+    }
+
+    func testItemsPageFolderUsesNonRecursiveDirectChildren() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        _ = try await provider.items(in: "folder1", kind: .folder, page: PageRequest())
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertNil(query.first(where: { $0.name == "Recursive" }))
+        XCTAssertNil(query.first(where: { $0.name == "IncludeItemTypes" }))
+        XCTAssertEqual(query.first(where: { $0.name == "ParentId" })?.value, "folder1")
     }
 
     func testItemsPageDefaultsTotalCountToItemCountWhenMissing() async throws {
@@ -109,7 +137,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
-        let page = try await provider.items(in: "lib1", page: PageRequest(startIndex: 0, limit: 60))
+        let page = try await provider.items(in: "lib1", kind: .movie, page: PageRequest(startIndex: 0, limit: 60))
         XCTAssertEqual(page.totalCount, 1)
         XCTAssertFalse(page.hasMore)
     }

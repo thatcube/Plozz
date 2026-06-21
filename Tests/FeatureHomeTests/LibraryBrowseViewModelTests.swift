@@ -6,7 +6,7 @@ import CoreModels
 final class LibraryBrowseViewModelTests: XCTestCase {
     private func makeVM(itemCount: Int, pageSize: Int = 10) -> (LibraryBrowseViewModel, FakeMediaProvider) {
         let provider = FakeMediaProvider(allItems: makeItems(itemCount))
-        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", pageSize: pageSize)
+        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, pageSize: pageSize)
         return (vm, provider)
     }
 
@@ -73,7 +73,7 @@ final class LibraryBrowseViewModelTests: XCTestCase {
     func testFirstPageFailureSetsFailedState() async {
         let provider = FakeMediaProvider(allItems: makeItems(100))
         provider.failAtStartIndex = 0
-        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", pageSize: 10)
+        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, pageSize: 10)
 
         await vm.loadFirstPage()
 
@@ -85,7 +85,7 @@ final class LibraryBrowseViewModelTests: XCTestCase {
 
     func testNextPageFailureKeepsLoadedItems() async {
         let provider = FakeMediaProvider(allItems: makeItems(100))
-        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", pageSize: 10)
+        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, pageSize: 10)
         await vm.loadFirstPage()
 
         provider.failAtStartIndex = 10

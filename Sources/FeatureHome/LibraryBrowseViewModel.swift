@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import CoreModels
+import CoreNetworking
 
 /// Drives a paginated library grid: loads the first page fast, then lazily
 /// fetches further pages as the user scrolls, so libraries with hundreds of
@@ -24,16 +25,19 @@ public final class LibraryBrowseViewModel {
 
     private let provider: any MediaProvider
     private let containerID: String
+    private let containerKind: MediaItemKind
     private let pageSize: Int
     private var nextPage: PageRequest
 
     public init(
         provider: any MediaProvider,
         containerID: String,
+        containerKind: MediaItemKind,
         pageSize: Int = PageRequest.defaultLimit
     ) {
         self.provider = provider
         self.containerID = containerID
+        self.containerKind = containerKind
         self.pageSize = pageSize
         self.nextPage = PageRequest(startIndex: 0, limit: pageSize)
     }
@@ -48,15 +52,18 @@ public final class LibraryBrowseViewModel {
         totalCount = 0
         pageError = nil
         nextPage = PageRequest(startIndex: 0, limit: pageSize)
+        PlozzLog.app.info("LibraryBrowse: loading first page for \(containerID) (\(containerKind.rawValue))")
         do {
-            let page = try await provider.items(in: containerID, page: nextPage)
+            let page = try await provider.items(in: containerID, kind: containerKind, page: nextPage)
             items = page.items
             totalCount = page.totalCount
             nextPage = nextPage.next()
             state = page.items.isEmpty ? .empty : .loaded(items)
         } catch let error as AppError {
+            PlozzLog.app.error("LibraryBrowse: first page failed for \(containerID): \(String(describing: error))")
             state = .failed(error)
         } catch {
+            PlozzLog.app.error("LibraryBrowse: first page failed for \(containerID): \(String(describing: error))")
             state = .failed(.unknown(""))
         }
     }
@@ -89,7 +96,7 @@ public final class LibraryBrowseViewModel {
         isLoadingNextPage = true
         defer { isLoadingNextPage = false }
         do {
-            let page = try await provider.items(in: containerID, page: nextPage)
+            let page = try await provider.items(in: containerID, kind: containerKind, page: nextPage)
             // Guard against duplicate ids if the library changed between pages.
             let existing = Set(items.map(\.id))
             items.append(contentsOf: page.items.filter { !existing.contains($0.id) })
@@ -97,8 +104,10 @@ public final class LibraryBrowseViewModel {
             nextPage = nextPage.next()
             state = .loaded(items)
         } catch let error as AppError {
+            PlozzLog.app.error("LibraryBrowse: next page failed for \(containerID): \(String(describing: error))")
             pageError = error
         } catch {
+            PlozzLog.app.error("LibraryBrowse: next page failed for \(containerID): \(String(describing: error))")
             pageError = .unknown("")
         }
     }

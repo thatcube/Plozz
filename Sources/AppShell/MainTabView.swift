@@ -59,7 +59,7 @@ private struct HomeTab: View {
             )
             .navigationDestination(for: MediaLibrary.self) { library in
                 LibraryBrowseView(
-                    viewModel: LibraryBrowseViewModel(provider: provider, containerID: library.id),
+                    viewModel: LibraryBrowseViewModel(provider: provider, containerID: library.id, containerKind: library.kind),
                     title: library.title,
                     onSelect: { open($0) }
                 )

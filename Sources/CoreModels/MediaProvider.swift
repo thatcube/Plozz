@@ -41,7 +41,11 @@ public protocol MediaProvider: Sendable {
     /// libraries. Implementations request only `page.limit` items starting at
     /// `page.startIndex` and report the container's `totalCount` so callers can
     /// lazily fetch further pages on demand.
-    func items(in containerID: String, page: PageRequest) async throws -> MediaPage
+    ///
+    /// `kind` is the container's kind (e.g. `.movie`/`.series` for a library
+    /// view) so the provider can pick its most efficient, indexed query for that
+    /// content type rather than an unbounded folder enumeration.
+    func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage
 
     // MARK: Playback
 

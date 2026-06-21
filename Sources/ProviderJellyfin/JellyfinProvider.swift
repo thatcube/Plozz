@@ -51,19 +51,44 @@ public struct JellyfinProvider: MediaProvider {
         try await client.children(userID: session.userID, parentID: itemID).map(map(item:))
     }
 
-    public func items(in containerID: String, page: PageRequest) async throws -> MediaPage {
-        let response = try await client.items(
-            userID: session.userID,
-            parentID: containerID,
-            startIndex: page.startIndex,
-            limit: page.limit
+    public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
+        let (recursive, includeItemTypes) = Self.query(forContainerKind: kind)
+        PlozzLog.networking.info(
+            "Library browse: container=\(containerID) kind=\(kind.rawValue) recursive=\(recursive) types=\(includeItemTypes.joined(separator: ",")) start=\(page.startIndex) limit=\(page.limit)"
         )
-        let items = response.Items.map(map(item:))
-        return MediaPage(
-            items: items,
-            startIndex: page.startIndex,
-            totalCount: response.TotalRecordCount ?? (page.startIndex + items.count)
-        )
+        do {
+            let response = try await client.items(
+                userID: session.userID,
+                parentID: containerID,
+                includeItemTypes: includeItemTypes,
+                recursive: recursive,
+                startIndex: page.startIndex,
+                limit: page.limit
+            )
+            let items = response.Items.map(map(item:))
+            PlozzLog.networking.info(
+                "Library browse: container=\(containerID) returned=\(items.count) total=\(response.TotalRecordCount ?? -1)"
+            )
+            return MediaPage(
+                items: items,
+                startIndex: page.startIndex,
+                totalCount: response.TotalRecordCount ?? (page.startIndex + items.count)
+            )
+        } catch {
+            PlozzLog.networking.error("Library browse failed: container=\(containerID) error=\(String(describing: error))")
+            throw error
+        }
+    }
+
+    /// Picks the Jellyfin query strategy for a container kind. Typed libraries
+    /// use the fast recursive/indexed path; folders/collections list direct
+    /// children.
+    private static func query(forContainerKind kind: MediaItemKind) -> (recursive: Bool, includeItemTypes: [String]) {
+        switch kind {
+        case .movie: return (true, ["Movie"])
+        case .series: return (true, ["Series"])
+        default: return (false, [])
+        }
     }
 
     // MARK: Playback

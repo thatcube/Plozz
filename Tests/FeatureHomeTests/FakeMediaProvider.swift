@@ -30,7 +30,7 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     }
     func children(of itemID: String) async throws -> [MediaItem] { allItems }
 
-    func items(in containerID: String, page: PageRequest) async throws -> MediaPage {
+    func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         requestedPages.append(page)
         if let failAt = failAtStartIndex, failAt == page.startIndex {
             failAtStartIndex = nil

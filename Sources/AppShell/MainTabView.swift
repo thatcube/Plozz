@@ -5,6 +5,7 @@ import CoreUI
 import FeatureHome
 import FeaturePlayback
 import FeatureSettings
+import RatingsService
 
 /// The signed-in experience: Home and Settings tabs, with item-detail
 /// navigation and full-screen playback.
@@ -17,6 +18,7 @@ struct MainTabView: View {
     let provider: any MediaProvider
     let captionModel: CaptionSettingsModel
     let spoilerModel: SpoilerSettingsModel
+    let ratingsProvider: any ExternalRatingsProviding
     let accounts: [Account]
     let activeAccountID: String?
     @Binding var pendingPlayItemID: String?
@@ -30,6 +32,7 @@ struct MainTabView: View {
                 provider: provider,
                 captionSettings: captionModel.settings,
                 spoilerSettings: spoilerModel.settings,
+                ratingsProvider: ratingsProvider,
                 pendingPlayItemID: $pendingPlayItemID
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
@@ -57,6 +60,7 @@ private struct HomeTab: View {
     let provider: any MediaProvider
     let captionSettings: CaptionSettings
     let spoilerSettings: SpoilerSettings
+    let ratingsProvider: any ExternalRatingsProviding
     @Binding var pendingPlayItemID: String?
 
     @State private var path = NavigationPath()
@@ -82,7 +86,7 @@ private struct HomeTab: View {
             }
             .navigationDestination(for: MediaItem.self) { item in
                 ItemDetailView(
-                    viewModel: ItemDetailViewModel(provider: provider, itemID: item.id),
+                    viewModel: ItemDetailViewModel(provider: provider, itemID: item.id, ratingsProvider: ratingsProvider),
                     spoilerSettings: spoilerSettings,
                     onPlay: { playingItem = $0 },
                     onSelectChild: { open($0) }

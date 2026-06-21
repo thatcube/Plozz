@@ -72,6 +72,9 @@ public struct ItemDetailView: View {
                 if let subtitle = item.subtitle {
                     Text(subtitle).font(.title3).foregroundStyle(.secondary)
                 }
+                if !item.ratings.isEmpty {
+                    RatingsBadgeRow(ratings: item.ratings)
+                }
                 if hideText {
                     Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
                         .font(.title3)

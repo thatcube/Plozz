@@ -4,6 +4,7 @@ import CoreModels
 import FeatureAuth
 import FeatureDiscovery
 import ProviderJellyfin
+import RatingsService
 import TopShelfKit
 
 /// The app's composition root and single source of truth for session state.
@@ -32,6 +33,12 @@ public final class AppState {
 
     public let captionModel: CaptionSettingsModel
     public let spoilerModel: SpoilerSettingsModel
+
+    /// Provider-agnostic external-ratings enrichment (IMDb/RT/Metacritic via
+    /// OMDb when a key is configured; otherwise a no-op). Injected into item
+    /// detail so ratings are fetched async without blocking the screen.
+    public let ratingsProvider: any ExternalRatingsProviding
+
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry
@@ -40,12 +47,14 @@ public final class AppState {
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
         captionModel: CaptionSettingsModel? = nil,
-        spoilerModel: SpoilerSettingsModel? = nil
+        spoilerModel: SpoilerSettingsModel? = nil,
+        ratingsProvider: (any ExternalRatingsProviding)? = nil
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
         self.captionModel = captionModel ?? CaptionSettingsModel()
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel()
+        self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {

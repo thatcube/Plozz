@@ -46,6 +46,7 @@ public struct RootView: View {
                         provider: provider,
                         captionModel: appState.captionModel,
                         spoilerModel: appState.spoilerModel,
+                        ratingsProvider: appState.ratingsProvider,
                         accounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
                         pendingPlayItemID: Binding(

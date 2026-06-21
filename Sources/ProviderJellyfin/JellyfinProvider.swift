@@ -192,8 +192,25 @@ public struct JellyfinProvider: MediaProvider {
             playedPercentage: dto.UserData?.PlayedPercentage.map { $0 / 100.0 },
             isPlayed: dto.UserData?.Played ?? false,
             posterURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 500),
-            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280)
+            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280),
+            ratings: Self.ratings(from: dto),
+            providerIDs: dto.ProviderIds ?? [:]
         )
+    }
+
+    /// Maps Jellyfin's native rating fields onto provider-agnostic ratings.
+    ///
+    /// `CommunityRating` is a 0–10 audience score; `CriticRating` is a 0–100
+    /// Rotten Tomatoes Tomatometer percentage.
+    private static func ratings(from dto: BaseItemDto) -> [ExternalRating] {
+        var ratings: [ExternalRating] = []
+        if let community = dto.CommunityRating {
+            ratings.append(ExternalRating(source: .community, value: community, scale: .outOfTen))
+        }
+        if let critic = dto.CriticRating {
+            ratings.append(ExternalRating(source: .rottenTomatoes, value: critic, scale: .percent))
+        }
+        return ratings
     }
 
     private func map(stream dto: MediaStreamDto) -> MediaTrack {

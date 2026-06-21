@@ -142,6 +142,43 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertFalse(page.hasMore)
     }
 
+    func testItemMapsNativeRatingsAndProviderIDs() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0,
+        "CommunityRating":7.2,"CriticRating":74,
+        "ProviderIds":{"Imdb":"tt0111161","Tmdb":"278"},
+        "UserData":{"PlaybackPositionTicks":0}}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "i1")
+
+        XCTAssertEqual(item.providerIDs["Imdb"], "tt0111161")
+        XCTAssertEqual(item.providerIDs["Tmdb"], "278")
+
+        let community = item.ratings.first { $0.source == .community }
+        XCTAssertEqual(community?.value, 7.2)
+        XCTAssertEqual(community?.scale, .outOfTen)
+
+        let critic = item.ratings.first { $0.source == .rottenTomatoes }
+        XCTAssertEqual(critic?.value, 74)
+        XCTAssertEqual(critic?.scale, .percent)
+    }
+
+    func testItemWithoutRatingFieldsHasEmptyRatings() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i2", json: """
+        {"Id":"i2","Name":"Movie","Type":"Movie","RunTimeTicks":0,
+        "UserData":{"PlaybackPositionTicks":0}}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "i2")
+        XCTAssertTrue(item.ratings.isEmpty)
+        XCTAssertTrue(item.providerIDs.isEmpty)
+    }
+
     func testPlaybackInfoResolvesDirectStreamWithApiKey() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """

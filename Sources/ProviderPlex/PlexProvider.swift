@@ -74,6 +74,16 @@ public struct PlexProvider: MediaProvider {
         }
     }
 
+    // MARK: Search
+
+    public func search(query: String, limit: Int) async throws -> [MediaItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        return try await client.search(query: trimmed, limit: limit)
+            .map(map(metadata:))
+            .filter { $0.kind == .movie || $0.kind == .series || $0.kind == .episode }
+    }
+
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {

@@ -91,6 +91,16 @@ public struct PlexClient: Sendable {
         return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL).MediaContainer
     }
 
+    /// `GET /search?query=…` — global server search across libraries. Returns a
+    /// flat `Metadata` list of matching movies/shows/episodes.
+    func search(query: String, limit: Int) async throws -> [PlexMetadata] {
+        var items = containerQuery(start: 0, size: limit)
+        items.append(URLQueryItem(name: "query", value: query))
+        let endpoint = Endpoint(path: "/search", queryItems: items, headers: headers)
+        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+            .MediaContainer.Metadata ?? []
+    }
+
     // MARK: Playback
 
     /// `GET /:/timeline` — report progress so Plex keeps resume points in sync.

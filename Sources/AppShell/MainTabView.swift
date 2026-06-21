@@ -45,6 +45,7 @@ struct MainTabView: View {
                 provider: provider,
                 captionSettings: captionModel.settings,
                 spoilerSettings: spoilerModel.settings,
+                showDiagnostics: diagnosticsModel.settings.isEnabled,
                 ratingsProvider: ratingsProvider
             )
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
@@ -200,6 +201,7 @@ private struct SearchTab: View {
     let provider: any MediaProvider
     let captionSettings: CaptionSettings
     let spoilerSettings: SpoilerSettings
+    let showDiagnostics: Bool
     let ratingsProvider: any ExternalRatingsProviding
 
     @State private var path = NavigationPath()

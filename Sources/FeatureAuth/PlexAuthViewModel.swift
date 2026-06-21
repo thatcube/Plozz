@@ -40,31 +40,43 @@ public final class PlexAuthViewModel {
     }
 
     /// Starts (or restarts) the whole PIN-link flow.
+    ///
+    /// Keeps a live code (and QR) on screen indefinitely: as soon as one lapses
+    /// without being linked it requests a fresh one, so the user never has to
+    /// hit "retry" — mirroring the Jellyfin Quick Connect screen.
     public func start() {
         flow?.cancel()
         phase = .requesting
         flow = Task { [weak self] in
             guard let self else { return }
             do {
-                let pin = try await service.begin()
-                try Task.checkCancellation()
-                let expiresAt = Date().addingTimeInterval(service.timeout)
-                self.phase = .awaitingLink(code: pin.code, expiresAt: expiresAt)
+                while true {
+                    try Task.checkCancellation()
+                    let pin = try await service.begin()
+                    try Task.checkCancellation()
+                    let expiresAt = Date().addingTimeInterval(service.timeout)
+                    self.phase = .awaitingLink(code: pin.code, expiresAt: expiresAt)
 
-                let token = try await service.awaitLink(for: pin)
-                try Task.checkCancellation()
-                self.authToken = token
-                self.phase = .loadingServers
+                    switch try await Self.awaitLinkOrExpiry(service: service, pin: pin, expiresAt: expiresAt) {
+                    case let .linked(token):
+                        try Task.checkCancellation()
+                        self.authToken = token
+                        self.phase = .loadingServers
 
-                let servers = try await service.servers(authToken: token)
-                try Task.checkCancellation()
-                switch servers.count {
-                case 0:
-                    self.phase = .error("No Plex servers are available on this account.")
-                case 1:
-                    try await self.finish(with: servers[0], token: token)
-                default:
-                    self.phase = .selectingServer(servers)
+                        let servers = try await service.servers(authToken: token)
+                        try Task.checkCancellation()
+                        switch servers.count {
+                        case 0:
+                            self.phase = .error("No Plex servers are available on this account.")
+                        case 1:
+                            try await self.finish(with: servers[0], token: token)
+                        default:
+                            self.phase = .selectingServer(servers)
+                        }
+                        return
+                    case .expired:
+                        continue // Transparently issue a fresh code + QR.
+                    }
                 }
             } catch is CancellationError {
                 // Cancelled by the user; leave phase as-is (view is dismissing).
@@ -74,6 +86,40 @@ public final class PlexAuthViewModel {
             } catch {
                 self.phase = .error(AppError.unknown("").userMessage)
             }
+        }
+    }
+
+    private enum LinkOutcome {
+        case linked(String)
+        case expired
+    }
+
+    /// Races the link poll against a wall-clock expiry watchdog. The watchdog
+    /// guarantees we regenerate at the deadline even if a poll request stalls,
+    /// so the screen can never get stranded on an expired code.
+    private static func awaitLinkOrExpiry(
+        service: PlexAuthService,
+        pin: PlexPinChallenge,
+        expiresAt: Date
+    ) async throws -> LinkOutcome {
+        try await withThrowingTaskGroup(of: LinkOutcome.self) { group in
+            group.addTask {
+                do {
+                    return .linked(try await service.awaitLink(for: pin))
+                } catch let error as AppError where error == .quickConnectExpired {
+                    return .expired
+                }
+            }
+            group.addTask {
+                let remaining = expiresAt.timeIntervalSinceNow
+                if remaining > 0 {
+                    try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+                return .expired
+            }
+            let outcome = try await group.next()!
+            group.cancelAll()
+            return outcome
         }
     }
 

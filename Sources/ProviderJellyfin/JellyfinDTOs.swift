@@ -56,10 +56,16 @@ struct BaseItemDto: Decodable {
     let Overview: String?
     let SeriesName: String?
     let SeasonName: String?
+    /// For an episode, the id of its parent series (used to fall back to series
+    /// artwork when the episode itself has no image).
+    let SeriesId: String?
     let IndexNumber: Int?
     let ParentIndexNumber: Int?
     let ProductionYear: Int?
     let RunTimeTicks: Int64?
+    let CommunityRating: Double?
+    let CriticRating: Double?
+    let ProviderIds: [String: String]?
     let UserData: UserItemDataDto?
     let MediaSources: [MediaSourceInfo]?
     let MediaStreams: [MediaStreamDto]?
@@ -80,11 +86,23 @@ struct PlaybackInfoResponse: Decodable {
 
 struct MediaSourceInfo: Decodable {
     let Id: String?
+    let ETag: String?
     let TranscodingUrl: String?
+    let TranscodingSubProtocol: String?
     let SupportsDirectPlay: Bool?
     let SupportsDirectStream: Bool?
+    let SupportsTranscoding: Bool?
     let Container: String?
     let MediaStreams: [MediaStreamDto]?
+}
+
+/// Body of `POST /Items/{id}/PlaybackInfo`. Carrying a `DeviceProfile` is what
+/// lets the server choose DirectPlay vs a seekable HLS transcode for this device.
+struct PlaybackInfoBody: Encodable {
+    let UserId: String
+    let MaxStreamingBitrate: Int
+    let AutoOpenLiveStream: Bool
+    let DeviceProfile: JellyfinCapabilityProfile
 }
 
 struct MediaStreamDto: Decodable {
@@ -95,6 +113,19 @@ struct MediaStreamDto: Decodable {
     let DisplayTitle: String?
     let IsDefault: Bool?
     let IsForced: Bool?
+}
+
+/// One result from `GET /Items/{id}/RemoteSearch/Subtitles/{language}`.
+struct RemoteSubtitleInfoDto: Decodable {
+    let Id: String?
+    let Name: String?
+    let ProviderName: String?
+    let ThreeLetterISOLanguageName: String?
+    let Format: String?
+    let CommunityRating: Double?
+    let DownloadCount: Int?
+    let IsForced: Bool?
+    let IsHashMatch: Bool?
 }
 
 // MARK: - Ticks helpers

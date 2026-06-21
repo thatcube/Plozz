@@ -12,8 +12,23 @@ public enum PlozzTheme {
         public static let landscapeHeight: CGFloat = 270
         public static let rowSpacing: CGFloat = 40
         public static let cardSpacing: CGFloat = 40
+        /// Tighter spacing for dense multi-column library grids.
+        public static let gridSpacing: CGFloat = 28
         public static let cornerRadius: CGFloat = 12
-        public static let screenPadding: CGFloat = 60
+        /// Medium (landscape) card surface + media corner radii, matching the
+        /// Twozz medium content card.
+        public static let mediumCardCornerRadius: CGFloat = 22
+        public static let mediumMediaCornerRadius: CGFloat = 18
+        /// Content inset between a medium card's glass surface and its media.
+        public static let mediumCardInset: CGFloat = 16
+        /// Focus scale for a lifted medium card.
+        public static let mediumFocusedCardScale: CGFloat = 1.07
+        /// Vertical padding around a horizontal rail so a focused card's lift and
+        /// drop shadow are never clipped by the scroll view.
+        public static let railVerticalPadding: CGFloat = 48
+        /// Scale applied to a focused browsing tile (matches Twozz Browse).
+        public static let focusedCardScale: CGFloat = 1.08
+        public static let screenPadding: CGFloat = 36
     }
 }
 

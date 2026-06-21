@@ -3,129 +3,388 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// Settings: account info, full caption customization, and sign out.
+/// Settings: account management, appearance, caption customization, spoiler
+/// protection, playback diagnostics, and sign out.
 ///
-/// Uses only tvOS-supported controls — `Toggle`, `Picker`, `Button` — since
-/// `Slider` isn't available on tvOS. Caption changes apply immediately and
-/// persist via `CaptionSettingsModel`.
+/// Laid out in the Twozz style — distinct **sections**, each a panel, with
+/// selectable options presented as a **horizontal row of focusable cards**
+/// (`OptionCardRow`) rather than one long vertical list of pickers. This strays
+/// slightly from native tvOS Settings but scales far better as options grow.
+/// Caption controls are factored into the reusable `CaptionSettingsCard`
+/// (CoreUI) so the player can surface the same UI mid-playback. The whole screen
+/// is a `ScrollView` of focusable content, which also fixes the previously
+/// unreachable (and therefore unreadable) About section on tvOS.
 public struct SettingsView: View {
     @State private var captions: CaptionSettingsModel
-    private let userName: String
-    private let serverName: String
-    private let serverURL: String
+    @State private var spoilers: SpoilerSettingsModel
+    @State private var theme: ThemeSettingsModel
+    @State private var diagnostics: DiagnosticsSettingsModel
+    @State private var homeVisibility: HomeLibraryVisibilityModel
+    private let discoveredLibraries: LoadState<[AggregatedLibrary]>
+    private let reloadLibraries: () async -> Void
+    private let accounts: [Account]
+    private let activeAccountID: String?
+    private let profiles: [Profile]
+    private let activeProfile: Profile
     private let appVersion: String
     private let appBuild: String
     private let repoURL: String
-    private let onSignOut: () -> Void
+    private let onAddAccount: () -> Void
+    private let onRemoveAccount: (Account) -> Void
+    private let onSignOutAll: () -> Void
+    private let onSwitchProfile: () -> Void
 
     public init(
         captions: CaptionSettingsModel,
-        userName: String,
-        serverName: String,
-        serverURL: String,
+        spoilers: SpoilerSettingsModel,
+        theme: ThemeSettingsModel,
+        diagnostics: DiagnosticsSettingsModel,
+        homeVisibility: HomeLibraryVisibilityModel,
+        discoveredLibraries: LoadState<[AggregatedLibrary]>,
+        reloadLibraries: @escaping () async -> Void,
+        accounts: [Account],
+        activeAccountID: String?,
+        profiles: [Profile],
+        activeProfile: Profile,
         appVersion: String,
         appBuild: String,
         repoURL: String,
-        onSignOut: @escaping () -> Void
+        onAddAccount: @escaping () -> Void,
+        onRemoveAccount: @escaping (Account) -> Void,
+        onSignOutAll: @escaping () -> Void,
+        onSwitchProfile: @escaping () -> Void
     ) {
         _captions = State(initialValue: captions)
-        self.userName = userName
-        self.serverName = serverName
-        self.serverURL = serverURL
+        _spoilers = State(initialValue: spoilers)
+        _theme = State(initialValue: theme)
+        _diagnostics = State(initialValue: diagnostics)
+        _homeVisibility = State(initialValue: homeVisibility)
+        self.discoveredLibraries = discoveredLibraries
+        self.reloadLibraries = reloadLibraries
+        self.accounts = accounts
+        self.activeAccountID = activeAccountID
+        self.profiles = profiles
+        self.activeProfile = activeProfile
         self.appVersion = appVersion
         self.appBuild = appBuild
         self.repoURL = repoURL
-        self.onSignOut = onSignOut
+        self.onAddAccount = onAddAccount
+        self.onRemoveAccount = onRemoveAccount
+        self.onSignOutAll = onSignOutAll
+        self.onSwitchProfile = onSwitchProfile
     }
 
-    private let fontScales: [Double] = [0.75, 1.0, 1.25, 1.5, 2.0]
-    private let backgroundOpacities: [Double] = [0.0, 0.25, 0.5, 0.75, 1.0]
+    private var spoilerModeExplanation: String {
+        switch spoilers.settings.mode {
+        case .blur:
+            return "Episode thumbnails are blurred until watched. Titles and descriptions stay hidden until you finish the episode."
+        case .placeholder:
+            return "Episode thumbnails are replaced with generic series art and the episode number, so no real frame is ever shown. Titles and descriptions stay hidden until you finish the episode."
+        }
+    }
 
     public var body: some View {
         NavigationStack {
-            Form {
-                Section("Account") {
-                    LabeledContent("Signed in as", value: userName)
-                    LabeledContent("Server", value: serverName)
-                    LabeledContent("Address", value: serverURL)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 40) {
+                    profilePanel
+                    accountsPanel
+                    homeLibrariesPanel
+                    appearancePanel
+                    captionsPanel
+                    spoilerPanel
+                    playbackPanel
+                    if !accounts.isEmpty { signOutPanel }
+                    aboutPanel
                 }
-
-                Section("Captions") {
-                    Toggle("Use system caption style", isOn: $captions.settings.followsSystemStyle)
-
-                    if !captions.settings.followsSystemStyle {
-                        Picker("Text size", selection: $captions.settings.fontScale) {
-                            ForEach(fontScales, id: \.self) { scale in
-                                Text("\(Int(scale * 100))%").tag(scale)
-                            }
-                        }
-
-                        Picker("Text color", selection: $captions.settings.textColor) {
-                            ForEach(CaptionSettings.RGBAColor.presets, id: \.name) { preset in
-                                Text(preset.name).tag(preset.color)
-                            }
-                        }
-
-                        Picker("Background", selection: $captions.settings.backgroundColor.alpha) {
-                            ForEach(backgroundOpacities, id: \.self) { opacity in
-                                Text(opacity == 0 ? "Off" : "\(Int(opacity * 100))%").tag(opacity)
-                            }
-                        }
-
-                        Picker("Edge style", selection: $captions.settings.edgeStyle) {
-                            ForEach(CaptionSettings.EdgeStyle.allCases, id: \.self) { style in
-                                Text(style.displayName).tag(style)
-                            }
-                        }
-
-                        CaptionPreview(settings: captions.settings)
-                    }
-                }
-
-                Section {
-                    Button(role: .destructive, action: onSignOut) {
-                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                    }
-                }
-
-                Section("About") {
-                    SettingsAboutSection(
-                        version: appVersion,
-                        build: appBuild,
-                        repoURL: repoURL
-                    )
-                }
+                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                .padding(.vertical, 40)
             }
             .navigationTitle("Settings")
+            .task { await reloadLibraries() }
+        }
+    }
+
+    // MARK: - Profile
+
+    private var profilePanel: some View {
+        SettingsPanel(
+            title: "Profile",
+            footer: "Each profile keeps its own theme, spoiler, caption, and account selections."
+        ) {
+            HStack(spacing: 20) {
+                Image(systemName: activeProfile.avatarSymbol)
+                    .font(.largeTitle)
+                    .frame(width: 64, height: 64)
+                    .background(Circle().fill(Color.accentColor.opacity(0.25)))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(activeProfile.name).font(.title3.weight(.semibold))
+                    Text(profiles.count == 1 ? "1 profile" : "\(profiles.count) profiles")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: onSwitchProfile) {
+                    Label("Switch Profile", systemImage: "person.2.circle")
+                }
+            }
+        }
+    }
+
+    // MARK: - Accounts
+
+    private var accountsPanel: some View {
+        SettingsPanel(
+            title: accounts.count == 1 ? "Account" : "Accounts",
+            footer: "Add another Jellyfin or Plex server to combine their libraries on Home."
+        ) {
+            VStack(spacing: 20) {
+                ForEach(accounts) { account in
+                    accountRow(account)
+                }
+                Button(action: onAddAccount) {
+                    Label("Add Account", systemImage: "plus.circle")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func accountRow(_ account: Account) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(account.userName).font(.headline)
+                    Text(account.server.name)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(account.server.baseURL.absoluteString)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if account.id == activeAccountID {
+                    Label("Active", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.green)
+                }
+            }
+            Button(role: .destructive) {
+                onRemoveAccount(account)
+            } label: {
+                Label("Remove", systemImage: "trash")
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Home libraries
+
+    /// The customizable "Home Libraries" checklist: every discovered library,
+    /// grouped by account/provider, with an opt-out toggle that controls Home
+    /// visibility. Toggling persists immediately and updates Home live.
+    @ViewBuilder
+    private var homeLibrariesPanel: some View {
+        switch discoveredLibraries {
+        case .idle, .loading:
+            SettingsPanel(title: "Home Libraries") {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Discovering libraries…")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .empty:
+            SettingsPanel(title: "Home Libraries") {
+                Text("No libraries found on your servers.")
+                    .foregroundStyle(.secondary)
+            }
+        case .failed:
+            SettingsPanel(title: "Home Libraries") {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Couldn't load your libraries.")
+                        .foregroundStyle(.secondary)
+                    Button {
+                        Task { await reloadLibraries() }
+                    } label: {
+                        Label("Try Again", systemImage: "arrow.clockwise")
+                    }
+                }
+            }
+        case let .loaded(libraries):
+            SettingsPanel(
+                title: "Home Libraries",
+                footer: "Choose which libraries appear on your Home screen. Newly added libraries appear automatically."
+            ) {
+                VStack(alignment: .leading, spacing: 20) {
+                    ForEach(groupedLibraries(libraries), id: \.id) { group in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(group.header)
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                            ForEach(group.libraries) { aggregated in
+                                Toggle(aggregated.library.title, isOn: Binding(
+                                    get: { homeVisibility.isVisible(aggregated.key) },
+                                    set: { homeVisibility.setVisible($0, for: aggregated.key) }
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private struct LibraryGroup: Identifiable {
+        let id: String
+        let header: String
+        let libraries: [AggregatedLibrary]
+    }
+
+    /// Groups discovered libraries by their owning account, preserving discovery
+    /// order, with a "user · server (provider)" header per group.
+    private func groupedLibraries(_ libraries: [AggregatedLibrary]) -> [LibraryGroup] {
+        var order: [String] = []
+        var groups: [String: [AggregatedLibrary]] = [:]
+        for library in libraries {
+            if groups[library.accountID] == nil { order.append(library.accountID) }
+            groups[library.accountID, default: []].append(library)
+        }
+        return order.compactMap { accountID in
+            guard let libs = groups[accountID], let first = libs.first else { return nil }
+            let header = "\(first.accountName) · \(first.serverName) (\(first.providerKind.displayName))"
+            return LibraryGroup(id: accountID, header: header, libraries: libs)
+        }
+    }
+
+    // MARK: - Appearance
+
+    private var appearancePanel: some View {
+        SettingsPanel(
+            title: "Appearance",
+            footer: "Choose how Plozz looks. System follows your Apple TV's appearance; OLED uses a pure-black background."
+        ) {
+            OptionCardRow(options: AppTheme.allCases, selection: themeBinding) { option in
+                VStack(spacing: 12) {
+                    Image(systemName: option.symbolName)
+                        .font(.largeTitle)
+                    Text(option.displayName)
+                        .font(.headline)
+                }
+            }
+        }
+    }
+
+    private var themeBinding: Binding<AppTheme> {
+        Binding(get: { theme.theme }, set: { theme.theme = $0 })
+    }
+
+    // MARK: - Captions
+
+    private var captionsPanel: some View {
+        SettingsPanel(
+            title: "Captions",
+            footer: "These caption settings are also available from the player while you watch."
+        ) {
+            CaptionSettingsCard(settings: $captions.settings)
+        }
+    }
+
+    // MARK: - Spoilers
+
+    private var spoilerPanel: some View {
+        SettingsPanel(title: "Spoiler Protection") {
+            VStack(alignment: .leading, spacing: 18) {
+                Toggle("Hide spoilers for unwatched episodes", isOn: $spoilers.settings.isEnabled)
+
+                if spoilers.settings.isEnabled {
+                    OptionCardRow(
+                        options: SpoilerSettings.Mode.allCases,
+                        selection: $spoilers.settings.mode
+                    ) { mode in
+                        Text(mode.displayName)
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    Text(spoilerModeExplanation)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Playback
+
+    private var playbackPanel: some View {
+        SettingsPanel(
+            title: "Playback",
+            footer: "Overlays live stream details (resolution, bitrate, codec, HDR, buffer, dropped frames) on top of the player."
+        ) {
+            Toggle("Show playback diagnostics", isOn: $diagnostics.settings.isEnabled)
+        }
+    }
+
+    // MARK: - Sign out
+
+    private var signOutPanel: some View {
+        SettingsPanel(title: "Sign Out") {
+            Button(role: .destructive, action: onSignOutAll) {
+                Label("Sign Out of All Accounts", systemImage: "rectangle.portrait.and.arrow.right")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - About
+
+    private var aboutPanel: some View {
+        SettingsPanel(title: "About") {
+            SettingsAboutSection(
+                version: appVersion,
+                build: appBuild,
+                repoURL: repoURL
+            )
         }
     }
 }
 
-/// Live preview of how captions will look with the current settings.
-private struct CaptionPreview: View {
-    let settings: CaptionSettings
+/// A titled settings section rendered as a translucent panel. Used to break the
+/// screen into clear, scalable sections in the Twozz style.
+private struct SettingsPanel<Content: View>: View {
+    let title: String
+    var footer: String?
+    @ViewBuilder let content: Content
+
+    init(title: String, footer: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.footer = footer
+        self.content = content()
+    }
 
     var body: some View {
-        VStack {
-            Spacer()
-            Text("The quick brown fox")
-                .font(.system(size: 32 * settings.fontScale))
-                .foregroundStyle(settings.textColor.swiftUIColor)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(settings.backgroundColor.swiftUIColor)
-                .shadow(radius: settings.edgeStyle == .dropShadow ? 4 : 0)
+        VStack(alignment: .leading, spacing: 20) {
+            Text(title)
+                .font(.title2.weight(.bold))
+            content
+            if let footer {
+                Text(footer)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .frame(maxWidth: .infinity, minHeight: 160)
-        .background(LinearGradient(colors: [.blue, .purple], startPoint: .top, endPoint: .bottom))
-        .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
-        .padding(.vertical, 8)
-    }
-}
-
-extension CaptionSettings.RGBAColor {
-    var swiftUIColor: Color {
-        Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(36)
+        .background(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 

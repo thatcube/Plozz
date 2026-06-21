@@ -40,5 +40,7 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Plozz uses your local network to discover Jellyfin servers automatically.</string>
+	<key>OMDBAPIKey</key>
+	<string>$(OMDB_API_KEY)</string>
 </dict>
 </plist>

@@ -8,10 +8,17 @@ import FeatureDiscovery
 /// Top-level view that renders one screen per `SessionState`.
 public struct RootView: View {
     @State private var appState: AppState
+    @Environment(\.colorScheme) private var systemColorScheme
 
     @MainActor
     public init(appState: AppState? = nil) {
         _appState = State(initialValue: appState ?? AppState())
+    }
+
+    /// The palette for the currently-selected theme, re-resolved when either the
+    /// chosen `AppTheme` or the device colour scheme changes.
+    private var resolvedPalette: ThemePalette {
+        ThemePalette.palette(for: appState.themeModel.theme, systemColorScheme: systemColorScheme)
     }
 
     public var body: some View {
@@ -20,12 +27,16 @@ public struct RootView: View {
             case .launching:
                 LaunchView()
 
-            case .selectingServer:
-                ServerPickerView { server in
-                    appState.selectServer(server)
-                }
+            case let .onboarding(.selectingServer, canReturnToApp):
+                AddAccountView(
+                    deviceID: appState.deviceID,
+                    canReturnToApp: canReturnToApp,
+                    onJellyfinServerSelected: { server in appState.selectServer(server) },
+                    onPlexAuthenticated: { session in appState.didAuthenticatePlex(session) },
+                    onCancel: { appState.cancelAuthentication() }
+                )
 
-            case let .authenticating(server):
+            case let .onboarding(.authenticating(server), _):
                 AuthView(
                     server: server,
                     deviceID: appState.deviceID,
@@ -33,26 +44,46 @@ public struct RootView: View {
                     onCancel: { appState.cancelAuthentication() }
                 )
 
-            case .authenticated:
-                if let provider = appState.provider {
+            case .ready:
+                if appState.isChoosingProfile {
+                    ProfileSelectionView(appState: appState, canCancel: appState.primaryProvider != nil)
+                } else {
+                    let accounts = appState.homeAccounts
+                    if !accounts.isEmpty {
                     MainTabView(
-                        provider: provider,
+                        accounts: accounts,
                         captionModel: appState.captionModel,
+                        spoilerModel: appState.spoilerModel,
+                        themeModel: appState.themeModel,
+                        diagnosticsModel: appState.diagnosticsModel,
+                        homeVisibility: appState.homeLibraryVisibilityModel,
+                        ratingsProvider: appState.ratingsProvider,
+                        displayAccounts: appState.accounts,
+                        activeAccountID: appState.primaryActiveAccount?.id,
+                        profiles: appState.profilesModel.profiles,
+                        activeProfile: appState.profilesModel.activeProfile,
                         pendingPlayItemID: Binding(
                             get: { appState.pendingPlayItemID },
                             set: { appState.pendingPlayItemID = $0 }
-                        )
-                    ) {
-                        appState.signOut()
+                        ),
+                        onAddAccount: { appState.addAccount() },
+                        onRemoveAccount: { appState.removeAccount(id: $0.id) },
+                        onSignOutAll: { appState.signOutAll() },
+                        onSwitchProfile: { appState.requestProfileSelection() }
+                    )
+                    .id(appState.profilesModel.activeProfileID)
                     }
                 }
 
-            case let .failed(error):
+            case let .failed(error, _):
                 FailureView(message: error.userMessage) {
                     appState.retry()
                 }
             }
         }
+        .background { AppBackground(palette: resolvedPalette) }
+        .environment(\.themePalette, resolvedPalette)
+        .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)
         .onAppear { if case .launching = appState.state { appState.bootstrap() } }
         .onOpenURL { appState.handle(url: $0) }
     }

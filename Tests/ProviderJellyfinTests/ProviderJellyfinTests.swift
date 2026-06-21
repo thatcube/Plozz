@@ -77,6 +77,211 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "http://host:8096/Items/i1/Images/Primary?maxWidth=400")
     }
 
+    func testItemsPageMapsItemsAndTotalCount() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[
+          {"Id":"m1","Name":"Alien","Type":"Movie"},
+          {"Id":"m2","Name":"Aliens","Type":"Movie"}
+        ],"TotalRecordCount":250}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let page = try await provider.items(in: "lib1", kind: .movie, page: PageRequest(startIndex: 60, limit: 60))
+
+        XCTAssertEqual(page.items.map(\.title), ["Alien", "Aliens"])
+        XCTAssertEqual(page.items.first?.kind, .movie)
+        XCTAssertEqual(page.startIndex, 60)
+        XCTAssertEqual(page.totalCount, 250)
+        XCTAssertTrue(page.hasMore)
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertEqual(query.first(where: { $0.name == "ParentId" })?.value, "lib1")
+        XCTAssertEqual(query.first(where: { $0.name == "StartIndex" })?.value, "60")
+        XCTAssertEqual(query.first(where: { $0.name == "Limit" })?.value, "60")
+        XCTAssertEqual(query.first(where: { $0.name == "SortBy" })?.value, "SortName")
+        // Movie libraries use the fast recursive/indexed query path.
+        XCTAssertEqual(query.first(where: { $0.name == "Recursive" })?.value, "true")
+        XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Movie")
+    }
+
+    func testItemsPageUsesSeriesTypeForTVLibrary() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        _ = try await provider.items(in: "lib2", kind: .series, page: PageRequest())
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertEqual(query.first(where: { $0.name == "Recursive" })?.value, "true")
+        XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Series")
+    }
+
+    func testItemsPageFolderUsesNonRecursiveDirectChildren() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        _ = try await provider.items(in: "folder1", kind: .folder, page: PageRequest())
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertNil(query.first(where: { $0.name == "Recursive" }))
+        XCTAssertNil(query.first(where: { $0.name == "IncludeItemTypes" }))
+        XCTAssertEqual(query.first(where: { $0.name == "ParentId" })?.value, "folder1")
+    }
+
+    func testItemsPageDefaultsTotalCountToItemCountWhenMissing() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[{"Id":"m1","Name":"Solo","Type":"Movie"}]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let page = try await provider.items(in: "lib1", kind: .movie, page: PageRequest(startIndex: 0, limit: 60))
+        XCTAssertEqual(page.totalCount, 1)
+        XCTAssertFalse(page.hasMore)
+    }
+
+    func testItemsPageDefaultSortIsNameAscending() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        _ = try await provider.items(in: "lib1", kind: .movie, page: PageRequest())
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertEqual(query.first(where: { $0.name == "SortBy" })?.value, "SortName")
+        XCTAssertEqual(query.first(where: { $0.name == "SortOrder" })?.value, "Ascending")
+    }
+
+    func testItemsPageMapsEachSortFieldToJellyfinSortBy() async throws {
+        let expected: [SortField: String] = [
+            .name: "SortName",
+            .dateAdded: "DateCreated",
+            .releaseDate: "PremiereDate",
+            .communityRating: "CommunityRating",
+            .runtime: "Runtime",
+            .random: "Random"
+        ]
+        for field in SortField.allCases {
+            let stub = StubHTTPClient()
+            stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+            let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+            _ = try await provider.items(
+                in: "lib1",
+                kind: .movie,
+                page: PageRequest(sort: CoreModels.SortDescriptor(field: field, direction: .ascending))
+            )
+
+            let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+            XCTAssertEqual(
+                query.first(where: { $0.name == "SortBy" })?.value,
+                expected[field],
+                "SortBy mapping for \(field)"
+            )
+        }
+    }
+
+    func testItemsPageMapsSortDirectionToSortOrder() async throws {
+        let expected: [SortDirection: String] = [
+            .ascending: "Ascending",
+            .descending: "Descending"
+        ]
+        for direction in SortDirection.allCases {
+            let stub = StubHTTPClient()
+            stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+            let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+            _ = try await provider.items(
+                in: "lib1",
+                kind: .movie,
+                page: PageRequest(sort: CoreModels.SortDescriptor(field: .releaseDate, direction: direction))
+            )
+
+            let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+            XCTAssertEqual(
+                query.first(where: { $0.name == "SortOrder" })?.value,
+                expected[direction],
+                "SortOrder mapping for \(direction)"
+            )
+            // The chosen field must still be carried alongside the direction.
+            XCTAssertEqual(query.first(where: { $0.name == "SortBy" })?.value, "PremiereDate")
+        }
+    }
+
+    func testSearchSendsExpectedQueryAndMapsResults() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[
+          {"Id":"m1","Name":"Dune","Type":"Movie"},
+          {"Id":"s1","Name":"Dune: Prophecy","Type":"Series"}
+        ]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let results = try await provider.search(query: "  dune ", limit: 25)
+
+        XCTAssertEqual(results.map(\.title), ["Dune", "Dune: Prophecy"])
+        XCTAssertEqual(results.map(\.kind), [.movie, .series])
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        // Whitespace is trimmed before the request is issued.
+        XCTAssertEqual(query.first(where: { $0.name == "searchTerm" })?.value, "dune")
+        XCTAssertEqual(query.first(where: { $0.name == "Recursive" })?.value, "true")
+        XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Movie,Series,Episode")
+        XCTAssertEqual(query.first(where: { $0.name == "Limit" })?.value, "25")
+        XCTAssertEqual(query.first(where: { $0.name == "EnableTotalRecordCount" })?.value, "false")
+        XCTAssertEqual(query.first(where: { $0.name == "ImageTypeLimit" })?.value, "1")
+    }
+
+    func testSearchWithBlankQuerySkipsNetwork() async throws {
+        let stub = StubHTTPClient()
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let results = try await provider.search(query: "   ", limit: 25)
+
+        XCTAssertTrue(results.isEmpty)
+        XCTAssertTrue(stub.sentPaths.isEmpty)
+    }
+
+    func testItemMapsNativeRatingsAndProviderIDs() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0,
+        "CommunityRating":7.2,"CriticRating":74,
+        "ProviderIds":{"Imdb":"tt0111161","Tmdb":"278"},
+        "UserData":{"PlaybackPositionTicks":0}}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "i1")
+
+        XCTAssertEqual(item.providerIDs["Imdb"], "tt0111161")
+        XCTAssertEqual(item.providerIDs["Tmdb"], "278")
+
+        let community = item.ratings.first { $0.source == .community }
+        XCTAssertEqual(community?.value, 7.2)
+        XCTAssertEqual(community?.scale, .outOfTen)
+
+        let critic = item.ratings.first { $0.source == .rottenTomatoes }
+        XCTAssertEqual(critic?.value, 74)
+        XCTAssertEqual(critic?.scale, .percent)
+    }
+
+    func testItemWithoutRatingFieldsHasEmptyRatings() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i2", json: """
+        {"Id":"i2","Name":"Movie","Type":"Movie","RunTimeTicks":0,
+        "UserData":{"PlaybackPositionTicks":0}}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "i2")
+        XCTAssertTrue(item.ratings.isEmpty)
+        XCTAssertTrue(item.providerIDs.isEmpty)
+    }
+
     func testPlaybackInfoResolvesDirectStreamWithApiKey() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
@@ -84,7 +289,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         "UserData":{"PlaybackPositionTicks":0}}
         """)
         stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
-        {"MediaSources":[{"Id":"src1","Container":"mkv","SupportsDirectPlay":true,
+        {"MediaSources":[{"Id":"src1","ETag":"etag9","Container":"mp4","SupportsDirectPlay":true,
         "MediaStreams":[{"Index":1,"Type":"Audio","Language":"eng","DisplayTitle":"English"},
         {"Index":2,"Type":"Subtitle","Language":"eng","DisplayTitle":"English (SRT)"}]}],
         "PlaySessionId":"ps1"}
@@ -95,9 +300,83 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(request.playSessionID, "ps1")
         XCTAssertEqual(request.audioTracks.count, 1)
         XCTAssertEqual(request.subtitleTracks.count, 1)
-        XCTAssertTrue(request.streamURL.absoluteString.contains("/Videos/i1/stream.mkv"))
-        XCTAssertTrue(request.streamURL.absoluteString.contains("api_key=TOKEN"))
-        XCTAssertTrue(request.streamURL.absoluteString.contains("mediaSourceId=src1"))
+        let url = request.streamURL.absoluteString
+        XCTAssertTrue(url.contains("/Videos/i1/stream.mp4"))
+        XCTAssertTrue(url.contains("api_key=TOKEN"))
+        XCTAssertTrue(url.contains("mediaSourceId=src1"))
+        XCTAssertTrue(url.contains("playSessionId=ps1"))
+        XCTAssertTrue(url.contains("tag=etag9"))
+    }
+
+    func testPlaybackInfoPrefersTranscodingHLSURL() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0}
+        """)
+        // MKV that the server decided to remux: it returns a relative HLS URL.
+        stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mkv","SupportsDirectPlay":false,
+        "SupportsTranscoding":true,"TranscodingSubProtocol":"hls",
+        "TranscodingUrl":"/videos/i1/master.m3u8?api_key=TOKEN&PlaySessionId=ps1"}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "i1")
+        let url = request.streamURL.absoluteString
+        XCTAssertTrue(url.contains("/videos/i1/master.m3u8"), url)
+        XCTAssertTrue(url.hasPrefix("http://host:8096"), url)
+        XCTAssertFalse(url.contains("static=true"))
+    }
+
+    func testStopReleasesActiveEncoding() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Sessions/Playing/Stopped", json: "{}")
+        stub.stub(pathSuffix: "/Videos/ActiveEncodings", json: "")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.reportPlayback(
+            PlaybackProgress(itemID: "i1", playSessionID: "ps1", positionSeconds: 120, isPaused: true),
+            event: .stop
+        )
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Sessions/Playing/Stopped") })
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Videos/ActiveEncodings") })
+    }
+
+    func testProgressDoesNotReleaseActiveEncoding() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Sessions/Playing/Progress", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.reportPlayback(
+            PlaybackProgress(itemID: "i1", playSessionID: "ps1", positionSeconds: 30, isPaused: false),
+            event: .progress
+        )
+
+        XCTAssertFalse(stub.sentPaths.contains { $0.hasSuffix("/Videos/ActiveEncodings") })
+    }
+
+    func testPlaybackInfoSendsDeviceProfile() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0}
+        """)
+        stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+        _ = try await provider.playbackInfo(for: "i1")
+
+        let bodyEntry = try XCTUnwrap(stub.sentBodies.first { $0.key.hasSuffix("/Items/i1/PlaybackInfo") })
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyEntry.value) as? [String: Any])
+        XCTAssertEqual(json["UserId"] as? String, "u1")
+        XCTAssertEqual(json["AutoOpenLiveStream"] as? Bool, true)
+        let deviceProfile = try XCTUnwrap(json["DeviceProfile"] as? [String: Any])
+        let direct = try XCTUnwrap(deviceProfile["DirectPlayProfiles"] as? [[String: Any]])
+        XCTAssertFalse(direct.isEmpty)
+        XCTAssertNotNil(deviceProfile["TranscodingProfiles"])
     }
 }
 
@@ -172,5 +451,43 @@ final class JellyfinQuickConnectClientTests: XCTestCase {
         } catch {
             XCTFail("Unexpected \(error)")
         }
+    }
+}
+
+final class JellyfinRemoteSubtitleTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testRemoteSubtitleSearchMapsResultsAndUsesAlpha3Path() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/i1/RemoteSearch/Subtitles/eng", json: """
+        [{"Id":"sub-1","Name":"English.srt","ProviderName":"OpenSubtitles",
+          "ThreeLetterISOLanguageName":"eng","Format":"srt","CommunityRating":8.5,
+          "DownloadCount":1200,"IsForced":false}]
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        // Pass a 2-letter code; the client must convert it to the 3-letter path.
+        let results = try await provider.remoteSubtitleSearch(itemID: "i1", language: "en")
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0].id, "sub-1")
+        XCTAssertEqual(results[0].providerName, "OpenSubtitles")
+        XCTAssertEqual(results[0].language, "eng")
+        XCTAssertEqual(results[0].communityRating, 8.5)
+        XCTAssertEqual(results[0].downloadCount, 1200)
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Items/i1/RemoteSearch/Subtitles/eng") })
+    }
+
+    func testDownloadRemoteSubtitlePOSTsToExpectedPath() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/i1/RemoteSearch/Subtitles/sub-1", json: "")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.downloadRemoteSubtitle(itemID: "i1", subtitleID: "sub-1")
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Items/i1/RemoteSearch/Subtitles/sub-1") })
     }
 }

@@ -23,10 +23,14 @@ let package = Package(
         .library(name: "CoreUI", targets: ["CoreUI"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
+        .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
+        .library(name: "RatingsService", targets: ["RatingsService"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
+        .library(name: "FeatureSearch", targets: ["FeatureSearch"]),
         .library(name: "FeatureSettings", targets: ["FeatureSettings"]),
+        .library(name: "FeatureProfiles", targets: ["FeatureProfiles"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
@@ -49,6 +53,14 @@ let package = Package(
             name: "ProviderJellyfin",
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
+        .target(
+            name: "ProviderPlex",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        .target(
+            name: "RatingsService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
 
         // MARK: Features
         .target(
@@ -57,18 +69,26 @@ let package = Package(
         ),
         .target(
             name: "FeatureAuth",
-            dependencies: ["CoreModels", "CoreNetworking", "ProviderJellyfin"]
+            dependencies: ["CoreModels", "CoreNetworking", "ProviderJellyfin", "ProviderPlex"]
         ),
         .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TopShelfKit"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TopShelfKit", "RatingsService"]
         ),
         .target(
             name: "FeaturePlayback",
             dependencies: ["CoreModels", "CoreNetworking", "CoreUI"]
         ),
         .target(
+            name: "FeatureSearch",
+            dependencies: ["CoreModels", "CoreUI"]
+        ),
+        .target(
             name: "FeatureSettings",
+            dependencies: ["CoreModels", "CoreUI"]
+        ),
+        .target(
+            name: "FeatureProfiles",
             dependencies: ["CoreModels", "CoreUI"]
         ),
 
@@ -93,9 +113,13 @@ let package = Package(
                 "FeatureDiscovery",
                 "FeatureAuth",
                 "ProviderJellyfin",
+                "ProviderPlex",
+                "RatingsService",
                 "FeatureHome",
                 "FeaturePlayback",
+                "FeatureSearch",
                 "FeatureSettings",
+                "FeatureProfiles",
                 "TopShelfKit"
             ]
         ),
@@ -103,7 +127,7 @@ let package = Package(
         // MARK: Tests (pure logic, no UI required)
         .testTarget(
             name: "CoreModelsTests",
-            dependencies: ["CoreModels"]
+            dependencies: ["CoreModels", "CoreUI"]
         ),
         .testTarget(
             name: "CoreNetworkingTests",
@@ -118,8 +142,28 @@ let package = Package(
             dependencies: ["ProviderJellyfin", "CoreModels", "CoreNetworking"]
         ),
         .testTarget(
+            name: "ProviderPlexTests",
+            dependencies: ["ProviderPlex", "CoreModels", "CoreNetworking"]
+        ),
+        .testTarget(
+            name: "RatingsServiceTests",
+            dependencies: ["RatingsService", "CoreModels", "CoreNetworking"]
+        ),
+        .testTarget(
             name: "FeatureAuthTests",
             dependencies: ["FeatureAuth", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeatureHomeTests",
+            dependencies: ["FeatureHome", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeatureSearchTests",
+            dependencies: ["FeatureSearch", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeatureProfilesTests",
+            dependencies: ["FeatureProfiles", "CoreModels"]
         )
     ]
 )

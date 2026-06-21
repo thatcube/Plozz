@@ -6,15 +6,18 @@ import CoreUI
 /// Item detail screen: backdrop hero, metadata, Play/Resume, and children.
 public struct ItemDetailView: View {
     @State private var viewModel: ItemDetailViewModel
+    private let spoilerSettings: SpoilerSettings
     private let onPlay: (MediaItem) -> Void
     private let onSelectChild: (MediaItem) -> Void
 
     public init(
         viewModel: ItemDetailViewModel,
+        spoilerSettings: SpoilerSettings = .default,
         onPlay: @escaping (MediaItem) -> Void,
         onSelectChild: @escaping (MediaItem) -> Void
     ) {
         _viewModel = State(initialValue: viewModel)
+        self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
         self.onSelectChild = onSelectChild
     }
@@ -32,18 +35,24 @@ public struct ItemDetailView: View {
                             title: childrenTitle(for: detail.item),
                             items: detail.children,
                             style: detail.item.kind == .series ? .poster : .landscape,
+                            spoilerSettings: spoilerSettings,
+                            initialFocusID: nextUpFocusID(for: detail),
                             onSelect: onSelectChild
                         )
                     }
                 }
-                .padding(.bottom, 60)
+                .padding(.bottom, PlozzTheme.Metrics.screenPadding)
             }
         }
+        // Detail is a full-screen sub-page: hide the top tab bar.
+        .toolbar(.hidden, for: .tabBar)
         .task { if viewModel.state.value == nil { await viewModel.load() } }
     }
 
     private func hero(_ item: MediaItem) -> some View {
-        ZStack(alignment: .bottomLeading) {
+        let hideText = spoilerSettings.shouldHideText(for: item)
+        let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
+        return ZStack(alignment: .bottomLeading) {
             AsyncImage(url: item.backdropURL ?? item.posterURL) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
@@ -51,6 +60,7 @@ public struct ItemDetailView: View {
             }
             .frame(height: 720)
             .clipped()
+            .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
             .overlay(
                 LinearGradient(
                     colors: [.black.opacity(0.0), .black.opacity(0.85)],
@@ -60,12 +70,20 @@ public struct ItemDetailView: View {
             )
 
             VStack(alignment: .leading, spacing: 16) {
-                Text(item.title)
+                Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
                     .font(.system(size: 64, weight: .bold))
                 if let subtitle = item.subtitle {
                     Text(subtitle).font(.title3).foregroundStyle(.secondary)
                 }
-                if let overview = item.overview {
+                if !item.ratings.isEmpty {
+                    RatingsBadgeRow(ratings: item.ratings)
+                }
+                if hideText {
+                    Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: 1100, alignment: .leading)
+                } else if let overview = item.overview {
                     Text(overview)
                         .font(.title3)
                         .foregroundStyle(.secondary)
@@ -99,6 +117,18 @@ public struct ItemDetailView: View {
         case .series: return "Seasons"
         case .season: return "Episodes"
         default: return "Contents"
+        }
+    }
+
+    /// For a series/season, the child the episodes/seasons rail should open
+    /// focused on (the "next up" episode). Other container kinds keep default
+    /// focus.
+    private func nextUpFocusID(for detail: ItemDetailViewModel.Detail) -> String? {
+        switch detail.item.kind {
+        case .series, .season:
+            return SeriesResume.nextUp(in: detail.children)?.id
+        default:
+            return nil
         }
     }
 }

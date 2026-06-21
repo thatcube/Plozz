@@ -13,22 +13,25 @@ public struct JellyfinClient: Sendable {
     public let deviceProfile: JellyfinDeviceProfile
     private let token: String?
     private let http: HTTPClient
+    private let capabilityProfile: JellyfinCapabilityProfile
 
     public init(
         baseURL: URL,
         deviceProfile: JellyfinDeviceProfile,
         token: String? = nil,
-        http: HTTPClient = URLSessionHTTPClient()
+        http: HTTPClient = URLSessionHTTPClient(),
+        capabilityProfile: JellyfinCapabilityProfile = .detected()
     ) {
         self.baseURL = baseURL
         self.deviceProfile = deviceProfile
         self.token = token
         self.http = http
+        self.capabilityProfile = capabilityProfile
     }
 
     /// Returns a copy of this client carrying an auth token.
     public func authenticated(token: String) -> JellyfinClient {
-        JellyfinClient(baseURL: baseURL, deviceProfile: deviceProfile, token: token, http: http)
+        JellyfinClient(baseURL: baseURL, deviceProfile: deviceProfile, token: token, http: http, capabilityProfile: capabilityProfile)
     }
 
     // MARK: Header
@@ -153,7 +156,7 @@ public struct JellyfinClient: Sendable {
     func item(userID: String, id: String) async throws -> BaseItemDto {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/\(id)",
-            queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources")],
+            queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,ProviderIds")],
             headers: authHeaders
         )
         return try await http.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)
@@ -172,15 +175,106 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
+    /// One page of a container's items for library browsing.
+    ///
+    /// For typed libraries (movies/series) this uses Jellyfin's **recursive,
+    /// indexed** item query (`Recursive=true` + `IncludeItemTypes`), which is the
+    /// fast path the official clients use and which paginates server-side. A
+    /// plain `ParentId` folder enumeration over a large library is slow enough to
+    /// exceed the request timeout even with a `Limit`, because the server still
+    /// walks/sorts the whole folder before applying it. For untyped containers
+    /// (folders/collections) it falls back to direct, non-recursive children.
+    func items(
+        userID: String,
+        parentID: String,
+        includeItemTypes: [String],
+        recursive: Bool,
+        startIndex: Int,
+        limit: Int,
+        sort: CoreModels.SortDescriptor
+    ) async throws -> ItemsResponse {
+        var queryItems = [
+            URLQueryItem(name: "ParentId", value: parentID),
+            URLQueryItem(name: "StartIndex", value: String(startIndex)),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "SortBy", value: Self.sortBy(for: sort.field)),
+            URLQueryItem(name: "SortOrder", value: Self.sortOrder(for: sort.direction)),
+            // Minimal fields keep the first-page payload small for a fast grid.
+            URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio"),
+            URLQueryItem(name: "ImageTypeLimit", value: "1"),
+            URLQueryItem(name: "EnableTotalRecordCount", value: "true")
+        ]
+        if recursive {
+            queryItems.append(URLQueryItem(name: "Recursive", value: "true"))
+        }
+        if !includeItemTypes.isEmpty {
+            queryItems.append(URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")))
+        }
+        let endpoint = Endpoint(path: "/Users/\(userID)/Items", queryItems: queryItems, headers: authHeaders)
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// Maps a provider-agnostic `SortField` onto Jellyfin's `SortBy` key.
+    static func sortBy(for field: SortField) -> String {
+        switch field {
+        case .name: return "SortName"
+        case .dateAdded: return "DateCreated"
+        case .releaseDate: return "PremiereDate"
+        case .communityRating: return "CommunityRating"
+        case .runtime: return "Runtime"
+        case .random: return "Random"
+        }
+    }
+
+    /// Maps a provider-agnostic `SortDirection` onto Jellyfin's `SortOrder` key.
+    static func sortOrder(for direction: SortDirection) -> String {
+        switch direction {
+        case .ascending: return "Ascending"
+        case .descending: return "Descending"
+        }
+    }
+
+    // MARK: Search
+
+    /// `GET /Users/{userId}/Items?searchTerm=…` — a recursive, indexed search
+    /// across the user's libraries for the given playable content types.
+    func searchItems(
+        userID: String,
+        searchTerm: String,
+        includeItemTypes: [String],
+        limit: Int
+    ) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items",
+            queryItems: [
+                URLQueryItem(name: "searchTerm", value: searchTerm),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "Fields", value: "Overview"),
+                URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
+                URLQueryItem(name: "ImageTypeLimit", value: "1")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
     // MARK: Playback
 
     func playbackInfo(userID: String, itemID: String) async throws -> PlaybackInfoResponse {
-        let endpoint = Endpoint(
+        var endpoint = Endpoint(
             method: .post,
             path: "/Items/\(itemID)/PlaybackInfo",
             queryItems: [URLQueryItem(name: "UserId", value: userID)],
             headers: authHeaders
         )
+        endpoint = try endpoint.jsonBody(PlaybackInfoBody(
+            UserId: userID,
+            MaxStreamingBitrate: capabilityProfile.maxStreamingBitrate,
+            AutoOpenLiveStream: true,
+            DeviceProfile: capabilityProfile
+        ))
         return try await http.decode(PlaybackInfoResponse.self, from: endpoint, baseURL: baseURL)
     }
 
@@ -201,7 +295,47 @@ public struct JellyfinClient: Sendable {
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
-    // MARK: Images
+    /// Tells the server to tear down any active transcode/remux job for this
+    /// play session. Harmless for direct-play sessions (no encoding exists), but
+    /// essential for transcoded HLS so an ffmpeg job isn't left running on the
+    /// server until it times out.
+    func stopActiveEncoding(playSessionID: String) async throws {
+        let endpoint = Endpoint(
+            method: .delete,
+            path: "/Videos/ActiveEncodings",
+            queryItems: [
+                URLQueryItem(name: "deviceId", value: deviceProfile.deviceID),
+                URLQueryItem(name: "playSessionId", value: playSessionID)
+            ],
+            headers: authHeaders
+        )
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
+    // MARK: Remote subtitles
+
+    /// `GET /Items/{itemId}/RemoteSearch/Subtitles/{language}` — search subtitle
+    /// providers (OpenSubtitles, etc.) for the item. `language` must be a
+    /// 3-letter ISO-639-2 code; callers pass whatever they have and we normalise.
+    func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitleInfoDto] {
+        let lang = LanguageMatch.alpha3(language)
+        let endpoint = Endpoint(
+            path: "/Items/\(itemID)/RemoteSearch/Subtitles/\(lang)",
+            headers: authHeaders
+        )
+        return try await http.decode([RemoteSubtitleInfoDto].self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// `POST /Items/{itemId}/RemoteSearch/Subtitles/{subtitleId}` — tells the
+    /// server to download the chosen subtitle and attach it to the item.
+    func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {
+        let endpoint = Endpoint(
+            method: .post,
+            path: "/Items/\(itemID)/RemoteSearch/Subtitles/\(subtitleID)",
+            headers: authHeaders
+        )
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
 
     /// Builds an absolute image URL. Token is *not* required for images; the
     /// item id + image type is enough.

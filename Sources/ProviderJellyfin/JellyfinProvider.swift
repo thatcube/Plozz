@@ -18,7 +18,8 @@ public struct JellyfinProvider: MediaProvider {
             baseURL: session.server.baseURL,
             deviceProfile: JellyfinDeviceProfile(deviceID: session.deviceID),
             token: session.accessToken,
-            http: http
+            http: http,
+            capabilityProfile: .detected()
         )
     }
 
@@ -51,6 +52,60 @@ public struct JellyfinProvider: MediaProvider {
         try await client.children(userID: session.userID, parentID: itemID).map(map(item:))
     }
 
+    public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
+        let (recursive, includeItemTypes) = Self.query(forContainerKind: kind)
+        PlozzLog.networking.info(
+            "Library browse: container=\(containerID) kind=\(kind.rawValue) recursive=\(recursive) types=\(includeItemTypes.joined(separator: ",")) start=\(page.startIndex) limit=\(page.limit) sort=\(page.sort.field.rawValue)/\(page.sort.direction.rawValue)"
+        )
+        do {
+            let response = try await client.items(
+                userID: session.userID,
+                parentID: containerID,
+                includeItemTypes: includeItemTypes,
+                recursive: recursive,
+                startIndex: page.startIndex,
+                limit: page.limit,
+                sort: page.sort
+            )
+            let items = response.Items.map(map(item:))
+            PlozzLog.networking.info(
+                "Library browse: container=\(containerID) returned=\(items.count) total=\(response.TotalRecordCount ?? -1)"
+            )
+            return MediaPage(
+                items: items,
+                startIndex: page.startIndex,
+                totalCount: response.TotalRecordCount ?? (page.startIndex + items.count)
+            )
+        } catch {
+            PlozzLog.networking.error("Library browse failed: container=\(containerID) error=\(String(describing: error))")
+            throw error
+        }
+    }
+
+    /// Picks the Jellyfin query strategy for a container kind. Typed libraries
+    /// use the fast recursive/indexed path; folders/collections list direct
+    /// children.
+    private static func query(forContainerKind kind: MediaItemKind) -> (recursive: Bool, includeItemTypes: [String]) {
+        switch kind {
+        case .movie: return (true, ["Movie"])
+        case .series: return (true, ["Series"])
+        default: return (false, [])
+        }
+    }
+
+    // MARK: Search
+
+    public func search(query: String, limit: Int) async throws -> [MediaItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        return try await client.searchItems(
+            userID: session.userID,
+            searchTerm: trimmed,
+            includeItemTypes: ["Movie", "Series", "Episode"],
+            limit: limit
+        ).map(map(item:))
+    }
+
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
@@ -58,7 +113,7 @@ public struct JellyfinProvider: MediaProvider {
         let info = try await client.playbackInfo(userID: session.userID, itemID: itemID)
         guard let source = info.MediaSources.first else { throw AppError.notFound }
 
-        let streamURL = try resolveStreamURL(itemID: itemID, source: source)
+        let streamURL = try resolveStreamURL(itemID: itemID, source: source, playSessionID: info.PlaySessionId)
         let mappedItem = map(item: detail)
 
         let streams = source.MediaStreams ?? detail.MediaStreams ?? []
@@ -71,26 +126,47 @@ public struct JellyfinProvider: MediaProvider {
             playSessionID: info.PlaySessionId,
             audioTracks: audio,
             subtitleTracks: subs,
-            startPosition: mappedItem.resumePosition ?? 0
+            startPosition: mappedItem.resumePosition ?? 0,
+            isTranscoding: source.TranscodingUrl != nil
         )
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {
         try await client.reportPlaybackProgress(progress, event: event)
+        // On stop, also release any server-side transcode job for this session.
+        // Best-effort: cleanup failure must not surface as a playback error.
+        if event == .stop, let playSessionID = progress.playSessionID, !playSessionID.isEmpty {
+            try? await client.stopActiveEncoding(playSessionID: playSessionID)
+        }
     }
 
     public func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? {
         client.imageURL(itemID: itemID, kind: kind, maxWidth: maxWidth)
     }
 
+    // MARK: Subtitles
+
+    public func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] {
+        try await client.remoteSubtitleSearch(itemID: itemID, language: language).map(map(remoteSubtitle:))
+    }
+
+    public func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {
+        try await client.downloadRemoteSubtitle(itemID: itemID, subtitleID: subtitleID)
+    }
+
     // MARK: - Mapping
 
-    private func resolveStreamURL(itemID: String, source: MediaSourceInfo) throws -> URL {
-        // Prefer server-provided transcode/HLS URL when present (handles
-        // unsupported codecs); otherwise direct-stream the original container.
+    private func resolveStreamURL(itemID: String, source: MediaSourceInfo, playSessionID: String?) throws -> URL {
+        // Prefer the server-provided HLS transcode/remux URL when present: the
+        // server returns one whenever the file can't be direct-played for this
+        // device profile (e.g. MKV, or an unsupported codec). HLS (fMP4 segments,
+        // BreakOnNonKeyFrames) is fully seekable in AVPlayer, which fixes far
+        // seeks that fail on non-fragmented direct streams.
         if let transcoding = source.TranscodingUrl, let url = absoluteURL(fromServerPath: transcoding) {
             return url
         }
+        // DirectPlay: stream the original container as-is. Preferred for local
+        // servers (no transcode, best quality).
         let container = source.Container ?? "mp4"
         let sourceID = source.Id ?? itemID
         guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
@@ -98,11 +174,18 @@ public struct JellyfinProvider: MediaProvider {
         }
         let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
         components.path = basePath + "/Videos/\(itemID)/stream.\(container)"
-        components.queryItems = [
+        var query = [
             URLQueryItem(name: "static", value: "true"),
             URLQueryItem(name: "mediaSourceId", value: sourceID),
             URLQueryItem(name: "api_key", value: session.accessToken)
         ]
+        if let playSessionID, !playSessionID.isEmpty {
+            query.append(URLQueryItem(name: "playSessionId", value: playSessionID))
+        }
+        if let tag = source.ETag, !tag.isEmpty {
+            query.append(URLQueryItem(name: "tag", value: tag))
+        }
+        components.queryItems = query
         guard let url = components.url else { throw AppError.invalidResponse }
         return url
     }
@@ -134,8 +217,28 @@ public struct JellyfinProvider: MediaProvider {
             playedPercentage: dto.UserData?.PlayedPercentage.map { $0 / 100.0 },
             isPlayed: dto.UserData?.Played ?? false,
             posterURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 500),
-            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280)
+            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280),
+            fallbackArtworkURL: dto.SeriesId.flatMap {
+                client.imageURL(itemID: $0, kind: .backdrop, maxWidth: 1280)
+            },
+            ratings: Self.ratings(from: dto),
+            providerIDs: dto.ProviderIds ?? [:]
         )
+    }
+
+    /// Maps Jellyfin's native rating fields onto provider-agnostic ratings.
+    ///
+    /// `CommunityRating` is a 0–10 audience score; `CriticRating` is a 0–100
+    /// Rotten Tomatoes Tomatometer percentage.
+    private static func ratings(from dto: BaseItemDto) -> [ExternalRating] {
+        var ratings: [ExternalRating] = []
+        if let community = dto.CommunityRating {
+            ratings.append(ExternalRating(source: .community, value: community, scale: .outOfTen))
+        }
+        if let critic = dto.CriticRating {
+            ratings.append(ExternalRating(source: .rottenTomatoes, value: critic, scale: .percent))
+        }
+        return ratings
     }
 
     private func map(stream dto: MediaStreamDto) -> MediaTrack {
@@ -146,6 +249,20 @@ public struct JellyfinProvider: MediaProvider {
             language: dto.Language,
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false
+        )
+    }
+
+    private func map(remoteSubtitle dto: RemoteSubtitleInfoDto) -> RemoteSubtitle {
+        RemoteSubtitle(
+            id: dto.Id ?? "",
+            name: dto.Name ?? dto.ProviderName ?? "Subtitle",
+            providerName: dto.ProviderName,
+            language: dto.ThreeLetterISOLanguageName,
+            format: dto.Format,
+            communityRating: dto.CommunityRating,
+            downloadCount: dto.DownloadCount,
+            isForced: dto.IsForced ?? false,
+            isHearingImpaired: false
         )
     }
 

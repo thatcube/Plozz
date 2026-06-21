@@ -13,10 +13,13 @@ import CoreUI
 /// and progress reporting, handled by `PlayerViewModel`).
 public struct PlayerView: View {
     @State private var viewModel: PlayerViewModel
+    @State private var diagnosticsSampler = PlaybackDiagnosticsSampler()
     @Environment(\.dismiss) private var dismiss
+    private let showDiagnostics: Bool
 
-    public init(viewModel: PlayerViewModel) {
+    public init(viewModel: PlayerViewModel, showDiagnostics: Bool = false) {
         _viewModel = State(initialValue: viewModel)
+        self.showDiagnostics = showDiagnostics
     }
 
     public var body: some View {
@@ -39,8 +42,30 @@ public struct PlayerView: View {
                 PlaybackErrorView(message: error.userMessage) { dismiss() }
             }
         }
-        .task { await viewModel.load() }
-        .onDisappear { Task { await viewModel.stop() } }
+        .overlay(alignment: .topLeading) {
+            if showDiagnostics, case .ready = viewModel.phase {
+                PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .task {
+            await viewModel.load()
+            if showDiagnostics, let player = viewModel.player {
+                diagnosticsSampler.start(player: player, isTranscoding: viewModel.isTranscoding)
+            }
+        }
+        .onChange(of: showDiagnostics) { _, enabled in
+            if enabled, let player = viewModel.player {
+                diagnosticsSampler.start(player: player, isTranscoding: viewModel.isTranscoding)
+            } else {
+                diagnosticsSampler.stop()
+            }
+        }
+        .onDisappear {
+            diagnosticsSampler.stop()
+            Task { await viewModel.stop() }
+        }
     }
 }
 

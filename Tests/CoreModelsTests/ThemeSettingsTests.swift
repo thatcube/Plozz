@@ -1,0 +1,77 @@
+import XCTest
+@testable import CoreModels
+
+final class ThemeSettingsStoreTests: XCTestCase {
+    private func makeDefaults() -> UserDefaults {
+        let suite = "ThemeSettingsStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    func testDefaultIsSystemWhenEmpty() {
+        let store = ThemeSettingsStore(defaults: makeDefaults())
+        XCTAssertEqual(store.load(), .system)
+        XCTAssertEqual(AppTheme.default, .system)
+    }
+
+    func testRoundTripForEveryTheme() {
+        let defaults = makeDefaults()
+        let store = ThemeSettingsStore(defaults: defaults)
+        for theme in AppTheme.allCases {
+            store.save(theme)
+            XCTAssertEqual(store.load(), theme, "\(theme) did not round-trip")
+            // A fresh store over the same defaults must read the same value.
+            XCTAssertEqual(ThemeSettingsStore(defaults: defaults).load(), theme)
+        }
+    }
+
+    func testCorruptValueFallsBackToDefault() {
+        let defaults = makeDefaults()
+        defaults.set("not-a-real-theme", forKey: "com.plozz.appTheme")
+        XCTAssertEqual(ThemeSettingsStore(defaults: defaults).load(), .default)
+    }
+
+    @MainActor
+    func testModelPersistsOnChange() {
+        let defaults = makeDefaults()
+        let model = ThemeSettingsModel(store: ThemeSettingsStore(defaults: defaults))
+        XCTAssertEqual(model.theme, .system)
+        model.theme = .oled
+        XCTAssertEqual(ThemeSettingsStore(defaults: defaults).load(), .oled)
+    }
+
+    func testCodableRoundTrip() throws {
+        for theme in AppTheme.allCases {
+            let data = try JSONEncoder().encode(theme)
+            XCTAssertEqual(try JSONDecoder().decode(AppTheme.self, from: data), theme)
+        }
+    }
+}
+
+#if canImport(SwiftUI)
+import SwiftUI
+import CoreUI
+
+final class ThemePaletteResolutionTests: XCTestCase {
+    func testEveryThemeResolvesAPalette() {
+        for theme in AppTheme.allCases {
+            let dark = ThemePalette.palette(for: theme, systemColorScheme: .dark)
+            let light = ThemePalette.palette(for: theme, systemColorScheme: .light)
+            // `.system` follows the device scheme; the rest ignore it.
+            if theme == .system {
+                XCTAssertEqual(dark, .dark)
+                XCTAssertEqual(light, .light)
+            } else {
+                XCTAssertEqual(dark, light, "\(theme) should not depend on the system scheme")
+            }
+        }
+    }
+
+    func testOLEDHasNoGlowOthersAreThemed() {
+        XCTAssertNil(ThemePalette.oled.topGlow)
+        XCTAssertNotNil(ThemePalette.dark.topGlow)
+        XCTAssertNotNil(ThemePalette.light.topGlow)
+    }
+}
+#endif

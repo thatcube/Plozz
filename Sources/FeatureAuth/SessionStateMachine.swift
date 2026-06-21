@@ -1,40 +1,64 @@
 import Foundation
 import CoreModels
 
-/// Explicit auth/session state machine.
+/// Explicit auth/session state machine for **multi-account** Plozz.
 ///
 /// The spec requires session state be modelled explicitly rather than as a
 /// scattering of booleans. `AppShell` renders one screen per state and feeds
 /// events in; the machine owns all legal transitions in one place.
 ///
+/// "Authenticated" now means **≥1 account**. Onboarding (`selectingServer` →
+/// `authenticating`) is reachable both at first launch (no accounts yet) and
+/// from inside the signed-in app ("add another server"). The `canReturnToApp`
+/// flag on an onboarding step records whether there is already ≥1 account behind
+/// it, so cancelling returns to the app instead of dead-ending.
+///
 /// ```
-/// launching ──restore──▶ authenticated
-///     │                       ▲
-///     └──noSession──▶ selectingServer ──serverSelected──▶ authenticating
-///                          ▲                                   │
-///                          └──── signedOut (cancel/success) ◀──┘
+/// launching ─restored(≥1)────────────────────────▶ ready
+///     │                                              │  ▲
+///     └─restored([])─▶ onboarding(selectingServer)   │  │ addAccountRequested
+///                          │        ▲   (canReturnToApp reflects account count)
+///                  serverSelected   │ cancelOnboarding / authFailed→failed→retry
+///                          ▼        │
+///                 onboarding(authenticating) ─accountAuthenticated─▶ ready
 /// ```
-public enum SessionState: Equatable, Sendable {
-    /// App just launched; we haven't checked for a stored session yet.
-    case launching
-    /// No server chosen / no stored session — show the picker.
+public enum OnboardingStep: Equatable, Sendable {
+    /// No server chosen yet — show the picker.
     case selectingServer
-    /// Server chosen, running Quick Connect.
+    /// Server chosen, running Quick Connect / password sign-in.
     case authenticating(MediaServer)
-    /// Fully signed in.
-    case authenticated(UserSession)
+}
+
+public enum SessionState: Equatable, Sendable {
+    /// App just launched; we haven't checked for stored accounts yet.
+    case launching
+    /// Adding an account. `canReturnToApp` is true when ≥1 account already
+    /// exists (i.e. the user is adding *another* server and can cancel back to
+    /// the app); false during first-run onboarding.
+    case onboarding(OnboardingStep, canReturnToApp: Bool)
+    /// Signed in with ≥1 account. `AppState` owns the account list/active set.
+    case ready
     /// A non-fatal failure surfaced to the user (with recovery options).
-    case failed(AppError)
+    /// `canReturnToApp` carries the onboarding context forward so retry/cancel
+    /// can route correctly.
+    case failed(AppError, canReturnToApp: Bool)
 }
 
 /// Events that can drive `SessionState`.
 public enum SessionEvent: Sendable {
-    /// Result of the launch-time restore attempt.
-    case restored(UserSession?)
+    /// Result of the launch-time restore (the persisted accounts, possibly empty).
+    case restored([Account])
+    /// User asked to add another account from inside the app.
+    case addAccountRequested
     case serverSelected(MediaServer)
-    case authenticated(UserSession)
+    /// An account finished authenticating and was persisted.
+    case accountAuthenticated
     case authenticationFailed(AppError)
-    case signedOut
+    /// Back out of onboarding without adding an account.
+    case cancelOnboarding
+    /// The persisted account set changed (e.g. removal/sign-out); carries the
+    /// new list so the machine can decide ready vs. onboarding.
+    case accountsChanged([Account])
     case retry
 }
 
@@ -54,32 +78,46 @@ public struct SessionStateMachine: Sendable {
     /// Pure reducer — easy to unit-test exhaustively.
     public static func reduce(state: SessionState, event: SessionEvent) -> SessionState {
         switch (state, event) {
-        case let (.launching, .restored(session?)):
-            return .authenticated(session)
-        case (.launching, .restored(nil)):
-            return .selectingServer
+        // Launch restore.
+        case let (.launching, .restored(accounts)):
+            return accounts.isEmpty
+                ? .onboarding(.selectingServer, canReturnToApp: false)
+                : .ready
 
-        case let (.selectingServer, .serverSelected(server)):
-            return .authenticating(server)
+        // Add-another-account from inside the app.
+        case (.ready, .addAccountRequested):
+            return .onboarding(.selectingServer, canReturnToApp: true)
 
-        case let (.authenticating, .authenticated(session)):
-            return .authenticated(session)
-        case let (.authenticating, .authenticationFailed(error)):
-            return .failed(error)
+        // Server picked during onboarding.
+        case let (.onboarding(.selectingServer, canReturn), .serverSelected(server)):
+            return .onboarding(.authenticating(server), canReturnToApp: canReturn)
+        // Re-select a different server while authenticating.
+        case let (.onboarding(.authenticating, canReturn), .serverSelected(server)):
+            return .onboarding(.authenticating(server), canReturnToApp: canReturn)
 
-        // Allow re-selecting a different server while authenticating.
-        case let (.authenticating, .serverSelected(server)):
-            return .authenticating(server)
+        // Authentication outcomes.
+        case (.onboarding(.authenticating, _), .accountAuthenticated):
+            return .ready
+        case let (.onboarding(.authenticating, canReturn), .authenticationFailed(error)):
+            return .failed(error, canReturnToApp: canReturn)
 
-        case (.authenticated, .signedOut),
-             (.authenticating, .signedOut),
-             (.failed, .signedOut):
-            return .selectingServer
+        // Cancelling onboarding: return to the app if it has accounts, else stay
+        // on the picker.
+        case let (.onboarding(_, canReturn), .cancelOnboarding):
+            return canReturn ? .ready : .onboarding(.selectingServer, canReturnToApp: false)
 
-        case (.failed, .retry):
-            return .selectingServer
-        case let (.failed, .serverSelected(server)):
-            return .authenticating(server)
+        // Failure recovery.
+        case let (.failed(_, canReturn), .retry),
+             let (.failed(_, canReturn), .cancelOnboarding):
+            return canReturn ? .ready : .onboarding(.selectingServer, canReturnToApp: false)
+        case let (.failed(_, canReturn), .serverSelected(server)):
+            return .onboarding(.authenticating(server), canReturnToApp: canReturn)
+
+        // Account set changed (removal / sign-out) from anywhere meaningful.
+        case let (_, .accountsChanged(accounts)):
+            return accounts.isEmpty
+                ? .onboarding(.selectingServer, canReturnToApp: false)
+                : .ready
 
         default:
             // No legal transition for this (state, event) pair — stay put.

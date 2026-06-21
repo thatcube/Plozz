@@ -64,7 +64,8 @@ private struct HomeTab: View {
     @Binding var pendingPlayItemID: String?
 
     @State private var path = NavigationPath()
-    @State private var playingItem: MediaItem?
+    @State private var playRequest: PlayRequest?
+    @State private var resumePrompt: MediaItem?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -88,19 +89,23 @@ private struct HomeTab: View {
                 ItemDetailView(
                     viewModel: ItemDetailViewModel(provider: provider, itemID: item.id, ratingsProvider: ratingsProvider),
                     spoilerSettings: spoilerSettings,
-                    onPlay: { playingItem = $0 },
+                    onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) }
                 )
             }
         }
-        .fullScreenCover(item: $playingItem) { item in
+        .fullScreenCover(item: $playRequest) { request in
             PlayerView(
                 viewModel: PlayerViewModel(
                     provider: provider,
-                    itemID: item.id,
-                    captionSettings: captionSettings
+                    itemID: request.item.id,
+                    captionSettings: captionSettings,
+                    startPosition: request.startPosition
                 )
             )
+        }
+        .resumePrompt(item: $resumePrompt) { item, startPosition in
+            playRequest = PlayRequest(item: item, startPosition: startPosition)
         }
         .task(id: pendingPlayItemID) { await handleDeepLink() }
     }
@@ -115,13 +120,61 @@ private struct HomeTab: View {
         }
     }
 
-    /// Playable leaves go straight to the player; containers push a detail page.
+    /// Playable leaves start playback (via the resume prompt when applicable);
+    /// containers push a detail page.
     private func open(_ item: MediaItem) {
         switch item.kind {
         case .movie, .episode, .video:
-            playingItem = item
+            requestPlay(item)
         default:
             path.append(item)
+        }
+    }
+
+    /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
+    /// play immediately from the start.
+    private func requestPlay(_ item: MediaItem) {
+        if let resume = item.resumePosition, resume > 1 {
+            resumePrompt = item
+        } else {
+            playRequest = PlayRequest(item: item, startPosition: 0)
+        }
+    }
+}
+
+/// A fully-resolved request to present the player for an item at an explicit
+/// start position (seconds). `startPosition` of `0` means "start over".
+private struct PlayRequest: Identifiable, Equatable {
+    let item: MediaItem
+    let startPosition: TimeInterval
+    var id: String { item.id }
+}
+
+private extension View {
+    /// Presents a "Resume vs Start Over" choice for an in-progress `item`.
+    /// `onChoose` receives the chosen start position in seconds (the saved
+    /// resume point for Resume, `0` for Start Over).
+    func resumePrompt(
+        item: Binding<MediaItem?>,
+        onChoose: @escaping (MediaItem, TimeInterval) -> Void
+    ) -> some View {
+        confirmationDialog(
+            item.wrappedValue?.title ?? "",
+            isPresented: Binding(
+                get: { item.wrappedValue != nil },
+                set: { if !$0 { item.wrappedValue = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: item.wrappedValue
+        ) { presented in
+            // Resume is listed first so it receives default focus.
+            Button("Resume from \(PlaybackTimecode.string(from: presented.resumePosition ?? 0))") {
+                onChoose(presented, presented.resumePosition ?? 0)
+            }
+            Button("Start Over") {
+                onChoose(presented, 0)
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 }

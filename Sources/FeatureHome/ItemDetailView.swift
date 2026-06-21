@@ -36,6 +36,7 @@ public struct ItemDetailView: View {
                             items: detail.children,
                             style: detail.item.kind == .series ? .poster : .landscape,
                             spoilerSettings: spoilerSettings,
+                            initialFocusID: nextUpFocusID(for: detail),
                             onSelect: onSelectChild
                         )
                     }
@@ -114,6 +115,18 @@ public struct ItemDetailView: View {
         case .series: return "Seasons"
         case .season: return "Episodes"
         default: return "Contents"
+        }
+    }
+
+    /// For a series/season, the child the episodes/seasons rail should open
+    /// focused on (the "next up" episode). Other container kinds keep default
+    /// focus.
+    private func nextUpFocusID(for detail: ItemDetailViewModel.Detail) -> String? {
+        switch detail.item.kind {
+        case .series, .season:
+            return SeriesResume.nextUp(in: detail.children)?.id
+        default:
+            return nil
         }
     }
 }

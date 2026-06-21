@@ -28,6 +28,10 @@ public final class PlayerViewModel {
     private let provider: any MediaProvider
     private let itemID: String
     private let captionSettings: CaptionSettings
+    /// Explicit start position (seconds) that overrides the provider's resume
+    /// point when set. `nil` keeps the default behaviour (derive from the
+    /// `PlaybackRequest`); `0` forces "start over"; a positive value resumes.
+    private let startPositionOverride: TimeInterval?
     private var request: PlaybackRequest?
     private var timeObserver: Any?
     private let reportInterval: TimeInterval = 10
@@ -36,11 +40,13 @@ public final class PlayerViewModel {
     public init(
         provider: any MediaProvider,
         itemID: String,
-        captionSettings: CaptionSettings = .default
+        captionSettings: CaptionSettings = .default,
+        startPosition: TimeInterval? = nil
     ) {
         self.provider = provider
         self.itemID = itemID
         self.captionSettings = captionSettings
+        self.startPositionOverride = startPosition
     }
 
     /// Loads stream info, configures the player, and seeks to resume.
@@ -59,8 +65,11 @@ public final class PlayerViewModel {
             player.allowsExternalPlayback = true
             self.player = player
 
-            if request.startPosition > 1 {
-                await seekWhenReady(player: player, to: request.startPosition)
+            // An explicit override wins over the provider's resume point so the
+            // caller can force "start over" (0) or resume from a chosen second.
+            let startPosition = startPositionOverride ?? request.startPosition
+            if startPosition > 1 {
+                await seekWhenReady(player: player, to: startPosition)
             }
 
             installTimeObserver(on: player)

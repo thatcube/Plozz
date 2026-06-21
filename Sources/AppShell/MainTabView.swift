@@ -8,31 +8,36 @@ import FeatureSearch
 import FeatureSettings
 import RatingsService
 
-/// The signed-in experience: Home and Settings tabs, with item-detail
+/// The signed-in experience: Home, Search and Settings tabs, with item-detail
 /// navigation and full-screen playback.
 ///
-/// Home runs against the **primary active** provider in this branch; the
-/// multi-account aggregation seam (`resolvedActiveAccounts`) is reserved for
-/// branch H. Settings exposes account management (add/remove) plus caption and
-/// spoiler settings.
+/// Home and Search are **unified across every active account/provider** via the
+/// aggregation seam (`[ResolvedAccount]`). Each merged item/library is tagged
+/// with its owning account so a tapped result routes to the correct provider.
+/// Settings exposes account management, the customizable Home-libraries
+/// checklist, and caption/spoiler/theme settings.
 struct MainTabView: View {
-    let provider: any MediaProvider
+    let accounts: [ResolvedAccount]
     let captionModel: CaptionSettingsModel
     let spoilerModel: SpoilerSettingsModel
     let themeModel: ThemeSettingsModel
     let diagnosticsModel: DiagnosticsSettingsModel
+    let homeVisibility: HomeLibraryVisibilityModel
     let ratingsProvider: any ExternalRatingsProviding
-    let accounts: [Account]
+    let displayAccounts: [Account]
     let activeAccountID: String?
     @Binding var pendingPlayItemID: String?
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
     let onSignOutAll: () -> Void
 
+    @State private var discovery = LibraryDiscoveryModel()
+
     var body: some View {
         TabView {
             HomeTab(
-                provider: provider,
+                accounts: accounts,
+                homeVisibility: homeVisibility,
                 captionSettings: captionModel.settings,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
@@ -42,7 +47,7 @@ struct MainTabView: View {
             .tabItem { Label("Home", systemImage: "house.fill") }
 
             SearchTab(
-                provider: provider,
+                accounts: accounts,
                 captionSettings: captionModel.settings,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
@@ -55,7 +60,10 @@ struct MainTabView: View {
                 spoilers: spoilerModel,
                 theme: themeModel,
                 diagnostics: diagnosticsModel,
-                accounts: accounts,
+                homeVisibility: homeVisibility,
+                discoveredLibraries: discovery.state,
+                reloadLibraries: { await discovery.load(from: accounts) },
+                accounts: displayAccounts,
                 activeAccountID: activeAccountID,
                 appVersion: AppInfo.version,
                 appBuild: AppInfo.build,
@@ -69,10 +77,22 @@ struct MainTabView: View {
     }
 }
 
+/// Resolves the provider that owns `accountID`, falling back to the primary
+/// (first) account for untagged items. `accounts` is guaranteed non-empty by the
+/// caller (`RootView`).
+private func resolveProvider(_ accountID: String?, in accounts: [ResolvedAccount]) -> any MediaProvider {
+    if let accountID, let match = accounts.first(where: { $0.account.id == accountID }) {
+        return match.provider
+    }
+    return accounts[0].provider
+}
+
 /// Home tab with its own navigation stack: Home → Library (paged) → Detail and
-/// full-screen player presentation.
+/// full-screen player presentation. Every destination resolves its provider from
+/// the tapped item/library's `sourceAccountID`.
 private struct HomeTab: View {
-    let provider: any MediaProvider
+    let accounts: [ResolvedAccount]
+    let homeVisibility: HomeLibraryVisibilityModel
     let captionSettings: CaptionSettings
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
@@ -86,7 +106,8 @@ private struct HomeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             HomeView(
-                viewModel: HomeViewModel(provider: provider),
+                viewModel: HomeViewModel(accounts: accounts),
+                visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
                 onSelectItem: { open($0) },
                 onSelectLibrary: { library in
@@ -95,7 +116,12 @@ private struct HomeTab: View {
             )
             .navigationDestination(for: MediaLibrary.self) { library in
                 LibraryBrowseView(
-                    viewModel: LibraryBrowseViewModel(provider: provider, containerID: library.id, containerKind: library.kind),
+                    viewModel: LibraryBrowseViewModel(
+                        provider: resolveProvider(library.sourceAccountID, in: accounts),
+                        containerID: library.id,
+                        containerKind: library.kind,
+                        sourceAccountID: library.sourceAccountID
+                    ),
                     title: library.title,
                     spoilerSettings: spoilerSettings,
                     onSelect: { open($0) }
@@ -103,7 +129,12 @@ private struct HomeTab: View {
             }
             .navigationDestination(for: MediaItem.self) { item in
                 ItemDetailView(
-                    viewModel: ItemDetailViewModel(provider: provider, itemID: item.id, ratingsProvider: ratingsProvider),
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(item.sourceAccountID, in: accounts),
+                        itemID: item.id,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: item.sourceAccountID
+                    ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) }
@@ -113,7 +144,7 @@ private struct HomeTab: View {
         .fullScreenCover(item: $playRequest) { request in
             PlayerView(
                 viewModel: PlayerViewModel(
-                    provider: provider,
+                    provider: resolveProvider(request.item.sourceAccountID, in: accounts),
                     itemID: request.item.id,
                     captionSettings: captionSettings,
                     startPosition: request.startPosition
@@ -127,12 +158,17 @@ private struct HomeTab: View {
     }
 
     /// Resolves a deep-linked item id (from a Top Shelf card) and routes to it,
-    /// then clears the request so it fires exactly once.
+    /// then clears the request so it fires exactly once. Because the id alone is
+    /// provider-ambiguous once content is merged, each active provider is tried
+    /// until one resolves the item; the resolved item is tagged with its source.
     private func handleDeepLink() async {
         guard let id = pendingPlayItemID else { return }
         pendingPlayItemID = nil
-        if let item = try? await provider.item(id: id) {
-            open(item)
+        for resolved in accounts {
+            if let item = try? await resolved.provider.item(id: id) {
+                open(item.taggingSource(resolved.account.id))
+                return
+            }
         }
     }
 
@@ -196,9 +232,10 @@ private extension View {
 }
 
 /// Search tab with its own navigation stack: Search → Detail and full-screen
-/// player presentation, mirroring `HomeTab`'s wiring.
+/// player presentation, mirroring `HomeTab`'s wiring. Search is aggregated
+/// across every active account; results route to their owning provider.
 private struct SearchTab: View {
-    let provider: any MediaProvider
+    let accounts: [ResolvedAccount]
     let captionSettings: CaptionSettings
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
@@ -210,13 +247,18 @@ private struct SearchTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             SearchView(
-                viewModel: SearchViewModel(provider: provider),
+                viewModel: SearchViewModel(accounts: accounts),
                 spoilerSettings: spoilerSettings,
                 onSelect: { open($0) }
             )
             .navigationDestination(for: MediaItem.self) { item in
                 ItemDetailView(
-                    viewModel: ItemDetailViewModel(provider: provider, itemID: item.id, ratingsProvider: ratingsProvider),
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(item.sourceAccountID, in: accounts),
+                        itemID: item.id,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: item.sourceAccountID
+                    ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { playingItem = $0 },
                     onSelectChild: { open($0) }
@@ -226,7 +268,7 @@ private struct SearchTab: View {
         .fullScreenCover(item: $playingItem) { item in
             PlayerView(
                 viewModel: PlayerViewModel(
-                    provider: provider,
+                    provider: resolveProvider(item.sourceAccountID, in: accounts),
                     itemID: item.id,
                     captionSettings: captionSettings
                 ),

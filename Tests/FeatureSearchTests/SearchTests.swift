@@ -61,9 +61,16 @@ final class SearchSectionTests: XCTestCase {
 
 @MainActor
 final class SearchViewModelTests: XCTestCase {
+    private func makeVM(_ providers: SearchStubProvider..., debounceMilliseconds: Int = 0) -> SearchViewModel {
+        let accounts = providers.map { provider in
+            ResolvedAccount(account: Account(from: provider.session), provider: provider)
+        }
+        return SearchViewModel(accounts: accounts, debounceMilliseconds: debounceMilliseconds)
+    }
+
     func testBlankQueryResetsToIdleWithoutSearching() async {
         let provider = SearchStubProvider(results: makeItems(3))
-        let vm = SearchViewModel(provider: provider, debounceMilliseconds: 0)
+        let vm = makeVM(provider)
         vm.query = "   "
 
         await vm.search()
@@ -77,7 +84,7 @@ final class SearchViewModelTests: XCTestCase {
             MediaItem(id: "m1", title: "Dune", kind: .movie),
             MediaItem(id: "s1", title: "Dune: Prophecy", kind: .series)
         ])
-        let vm = SearchViewModel(provider: provider, debounceMilliseconds: 0)
+        let vm = makeVM(provider)
         vm.query = "dune"
 
         await vm.search()
@@ -91,7 +98,7 @@ final class SearchViewModelTests: XCTestCase {
 
     func testNoResultsYieldsEmptyState() async {
         let provider = SearchStubProvider(results: [])
-        let vm = SearchViewModel(provider: provider, debounceMilliseconds: 0)
+        let vm = makeVM(provider)
         vm.query = "zzz"
 
         await vm.search()
@@ -101,7 +108,7 @@ final class SearchViewModelTests: XCTestCase {
 
     func testFailureSurfacesError() async {
         let provider = SearchStubProvider(results: [], error: .serverUnreachable)
-        let vm = SearchViewModel(provider: provider, debounceMilliseconds: 0)
+        let vm = makeVM(provider)
         vm.query = "dune"
 
         await vm.search()
@@ -110,23 +117,71 @@ final class SearchViewModelTests: XCTestCase {
             XCTFail("Expected failed(.serverUnreachable), got \(vm.state)")
         }
     }
+
+    func testMergesAndTagsResultsAcrossAccounts() async {
+        let plex = SearchStubProvider(
+            results: [MediaItem(id: "p1", title: "Dune", kind: .movie)],
+            providerKind: .plex,
+            accountID: "acct-plex"
+        )
+        let jellyfin = SearchStubProvider(
+            results: [MediaItem(id: "j1", title: "Dune Part Two", kind: .movie)],
+            providerKind: .jellyfin,
+            accountID: "acct-jelly"
+        )
+        let vm = makeVM(plex, jellyfin)
+        vm.query = "dune"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded, got \(vm.state)")
+        }
+        let movies = sections.first { $0.title == "Movies" }
+        XCTAssertEqual(movies?.items.map(\.id), ["p1", "j1"], "Round-robin interleave keeps account order")
+        XCTAssertEqual(movies?.items.first?.sourceAccountID, "acct-plex")
+        XCTAssertEqual(movies?.items.last?.sourceAccountID, "acct-jelly")
+    }
+
+    func testOneAccountDownStillReturnsTheOtherResults() async {
+        let down = SearchStubProvider(results: [], error: .serverUnreachable, accountID: "acct-down")
+        let up = SearchStubProvider(
+            results: [MediaItem(id: "m1", title: "Dune", kind: .movie)],
+            accountID: "acct-up"
+        )
+        let vm = makeVM(down, up)
+        vm.query = "dune"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded despite one account failing, got \(vm.state)")
+        }
+        XCTAssertEqual(sections.first { $0.title == "Movies" }?.items.map(\.id), ["m1"])
+    }
 }
 
 /// Minimal `MediaProvider` stub that only implements `search`.
 private final class SearchStubProvider: MediaProvider, @unchecked Sendable {
-    let kind: ProviderKind = .jellyfin
+    let kind: ProviderKind
     let session: UserSession
     private let results: [MediaItem]
     private let error: AppError?
     private(set) var callCount = 0
     private(set) var lastQuery: String?
 
-    init(results: [MediaItem], error: AppError? = nil) {
+    init(
+        results: [MediaItem],
+        error: AppError? = nil,
+        providerKind: ProviderKind = .jellyfin,
+        accountID: String = "acct-1"
+    ) {
+        self.kind = providerKind
         self.results = results
         self.error = error
         self.session = UserSession(
-            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
-            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+            server: MediaServer(id: "s-\(accountID)", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: providerKind),
+            userID: "u-\(accountID)", userName: "Alice", deviceID: "d-\(accountID)", accessToken: "TOKEN"
         )
     }
 

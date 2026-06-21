@@ -45,15 +45,17 @@ public struct RootView: View {
                 )
 
             case .ready:
-                if let provider = appState.primaryProvider {
+                let accounts = appState.homeAccounts
+                if !accounts.isEmpty {
                     MainTabView(
-                        provider: provider,
+                        accounts: accounts,
                         captionModel: appState.captionModel,
                         spoilerModel: appState.spoilerModel,
                         themeModel: appState.themeModel,
                         diagnosticsModel: appState.diagnosticsModel,
+                        homeVisibility: appState.homeLibraryVisibilityModel,
                         ratingsProvider: appState.ratingsProvider,
-                        accounts: appState.accounts,
+                        displayAccounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
                         pendingPlayItemID: Binding(
                             get: { appState.pendingPlayItemID },

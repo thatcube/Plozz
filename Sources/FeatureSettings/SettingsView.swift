@@ -15,6 +15,9 @@ public struct SettingsView: View {
     @State private var spoilers: SpoilerSettingsModel
     @State private var theme: ThemeSettingsModel
     @State private var diagnostics: DiagnosticsSettingsModel
+    @State private var homeVisibility: HomeLibraryVisibilityModel
+    private let discoveredLibraries: LoadState<[AggregatedLibrary]>
+    private let reloadLibraries: () async -> Void
     private let accounts: [Account]
     private let activeAccountID: String?
     private let appVersion: String
@@ -29,6 +32,9 @@ public struct SettingsView: View {
         spoilers: SpoilerSettingsModel,
         theme: ThemeSettingsModel,
         diagnostics: DiagnosticsSettingsModel,
+        homeVisibility: HomeLibraryVisibilityModel,
+        discoveredLibraries: LoadState<[AggregatedLibrary]>,
+        reloadLibraries: @escaping () async -> Void,
         accounts: [Account],
         activeAccountID: String?,
         appVersion: String,
@@ -42,6 +48,9 @@ public struct SettingsView: View {
         _spoilers = State(initialValue: spoilers)
         _theme = State(initialValue: theme)
         _diagnostics = State(initialValue: diagnostics)
+        _homeVisibility = State(initialValue: homeVisibility)
+        self.discoveredLibraries = discoveredLibraries
+        self.reloadLibraries = reloadLibraries
         self.accounts = accounts
         self.activeAccountID = activeAccountID
         self.appVersion = appVersion
@@ -87,8 +96,10 @@ public struct SettingsView: View {
                 } header: {
                     Text(accounts.count == 1 ? "Account" : "Accounts")
                 } footer: {
-                    Text("Add another Jellyfin server to switch between libraries.")
+                    Text("Add another Jellyfin or Plex server to combine their libraries on Home.")
                 }
+
+                homeLibrariesSection
 
                 Section {
                     ForEach(AppTheme.allCases) { option in
@@ -208,6 +219,85 @@ public struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task { await reloadLibraries() }
+        }
+    }
+
+    /// The customizable "Home Libraries" checklist: every discovered library,
+    /// grouped by account/provider, with an opt-out toggle that controls Home
+    /// visibility. Toggling persists immediately and updates Home live.
+    @ViewBuilder
+    private var homeLibrariesSection: some View {
+        switch discoveredLibraries {
+        case .idle, .loading:
+            Section {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Discovering libraries…")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Home Libraries")
+            }
+        case .empty:
+            Section {
+                Text("No libraries found on your servers.")
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Home Libraries")
+            }
+        case .failed:
+            Section {
+                Text("Couldn't load your libraries.")
+                    .foregroundStyle(.secondary)
+                Button {
+                    Task { await reloadLibraries() }
+                } label: {
+                    Label("Try Again", systemImage: "arrow.clockwise")
+                }
+            } header: {
+                Text("Home Libraries")
+            }
+        case let .loaded(libraries):
+            Section {
+                ForEach(groupedLibraries(libraries), id: \.id) { group in
+                    Text(group.header)
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    ForEach(group.libraries) { aggregated in
+                        Toggle(aggregated.library.title, isOn: Binding(
+                            get: { homeVisibility.isVisible(aggregated.key) },
+                            set: { homeVisibility.setVisible($0, for: aggregated.key) }
+                        ))
+                    }
+                }
+            } header: {
+                Text("Home Libraries")
+            } footer: {
+                Text("Choose which libraries appear on your Home screen. Newly added libraries appear automatically.")
+            }
+        }
+    }
+
+    private struct LibraryGroup: Identifiable {
+        let id: String
+        let header: String
+        let libraries: [AggregatedLibrary]
+    }
+
+    /// Groups discovered libraries by their owning account, preserving discovery
+    /// order, with a "user · server (provider)" header per group.
+    private func groupedLibraries(_ libraries: [AggregatedLibrary]) -> [LibraryGroup] {
+        var order: [String] = []
+        var groups: [String: [AggregatedLibrary]] = [:]
+        for library in libraries {
+            if groups[library.accountID] == nil { order.append(library.accountID) }
+            groups[library.accountID, default: []].append(library)
+        }
+        return order.compactMap { accountID in
+            guard let libs = groups[accountID], let first = libs.first else { return nil }
+            let header = "\(first.accountName) · \(first.serverName) (\(first.providerKind.displayName))"
+            return LibraryGroup(id: accountID, header: header, libraries: libs)
         }
     }
 

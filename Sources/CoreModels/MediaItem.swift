@@ -53,6 +53,16 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// used by enrichment services to look up additional ratings/metadata.
     public var providerIDs: [String: String]
 
+    /// The `Account.id` this item was fetched from, stamped by the Home/Search
+    /// aggregator when content from several providers is merged into one row.
+    ///
+    /// Providers never set this (they don't know app account ids) — it is `nil`
+    /// for items returned directly by a single provider and only populated at the
+    /// aggregated entry points, so callers can route a tapped item back to its
+    /// owning provider. Once you drill into a single-provider subtree the field
+    /// is irrelevant and may be `nil`.
+    public var sourceAccountID: String?
+
     public init(
         id: String,
         title: String,
@@ -70,7 +80,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         backdropURL: URL? = nil,
         fallbackArtworkURL: URL? = nil,
         ratings: [ExternalRating] = [],
-        providerIDs: [String: String] = [:]
+        providerIDs: [String: String] = [:],
+        sourceAccountID: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -89,6 +100,15 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.fallbackArtworkURL = fallbackArtworkURL
         self.ratings = ratings
         self.providerIDs = providerIDs
+        self.sourceAccountID = sourceAccountID
+    }
+
+    /// Returns a copy of this item tagged as belonging to `accountID`, used by the
+    /// aggregator to stamp merged rows with their owning account.
+    public func taggingSource(_ accountID: String) -> MediaItem {
+        var copy = self
+        copy.sourceAccountID = accountID
+        return copy
     }
 
     /// A human-friendly subtitle line, e.g. `S1 · E3` or the production year.
@@ -109,10 +129,23 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
     public var kind: MediaItemKind
     public var imageURL: URL?
 
-    public init(id: String, title: String, kind: MediaItemKind, imageURL: URL? = nil) {
+    /// The `Account.id` this library was fetched from, stamped by the aggregator
+    /// so a tapped library can be browsed against its owning provider. `nil` when
+    /// returned directly by a single provider.
+    public var sourceAccountID: String?
+
+    public init(id: String, title: String, kind: MediaItemKind, imageURL: URL? = nil, sourceAccountID: String? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
         self.imageURL = imageURL
+        self.sourceAccountID = sourceAccountID
+    }
+
+    /// Returns a copy of this library tagged as belonging to `accountID`.
+    public func taggingSource(_ accountID: String) -> MediaLibrary {
+        var copy = self
+        copy.sourceAccountID = accountID
+        return copy
     }
 }

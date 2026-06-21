@@ -33,6 +33,9 @@ public final class LibraryBrowseViewModel {
     private let containerKind: MediaItemKind
     private let pageSize: Int
     private let defaults: UserDefaults
+    /// The account this library belongs to, stamped onto every emitted item so a
+    /// tapped grid cell routes to the right provider. `nil` outside aggregated flows.
+    private let sourceAccountID: String?
 
     /// The order the grid is currently sorted by. Changing it via `setSort`
     /// restarts paging from the first page and persists the choice per container
@@ -50,13 +53,15 @@ public final class LibraryBrowseViewModel {
         containerID: String,
         containerKind: MediaItemKind,
         pageSize: Int = PageRequest.defaultLimit,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        sourceAccountID: String? = nil
     ) {
         self.provider = provider
         self.containerID = containerID
         self.containerKind = containerKind
         self.pageSize = pageSize
         self.defaults = defaults
+        self.sourceAccountID = sourceAccountID
         self.sort = Self.loadSort(for: containerKind, from: defaults)
     }
 
@@ -171,8 +176,14 @@ public final class LibraryBrowseViewModel {
             resize(to: page.startIndex + page.items.count)
         }
         for (offset, item) in page.items.enumerated() {
-            loaded[page.startIndex + offset] = item
+            loaded[page.startIndex + offset] = tagged(item)
         }
+    }
+
+    /// Stamps an item with this library's owning account (if any).
+    private func tagged(_ item: MediaItem) -> MediaItem {
+        guard let sourceAccountID else { return item }
+        return item.taggingSource(sourceAccountID)
     }
 
     private func resize(to count: Int) {

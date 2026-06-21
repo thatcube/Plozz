@@ -18,15 +18,21 @@ public final class ItemDetailViewModel {
     private let provider: any MediaProvider
     private let itemID: String
     private let ratingsProvider: any ExternalRatingsProviding
+    /// The account this item belongs to, propagated so the detail item and its
+    /// children stay tagged with their owning provider as the user drills down
+    /// (children come from the provider untagged). `nil` outside aggregated flows.
+    private let sourceAccountID: String?
 
     public init(
         provider: any MediaProvider,
         itemID: String,
-        ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider()
+        ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
+        sourceAccountID: String? = nil
     ) {
         self.provider = provider
         self.itemID = itemID
         self.ratingsProvider = ratingsProvider
+        self.sourceAccountID = sourceAccountID
     }
 
     public func load() async {
@@ -41,13 +47,20 @@ public final class ItemDetailViewModel {
             default:
                 children = []
             }
-            state = .loaded(Detail(item: item, children: children))
+            state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
             await enrichRatings(for: item)
         } catch let error as AppError {
             state = .failed(error)
         } catch {
             state = .failed(.unknown(""))
         }
+    }
+
+    /// Stamps an item with this detail's owning account (if any) so navigation
+    /// keeps routing to the right provider.
+    private func tagged(_ item: MediaItem) -> MediaItem {
+        guard let sourceAccountID else { return item }
+        return item.taggingSource(sourceAccountID)
     }
 
     /// Fetches external ratings off the critical path and merges them into the

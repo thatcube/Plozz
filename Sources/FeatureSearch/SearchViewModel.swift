@@ -15,16 +15,16 @@ public final class SearchViewModel {
     public var query: String = ""
     public private(set) var state: LoadState<[SearchSection]> = .idle
 
-    private let provider: any MediaProvider
+    private let accounts: [ResolvedAccount]
     private let limit: Int
     private let debounce: Duration
 
     public init(
-        provider: any MediaProvider,
+        accounts: [ResolvedAccount],
         limit: Int = 40,
         debounceMilliseconds: Int = 350
     ) {
-        self.provider = provider
+        self.accounts = accounts
         self.limit = limit
         self.debounce = .milliseconds(debounceMilliseconds)
     }
@@ -51,7 +51,7 @@ public final class SearchViewModel {
 
         state = .loading
         do {
-            let items = try await provider.search(query: requested, limit: limit)
+            let items = try await aggregatedSearch(query: requested)
             guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
             let sections = SearchSection.sections(from: items)
             state = sections.isEmpty ? .empty : .loaded(sections)
@@ -62,5 +62,59 @@ public final class SearchViewModel {
             guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
             state = .failed(.unknown(""))
         }
+    }
+
+    /// Searches every active account concurrently and round-robin interleaves the
+    /// per-account hits, tagging each with its owning account so a tapped result
+    /// routes to the right provider. Resilient: if some accounts fail their hits
+    /// are simply omitted; only when **every** account fails is the error
+    /// surfaced, so a single server being down still shows results from the rest.
+    private func aggregatedSearch(query: String) async throws -> [MediaItem] {
+        let perAccountLimit = limit
+        let results = await withTaskGroup(of: (Int, Result<[MediaItem], AppError>).self) { group in
+            for (index, resolved) in accounts.enumerated() {
+                group.addTask {
+                    let accountID = resolved.account.id
+                    do {
+                        let hits = try await resolved.provider.search(query: query, limit: perAccountLimit)
+                        return (index, .success(hits.map { $0.taggingSource(accountID) }))
+                    } catch let error as AppError {
+                        return (index, .failure(error))
+                    } catch {
+                        return (index, .failure(.unknown("")))
+                    }
+                }
+            }
+            var byIndex: [Int: Result<[MediaItem], AppError>] = [:]
+            for await (index, result) in group { byIndex[index] = result }
+            return accounts.indices.map { byIndex[$0] ?? .success([]) }
+        }
+
+        var groups: [[MediaItem]] = []
+        var firstError: AppError?
+        var anySuccess = false
+        for result in results {
+            switch result {
+            case let .success(hits):
+                groups.append(hits)
+                anySuccess = true
+            case let .failure(error):
+                if firstError == nil { firstError = error }
+            }
+        }
+        if !anySuccess, let firstError { throw firstError }
+        return Self.interleave(groups)
+    }
+
+    /// Round-robin interleave preserving each account's relevance order.
+    static func interleave<T>(_ groups: [[T]]) -> [T] {
+        let maxCount = groups.map(\.count).max() ?? 0
+        var result: [T] = []
+        for offset in 0..<maxCount {
+            for group in groups where offset < group.count {
+                result.append(group[offset])
+            }
+        }
+        return result
     }
 }

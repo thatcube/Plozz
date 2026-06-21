@@ -36,6 +36,10 @@ public final class AppState {
     public let spoilerModel: SpoilerSettingsModel
     public let themeModel: ThemeSettingsModel
     public let diagnosticsModel: DiagnosticsSettingsModel
+    /// Which discovered libraries appear on the unified Home (opt-out). Shared
+    /// live between the Settings checklist and Home so toggles take effect
+    /// without a reload.
+    public let homeLibraryVisibilityModel: HomeLibraryVisibilityModel
 
     /// Provider-agnostic external-ratings enrichment (IMDb/RT/Metacritic via
     /// OMDb when a key is configured; otherwise a no-op). Injected into item
@@ -53,6 +57,7 @@ public final class AppState {
         spoilerModel: SpoilerSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
+        homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
         ratingsProvider: (any ExternalRatingsProviding)? = nil
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
@@ -61,6 +66,7 @@ public final class AppState {
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel()
         self.themeModel = themeModel ?? ThemeSettingsModel()
         self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel()
+        self.homeLibraryVisibilityModel = homeLibraryVisibilityModel ?? HomeLibraryVisibilityModel()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
     }
 
@@ -126,6 +132,29 @@ public final class AppState {
             else { return nil }
             return ResolvedAccount(account: account, provider: provider)
         }
+    }
+
+    /// The accounts the unified Home/Search fan out over. Normally the active
+    /// set; falls back to the primary account so the signed-in UI is never empty
+    /// even if the active-id set is somehow empty.
+    public var homeAccounts: [ResolvedAccount] {
+        let active = resolvedActiveAccounts
+        if !active.isEmpty { return active }
+        guard let account = primaryActiveAccount,
+              let token = accountStore.token(for: account.id),
+              let provider = try? registry.provider(for: account.session(token: token))
+        else { return [] }
+        return [ResolvedAccount(account: account, provider: provider)]
+    }
+
+    /// Resolves the provider for a specific account id — used to route a tapped
+    /// library/item from the merged Home back to its owning provider. Tokens are
+    /// resolved on demand and never stored on the value.
+    public func provider(forAccountID id: String) -> (any MediaProvider)? {
+        guard let account = accounts.first(where: { $0.id == id }),
+              let token = accountStore.token(for: account.id)
+        else { return nil }
+        return try? registry.provider(for: account.session(token: token))
     }
 
     // MARK: Events

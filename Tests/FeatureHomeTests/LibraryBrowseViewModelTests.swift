@@ -182,3 +182,4 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         let otherKind = LibraryBrowseViewModel(provider: provider, containerID: "lib2", containerKind: .series, defaults: defaults)
         XCTAssertEqual(otherKind.sort, .default)
     }
+}

@@ -98,9 +98,18 @@ public struct SettingsView: View {
                     Toggle("Hide spoilers for unwatched episodes", isOn: $spoilers.settings.isEnabled)
 
                     if spoilers.settings.isEnabled {
-                        Picker("Thumbnail style", selection: $spoilers.settings.mode) {
-                            ForEach(SpoilerSettings.Mode.allCases, id: \.self) { mode in
-                                Text(mode.displayName).tag(mode)
+                        ForEach(SpoilerSettings.Mode.allCases, id: \.self) { mode in
+                            Button {
+                                spoilers.settings.mode = mode
+                            } label: {
+                                HStack {
+                                    Text(mode.displayName)
+                                    Spacer()
+                                    if spoilers.settings.mode == mode {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.tint)
+                                    }
+                                }
                             }
                         }
 

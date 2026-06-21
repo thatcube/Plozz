@@ -1,0 +1,173 @@
+import Foundation
+import CoreModels
+import CoreNetworking
+
+/// `MediaProvider` conformer for Jellyfin.
+///
+/// Holds an authenticated `JellyfinClient` and maps Jellyfin DTOs onto the
+/// provider-agnostic `CoreModels` types. Feature modules depend only on
+/// `MediaProvider`; this is the single place Jellyfin specifics live.
+public struct JellyfinProvider: MediaProvider {
+    public let kind: ProviderKind = .jellyfin
+    public let session: UserSession
+    private let client: JellyfinClient
+
+    public init(session: UserSession, http: HTTPClient = URLSessionHTTPClient()) {
+        self.session = session
+        self.client = JellyfinClient(
+            baseURL: session.server.baseURL,
+            deviceProfile: JellyfinDeviceProfile(deviceID: session.deviceID),
+            token: session.accessToken,
+            http: http
+        )
+    }
+
+    // MARK: Browsing
+
+    public func libraries() async throws -> [MediaLibrary] {
+        try await client.userViews(userID: session.userID).map { dto in
+            MediaLibrary(
+                id: dto.Id,
+                title: dto.Name ?? "Library",
+                kind: Self.kind(forCollectionType: dto.CollectionType),
+                imageURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 400)
+            )
+        }
+    }
+
+    public func continueWatching(limit: Int) async throws -> [MediaItem] {
+        try await client.resumeItems(userID: session.userID, limit: limit).map(map(item:))
+    }
+
+    public func latest(limit: Int) async throws -> [MediaItem] {
+        try await client.latestItems(userID: session.userID, limit: limit).map(map(item:))
+    }
+
+    public func item(id: String) async throws -> MediaItem {
+        map(item: try await client.item(userID: session.userID, id: id))
+    }
+
+    public func children(of itemID: String) async throws -> [MediaItem] {
+        try await client.children(userID: session.userID, parentID: itemID).map(map(item:))
+    }
+
+    // MARK: Playback
+
+    public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
+        let detail = try await client.item(userID: session.userID, id: itemID)
+        let info = try await client.playbackInfo(userID: session.userID, itemID: itemID)
+        guard let source = info.MediaSources.first else { throw AppError.notFound }
+
+        let streamURL = try resolveStreamURL(itemID: itemID, source: source)
+        let mappedItem = map(item: detail)
+
+        let streams = source.MediaStreams ?? detail.MediaStreams ?? []
+        let audio = streams.filter { $0.Type == "Audio" }.map(map(stream:))
+        let subs = streams.filter { $0.Type == "Subtitle" }.map(map(stream:))
+
+        return PlaybackRequest(
+            item: mappedItem,
+            streamURL: streamURL,
+            playSessionID: info.PlaySessionId,
+            audioTracks: audio,
+            subtitleTracks: subs,
+            startPosition: mappedItem.resumePosition ?? 0
+        )
+    }
+
+    public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {
+        try await client.reportPlaybackProgress(progress, event: event)
+    }
+
+    public func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? {
+        client.imageURL(itemID: itemID, kind: kind, maxWidth: maxWidth)
+    }
+
+    // MARK: - Mapping
+
+    private func resolveStreamURL(itemID: String, source: MediaSourceInfo) throws -> URL {
+        // Prefer server-provided transcode/HLS URL when present (handles
+        // unsupported codecs); otherwise direct-stream the original container.
+        if let transcoding = source.TranscodingUrl, let url = absoluteURL(fromServerPath: transcoding) {
+            return url
+        }
+        let container = source.Container ?? "mp4"
+        let sourceID = source.Id ?? itemID
+        guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
+            throw AppError.invalidResponse
+        }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/Videos/\(itemID)/stream.\(container)"
+        components.queryItems = [
+            URLQueryItem(name: "static", value: "true"),
+            URLQueryItem(name: "mediaSourceId", value: sourceID),
+            URLQueryItem(name: "api_key", value: session.accessToken)
+        ]
+        guard let url = components.url else { throw AppError.invalidResponse }
+        return url
+    }
+
+    private func absoluteURL(fromServerPath path: String) -> URL? {
+        if let absolute = URL(string: path), absolute.scheme != nil { return absolute }
+        guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        if let pathComponents = URLComponents(string: path) {
+            components.path = (components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path) + pathComponents.path
+            components.queryItems = pathComponents.queryItems
+        }
+        return components.url
+    }
+
+    private func map(item dto: BaseItemDto) -> MediaItem {
+        MediaItem(
+            id: dto.Id,
+            title: dto.Name ?? "Untitled",
+            kind: Self.kind(forItemType: dto.Type),
+            overview: dto.Overview,
+            parentTitle: dto.SeriesName ?? dto.SeasonName,
+            seasonNumber: dto.ParentIndexNumber,
+            episodeNumber: dto.IndexNumber,
+            productionYear: dto.ProductionYear,
+            runtime: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
+            resumePosition: JellyfinTicks.seconds(fromTicks: dto.UserData?.PlaybackPositionTicks),
+            playedPercentage: dto.UserData?.PlayedPercentage.map { $0 / 100.0 },
+            isPlayed: dto.UserData?.Played ?? false,
+            posterURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 500),
+            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280)
+        )
+    }
+
+    private func map(stream dto: MediaStreamDto) -> MediaTrack {
+        MediaTrack(
+            id: dto.Index,
+            kind: dto.Type == "Subtitle" ? .subtitle : .audio,
+            displayTitle: dto.DisplayTitle ?? dto.Language ?? dto.Codec ?? "Track \(dto.Index)",
+            language: dto.Language,
+            isDefault: dto.IsDefault ?? false,
+            isForced: dto.IsForced ?? false
+        )
+    }
+
+    private static func kind(forItemType type: String?) -> MediaItemKind {
+        switch type {
+        case "Movie": return .movie
+        case "Series": return .series
+        case "Season": return .season
+        case "Episode": return .episode
+        case "Video": return .video
+        case "CollectionFolder", "Folder": return .folder
+        case "BoxSet": return .collection
+        default: return .unknown
+        }
+    }
+
+    private static func kind(forCollectionType type: String?) -> MediaItemKind {
+        switch type {
+        case "movies": return .movie
+        case "tvshows": return .series
+        case "boxsets": return .collection
+        default: return .folder
+        }
+    }
+}

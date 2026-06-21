@@ -142,6 +142,31 @@ final class SettingsNamespaceTests: XCTestCase {
         XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: nil).load(), .oled)
     }
 
+    /// End-to-end zero-migration proof: an existing install's settings (written
+    /// under the legacy un-suffixed keys) must be read by the *active default
+    /// profile* after the profile system bootstraps. This ties the bootstrapped
+    /// default profile's `activeNamespace` to the legacy keys explicitly.
+    @MainActor
+    func testDefaultProfileReadsPreExistingLegacyKeys() {
+        let defaults = makeDefaults()
+        // Seed several legacy keys as a pre-profiles install would have.
+        defaults.set(AppTheme.oled.rawValue, forKey: "com.plozz.appTheme")
+        var spoilerOff = SpoilerSettings.default
+        spoilerOff.isEnabled = false
+        SpoilerSettingsStore(defaults: defaults, namespace: nil).save(spoilerOff)
+
+        // Bootstrap the profile system over the same defaults (init migrates).
+        let model = ProfilesModel(store: ProfileStore(defaults: defaults))
+
+        // The active (default) profile must resolve to the legacy nil namespace.
+        XCTAssertNil(model.activeNamespace)
+
+        // Settings stores built from that namespace read the pre-existing values.
+        let ns = model.activeNamespace
+        XCTAssertEqual(ThemeSettingsStore(defaults: defaults, namespace: ns).load(), .oled)
+        XCTAssertFalse(SpoilerSettingsStore(defaults: defaults, namespace: ns).load().isEnabled)
+    }
+
     func testDistinctNamespacesAreIsolated() {
         let defaults = makeDefaults()
         let a = ThemeSettingsStore(defaults: defaults, namespace: "p1")

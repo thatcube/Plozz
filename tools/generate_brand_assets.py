@@ -24,20 +24,23 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOGO_SVG = os.path.join(REPO, "App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg")
 BRAND = os.path.join(REPO, "App/Resources/Assets.xcassets/App Icon & Top Shelf Image.brandassets")
 
-# Brand background: a mid grey (#515151) rendered as a subtle vertical gradient
-# overlaid with a deterministic pixel-block texture that echoes the pixelated
-# logo. The shade sits between the original dark and the lighter revision so the
+# Brand background: a dark grey (#2e2e30) rendered as a subtle vertical gradient
+# overlaid with a gentle pixel-block texture that echoes the pixelated logo. The
+# shade was toned down from the original mid grey (#515151) so the background is
+# darker and the pixel pattern reads as a soft, low-contrast shift rather than an
+# aggressive checker — closer to a softly shifting radial gradient — while the
 # logo's black antenna/outline stay clearly visible against it.
-BRAND_DARK = (81, 81, 81)  # #515151
-BG_TOP = (89, 89, 89)
-BG_BOTTOM = (73, 73, 73)
+BRAND_DARK = (46, 46, 48)  # #2e2e30
+BG_TOP = (52, 52, 54)
+BG_BOTTOM = (40, 40, 42)
 
 # Pixel-art background texture: a grid of square "pixels" whose size matches the
 # logo's own pixels (the logo SVG is a LOGO_GRID x LOGO_GRID pixel-art grid), each
-# nudged +/- PIXEL_JITTER in brightness. Seeded so regeneration is reproducible;
-# the cell size is derived from the rendered logo so the texture scales with it.
+# nudged +/- PIXEL_JITTER in brightness. The jitter was reduced from 10 to 4 so
+# the gray-to-gray contrast is much subtler. Seeded so regeneration is
+# reproducible; the cell size is derived from the rendered logo so it scales.
 LOGO_GRID = 32
-PIXEL_JITTER = 10
+PIXEL_JITTER = 4
 PIXEL_SEED = 0x504C5A  # "PLZ"
 
 # Logo size as a fraction of the shorter side, matched to the sibling Twozz app.

@@ -55,7 +55,7 @@ public struct JellyfinProvider: MediaProvider {
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         let (recursive, includeItemTypes) = Self.query(forContainerKind: kind)
         PlozzLog.networking.info(
-            "Library browse: container=\(containerID) kind=\(kind.rawValue) recursive=\(recursive) types=\(includeItemTypes.joined(separator: ",")) start=\(page.startIndex) limit=\(page.limit)"
+            "Library browse: container=\(containerID) kind=\(kind.rawValue) recursive=\(recursive) types=\(includeItemTypes.joined(separator: ",")) start=\(page.startIndex) limit=\(page.limit) sort=\(page.sort.field.rawValue)/\(page.sort.direction.rawValue)"
         )
         do {
             let response = try await client.items(
@@ -64,7 +64,8 @@ public struct JellyfinProvider: MediaProvider {
                 includeItemTypes: includeItemTypes,
                 recursive: recursive,
                 startIndex: page.startIndex,
-                limit: page.limit
+                limit: page.limit,
+                sort: page.sort
             )
             let items = response.Items.map(map(item:))
             PlozzLog.networking.info(

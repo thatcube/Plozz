@@ -142,6 +142,74 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertFalse(page.hasMore)
     }
 
+    func testItemsPageDefaultSortIsNameAscending() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        _ = try await provider.items(in: "lib1", kind: .movie, page: PageRequest())
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertEqual(query.first(where: { $0.name == "SortBy" })?.value, "SortName")
+        XCTAssertEqual(query.first(where: { $0.name == "SortOrder" })?.value, "Ascending")
+    }
+
+    func testItemsPageMapsEachSortFieldToJellyfinSortBy() async throws {
+        let expected: [SortField: String] = [
+            .name: "SortName",
+            .dateAdded: "DateCreated",
+            .releaseDate: "PremiereDate",
+            .communityRating: "CommunityRating",
+            .runtime: "Runtime",
+            .random: "Random"
+        ]
+        for field in SortField.allCases {
+            let stub = StubHTTPClient()
+            stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+            let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+            _ = try await provider.items(
+                in: "lib1",
+                kind: .movie,
+                page: PageRequest(sort: CoreModels.SortDescriptor(field: field, direction: .ascending))
+            )
+
+            let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+            XCTAssertEqual(
+                query.first(where: { $0.name == "SortBy" })?.value,
+                expected[field],
+                "SortBy mapping for \(field)"
+            )
+        }
+    }
+
+    func testItemsPageMapsSortDirectionToSortOrder() async throws {
+        let expected: [SortDirection: String] = [
+            .ascending: "Ascending",
+            .descending: "Descending"
+        ]
+        for direction in SortDirection.allCases {
+            let stub = StubHTTPClient()
+            stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
+            let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+            _ = try await provider.items(
+                in: "lib1",
+                kind: .movie,
+                page: PageRequest(sort: CoreModels.SortDescriptor(field: .releaseDate, direction: direction))
+            )
+
+            let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+            XCTAssertEqual(
+                query.first(where: { $0.name == "SortOrder" })?.value,
+                expected[direction],
+                "SortOrder mapping for \(direction)"
+            )
+            // The chosen field must still be carried alongside the direction.
+            XCTAssertEqual(query.first(where: { $0.name == "SortBy" })?.value, "PremiereDate")
+        }
+    }
+
     func testItemMapsNativeRatingsAndProviderIDs() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """

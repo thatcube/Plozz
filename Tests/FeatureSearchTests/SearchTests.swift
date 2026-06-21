@@ -212,3 +212,126 @@ private final class SearchStubProvider: MediaProvider, @unchecked Sendable {
 private func makeItems(_ count: Int) -> [MediaItem] {
     (0..<count).map { MediaItem(id: "i\($0)", title: "Item \($0)", kind: .movie) }
 }
+
+final class SearchDeduplicatorTests: XCTestCase {
+    private func movie(
+        _ id: String,
+        title: String,
+        year: Int? = nil,
+        account: String,
+        providerIDs: [String: String] = [:]
+    ) -> MediaItem {
+        MediaItem(
+            id: id,
+            title: title,
+            kind: .movie,
+            productionYear: year,
+            providerIDs: providerIDs,
+            sourceAccountID: account
+        )
+    }
+
+    func testCollapsesSameTitleAcrossServersIntoOneCard() {
+        // The exact same movie on a Plex account and a Jellyfin account.
+        let plex = movie("p1", title: "Dune", year: 2021, account: "acct-plex")
+        let jellyfin = movie("j1", title: "Dune", year: 2021, account: "acct-jelly")
+
+        let merged = SearchDeduplicator.deduplicate([plex, jellyfin])
+
+        XCTAssertEqual(merged.count, 1, "Same title/year/kind on two servers must show once")
+        let card = merged[0]
+        XCTAssertEqual(card.id, "p1", "First occurrence stays primary")
+        XCTAssertEqual(card.sourceAccountID, "acct-plex")
+        XCTAssertEqual(card.additionalSourceAccountIDs, ["acct-jelly"], "Alternate server retained for playback")
+        XCTAssertEqual(card.allSourceAccountIDs, ["acct-plex", "acct-jelly"])
+    }
+
+    func testDoesNotMergeDifferentYears() {
+        let original = movie("a", title: "Dune", year: 1984, account: "acct-1")
+        let remake = movie("b", title: "Dune", year: 2021, account: "acct-2")
+
+        let merged = SearchDeduplicator.deduplicate([original, remake])
+
+        XCTAssertEqual(merged.map(\.id), ["a", "b"], "A reboot with a different year is a different title")
+    }
+
+    func testMergesOnSharedExternalIDDespiteTitleDifferences() {
+        // Different display titles / years but the same IMDb id ⇒ same film.
+        let plex = movie("p1", title: "Spider-Man", account: "acct-plex", providerIDs: ["Imdb": "tt0145487"])
+        let jellyfin = movie(
+            "j1",
+            title: "Spider Man",
+            year: 2002,
+            account: "acct-jelly",
+            providerIDs: ["Imdb": "tt0145487", "Tmdb": "557"]
+        )
+
+        let merged = SearchDeduplicator.deduplicate([plex, jellyfin])
+
+        XCTAssertEqual(merged.count, 1)
+        let card = merged[0]
+        XCTAssertEqual(card.id, "p1")
+        XCTAssertEqual(card.additionalSourceAccountIDs, ["acct-jelly"])
+        XCTAssertEqual(card.providerIDs["Imdb"], "tt0145487")
+        XCTAssertEqual(card.providerIDs["Tmdb"], "557", "External ids are unioned across sources")
+    }
+
+    func testTransitiveMergeAcrossThreeServers() {
+        // a↔b share an IMDb id; b↔c share title+year ⇒ all three are one card.
+        let a = movie("a", title: "The Matrix", account: "acct-a", providerIDs: ["Imdb": "tt0133093"])
+        let b = movie("b", title: "The Matrix", year: 1999, account: "acct-b", providerIDs: ["Imdb": "tt0133093"])
+        let c = movie("c", title: "the  matrix", year: 1999, account: "acct-c")
+
+        let merged = SearchDeduplicator.deduplicate([a, b, c])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].id, "a")
+        XCTAssertEqual(merged[0].additionalSourceAccountIDs, ["acct-b", "acct-c"])
+    }
+
+    func testNormalizationIgnoresPunctuationDiacriticsAndCase() {
+        let plex = movie("p1", title: "Amélie", year: 2001, account: "acct-plex")
+        let jellyfin = movie("j1", title: "amelie", year: 2001, account: "acct-jelly")
+
+        let merged = SearchDeduplicator.deduplicate([plex, jellyfin])
+
+        XCTAssertEqual(merged.count, 1, "Accents and case must not split a duplicate")
+    }
+
+    func testPreservesOrderAndLeavesUniqueItemsUntouched() {
+        let items = [
+            movie("m1", title: "Dune", year: 2021, account: "acct-plex"),
+            movie("m2", title: "Arrival", year: 2016, account: "acct-plex"),
+            movie("m3", title: "Dune", year: 2021, account: "acct-jelly")
+        ]
+
+        let merged = SearchDeduplicator.deduplicate(items)
+
+        XCTAssertEqual(merged.map(\.id), ["m1", "m2"], "Relevance order preserved, duplicate folded into primary")
+        XCTAssertEqual(merged[0].additionalSourceAccountIDs, ["acct-jelly"])
+        XCTAssertTrue(merged[1].additionalSourceAccountIDs.isEmpty, "Unique item is unchanged")
+    }
+}
+
+@MainActor
+final class SearchViewModelDedupTests: XCTestCase {
+    func testSameMovieOnTwoServersShowsSingleCard() async {
+        let shared = MediaItem(id: "shared", title: "Blade Runner 2049", kind: .movie, productionYear: 2017)
+        let plex = SearchStubProvider(results: [shared], providerKind: .plex, accountID: "acct-plex")
+        let jellyfin = SearchStubProvider(results: [shared], providerKind: .jellyfin, accountID: "acct-jelly")
+        let accounts = [plex, jellyfin].map {
+            ResolvedAccount(account: Account(id: $0.accountID, from: $0.session), provider: $0)
+        }
+        let vm = SearchViewModel(accounts: accounts, debounceMilliseconds: 0)
+        vm.query = "blade"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded, got \(vm.state)")
+        }
+        let movies = sections.first { $0.title == "Movies" }
+        XCTAssertEqual(movies?.items.count, 1, "Duplicate across providers collapses to one card")
+        XCTAssertEqual(movies?.items.first?.allSourceAccountIDs, ["acct-plex", "acct-jelly"])
+    }
+}

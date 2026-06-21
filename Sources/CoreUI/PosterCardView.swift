@@ -60,8 +60,8 @@ public struct PosterCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 artwork
                     .frame(width: size.width, height: size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
                     .overlay(alignment: .bottom) { progressBar(height: 8) }
+                    .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primaryText)
@@ -88,8 +88,8 @@ public struct PosterCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 artwork
                     .frame(width: size.width, height: size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                     .overlay(alignment: .bottom) { progressBar(height: 8) }
+                    .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(primaryText)

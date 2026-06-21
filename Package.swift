@@ -120,6 +120,10 @@ let package = Package(
         .testTarget(
             name: "FeatureAuthTests",
             dependencies: ["FeatureAuth", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeatureHomeTests",
+            dependencies: ["FeatureHome", "CoreModels"]
         )
     ]
 )

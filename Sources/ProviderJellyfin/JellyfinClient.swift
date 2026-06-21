@@ -172,6 +172,26 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
+    /// One page of a container's direct children. Requests only `limit` items
+    /// from `startIndex` and relies on `TotalRecordCount` so large libraries
+    /// load a screenful quickly instead of fetching everything (which would
+    /// time out). Non-recursive: returns the container's direct children, which
+    /// is correct for flat libraries, folders, and collections.
+    func items(userID: String, parentID: String, startIndex: Int, limit: Int) async throws -> ItemsResponse {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items",
+            queryItems: [
+                URLQueryItem(name: "ParentId", value: parentID),
+                URLQueryItem(name: "StartIndex", value: String(startIndex)),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "SortBy", value: "SortName"),
+                URLQueryItem(name: "Fields", value: "Overview")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
+    }
+
     // MARK: Playback
 
     func playbackInfo(userID: String, itemID: String) async throws -> PlaybackInfoResponse {

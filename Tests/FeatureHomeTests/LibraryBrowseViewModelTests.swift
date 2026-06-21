@@ -123,4 +123,62 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         XCTAssertNotNil(vm.item(at: 20))
         XCTAssertNil(vm.pageError)
     }
-}
+
+    // MARK: Sorting
+
+    private func isolatedDefaults() -> UserDefaults {
+        let defaults = UserDefaults(suiteName: "LibraryBrowseSortTests-\(UUID().uuidString)")!
+        return defaults
+    }
+
+    func testDefaultSortIsNameAscending() {
+        let provider = FakeMediaProvider(allItems: makeItems(10))
+        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, defaults: isolatedDefaults())
+        XCTAssertEqual(vm.sort, .default)
+    }
+
+    func testSetSortReloadsFirstPageWithNewSortAndResetsPaging() async {
+        let provider = FakeMediaProvider(allItems: makeItems(100))
+        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, pageSize: 10, defaults: isolatedDefaults())
+        await vm.loadFirstPage()
+        await vm.itemAppeared(at: 20) // load a later page so paging state is non-trivial
+
+        let newSort = CoreModels.SortDescriptor(field: .dateAdded, direction: .descending)
+        await vm.setSort(newSort)
+
+        XCTAssertEqual(vm.sort, newSort)
+        // Paging restarts: only the first page is loaded again under the new sort.
+        XCTAssertEqual(vm.loadedCount, 10)
+        XCTAssertNil(vm.item(at: 20), "Previously loaded later pages are cleared on re-sort")
+        let lastRequest = provider.requestedPages.last
+        XCTAssertEqual(lastRequest?.startIndex, 0, "Re-sort reloads from the first page, not the whole library")
+        XCTAssertEqual(lastRequest?.sort, newSort)
+    }
+
+    func testSetSortToCurrentValueIsNoOp() async {
+        let provider = FakeMediaProvider(allItems: makeItems(50))
+        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, pageSize: 10, defaults: isolatedDefaults())
+        await vm.loadFirstPage()
+        let requestsBefore = provider.requestedPages.count
+
+        await vm.setSort(.default)
+
+        XCTAssertEqual(provider.requestedPages.count, requestsBefore, "Re-applying the same sort does not reload")
+    }
+
+    func testSortPersistsAndIsRestoredPerContainerKind() async {
+        let defaults = isolatedDefaults()
+        let chosen = CoreModels.SortDescriptor(field: .communityRating, direction: .descending)
+
+        let provider = FakeMediaProvider(allItems: makeItems(10))
+        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, defaults: defaults)
+        await vm.setSort(chosen)
+
+        // A fresh VM for the same kind restores the persisted choice.
+        let restored = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, defaults: defaults)
+        XCTAssertEqual(restored.sort, chosen)
+
+        // A different kind keeps its own default.
+        let otherKind = LibraryBrowseViewModel(provider: provider, containerID: "lib2", containerKind: .series, defaults: defaults)
+        XCTAssertEqual(otherKind.sort, .default)
+    }

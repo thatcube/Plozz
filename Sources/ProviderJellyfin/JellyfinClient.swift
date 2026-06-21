@@ -190,14 +190,15 @@ public struct JellyfinClient: Sendable {
         includeItemTypes: [String],
         recursive: Bool,
         startIndex: Int,
-        limit: Int
+        limit: Int,
+        sort: CoreModels.SortDescriptor
     ) async throws -> ItemsResponse {
         var queryItems = [
             URLQueryItem(name: "ParentId", value: parentID),
             URLQueryItem(name: "StartIndex", value: String(startIndex)),
             URLQueryItem(name: "Limit", value: String(limit)),
-            URLQueryItem(name: "SortBy", value: "SortName"),
-            URLQueryItem(name: "SortOrder", value: "Ascending"),
+            URLQueryItem(name: "SortBy", value: Self.sortBy(for: sort.field)),
+            URLQueryItem(name: "SortOrder", value: Self.sortOrder(for: sort.direction)),
             // Minimal fields keep the first-page payload small for a fast grid.
             URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio"),
             URLQueryItem(name: "ImageTypeLimit", value: "1"),
@@ -211,6 +212,26 @@ public struct JellyfinClient: Sendable {
         }
         let endpoint = Endpoint(path: "/Users/\(userID)/Items", queryItems: queryItems, headers: authHeaders)
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// Maps a provider-agnostic `SortField` onto Jellyfin's `SortBy` key.
+    static func sortBy(for field: SortField) -> String {
+        switch field {
+        case .name: return "SortName"
+        case .dateAdded: return "DateCreated"
+        case .releaseDate: return "PremiereDate"
+        case .communityRating: return "CommunityRating"
+        case .runtime: return "Runtime"
+        case .random: return "Random"
+        }
+    }
+
+    /// Maps a provider-agnostic `SortDirection` onto Jellyfin's `SortOrder` key.
+    static func sortOrder(for direction: SortDirection) -> String {
+        switch direction {
+        case .ascending: return "Ascending"
+        case .descending: return "Descending"
+        }
     }
 
     // MARK: Playback

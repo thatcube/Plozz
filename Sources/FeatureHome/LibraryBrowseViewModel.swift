@@ -32,6 +32,12 @@ public final class LibraryBrowseViewModel {
     private let containerID: String
     private let containerKind: MediaItemKind
     private let pageSize: Int
+    private let defaults: UserDefaults
+
+    /// The order the grid is currently sorted by. Changing it via `setSort`
+    /// restarts paging from the first page and persists the choice per container
+    /// kind so it is restored next time a library of that kind is opened.
+    public private(set) var sort: CoreModels.SortDescriptor
 
     /// Page indices whose load is in flight — guards against duplicate requests
     /// for the same page when several of its cells appear at once.
@@ -43,12 +49,15 @@ public final class LibraryBrowseViewModel {
         provider: any MediaProvider,
         containerID: String,
         containerKind: MediaItemKind,
-        pageSize: Int = PageRequest.defaultLimit
+        pageSize: Int = PageRequest.defaultLimit,
+        defaults: UserDefaults = .standard
     ) {
         self.provider = provider
         self.containerID = containerID
         self.containerKind = containerKind
         self.pageSize = pageSize
+        self.defaults = defaults
+        self.sort = Self.loadSort(for: containerKind, from: defaults)
     }
 
     /// The item at `index`, or `nil` if it hasn't been loaded yet (placeholder).
@@ -125,7 +134,34 @@ public final class LibraryBrowseViewModel {
     }
 
     private func pageRequest(forPage page: Int) -> PageRequest {
-        PageRequest(startIndex: page * pageSize, limit: pageSize)
+        PageRequest(startIndex: page * pageSize, limit: pageSize, sort: sort)
+    }
+
+    /// Applies a new sort order: persists the choice and, if it actually changed,
+    /// resets paging and reloads the first page so the grid re-sorts from the
+    /// top rather than fetching the whole library at once.
+    public func setSort(_ newSort: CoreModels.SortDescriptor) async {
+        guard newSort != sort else { return }
+        sort = newSort
+        Self.saveSort(newSort, for: containerKind, to: defaults)
+        await loadFirstPage()
+    }
+
+    private static func defaultsKey(for kind: MediaItemKind) -> String {
+        "LibraryBrowse.sort.\(kind.rawValue)"
+    }
+
+    private static func loadSort(for kind: MediaItemKind, from defaults: UserDefaults) -> CoreModels.SortDescriptor {
+        guard
+            let data = defaults.data(forKey: defaultsKey(for: kind)),
+            let descriptor = try? JSONDecoder().decode(CoreModels.SortDescriptor.self, from: data)
+        else { return .default }
+        return descriptor
+    }
+
+    private static func saveSort(_ sort: CoreModels.SortDescriptor, for kind: MediaItemKind, to defaults: UserDefaults) {
+        guard let data = try? JSONEncoder().encode(sort) else { return }
+        defaults.set(data, forKey: defaultsKey(for: kind))
     }
 
     /// Writes a fetched page's items into their absolute slots.

@@ -57,7 +57,50 @@ public struct LibraryBrowseView: View {
             }
         }
         .navigationTitle(title)
+        .overlay(alignment: .topTrailing) { sortControl }
         .task { if viewModel.state.value == nil { await viewModel.loadFirstPage() } }
+    }
+
+    /// A focusable sort menu pinned to the top-right. It lives in its own focus
+    /// section, outside the grid's, so it never sits on the remote's path
+    /// between poster tiles — the user reaches it deliberately by navigating up
+    /// to the corner.
+    private var sortControl: some View {
+        Menu {
+            Picker("Sort By", selection: sortFieldBinding) {
+                ForEach(SortField.allCases, id: \.self) { field in
+                    Text(field.displayName).tag(field)
+                }
+            }
+            Picker("Order", selection: sortDirectionBinding) {
+                ForEach(SortDirection.allCases, id: \.self) { direction in
+                    Text(direction.displayName).tag(direction)
+                }
+            }
+        } label: {
+            Label("Sort: \(viewModel.sort.field.displayName)", systemImage: "arrow.up.arrow.down")
+        }
+        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+        .padding(.top, 24)
+        .focusSection()
+    }
+
+    private var sortFieldBinding: Binding<SortField> {
+        Binding(
+            get: { viewModel.sort.field },
+            set: { field in
+                Task { await viewModel.setSort(CoreModels.SortDescriptor(field: field, direction: viewModel.sort.direction)) }
+            }
+        )
+    }
+
+    private var sortDirectionBinding: Binding<SortDirection> {
+        Binding(
+            get: { viewModel.sort.direction },
+            set: { direction in
+                Task { await viewModel.setSort(CoreModels.SortDescriptor(field: viewModel.sort.field, direction: direction)) }
+            }
+        )
     }
 
     @ViewBuilder

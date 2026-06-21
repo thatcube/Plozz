@@ -16,9 +16,11 @@ struct SettingsAboutSection: View {
     var body: some View {
         HStack(alignment: .top, spacing: 36) {
             VStack(alignment: .leading, spacing: 16) {
-                Image(systemName: "play.rectangle.on.rectangle.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.tint)
+                Image("PlozzLogo")
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(width: 72, height: 72)
 
                 VStack(alignment: .leading, spacing: 10) {
                     infoRow("Name", "Plozz")
@@ -73,6 +75,14 @@ private struct QRCodeView: View {
                     .scaledToFit()
                     .padding(12)
                     .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        Image("GitHubMark")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 40, height: 40)
+                            .padding(8)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    }
             } else {
                 placeholder
             }

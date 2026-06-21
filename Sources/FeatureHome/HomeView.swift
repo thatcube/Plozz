@@ -9,6 +9,7 @@ public struct HomeView: View {
     private var visibility: HomeLibraryVisibilityModel
     private let spoilerSettings: SpoilerSettings
     private let onSelectItem: (MediaItem) -> Void
+    private let onPlayItem: (MediaItem) -> Void
     private let onSelectLibrary: (MediaLibrary) -> Void
 
     public init(
@@ -16,12 +17,14 @@ public struct HomeView: View {
         visibility: HomeLibraryVisibilityModel,
         spoilerSettings: SpoilerSettings = .default,
         onSelectItem: @escaping (MediaItem) -> Void,
+        onPlayItem: @escaping (MediaItem) -> Void,
         onSelectLibrary: @escaping (MediaLibrary) -> Void
     ) {
         _viewModel = State(initialValue: viewModel)
         self.visibility = visibility
         self.spoilerSettings = spoilerSettings
         self.onSelectItem = onSelectItem
+        self.onPlayItem = onPlayItem
         self.onSelectLibrary = onSelectLibrary
     }
 
@@ -34,7 +37,7 @@ public struct HomeView: View {
             let visibleLibraries = content.libraries.filter { visibility.isVisible($0.key) }
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
-                    MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
+                    MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, spoilerSettings: spoilerSettings, onSelect: onPlayItem)
                     MediaRowView(title: "Recently Added", items: content.latest, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
 
                     if !visibleLibraries.isEmpty {

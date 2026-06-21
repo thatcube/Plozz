@@ -44,6 +44,8 @@ public struct ItemDetailView: View {
                 .padding(.bottom, PlozzTheme.Metrics.screenPadding)
             }
         }
+        // Detail is a full-screen sub-page: hide the top tab bar.
+        .toolbar(.hidden, for: .tabBar)
         .task { if viewModel.state.value == nil { await viewModel.load() } }
     }
 

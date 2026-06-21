@@ -115,7 +115,8 @@ private struct HomeTab: View {
                 viewModel: HomeViewModel(accounts: accounts),
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
-                onSelectItem: { open($0) },
+                onSelectItem: { navigate($0) },
+                onPlayItem: { requestPlay($0) },
                 onSelectLibrary: { library in
                     path.append(library)
                 }
@@ -130,7 +131,7 @@ private struct HomeTab: View {
                     ),
                     title: library.title,
                     spoilerSettings: spoilerSettings,
-                    onSelect: { open($0) }
+                    onSelect: { navigate($0) }
                 )
             }
             .navigationDestination(for: MediaItem.self) { item in
@@ -143,7 +144,7 @@ private struct HomeTab: View {
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
-                    onSelectChild: { open($0) }
+                    onSelectChild: { navigate($0) }
                 )
             }
         }
@@ -172,21 +173,18 @@ private struct HomeTab: View {
         pendingPlayItemID = nil
         for resolved in accounts {
             if let item = try? await resolved.provider.item(id: id) {
-                open(item.taggingSource(resolved.account.id))
+                requestPlay(item.taggingSource(resolved.account.id))
                 return
             }
         }
     }
 
-    /// Playable leaves start playback (via the resume prompt when applicable);
-    /// containers push a detail page.
-    private func open(_ item: MediaItem) {
-        switch item.kind {
-        case .movie, .episode, .video:
-            requestPlay(item)
-        default:
-            path.append(item)
-        }
+    /// Pushes a detail page for any item — movies and episodes get a Movie/Episode
+    /// Details page (with a Play button) before playback; series/seasons get their
+    /// children list. Immediate playback is reserved for Continue Watching and
+    /// the detail page's own Play action.
+    private func navigate(_ item: MediaItem) {
+        path.append(item)
     }
 
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items

@@ -49,6 +49,22 @@ def asc_api_key
   )
 end
 
+# Next build number = (latest build already on TestFlight for this app+platform)
+# + 1. initial_build_number: 0 makes the very first build a clean 1 when no
+# builds exist yet. Falls back to 1 only if App Store Connect can't be reached.
+def next_build_number
+  latest = latest_testflight_build_number(
+    api_key: asc_api_key,
+    app_identifier: APP_IDENTIFIER,
+    platform: APP_PLATFORM,
+    initial_build_number: 0
+  )
+  latest.to_i + 1
+rescue => e
+  UI.important("Couldn't fetch latest TestFlight build number (#{e.message}); defaulting to 1")
+  1
+end
+
 desc "Regenerate the Xcode project from project.yml via XcodeGen"
 lane :generate_project do
   sh("cd .. && xcodegen generate")
@@ -57,6 +73,14 @@ end
 desc "Archive and export a signed App Store .ipa (no upload)"
 lane :build do |options|
   generate_project
+  # Build number must strictly increase per upload for a given marketing
+  # version. TestFlight is the source of truth, so derive the next build from
+  # (latest TestFlight build + 1). Robust across machines/worktrees, nothing
+  # committed. Marketing version (CFBundleShortVersionString) stays manual in
+  # project.yml — bump it by hand for real releases.
+  build_number = next_build_number
+  UI.message("Using build number #{build_number} (CFBundleVersion)")
+
   # Let Xcode create/download the distribution certificate and provisioning
   # profile on first run, authenticating with the same App Store Connect API key.
   prov_args = "-allowProvisioningUpdates"
@@ -65,6 +89,9 @@ lane :build do |options|
                  " -authenticationKeyID #{ENV['ASC_KEY_ID'].shellescape}" \
                  " -authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID'].shellescape}"
   end
+  # Inject the computed build number into the archive (CFBundleVersion in the
+  # generated Info.plist resolves $(CURRENT_PROJECT_VERSION)).
+  prov_args += " CURRENT_PROJECT_VERSION=#{build_number}"
   build_app(
     project: XCODEPROJ,
     scheme: SCHEME,

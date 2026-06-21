@@ -45,12 +45,17 @@ public struct ServerPickerView: View {
                     }
                 }
 
-                Section("Enter address") {
-                    TextField("e.g. 192.168.1.10 or https://jelly.example.com", text: $viewModel.manualURLText)
+                Section {
+                    TextField("Server address", text: $viewModel.manualURLText)
                         .focused($manualFieldFocused)
                         .textContentType(.URL)
+                        .autocorrectionDisabled()
                     Button("Connect") { Task { await connectManually() } }
                         .disabled(viewModel.manualURLText.isEmpty)
+                } header: {
+                    Text("Enter address")
+                } footer: {
+                    Text("Enter an IP address or full URL, e.g. 192.168.1.10 or jelly.example.com")
                 }
 
                 if case let .error(message) = viewModel.phase {

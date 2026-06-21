@@ -35,7 +35,14 @@ public struct RootView: View {
 
             case .authenticated:
                 if let provider = appState.provider {
-                    MainTabView(provider: provider, captionModel: appState.captionModel) {
+                    MainTabView(
+                        provider: provider,
+                        captionModel: appState.captionModel,
+                        pendingPlayItemID: Binding(
+                            get: { appState.pendingPlayItemID },
+                            set: { appState.pendingPlayItemID = $0 }
+                        )
+                    ) {
                         appState.signOut()
                     }
                 }
@@ -47,6 +54,7 @@ public struct RootView: View {
             }
         }
         .onAppear { if case .launching = appState.state { appState.bootstrap() } }
+        .onOpenURL { appState.handle(url: $0) }
     }
 }
 

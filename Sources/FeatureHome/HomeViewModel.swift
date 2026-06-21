@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import CoreModels
+import TopShelfKit
 
 /// Loads and holds the Home screen's content rows.
 @MainActor
@@ -42,6 +43,13 @@ public final class HomeViewModel {
                 libraries: try await libs
             )
             state = content.isEmpty ? .empty : .loaded(content)
+
+            // Publish the playable rows to the App Group so the Top Shelf
+            // extension can render them while the app is closed.
+            TopShelfPublisher.publish(
+                continueWatching: content.continueWatching,
+                latest: content.latest
+            )
         } catch let error as AppError {
             state = .failed(error)
         } catch {

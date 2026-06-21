@@ -27,6 +27,7 @@ let package = Package(
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
         .library(name: "FeatureSettings", targets: ["FeatureSettings"]),
+        .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     targets: [
@@ -60,7 +61,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TopShelfKit"]
         ),
         .target(
             name: "FeaturePlayback",
@@ -69,6 +70,17 @@ let package = Package(
         .target(
             name: "FeatureSettings",
             dependencies: ["CoreModels", "CoreUI"]
+        ),
+
+        // MARK: Top Shelf (shared with the tvOS Top Shelf extension)
+        //
+        // `TopShelfSnapshot` + `TopShelfStore` are Foundation-only and are also
+        // compiled directly into the Top Shelf extension by source path (see
+        // project.yml). `TopShelfPublisher` imports CoreModels and is therefore
+        // app-only — the extension never compiles it.
+        .target(
+            name: "TopShelfKit",
+            dependencies: ["CoreModels"]
         ),
 
         // MARK: App composition root
@@ -83,7 +95,8 @@ let package = Package(
                 "ProviderJellyfin",
                 "FeatureHome",
                 "FeaturePlayback",
-                "FeatureSettings"
+                "FeatureSettings",
+                "TopShelfKit"
             ]
         ),
 

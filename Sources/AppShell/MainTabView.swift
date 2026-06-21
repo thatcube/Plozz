@@ -11,12 +11,17 @@ import FeatureSettings
 struct MainTabView: View {
     let provider: any MediaProvider
     let captionModel: CaptionSettingsModel
+    @Binding var pendingPlayItemID: String?
     let onSignOut: () -> Void
 
     var body: some View {
         TabView {
-            HomeTab(provider: provider, captionSettings: captionModel.settings)
-                .tabItem { Label("Home", systemImage: "house.fill") }
+            HomeTab(
+                provider: provider,
+                captionSettings: captionModel.settings,
+                pendingPlayItemID: $pendingPlayItemID
+            )
+            .tabItem { Label("Home", systemImage: "house.fill") }
 
             SettingsView(
                 captions: captionModel,
@@ -38,6 +43,7 @@ struct MainTabView: View {
 private struct HomeTab: View {
     let provider: any MediaProvider
     let captionSettings: CaptionSettings
+    @Binding var pendingPlayItemID: String?
 
     @State private var path: [MediaItem] = []
     @State private var playingItem: MediaItem?
@@ -67,6 +73,17 @@ private struct HomeTab: View {
                     captionSettings: captionSettings
                 )
             )
+        }
+        .task(id: pendingPlayItemID) { await handleDeepLink() }
+    }
+
+    /// Resolves a deep-linked item id (from a Top Shelf card) and routes to it,
+    /// then clears the request so it fires exactly once.
+    private func handleDeepLink() async {
+        guard let id = pendingPlayItemID else { return }
+        pendingPlayItemID = nil
+        if let item = try? await provider.item(id: id) {
+            open(item)
         }
     }
 

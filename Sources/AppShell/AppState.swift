@@ -4,6 +4,7 @@ import CoreModels
 import FeatureAuth
 import FeatureDiscovery
 import ProviderJellyfin
+import TopShelfKit
 
 /// The app's composition root and single source of truth for session state.
 ///
@@ -14,6 +15,12 @@ import ProviderJellyfin
 @Observable
 public final class AppState {
     public private(set) var state: SessionState = .launching
+
+    /// A Jellyfin item id requested via a Top Shelf deep link
+    /// (`plozz://item/<id>`) that the signed-in UI should open for playback.
+    /// Set when the app is launched/foregrounded from a Top Shelf card and
+    /// cleared once the Home tab has routed to it.
+    public var pendingPlayItemID: String?
 
     public let captionModel: CaptionSettingsModel
     private var machine = SessionStateMachine()
@@ -53,6 +60,14 @@ public final class AppState {
     public var lastServerStore: LastServerStoring { UserDefaultsLastServerStore() }
 
     // MARK: Events
+
+    /// Handles an incoming deep link. Recognised `plozz://item/<id>` links queue
+    /// the item for playback once the user is signed in.
+    public func handle(url: URL) {
+        if let id = TopShelf.itemID(from: url) {
+            pendingPlayItemID = id
+        }
+    }
 
     public func selectServer(_ server: MediaServer) {
         apply(.serverSelected(server))

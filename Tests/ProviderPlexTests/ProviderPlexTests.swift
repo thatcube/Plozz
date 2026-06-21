@@ -140,7 +140,7 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.episodeNumber, 3)
         XCTAssertEqual(item.overview, "First episode")
         XCTAssertEqual(item.subtitle, "S1 · E3")
-        XCTAssertEqual(item.posterURL?.absoluteString, "https://plex.host:32400/photo/:/transcode?width=500&height=750&minSize=1&url=/show.png&X-Plex-Token=TOKEN")
+        XCTAssertEqual(item.posterURL?.absoluteString, "https://plex.host:32400/photo/:/transcode?width=500&height=750&minSize=1&upscale=1&url=%2Fshow.png%3FX-Plex-Token%3DTOKEN&X-Plex-Token=TOKEN")
     }
 
     func testItemsPagePassesContainerParamsAndType() async throws {
@@ -191,12 +191,15 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(children[0].id, "s1")
     }
 
-    func testPlaybackInfoResolvesDirectStreamAndTracks() async throws {
+    func testPlaybackInfoTranscodesUnsupportedContainer() async throws {
+        // An MKV part cannot be demuxed by AVFoundation, so the provider must
+        // resolve a server-side HLS transcode URL rather than the raw file —
+        // this is the fix for "Plex doesn't play while Jellyfin does".
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/77", json: """
         {"MediaContainer":{"Metadata":[
           {"ratingKey":"77","type":"movie","title":"Movie","duration":3600000,"viewOffset":600000,
-           "Media":[{"id":1,"Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","Stream":[
+           "Media":[{"id":1,"container":"mkv","videoCodec":"h264","audioCodec":"ac3","Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
              {"id":10,"streamType":1,"index":0,"codec":"h264"},
              {"id":11,"streamType":2,"index":1,"codec":"ac3","language":"English","languageTag":"en","displayTitle":"English (AC3)","selected":true},
              {"id":12,"streamType":3,"index":2,"language":"English","displayTitle":"English (SRT)","forced":false}
@@ -212,9 +215,34 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(request.subtitleTracks.count, 1)
         XCTAssertEqual(request.audioTracks.first?.language, "en")
         XCTAssertTrue(request.audioTracks.first?.isDefault == true)
+        XCTAssertTrue(request.isTranscoding)
 
         let url = request.streamURL.absoluteString
-        XCTAssertTrue(url.hasPrefix("https://plex.host:32400/library/parts/2/16000/file.mkv"), url)
+        XCTAssertTrue(url.hasPrefix("https://plex.host:32400/video/:/transcode/universal/start.m3u8"), url)
+        XCTAssertTrue(url.contains("protocol=hls"), url)
+        XCTAssertTrue(url.contains("path=/library/metadata/77"), url)
+        XCTAssertTrue(url.contains("X-Plex-Token=TOKEN"), url)
+    }
+
+    func testPlaybackInfoDirectPlaysSupportedContainer() async throws {
+        // An MP4/h264/aac file is natively playable, so the provider should hand
+        // AVPlayer the original part URL (direct play, no transcode).
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/88", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"88","type":"movie","title":"Movie","duration":3600000,
+           "Media":[{"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac","Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+             {"id":10,"streamType":1,"index":0,"codec":"h264"},
+             {"id":11,"streamType":2,"index":1,"codec":"aac","language":"English","languageTag":"en","selected":true}
+           ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "88")
+        XCTAssertFalse(request.isTranscoding)
+        let url = request.streamURL.absoluteString
+        XCTAssertTrue(url.hasPrefix("https://plex.host:32400/library/parts/2/16000/file.mp4"), url)
         XCTAssertTrue(url.contains("X-Plex-Token=TOKEN"), url)
     }
 

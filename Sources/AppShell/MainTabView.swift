@@ -18,6 +18,7 @@ struct MainTabView: View {
     let provider: any MediaProvider
     let captionModel: CaptionSettingsModel
     let spoilerModel: SpoilerSettingsModel
+    let diagnosticsModel: DiagnosticsSettingsModel
     let ratingsProvider: any ExternalRatingsProviding
     let accounts: [Account]
     let activeAccountID: String?
@@ -32,6 +33,7 @@ struct MainTabView: View {
                 provider: provider,
                 captionSettings: captionModel.settings,
                 spoilerSettings: spoilerModel.settings,
+                showDiagnostics: diagnosticsModel.settings.isEnabled,
                 ratingsProvider: ratingsProvider,
                 pendingPlayItemID: $pendingPlayItemID
             )
@@ -40,6 +42,7 @@ struct MainTabView: View {
             SettingsView(
                 captions: captionModel,
                 spoilers: spoilerModel,
+                diagnostics: diagnosticsModel,
                 accounts: accounts,
                 activeAccountID: activeAccountID,
                 appVersion: AppInfo.version,
@@ -60,6 +63,7 @@ private struct HomeTab: View {
     let provider: any MediaProvider
     let captionSettings: CaptionSettings
     let spoilerSettings: SpoilerSettings
+    let showDiagnostics: Bool
     let ratingsProvider: any ExternalRatingsProviding
     @Binding var pendingPlayItemID: String?
 
@@ -99,7 +103,8 @@ private struct HomeTab: View {
                     provider: provider,
                     itemID: item.id,
                     captionSettings: captionSettings
-                )
+                ),
+                showDiagnostics: showDiagnostics
             )
         }
         .task(id: pendingPlayItemID) { await handleDeepLink() }

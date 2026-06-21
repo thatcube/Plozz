@@ -47,6 +47,10 @@ public struct PlaybackRequest: Hashable, Sendable {
     public var subtitleTracks: [MediaTrack]
     /// Where to resume from, in seconds.
     public var startPosition: TimeInterval
+    /// Whether the server is transcoding this stream (a `TranscodingUrl` was
+    /// used) rather than direct-playing the original file. Surfaced by the
+    /// playback diagnostics overlay.
+    public var isTranscoding: Bool
 
     public init(
         item: MediaItem,
@@ -54,7 +58,8 @@ public struct PlaybackRequest: Hashable, Sendable {
         playSessionID: String? = nil,
         audioTracks: [MediaTrack] = [],
         subtitleTracks: [MediaTrack] = [],
-        startPosition: TimeInterval = 0
+        startPosition: TimeInterval = 0,
+        isTranscoding: Bool = false
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -62,6 +67,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.audioTracks = audioTracks
         self.subtitleTracks = subtitleTracks
         self.startPosition = startPosition
+        self.isTranscoding = isTranscoding
     }
 }
 

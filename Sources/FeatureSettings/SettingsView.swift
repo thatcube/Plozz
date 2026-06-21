@@ -13,6 +13,7 @@ import CoreUI
 public struct SettingsView: View {
     @State private var captions: CaptionSettingsModel
     @State private var spoilers: SpoilerSettingsModel
+    @State private var diagnostics: DiagnosticsSettingsModel
     private let accounts: [Account]
     private let activeAccountID: String?
     private let appVersion: String
@@ -25,6 +26,7 @@ public struct SettingsView: View {
     public init(
         captions: CaptionSettingsModel,
         spoilers: SpoilerSettingsModel,
+        diagnostics: DiagnosticsSettingsModel,
         accounts: [Account],
         activeAccountID: String?,
         appVersion: String,
@@ -36,6 +38,7 @@ public struct SettingsView: View {
     ) {
         _captions = State(initialValue: captions)
         _spoilers = State(initialValue: spoilers)
+        _diagnostics = State(initialValue: diagnostics)
         self.accounts = accounts
         self.activeAccountID = activeAccountID
         self.appVersion = appVersion
@@ -137,6 +140,14 @@ public struct SettingsView: View {
                             Label("Sign Out of All Accounts", systemImage: "rectangle.portrait.and.arrow.right")
                         }
                     }
+                }
+
+                Section {
+                    Toggle("Show playback diagnostics", isOn: $diagnostics.settings.isEnabled)
+                } header: {
+                    Text("Playback")
+                } footer: {
+                    Text("Overlays live stream details (resolution, bitrate, codec, HDR, buffer, dropped frames) on top of the player.")
                 }
 
                 Section("About") {

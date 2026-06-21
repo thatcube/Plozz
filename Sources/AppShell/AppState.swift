@@ -33,6 +33,7 @@ public final class AppState {
 
     public let captionModel: CaptionSettingsModel
     public let spoilerModel: SpoilerSettingsModel
+    public let diagnosticsModel: DiagnosticsSettingsModel
 
     /// Provider-agnostic external-ratings enrichment (IMDb/RT/Metacritic via
     /// OMDb when a key is configured; otherwise a no-op). Injected into item
@@ -48,12 +49,14 @@ public final class AppState {
         registry: ProviderRegistry? = nil,
         captionModel: CaptionSettingsModel? = nil,
         spoilerModel: SpoilerSettingsModel? = nil,
+        diagnosticsModel: DiagnosticsSettingsModel? = nil,
         ratingsProvider: (any ExternalRatingsProviding)? = nil
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
         self.captionModel = captionModel ?? CaptionSettingsModel()
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel()
+        self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
     }
 

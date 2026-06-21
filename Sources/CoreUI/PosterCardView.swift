@@ -74,7 +74,6 @@ public struct PosterCardView: View {
             case .blur:
                 realArtwork
                     .blur(radius: 28)
-                    .overlay { spoilerBadge }
             case .placeholder:
                 placeholderArtwork
             }
@@ -116,23 +115,10 @@ public struct PosterCardView: View {
                 }
             }
             Rectangle().fill(.black.opacity(0.45))
-            VStack(spacing: 6) {
-                Image(systemName: "eye.slash.fill")
-                    .font(.system(size: 30))
-                    .foregroundStyle(.white.opacity(0.85))
-                Text(spoilerSettings.maskedTitle(for: item))
-                    .font(.title3).bold()
-                    .foregroundStyle(.white)
-            }
+            Text(spoilerSettings.maskedTitle(for: item))
+                .font(.title3).bold()
+                .foregroundStyle(.white)
         }
-    }
-
-    private var spoilerBadge: some View {
-        Image(systemName: "eye.slash.fill")
-            .font(.system(size: 30))
-            .foregroundStyle(.white)
-            .padding(14)
-            .background(.black.opacity(0.5), in: Circle())
     }
 
     private func placeholder(icon: String) -> some View {

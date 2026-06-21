@@ -85,6 +85,37 @@ behind `#if canImport(...)` guards, so `swift test` exercises the models,
 networking, discovery, provider mapping, and auth logic directly. CI runs
 `swift test` on Linux and an `xcodebuild` tvOS build on macOS.
 
+## Releasing to TestFlight & versioning
+
+Distribution is automated with fastlane (App Store Connect API key auth — no
+Apple ID/2FA needed). From a worktree, drop a gitignored `.env.fastlane` with
+`ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY_PATH` (see `.env.fastlane.example`),
+then:
+
+```bash
+fastlane beta --env fastlane    # build + upload to TestFlight
+fastlane build --env fastlane   # archive a signed .ipa locally, no upload
+fastlane release --env fastlane # build + upload to the App Store
+```
+
+**Versioning** uses the standard two-number scheme, set in `project.yml`:
+
+- **Marketing version** (`CFBundleShortVersionString`, e.g. `0.1`) — the public
+  semver label. **Bump it manually** in `project.yml` when a release earns it
+  (`0.1` → `0.2` → `1.0` → `1.0.1`). Pre-`1.0` signals in-development.
+- **Build number** (`CFBundleVersion`) — **auto-incremented**; never edit it by
+  hand. The `build` lane queries the latest build already on TestFlight, adds 1,
+  and injects it via `CURRENT_PROJECT_VERSION` at archive time. This guarantees
+  the strictly-increasing build number Apple requires for every upload, with no
+  bookkeeping and no collisions across machines/worktrees. (The
+  `CURRENT_PROJECT_VERSION: 1` default in `project.yml` only seeds plain
+  `xcodebuild` / local device installs.)
+
+tvOS **Brand Assets** (layered app icon + Top Shelf images) live in
+`App/Resources/Assets.xcassets/App Icon & Top Shelf Image.brandassets` and are
+required for *any* App Store Connect upload, including TestFlight. The current
+art is a placeholder — replace it before a public App Store release.
+
 ## Privacy & security
 
 - Access tokens are stored in the Keychain; never in `UserDefaults` or logs.
@@ -94,8 +125,8 @@ networking, discovery, provider mapping, and auth logic directly. CI runs
 ## Roadmap
 
 - **Phase 2:** Plex provider, Overseerr (request media).
-- App Store polish: tvOS **Brand Assets** app icon & Top Shelf image (the MVP
-  ships without placeholder art so it builds clean for the simulator).
+- App Store polish: replace the placeholder tvOS **Brand Assets** app icon &
+  Top Shelf image with final artwork before a public release.
 
 ## License
 

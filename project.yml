@@ -1,6 +1,6 @@
 name: Plozz
 options:
-  bundleIdPrefix: com.plozz
+  bundleIdPrefix: com.thatcube
   deploymentTarget:
     tvOS: "17.0"
   createIntermediateGroups: true
@@ -40,7 +40,7 @@ targets:
           NSAllowsLocalNetworking: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.plozz.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz
         PRODUCT_NAME: Plozz
         # NOTE: A tvOS "Brand Assets" app icon (layered image stacks) should be
         # added before App Store submission. Omitted here so the MVP builds for

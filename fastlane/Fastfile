@@ -17,13 +17,13 @@
 # record itself (Apple exposes no "create app" API and `produce` needs an Apple
 # ID + 2FA). Before the first `beta`, create the app once in the App Store
 # Connect web UI:  Apps > + > New App  ->  Platform: tvOS, Name: Plozz,
-# Bundle ID: com.plozz.app (team N8Z5T4AK3X), SKU: plozz-tvos.
+# Bundle ID: com.thatcube.Plozz (team N8Z5T4AK3X), SKU: plozz-tvos.
 # The bundle ID registration and distribution signing are handled automatically
 # by `build` via -allowProvisioningUpdates + the API key.
 
 require "shellwords"
 
-APP_IDENTIFIER = "com.plozz.app"
+APP_IDENTIFIER = "com.thatcube.Plozz"
 APP_NAME       = "Plozz"
 SCHEME         = "Plozz"
 XCODEPROJ      = "Plozz.xcodeproj"

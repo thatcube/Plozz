@@ -1,4 +1,4 @@
-app_identifier("com.plozz.app")
+app_identifier("com.thatcube.Plozz")
 team_id("N8Z5T4AK3X")
 
 # Apple ID login is not used; authentication is handled by an App Store Connect

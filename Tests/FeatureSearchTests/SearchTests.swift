@@ -63,7 +63,7 @@ final class SearchSectionTests: XCTestCase {
 final class SearchViewModelTests: XCTestCase {
     private func makeVM(_ providers: SearchStubProvider..., debounceMilliseconds: Int = 0) -> SearchViewModel {
         let accounts = providers.map { provider in
-            ResolvedAccount(account: Account(from: provider.session), provider: provider)
+            ResolvedAccount(account: Account(id: provider.accountID, from: provider.session), provider: provider)
         }
         return SearchViewModel(accounts: accounts, debounceMilliseconds: debounceMilliseconds)
     }
@@ -165,6 +165,9 @@ final class SearchViewModelTests: XCTestCase {
 private final class SearchStubProvider: MediaProvider, @unchecked Sendable {
     let kind: ProviderKind
     let session: UserSession
+    /// The app account id this stub stands in for; the test pins it as the
+    /// `Account.id` so source-tagging assertions are deterministic.
+    let accountID: String
     private let results: [MediaItem]
     private let error: AppError?
     private(set) var callCount = 0
@@ -177,6 +180,7 @@ private final class SearchStubProvider: MediaProvider, @unchecked Sendable {
         accountID: String = "acct-1"
     ) {
         self.kind = providerKind
+        self.accountID = accountID
         self.results = results
         self.error = error
         self.session = UserSession(

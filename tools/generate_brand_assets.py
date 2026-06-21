@@ -2,12 +2,12 @@
 """Generate tvOS Brand Assets (layered app icon + Top Shelf images) for Plozz.
 
 Source art is the Plozz pixel-art logo (a smiling TV in Jellyfin blue). The
-visual style matches the sibling Twozz app: a flat dark background rendered as a
-subtle vertical gradient centered on the brand dark colour, with the colour logo
-floating on top. The icon is composed as three parallax layers — the dark
-gradient back, plus two identical logo layers (Middle and Front) that the Apple
-TV separates on focus for a parallax depth effect. Top Shelf images use the same
-dark vertical gradient banner with the centered logo.
+visual style matches the sibling Twozz app: a mid-grey background rendered as a
+subtle vertical gradient with a pixel-block texture (echoing the pixelated logo),
+with the colour logo floating on top. The icon is composed as three parallax
+layers — the textured back, plus two identical logo layers (Middle and Front)
+that the Apple TV separates on focus for a parallax depth effect. Top Shelf
+images use the same textured banner with the centered logo.
 
 Run from the repo root:  python3 tools/generate_brand_assets.py
 """
@@ -24,13 +24,20 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOGO_SVG = os.path.join(REPO, "App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg")
 BRAND = os.path.join(REPO, "App/Resources/Assets.xcassets/App Icon & Top Shelf Image.brandassets")
 
-# Twozz-style brand background: a flat dark colour rendered as a subtle vertical
-# gradient (lighter top -> darker bottom) centered on the brand dark. The shade
-# is kept light enough that the logo's black antenna/outline stay visible
-# against it rather than blending into the background.
-BRAND_DARK = (96, 96, 98)
-BG_TOP = (109, 109, 111)
-BG_BOTTOM = (83, 83, 85)
+# Brand background: a mid grey (#515151) rendered as a subtle vertical gradient
+# overlaid with a deterministic pixel-block texture that echoes the pixelated
+# logo. The shade sits between the original dark and the lighter revision so the
+# logo's black antenna/outline stay clearly visible against it.
+BRAND_DARK = (81, 81, 81)  # #515151
+BG_TOP = (89, 89, 89)
+BG_BOTTOM = (73, 73, 73)
+
+# Pixel-art background texture: a grid of `PIXEL_COLS` square "pixels" across the
+# width, each nudged +/- PIXEL_JITTER in brightness. Seeded so regeneration is
+# reproducible; rows are derived from the aspect ratio so the cells stay square.
+PIXEL_COLS = 24
+PIXEL_JITTER = 10
+PIXEL_SEED = 0x504C5A  # "PLZ"
 
 
 def render_logo(px: int) -> Image.Image:
@@ -39,15 +46,28 @@ def render_logo(px: int) -> Image.Image:
     return Image.open(io.BytesIO(png)).convert("RGBA")
 
 
-def vertical_gradient(w: int, h: int, c0, c1) -> Image.Image:
-    """Top -> bottom linear gradient as an opaque RGBA image."""
-    yy = np.mgrid[0:h, 0:w][0].astype(np.float32)
-    t = yy / max(h - 1, 1)
-    grad = np.zeros((h, w, 4), dtype=np.uint8)
+def pixel_background(w: int, h: int, c_top, c_bottom) -> Image.Image:
+    """Vertical gradient (c_top -> c_bottom) overlaid with a pixel-block texture.
+
+    The same `PIXEL_SEED` and aspect-derived grid are used regardless of output
+    resolution, so an icon's @1x and @2x renders show the identical pattern.
+    """
+    t = np.mgrid[0:h, 0:w][0].astype(np.float32) / max(h - 1, 1)
+    base = np.zeros((h, w, 3), dtype=np.float32)
     for i in range(3):
-        grad[..., i] = (c0[i] + (c1[i] - c0[i]) * t).astype(np.uint8)
-    grad[..., 3] = 255
-    return Image.fromarray(grad, "RGBA")
+        base[..., i] = c_top[i] + (c_bottom[i] - c_top[i]) * t
+
+    cols = PIXEL_COLS
+    rows = max(1, round(cols * h / w))
+    rng = np.random.default_rng(PIXEL_SEED)
+    offsets = rng.integers(-PIXEL_JITTER, PIXEL_JITTER + 1, size=(rows, cols)).astype(np.float32)
+    yi = (np.arange(h) * rows // h).clip(0, rows - 1)
+    xi = (np.arange(w) * cols // w).clip(0, cols - 1)
+    tile = offsets[np.ix_(yi, xi)]
+
+    out = np.clip(base + tile[..., None], 0, 255).astype(np.uint8)
+    alpha = np.full((h, w, 1), 255, dtype=np.uint8)
+    return Image.fromarray(np.concatenate([out, alpha], axis=2), "RGBA")
 
 
 def centered_logo(w: int, h: int, logo_frac: float) -> Image.Image:
@@ -76,11 +96,11 @@ def save_json(path, obj):
 def icon_layers(w: int, h: int):
     """Return (front, middle, back) layers, ordered to match layer_names.
 
-    Matches the Twozz style: the Back is the dark vertical gradient, and both the
-    Middle and Front parallax layers are the same colour logo (no white tile), so
-    the Apple TV's focus parallax gives the logo subtle depth.
+    Matches the Twozz style: the Back is the pixel-textured grey background, and
+    both the Middle and Front parallax layers are the same colour logo (no white
+    tile), so the Apple TV's focus parallax gives the logo subtle depth.
     """
-    back = vertical_gradient(w, h, BG_TOP, BG_BOTTOM)
+    back = pixel_background(w, h, BG_TOP, BG_BOTTOM)
     logo = centered_logo(w, h, logo_frac=0.688)
     return logo.copy(), logo.copy(), back
 
@@ -111,10 +131,10 @@ def write_imagestack(stack_name: str, base_w: int, base_h: int, scales):
 
 
 def write_top_shelf(name: str, w: int, h: int, file_prefix: str):
-    """Write a 2-scale Top Shelf imageset (dark gradient banner + centered logo)."""
+    """Write a 2-scale Top Shelf imageset (pixel-textured banner + centered logo)."""
     images = []
     for s in (1, 2):
-        bg = vertical_gradient(w * s, h * s, BG_TOP, BG_BOTTOM)
+        bg = pixel_background(w * s, h * s, BG_TOP, BG_BOTTOM)
         bg.alpha_composite(centered_logo(w * s, h * s, logo_frac=0.635))
         fname = f"{file_prefix}@{s}x.png"
         save_png(bg, f"{name}.imageset", fname)

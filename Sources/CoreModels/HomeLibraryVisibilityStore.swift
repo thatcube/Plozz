@@ -9,10 +9,15 @@ public protocol HomeLibraryVisibilityStoring: Sendable {
 
 public final class HomeLibraryVisibilityStore: HomeLibraryVisibilityStoring, @unchecked Sendable {
     private let defaults: UserDefaults
-    private let key = "com.plozz.homeLibraryVisibility"
+    private let key: String
 
-    public init(defaults: UserDefaults = .standard) {
+    /// - Parameter namespace: per-profile scope. `nil` (the default/primary
+    ///   profile) uses the legacy un-suffixed key so upgrading installs keep
+    ///   their Home customization; other profiles pass their `Profile.id` so each
+    ///   profile gets its own independent set of hidden libraries.
+    public init(defaults: UserDefaults = .standard, namespace: String? = nil) {
         self.defaults = defaults
+        self.key = SettingsKey.scoped("com.plozz.homeLibraryVisibility", namespace: namespace)
     }
 
     public func load() -> HomeLibraryVisibility {

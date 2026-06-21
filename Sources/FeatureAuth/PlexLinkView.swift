@@ -31,11 +31,11 @@ public struct PlexLinkView: View {
             VStack(spacing: 8) {
                 Text("Sign in to Plex")
                     .font(.largeTitle).bold()
-                Text("On your phone or computer, go to **plex.tv/link** and enter this code.")
+                Text("Scan the code with your phone, or enter it manually at **plex.tv/link**.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 900)
+                    .frame(maxWidth: 1000)
             }
 
             content
@@ -58,16 +58,49 @@ public struct PlexLinkView: View {
                 .font(.title2)
 
         case let .awaitingLink(code, expiresAt):
-            VStack(spacing: 28) {
-                Text(code)
-                    .font(.system(size: 96, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .tracking(12)
-                    .padding(.horizontal, 48)
-                    .padding(.vertical, 24)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            HStack(alignment: .top, spacing: 80) {
+                VStack(spacing: 28) {
+                    Text("Scan with your phone")
+                        .font(.title2).bold()
+                    BrandQRCodeView(
+                        payload: Self.linkURL(for: code),
+                        moduleColor: PlexBrand.gold,
+                        size: 440
+                    ) {
+                        PlexLogoMark()
+                    }
+                }
 
-                PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
+                orDivider
+
+                VStack(spacing: 24) {
+                    Text("Or enter a code")
+                        .font(.title2).bold()
+
+                    VStack(spacing: 4) {
+                        Text("Go to")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                        Text("plex.tv/link")
+                            .font(.system(size: 52, weight: .heavy, design: .rounded))
+                            .foregroundStyle(PlexBrand.gold)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                    }
+
+                    Text(code)
+                        .font(.system(size: 84, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .tracking(10)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .padding(.horizontal, 44)
+                        .padding(.vertical, 20)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+
+                    PlexExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
+                }
+                .frame(maxWidth: 560)
             }
 
         case .loadingServers:
@@ -93,6 +126,29 @@ public struct PlexLinkView: View {
                     .frame(maxWidth: 900)
             }
         }
+    }
+
+    private var orDivider: some View {
+        VStack(spacing: 16) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.15))
+                .frame(width: 2)
+                .frame(maxHeight: .infinity)
+            Text("OR")
+                .font(.title3).bold()
+                .foregroundStyle(.secondary)
+            Rectangle()
+                .fill(Color.primary.opacity(0.15))
+                .frame(width: 2)
+                .frame(maxHeight: .infinity)
+        }
+        .frame(height: 500)
+    }
+
+    /// The activation URL the QR encodes: scanning it on a phone opens
+    /// plex.tv/link with the code pre-filled.
+    static func linkURL(for code: String) -> String {
+        "https://plex.tv/link?code=\(code)"
     }
 
     @ViewBuilder

@@ -45,8 +45,11 @@ public struct RootView: View {
                 )
 
             case .ready:
-                let accounts = appState.homeAccounts
-                if !accounts.isEmpty {
+                if appState.isChoosingProfile {
+                    ProfileSelectionView(appState: appState, canCancel: appState.primaryProvider != nil)
+                } else {
+                    let accounts = appState.homeAccounts
+                    if !accounts.isEmpty {
                     MainTabView(
                         accounts: accounts,
                         captionModel: appState.captionModel,
@@ -57,14 +60,19 @@ public struct RootView: View {
                         ratingsProvider: appState.ratingsProvider,
                         displayAccounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
+                        profiles: appState.profilesModel.profiles,
+                        activeProfile: appState.profilesModel.activeProfile,
                         pendingPlayItemID: Binding(
                             get: { appState.pendingPlayItemID },
                             set: { appState.pendingPlayItemID = $0 }
                         ),
                         onAddAccount: { appState.addAccount() },
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },
-                        onSignOutAll: { appState.signOutAll() }
+                        onSignOutAll: { appState.signOutAll() },
+                        onSwitchProfile: { appState.requestProfileSelection() }
                     )
+                    .id(appState.profilesModel.activeProfileID)
+                    }
                 }
 
             case let .failed(error, _):

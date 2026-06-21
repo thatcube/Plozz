@@ -26,10 +26,13 @@ struct MainTabView: View {
     let ratingsProvider: any ExternalRatingsProviding
     let displayAccounts: [Account]
     let activeAccountID: String?
+    let profiles: [Profile]
+    let activeProfile: Profile
     @Binding var pendingPlayItemID: String?
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
     let onSignOutAll: () -> Void
+    let onSwitchProfile: () -> Void
 
     @State private var discovery = LibraryDiscoveryModel()
 
@@ -65,12 +68,15 @@ struct MainTabView: View {
                 reloadLibraries: { await discovery.load(from: accounts) },
                 accounts: displayAccounts,
                 activeAccountID: activeAccountID,
+                profiles: profiles,
+                activeProfile: activeProfile,
                 appVersion: AppInfo.version,
                 appBuild: AppInfo.build,
                 repoURL: AppInfo.repoURLString,
                 onAddAccount: onAddAccount,
                 onRemoveAccount: onRemoveAccount,
-                onSignOutAll: onSignOutAll
+                onSignOutAll: onSignOutAll,
+                onSwitchProfile: onSwitchProfile
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }

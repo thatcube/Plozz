@@ -9,10 +9,14 @@ public protocol SpoilerSettingsStoring: Sendable {
 
 public final class SpoilerSettingsStore: SpoilerSettingsStoring, @unchecked Sendable {
     private let defaults: UserDefaults
-    private let key = "com.plozz.spoilerSettings"
+    private let key: String
 
-    public init(defaults: UserDefaults = .standard) {
+    /// - Parameter namespace: per-profile scope. `nil` (the default/primary
+    ///   profile) uses the legacy un-suffixed key so upgrading installs keep
+    ///   their settings; other profiles pass their `Profile.id`.
+    public init(defaults: UserDefaults = .standard, namespace: String? = nil) {
         self.defaults = defaults
+        self.key = SettingsKey.scoped("com.plozz.spoilerSettings", namespace: namespace)
     }
 
     public func load() -> SpoilerSettings {

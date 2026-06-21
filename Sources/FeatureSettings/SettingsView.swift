@@ -20,12 +20,15 @@ public struct SettingsView: View {
     private let reloadLibraries: () async -> Void
     private let accounts: [Account]
     private let activeAccountID: String?
+    private let profiles: [Profile]
+    private let activeProfile: Profile
     private let appVersion: String
     private let appBuild: String
     private let repoURL: String
     private let onAddAccount: () -> Void
     private let onRemoveAccount: (Account) -> Void
     private let onSignOutAll: () -> Void
+    private let onSwitchProfile: () -> Void
 
     public init(
         captions: CaptionSettingsModel,
@@ -37,12 +40,15 @@ public struct SettingsView: View {
         reloadLibraries: @escaping () async -> Void,
         accounts: [Account],
         activeAccountID: String?,
+        profiles: [Profile],
+        activeProfile: Profile,
         appVersion: String,
         appBuild: String,
         repoURL: String,
         onAddAccount: @escaping () -> Void,
         onRemoveAccount: @escaping (Account) -> Void,
-        onSignOutAll: @escaping () -> Void
+        onSignOutAll: @escaping () -> Void,
+        onSwitchProfile: @escaping () -> Void
     ) {
         _captions = State(initialValue: captions)
         _spoilers = State(initialValue: spoilers)
@@ -53,12 +59,15 @@ public struct SettingsView: View {
         self.reloadLibraries = reloadLibraries
         self.accounts = accounts
         self.activeAccountID = activeAccountID
+        self.profiles = profiles
+        self.activeProfile = activeProfile
         self.appVersion = appVersion
         self.appBuild = appBuild
         self.repoURL = repoURL
         self.onAddAccount = onAddAccount
         self.onRemoveAccount = onRemoveAccount
         self.onSignOutAll = onSignOutAll
+        self.onSwitchProfile = onSwitchProfile
     }
 
     private let fontScales: [Double] = [0.75, 1.0, 1.25, 1.5, 2.0]
@@ -86,6 +95,29 @@ public struct SettingsView: View {
     public var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    HStack(spacing: 16) {
+                        Image(systemName: activeProfile.avatarSymbol)
+                            .font(.title2)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(Color.accentColor.opacity(0.25)))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(activeProfile.name).font(.headline)
+                            Text(profiles.count == 1 ? "1 profile" : "\(profiles.count) profiles")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    Button(action: onSwitchProfile) {
+                        Label("Switch Profile", systemImage: "person.2.circle")
+                    }
+                } header: {
+                    Text("Profile")
+                } footer: {
+                    Text("Each profile keeps its own theme, spoiler, caption, and account selections.")
+                }
+
                 Section {
                     ForEach(accounts) { account in
                         accountRow(account)

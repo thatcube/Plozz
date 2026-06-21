@@ -41,6 +41,40 @@ final class HomeLibraryVisibilityTests: XCTestCase {
     }
 }
 
+final class HomeLibraryVisibilityStoreTests: XCTestCase {
+    private func makeDefaults() -> UserDefaults {
+        let suite = "test.homeVisibility.\(UUID().uuidString)"
+        return UserDefaults(suiteName: suite)!
+    }
+
+    func testDefaultNamespaceUsesLegacyUnsuffixedKey() {
+        let defaults = makeDefaults()
+        let store = HomeLibraryVisibilityStore(defaults: defaults, namespace: nil)
+        var v = HomeLibraryVisibility.default
+        v.setVisible(false, for: "acct:movies")
+        store.save(v)
+
+        // Persisted under the un-suffixed key so upgrading installs inherit it.
+        XCTAssertNotNil(defaults.data(forKey: "com.plozz.homeLibraryVisibility"))
+        XCTAssertEqual(store.load().excludedKeys, ["acct:movies"])
+    }
+
+    func testProfilesGetIsolatedVisibility() {
+        let defaults = makeDefaults()
+        let alice = HomeLibraryVisibilityStore(defaults: defaults, namespace: "profile-alice")
+        let bob = HomeLibraryVisibilityStore(defaults: defaults, namespace: "profile-bob")
+
+        var aliceV = alice.load()
+        aliceV.setVisible(false, for: "acct:movies")
+        alice.save(aliceV)
+
+        // Bob's scope is untouched by Alice's choice.
+        XCTAssertEqual(alice.load().excludedKeys, ["acct:movies"])
+        XCTAssertTrue(bob.load().excludedKeys.isEmpty)
+        XCTAssertTrue(bob.load().isVisible("acct:movies"))
+    }
+}
+
 final class AggregatedLibraryTests: XCTestCase {
     private func make(accountID: String, libraryID: String) -> AggregatedLibrary {
         AggregatedLibrary(

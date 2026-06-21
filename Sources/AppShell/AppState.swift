@@ -3,6 +3,7 @@ import Observation
 import CoreModels
 import FeatureAuth
 import FeatureDiscovery
+import FeatureProfiles
 import ProviderJellyfin
 import ProviderPlex
 import RatingsService
@@ -22,8 +23,10 @@ public final class AppState {
 
     /// All signed-in accounts, in stable order.
     public private(set) var accounts: [Account] = []
-    /// The subset of `accounts` currently included in the active set. Branch H
-    /// (aggregated Home) fans out over this; this branch uses the primary one.
+    /// The subset of `accounts` currently included in the active set. Sourced
+    /// from the **active profile** (falling back to the household-global active
+    /// set for the default profile). Branch H (aggregated Home) fans out over
+    /// this; this branch uses the primary one.
     public private(set) var activeAccountIDs: Set<String> = []
 
     /// A Jellyfin item id requested via a Top Shelf deep link
@@ -32,14 +35,26 @@ public final class AppState {
     /// cleared once the Home tab has routed to it.
     public var pendingPlayItemID: String?
 
-    public let captionModel: CaptionSettingsModel
-    public let spoilerModel: SpoilerSettingsModel
-    public let themeModel: ThemeSettingsModel
-    public let diagnosticsModel: DiagnosticsSettingsModel
+    /// Per-profile settings models. Rebuilt when the active profile changes so
+    /// switching profiles swaps the active theme/spoiler/caption/diagnostics
+    /// state cleanly. When the caller injects models (tests), they're used
+    /// as-is and not rebuilt.
+    public private(set) var captionModel: CaptionSettingsModel
+    public private(set) var spoilerModel: SpoilerSettingsModel
+    public private(set) var themeModel: ThemeSettingsModel
+    public private(set) var diagnosticsModel: DiagnosticsSettingsModel
     /// Which discovered libraries appear on the unified Home (opt-out). Shared
     /// live between the Settings checklist and Home so toggles take effect
-    /// without a reload.
-    public let homeLibraryVisibilityModel: HomeLibraryVisibilityModel
+    /// without a reload, and scoped per profile (rebuilt on profile switch) so
+    /// each profile keeps its own Home customization.
+    public private(set) var homeLibraryVisibilityModel: HomeLibraryVisibilityModel
+
+    /// The household's profiles + active selection. Owned at the app level and
+    /// layered on top of the multi-account core.
+    public let profilesModel: ProfilesModel
+    /// When `true`, `RootView` shows the profile picker instead of the signed-in
+    /// UI (shown at launch with >1 profile, and from "Switch Profile").
+    public private(set) var isChoosingProfile = false
 
     /// Provider-agnostic external-ratings enrichment (IMDb/RT/Metacritic via
     /// OMDb when a key is configured; otherwise a no-op). Injected into item
@@ -49,10 +64,18 @@ public final class AppState {
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry
+    /// Optional tvOS system-user seam (default app-owned no-op). See
+    /// `SystemProfileBridging`.
+    private let systemBridge: SystemProfileBridging
+    /// True when settings models were injected by the caller (tests) and so must
+    /// not be rebuilt on profile switch.
+    private let usesInjectedModels: Bool
 
     public init(
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
+        profilesModel: ProfilesModel? = nil,
+        systemBridge: SystemProfileBridging = AppOwnedProfileBridge(),
         captionModel: CaptionSettingsModel? = nil,
         spoilerModel: SpoilerSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
@@ -62,12 +85,24 @@ public final class AppState {
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
-        self.captionModel = captionModel ?? CaptionSettingsModel()
-        self.spoilerModel = spoilerModel ?? SpoilerSettingsModel()
-        self.themeModel = themeModel ?? ThemeSettingsModel()
-        self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel()
-        self.homeLibraryVisibilityModel = homeLibraryVisibilityModel ?? HomeLibraryVisibilityModel()
+        self.profilesModel = profilesModel ?? ProfilesModel()
+        self.systemBridge = systemBridge
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
+
+        // If the caller supplied any settings model, treat them all as injected
+        // (test path) and don't rebuild them on profile switch. Otherwise build
+        // them scoped to the active profile's namespace.
+        let injected = captionModel != nil || spoilerModel != nil
+            || themeModel != nil || diagnosticsModel != nil
+            || homeLibraryVisibilityModel != nil
+        self.usesInjectedModels = injected
+        let ns = (profilesModel ?? self.profilesModel).activeNamespace
+        self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
+        self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
+        self.themeModel = themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
+        self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
+        self.homeLibraryVisibilityModel = homeLibraryVisibilityModel
+            ?? HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
@@ -92,15 +127,25 @@ public final class AppState {
     }
 
     /// Restores stored accounts on launch (relaunch without re-login), migrating
-    /// any legacy single session first.
+    /// any legacy single session first. With more than one profile, opens the
+    /// profile picker before the signed-in UI.
     public func bootstrap() {
         accountStore.migrateLegacySessionIfNeeded()
         reloadAccounts()
+        // Prompt for a profile at launch only when the household has more than
+        // one; a single (default) profile goes straight in.
+        isChoosingProfile = profilesModel.profiles.count > 1
         apply(.restored(accounts))
     }
 
     /// Stable per-install device id used for Quick Connect + auth.
     public var deviceID: String { accountStore.deviceID() }
+
+    /// Whether the environment permits remembering the selected profile for the
+    /// current Apple TV system user (see `SystemProfileBridging`). v1 shows the
+    /// launch picker for >1 profile regardless; this surfaces the one surviving,
+    /// non-deprecated tvOS system signal for future tuning.
+    public var mayRememberProfileSelection: Bool { systemBridge.mayRememberProfileSelection }
 
     public var lastServerStore: LastServerStoring { UserDefaultsLastServerStore() }
 
@@ -230,11 +275,101 @@ public final class AppState {
         apply(.retry)
     }
 
+    // MARK: Profiles
+
+    /// Opens the profile picker (from Settings → "Switch Profile").
+    public func requestProfileSelection() {
+        isChoosingProfile = true
+    }
+
+    /// Dismisses the profile picker without changing the active profile (only
+    /// allowed when a profile is already active behind it).
+    public func cancelProfileSelection() {
+        isChoosingProfile = false
+    }
+
+    /// Switches to `id`, re-scoping settings + the active account set, then
+    /// dismisses the picker. Fast: a few `UserDefaults` reads plus an in-memory
+    /// account recompute; content reloads async via the rebuilt view subtree.
+    public func switchProfile(to id: String) {
+        profilesModel.select(id)
+        rebuildSettingsModels()
+        reloadAccounts()
+        isChoosingProfile = false
+    }
+
+    /// Creates or updates a profile from an editor draft. Updating the active
+    /// profile re-applies its settings + account scope immediately.
+    public func saveProfile(_ draft: ProfileDraft) {
+        if let id = draft.id {
+            if var profile = profilesModel.profiles.first(where: { $0.id == id }) {
+                profile.name = draft.name
+                profile.avatarSymbol = draft.avatarSymbol
+                profile.colorIndex = draft.colorIndex
+                profile.linkedAccountID = draft.linkedAccountID
+                profilesModel.update(profile)
+            }
+            profilesModel.setActiveAccountIDs(draft.activeAccountIDs, for: id)
+            if id == profilesModel.activeProfileID {
+                rebuildSettingsModels()
+                reloadAccounts()
+            }
+        } else {
+            profilesModel.add(
+                name: draft.name,
+                avatarSymbol: draft.avatarSymbol,
+                colorIndex: draft.colorIndex,
+                linkedAccountID: draft.linkedAccountID,
+                activeAccountIDs: draft.activeAccountIDs
+            )
+        }
+    }
+
+    /// Removes a profile (the default profile can't be removed). If it was
+    /// active, selection falls back to the first profile and re-scopes.
+    public func removeProfile(id: String) {
+        let wasActive = id == profilesModel.activeProfileID
+        profilesModel.remove(id)
+        if wasActive {
+            rebuildSettingsModels()
+            reloadAccounts()
+        }
+    }
+
+    /// The account subset currently stored for a profile (for the editor), or
+    /// the resolved fallback when it never chose one.
+    public func activeAccountIDs(forProfile id: String) -> [String] {
+        Array(profilesModel.activeAccountIDs(for: id, fallback: accountStore.activeAccountIDs()))
+    }
+
     // MARK: Internals
 
     private func reloadAccounts() {
         accounts = accountStore.loadAccounts()
-        activeAccountIDs = Set(accountStore.activeAccountIDs())
+        let known = Set(accounts.map(\.id))
+        // The active set is the active profile's chosen subset, falling back to
+        // the household-global active set (default profile / upgrade path).
+        let globalActive = accountStore.activeAccountIDs()
+        let profileIDs = profilesModel.activeAccountIDs(
+            for: profilesModel.activeProfileID,
+            fallback: globalActive
+        )
+        var resolved = Set(profileIDs.filter { known.contains($0) })
+        // A profile that selected nothing valid uses every account.
+        if resolved.isEmpty { resolved = known }
+        activeAccountIDs = resolved
+    }
+
+    /// Rebuilds the four settings models scoped to the active profile's
+    /// namespace. No-op when settings models were injected (tests).
+    private func rebuildSettingsModels() {
+        guard !usesInjectedModels else { return }
+        let ns = profilesModel.activeNamespace
+        captionModel = CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
+        spoilerModel = SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
+        themeModel = ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
+        diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
+        homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
     }
 
     private func apply(_ event: SessionEvent) {

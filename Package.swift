@@ -30,6 +30,7 @@ let package = Package(
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
         .library(name: "FeatureSearch", targets: ["FeatureSearch"]),
         .library(name: "FeatureSettings", targets: ["FeatureSettings"]),
+        .library(name: "FeatureProfiles", targets: ["FeatureProfiles"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
@@ -86,6 +87,10 @@ let package = Package(
             name: "FeatureSettings",
             dependencies: ["CoreModels", "CoreUI"]
         ),
+        .target(
+            name: "FeatureProfiles",
+            dependencies: ["CoreModels", "CoreUI"]
+        ),
 
         // MARK: Top Shelf (shared with the tvOS Top Shelf extension)
         //
@@ -114,6 +119,7 @@ let package = Package(
                 "FeaturePlayback",
                 "FeatureSearch",
                 "FeatureSettings",
+                "FeatureProfiles",
                 "TopShelfKit"
             ]
         ),
@@ -154,6 +160,10 @@ let package = Package(
         .testTarget(
             name: "FeatureSearchTests",
             dependencies: ["FeatureSearch", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeatureProfilesTests",
+            dependencies: ["FeatureProfiles", "CoreModels"]
         )
     ]
 )

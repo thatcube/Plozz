@@ -14,6 +14,8 @@ public struct SettingsView: View {
     private let serverName: String
     private let serverURL: String
     private let appVersion: String
+    private let appBuild: String
+    private let repoURL: String
     private let onSignOut: () -> Void
 
     public init(
@@ -22,6 +24,8 @@ public struct SettingsView: View {
         serverName: String,
         serverURL: String,
         appVersion: String,
+        appBuild: String,
+        repoURL: String,
         onSignOut: @escaping () -> Void
     ) {
         _captions = State(initialValue: captions)
@@ -29,6 +33,8 @@ public struct SettingsView: View {
         self.serverName = serverName
         self.serverURL = serverURL
         self.appVersion = appVersion
+        self.appBuild = appBuild
+        self.repoURL = repoURL
         self.onSignOut = onSignOut
     }
 
@@ -80,8 +86,14 @@ public struct SettingsView: View {
                     Button(role: .destructive, action: onSignOut) {
                         Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
-                } footer: {
-                    Text("Plozz \(appVersion) · Open source")
+                }
+
+                Section("About") {
+                    SettingsAboutSection(
+                        version: appVersion,
+                        build: appBuild,
+                        repoURL: repoURL
+                    )
                 }
             }
             .navigationTitle("Settings")

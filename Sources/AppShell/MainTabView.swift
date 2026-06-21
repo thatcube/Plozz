@@ -24,6 +24,8 @@ struct MainTabView: View {
                 serverName: provider.session.server.name,
                 serverURL: provider.session.server.baseURL.absoluteString,
                 appVersion: AppInfo.version,
+                appBuild: AppInfo.build,
+                repoURL: AppInfo.repoURLString,
                 onSignOut: onSignOut
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }

@@ -27,6 +27,7 @@ let package = Package(
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
+        .library(name: "FeatureSearch", targets: ["FeatureSearch"]),
         .library(name: "FeatureSettings", targets: ["FeatureSettings"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "AppShell", targets: ["AppShell"])
@@ -73,6 +74,10 @@ let package = Package(
             dependencies: ["CoreModels", "CoreNetworking", "CoreUI"]
         ),
         .target(
+            name: "FeatureSearch",
+            dependencies: ["CoreModels", "CoreUI"]
+        ),
+        .target(
             name: "FeatureSettings",
             dependencies: ["CoreModels", "CoreUI"]
         ),
@@ -101,6 +106,7 @@ let package = Package(
                 "RatingsService",
                 "FeatureHome",
                 "FeaturePlayback",
+                "FeatureSearch",
                 "FeatureSettings",
                 "TopShelfKit"
             ]
@@ -134,6 +140,10 @@ let package = Package(
         .testTarget(
             name: "FeatureHomeTests",
             dependencies: ["FeatureHome", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeatureSearchTests",
+            dependencies: ["FeatureSearch", "CoreModels"]
         )
     ]
 )

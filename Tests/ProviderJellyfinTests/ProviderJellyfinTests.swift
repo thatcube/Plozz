@@ -142,6 +142,41 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertFalse(page.hasMore)
     }
 
+    func testSearchSendsExpectedQueryAndMapsResults() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[
+          {"Id":"m1","Name":"Dune","Type":"Movie"},
+          {"Id":"s1","Name":"Dune: Prophecy","Type":"Series"}
+        ]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let results = try await provider.search(query: "  dune ", limit: 25)
+
+        XCTAssertEqual(results.map(\.title), ["Dune", "Dune: Prophecy"])
+        XCTAssertEqual(results.map(\.kind), [.movie, .series])
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        // Whitespace is trimmed before the request is issued.
+        XCTAssertEqual(query.first(where: { $0.name == "searchTerm" })?.value, "dune")
+        XCTAssertEqual(query.first(where: { $0.name == "Recursive" })?.value, "true")
+        XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Movie,Series,Episode")
+        XCTAssertEqual(query.first(where: { $0.name == "Limit" })?.value, "25")
+        XCTAssertEqual(query.first(where: { $0.name == "EnableTotalRecordCount" })?.value, "false")
+        XCTAssertEqual(query.first(where: { $0.name == "ImageTypeLimit" })?.value, "1")
+    }
+
+    func testSearchWithBlankQuerySkipsNetwork() async throws {
+        let stub = StubHTTPClient()
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let results = try await provider.search(query: "   ", limit: 25)
+
+        XCTAssertTrue(results.isEmpty)
+        XCTAssertTrue(stub.sentPaths.isEmpty)
+    }
+
     func testItemMapsNativeRatingsAndProviderIDs() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """

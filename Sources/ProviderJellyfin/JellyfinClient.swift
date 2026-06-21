@@ -213,6 +213,32 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
     }
 
+    // MARK: Search
+
+    /// `GET /Users/{userId}/Items?searchTerm=…` — a recursive, indexed search
+    /// across the user's libraries for the given playable content types.
+    func searchItems(
+        userID: String,
+        searchTerm: String,
+        includeItemTypes: [String],
+        limit: Int
+    ) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items",
+            queryItems: [
+                URLQueryItem(name: "searchTerm", value: searchTerm),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "Fields", value: "Overview"),
+                URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
+                URLQueryItem(name: "ImageTypeLimit", value: "1")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
     // MARK: Playback
 
     func playbackInfo(userID: String, itemID: String) async throws -> PlaybackInfoResponse {

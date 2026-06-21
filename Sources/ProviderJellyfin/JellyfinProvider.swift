@@ -92,6 +92,19 @@ public struct JellyfinProvider: MediaProvider {
         }
     }
 
+    // MARK: Search
+
+    public func search(query: String, limit: Int) async throws -> [MediaItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        return try await client.searchItems(
+            userID: session.userID,
+            searchTerm: trimmed,
+            includeItemTypes: ["Movie", "Series", "Episode"],
+            limit: limit
+        ).map(map(item:))
+    }
+
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {

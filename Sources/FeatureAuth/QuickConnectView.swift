@@ -47,8 +47,8 @@ public struct QuickConnectView: View {
             ProgressView("Requesting a code…")
                 .font(.title2)
 
-        case let .awaitingApproval(code):
-            VStack(spacing: 16) {
+        case let .awaitingApproval(code, expiresAt):
+            VStack(spacing: 24) {
                 Text(code)
                     .font(.system(size: 96, weight: .bold, design: .rounded))
                     .monospacedDigit()
@@ -56,6 +56,9 @@ public struct QuickConnectView: View {
                     .padding(.horizontal, 48)
                     .padding(.vertical, 24)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+
+                ExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
+
                 Label("Waiting for approval…", systemImage: "hourglass")
                     .foregroundStyle(.secondary)
             }
@@ -95,6 +98,42 @@ public struct QuickConnectView: View {
                     Text("Try Again").frame(minWidth: 200)
                 }
                 .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+}
+
+/// Animated ring + numeric countdown showing how long the current code stays
+/// valid. Depletes smoothly and shifts to a warning colour as time runs low.
+private struct ExpiryCountdown: View {
+    let expiresAt: Date
+    let lifetime: TimeInterval
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+            let fraction = lifetime > 0 ? remaining / lifetime : 0
+            let isUrgent = remaining <= 15
+            let tint: Color = isUrgent ? .orange : .accentColor
+
+            VStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .stroke(tint.opacity(0.2), lineWidth: 10)
+                    Circle()
+                        .trim(from: 0, to: fraction)
+                        .stroke(tint, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Text("\(Int(remaining.rounded(.up)))")
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                }
+                .frame(width: 120, height: 120)
+
+                Text("Code expires soon — a new one appears automatically")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
     }

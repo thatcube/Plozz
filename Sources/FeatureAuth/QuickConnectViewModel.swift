@@ -13,12 +13,15 @@ public final class QuickConnectViewModel {
     public enum Phase: Equatable {
         case idle
         case requesting
-        case awaitingApproval(code: String)
+        case awaitingApproval(code: String, expiresAt: Date)
         case success
         case error(String)
     }
 
     public private(set) var phase: Phase = .idle
+
+    /// How long each issued code stays valid; drives the on-screen countdown.
+    public var codeLifetime: TimeInterval { service.timeout }
 
     private let service: QuickConnectService
     private let onAuthenticated: (UserSession) -> Void
@@ -41,7 +44,8 @@ public final class QuickConnectViewModel {
             do {
                 let challenge = try await service.begin()
                 if Task.isCancelled { return }
-                self.phase = .awaitingApproval(code: challenge.userCode)
+                let expiresAt = Date().addingTimeInterval(service.timeout)
+                self.phase = .awaitingApproval(code: challenge.userCode, expiresAt: expiresAt)
 
                 let session = try await service.awaitApproval(for: challenge)
                 if Task.isCancelled { return }
@@ -51,6 +55,12 @@ public final class QuickConnectViewModel {
                 // Cancelled by the user; leave phase as-is (view is dismissing).
             } catch let error as AppError {
                 if error == .cancelled { return }
+                if error == .quickConnectExpired {
+                    // The code lapsed before approval; transparently request a
+                    // fresh one so the user always has a valid code on screen.
+                    self.start()
+                    return
+                }
                 self.phase = .error(error.userMessage)
             } catch {
                 self.phase = .error(AppError.unknown("").userMessage)

@@ -66,19 +66,50 @@ public enum JellyfinDiscoveryParser {
         }
 
         var candidates: [URL] = []
+        func add(_ url: URL?) {
+            guard let url, !candidates.contains(url) else { return }
+            candidates.append(url)
+        }
         func add(_ raw: String?) {
-            guard let raw, let url = ServerURLNormalizer.normalize(raw) else { return }
-            if !candidates.contains(url) { candidates.append(url) }
+            guard let raw, !raw.isEmpty else { return }
+            add(ServerURLNormalizer.normalize(raw))
         }
 
-        add(sourceIP)                  // reachable: the reply came from here
-        add(response.EndpointAddress)  // server's own notion of its endpoint
-        add(response.Address)          // self-reported; may be a foreign subnet
+        // The server's own advertised endpoint, normalized. It may be on a
+        // foreign subnet/host, but it carries the scheme, port and path the
+        // server actually serves on (https, a reverse-proxy path, a non-default
+        // port, …) — information the bare source IP lacks.
+        let advertised = ServerURLNormalizer.normalize(response.EndpointAddress ?? "")
+            ?? ServerURLNormalizer.normalize(response.Address ?? "")
+
+        if let sourceIP, !sourceIP.isEmpty {
+            // 1. Best bet: the reachable host, but using the scheme/port/path the
+            //    server advertised. Covers https, reverse proxies and custom
+            //    ports while still aiming at an address we know we can reach.
+            if let advertised { add(hostSwapped(advertised, host: sourceIP)) }
+            // 2. The reachable host on Jellyfin's default http port.
+            add(sourceIP)
+        }
+        // 3/4. The server's own addresses, exactly as advertised (last resort —
+        //      only works when the published address is correct for this LAN).
+        add(response.EndpointAddress)
+        add(response.Address)
 
         guard let primary = candidates.first else { return nil }
 
         let id = response.Id ?? primary.absoluteString
         let name = response.Name ?? sourceIP ?? primary.host ?? "Jellyfin Server"
         return JellyfinAnnouncement(id: id, name: name, candidateURLs: candidates)
+    }
+
+    /// Returns `template` with its host replaced by `host`, preserving scheme,
+    /// port and path. Used to aim the server's advertised endpoint at an address
+    /// we know is reachable.
+    private static func hostSwapped(_ template: URL, host: String) -> URL? {
+        guard var components = URLComponents(url: template, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.host = host
+        return components.url
     }
 }

@@ -26,12 +26,10 @@ public struct RootView: View {
                 }
 
             case let .authenticating(server):
-                QuickConnectView(
-                    viewModel: QuickConnectViewModel(
-                        service: QuickConnectService(server: server, deviceID: appState.deviceID),
-                        onAuthenticated: { session in appState.didAuthenticate(session) }
-                    ),
-                    serverName: server.name,
+                AuthView(
+                    server: server,
+                    deviceID: appState.deviceID,
+                    onAuthenticated: { session in appState.didAuthenticate(session) },
                     onCancel: { appState.cancelAuthentication() }
                 )
 

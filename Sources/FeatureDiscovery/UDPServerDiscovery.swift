@@ -28,24 +28,94 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
     /// `/16`. Larger subnets fall back to broadcast only.
     private let maxSweepHosts: UInt32
 
-    public init(maxSweepHosts: UInt32 = 1024) {
+    /// Validates discovery candidates over HTTP so we surface the URL that
+    /// actually answers (handles https / custom ports / reverse proxies and
+    /// servers advertising a foreign address). Uses a short-timeout session so
+    /// trying several candidates per server stays fast.
+    private let validator: ServerValidator
+
+    public init(
+        maxSweepHosts: UInt32 = 1024,
+        validator: ServerValidator = ServerValidator(http: URLSessionHTTPClient(session: .plozzDiscovery))
+    ) {
         self.maxSweepHosts = maxSweepHosts
+        self.validator = validator
     }
 
     public func discover(timeout: TimeInterval) -> AsyncStream<MediaServer> {
-        AsyncStream { continuation in
-            let queue = DispatchQueue(label: "com.plozz.discovery.socket")
-            let cancelled = AtomicFlag()
-            let maxSweepHosts = self.maxSweepHosts
+        let maxSweepHosts = self.maxSweepHosts
+        let validator = self.validator
 
-            queue.async {
-                Self.run(timeout: timeout, maxSweepHosts: maxSweepHosts, cancelled: cancelled) { server in
-                    continuation.yield(server)
+        return AsyncStream { continuation in
+            let cancelled = AtomicFlag()
+
+            let task = Task {
+                // Validate each announcement's candidates concurrently so a slow
+                // (or wrong) candidate for one server never holds up another.
+                await withTaskGroup(of: Void.self) { group in
+                    let stream = Self.announcements(
+                        timeout: timeout, maxSweepHosts: maxSweepHosts, cancelled: cancelled
+                    )
+                    for await announcement in stream {
+                        if Task.isCancelled { break }
+                        group.addTask {
+                            if let server = await Self.resolve(announcement, validator: validator) {
+                                continuation.yield(server)
+                            }
+                        }
+                    }
                 }
                 continuation.finish()
             }
 
-            continuation.onTermination = { _ in cancelled.set() }
+            continuation.onTermination = { _ in
+                cancelled.set()
+                task.cancel()
+            }
+        }
+    }
+
+    // MARK: - Candidate resolution
+
+    /// Probes an announcement's candidate URLs in priority order and returns the
+    /// first that a Jellyfin server actually answers on. If none answer in time
+    /// (slow server, HTTP blocked, …) the best-effort first candidate is still
+    /// surfaced — the server clearly exists, so the user shouldn't see "nothing".
+    private static func resolve(
+        _ announcement: JellyfinAnnouncement,
+        validator: ServerValidator
+    ) async -> MediaServer? {
+        for url in announcement.candidateURLs {
+            if Task.isCancelled { return nil }
+            if let server = try? await validator.validate(rawURL: url.absoluteString) {
+                PlozzLog.discovery.info("Validated \(server.name) at \(server.baseURL.absoluteString)")
+                return server
+            }
+        }
+        if let server = announcement.primaryServer {
+            PlozzLog.discovery.info("No candidate validated; surfacing best-effort \(server.name)")
+            return server
+        }
+        return nil
+    }
+
+    // MARK: - Announcement stream
+
+    /// Bridges the blocking BSD-socket loop (run on a background queue) into an
+    /// `AsyncStream` of parsed, de-duplicated announcements.
+    private static func announcements(
+        timeout: TimeInterval,
+        maxSweepHosts: UInt32,
+        cancelled: AtomicFlag
+    ) -> AsyncStream<JellyfinAnnouncement> {
+        AsyncStream { continuation in
+            let queue = DispatchQueue(label: "com.plozz.discovery.socket")
+            queue.async {
+                Self.run(timeout: timeout, maxSweepHosts: maxSweepHosts, cancelled: cancelled) { announcement in
+                    continuation.yield(announcement)
+                }
+                continuation.finish()
+            }
         }
     }
 
@@ -55,7 +125,7 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
         timeout: TimeInterval,
         maxSweepHosts: UInt32,
         cancelled: AtomicFlag,
-        yield: (MediaServer) -> Void
+        yield: (JellyfinAnnouncement) -> Void
     ) {
         let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard fd >= 0 else {
@@ -123,10 +193,11 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
                 let data = Data(buffer[0..<n])
                 let sourceIP = Self.ipString(from: from)
                 if let announcement = JellyfinDiscoveryParser.parse(data, sourceIP: sourceIP),
-                   seen.insert(announcement.id).inserted,
-                   let server = announcement.primaryServer {
-                    PlozzLog.discovery.info("Discovered \(server.name) at \(server.baseURL.absoluteString)")
-                    yield(server)
+                   seen.insert(announcement.id).inserted {
+                    PlozzLog.discovery.info(
+                        "Announce \(announcement.name) — \(announcement.candidateURLs.count) candidate(s)"
+                    )
+                    yield(announcement)
                 }
             }
 
@@ -164,6 +235,18 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
                     append(in_addr_t(addr).bigEndian)
                     addr += 1
                 }
+            } else if hostCount > maxSweepHosts {
+                // Subnet too large to sweep fully (e.g. a /16). Still unicast the
+                // local /24 around our own address — the overwhelmingly common
+                // real-world segment — so a nearby server is found without a
+                // pathological full-range sweep.
+                let net24 = host & 0xFFFF_FF00
+                let bcast24 = net24 | 0x0000_00FF
+                var addr = net24 + 1
+                while addr < bcast24 {
+                    append(in_addr_t(addr).bigEndian)
+                    addr += 1
+                }
             }
             append(in_addr_t(broadcast).bigEndian)
         }
@@ -174,7 +257,9 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
 
     private struct Interface { let address: in_addr_t; let netmask: in_addr_t }
 
-    /// Active, non-loopback IPv4 interfaces and their netmasks.
+    /// Active, broadcast-capable, non-loopback IPv4 LAN interfaces and their
+    /// netmasks. Point-to-point links (VPN tunnels, cellular) are skipped: a
+    /// unicast LAN sweep over them is meaningless and a broadcast is undeliverable.
     private static func localIPv4Interfaces() -> [Interface] {
         var result: [Interface] = []
         var head: UnsafeMutablePointer<ifaddrs>?
@@ -189,6 +274,8 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
                   sa.pointee.sa_family == sa_family_t(AF_INET),
                   (flags & IFF_UP) != 0,
                   (flags & IFF_LOOPBACK) == 0,
+                  (flags & IFF_POINTOPOINT) == 0,
+                  (flags & IFF_BROADCAST) != 0,
                   let nm = cur.pointee.ifa_netmask else { continue }
 
             let address = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr }

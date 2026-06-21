@@ -4,18 +4,33 @@ import CoreModels
 
 /// TV-friendly Quick Connect screen: shows the big code, status, and Cancel/Retry.
 public struct QuickConnectView: View {
+    /// A low-emphasis alternative action rendered beneath the main controls
+    /// (e.g. "Sign in with username & password"). Kept visually subordinate so
+    /// Quick Connect remains the primary path.
+    public struct SecondaryAction {
+        public let title: String
+        public let handler: () -> Void
+        public init(title: String, handler: @escaping () -> Void) {
+            self.title = title
+            self.handler = handler
+        }
+    }
+
     @State private var viewModel: QuickConnectViewModel
     private let serverName: String
     private let onCancel: () -> Void
+    private let secondaryAction: SecondaryAction?
 
     public init(
         viewModel: QuickConnectViewModel,
         serverName: String,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        secondaryAction: SecondaryAction? = nil
     ) {
         _viewModel = State(initialValue: viewModel)
         self.serverName = serverName
         self.onCancel = onCancel
+        self.secondaryAction = secondaryAction
     }
 
     public var body: some View {
@@ -33,6 +48,17 @@ public struct QuickConnectView: View {
             content
 
             controls
+
+            if let secondaryAction {
+                Button {
+                    secondaryAction.handler()
+                } label: {
+                    Text(secondaryAction.title).font(.callout)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            }
         }
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

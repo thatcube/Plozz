@@ -34,6 +34,11 @@ struct AuthenticateWithQuickConnectBody: Encodable {
     let Secret: String
 }
 
+struct AuthenticateByNameBody: Encodable {
+    let Username: String
+    let Pw: String
+}
+
 struct ItemsResponse: Decodable {
     let Items: [BaseItemDto]
     let TotalRecordCount: Int?

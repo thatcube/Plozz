@@ -49,7 +49,7 @@ public final class ServerPickerViewModel {
     public var lastServer: MediaServer? { store.lastServer }
 
     /// Starts a LAN scan, appending servers as they answer.
-    public func startScan(timeout: TimeInterval = 5) {
+    public func startScan(timeout: TimeInterval = 6) {
         scanTask?.cancel()
         discoveredServers = []
         phase = .scanning

@@ -101,6 +101,21 @@ public struct JellyfinClient: Sendable {
         return (dto.AccessToken, dto.User.Id, dto.User.Name, dto.ServerId)
     }
 
+    /// `POST /Users/AuthenticateByName` — exchange a username/password for an
+    /// access token + user. Used as a lower-priority alternative to Quick
+    /// Connect (and the only option when the server has Quick Connect disabled).
+    /// Maps a rejected login (HTTP 401/403) to `.invalidCredentials`.
+    public func authenticate(username: String, password: String) async throws -> (token: String, userID: String, userName: String, serverID: String?) {
+        var endpoint = Endpoint(method: .post, path: "/Users/AuthenticateByName", headers: authHeaders)
+        endpoint = try endpoint.jsonBody(AuthenticateByNameBody(Username: username, Pw: password))
+        do {
+            let dto = try await http.decode(AuthenticationResultDTO.self, from: endpoint, baseURL: baseURL)
+            return (dto.AccessToken, dto.User.Id, dto.User.Name, dto.ServerId)
+        } catch AppError.unauthorized {
+            throw AppError.invalidCredentials
+        }
+    }
+
     // MARK: Items
 
     func userViews(userID: String) async throws -> [BaseItemDto] {

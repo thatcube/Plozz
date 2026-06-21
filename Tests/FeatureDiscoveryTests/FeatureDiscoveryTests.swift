@@ -50,6 +50,26 @@ final class JellyfinDiscoveryParserTests: XCTestCase {
         XCTAssertEqual(announcement?.candidateURLs.first?.absoluteString, "http://10.0.0.42:8096")
     }
 
+    func testHostSwapsReportedSchemeAndPortOntoSourceIP() {
+        // Server advertises https on a custom port at a foreign address. The best
+        // candidate aims that scheme/port at the reachable source IP, so reverse
+        // proxies / non-default ports / TLS all keep working over the LAN.
+        let json = #"{"Address":"https://10.0.0.5:8920","Id":"srv","Name":"Proxy"}"#
+        let announcement = JellyfinDiscoveryParser.parse(Data(json.utf8), sourceIP: "192.168.68.71")
+        XCTAssertEqual(announcement?.candidateURLs.first?.absoluteString, "https://192.168.68.71:8920")
+        // Default-port http on the reachable host is kept as a fallback…
+        XCTAssertTrue(announcement?.candidateURLs.contains { $0.absoluteString == "http://192.168.68.71:8096" } ?? false)
+        // …and the server's own advertised URL remains a last resort.
+        XCTAssertTrue(announcement?.candidateURLs.contains { $0.absoluteString == "https://10.0.0.5:8920" } ?? false)
+    }
+
+    func testHostSwapsReportedPathOntoSourceIP() {
+        // Reverse-proxy style published path is preserved on the reachable host.
+        let json = #"{"Address":"http://media.example.com:443/jellyfin","Id":"rp","Name":"RP"}"#
+        let announcement = JellyfinDiscoveryParser.parse(Data(json.utf8), sourceIP: "192.168.1.50")
+        XCTAssertEqual(announcement?.candidateURLs.first?.absoluteString, "http://192.168.1.50:443/jellyfin")
+    }
+
     func testProbeConstants() {
         XCTAssertEqual(JellyfinDiscoveryParser.probeMessage, "Who is JellyfinServer?")
         XCTAssertEqual(JellyfinDiscoveryParser.discoveryPort, 7359)

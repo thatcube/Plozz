@@ -148,4 +148,29 @@ final class JellyfinQuickConnectClientTests: XCTestCase {
         XCTAssertEqual(result.userName, "Bob")
         XCTAssertEqual(result.serverID, "srv")
     }
+
+    func testAuthenticateByNameReturnsTokenAndUser() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/AuthenticateByName", json: """
+        {"AccessToken":"TOK2","ServerId":"srv2","User":{"Id":"u3","Name":"Carol"}}
+        """)
+        let result = try await client(stub).authenticate(username: "carol", password: "hunter2")
+        XCTAssertEqual(result.token, "TOK2")
+        XCTAssertEqual(result.userID, "u3")
+        XCTAssertEqual(result.userName, "Carol")
+        XCTAssertEqual(result.serverID, "srv2")
+    }
+
+    func testAuthenticateByNameMapsUnauthorizedToInvalidCredentials() async {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/AuthenticateByName", json: "{}", status: 401)
+        do {
+            _ = try await client(stub).authenticate(username: "x", password: "wrong")
+            XCTFail("Expected invalidCredentials")
+        } catch let error as AppError {
+            XCTAssertEqual(error, .invalidCredentials)
+        } catch {
+            XCTFail("Unexpected \(error)")
+        }
+    }
 }

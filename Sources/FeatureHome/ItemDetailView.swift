@@ -40,7 +40,7 @@ public struct ItemDetailView: View {
                         )
                     }
                 }
-                .padding(.bottom, 60)
+                .padding(.bottom, PlozzTheme.Metrics.screenPadding)
             }
         }
         .task { if viewModel.state.value == nil { await viewModel.load() } }

@@ -56,6 +56,9 @@ struct BaseItemDto: Decodable {
     let Overview: String?
     let SeriesName: String?
     let SeasonName: String?
+    /// For an episode, the id of its parent series (used to fall back to series
+    /// artwork when the episode itself has no image).
+    let SeriesId: String?
     let IndexNumber: Int?
     let ParentIndexNumber: Int?
     let ProductionYear: Int?

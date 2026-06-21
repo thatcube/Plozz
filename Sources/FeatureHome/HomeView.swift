@@ -30,8 +30,6 @@ public struct HomeView: View {
         ) { content in
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
-                    header
-
                     MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
                     MediaRowView(title: "Recently Added", items: content.latest, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
 
@@ -43,12 +41,6 @@ public struct HomeView: View {
             }
         }
         .task { if viewModel.state.value == nil { await viewModel.load() } }
-    }
-
-    private var header: some View {
-        Text("Welcome back, \(viewModel.userName)")
-            .font(.largeTitle).bold()
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
     }
 
     private func librariesRow(_ libraries: [MediaLibrary]) -> some View {

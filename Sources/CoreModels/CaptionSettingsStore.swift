@@ -9,7 +9,7 @@ public protocol CaptionSettingsStoring: Sendable {
 
 public final class CaptionSettingsStore: CaptionSettingsStoring, @unchecked Sendable {
     private let defaults: UserDefaults
-    private let key = "com.plizz.captionSettings"
+    private let key = "com.plozz.captionSettings"
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

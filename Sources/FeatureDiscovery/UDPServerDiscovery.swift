@@ -12,7 +12,7 @@ import CoreNetworking
 /// extra configuration.
 public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
     private let port: NWEndpoint.Port
-    private let queue = DispatchQueue(label: "com.plizz.discovery")
+    private let queue = DispatchQueue(label: "com.plozz.discovery")
 
     public init() {
         self.port = NWEndpoint.Port(rawValue: JellyfinDiscoveryParser.discoveryPort)!
@@ -38,7 +38,7 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
                 guard let server = JellyfinDiscoveryParser.parse(data) else { return }
                 lock.lock(); defer { lock.unlock() }
                 guard seen.insert(server.id).inserted else { return }
-                PlizzLog.discovery.info("Discovered server \(server.name)")
+                PlozzLog.discovery.info("Discovered server \(server.name)")
                 continuation.yield(server)
             }
 

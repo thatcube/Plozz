@@ -46,7 +46,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild build \
-            -project Plizz.xcodeproj \
-            -scheme Plizz \
+            -project Plozz.xcodeproj \
+            -scheme Plozz \
             -destination 'generic/platform=tvOS Simulator' \
             CODE_SIGNING_ALLOWED=NO

@@ -27,7 +27,7 @@ public enum KeychainError: Error, Equatable {
 public struct KeychainStore: SecureStore {
     private let service: String
 
-    public init(service: String = "com.plizz.app.tokens") {
+    public init(service: String = "com.plozz.app.tokens") {
         self.service = service
     }
 

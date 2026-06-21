@@ -1,4 +1,4 @@
-# Fastfile — App Store Connect automation for Plizz (tvOS)
+# Fastfile — App Store Connect automation for Plozz (tvOS)
 #
 # Authentication uses an App Store Connect API key (no Apple ID / 2FA needed),
 # which is required for unattended runs and CI. Provide these via env vars
@@ -16,17 +16,17 @@
 # ONE-TIME SETUP (manual): the App Store Connect API key cannot create the app
 # record itself (Apple exposes no "create app" API and `produce` needs an Apple
 # ID + 2FA). Before the first `beta`, create the app once in the App Store
-# Connect web UI:  Apps > + > New App  ->  Platform: tvOS, Name: Plizz,
-# Bundle ID: com.plizz.app (team N8Z5T4AK3X), SKU: plizz-tvos.
+# Connect web UI:  Apps > + > New App  ->  Platform: tvOS, Name: Plozz,
+# Bundle ID: com.plozz.app (team N8Z5T4AK3X), SKU: plozz-tvos.
 # The bundle ID registration and distribution signing are handled automatically
 # by `build` via -allowProvisioningUpdates + the API key.
 
 require "shellwords"
 
-APP_IDENTIFIER = "com.plizz.app"
-APP_NAME       = "Plizz"
-SCHEME         = "Plizz"
-XCODEPROJ      = "Plizz.xcodeproj"
+APP_IDENTIFIER = "com.plozz.app"
+APP_NAME       = "Plozz"
+SCHEME         = "Plozz"
+XCODEPROJ      = "Plozz.xcodeproj"
 OUTPUT_DIR     = "build"
 # tvOS apps are a distinct App Store "platform"; deliver/pilot default to iOS
 # unless told otherwise, so every upload must specify this explicitly.

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Stable identity Plizz presents to a Jellyfin server.
+/// Stable identity Plozz presents to a Jellyfin server.
 ///
 /// `deviceID` must be stable for the lifetime of an install so the server can
 /// recognise the same device across sessions (and so Quick Connect/auth tokens
@@ -12,7 +12,7 @@ public struct JellyfinDeviceProfile: Sendable, Hashable {
     public var version: String
 
     public init(
-        client: String = "Plizz",
+        client: String = "Plozz",
         device: String = "Apple TV",
         deviceID: String,
         version: String = "1.0"
@@ -26,7 +26,7 @@ public struct JellyfinDeviceProfile: Sendable, Hashable {
     /// Builds the `Authorization: MediaBrowser …` header value Jellyfin expects.
     ///
     /// When `token` is present it's appended as `Token="…"`. The full value is
-    /// sensitive and must be redacted before logging (see `PlizzLog`).
+    /// sensitive and must be redacted before logging (see `PlozzLog`).
     public func authorizationHeaderValue(token: String? = nil) -> String {
         var parts = [
             "Client=\(quoted(client))",

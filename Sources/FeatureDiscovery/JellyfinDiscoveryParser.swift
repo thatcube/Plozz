@@ -15,7 +15,7 @@ struct JellyfinDiscoveryResponse: Decodable {
 /// Kept free of any networking so it can be unit-tested directly against raw
 /// bytes captured from a real server.
 public enum JellyfinDiscoveryParser {
-    /// The probe message Plizz broadcasts. Jellyfin servers listen for this
+    /// The probe message Plozz broadcasts. Jellyfin servers listen for this
     /// exact string on UDP port 7359.
     public static let probeMessage = "Who is JellyfinServer?"
     public static let discoveryPort: UInt16 = 7359

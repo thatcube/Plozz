@@ -1,6 +1,6 @@
 import Foundation
 
-/// The media backends Plizz can talk to.
+/// The media backends Plozz can talk to.
 ///
 /// Phase 1 ships `.jellyfin` only. `.plex` is reserved for Phase 2 and exists
 /// here so that persisted data and the `MediaProvider` abstraction are already

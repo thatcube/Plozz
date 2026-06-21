@@ -1,9 +1,9 @@
 import SwiftUI
 import AppShell
 
-/// Plizz — an open-source tvOS Jellyfin client.
+/// Plozz — an open-source tvOS Jellyfin client.
 @main
-struct PlizzApp: App {
+struct PlozzApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()

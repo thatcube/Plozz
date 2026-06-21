@@ -6,7 +6,7 @@ import CoreUI
 
 /// Full-screen playback using the **native** `AVPlayerViewController`.
 ///
-/// Using the system player gives Plizz the platform-standard transport bar,
+/// Using the system player gives Plozz the platform-standard transport bar,
 /// scrubbing, Siri Remote gestures, and the built-in audio/subtitle picker
 /// (populated from the stream's media selection groups) for free — we only
 /// deviate from native where the spec requires (in-app caption styling, resume,

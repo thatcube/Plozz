@@ -1,6 +1,6 @@
 import Foundation
 
-/// The provider abstraction that lets Plizz support multiple backends.
+/// The provider abstraction that lets Plozz support multiple backends.
 ///
 /// Phase 1 ships a single conformer (`ProviderJellyfin.JellyfinProvider`).
 /// Phase 2 adds a Plex conformer **without** changing any feature module:

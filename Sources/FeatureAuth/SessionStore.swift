@@ -28,9 +28,9 @@ public final class SessionStore: SessionPersisting, @unchecked Sendable {
 
     private let secureStore: SecureStore
     private let defaults: UserDefaults
-    private let metadataKey = "com.plizz.session.metadata"
-    private let deviceIDKey = "com.plizz.session.deviceID"
-    private let tokenAccount = "com.plizz.session.accessToken"
+    private let metadataKey = "com.plozz.session.metadata"
+    private let deviceIDKey = "com.plozz.session.deviceID"
+    private let tokenAccount = "com.plozz.session.accessToken"
     private let lock = NSLock()
 
     #if canImport(Security)
@@ -65,7 +65,7 @@ public final class SessionStore: SessionPersisting, @unchecked Sendable {
         defaults.set(data, forKey: metadataKey)
         // Token only ever lives in the Keychain.
         try secureStore.setString(session.accessToken, for: tokenAccount)
-        PlizzLog.auth.info("Saved session for user \(session.userName)")
+        PlozzLog.auth.info("Saved session for user \(session.userName)")
     }
 
     public func loadSession() -> UserSession? {
@@ -88,6 +88,6 @@ public final class SessionStore: SessionPersisting, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         defaults.removeObject(forKey: metadataKey)
         try secureStore.removeValue(for: tokenAccount)
-        PlizzLog.auth.info("Cleared session")
+        PlozzLog.auth.info("Cleared session")
     }
 }

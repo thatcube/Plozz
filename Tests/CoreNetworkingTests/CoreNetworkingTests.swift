@@ -31,9 +31,9 @@ final class ServerURLNormalizerTests: XCTestCase {
     }
 }
 
-final class PlizzLogRedactionTests: XCTestCase {
+final class PlozzLogRedactionTests: XCTestCase {
     func testSensitiveHeadersRedacted() {
-        let redacted = PlizzLog.redact(headers: [
+        let redacted = PlozzLog.redact(headers: [
             "Authorization": "MediaBrowser Token=\"secret\"",
             "Accept": "application/json"
         ])
@@ -43,7 +43,7 @@ final class PlizzLogRedactionTests: XCTestCase {
 
     func testSecretQueryItemsRedacted() {
         let url = URL(string: "http://h/QuickConnect/Connect?secret=abc&Limit=5")!
-        let result = PlizzLog.redact(url: url)
+        let result = PlozzLog.redact(url: url)
         XCTAssertFalse(result.contains("abc"))
         XCTAssertTrue(result.contains("Limit=5"))
     }

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Centralised design tokens so spacing/sizing stay consistent and tweakable
 /// in one place across all features.
-public enum PlizzTheme {
+public enum PlozzTheme {
     public enum Metrics {
         /// Standard poster card width (3:2-ish) tuned for tvOS 10-foot UI.
         public static let posterWidth: CGFloat = 280

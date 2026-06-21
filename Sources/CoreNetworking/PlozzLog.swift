@@ -5,17 +5,17 @@ import OSLog
 
 /// Centralised, secret-safe logging.
 ///
-/// Plizz must **never** log tokens, Quick Connect secrets, or full
+/// Plozz must **never** log tokens, Quick Connect secrets, or full
 /// `Authorization` headers. Use these helpers everywhere instead of `print`.
 ///
 /// Backed by `OSLog` where available (Apple platforms) and a no-op elsewhere,
 /// so non-Apple hosts (CI tooling, Linux) can still compile the logic modules.
-public struct PlizzLogger: Sendable {
+public struct PlozzLogger: Sendable {
     #if canImport(OSLog)
     private let logger: Logger
 
     init(category: String) {
-        self.logger = Logger(subsystem: PlizzLog.subsystem, category: category)
+        self.logger = Logger(subsystem: PlozzLog.subsystem, category: category)
     }
 
     public func debug(_ message: String) { logger.debug("\(message, privacy: .public)") }
@@ -29,14 +29,14 @@ public struct PlizzLogger: Sendable {
     #endif
 }
 
-public enum PlizzLog {
-    static let subsystem = "com.plizz.app"
+public enum PlozzLog {
+    static let subsystem = "com.plozz.app"
 
-    public static let networking = PlizzLogger(category: "networking")
-    public static let auth = PlizzLogger(category: "auth")
-    public static let discovery = PlizzLogger(category: "discovery")
-    public static let playback = PlizzLogger(category: "playback")
-    public static let app = PlizzLogger(category: "app")
+    public static let networking = PlozzLogger(category: "networking")
+    public static let auth = PlozzLogger(category: "auth")
+    public static let discovery = PlozzLogger(category: "discovery")
+    public static let playback = PlozzLogger(category: "playback")
+    public static let app = PlozzLogger(category: "app")
 
     /// Header names whose values must never be printed.
     static let sensitiveHeaders: Set<String> = [

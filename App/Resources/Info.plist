@@ -28,6 +28,6 @@
 		<string>_jellyfin._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Plizz uses your local network to discover Jellyfin servers automatically.</string>
+	<string>Plozz uses your local network to discover Jellyfin servers automatically.</string>
 </dict>
 </plist>

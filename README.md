@@ -1,6 +1,6 @@
-# Plizz
+# Plozz
 
-**Plizz** is a free, open-source **tvOS** client for [Jellyfin](https://jellyfin.org).
+**Plozz** is a free, open-source **tvOS** client for [Jellyfin](https://jellyfin.org).
 Discover a Jellyfin server on your local network, sign in from your couch with
 **Quick Connect**, browse your library, and play media with resume support —
 all using native tvOS controls and the Apple TV focus engine.
@@ -28,13 +28,13 @@ all using native tvOS controls and the Apple TV focus engine.
 
 ## Architecture
 
-Plizz is a Swift Package with one library per concern, consumed by a thin tvOS
+Plozz is a Swift Package with one library per concern, consumed by a thin tvOS
 app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 | Module | Responsibility |
 | --- | --- |
 | `CoreModels` | Domain models, `AppError`, `LoadState`, caption settings, and the **`MediaProvider`** protocol (the provider abstraction). |
-| `CoreNetworking` | `HTTPClient`, `Endpoint`, URL normalization, and a secret-safe logger (`PlizzLog`). |
+| `CoreNetworking` | `HTTPClient`, `Endpoint`, URL normalization, and a secret-safe logger (`PlozzLog`). |
 | `ProviderJellyfin` | Jellyfin REST client, DTOs, and a `MediaProvider` implementation. |
 | `FeatureDiscovery` | LAN (UDP) discovery, server validation, server-picker UI, last-server persistence. |
 | `FeatureAuth` | Quick Connect service, explicit **session state machine**, Keychain-backed `SessionStore`. |
@@ -67,8 +67,8 @@ keeping UI free of ad-hoc boolean flags.
 
 ```bash
 xcodegen generate
-open Plizz.xcodeproj
-# Select the "Plizz" scheme and an Apple TV simulator, then Run.
+open Plozz.xcodeproj
+# Select the "Plozz" scheme and an Apple TV simulator, then Run.
 ```
 
 ### Run the unit tests
@@ -88,7 +88,7 @@ networking, discovery, provider mapping, and auth logic directly. CI runs
 ## Privacy & security
 
 - Access tokens are stored in the Keychain; never in `UserDefaults` or logs.
-- `PlizzLog` is the single logging entry point and never logs secrets.
+- `PlozzLog` is the single logging entry point and never logs secrets.
 - Local network usage is declared in `Info.plist` for LAN discovery.
 
 ## Roadmap
@@ -99,4 +99,4 @@ networking, discovery, provider mapping, and auth logic directly. CI runs
 
 ## License
 
-Plizz is open source and free. See [`LICENSE`](LICENSE).
+Plozz is open source and free. See [`LICENSE`](LICENSE).

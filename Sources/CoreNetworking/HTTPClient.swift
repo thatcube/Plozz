@@ -17,13 +17,13 @@ public extension HTTPClient {
         _ type: T.Type,
         from endpoint: Endpoint,
         baseURL: URL,
-        decoder: JSONDecoder = .plizz
+        decoder: JSONDecoder = .plozz
     ) async throws -> T {
         let (data, _) = try await send(endpoint, baseURL: baseURL)
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
-            PlizzLog.networking.error("Decoding \(String(describing: T.self)) failed")
+            PlozzLog.networking.error("Decoding \(String(describing: T.self)) failed")
             throw AppError.decoding
         }
     }
@@ -33,15 +33,15 @@ public extension HTTPClient {
 public struct URLSessionHTTPClient: HTTPClient {
     private let session: URLSession
 
-    public init(session: URLSession = .plizzDefault) {
+    public init(session: URLSession = .plozzDefault) {
         self.session = session
     }
 
     public func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
         let request = try Self.makeRequest(endpoint, baseURL: baseURL)
 
-        PlizzLog.networking.debug(
-            "→ \(endpoint.method.rawValue) \(PlizzLog.redact(url: request.url ?? baseURL))"
+        PlozzLog.networking.debug(
+            "→ \(endpoint.method.rawValue) \(PlozzLog.redact(url: request.url ?? baseURL))"
         )
 
         let data: Data
@@ -60,7 +60,7 @@ public struct URLSessionHTTPClient: HTTPClient {
             throw AppError.invalidResponse
         }
 
-        PlizzLog.networking.debug("← \(http.statusCode)")
+        PlozzLog.networking.debug("← \(http.statusCode)")
 
         switch http.statusCode {
         case 200...299:
@@ -111,7 +111,7 @@ public struct URLSessionHTTPClient: HTTPClient {
 public extension URLSession {
     /// Session tuned for tvOS: short-ish timeouts so the UI can fail fast and
     /// show a graceful "server unreachable" state instead of hanging.
-    static var plizzDefault: URLSession {
+    static var plozzDefault: URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
@@ -122,7 +122,7 @@ public extension URLSession {
 
 public extension JSONDecoder {
     /// Decoder configured for Jellyfin's PascalCase JSON.
-    static var plizz: JSONDecoder {
+    static var plozz: JSONDecoder {
         let decoder = JSONDecoder()
         return decoder
     }

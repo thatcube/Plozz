@@ -21,9 +21,9 @@ public struct PosterCardView: View {
     private var size: CGSize {
         switch style {
         case .poster:
-            return CGSize(width: PlizzTheme.Metrics.posterWidth, height: PlizzTheme.Metrics.posterHeight)
+            return CGSize(width: PlozzTheme.Metrics.posterWidth, height: PlozzTheme.Metrics.posterHeight)
         case .landscape:
-            return CGSize(width: PlizzTheme.Metrics.landscapeWidth, height: PlizzTheme.Metrics.landscapeHeight)
+            return CGSize(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
         }
     }
 
@@ -36,7 +36,7 @@ public struct PosterCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 artwork
                     .frame(width: size.width, height: size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: PlizzTheme.Metrics.cornerRadius))
+                    .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
                     .overlay(alignment: .bottom) { progressBar }
 
                 VStack(alignment: .leading, spacing: 2) {

@@ -83,7 +83,7 @@ public struct ItemDetailView: View {
                     .padding(.top, 8)
                 }
             }
-            .padding(PlizzTheme.Metrics.screenPadding)
+            .padding(PlozzTheme.Metrics.screenPadding)
         }
     }
 

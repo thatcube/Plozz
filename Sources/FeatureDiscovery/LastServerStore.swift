@@ -10,7 +10,7 @@ public protocol LastServerStoring: Sendable {
 /// `UserDefaults`-backed implementation. Stores a JSON blob of `MediaServer`.
 public final class UserDefaultsLastServerStore: LastServerStoring, @unchecked Sendable {
     private let defaults: UserDefaults
-    private let key = "com.plizz.lastServer"
+    private let key = "com.plozz.lastServer"
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

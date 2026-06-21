@@ -27,15 +27,15 @@ public struct MediaRowView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text(title)
                     .font(.title2).bold()
-                    .padding(.leading, PlizzTheme.Metrics.screenPadding)
+                    .padding(.leading, PlozzTheme.Metrics.screenPadding)
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: PlizzTheme.Metrics.cardSpacing) {
+                    LazyHStack(spacing: PlozzTheme.Metrics.cardSpacing) {
                         ForEach(items) { item in
                             PosterCardView(item: item, style: style) { onSelect(item) }
                         }
                     }
-                    .padding(.horizontal, PlizzTheme.Metrics.screenPadding)
+                    .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                     // Give focus room so the lifted card isn't clipped.
                     .padding(.vertical, 24)
                 }

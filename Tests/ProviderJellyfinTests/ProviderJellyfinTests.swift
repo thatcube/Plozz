@@ -5,10 +5,10 @@ import CoreNetworking
 
 final class JellyfinDeviceProfileTests: XCTestCase {
     func testAuthorizationHeaderFormat() {
-        let profile = JellyfinDeviceProfile(client: "Plizz", device: "Apple TV", deviceID: "DID", version: "1.0")
+        let profile = JellyfinDeviceProfile(client: "Plozz", device: "Apple TV", deviceID: "DID", version: "1.0")
         let header = profile.authorizationHeaderValue()
         XCTAssertTrue(header.hasPrefix("MediaBrowser "))
-        XCTAssertTrue(header.contains(#"Client="Plizz""#))
+        XCTAssertTrue(header.contains(#"Client="Plozz""#))
         XCTAssertTrue(header.contains(#"DeviceId="DID""#))
         XCTAssertFalse(header.contains("Token="))
     }

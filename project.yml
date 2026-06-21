@@ -1,6 +1,6 @@
-name: Plizz
+name: Plozz
 options:
-  bundleIdPrefix: com.plizz
+  bundleIdPrefix: com.plozz
   deploymentTarget:
     tvOS: "17.0"
   createIntermediateGroups: true
@@ -15,16 +15,16 @@ settings:
 
 # Local Swift package providing all modular feature/code libraries.
 packages:
-  Plizz:
+  Plozz:
     path: .
 
 targets:
-  Plizz:
+  Plozz:
     type: application
     platform: tvOS
     deploymentTarget: "17.0"
     sources:
-      - path: App/Plizz
+      - path: App/Plozz
       - path: App/Resources/Assets.xcassets
     info:
       path: App/Resources/Info.plist
@@ -32,7 +32,7 @@ targets:
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         # Local network access is required for LAN server discovery on tvOS.
-        NSLocalNetworkUsageDescription: "Plizz uses your local network to discover Jellyfin servers automatically."
+        NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:
           - _jellyfin._tcp
         # Jellyfin servers are often plain HTTP on the LAN. Allow local networking.
@@ -40,24 +40,24 @@ targets:
           NSAllowsLocalNetworking: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.plizz.app
-        PRODUCT_NAME: Plizz
+        PRODUCT_BUNDLE_IDENTIFIER: com.plozz.app
+        PRODUCT_NAME: Plozz
         # NOTE: A tvOS "Brand Assets" app icon (layered image stacks) should be
         # added before App Store submission. Omitted here so the MVP builds for
         # the simulator without placeholder art. See README "Roadmap".
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
-      - package: Plizz
+      - package: Plozz
         product: AppShell
 
 schemes:
-  Plizz:
+  Plozz:
     build:
       targets:
-        Plizz: all
+        Plozz: all
     run:
       config: Debug
     test:
       config: Debug
       # Unit tests live in the Swift package; run them via the package scheme
-      # (`swift test` / `xcodebuild test -scheme Plizz-Package`).
+      # (`swift test` / `xcodebuild test -scheme Plozz-Package`).

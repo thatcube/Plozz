@@ -107,7 +107,7 @@ final class SessionStoreTests: XCTestCase {
         let store = SessionStore(secureStore: secure, defaults: defaults)
         try store.save(session)
         // Simulate Keychain eviction: token gone but metadata remains.
-        try secure.removeValue(for: "com.plizz.session.accessToken")
+        try secure.removeValue(for: "com.plozz.session.accessToken")
         XCTAssertNil(store.loadSession())
     }
 }

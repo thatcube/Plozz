@@ -1,6 +1,6 @@
 import Foundation
 
-/// A media server Plizz can connect to.
+/// A media server Plozz can connect to.
 ///
 /// `id` is the backend-assigned server identity (Jellyfin's `Id` from
 /// `/System/Info/Public`). It lets us recognise the same server across

@@ -26,7 +26,7 @@ public struct HomeView: View {
             onRetry: { Task { await viewModel.load() } }
         ) { content in
             ScrollView {
-                VStack(alignment: .leading, spacing: PlizzTheme.Metrics.rowSpacing) {
+                VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
                     header
 
                     MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, onSelect: onSelectItem)
@@ -45,16 +45,16 @@ public struct HomeView: View {
     private var header: some View {
         Text("Welcome back, \(viewModel.userName)")
             .font(.largeTitle).bold()
-            .padding(.horizontal, PlizzTheme.Metrics.screenPadding)
+            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
     }
 
     private func librariesRow(_ libraries: [MediaLibrary]) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Libraries")
                 .font(.title2).bold()
-                .padding(.leading, PlizzTheme.Metrics.screenPadding)
+                .padding(.leading, PlozzTheme.Metrics.screenPadding)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: PlizzTheme.Metrics.cardSpacing) {
+                LazyHStack(spacing: PlozzTheme.Metrics.cardSpacing) {
                     ForEach(libraries) { library in
                         Button { onSelectLibrary(library) } label: {
                             ZStack {
@@ -68,13 +68,13 @@ public struct HomeView: View {
                                     .padding(8)
                                     .background(.ultraThinMaterial, in: Capsule())
                             }
-                            .frame(width: PlizzTheme.Metrics.landscapeWidth, height: PlizzTheme.Metrics.landscapeHeight)
-                            .clipShape(RoundedRectangle(cornerRadius: PlizzTheme.Metrics.cornerRadius))
+                            .frame(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
+                            .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
                         }
                         .buttonStyle(.card)
                     }
                 }
-                .padding(.horizontal, PlizzTheme.Metrics.screenPadding)
+                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 24)
             }
         }

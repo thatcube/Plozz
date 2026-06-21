@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Jellyfin API DTOs
 //
-// Minimal Codable mirrors of the Jellyfin REST shapes Plizz consumes. Field
+// Minimal Codable mirrors of the Jellyfin REST shapes Plozz consumes. Field
 // names match Jellyfin's PascalCase JSON. Only fields we actually use are
 // modelled; unknown fields are ignored by the decoder.
 

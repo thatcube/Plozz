@@ -81,7 +81,7 @@ public struct SettingsView: View {
                         Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 } footer: {
-                    Text("Plizz \(appVersion) · Open source")
+                    Text("Plozz \(appVersion) · Open source")
                 }
             }
             .navigationTitle("Settings")
@@ -106,7 +106,7 @@ private struct CaptionPreview: View {
         }
         .frame(maxWidth: .infinity, minHeight: 160)
         .background(LinearGradient(colors: [.blue, .purple], startPoint: .top, endPoint: .bottom))
-        .clipShape(RoundedRectangle(cornerRadius: PlizzTheme.Metrics.cornerRadius))
+        .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
         .padding(.vertical, 8)
     }
 }

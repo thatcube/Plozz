@@ -99,7 +99,7 @@ public final class PlayerViewModel {
         do {
             try await provider.reportPlayback(progress, event: event)
         } catch {
-            PlizzLog.playback.debug("Progress report failed (non-fatal)")
+            PlozzLog.playback.debug("Progress report failed (non-fatal)")
         }
     }
 

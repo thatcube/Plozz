@@ -44,7 +44,7 @@ public struct CaptionSettings: Codable, Equatable, Sendable {
     public var textColor: RGBAColor
     public var backgroundColor: RGBAColor
     public var edgeStyle: EdgeStyle
-    /// When true, Plizz defers entirely to the system/Settings caption style.
+    /// When true, Plozz defers entirely to the system/Settings caption style.
     public var followsSystemStyle: Bool
 
     public init(

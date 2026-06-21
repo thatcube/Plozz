@@ -24,6 +24,11 @@ Package.resolved
 *.local.xcconfig
 Secrets.plist
 
+# Private machine-local agent instructions (never commit; canonical copy lives
+# at ~/.copilot/plozz-AGENTS.local.md and is restored into new worktrees by the
+# global Copilot instructions).
+AGENTS.local.md
+
 # App Store Connect / fastlane secrets (never commit)
 .env.fastlane
 *.p8

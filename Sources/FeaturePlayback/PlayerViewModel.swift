@@ -36,6 +36,7 @@ public final class PlayerViewModel {
     private var timeObserver: Any?
     private let reportInterval: TimeInterval = 10
     private var lastReportedSecond: Int = -1
+    private var subtitleDownloadTask: Task<Void, Never>?
 
     public init(
         provider: any MediaProvider,
@@ -76,6 +77,11 @@ public final class PlayerViewModel {
             phase = .ready
             player.play()
             await report(event: .start, isPaused: false)
+
+            // Best-effort, never blocking play(): pick the default subtitle for
+            // the user's mode/language, and (if enabled) fetch a missing one.
+            await applyDefaultSubtitleSelection(for: item)
+            startAutoSubtitleDownloadIfNeeded(request: request)
         } catch let error as AppError {
             phase = .failed(error)
         } catch {
@@ -166,6 +172,8 @@ public final class PlayerViewModel {
     /// resume point, then tear the player down.
     public func stop() async {
         await report(event: .stop, isPaused: true)
+        subtitleDownloadTask?.cancel()
+        subtitleDownloadTask = nil
         if let timeObserver, let player {
             player.removeTimeObserver(timeObserver)
         }
@@ -180,6 +188,70 @@ public final class PlayerViewModel {
     /// Whether the active stream is being transcoded by the server (vs direct
     /// play). Read by the playback diagnostics overlay.
     public var isTranscoding: Bool { request?.isTranscoding ?? false }
+
+    // MARK: - Subtitle selection & auto-download
+
+    /// Chooses the default legible (subtitle) option on the player item to honour
+    /// the user's subtitle mode + preferred language, using the asset's own
+    /// AVMediaSelectionGroup. Best-effort: any failure leaves AVPlayer's default
+    /// selection untouched and never affects playback.
+    private func applyDefaultSubtitleSelection(for item: AVPlayerItem) async {
+        guard let group = await legibleGroup(for: item.asset) else { return }
+
+        let options = group.options
+        let candidates: [SubtitleCandidate] = options.enumerated().map { index, option in
+            SubtitleCandidate(
+                id: index,
+                languageCode: option.extendedLanguageTag ?? option.locale?.identifier,
+                isForced: option.hasMediaCharacteristic(.containsOnlyForcedSubtitles),
+                isDefault: group.defaultOption == option
+            )
+        }
+
+        let decision = SubtitleSelector.decide(
+            candidates: candidates,
+            mode: captionSettings.subtitleMode,
+            preferredLanguage: captionSettings.resolvedPreferredLanguage
+        )
+
+        switch decision {
+        case .none:
+            item.select(nil, in: group)
+        case .select(let id):
+            guard options.indices.contains(id) else { return }
+            item.select(options[id], in: group)
+        }
+    }
+
+    private func legibleGroup(for asset: AVAsset) async -> AVMediaSelectionGroup? {
+        try? await asset.loadMediaSelectionGroup(for: .legible)
+    }
+
+    /// If auto-download is enabled and the item lacks a suitable subtitle in the
+    /// preferred language, kicks off a detached background search+download so the
+    /// server fetches one. Never blocks or affects the current playback session.
+    private func startAutoSubtitleDownloadIfNeeded(request: PlaybackRequest) {
+        guard captionSettings.autoDownloadSubtitles else { return }
+        let language = captionSettings.resolvedPreferredLanguage
+        guard !request.subtitleTracks.hasSuitableSubtitle(forLanguage: language) else { return }
+        guard let language, !language.isEmpty else { return }
+
+        let provider = self.provider
+        let itemID = self.itemID
+        let mode = captionSettings.subtitleMode
+        subtitleDownloadTask = Task.detached(priority: .background) {
+            do {
+                let results = try await provider.remoteSubtitleSearch(itemID: itemID, language: language)
+                guard let best = results.bestMatch(forLanguage: language, mode: mode), !best.id.isEmpty else {
+                    return
+                }
+                try await provider.downloadRemoteSubtitle(itemID: itemID, subtitleID: best.id)
+                PlozzLog.playback.info("Auto-downloaded subtitle for item")
+            } catch {
+                PlozzLog.playback.debug("Auto subtitle download failed (non-fatal)")
+            }
+        }
+    }
 }
 
 #endif

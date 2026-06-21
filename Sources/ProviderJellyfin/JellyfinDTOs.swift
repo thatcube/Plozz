@@ -115,6 +115,19 @@ struct MediaStreamDto: Decodable {
     let IsForced: Bool?
 }
 
+/// One result from `GET /Items/{id}/RemoteSearch/Subtitles/{language}`.
+struct RemoteSubtitleInfoDto: Decodable {
+    let Id: String?
+    let Name: String?
+    let ProviderName: String?
+    let ThreeLetterISOLanguageName: String?
+    let Format: String?
+    let CommunityRating: Double?
+    let DownloadCount: Int?
+    let IsForced: Bool?
+    let IsHashMatch: Bool?
+}
+
 // MARK: - Ticks helpers
 
 enum JellyfinTicks {

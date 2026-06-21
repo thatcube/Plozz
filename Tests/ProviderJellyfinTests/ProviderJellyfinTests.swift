@@ -453,3 +453,41 @@ final class JellyfinQuickConnectClientTests: XCTestCase {
         }
     }
 }
+
+final class JellyfinRemoteSubtitleTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testRemoteSubtitleSearchMapsResultsAndUsesAlpha3Path() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/i1/RemoteSearch/Subtitles/eng", json: """
+        [{"Id":"sub-1","Name":"English.srt","ProviderName":"OpenSubtitles",
+          "ThreeLetterISOLanguageName":"eng","Format":"srt","CommunityRating":8.5,
+          "DownloadCount":1200,"IsForced":false}]
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        // Pass a 2-letter code; the client must convert it to the 3-letter path.
+        let results = try await provider.remoteSubtitleSearch(itemID: "i1", language: "en")
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0].id, "sub-1")
+        XCTAssertEqual(results[0].providerName, "OpenSubtitles")
+        XCTAssertEqual(results[0].language, "eng")
+        XCTAssertEqual(results[0].communityRating, 8.5)
+        XCTAssertEqual(results[0].downloadCount, 1200)
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Items/i1/RemoteSearch/Subtitles/eng") })
+    }
+
+    func testDownloadRemoteSubtitlePOSTsToExpectedPath() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/i1/RemoteSearch/Subtitles/sub-1", json: "")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.downloadRemoteSubtitle(itemID: "i1", subtitleID: "sub-1")
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Items/i1/RemoteSearch/Subtitles/sub-1") })
+    }
+}

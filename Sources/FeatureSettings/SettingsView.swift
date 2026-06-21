@@ -55,6 +55,16 @@ public struct SettingsView: View {
     private let fontScales: [Double] = [0.75, 1.0, 1.25, 1.5, 2.0]
     private let backgroundOpacities: [Double] = [0.0, 0.25, 0.5, 0.75, 1.0]
 
+    /// A short, common-language list for the subtitle language picker. Codes are
+    /// 2-letter ISO-639-1; the provider normalises to the server's expected form.
+    static let subtitleLanguages: [(code: String, name: String)] = [
+        ("en", "English"), ("es", "Spanish"), ("fr", "French"), ("de", "German"),
+        ("it", "Italian"), ("pt", "Portuguese"), ("nl", "Dutch"), ("sv", "Swedish"),
+        ("no", "Norwegian"), ("da", "Danish"), ("fi", "Finnish"), ("pl", "Polish"),
+        ("ru", "Russian"), ("ja", "Japanese"), ("ko", "Korean"), ("zh", "Chinese"),
+        ("ar", "Arabic"), ("tr", "Turkish")
+    ]
+
     private var spoilerModeExplanation: String {
         switch spoilers.settings.mode {
         case .blur:
@@ -102,6 +112,21 @@ public struct SettingsView: View {
                 }
 
                 Section("Captions") {
+                    Toggle("Automatically download subtitles", isOn: $captions.settings.autoDownloadSubtitles)
+
+                    Picker("Show subtitles", selection: $captions.settings.subtitleMode) {
+                        ForEach(CaptionSettings.SubtitleMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+
+                    Picker("Subtitle language", selection: $captions.settings.preferredSubtitleLanguage) {
+                        Text("Device Default").tag(String?.none)
+                        ForEach(Self.subtitleLanguages, id: \.code) { language in
+                            Text(language.name).tag(String?.some(language.code))
+                        }
+                    }
+
                     Toggle("Use system caption style", isOn: $captions.settings.followsSystemStyle)
 
                     if !captions.settings.followsSystemStyle {

@@ -312,6 +312,31 @@ public struct JellyfinClient: Sendable {
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
+    // MARK: Remote subtitles
+
+    /// `GET /Items/{itemId}/RemoteSearch/Subtitles/{language}` — search subtitle
+    /// providers (OpenSubtitles, etc.) for the item. `language` must be a
+    /// 3-letter ISO-639-2 code; callers pass whatever they have and we normalise.
+    func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitleInfoDto] {
+        let lang = LanguageMatch.alpha3(language)
+        let endpoint = Endpoint(
+            path: "/Items/\(itemID)/RemoteSearch/Subtitles/\(lang)",
+            headers: authHeaders
+        )
+        return try await http.decode([RemoteSubtitleInfoDto].self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// `POST /Items/{itemId}/RemoteSearch/Subtitles/{subtitleId}` — tells the
+    /// server to download the chosen subtitle and attach it to the item.
+    func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {
+        let endpoint = Endpoint(
+            method: .post,
+            path: "/Items/\(itemID)/RemoteSearch/Subtitles/\(subtitleID)",
+            headers: authHeaders
+        )
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
     /// Builds an absolute image URL. Token is *not* required for images; the
     /// item id + image type is enough.
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? {

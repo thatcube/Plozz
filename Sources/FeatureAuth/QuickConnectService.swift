@@ -41,6 +41,9 @@ public struct QuickConnectService: Sendable {
         self.sleep = sleep
     }
 
+    /// How long a freshly issued code remains valid before it expires.
+    public var timeout: TimeInterval { config.timeout }
+
     private var client: JellyfinClient {
         JellyfinClient(baseURL: server.baseURL, deviceProfile: JellyfinDeviceProfile(deviceID: deviceID), http: http)
     }

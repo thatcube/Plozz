@@ -42,4 +42,20 @@ public struct ServerValidator: Sendable {
             version: info.Version
         )
     }
+
+    /// Lightweight reachability check for an already-known server: returns
+    /// `true` if the server answers its public system-info endpoint right now.
+    ///
+    /// Used to tell the user whether a saved server is actually online, even
+    /// when UDP broadcast discovery turns up nothing (blocked broadcasts,
+    /// different subnet, lossy Wi-Fi, etc.).
+    public func isReachable(_ baseURL: URL) async -> Bool {
+        let endpoint = Endpoint(path: "/System/Info/Public")
+        do {
+            _ = try await http.send(endpoint, baseURL: baseURL)
+            return true
+        } catch {
+            return false
+        }
+    }
 }

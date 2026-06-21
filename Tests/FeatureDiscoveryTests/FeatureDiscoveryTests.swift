@@ -20,6 +20,33 @@ final class JellyfinDiscoveryParserTests: XCTestCase {
         XCTAssertEqual(announcement?.candidateURLs.first?.absoluteString, "http://10.0.0.5:8096")
     }
 
+    func testNormalizesBareIPAddress() {
+        // Some Jellyfin builds announce a scheme-less host in `Address`; with no
+        // source IP the advertised address is all we have to surface.
+        let json = #"{"Address":"192.168.1.50","Id":"x","Name":"Den"}"#
+        let announcement = JellyfinDiscoveryParser.parse(Data(json.utf8))
+        XCTAssertEqual(announcement?.candidateURLs.first?.absoluteString, "http://192.168.1.50:8096")
+    }
+
+    func testFallsBackToEndpointAddress() {
+        // When `Address` is empty/missing, use `EndpointAddress`.
+        let json = #"{"Address":"","Id":"x","Name":"S","EndpointAddress":"http://10.0.0.9:8096"}"#
+        let announcement = JellyfinDiscoveryParser.parse(Data(json.utf8))
+        XCTAssertEqual(announcement?.candidateURLs.first?.absoluteString, "http://10.0.0.9:8096")
+    }
+
+    func testParsesReverseProxyHTTPSAddress() {
+        let json = #"{"Address":"https://jelly.example.com","Id":"x","Name":"S"}"#
+        let announcement = JellyfinDiscoveryParser.parse(Data(json.utf8))
+        XCTAssertEqual(announcement?.candidateURLs.first?.absoluteString, "https://jelly.example.com")
+    }
+
+    func testParsesBasePathAddress() {
+        let json = #"{"Address":"http://10.0.0.5:8096/jellyfin/","Id":"x","Name":"S"}"#
+        let announcement = JellyfinDiscoveryParser.parse(Data(json.utf8))
+        XCTAssertEqual(announcement?.candidateURLs.first?.absoluteString, "http://10.0.0.5:8096/jellyfin")
+    }
+
     func testRejectsGarbage() {
         XCTAssertNil(JellyfinDiscoveryParser.parse(Data("not json".utf8)))
     }
@@ -115,5 +142,100 @@ final class ServerValidatorTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error \(error)")
         }
+    }
+}
+
+// MARK: - View-model behavior
+
+private final class StubDiscovery: ServerDiscovering, @unchecked Sendable {
+    let servers: [MediaServer]
+    init(servers: [MediaServer]) { self.servers = servers }
+    func discover(timeout: TimeInterval) -> AsyncStream<MediaServer> {
+        AsyncStream { continuation in
+            for server in servers { continuation.yield(server) }
+            continuation.finish()
+        }
+    }
+}
+
+private final class StubLastServerStore: LastServerStoring, @unchecked Sendable {
+    var lastServer: MediaServer?
+    init(lastServer: MediaServer?) { self.lastServer = lastServer }
+}
+
+final class ServerPickerViewModelTests: XCTestCase {
+    private func server(_ id: String, _ urlString: String, _ name: String = "S") -> MediaServer {
+        MediaServer(id: id, name: name, baseURL: URL(string: urlString)!, provider: .jellyfin)
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: @escaping () -> Bool, timeout: TimeInterval = 2) async {
+        let start = Date()
+        while !condition() && Date().timeIntervalSince(start) < timeout {
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+
+    @MainActor
+    func testDeduplicatesDiscoveredLastServerAndMarksReachable() async {
+        let last = server("srv1", "http://10.0.0.5:8096", "Den")
+        let store = StubLastServerStore(lastServer: last)
+        let discovery = StubDiscovery(servers: [
+            server("srv1", "http://10.0.0.5:8096", "Den"),
+            server("srv2", "http://10.0.0.6:8096", "Attic"),
+        ])
+        let stub = StubHTTPClient()
+        stub.stub(path: "/System/Info/Public", json: #"{"Id":"srv1","ServerName":"Den"}"#)
+        let vm = ServerPickerViewModel(
+            discovery: discovery,
+            validator: ServerValidator(http: stub),
+            store: store
+        )
+
+        vm.startScan(timeout: 1)
+        await waitUntil { vm.phase == .idle }
+
+        XCTAssertEqual(vm.discoveredServers.map(\.id), ["srv2"], "Saved server must not be listed twice")
+        XCTAssertEqual(vm.lastServerReachable, true)
+    }
+
+    @MainActor
+    func testMarksSavedServerOfflineWhenUnreachableAndUndiscovered() async {
+        let last = server("srv1", "http://10.0.0.5:8096", "Den")
+        let store = StubLastServerStore(lastServer: last)
+        let discovery = StubDiscovery(servers: [])
+        let stub = StubHTTPClient()
+        stub.error = .serverUnreachable
+        let vm = ServerPickerViewModel(
+            discovery: discovery,
+            validator: ServerValidator(http: stub),
+            store: store
+        )
+
+        vm.startScan(timeout: 1)
+        await waitUntil { vm.lastServerReachable != nil && vm.phase == .idle }
+
+        XCTAssertEqual(vm.lastServerReachable, false)
+        XCTAssertTrue(vm.discoveredServers.isEmpty)
+    }
+
+    @MainActor
+    func testDedupesServersSharingAHostWithoutIds() async {
+        let store = StubLastServerStore(lastServer: nil)
+        let discovery = StubDiscovery(servers: [
+            server("", "http://10.0.0.7:8096"),
+            server("", "http://10.0.0.7:8096"),
+        ])
+        let vm = ServerPickerViewModel(
+            discovery: discovery,
+            validator: ServerValidator(http: StubHTTPClient()),
+            store: store
+        )
+
+        vm.startScan(timeout: 1)
+        await waitUntil { vm.phase == .idle }
+
+        XCTAssertEqual(vm.discoveredServers.count, 1)
     }
 }

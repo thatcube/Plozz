@@ -2,7 +2,8 @@
 import SwiftUI
 import CoreModels
 
-/// TV-friendly Quick Connect screen: shows the big code, status, and Cancel/Retry.
+/// TV-friendly Quick Connect screen: shows the big code, a live expiry timer,
+/// and Cancel / Try Again, plus an optional low-emphasis secondary action.
 public struct QuickConnectView: View {
     /// A low-emphasis alternative action rendered beneath the main controls
     /// (e.g. "Sign in with username & password"). Kept visually subordinate so
@@ -87,8 +88,8 @@ public struct QuickConnectView: View {
             ProgressView("Requesting a code…")
                 .font(.title2)
 
-        case let .awaitingApproval(code):
-            VStack(spacing: 16) {
+        case let .awaitingApproval(code, expiresAt):
+            VStack(spacing: 28) {
                 Text(code)
                     .font(.system(size: 96, weight: .bold, design: .rounded))
                     .monospacedDigit()
@@ -96,8 +97,8 @@ public struct QuickConnectView: View {
                     .padding(.horizontal, 48)
                     .padding(.vertical, 24)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-                Label("Waiting for approval…", systemImage: "hourglass")
-                    .foregroundStyle(.secondary)
+
+                ExpiryCountdown(expiresAt: expiresAt, lifetime: viewModel.codeLifetime)
             }
 
         case .success:
@@ -137,6 +138,39 @@ public struct QuickConnectView: View {
                 .buttonStyle(.borderedProminent)
                 .focused($focused, equals: .retry)
             }
+        }
+    }
+}
+
+/// Animated ring that depletes over the life of the current code, with the
+/// seconds remaining at its centre. The sole, self-evident signal that a code
+/// is time-limited — it shifts to a warning tint as the deadline nears.
+private struct ExpiryCountdown: View {
+    let expiresAt: Date
+    let lifetime: TimeInterval
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+            let fraction = lifetime > 0 ? remaining / lifetime : 0
+            let tint: Color = remaining <= 15 ? .orange : .accentColor
+
+            ZStack {
+                Circle()
+                    .stroke(tint.opacity(0.18), lineWidth: 8)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text("\(Int(remaining.rounded(.up)))")
+                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(tint)
+                    .contentTransition(.numericText())
+            }
+            .frame(width: 104, height: 104)
+            .animation(.easeOut(duration: 0.3), value: tint)
+            .accessibilityLabel("Code expires in \(Int(remaining.rounded(.up))) seconds")
         }
     }
 }

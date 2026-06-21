@@ -10,6 +10,7 @@ import CoreUI
 /// persist via `CaptionSettingsModel`.
 public struct SettingsView: View {
     @State private var captions: CaptionSettingsModel
+    @State private var spoilers: SpoilerSettingsModel
     private let userName: String
     private let serverName: String
     private let serverURL: String
@@ -20,6 +21,7 @@ public struct SettingsView: View {
 
     public init(
         captions: CaptionSettingsModel,
+        spoilers: SpoilerSettingsModel,
         userName: String,
         serverName: String,
         serverURL: String,
@@ -29,6 +31,7 @@ public struct SettingsView: View {
         onSignOut: @escaping () -> Void
     ) {
         _captions = State(initialValue: captions)
+        _spoilers = State(initialValue: spoilers)
         self.userName = userName
         self.serverName = serverName
         self.serverURL = serverURL
@@ -40,6 +43,15 @@ public struct SettingsView: View {
 
     private let fontScales: [Double] = [0.75, 1.0, 1.25, 1.5, 2.0]
     private let backgroundOpacities: [Double] = [0.0, 0.25, 0.5, 0.75, 1.0]
+
+    private var spoilerModeExplanation: String {
+        switch spoilers.settings.mode {
+        case .blur:
+            return "Episode thumbnails are blurred until watched. Titles and descriptions stay hidden until you finish the episode."
+        case .placeholder:
+            return "Episode thumbnails are replaced with generic series art and the episode number, so no real frame is ever shown. Titles and descriptions stay hidden until you finish the episode."
+        }
+    }
 
     public var body: some View {
         NavigationStack {
@@ -79,6 +91,22 @@ public struct SettingsView: View {
                         }
 
                         CaptionPreview(settings: captions.settings)
+                    }
+                }
+
+                Section("Spoiler Protection") {
+                    Toggle("Hide spoilers for unwatched episodes", isOn: $spoilers.settings.isEnabled)
+
+                    if spoilers.settings.isEnabled {
+                        Picker("Thumbnail style", selection: $spoilers.settings.mode) {
+                            ForEach(SpoilerSettings.Mode.allCases, id: \.self) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+
+                        Text(spoilerModeExplanation)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 

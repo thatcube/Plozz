@@ -10,13 +10,23 @@ public struct PosterCardView: View {
 
     private let item: MediaItem
     private let style: Style
+    private let spoilerSettings: SpoilerSettings
     private let action: () -> Void
 
-    public init(item: MediaItem, style: Style = .poster, action: @escaping () -> Void) {
+    public init(
+        item: MediaItem,
+        style: Style = .poster,
+        spoilerSettings: SpoilerSettings = .default,
+        action: @escaping () -> Void
+    ) {
         self.item = item
         self.style = style
+        self.spoilerSettings = spoilerSettings
         self.action = action
     }
+
+    private var hideThumbnail: Bool { spoilerSettings.shouldHideThumbnail(for: item) }
+    private var hideText: Bool { spoilerSettings.shouldHideText(for: item) }
 
     private var size: CGSize {
         switch style {
@@ -40,7 +50,7 @@ public struct PosterCardView: View {
                     .overlay(alignment: .bottom) { progressBar }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title)
+                    Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
                         .font(.headline)
                         .lineLimit(1)
                     if let subtitle = item.subtitle {
@@ -59,6 +69,22 @@ public struct PosterCardView: View {
 
     @ViewBuilder
     private var artwork: some View {
+        if hideThumbnail {
+            switch spoilerSettings.mode {
+            case .blur:
+                realArtwork
+                    .blur(radius: 28)
+                    .overlay { spoilerBadge }
+            case .placeholder:
+                placeholderArtwork
+            }
+        } else {
+            realArtwork
+        }
+    }
+
+    @ViewBuilder
+    private var realArtwork: some View {
         AsyncImage(url: artworkURL) { phase in
             switch phase {
             case let .success(image):
@@ -71,6 +97,42 @@ public struct PosterCardView: View {
                 placeholder(icon: "photo")
             }
         }
+    }
+
+    /// Spoiler-safe art for `.placeholder` mode: series fan-art (never the real
+    /// episode image) with the episode number, so no episode frame is fetched.
+    @ViewBuilder
+    private var placeholderArtwork: some View {
+        ZStack {
+            AsyncImage(url: item.backdropURL) { phase in
+                if case let .success(image) = phase {
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    LinearGradient(
+                        colors: [.indigo.opacity(0.6), .black],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+            }
+            Rectangle().fill(.black.opacity(0.45))
+            VStack(spacing: 6) {
+                Image(systemName: "eye.slash.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.white.opacity(0.85))
+                Text(spoilerSettings.maskedTitle(for: item))
+                    .font(.title3).bold()
+                    .foregroundStyle(.white)
+            }
+        }
+    }
+
+    private var spoilerBadge: some View {
+        Image(systemName: "eye.slash.fill")
+            .font(.system(size: 30))
+            .foregroundStyle(.white)
+            .padding(14)
+            .background(.black.opacity(0.5), in: Circle())
     }
 
     private func placeholder(icon: String) -> some View {

@@ -11,6 +11,7 @@ import FeatureSettings
 struct MainTabView: View {
     let provider: any MediaProvider
     let captionModel: CaptionSettingsModel
+    let spoilerModel: SpoilerSettingsModel
     @Binding var pendingPlayItemID: String?
     let onSignOut: () -> Void
 
@@ -19,12 +20,14 @@ struct MainTabView: View {
             HomeTab(
                 provider: provider,
                 captionSettings: captionModel.settings,
+                spoilerSettings: spoilerModel.settings,
                 pendingPlayItemID: $pendingPlayItemID
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
 
             SettingsView(
                 captions: captionModel,
+                spoilers: spoilerModel,
                 userName: provider.session.userName,
                 serverName: provider.session.server.name,
                 serverURL: provider.session.server.baseURL.absoluteString,
@@ -43,6 +46,7 @@ struct MainTabView: View {
 private struct HomeTab: View {
     let provider: any MediaProvider
     let captionSettings: CaptionSettings
+    let spoilerSettings: SpoilerSettings
     @Binding var pendingPlayItemID: String?
 
     @State private var path: [MediaItem] = []
@@ -52,6 +56,7 @@ private struct HomeTab: View {
         NavigationStack(path: $path) {
             HomeView(
                 viewModel: HomeViewModel(provider: provider),
+                spoilerSettings: spoilerSettings,
                 onSelectItem: { open($0) },
                 onSelectLibrary: { library in
                     path.append(MediaItem(id: library.id, title: library.title, kind: library.kind))
@@ -60,6 +65,7 @@ private struct HomeTab: View {
             .navigationDestination(for: MediaItem.self) { item in
                 ItemDetailView(
                     viewModel: ItemDetailViewModel(provider: provider, itemID: item.id),
+                    spoilerSettings: spoilerSettings,
                     onPlay: { playingItem = $0 },
                     onSelectChild: { open($0) }
                 )

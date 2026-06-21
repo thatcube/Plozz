@@ -23,15 +23,18 @@ public final class AppState {
     public var pendingPlayItemID: String?
 
     public let captionModel: CaptionSettingsModel
+    public let spoilerModel: SpoilerSettingsModel
     private var machine = SessionStateMachine()
     private let sessionStore: SessionPersisting
 
     public init(
         sessionStore: SessionPersisting? = nil,
-        captionModel: CaptionSettingsModel? = nil
+        captionModel: CaptionSettingsModel? = nil,
+        spoilerModel: SpoilerSettingsModel? = nil
     ) {
         self.sessionStore = sessionStore ?? Self.makeDefaultSessionStore()
         self.captionModel = captionModel ?? CaptionSettingsModel()
+        self.spoilerModel = spoilerModel ?? SpoilerSettingsModel()
     }
 
     private static func makeDefaultSessionStore() -> SessionPersisting {

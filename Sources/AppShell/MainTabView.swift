@@ -18,6 +18,7 @@ struct MainTabView: View {
     let provider: any MediaProvider
     let captionModel: CaptionSettingsModel
     let spoilerModel: SpoilerSettingsModel
+    let themeModel: ThemeSettingsModel
     let ratingsProvider: any ExternalRatingsProviding
     let accounts: [Account]
     let activeAccountID: String?
@@ -40,6 +41,7 @@ struct MainTabView: View {
             SettingsView(
                 captions: captionModel,
                 spoilers: spoilerModel,
+                theme: themeModel,
                 accounts: accounts,
                 activeAccountID: activeAccountID,
                 appVersion: AppInfo.version,

@@ -8,10 +8,17 @@ import FeatureDiscovery
 /// Top-level view that renders one screen per `SessionState`.
 public struct RootView: View {
     @State private var appState: AppState
+    @Environment(\.colorScheme) private var systemColorScheme
 
     @MainActor
     public init(appState: AppState? = nil) {
         _appState = State(initialValue: appState ?? AppState())
+    }
+
+    /// The palette for the currently-selected theme, re-resolved when either the
+    /// chosen `AppTheme` or the device colour scheme changes.
+    private var resolvedPalette: ThemePalette {
+        ThemePalette.palette(for: appState.themeModel.theme, systemColorScheme: systemColorScheme)
     }
 
     public var body: some View {
@@ -46,6 +53,7 @@ public struct RootView: View {
                         provider: provider,
                         captionModel: appState.captionModel,
                         spoilerModel: appState.spoilerModel,
+                        themeModel: appState.themeModel,
                         ratingsProvider: appState.ratingsProvider,
                         accounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
@@ -65,6 +73,9 @@ public struct RootView: View {
                 }
             }
         }
+        .background { AppBackground(palette: resolvedPalette) }
+        .environment(\.themePalette, resolvedPalette)
+        .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)
         .onAppear { if case .launching = appState.state { appState.bootstrap() } }
         .onOpenURL { appState.handle(url: $0) }
     }

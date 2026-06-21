@@ -109,7 +109,7 @@ let package = Package(
         // MARK: Tests (pure logic, no UI required)
         .testTarget(
             name: "CoreModelsTests",
-            dependencies: ["CoreModels"]
+            dependencies: ["CoreModels", "CoreUI"]
         ),
         .testTarget(
             name: "CoreNetworkingTests",

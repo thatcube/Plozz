@@ -13,6 +13,7 @@ import CoreUI
 public struct SettingsView: View {
     @State private var captions: CaptionSettingsModel
     @State private var spoilers: SpoilerSettingsModel
+    @State private var theme: ThemeSettingsModel
     private let accounts: [Account]
     private let activeAccountID: String?
     private let appVersion: String
@@ -25,6 +26,7 @@ public struct SettingsView: View {
     public init(
         captions: CaptionSettingsModel,
         spoilers: SpoilerSettingsModel,
+        theme: ThemeSettingsModel,
         accounts: [Account],
         activeAccountID: String?,
         appVersion: String,
@@ -36,6 +38,7 @@ public struct SettingsView: View {
     ) {
         _captions = State(initialValue: captions)
         _spoilers = State(initialValue: spoilers)
+        _theme = State(initialValue: theme)
         self.accounts = accounts
         self.activeAccountID = activeAccountID
         self.appVersion = appVersion
@@ -72,6 +75,27 @@ public struct SettingsView: View {
                     Text(accounts.count == 1 ? "Account" : "Accounts")
                 } footer: {
                     Text("Add another Jellyfin server to switch between libraries.")
+                }
+
+                Section {
+                    ForEach(AppTheme.allCases) { option in
+                        Button {
+                            theme.theme = option
+                        } label: {
+                            HStack {
+                                Label(option.displayName, systemImage: option.symbolName)
+                                Spacer()
+                                if theme.theme == option {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Appearance")
+                } footer: {
+                    Text("Choose how Plozz looks. System follows your Apple TV's appearance; OLED uses a pure-black background.")
                 }
 
                 Section("Captions") {

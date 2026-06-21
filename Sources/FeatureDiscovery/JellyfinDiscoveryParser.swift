@@ -1,8 +1,18 @@
 import Foundation
 import CoreModels
+import CoreNetworking
 
 /// The JSON a Jellyfin server broadcasts in reply to the UDP discovery probe
 /// `"Who is JellyfinServer?"` on port 7359.
+///
+/// Field shapes vary across Jellyfin versions / deployment styles:
+///  * `Address` is usually a full URL (`http://10.0.0.5:8096`,
+///    `https://jelly.example.com`, or one with a reverse-proxy base path like
+///    `http://10.0.0.5:8096/jellyfin`) — it's the server's "smart" API URL for
+///    the requesting client's subnet.
+///  * Some builds instead put a bare IP/host in `Address` and the full URL in
+///    `EndpointAddress`, or leave `EndpointAddress` null.
+/// We therefore try both fields and normalise whatever we get.
 struct JellyfinDiscoveryResponse: Decodable {
     let Address: String?
     let Id: String?
@@ -22,27 +32,33 @@ public enum JellyfinDiscoveryParser {
 
     /// Decodes a single UDP response payload into a `MediaServer`, or `nil` if
     /// it isn't a usable Jellyfin announcement.
+    ///
+    /// Accepts either `Address` or `EndpointAddress`, and tolerates scheme-less
+    /// / bare-IP values by routing them through `ServerURLNormalizer` (which
+    /// adds `http://` + the default port and strips trailing slashes). This is
+    /// what lets stock servers behind reverse proxies, custom base paths, or
+    /// older firmware all resolve to a usable base URL.
     public static func parse(_ data: Data) -> MediaServer? {
-        guard let response = try? JSONDecoder().decode(JellyfinDiscoveryResponse.self, from: data),
-              let address = response.Address,
-              let url = URL(string: address),
-              url.scheme != nil else {
+        guard let response = try? JSONDecoder().decode(JellyfinDiscoveryResponse.self, from: data) else {
             return nil
         }
+
+        // Prefer the first field that yields a usable base URL. `Address` is the
+        // server's smart URL for our subnet; `EndpointAddress` is a fallback.
+        let candidates = [response.Address, response.EndpointAddress]
+        guard let url = candidates
+            .compactMap({ $0 })
+            .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+            .flatMap(ServerURLNormalizer.normalize)
+        else {
+            return nil
+        }
+
         return MediaServer(
-            id: response.Id ?? address,
+            id: response.Id ?? url.absoluteString,
             name: response.Name ?? url.host ?? "Jellyfin Server",
-            baseURL: normalize(url),
+            baseURL: url,
             provider: .jellyfin
         )
-    }
-
-    /// Drops a trailing slash so server identity comparisons are stable.
-    static func normalize(_ url: URL) -> URL {
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
-        if components.path.hasSuffix("/") {
-            components.path = String(components.path.dropLast())
-        }
-        return components.url ?? url
     }
 }

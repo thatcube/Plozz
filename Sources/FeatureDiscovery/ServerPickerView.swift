@@ -25,7 +25,7 @@ public struct ServerPickerView: View {
             Form {
                 if let last = viewModel.lastServer {
                     Section("Recently used") {
-                        serverRow(last, subtitle: "Reconnect")
+                        serverRow(last, subtitle: lastServerSubtitle)
                     }
                 }
 
@@ -80,10 +80,24 @@ public struct ServerPickerView: View {
             if case .scanning = viewModel.phase {
                 Label("Searching for Jellyfin servers…", systemImage: "antenna.radiowaves.left.and.right")
                     .foregroundStyle(.secondary)
+            } else if viewModel.lastServerReachable == true {
+                // The saved server above is confirmed online, so an empty
+                // discovered list isn't a dead end — point the user up.
+                Label("Your saved server above is online and ready.", systemImage: "checkmark.circle")
+                    .foregroundStyle(.secondary)
             } else {
                 Label("No servers found. Enter an address below.", systemImage: "magnifyingglass")
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// Subtitle for the saved server, reflecting live reachability.
+    private var lastServerSubtitle: String {
+        switch viewModel.lastServerReachable {
+        case .some(true): return "Reconnect · On your network"
+        case .some(false): return "Reconnect · Offline right now"
+        case .none: return "Reconnect"
         }
     }
 

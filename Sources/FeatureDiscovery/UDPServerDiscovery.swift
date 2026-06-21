@@ -52,8 +52,24 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
+                    // Jellyfin answers once per probe and UDP is lossy, so we
+                    // re-broadcast a few times across the window instead of
+                    // relying on a single datagram surviving the round trip.
                     let probe = Data(JellyfinDiscoveryParser.probeMessage.utf8)
-                    connection.send(content: probe, completion: .contentProcessed { _ in })
+                    @Sendable func sendProbe() {
+                        connection.send(content: probe, completion: .contentProcessed { _ in })
+                    }
+                    let interval: TimeInterval = 0.8
+                    let probeCount = max(1, Int(timeout / interval))
+                    for index in 0..<probeCount {
+                        if index == 0 {
+                            sendProbe()
+                        } else {
+                            self.queue.asyncAfter(deadline: .now() + interval * Double(index)) {
+                                sendProbe()
+                            }
+                        }
+                    }
                     receiveLoop()
                 case .failed, .cancelled:
                     continuation.finish()

@@ -1,13 +1,8 @@
 import Foundation
+#if canImport(Network)
 import Network
 import CoreModels
 import CoreNetworking
-
-/// Discovers Jellyfin servers on the local network.
-public protocol ServerDiscovering: Sendable {
-    /// Streams unique `MediaServer`s as they answer, stopping after `timeout`.
-    func discover(timeout: TimeInterval) -> AsyncStream<MediaServer>
-}
 
 /// UDP-broadcast based discovery — Jellyfin's native LAN announce protocol.
 ///
@@ -43,7 +38,7 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
                 guard let server = JellyfinDiscoveryParser.parse(data) else { return }
                 lock.lock(); defer { lock.unlock() }
                 guard seen.insert(server.id).inserted else { return }
-                PlizzLog.discovery.info("Discovered server \(server.name, privacy: .public)")
+                PlizzLog.discovery.info("Discovered server \(server.name)")
                 continuation.yield(server)
             }
 
@@ -81,3 +76,5 @@ public final class UDPServerDiscovery: ServerDiscovering, @unchecked Sendable {
         }
     }
 }
+
+#endif

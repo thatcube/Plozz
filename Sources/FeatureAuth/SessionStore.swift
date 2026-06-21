@@ -33,10 +33,17 @@ public final class SessionStore: SessionPersisting, @unchecked Sendable {
     private let tokenAccount = "com.plizz.session.accessToken"
     private let lock = NSLock()
 
+    #if canImport(Security)
     public init(secureStore: SecureStore = KeychainStore(), defaults: UserDefaults = .standard) {
         self.secureStore = secureStore
         self.defaults = defaults
     }
+    #else
+    public init(secureStore: SecureStore, defaults: UserDefaults = .standard) {
+        self.secureStore = secureStore
+        self.defaults = defaults
+    }
+    #endif
 
     public func deviceID() -> String {
         lock.lock(); defer { lock.unlock() }
@@ -58,7 +65,7 @@ public final class SessionStore: SessionPersisting, @unchecked Sendable {
         defaults.set(data, forKey: metadataKey)
         // Token only ever lives in the Keychain.
         try secureStore.setString(session.accessToken, for: tokenAccount)
-        PlizzLog.auth.info("Saved session for user \(session.userName, privacy: .public)")
+        PlizzLog.auth.info("Saved session for user \(session.userName)")
     }
 
     public func loadSession() -> UserSession? {

@@ -20,6 +20,7 @@ let package = Package(
     products: [
         .library(name: "CoreModels", targets: ["CoreModels"]),
         .library(name: "CoreNetworking", targets: ["CoreNetworking"]),
+        .library(name: "CoreUI", targets: ["CoreUI"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
@@ -33,6 +34,12 @@ let package = Package(
         .target(name: "CoreModels"),
         .target(
             name: "CoreNetworking",
+            dependencies: ["CoreModels"]
+        ),
+
+        // MARK: Shared UI (design system + reusable tvOS components)
+        .target(
+            name: "CoreUI",
             dependencies: ["CoreModels"]
         ),
 
@@ -53,15 +60,15 @@ let package = Package(
         ),
         .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI"]
         ),
         .target(
             name: "FeaturePlayback",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI"]
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels"]
+            dependencies: ["CoreModels", "CoreUI"]
         ),
 
         // MARK: App composition root
@@ -70,6 +77,7 @@ let package = Package(
             dependencies: [
                 "CoreModels",
                 "CoreNetworking",
+                "CoreUI",
                 "FeatureDiscovery",
                 "FeatureAuth",
                 "ProviderJellyfin",

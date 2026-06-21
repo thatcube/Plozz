@@ -20,9 +20,10 @@ public final class ServerPickerViewModel {
 
     private let discovery: ServerDiscovering
     private let validator: ServerValidator
-    private let store: LastServerStoring
+    private var store: LastServerStoring
     private var scanTask: Task<Void, Never>?
 
+    #if canImport(Network)
     public init(
         discovery: ServerDiscovering = UDPServerDiscovery(),
         validator: ServerValidator = ServerValidator(),
@@ -32,6 +33,17 @@ public final class ServerPickerViewModel {
         self.validator = validator
         self.store = store
     }
+    #else
+    public init(
+        discovery: ServerDiscovering,
+        validator: ServerValidator = ServerValidator(),
+        store: LastServerStoring = UserDefaultsLastServerStore()
+    ) {
+        self.discovery = discovery
+        self.validator = validator
+        self.store = store
+    }
+    #endif
 
     /// The previously-used server, offered as a one-tap reconnect option.
     public var lastServer: MediaServer? { store.lastServer }

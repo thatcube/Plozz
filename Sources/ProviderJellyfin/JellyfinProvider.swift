@@ -62,8 +62,8 @@ public struct JellyfinProvider: MediaProvider {
         let mappedItem = map(item: detail)
 
         let streams = source.MediaStreams ?? detail.MediaStreams ?? []
-        let audio = streams.filter { $0.Type == "Audio" }.map(map(stream:))
-        let subs = streams.filter { $0.Type == "Subtitle" }.map(map(stream:))
+        let audio = streams.filter { $0.`Type` == "Audio" }.map(map(stream:))
+        let subs = streams.filter { $0.`Type` == "Subtitle" }.map(map(stream:))
 
         return PlaybackRequest(
             item: mappedItem,
@@ -123,7 +123,7 @@ public struct JellyfinProvider: MediaProvider {
         MediaItem(
             id: dto.Id,
             title: dto.Name ?? "Untitled",
-            kind: Self.kind(forItemType: dto.Type),
+            kind: Self.kind(forItemType: dto.`Type`),
             overview: dto.Overview,
             parentTitle: dto.SeriesName ?? dto.SeasonName,
             seasonNumber: dto.ParentIndexNumber,
@@ -141,7 +141,7 @@ public struct JellyfinProvider: MediaProvider {
     private func map(stream dto: MediaStreamDto) -> MediaTrack {
         MediaTrack(
             id: dto.Index,
-            kind: dto.Type == "Subtitle" ? .subtitle : .audio,
+            kind: dto.`Type` == "Subtitle" ? .subtitle : .audio,
             displayTitle: dto.DisplayTitle ?? dto.Language ?? dto.Codec ?? "Track \(dto.Index)",
             language: dto.Language,
             isDefault: dto.IsDefault ?? false,

@@ -1,0 +1,52 @@
+name: Plizz
+options:
+  bundleIdPrefix: com.plizz
+  deploymentTarget:
+    tvOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: ""
+    TARGETED_DEVICE_FAMILY: "3" # Apple TV
+    SWIFT_STRICT_CONCURRENCY: complete
+
+# Local Swift package providing all modular feature/code libraries.
+packages:
+  Plizz:
+    path: .
+
+targets:
+  Plizz:
+    type: application
+    platform: tvOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App/Plizz
+      - path: App/Resources/Assets.xcassets
+    info:
+      path: App/Resources/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.plizz.app
+        PRODUCT_NAME: Plizz
+        # NOTE: A tvOS "Brand Assets" app icon (layered image stacks) should be
+        # added before App Store submission. Omitted here so the MVP builds for
+        # the simulator without placeholder art. See README "Roadmap".
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - package: Plizz
+        product: AppShell
+
+schemes:
+  Plizz:
+    build:
+      targets:
+        Plizz: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      # Unit tests live in the Swift package; run them via the package scheme
+      # (`swift test` / `xcodebuild test -scheme Plizz-Package`).

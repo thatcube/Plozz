@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
 
@@ -105,3 +106,5 @@ public struct ServerPickerView: View {
         }
     }
 }
+
+#endif

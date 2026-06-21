@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Security)
 import Security
+#endif
 
 /// Minimal secure key/value store for secrets (access tokens).
 ///
@@ -11,6 +13,7 @@ public protocol SecureStore: Sendable {
     func removeValue(for key: String) throws
 }
 
+#if canImport(Security)
 public enum KeychainError: Error, Equatable {
     case unexpectedStatus(OSStatus)
     case encodingFailed
@@ -68,6 +71,7 @@ public struct KeychainStore: SecureStore {
         }
     }
 }
+#endif
 
 /// In-memory `SecureStore` for tests and previews. **Not** secure.
 public final class InMemorySecureStore: SecureStore, @unchecked Sendable {

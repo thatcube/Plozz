@@ -1,5 +1,8 @@
 import Foundation
 import CoreModels
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Abstraction over the transport so providers can be unit-tested with a stub.
 public protocol HTTPClient: Sendable {
@@ -38,7 +41,7 @@ public struct URLSessionHTTPClient: HTTPClient {
         let request = try Self.makeRequest(endpoint, baseURL: baseURL)
 
         PlizzLog.networking.debug(
-            "→ \(endpoint.method.rawValue, privacy: .public) \(PlizzLog.redact(url: request.url ?? baseURL), privacy: .public)"
+            "→ \(endpoint.method.rawValue) \(PlizzLog.redact(url: request.url ?? baseURL))"
         )
 
         let data: Data
@@ -57,7 +60,7 @@ public struct URLSessionHTTPClient: HTTPClient {
             throw AppError.invalidResponse
         }
 
-        PlizzLog.networking.debug("← \(http.statusCode, privacy: .public)")
+        PlizzLog.networking.debug("← \(http.statusCode)")
 
         switch http.statusCode {
         case 200...299:
@@ -112,7 +115,6 @@ public extension URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
-        config.waitsForConnectivity = false
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
     }

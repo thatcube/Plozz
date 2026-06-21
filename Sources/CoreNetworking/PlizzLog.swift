@@ -1,18 +1,42 @@
 import Foundation
+#if canImport(OSLog)
 import OSLog
+#endif
 
 /// Centralised, secret-safe logging.
 ///
 /// Plizz must **never** log tokens, Quick Connect secrets, or full
 /// `Authorization` headers. Use these helpers everywhere instead of `print`.
-public enum PlizzLog {
-    public static let networking = Logger(subsystem: subsystem, category: "networking")
-    public static let auth = Logger(subsystem: subsystem, category: "auth")
-    public static let discovery = Logger(subsystem: subsystem, category: "discovery")
-    public static let playback = Logger(subsystem: subsystem, category: "playback")
-    public static let app = Logger(subsystem: subsystem, category: "app")
+///
+/// Backed by `OSLog` where available (Apple platforms) and a no-op elsewhere,
+/// so non-Apple hosts (CI tooling, Linux) can still compile the logic modules.
+public struct PlizzLogger: Sendable {
+    #if canImport(OSLog)
+    private let logger: Logger
 
-    private static let subsystem = "com.plizz.app"
+    init(category: String) {
+        self.logger = Logger(subsystem: PlizzLog.subsystem, category: category)
+    }
+
+    public func debug(_ message: String) { logger.debug("\(message, privacy: .public)") }
+    public func info(_ message: String) { logger.info("\(message, privacy: .public)") }
+    public func error(_ message: String) { logger.error("\(message, privacy: .public)") }
+    #else
+    init(category: String) {}
+    public func debug(_ message: String) {}
+    public func info(_ message: String) {}
+    public func error(_ message: String) {}
+    #endif
+}
+
+public enum PlizzLog {
+    static let subsystem = "com.plizz.app"
+
+    public static let networking = PlizzLogger(category: "networking")
+    public static let auth = PlizzLogger(category: "auth")
+    public static let discovery = PlizzLogger(category: "discovery")
+    public static let playback = PlizzLogger(category: "playback")
+    public static let app = PlizzLogger(category: "app")
 
     /// Header names whose values must never be printed.
     static let sensitiveHeaders: Set<String> = [

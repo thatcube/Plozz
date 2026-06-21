@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
 
@@ -98,3 +99,5 @@ public struct QuickConnectView: View {
         }
     }
 }
+
+#endif

@@ -46,7 +46,7 @@ struct UserViewsResponse: Decodable {
 struct BaseItemDto: Decodable {
     let Id: String
     let Name: String?
-    let Type: String?
+    let `Type`: String?
     let CollectionType: String?
     let Overview: String?
     let SeriesName: String?
@@ -84,7 +84,7 @@ struct MediaSourceInfo: Decodable {
 
 struct MediaStreamDto: Decodable {
     let Index: Int
-    let Type: String          // "Audio", "Subtitle", "Video"
+    let `Type`: String       // "Audio", "Subtitle", "Video"
     let Codec: String?
     let Language: String?
     let DisplayTitle: String?

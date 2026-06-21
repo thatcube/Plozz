@@ -60,8 +60,7 @@ public final class PlayerViewModel {
             self.player = player
 
             if request.startPosition > 1 {
-                let time = CMTime(seconds: request.startPosition, preferredTimescale: 600)
-                await player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+                await seekWhenReady(player: player, to: request.startPosition)
             }
 
             installTimeObserver(on: player)
@@ -73,6 +72,51 @@ public final class PlayerViewModel {
         } catch {
             phase = .failed(.unknown(""))
         }
+    }
+
+    /// Seeks to `seconds`, clamped into the stream's seekable range. Tolerances
+    /// are non-zero so far seeks resolve to the nearest keyframe instead of
+    /// stalling on an exact-frame seek (which can fail on transcoded HLS).
+    public func seek(to seconds: TimeInterval) async {
+        guard let player else { return }
+        await seek(player: player, to: seconds)
+    }
+
+    /// Waits (briefly) for the player item to become ready before seeking. A
+    /// resume seek issued before the asset is ready — common for far positions —
+    /// is silently dropped by AVPlayer, leaving playback at 0.
+    private func seekWhenReady(player: AVPlayer, to seconds: TimeInterval) async {
+        guard let item = player.currentItem else { return }
+        let deadline = Date().addingTimeInterval(5)
+        while item.status != .readyToPlay, Date() < deadline {
+            if item.status == .failed { return }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        await seek(player: player, to: seconds)
+    }
+
+    private func seek(player: AVPlayer, to seconds: TimeInterval) async {
+        let target = clampToSeekableRange(seconds, item: player.currentItem)
+        let time = CMTime(seconds: target, preferredTimescale: 600)
+        // Allow a small tolerance: exact (.zero) seeks can stall or fail on
+        // transcoded HLS, which is exactly the far-seek failure we're fixing.
+        let tolerance = CMTime(seconds: 1, preferredTimescale: 600)
+        await player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+    }
+
+    /// Clamps a target time into the item's seekable range when one is known, so
+    /// a seek past the currently-available range doesn't error out.
+    private func clampToSeekableRange(_ seconds: TimeInterval, item: AVPlayerItem?) -> TimeInterval {
+        guard let ranges = item?.seekableTimeRanges, !ranges.isEmpty else { return max(0, seconds) }
+        var lower = TimeInterval.greatestFiniteMagnitude
+        var upper = 0.0
+        for value in ranges {
+            let range = value.timeRangeValue
+            lower = min(lower, range.start.seconds)
+            upper = max(upper, (range.start + range.duration).seconds)
+        }
+        guard upper > 0 else { return max(0, seconds) }
+        return min(max(seconds, lower), upper)
     }
 
     private func installTimeObserver(on player: AVPlayer) {

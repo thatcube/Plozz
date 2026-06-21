@@ -10,54 +10,74 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         return (vm, provider)
     }
 
-    func testLoadFirstPageLoadsOnlyOnePage() async {
+    func testLoadFirstPageSizesGridToTotalAndLoadsOnlyFirstPage() async {
         let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
         await vm.loadFirstPage()
 
-        XCTAssertEqual(vm.items.count, 10)
         XCTAssertEqual(vm.totalCount, 100)
-        XCTAssertTrue(vm.canLoadMore)
+        XCTAssertEqual(vm.loaded.count, 100, "Grid is sized to the whole library up front")
+        XCTAssertEqual(vm.loadedCount, 10, "Only the first page is populated")
+        XCTAssertEqual(vm.state.value, 100)
+        XCTAssertNotNil(vm.item(at: 0))
+        XCTAssertNil(vm.item(at: 10), "Later items are placeholders until their page loads")
         XCTAssertEqual(provider.requestedPages.count, 1)
         XCTAssertEqual(provider.requestedPages.first?.startIndex, 0)
-        XCTAssertNotNil(vm.state.value)
     }
 
-    func testLoadMoreAppendsNextPage() async {
-        let (vm, _) = makeVM(itemCount: 100, pageSize: 10)
-        await vm.loadFirstPage()
-
-        // Focusing the last loaded item should pull the next page.
-        await vm.loadMoreIfNeeded(currentItemID: vm.items.last!.id)
-
-        XCTAssertEqual(vm.items.count, 20)
-        XCTAssertEqual(vm.items.map(\.id).prefix(11).last, "i10")
-        XCTAssertTrue(vm.canLoadMore)
-    }
-
-    func testEarlyItemDoesNotTriggerPrefetch() async {
+    func testItemAppearedLoadsOwningPage() async {
         let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
         await vm.loadFirstPage()
 
-        await vm.loadMoreIfNeeded(currentItemID: vm.items.first!.id)
+        // A cell in the third page (indices 20..29) appears.
+        await vm.itemAppeared(at: 20)
 
-        XCTAssertEqual(vm.items.count, 10)
+        XCTAssertNotNil(vm.item(at: 20))
+        XCTAssertNotNil(vm.item(at: 29))
+        XCTAssertEqual(vm.item(at: 20)?.id, "i20")
+        XCTAssertTrue(provider.requestedPages.contains { $0.startIndex == 20 })
+    }
+
+    func testBackHalfOfPagePrefetchesNextPage() async {
+        let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
+        await vm.loadFirstPage()
+
+        // Index 5 is in the back half of page 0, so page 1 is prefetched.
+        await vm.itemAppeared(at: 5)
+
+        XCTAssertTrue(provider.requestedPages.contains { $0.startIndex == 10 })
+        XCTAssertNotNil(vm.item(at: 12))
+    }
+
+    func testFrontHalfOfPageDoesNotPrefetch() async {
+        let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
+        await vm.loadFirstPage()
+
+        // Index 1 is in the front half of page 0; nothing new is fetched
+        // (page 0 already loaded).
+        await vm.itemAppeared(at: 1)
+
         XCTAssertEqual(provider.requestedPages.count, 1)
     }
 
-    func testPagingStopsAtTotalCount() async {
-        let (vm, _) = makeVM(itemCount: 25, pageSize: 10)
+    func testRepeatedAppearLoadsEachPageOnce() async {
+        let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
         await vm.loadFirstPage()
 
-        // Page until exhausted.
-        for _ in 0..<5 {
-            await vm.loadMoreIfNeeded(currentItemID: vm.items.last!.id)
-        }
+        await vm.itemAppeared(at: 20)
+        await vm.itemAppeared(at: 21)
+        await vm.itemAppeared(at: 22)
 
-        XCTAssertEqual(vm.items.count, 25)
-        XCTAssertFalse(vm.canLoadMore)
-        // Further requests are no-ops once everything is loaded.
-        await vm.loadMoreIfNeeded(currentItemID: vm.items.last!.id)
-        XCTAssertEqual(vm.items.count, 25)
+        let page2Requests = provider.requestedPages.filter { $0.startIndex == 20 }
+        XCTAssertEqual(page2Requests.count, 1, "A loaded page is never re-requested")
+    }
+
+    func testAppearingOutOfRangeIsIgnored() async {
+        let (vm, provider) = makeVM(itemCount: 25, pageSize: 10)
+        await vm.loadFirstPage()
+
+        await vm.itemAppeared(at: 999)
+
+        XCTAssertEqual(provider.requestedPages.count, 1)
     }
 
     func testEmptyLibraryReportsEmptyState() async {
@@ -67,7 +87,8 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         if case .empty = vm.state {} else {
             XCTFail("Expected empty state, got \(vm.state)")
         }
-        XCTAssertFalse(vm.canLoadMore)
+        XCTAssertEqual(vm.totalCount, 0)
+        XCTAssertTrue(vm.loaded.isEmpty)
     }
 
     func testFirstPageFailureSetsFailedState() async {
@@ -80,28 +101,26 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         if case .failed(.serverUnreachable) = vm.state {} else {
             XCTFail("Expected failed state, got \(vm.state)")
         }
-        XCTAssertTrue(vm.items.isEmpty)
+        XCTAssertTrue(vm.loaded.isEmpty)
     }
 
-    func testNextPageFailureKeepsLoadedItems() async {
+    func testPageFailureKeepsLoadedItemsAndRetriesOnReappear() async {
         let provider = FakeMediaProvider(allItems: makeItems(100))
         let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, pageSize: 10)
         await vm.loadFirstPage()
 
-        provider.failAtStartIndex = 10
-        await vm.loadMoreIfNeeded(currentItemID: vm.items.last!.id)
+        provider.failAtStartIndex = 20
+        await vm.itemAppeared(at: 20)
 
-        // Existing page survives; error is surfaced separately.
-        XCTAssertEqual(vm.items.count, 10)
+        // First page survives; the failure is surfaced separately.
+        XCTAssertNotNil(vm.item(at: 0))
+        XCTAssertNil(vm.item(at: 20))
         XCTAssertEqual(vm.pageError, .serverUnreachable)
-        XCTAssertNotNil(vm.state.value)
+        XCTAssertEqual(vm.state.value, 100)
 
-        // Prefetch is suppressed while an error is pending; retry recovers it.
-        await vm.loadMoreIfNeeded(currentItemID: vm.items.last!.id)
-        XCTAssertEqual(vm.items.count, 10)
-
-        await vm.retryNextPage()
-        XCTAssertEqual(vm.items.count, 20)
+        // The failed page is not marked loaded, so a reappear retries it.
+        await vm.itemAppeared(at: 20)
+        XCTAssertNotNil(vm.item(at: 20))
         XCTAssertNil(vm.pageError)
     }
 }

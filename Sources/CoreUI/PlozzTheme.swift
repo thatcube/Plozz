@@ -12,7 +12,11 @@ public enum PlozzTheme {
         public static let landscapeHeight: CGFloat = 270
         public static let rowSpacing: CGFloat = 40
         public static let cardSpacing: CGFloat = 40
+        /// Tighter spacing for dense multi-column library grids.
+        public static let gridSpacing: CGFloat = 28
         public static let cornerRadius: CGFloat = 12
+        /// Scale applied to a focused browsing tile (matches Twozz Browse).
+        public static let focusedCardScale: CGFloat = 1.08
         public static let screenPadding: CGFloat = 60
     }
 }

@@ -8,10 +8,18 @@ import UIKit
 /// Footer panel for Settings showing app identity, the auto-stamped version /
 /// build, open-source info, and a QR code linking to the GitHub repo. tvOS has
 /// no browser, so a scannable code is how we hand the URL off to a phone.
+///
+/// The whole panel is made **focusable** so that on tvOS it can actually be
+/// reached: a non-interactive view never receives focus, which previously meant
+/// the user could not scroll the content into view and the About text was
+/// effectively unreadable on the 10-foot UI. Focusing it lets the parent
+/// `ScrollView` scroll to it and shows a subtle highlight.
 struct SettingsAboutSection: View {
     let version: String
     let build: String
     let repoURL: String
+
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 36) {
@@ -45,7 +53,20 @@ struct SettingsAboutSection: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 8)
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.primary.opacity(isFocused ? 0.10 : 0))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(isFocused ? 0.9 : 0), lineWidth: isFocused ? 5 : 0)
+        )
+        .focusable()
+        .focused($isFocused)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("About Plozz. Version \(version), build \(build). Free and open source, an unofficial tvOS client for Jellyfin. Scan the on-screen code to view the GitHub repository.")
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {

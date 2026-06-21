@@ -25,10 +25,12 @@ LOGO_SVG = os.path.join(REPO, "App/Resources/Assets.xcassets/PlozzLogo.imageset/
 BRAND = os.path.join(REPO, "App/Resources/Assets.xcassets/App Icon & Top Shelf Image.brandassets")
 
 # Twozz-style brand background: a flat dark colour rendered as a subtle vertical
-# gradient (lighter top -> darker bottom) centered on the brand dark.
-BRAND_DARK = (31, 31, 33)
-BG_TOP = (44, 44, 46)
-BG_BOTTOM = (18, 18, 20)
+# gradient (lighter top -> darker bottom) centered on the brand dark. The shade
+# is kept light enough that the logo's black antenna/outline stay visible
+# against it rather than blending into the background.
+BRAND_DARK = (96, 96, 98)
+BG_TOP = (109, 109, 111)
+BG_BOTTOM = (83, 83, 85)
 
 
 def render_logo(px: int) -> Image.Image:

@@ -126,7 +126,8 @@ public struct JellyfinProvider: MediaProvider {
             playSessionID: info.PlaySessionId,
             audioTracks: audio,
             subtitleTracks: subs,
-            startPosition: mappedItem.resumePosition ?? 0
+            startPosition: mappedItem.resumePosition ?? 0,
+            isTranscoding: source.TranscodingUrl != nil
         )
     }
 

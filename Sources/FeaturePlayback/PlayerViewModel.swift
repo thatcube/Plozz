@@ -176,6 +176,10 @@ public final class PlayerViewModel {
 
     public var availableSubtitleTracks: [MediaTrack] { request?.subtitleTracks ?? [] }
     public var availableAudioTracks: [MediaTrack] { request?.audioTracks ?? [] }
+
+    /// Whether the active stream is being transcoded by the server (vs direct
+    /// play). Read by the playback diagnostics overlay.
+    public var isTranscoding: Bool { request?.isTranscoding ?? false }
 }
 
 #endif

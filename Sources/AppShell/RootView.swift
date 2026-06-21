@@ -54,6 +54,7 @@ public struct RootView: View {
                         captionModel: appState.captionModel,
                         spoilerModel: appState.spoilerModel,
                         themeModel: appState.themeModel,
+                        diagnosticsModel: appState.diagnosticsModel,
                         ratingsProvider: appState.ratingsProvider,
                         accounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,

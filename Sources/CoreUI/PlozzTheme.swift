@@ -28,7 +28,7 @@ public enum PlozzTheme {
         public static let railVerticalPadding: CGFloat = 48
         /// Scale applied to a focused browsing tile (matches Twozz Browse).
         public static let focusedCardScale: CGFloat = 1.08
-        public static let screenPadding: CGFloat = 60
+        public static let screenPadding: CGFloat = 36
     }
 }
 

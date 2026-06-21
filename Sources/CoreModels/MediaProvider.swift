@@ -31,7 +31,17 @@ public protocol MediaProvider: Sendable {
     func item(id: String) async throws -> MediaItem
 
     /// Children of a container (season → episodes, series → seasons, …).
+    ///
+    /// Intended for small containers whose contents fit comfortably in one
+    /// request. For potentially large containers (top-level libraries with
+    /// hundreds of items) use `items(in:page:)` instead so the UI can page.
     func children(of itemID: String) async throws -> [MediaItem]
+
+    /// A single page of a container's children, for scalable browsing of large
+    /// libraries. Implementations request only `page.limit` items starting at
+    /// `page.startIndex` and report the container's `totalCount` so callers can
+    /// lazily fetch further pages on demand.
+    func items(in containerID: String, page: PageRequest) async throws -> MediaPage
 
     // MARK: Playback
 
@@ -45,6 +55,50 @@ public protocol MediaProvider: Sendable {
 
     /// Absolute URL for an item's artwork, or `nil` if unavailable.
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL?
+}
+
+/// A request for one page of a container's children.
+public struct PageRequest: Equatable, Sendable {
+    /// Zero-based index of the first item to fetch.
+    public var startIndex: Int
+    /// Maximum number of items to fetch in this page.
+    public var limit: Int
+
+    public init(startIndex: Int = 0, limit: Int = PageRequest.defaultLimit) {
+        self.startIndex = startIndex
+        self.limit = limit
+    }
+
+    /// Default page size tuned for a tvOS 10-foot grid: large enough to fill the
+    /// screen and minimise round trips, small enough to load quickly.
+    public static let defaultLimit = 60
+
+    /// The request for the page that follows this one.
+    public func next() -> PageRequest {
+        PageRequest(startIndex: startIndex + limit, limit: limit)
+    }
+}
+
+/// One page of a container's children plus the total available, so callers can
+/// page lazily without over-fetching large libraries.
+public struct MediaPage: Equatable, Sendable {
+    public var items: [MediaItem]
+    /// Zero-based index of `items.first` within the full container.
+    public var startIndex: Int
+    /// Total number of items in the container across all pages.
+    public var totalCount: Int
+
+    public init(items: [MediaItem], startIndex: Int, totalCount: Int) {
+        self.items = items
+        self.startIndex = startIndex
+        self.totalCount = totalCount
+    }
+
+    /// Index one past the last item in this page.
+    public var endIndex: Int { startIndex + items.count }
+
+    /// Whether more items remain beyond this page.
+    public var hasMore: Bool { endIndex < totalCount }
 }
 
 /// Lifecycle events reported during playback.

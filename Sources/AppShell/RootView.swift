@@ -45,6 +45,7 @@ public struct RootView: View {
                     MainTabView(
                         provider: provider,
                         captionModel: appState.captionModel,
+                        spoilerModel: appState.spoilerModel,
                         accounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
                         pendingPlayItemID: Binding(

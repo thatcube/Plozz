@@ -31,6 +31,7 @@ public final class AppState {
     public var pendingPlayItemID: String?
 
     public let captionModel: CaptionSettingsModel
+    public let spoilerModel: SpoilerSettingsModel
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry
@@ -38,11 +39,13 @@ public final class AppState {
     public init(
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
-        captionModel: CaptionSettingsModel? = nil
+        captionModel: CaptionSettingsModel? = nil,
+        spoilerModel: SpoilerSettingsModel? = nil
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
         self.captionModel = captionModel ?? CaptionSettingsModel()
+        self.spoilerModel = spoilerModel ?? SpoilerSettingsModel()
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {

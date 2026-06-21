@@ -8,17 +8,20 @@ public struct MediaRowView: View {
     private let title: String
     private let items: [MediaItem]
     private let style: PosterCardView.Style
+    private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
 
     public init(
         title: String,
         items: [MediaItem],
         style: PosterCardView.Style = .poster,
+        spoilerSettings: SpoilerSettings = .default,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
         self.items = items
         self.style = style
+        self.spoilerSettings = spoilerSettings
         self.onSelect = onSelect
     }
 
@@ -32,7 +35,7 @@ public struct MediaRowView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: PlozzTheme.Metrics.cardSpacing) {
                         ForEach(items) { item in
-                            PosterCardView(item: item, style: style) { onSelect(item) }
+                            PosterCardView(item: item, style: style, spoilerSettings: spoilerSettings) { onSelect(item) }
                         }
                     }
                     .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

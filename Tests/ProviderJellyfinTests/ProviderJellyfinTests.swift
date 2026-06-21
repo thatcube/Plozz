@@ -77,6 +77,43 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "http://host:8096/Items/i1/Images/Primary?maxWidth=400")
     }
 
+    func testItemsPageMapsItemsAndTotalCount() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[
+          {"Id":"m1","Name":"Alien","Type":"Movie"},
+          {"Id":"m2","Name":"Aliens","Type":"Movie"}
+        ],"TotalRecordCount":250}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let page = try await provider.items(in: "lib1", page: PageRequest(startIndex: 60, limit: 60))
+
+        XCTAssertEqual(page.items.map(\.title), ["Alien", "Aliens"])
+        XCTAssertEqual(page.items.first?.kind, .movie)
+        XCTAssertEqual(page.startIndex, 60)
+        XCTAssertEqual(page.totalCount, 250)
+        XCTAssertTrue(page.hasMore)
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertEqual(query.first(where: { $0.name == "ParentId" })?.value, "lib1")
+        XCTAssertEqual(query.first(where: { $0.name == "StartIndex" })?.value, "60")
+        XCTAssertEqual(query.first(where: { $0.name == "Limit" })?.value, "60")
+        XCTAssertEqual(query.first(where: { $0.name == "SortBy" })?.value, "SortName")
+    }
+
+    func testItemsPageDefaultsTotalCountToItemCountWhenMissing() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[{"Id":"m1","Name":"Solo","Type":"Movie"}]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let page = try await provider.items(in: "lib1", page: PageRequest(startIndex: 0, limit: 60))
+        XCTAssertEqual(page.totalCount, 1)
+        XCTAssertFalse(page.hasMore)
+    }
+
     func testPlaybackInfoResolvesDirectStreamWithApiKey() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """

@@ -3,62 +3,223 @@ import CoreModels
 @testable import FeatureAuth
 
 final class SessionStateMachineTests: XCTestCase {
-    private let session = UserSession(
-        server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://h")!, provider: .jellyfin),
-        userID: "u", userName: "A", deviceID: "d", accessToken: "t"
-    )
     private let server = MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://h")!, provider: .jellyfin)
-
-    func testLaunchRestoresExistingSession() {
-        var m = SessionStateMachine()
-        m.apply(.restored(session))
-        XCTAssertEqual(m.state, .authenticated(session))
+    private func account(_ id: String = "a1") -> Account {
+        Account(id: id, server: server, userID: "u", userName: "A", deviceID: "d")
     }
 
-    func testLaunchWithoutSessionGoesToPicker() {
+    func testLaunchWithAccountsBecomesReady() {
         var m = SessionStateMachine()
-        m.apply(.restored(nil))
-        XCTAssertEqual(m.state, .selectingServer)
+        m.apply(.restored([account()]))
+        XCTAssertEqual(m.state, .ready)
     }
 
-    func testHappyPath() {
+    func testLaunchWithoutAccountsStartsOnboarding() {
         var m = SessionStateMachine()
-        m.apply(.restored(nil))
+        m.apply(.restored([]))
+        XCTAssertEqual(m.state, .onboarding(.selectingServer, canReturnToApp: false))
+    }
+
+    func testFirstRunHappyPath() {
+        var m = SessionStateMachine()
+        m.apply(.restored([]))
         m.apply(.serverSelected(server))
-        XCTAssertEqual(m.state, .authenticating(server))
-        m.apply(.authenticated(session))
-        XCTAssertEqual(m.state, .authenticated(session))
+        XCTAssertEqual(m.state, .onboarding(.authenticating(server), canReturnToApp: false))
+        m.apply(.accountAuthenticated)
+        XCTAssertEqual(m.state, .ready)
     }
 
-    func testAuthenticationFailureGoesToFailed() {
-        var m = SessionStateMachine(state: .authenticating(server))
+    func testAddSecondAccountLoopReturnsToReady() {
+        var m = SessionStateMachine(state: .ready)
+        m.apply(.addAccountRequested)
+        XCTAssertEqual(m.state, .onboarding(.selectingServer, canReturnToApp: true))
+        m.apply(.serverSelected(server))
+        XCTAssertEqual(m.state, .onboarding(.authenticating(server), canReturnToApp: true))
+        m.apply(.accountAuthenticated)
+        XCTAssertEqual(m.state, .ready)
+    }
+
+    func testCancelAddingAnotherAccountReturnsToApp() {
+        var m = SessionStateMachine(state: .onboarding(.selectingServer, canReturnToApp: true))
+        m.apply(.cancelOnboarding)
+        XCTAssertEqual(m.state, .ready)
+    }
+
+    func testCancelFirstRunOnboardingStaysOnPicker() {
+        var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
+        m.apply(.cancelOnboarding)
+        XCTAssertEqual(m.state, .onboarding(.selectingServer, canReturnToApp: false))
+    }
+
+    func testAuthenticationFailureGoesToFailedPreservingContext() {
+        var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: true))
         m.apply(.authenticationFailed(.quickConnectExpired))
-        XCTAssertEqual(m.state, .failed(.quickConnectExpired))
+        XCTAssertEqual(m.state, .failed(.quickConnectExpired, canReturnToApp: true))
     }
 
-    func testSignOutReturnsToPicker() {
-        var m = SessionStateMachine(state: .authenticated(session))
-        m.apply(.signedOut)
-        XCTAssertEqual(m.state, .selectingServer)
+    func testRetryFromFailureWhenAddingReturnsToApp() {
+        var m = SessionStateMachine(state: .failed(.serverUnreachable, canReturnToApp: true))
+        m.apply(.retry)
+        XCTAssertEqual(m.state, .ready)
     }
 
-    func testCancelFromAuthenticatingReturnsToPicker() {
-        // Cancel/Menu on the auth screen must back out to the picker.
-        var m = SessionStateMachine(state: .authenticating(server))
-        m.apply(.signedOut)
-        XCTAssertEqual(m.state, .selectingServer)
+    func testRetryFromFirstRunFailureReturnsToPicker() {
+        var m = SessionStateMachine(state: .failed(.serverUnreachable, canReturnToApp: false))
+        m.apply(.retry)
+        XCTAssertEqual(m.state, .onboarding(.selectingServer, canReturnToApp: false))
+    }
+
+    func testRemovingLastAccountReturnsToOnboarding() {
+        var m = SessionStateMachine(state: .ready)
+        m.apply(.accountsChanged([]))
+        XCTAssertEqual(m.state, .onboarding(.selectingServer, canReturnToApp: false))
+    }
+
+    func testRemovingOneOfSeveralAccountsStaysReady() {
+        var m = SessionStateMachine(state: .ready)
+        m.apply(.accountsChanged([account()]))
+        XCTAssertEqual(m.state, .ready)
     }
 
     func testIllegalTransitionIsIgnored() {
-        var m = SessionStateMachine(state: .selectingServer)
-        m.apply(.authenticated(session)) // not legal from selectingServer
-        XCTAssertEqual(m.state, .selectingServer)
+        var m = SessionStateMachine(state: .onboarding(.selectingServer, canReturnToApp: false))
+        m.apply(.accountAuthenticated) // not legal from selectingServer
+        XCTAssertEqual(m.state, .onboarding(.selectingServer, canReturnToApp: false))
+    }
+}
+
+final class AccountStoreTests: XCTestCase {
+    private func makeDefaults() -> UserDefaults {
+        let suite = "test.\(UUID().uuidString)"
+        return UserDefaults(suiteName: suite)!
     }
 
-    func testRetryFromFailure() {
-        var m = SessionStateMachine(state: .failed(.serverUnreachable))
-        m.apply(.retry)
-        XCTAssertEqual(m.state, .selectingServer)
+    private let server = MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://h")!, provider: .jellyfin)
+
+    private func account(_ id: String, user: String = "Alice", added: TimeInterval = 0) -> Account {
+        Account(id: id, server: server, userID: "u-\(id)", userName: user, deviceID: "dev", addedAt: Date(timeIntervalSince1970: added))
+    }
+
+    func testAddLoadRoundTrip() throws {
+        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        let acc = account("a1")
+        try store.add(acc, token: "TOK1")
+        XCTAssertEqual(store.loadAccounts(), [acc])
+        XCTAssertEqual(store.token(for: "a1"), "TOK1")
+    }
+
+    func testMultipleAccountsPersistInAddedOrder() throws {
+        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        try store.add(account("a2", added: 200), token: "T2")
+        try store.add(account("a1", added: 100), token: "T1")
+        XCTAssertEqual(store.loadAccounts().map(\.id), ["a1", "a2"])
+        XCTAssertTrue(Set(store.activeAccountIDs()) == ["a1", "a2"])
+    }
+
+    func testTokenIsNeverWrittenToUserDefaults() throws {
+        let defaults = makeDefaults()
+        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: defaults)
+        try store.add(account("a1"), token: "TOPSECRET")
+        for (_, value) in defaults.dictionaryRepresentation() {
+            if let data = value as? Data, let text = String(data: data, encoding: .utf8) {
+                XCTAssertFalse(text.contains("TOPSECRET"), "Token leaked into UserDefaults")
+            }
+            if let text = value as? String {
+                XCTAssertFalse(text.contains("TOPSECRET"), "Token leaked into UserDefaults")
+            }
+        }
+    }
+
+    func testRemoveDeletesAccountAndToken() throws {
+        let secure = InMemorySecureStore()
+        let store = AccountStore(secureStore: secure, defaults: makeDefaults())
+        try store.add(account("a1"), token: "T1")
+        try store.add(account("a2", added: 50), token: "T2")
+        try store.remove(id: "a1")
+        XCTAssertEqual(store.loadAccounts().map(\.id), ["a2"])
+        XCTAssertNil(store.token(for: "a1"))
+        XCTAssertEqual(store.token(for: "a2"), "T2")
+        XCTAssertFalse(store.activeAccountIDs().contains("a1"))
+    }
+
+    func testActiveSetPersistsAndFiltersStaleIDs() throws {
+        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        try store.add(account("a1"), token: "T1")
+        try store.add(account("a2", added: 50), token: "T2")
+        store.setActiveAccountIDs(["a2", "ghost"])
+        XCTAssertEqual(store.activeAccountIDs(), ["a2"])
+    }
+
+    func testClearAllRemovesEverything() throws {
+        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        try store.add(account("a1"), token: "T1")
+        try store.add(account("a2", added: 50), token: "T2")
+        try store.clearAll()
+        XCTAssertTrue(store.loadAccounts().isEmpty)
+        XCTAssertNil(store.token(for: "a1"))
+        XCTAssertNil(store.token(for: "a2"))
+    }
+
+    func testDeviceIDIsStable() {
+        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        XCTAssertEqual(store.deviceID(), store.deviceID())
+    }
+
+    // MARK: Migration
+
+    /// Seeds the legacy single-session keys the way `SessionStore` would.
+    private func seedLegacySession(defaults: UserDefaults, secure: InMemorySecureStore, token: String) throws {
+        let legacy = UserSession(server: server, userID: "u1", userName: "Legacy", deviceID: "dev1", accessToken: token)
+        let store = SessionStore(secureStore: secure, defaults: defaults)
+        try store.save(legacy)
+    }
+
+    func testMigratesLegacySingleSession() throws {
+        let defaults = makeDefaults()
+        let secure = InMemorySecureStore()
+        try seedLegacySession(defaults: defaults, secure: secure, token: "LEGACYTOK")
+
+        let store = AccountStore(secureStore: secure, defaults: defaults)
+        XCTAssertTrue(store.migrateLegacySessionIfNeeded())
+
+        let accounts = store.loadAccounts()
+        XCTAssertEqual(accounts.count, 1)
+        let migrated = try XCTUnwrap(accounts.first)
+        XCTAssertEqual(migrated.userName, "Legacy")
+        XCTAssertEqual(store.token(for: migrated.id), "LEGACYTOK")
+        XCTAssertEqual(store.activeAccountIDs(), [migrated.id])
+        // Legacy keys retired.
+        XCTAssertNil(secure.string(for: "com.plozz.session.accessToken"))
+        XCTAssertNil(defaults.data(forKey: "com.plozz.session.metadata"))
+    }
+
+    func testMigrationIsIdempotent() throws {
+        let defaults = makeDefaults()
+        let secure = InMemorySecureStore()
+        try seedLegacySession(defaults: defaults, secure: secure, token: "LEGACYTOK")
+
+        let store = AccountStore(secureStore: secure, defaults: defaults)
+        XCTAssertTrue(store.migrateLegacySessionIfNeeded())
+        // Second call must be a no-op (accounts schema already present).
+        XCTAssertFalse(store.migrateLegacySessionIfNeeded())
+        XCTAssertEqual(store.loadAccounts().count, 1)
+    }
+
+    func testMigrationNoOpsOnFreshInstall() {
+        let store = AccountStore(secureStore: InMemorySecureStore(), defaults: makeDefaults())
+        XCTAssertFalse(store.migrateLegacySessionIfNeeded())
+        XCTAssertTrue(store.loadAccounts().isEmpty)
+    }
+
+    func testMigrationDoesNotClobberExistingAccounts() throws {
+        let defaults = makeDefaults()
+        let secure = InMemorySecureStore()
+        let store = AccountStore(secureStore: secure, defaults: defaults)
+        try store.add(account("a1"), token: "T1")
+        try seedLegacySession(defaults: defaults, secure: secure, token: "LEGACYTOK")
+        // Accounts schema already exists → migration must not run.
+        XCTAssertFalse(store.migrateLegacySessionIfNeeded())
+        XCTAssertEqual(store.loadAccounts().map(\.id), ["a1"])
     }
 }
 
@@ -85,7 +246,6 @@ final class SessionStoreTests: XCTestCase {
         let store = SessionStore(secureStore: InMemorySecureStore(), defaults: defaults)
         try store.save(session)
 
-        // Scan every persisted UserDefaults value for the secret token.
         for (_, value) in defaults.dictionaryRepresentation() {
             if let data = value as? Data, let text = String(data: data, encoding: .utf8) {
                 XCTAssertFalse(text.contains("TOPSECRET"), "Token leaked into UserDefaults")
@@ -113,7 +273,6 @@ final class SessionStoreTests: XCTestCase {
         let secure = InMemorySecureStore()
         let store = SessionStore(secureStore: secure, defaults: defaults)
         try store.save(session)
-        // Simulate Keychain eviction: token gone but metadata remains.
         try secure.removeValue(for: "com.plozz.session.accessToken")
         XCTAssertNil(store.loadSession())
     }

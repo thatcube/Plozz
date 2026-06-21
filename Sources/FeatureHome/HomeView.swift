@@ -6,15 +6,18 @@ import CoreUI
 /// The Home screen: Continue Watching, Latest, and library shortcuts.
 public struct HomeView: View {
     @State private var viewModel: HomeViewModel
+    private let spoilerSettings: SpoilerSettings
     private let onSelectItem: (MediaItem) -> Void
     private let onSelectLibrary: (MediaLibrary) -> Void
 
     public init(
         viewModel: HomeViewModel,
+        spoilerSettings: SpoilerSettings = .default,
         onSelectItem: @escaping (MediaItem) -> Void,
         onSelectLibrary: @escaping (MediaLibrary) -> Void
     ) {
         _viewModel = State(initialValue: viewModel)
+        self.spoilerSettings = spoilerSettings
         self.onSelectItem = onSelectItem
         self.onSelectLibrary = onSelectLibrary
     }
@@ -29,8 +32,8 @@ public struct HomeView: View {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
                     header
 
-                    MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, onSelect: onSelectItem)
-                    MediaRowView(title: "Recently Added", items: content.latest, onSelect: onSelectItem)
+                    MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
+                    MediaRowView(title: "Recently Added", items: content.latest, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
 
                     if !content.libraries.isEmpty {
                         librariesRow(content.libraries)

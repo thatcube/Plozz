@@ -39,8 +39,10 @@ public struct MediaRowView: View {
                         }
                     }
                     .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                    // Give focus room so the lifted card isn't clipped.
-                    .padding(.vertical, 24)
+                    // Give the focused card's lift + drop shadow room so it is
+                    // never clipped by the scroll view's bounds.
+                    .padding(.top, 16)
+                    .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
                 }
             }
         }

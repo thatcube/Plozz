@@ -40,6 +40,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var posterURL: URL?
     /// Wide/backdrop artwork.
     public var backdropURL: URL?
+    /// Spoiler-safe parent artwork to use when this item has no image of its own
+    /// (e.g. an episode with no thumbnail falls back to its series' backdrop).
+    /// Never an episode's own frame, so it is safe to show even under spoilers.
+    public var fallbackArtworkURL: URL?
 
     /// External/critical ratings (IMDb, Rotten Tomatoes, …), in their native
     /// scales. May be enriched asynchronously after the item first loads.
@@ -64,6 +68,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         isPlayed: Bool = false,
         posterURL: URL? = nil,
         backdropURL: URL? = nil,
+        fallbackArtworkURL: URL? = nil,
         ratings: [ExternalRating] = [],
         providerIDs: [String: String] = [:]
     ) {
@@ -81,6 +86,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.isPlayed = isPlayed
         self.posterURL = posterURL
         self.backdropURL = backdropURL
+        self.fallbackArtworkURL = fallbackArtworkURL
         self.ratings = ratings
         self.providerIDs = providerIDs
     }

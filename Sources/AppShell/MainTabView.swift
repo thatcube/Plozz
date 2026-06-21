@@ -24,10 +24,13 @@ struct MainTabView: View {
     let ratingsProvider: any ExternalRatingsProviding
     let accounts: [Account]
     let activeAccountID: String?
+    let profiles: [Profile]
+    let activeProfile: Profile
     @Binding var pendingPlayItemID: String?
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
     let onSignOutAll: () -> Void
+    let onSwitchProfile: () -> Void
 
     var body: some View {
         TabView {
@@ -57,12 +60,15 @@ struct MainTabView: View {
                 diagnostics: diagnosticsModel,
                 accounts: accounts,
                 activeAccountID: activeAccountID,
+                profiles: profiles,
+                activeProfile: activeProfile,
                 appVersion: AppInfo.version,
                 appBuild: AppInfo.build,
                 repoURL: AppInfo.repoURLString,
                 onAddAccount: onAddAccount,
                 onRemoveAccount: onRemoveAccount,
-                onSignOutAll: onSignOutAll
+                onSignOutAll: onSignOutAll,
+                onSwitchProfile: onSwitchProfile
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }

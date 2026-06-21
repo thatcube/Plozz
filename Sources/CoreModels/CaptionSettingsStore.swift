@@ -9,10 +9,14 @@ public protocol CaptionSettingsStoring: Sendable {
 
 public final class CaptionSettingsStore: CaptionSettingsStoring, @unchecked Sendable {
     private let defaults: UserDefaults
-    private let key = "com.plozz.captionSettings"
+    private let key: String
 
-    public init(defaults: UserDefaults = .standard) {
+    /// - Parameter namespace: per-profile scope. `nil` (the default/primary
+    ///   profile) uses the legacy un-suffixed key; other profiles pass their
+    ///   `Profile.id`.
+    public init(defaults: UserDefaults = .standard, namespace: String? = nil) {
         self.defaults = defaults
+        self.key = SettingsKey.scoped("com.plozz.captionSettings", namespace: namespace)
     }
 
     public func load() -> CaptionSettings {

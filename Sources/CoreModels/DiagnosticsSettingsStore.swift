@@ -9,10 +9,14 @@ public protocol DiagnosticsSettingsStoring: Sendable {
 
 public final class DiagnosticsSettingsStore: DiagnosticsSettingsStoring, @unchecked Sendable {
     private let defaults: UserDefaults
-    private let key = "com.plozz.diagnosticsSettings"
+    private let key: String
 
-    public init(defaults: UserDefaults = .standard) {
+    /// - Parameter namespace: per-profile scope. `nil` (the default/primary
+    ///   profile) uses the legacy un-suffixed key; other profiles pass their
+    ///   `Profile.id`.
+    public init(defaults: UserDefaults = .standard, namespace: String? = nil) {
         self.defaults = defaults
+        self.key = SettingsKey.scoped("com.plozz.diagnosticsSettings", namespace: namespace)
     }
 
     public func load() -> DiagnosticsSettings {

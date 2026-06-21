@@ -53,7 +53,8 @@ public final class SearchViewModel {
         do {
             let items = try await aggregatedSearch(query: requested)
             guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
-            let sections = SearchSection.sections(from: items)
+            let deduped = SearchDeduplicator.deduplicate(items)
+            let sections = SearchSection.sections(from: deduped)
             state = sections.isEmpty ? .empty : .loaded(sections)
         } catch let error as AppError {
             guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }

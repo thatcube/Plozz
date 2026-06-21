@@ -63,6 +63,20 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// is irrelevant and may be `nil`.
     public var sourceAccountID: String?
 
+    /// Other `Account.id`s that also hold this same title, populated when the
+    /// Search aggregator de-duplicates a result that exists on several servers
+    /// (e.g. the same movie on both a Jellyfin and a Plex account). The primary
+    /// source stays in `sourceAccountID`; these are fallbacks so playback can
+    /// still resolve the item if the primary server is unavailable. Empty for
+    /// non-merged items.
+    public var additionalSourceAccountIDs: [String]
+
+    /// Every account this item can be played from, primary first: the merged
+    /// `sourceAccountID` followed by any de-duplicated alternates.
+    public var allSourceAccountIDs: [String] {
+        (sourceAccountID.map { [$0] } ?? []) + additionalSourceAccountIDs
+    }
+
     public init(
         id: String,
         title: String,
@@ -81,7 +95,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         fallbackArtworkURL: URL? = nil,
         ratings: [ExternalRating] = [],
         providerIDs: [String: String] = [:],
-        sourceAccountID: String? = nil
+        sourceAccountID: String? = nil,
+        additionalSourceAccountIDs: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -101,6 +116,33 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.ratings = ratings
         self.providerIDs = providerIDs
         self.sourceAccountID = sourceAccountID
+        self.additionalSourceAccountIDs = additionalSourceAccountIDs
+    }
+
+    /// Custom decoding so `additionalSourceAccountIDs` (added after items were
+    /// first persisted/cached) defaults to empty when absent, keeping older
+    /// encoded `MediaItem`s decodable. Encoding stays synthesized.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        kind = try container.decode(MediaItemKind.self, forKey: .kind)
+        overview = try container.decodeIfPresent(String.self, forKey: .overview)
+        parentTitle = try container.decodeIfPresent(String.self, forKey: .parentTitle)
+        seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
+        episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
+        productionYear = try container.decodeIfPresent(Int.self, forKey: .productionYear)
+        runtime = try container.decodeIfPresent(TimeInterval.self, forKey: .runtime)
+        resumePosition = try container.decodeIfPresent(TimeInterval.self, forKey: .resumePosition)
+        playedPercentage = try container.decodeIfPresent(Double.self, forKey: .playedPercentage)
+        isPlayed = try container.decodeIfPresent(Bool.self, forKey: .isPlayed) ?? false
+        posterURL = try container.decodeIfPresent(URL.self, forKey: .posterURL)
+        backdropURL = try container.decodeIfPresent(URL.self, forKey: .backdropURL)
+        fallbackArtworkURL = try container.decodeIfPresent(URL.self, forKey: .fallbackArtworkURL)
+        ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []
+        providerIDs = try container.decodeIfPresent([String: String].self, forKey: .providerIDs) ?? [:]
+        sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
+        additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
     }
 
     /// Returns a copy of this item tagged as belonging to `accountID`, used by the

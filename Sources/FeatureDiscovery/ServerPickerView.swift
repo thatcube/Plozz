@@ -11,11 +11,12 @@ public struct ServerPickerView: View {
     @FocusState private var manualFieldFocused: Bool
     private let onSelect: (MediaServer) -> Void
 
+    @MainActor
     public init(
-        viewModel: ServerPickerViewModel = ServerPickerViewModel(),
+        viewModel: ServerPickerViewModel? = nil,
         onSelect: @escaping (MediaServer) -> Void
     ) {
-        _viewModel = State(initialValue: viewModel)
+        _viewModel = State(initialValue: viewModel ?? ServerPickerViewModel())
         self.onSelect = onSelect
     }
 

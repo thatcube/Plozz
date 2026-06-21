@@ -9,8 +9,9 @@ import FeatureDiscovery
 public struct RootView: View {
     @State private var appState: AppState
 
-    public init(appState: AppState = AppState()) {
-        _appState = State(initialValue: appState)
+    @MainActor
+    public init(appState: AppState? = nil) {
+        _appState = State(initialValue: appState ?? AppState())
     }
 
     public var body: some View {

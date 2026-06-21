@@ -20,12 +20,19 @@ public struct RootView: View {
             case .launching:
                 LaunchView()
 
-            case .selectingServer:
+            case let .onboarding(.selectingServer, canReturnToApp):
                 ServerPickerView { server in
                     appState.selectServer(server)
                 }
+                // When adding another account, allow backing out to the app.
+                .overlay(alignment: .topLeading) {
+                    if canReturnToApp {
+                        Button("Cancel") { appState.cancelAuthentication() }
+                            .padding()
+                    }
+                }
 
-            case let .authenticating(server):
+            case let .onboarding(.authenticating(server), _):
                 AuthView(
                     server: server,
                     deviceID: appState.deviceID,
@@ -33,21 +40,24 @@ public struct RootView: View {
                     onCancel: { appState.cancelAuthentication() }
                 )
 
-            case .authenticated:
-                if let provider = appState.provider {
+            case .ready:
+                if let provider = appState.primaryProvider {
                     MainTabView(
                         provider: provider,
                         captionModel: appState.captionModel,
+                        accounts: appState.accounts,
+                        activeAccountID: appState.primaryActiveAccount?.id,
                         pendingPlayItemID: Binding(
                             get: { appState.pendingPlayItemID },
                             set: { appState.pendingPlayItemID = $0 }
-                        )
-                    ) {
-                        appState.signOut()
-                    }
+                        ),
+                        onAddAccount: { appState.addAccount() },
+                        onRemoveAccount: { appState.removeAccount(id: $0.id) },
+                        onSignOutAll: { appState.signOutAll() }
+                    )
                 }
 
-            case let .failed(error):
+            case let .failed(error, _):
                 FailureView(message: error.userMessage) {
                     appState.retry()
                 }

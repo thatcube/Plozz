@@ -8,11 +8,19 @@ import FeatureSettings
 
 /// The signed-in experience: Home and Settings tabs, with item-detail
 /// navigation and full-screen playback.
+///
+/// Home runs against the **primary active** provider in this branch; the
+/// multi-account aggregation seam (`resolvedActiveAccounts`) is reserved for
+/// branch H. Settings exposes account management (add/remove).
 struct MainTabView: View {
     let provider: any MediaProvider
     let captionModel: CaptionSettingsModel
+    let accounts: [Account]
+    let activeAccountID: String?
     @Binding var pendingPlayItemID: String?
-    let onSignOut: () -> Void
+    let onAddAccount: () -> Void
+    let onRemoveAccount: (Account) -> Void
+    let onSignOutAll: () -> Void
 
     var body: some View {
         TabView {
@@ -25,13 +33,14 @@ struct MainTabView: View {
 
             SettingsView(
                 captions: captionModel,
-                userName: provider.session.userName,
-                serverName: provider.session.server.name,
-                serverURL: provider.session.server.baseURL.absoluteString,
+                accounts: accounts,
+                activeAccountID: activeAccountID,
                 appVersion: AppInfo.version,
                 appBuild: AppInfo.build,
                 repoURL: AppInfo.repoURLString,
-                onSignOut: onSignOut
+                onAddAccount: onAddAccount,
+                onRemoveAccount: onRemoveAccount,
+                onSignOutAll: onSignOutAll
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }

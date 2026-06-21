@@ -23,6 +23,7 @@ let package = Package(
         .library(name: "CoreUI", targets: ["CoreUI"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
+        .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
         .library(name: "RatingsService", targets: ["RatingsService"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
@@ -51,6 +52,10 @@ let package = Package(
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
         .target(
+            name: "ProviderPlex",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        .target(
             name: "RatingsService",
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
@@ -62,7 +67,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureAuth",
-            dependencies: ["CoreModels", "CoreNetworking", "ProviderJellyfin"]
+            dependencies: ["CoreModels", "CoreNetworking", "ProviderJellyfin", "ProviderPlex"]
         ),
         .target(
             name: "FeatureHome",
@@ -98,6 +103,7 @@ let package = Package(
                 "FeatureDiscovery",
                 "FeatureAuth",
                 "ProviderJellyfin",
+                "ProviderPlex",
                 "RatingsService",
                 "FeatureHome",
                 "FeaturePlayback",
@@ -122,6 +128,10 @@ let package = Package(
         .testTarget(
             name: "ProviderJellyfinTests",
             dependencies: ["ProviderJellyfin", "CoreModels", "CoreNetworking"]
+        ),
+        .testTarget(
+            name: "ProviderPlexTests",
+            dependencies: ["ProviderPlex", "CoreModels", "CoreNetworking"]
         ),
         .testTarget(
             name: "RatingsServiceTests",

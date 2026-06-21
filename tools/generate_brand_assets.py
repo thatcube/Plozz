@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Generate tvOS Brand Assets (layered app icon + Top Shelf images) for Plozz.
 
-Source art is the Plozz pixel-art logo (a smiling TV in Jellyfin blue). The icon
-is composed as three parallax layers — a brand gradient back, a white rounded
-tile in the middle, and the colour logo on front — which the Apple TV separates
-on focus. Top Shelf images are a wide gradient banner with the centered logo.
+Source art is the Plozz pixel-art logo (a smiling TV in Jellyfin blue). The
+visual style matches the sibling Twozz app: a flat dark background rendered as a
+subtle vertical gradient centered on the brand dark colour, with the colour logo
+floating on top. The icon is composed as three parallax layers — the dark
+gradient back, plus two identical logo layers (Middle and Front) that the Apple
+TV separates on focus for a parallax depth effect. Top Shelf images use the same
+dark vertical gradient banner with the centered logo.
 
 Run from the repo root:  python3 tools/generate_brand_assets.py
 """
@@ -15,15 +18,17 @@ import sys
 
 import cairosvg
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOGO_SVG = os.path.join(REPO, "App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg")
 BRAND = os.path.join(REPO, "App/Resources/Assets.xcassets/App Icon & Top Shelf Image.brandassets")
 
-# Jellyfin brand gradient endpoints (purple -> blue).
-PURPLE = (170, 92, 195)
-BLUE = (0, 130, 200)
+# Twozz-style brand background: a flat dark colour rendered as a subtle vertical
+# gradient (lighter top -> darker bottom) centered on the brand dark.
+BRAND_DARK = (31, 31, 33)
+BG_TOP = (44, 44, 46)
+BG_BOTTOM = (18, 18, 20)
 
 
 def render_logo(px: int) -> Image.Image:
@@ -32,27 +37,15 @@ def render_logo(px: int) -> Image.Image:
     return Image.open(io.BytesIO(png)).convert("RGBA")
 
 
-def diagonal_gradient(w: int, h: int, c0, c1) -> Image.Image:
-    """Top-left -> bottom-right linear gradient as an opaque RGBA image."""
-    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    t = (xx / max(w - 1, 1) + yy / max(h - 1, 1)) / 2.0
+def vertical_gradient(w: int, h: int, c0, c1) -> Image.Image:
+    """Top -> bottom linear gradient as an opaque RGBA image."""
+    yy = np.mgrid[0:h, 0:w][0].astype(np.float32)
+    t = yy / max(h - 1, 1)
     grad = np.zeros((h, w, 4), dtype=np.uint8)
     for i in range(3):
         grad[..., i] = (c0[i] + (c1[i] - c0[i]) * t).astype(np.uint8)
     grad[..., 3] = 255
     return Image.fromarray(grad, "RGBA")
-
-
-def rounded_tile(w: int, h: int, size_frac: float, radius_frac: float, color) -> Image.Image:
-    """A centered rounded rectangle on a transparent canvas."""
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    tw, th = int(w * size_frac), int(h * size_frac)
-    x0, y0 = (w - tw) // 2, (h - th) // 2
-    radius = int(min(tw, th) * radius_frac)
-    ImageDraw.Draw(img).rounded_rectangle(
-        [x0, y0, x0 + tw, y0 + th], radius=radius, fill=color
-    )
-    return img
 
 
 def centered_logo(w: int, h: int, logo_frac: float) -> Image.Image:
@@ -81,13 +74,13 @@ def save_json(path, obj):
 def icon_layers(w: int, h: int):
     """Return (front, middle, back) layers, ordered to match layer_names.
 
-    Front is the topmost parallax layer (the logo), Middle the white tile, and
-    Back the brand gradient.
+    Matches the Twozz style: the Back is the dark vertical gradient, and both the
+    Middle and Front parallax layers are the same colour logo (no white tile), so
+    the Apple TV's focus parallax gives the logo subtle depth.
     """
-    back = diagonal_gradient(w, h, PURPLE, BLUE)
-    middle = rounded_tile(w, h, size_frac=0.74, radius_frac=0.18, color=(255, 255, 255, 255))
-    front = centered_logo(w, h, logo_frac=0.46)
-    return front, middle, back
+    back = vertical_gradient(w, h, BG_TOP, BG_BOTTOM)
+    logo = centered_logo(w, h, logo_frac=0.688)
+    return logo.copy(), logo.copy(), back
 
 
 def write_imagestack(stack_name: str, base_w: int, base_h: int, scales):
@@ -116,11 +109,11 @@ def write_imagestack(stack_name: str, base_w: int, base_h: int, scales):
 
 
 def write_top_shelf(name: str, w: int, h: int, file_prefix: str):
-    """Write a 2-scale Top Shelf imageset (gradient banner + centered logo)."""
+    """Write a 2-scale Top Shelf imageset (dark gradient banner + centered logo)."""
     images = []
     for s in (1, 2):
-        bg = diagonal_gradient(w * s, h * s, PURPLE, BLUE)
-        bg.alpha_composite(centered_logo(w * s, h * s, logo_frac=0.58))
+        bg = vertical_gradient(w * s, h * s, BG_TOP, BG_BOTTOM)
+        bg.alpha_composite(centered_logo(w * s, h * s, logo_frac=0.635))
         fname = f"{file_prefix}@{s}x.png"
         save_png(bg, f"{name}.imageset", fname)
         images.append({"filename": fname, "idiom": "tv", "scale": f"{s}x"})

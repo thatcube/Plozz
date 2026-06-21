@@ -1,0 +1,6 @@
+app_identifier("com.plizz.app")
+team_id("N8Z5T4AK3X")
+
+# Apple ID login is not used; authentication is handled by an App Store Connect
+# API key (see the Fastfile / .env.fastlane.example). These are kept here only
+# for reference and for any lane that explicitly opts into user auth.

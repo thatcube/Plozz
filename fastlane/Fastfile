@@ -1,0 +1,105 @@
+# Fastfile — App Store Connect automation for Plizz (tvOS)
+#
+# Authentication uses an App Store Connect API key (no Apple ID / 2FA needed),
+# which is required for unattended runs and CI. Provide these via env vars
+# (see .env.fastlane.example) or your CI secrets:
+#
+#   ASC_KEY_ID       Key ID from App Store Connect > Integrations > App Store Connect API
+#   ASC_ISSUER_ID    Issuer ID from the same page
+#   ASC_KEY_PATH     Path to the downloaded AuthKey_XXXXXX.p8  (keep it OUT of git)
+#
+# Usage (Fastlane installed via Homebrew):
+#   fastlane beta       # build + upload to TestFlight
+#   fastlane build      # archive an .ipa locally, no upload
+#   fastlane release    # build + upload to App Store
+#
+# ONE-TIME SETUP (manual): the App Store Connect API key cannot create the app
+# record itself (Apple exposes no "create app" API and `produce` needs an Apple
+# ID + 2FA). Before the first `beta`, create the app once in the App Store
+# Connect web UI:  Apps > + > New App  ->  Platform: tvOS, Name: Plizz,
+# Bundle ID: com.plizz.app (team N8Z5T4AK3X), SKU: plizz-tvos.
+# The bundle ID registration and distribution signing are handled automatically
+# by `build` via -allowProvisioningUpdates + the API key.
+
+require "shellwords"
+
+APP_IDENTIFIER = "com.plizz.app"
+APP_NAME       = "Plizz"
+SCHEME         = "Plizz"
+XCODEPROJ      = "Plizz.xcodeproj"
+OUTPUT_DIR     = "build"
+# tvOS apps are a distinct App Store "platform"; deliver/pilot default to iOS
+# unless told otherwise, so every upload must specify this explicitly.
+APP_PLATFORM   = "appletvos"
+
+# The host GitHub desktop/CLI app injects safe.bareRepository=explicit via
+# GIT_CONFIG_* env vars, which breaks Swift Package Manager's bare dependency
+# checkouts during xcodebuild. Relax just that one value back to git's default
+# for everything fastlane spawns.
+if ENV["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+  ENV["GIT_CONFIG_VALUE_0"] = "all"
+end
+
+def asc_api_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    key_filepath: ENV.fetch("ASC_KEY_PATH"),
+    in_house: false
+  )
+end
+
+desc "Regenerate the Xcode project from project.yml via XcodeGen"
+lane :generate_project do
+  sh("cd .. && xcodegen generate")
+end
+
+desc "Archive and export a signed App Store .ipa (no upload)"
+lane :build do |options|
+  generate_project
+  # Let Xcode create/download the distribution certificate and provisioning
+  # profile on first run, authenticating with the same App Store Connect API key.
+  prov_args = "-allowProvisioningUpdates"
+  if ENV["ASC_KEY_ID"] && ENV["ASC_ISSUER_ID"] && ENV["ASC_KEY_PATH"]
+    prov_args += " -authenticationKeyPath #{ENV['ASC_KEY_PATH'].shellescape}" \
+                 " -authenticationKeyID #{ENV['ASC_KEY_ID'].shellescape}" \
+                 " -authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID'].shellescape}"
+  end
+  build_app(
+    project: XCODEPROJ,
+    scheme: SCHEME,
+    configuration: "Release",
+    export_method: "app-store",
+    output_directory: OUTPUT_DIR,
+    clean: true,
+    xcargs: prov_args
+  )
+end
+
+desc "Build and upload a new build to TestFlight"
+lane :beta do
+  api_key = asc_api_key
+  build
+  upload_to_testflight(
+    api_key: api_key,
+    app_identifier: APP_IDENTIFIER,
+    app_platform: APP_PLATFORM,
+    skip_waiting_for_build_processing: true,
+    distribute_external: false
+  )
+end
+
+desc "Build and upload to the App Store (no auto-submit for review)"
+lane :release do
+  api_key = asc_api_key
+  build
+  upload_to_app_store(
+    api_key: api_key,
+    app_identifier: APP_IDENTIFIER,
+    platform: APP_PLATFORM,
+    submit_for_review: false,
+    skip_screenshots: true,
+    precheck_include_in_app_purchases: false,
+    force: true
+  )
+end

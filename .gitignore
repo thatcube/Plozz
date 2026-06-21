@@ -23,3 +23,14 @@ Package.resolved
 # Secrets / local config (never commit)
 *.local.xcconfig
 Secrets.plist
+
+# App Store Connect / fastlane secrets (never commit)
+.env.fastlane
+*.p8
+AuthKey_*.p8
+
+# fastlane generated output
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output/
+fastlane/README.md

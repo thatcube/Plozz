@@ -8,7 +8,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: N8Z5T4AK3X
+    CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "3" # Apple TV
     SWIFT_STRICT_CONCURRENCY: complete
 
@@ -27,6 +28,16 @@ targets:
       - path: App/Resources/Assets.xcassets
     info:
       path: App/Resources/Info.plist
+      properties:
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        # Local network access is required for LAN server discovery on tvOS.
+        NSLocalNetworkUsageDescription: "Plizz uses your local network to discover Jellyfin servers automatically."
+        NSBonjourServices:
+          - _jellyfin._tcp
+        # Jellyfin servers are often plain HTTP on the LAN. Allow local networking.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.plizz.app

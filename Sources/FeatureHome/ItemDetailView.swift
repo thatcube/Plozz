@@ -65,6 +65,9 @@ public struct ItemDetailView: View {
                 if let subtitle = item.subtitle {
                     Text(subtitle).font(.title3).foregroundStyle(.secondary)
                 }
+                if !item.ratings.isEmpty {
+                    RatingsBadgeRow(ratings: item.ratings)
+                }
                 if let overview = item.overview {
                     Text(overview)
                         .font(.title3)

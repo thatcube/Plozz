@@ -38,6 +38,7 @@ public struct RootView: View {
                     MainTabView(
                         provider: provider,
                         captionModel: appState.captionModel,
+                        ratingsProvider: appState.ratingsProvider,
                         pendingPlayItemID: Binding(
                             get: { appState.pendingPlayItemID },
                             set: { appState.pendingPlayItemID = $0 }

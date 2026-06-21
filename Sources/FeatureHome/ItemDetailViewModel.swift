@@ -1,8 +1,10 @@
 import Foundation
 import Observation
 import CoreModels
+import RatingsService
 
-/// Loads full detail for an item plus its children (episodes/seasons).
+/// Loads full detail for an item plus its children (episodes/seasons), and
+/// asynchronously enriches it with external ratings (IMDb/RT/Metacritic).
 @MainActor
 @Observable
 public final class ItemDetailViewModel {
@@ -15,10 +17,16 @@ public final class ItemDetailViewModel {
 
     private let provider: any MediaProvider
     private let itemID: String
+    private let ratingsProvider: any ExternalRatingsProviding
 
-    public init(provider: any MediaProvider, itemID: String) {
+    public init(
+        provider: any MediaProvider,
+        itemID: String,
+        ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider()
+    ) {
         self.provider = provider
         self.itemID = itemID
+        self.ratingsProvider = ratingsProvider
     }
 
     public func load() async {
@@ -34,11 +42,23 @@ public final class ItemDetailViewModel {
                 children = []
             }
             state = .loaded(Detail(item: item, children: children))
+            await enrichRatings(for: item)
         } catch let error as AppError {
             state = .failed(error)
         } catch {
             state = .failed(.unknown(""))
         }
+    }
+
+    /// Fetches external ratings off the critical path and merges them into the
+    /// already-loaded detail. Failures are silent — the screen keeps whatever
+    /// backend-native ratings it already has.
+    private func enrichRatings(for item: MediaItem) async {
+        let external = await ratingsProvider.ratings(for: item)
+        guard !external.isEmpty else { return }
+        guard case var .loaded(detail) = state, detail.item.id == item.id else { return }
+        detail.item.ratings = detail.item.ratings.mergedWithAuthoritative(external)
+        state = .loaded(detail)
     }
 
     /// Label for the primary action button, reflecting resume vs. play.

@@ -41,6 +41,14 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// Wide/backdrop artwork.
     public var backdropURL: URL?
 
+    /// External/critical ratings (IMDb, Rotten Tomatoes, …), in their native
+    /// scales. May be enriched asynchronously after the item first loads.
+    public var ratings: [ExternalRating]
+
+    /// External database identifiers (e.g. `["Imdb": "tt0111161", "Tmdb": "278"]`),
+    /// used by enrichment services to look up additional ratings/metadata.
+    public var providerIDs: [String: String]
+
     public init(
         id: String,
         title: String,
@@ -55,7 +63,9 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         playedPercentage: Double? = nil,
         isPlayed: Bool = false,
         posterURL: URL? = nil,
-        backdropURL: URL? = nil
+        backdropURL: URL? = nil,
+        ratings: [ExternalRating] = [],
+        providerIDs: [String: String] = [:]
     ) {
         self.id = id
         self.title = title
@@ -71,6 +81,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.isPlayed = isPlayed
         self.posterURL = posterURL
         self.backdropURL = backdropURL
+        self.ratings = ratings
+        self.providerIDs = providerIDs
     }
 
     /// A human-friendly subtitle line, e.g. `S1 · E3` or the production year.

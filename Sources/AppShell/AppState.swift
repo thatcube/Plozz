@@ -4,6 +4,7 @@ import CoreModels
 import FeatureAuth
 import FeatureDiscovery
 import ProviderJellyfin
+import RatingsService
 import TopShelfKit
 
 /// The app's composition root and single source of truth for session state.
@@ -23,15 +24,23 @@ public final class AppState {
     public var pendingPlayItemID: String?
 
     public let captionModel: CaptionSettingsModel
+
+    /// Provider-agnostic external-ratings enrichment (IMDb/RT/Metacritic via
+    /// OMDb when a key is configured; otherwise a no-op). Injected into item
+    /// detail so ratings are fetched async without blocking the screen.
+    public let ratingsProvider: any ExternalRatingsProviding
+
     private var machine = SessionStateMachine()
     private let sessionStore: SessionPersisting
 
     public init(
         sessionStore: SessionPersisting? = nil,
-        captionModel: CaptionSettingsModel? = nil
+        captionModel: CaptionSettingsModel? = nil,
+        ratingsProvider: (any ExternalRatingsProviding)? = nil
     ) {
         self.sessionStore = sessionStore ?? Self.makeDefaultSessionStore()
         self.captionModel = captionModel ?? CaptionSettingsModel()
+        self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
     }
 
     private static func makeDefaultSessionStore() -> SessionPersisting {

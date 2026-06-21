@@ -89,9 +89,18 @@ public struct PlexProvider: MediaProvider {
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
         let detail = try await client.metadata(ratingKey: itemID)
         guard let media = detail.Media?.first,
-              let part = media.Part?.first,
-              let partKey = part.key,
-              let streamURL = client.streamURL(forPartKey: partKey) else {
+              let part = media.Part?.first else {
+            throw AppError.notFound
+        }
+        // A stable per-(device,item) session id ties the transcode m3u8 to its
+        // segments; deterministic so it's traceable and testable.
+        let transcodeSessionID = "plozz-\(session.deviceID)-\(itemID)"
+        guard let resolved = client.playbackURL(
+            ratingKey: itemID,
+            media: media,
+            part: part,
+            sessionID: transcodeSessionID
+        ) else {
             throw AppError.notFound
         }
         let mappedItem = map(metadata: detail)
@@ -101,13 +110,14 @@ public struct PlexProvider: MediaProvider {
 
         return PlaybackRequest(
             item: mappedItem,
-            streamURL: streamURL,
+            streamURL: resolved.url,
             // Plex correlates timeline reports by ratingKey; a per-play session
             // id isn't required, so reuse the item id for traceability.
             playSessionID: itemID,
             audioTracks: audio,
             subtitleTracks: subs,
-            startPosition: mappedItem.resumePosition ?? 0
+            startPosition: mappedItem.resumePosition ?? 0,
+            isTranscoding: resolved.isTranscoding
         )
     }
 

@@ -12,6 +12,8 @@ public enum AppError: Error, Equatable, Sendable {
     case invalidResponse
     /// Credentials/token rejected (HTTP 401/403). Triggers re-auth.
     case unauthorized
+    /// Username/password sign-in was rejected by the server.
+    case invalidCredentials
     /// The requested resource does not exist (HTTP 404).
     case notFound
     /// Quick Connect is disabled on the server.
@@ -34,6 +36,8 @@ public enum AppError: Error, Equatable, Sendable {
             return "The server sent an unexpected response."
         case .unauthorized:
             return "Your session has expired. Please sign in again."
+        case .invalidCredentials:
+            return "Incorrect username or password. Please try again."
         case .notFound:
             return "We couldn’t find what you were looking for."
         case .quickConnectUnavailable:

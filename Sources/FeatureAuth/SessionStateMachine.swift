@@ -12,7 +12,7 @@ import CoreModels
 ///     │                       ▲
 ///     └──noSession──▶ selectingServer ──serverSelected──▶ authenticating
 ///                          ▲                                   │
-///                          └────────── signedOut ◀─────────────┘ (on success)
+///                          └──── signedOut (cancel/success) ◀──┘
 /// ```
 public enum SessionState: Equatable, Sendable {
     /// App just launched; we haven't checked for a stored session yet.
@@ -72,6 +72,7 @@ public struct SessionStateMachine: Sendable {
             return .authenticating(server)
 
         case (.authenticated, .signedOut),
+             (.authenticating, .signedOut),
              (.failed, .signedOut):
             return .selectingServer
 

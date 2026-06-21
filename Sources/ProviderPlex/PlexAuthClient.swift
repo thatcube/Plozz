@@ -41,12 +41,17 @@ public struct PlexAuthClient: Sendable {
 
     // MARK: PIN flow
 
-    /// `POST /api/v2/pins?strong=true` — issues a new PIN/code pair.
+    /// `POST /api/v2/pins` — issues a new PIN/code pair.
+    ///
+    /// We intentionally do NOT request `strong=true`. A strong PIN returns a
+    /// long, random code meant for app-to-app / deep-link auth — not something
+    /// a person can read off a TV screen and type. The default (non-strong)
+    /// PIN returns the short 4-character code that the plex.tv/link manual-entry
+    /// flow expects.
     public func createPin() async throws -> PlexPinChallenge {
         let endpoint = Endpoint(
             method: .post,
             path: "/api/v2/pins",
-            queryItems: [URLQueryItem(name: "strong", value: "true")],
             headers: deviceProfile.headers()
         )
         let dto = try await http.decode(PlexPinDTO.self, from: endpoint, baseURL: baseURL)

@@ -262,8 +262,10 @@ final class PlexAuthClientTests: XCTestCase {
         XCTAssertEqual(pin.id, 424242)
         XCTAssertEqual(pin.code, "WXYZ")
 
-        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/api/v2/pins"))
-        XCTAssertEqual(query.first(where: { $0.name == "strong" })?.value, "true")
+        // We must NOT request a strong PIN: strong codes are long and not
+        // usable for the plex.tv/link manual-entry flow.
+        let query = stub.queryItems(forPathSuffix: "/api/v2/pins")
+        XCTAssertNil(query?.first(where: { $0.name == "strong" }))
     }
 
     func testPollPinPendingThenClaimed() async throws {

@@ -45,7 +45,7 @@ private struct HomeTab: View {
     let captionSettings: CaptionSettings
     @Binding var pendingPlayItemID: String?
 
-    @State private var path: [MediaItem] = []
+    @State private var path = NavigationPath()
     @State private var playingItem: MediaItem?
 
     var body: some View {
@@ -54,9 +54,16 @@ private struct HomeTab: View {
                 viewModel: HomeViewModel(provider: provider),
                 onSelectItem: { open($0) },
                 onSelectLibrary: { library in
-                    path.append(MediaItem(id: library.id, title: library.title, kind: library.kind))
+                    path.append(library)
                 }
             )
+            .navigationDestination(for: MediaLibrary.self) { library in
+                LibraryBrowseView(
+                    viewModel: LibraryBrowseViewModel(provider: provider, containerID: library.id),
+                    title: library.title,
+                    onSelect: { open($0) }
+                )
+            }
             .navigationDestination(for: MediaItem.self) { item in
                 ItemDetailView(
                     viewModel: ItemDetailViewModel(provider: provider, itemID: item.id),

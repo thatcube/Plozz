@@ -51,6 +51,21 @@ public struct JellyfinProvider: MediaProvider {
         try await client.children(userID: session.userID, parentID: itemID).map(map(item:))
     }
 
+    public func items(in containerID: String, page: PageRequest) async throws -> MediaPage {
+        let response = try await client.items(
+            userID: session.userID,
+            parentID: containerID,
+            startIndex: page.startIndex,
+            limit: page.limit
+        )
+        let items = response.Items.map(map(item:))
+        return MediaPage(
+            items: items,
+            startIndex: page.startIndex,
+            totalCount: response.TotalRecordCount ?? (page.startIndex + items.count)
+        )
+    }
+
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {

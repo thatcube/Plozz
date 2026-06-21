@@ -1,0 +1,236 @@
+import Foundation
+
+// MARK: - Language matching
+
+/// Small, provider-agnostic ISO-639 helper so subtitle/audio language codes can
+/// be compared and normalised without pulling in any platform localisation APIs
+/// at the call site. Jellyfin reports 3-letter codes (`eng`, `fra`) while the
+/// device language is usually 2-letter (`en`, `fr`); both must compare equal.
+public enum LanguageMatch {
+    /// Common ISO-639-2 (both bibliographic *and* terminologic variants) →
+    /// ISO-639-1 mappings. Not exhaustive — unknown codes pass through verbatim.
+    private static let alpha3ToAlpha2: [String: String] = [
+        "eng": "en", "spa": "es", "fra": "fr", "fre": "fr", "deu": "de", "ger": "de",
+        "ita": "it", "por": "pt", "jpn": "ja", "kor": "ko", "zho": "zh", "chi": "zh",
+        "rus": "ru", "ara": "ar", "nld": "nl", "dut": "nl", "swe": "sv", "nor": "no",
+        "dan": "da", "fin": "fi", "pol": "pl", "tur": "tr", "ces": "cs", "cze": "cs",
+        "ell": "el", "gre": "el", "heb": "he", "hin": "hi", "tha": "th", "ukr": "uk",
+        "hun": "hu", "ron": "ro", "rum": "ro", "ind": "id", "vie": "vi", "cat": "ca"
+    ]
+
+    private static let alpha2ToAlpha3: [String: String] = {
+        var map: [String: String] = [:]
+        // Prefer the terminologic ("t") code for the reverse direction where the
+        // language has two ISO-639-2 codes (e.g. fr → fra, not fre).
+        let preferred: [String: String] = [
+            "fr": "fra", "de": "deu", "nl": "nld", "cs": "ces", "el": "ell", "ro": "ron", "zh": "zho"
+        ]
+        for (three, two) in alpha3ToAlpha2 where map[two] == nil {
+            map[two] = three
+        }
+        for (two, three) in preferred { map[two] = three }
+        return map
+    }()
+
+    /// The base language subtag, lowercased, with region/script dropped and any
+    /// known 3-letter code folded to its 2-letter equivalent (`en-US` → `en`,
+    /// `fra` → `fr`). Used as the canonical key for equality comparisons.
+    public static func normalized(_ code: String?) -> String? {
+        guard let code, !code.isEmpty else { return nil }
+        let base = code.lowercased()
+            .split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .first
+            .map(String.init) ?? code.lowercased()
+        return alpha3ToAlpha2[base] ?? base
+    }
+
+    /// Whether two language codes refer to the same language, tolerating
+    /// 2-vs-3-letter and region/script differences.
+    public static func matches(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let a = normalized(lhs), let b = normalized(rhs) else { return false }
+        return a == b
+    }
+
+    /// Best-effort ISO-639-2 (3-letter) form of `code`, as required by some
+    /// server APIs. Unknown/already-3-letter codes pass through unchanged.
+    public static func alpha3(_ code: String) -> String {
+        let base = code.lowercased()
+            .split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .first
+            .map(String.init) ?? code.lowercased()
+        if base.count == 3 { return base }
+        return alpha2ToAlpha3[base] ?? base
+    }
+
+    /// The device's current language as a 2-letter code where possible.
+    public static var deviceLanguageCode: String? {
+        if #available(tvOS 16, macOS 13, iOS 16, *) {
+            if let code = Locale.current.language.languageCode?.identifier {
+                return normalized(code)
+            }
+        }
+        return normalized(Locale.current.identifier)
+    }
+}
+
+// MARK: - Subtitle selection decision (pure, unit-tested)
+
+/// A lightweight, platform-neutral description of one selectable subtitle
+/// option, decoupled from both `MediaTrack` and AVFoundation so the selection
+/// rule can be unit-tested in isolation.
+public struct SubtitleCandidate: Equatable, Sendable {
+    public var id: Int
+    public var languageCode: String?
+    public var isForced: Bool
+    public var isDefault: Bool
+
+    public init(id: Int, languageCode: String?, isForced: Bool = false, isDefault: Bool = false) {
+        self.id = id
+        self.languageCode = languageCode
+        self.isForced = isForced
+        self.isDefault = isDefault
+    }
+}
+
+/// The outcome of the default subtitle-selection rule.
+public enum SubtitleDecision: Equatable, Sendable {
+    /// Show no subtitles (deselect any legible option).
+    case none
+    /// Select the candidate with this `id`.
+    case select(id: Int)
+}
+
+public enum SubtitleSelector {
+    /// Decides which subtitle option (if any) to enable by default for a freshly
+    /// loaded item, given the user's mode and preferred language.
+    ///
+    /// * `.forcedOnly` → prefer a forced option in the preferred language, then
+    ///   any forced option, else nothing.
+    /// * `.all` → prefer a non-forced option in the preferred language, then a
+    ///   forced option in that language, then the stream's default option, else
+    ///   nothing (auto-download, if enabled, will fetch a better match later).
+    public static func decide(
+        candidates: [SubtitleCandidate],
+        mode: CaptionSettings.SubtitleMode,
+        preferredLanguage: String?
+    ) -> SubtitleDecision {
+        guard !candidates.isEmpty else { return .none }
+
+        func matchingLanguage(_ candidate: SubtitleCandidate) -> Bool {
+            LanguageMatch.matches(candidate.languageCode, preferredLanguage)
+        }
+
+        switch mode {
+        case .forcedOnly:
+            let forced = candidates.filter(\.isForced)
+            if let inLanguage = forced.first(where: matchingLanguage) {
+                return .select(id: inLanguage.id)
+            }
+            if let anyForced = forced.first {
+                return .select(id: anyForced.id)
+            }
+            return .none
+
+        case .all:
+            let inLanguage = candidates.filter(matchingLanguage)
+            if let full = inLanguage.first(where: { !$0.isForced }) {
+                return .select(id: full.id)
+            }
+            if let forced = inLanguage.first {
+                return .select(id: forced.id)
+            }
+            if let preset = candidates.first(where: { $0.isDefault && !$0.isForced }) {
+                return .select(id: preset.id)
+            }
+            return .none
+        }
+    }
+}
+
+// MARK: - Existing-subtitle suitability (drives auto-download)
+
+public extension Array where Element == MediaTrack {
+    /// Whether this list already contains a subtitle stream usable for
+    /// `language` (any subtitle when `language` is `nil`). When `false` and
+    /// auto-download is enabled, the player should fetch one in the background.
+    func hasSuitableSubtitle(forLanguage language: String?) -> Bool {
+        let subtitles = filter { $0.kind == .subtitle }
+        guard !subtitles.isEmpty else { return false }
+        guard let language, !language.isEmpty else { return true }
+        return subtitles.contains { LanguageMatch.matches($0.language, language) }
+    }
+}
+
+// MARK: - Remote subtitle search results
+
+/// A subtitle a provider found on a remote subtitle service, available to be
+/// downloaded onto the server. Provider-agnostic mirror of e.g. Jellyfin's
+/// `RemoteSubtitleInfo`.
+public struct RemoteSubtitle: Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var providerName: String?
+    /// Language code as reported by the service (often ISO-639-2, e.g. `eng`).
+    public var language: String?
+    public var format: String?
+    public var communityRating: Double?
+    public var downloadCount: Int?
+    public var isForced: Bool
+    public var isHearingImpaired: Bool
+
+    public init(
+        id: String,
+        name: String,
+        providerName: String? = nil,
+        language: String? = nil,
+        format: String? = nil,
+        communityRating: Double? = nil,
+        downloadCount: Int? = nil,
+        isForced: Bool = false,
+        isHearingImpaired: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.providerName = providerName
+        self.language = language
+        self.format = format
+        self.communityRating = communityRating
+        self.downloadCount = downloadCount
+        self.isForced = isForced
+        self.isHearingImpaired = isHearingImpaired
+    }
+}
+
+public extension Array where Element == RemoteSubtitle {
+    /// Picks the best remote subtitle to download for `language` and `mode`:
+    /// language match first, then forced-ness matching the mode, then the
+    /// highest community rating, then the most downloads. Returns `nil` only
+    /// when the list is empty.
+    func bestMatch(
+        forLanguage language: String?,
+        mode: CaptionSettings.SubtitleMode = .all
+    ) -> RemoteSubtitle? {
+        guard !isEmpty else { return nil }
+        let wantForced = (mode == .forcedOnly)
+        let pool: [RemoteSubtitle]
+        if let language, !language.isEmpty {
+            let inLanguage = filter { LanguageMatch.matches($0.language, language) }
+            pool = inLanguage.isEmpty ? self : inLanguage
+        } else {
+            pool = self
+        }
+        return pool.max { lhs, rhs in
+            if lhs.isForced != rhs.isForced, wantForced {
+                // When forced is desired, a forced candidate sorts higher.
+                return rhs.isForced && !lhs.isForced
+            }
+            if lhs.isForced != rhs.isForced, !wantForced {
+                // When full subs are desired, a non-forced candidate sorts higher.
+                return lhs.isForced && !rhs.isForced
+            }
+            let lr = lhs.communityRating ?? -1, rr = rhs.communityRating ?? -1
+            if lr != rr { return lr < rr }
+            return (lhs.downloadCount ?? -1) < (rhs.downloadCount ?? -1)
+        }
+    }
+}

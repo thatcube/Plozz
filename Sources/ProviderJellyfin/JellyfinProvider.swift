@@ -129,6 +129,16 @@ public struct JellyfinProvider: MediaProvider {
         client.imageURL(itemID: itemID, kind: kind, maxWidth: maxWidth)
     }
 
+    // MARK: Subtitles
+
+    public func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] {
+        try await client.remoteSubtitleSearch(itemID: itemID, language: language).map(map(remoteSubtitle:))
+    }
+
+    public func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {
+        try await client.downloadRemoteSubtitle(itemID: itemID, subtitleID: subtitleID)
+    }
+
     // MARK: - Mapping
 
     private func resolveStreamURL(itemID: String, source: MediaSourceInfo, playSessionID: String?) throws -> URL {
@@ -221,6 +231,20 @@ public struct JellyfinProvider: MediaProvider {
             language: dto.Language,
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false
+        )
+    }
+
+    private func map(remoteSubtitle dto: RemoteSubtitleInfoDto) -> RemoteSubtitle {
+        RemoteSubtitle(
+            id: dto.Id ?? "",
+            name: dto.Name ?? dto.ProviderName ?? "Subtitle",
+            providerName: dto.ProviderName,
+            language: dto.ThreeLetterISOLanguageName,
+            format: dto.Format,
+            communityRating: dto.CommunityRating,
+            downloadCount: dto.DownloadCount,
+            isForced: dto.IsForced ?? false,
+            isHearingImpaired: false
         )
     }
 

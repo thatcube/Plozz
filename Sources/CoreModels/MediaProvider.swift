@@ -55,10 +55,30 @@ public protocol MediaProvider: Sendable {
     /// Report progress so the server keeps resume points in sync.
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws
 
+    // MARK: Subtitles
+
+    /// Search remote subtitle services for subtitles matching `language`
+    /// (an ISO code). Returns candidates that can be downloaded onto the server.
+    func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle]
+
+    /// Ask the server to download a previously-searched remote subtitle and
+    /// attach it to the item, so every client sees it.
+    func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws
+
     // MARK: Images
 
     /// Absolute URL for an item's artwork, or `nil` if unavailable.
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL?
+}
+
+// MARK: - Optional subtitle capability defaults
+//
+// Providers that don't support remote subtitle search/download (or test
+// doubles) inherit safe no-ops, so adding the capability never forces every
+// conformer to implement it.
+public extension MediaProvider {
+    func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] { [] }
+    func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {}
 }
 
 /// A request for one page of a container's children.

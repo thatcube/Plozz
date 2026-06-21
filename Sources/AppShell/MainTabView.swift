@@ -4,6 +4,7 @@ import CoreModels
 import CoreUI
 import FeatureHome
 import FeaturePlayback
+import FeatureSearch
 import FeatureSettings
 import RatingsService
 
@@ -37,6 +38,14 @@ struct MainTabView: View {
                 pendingPlayItemID: $pendingPlayItemID
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
+
+            SearchTab(
+                provider: provider,
+                captionSettings: captionModel.settings,
+                spoilerSettings: spoilerModel.settings,
+                ratingsProvider: ratingsProvider
+            )
+            .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
             SettingsView(
                 captions: captionModel,
@@ -114,6 +123,55 @@ private struct HomeTab: View {
         pendingPlayItemID = nil
         if let item = try? await provider.item(id: id) {
             open(item)
+        }
+    }
+
+    /// Playable leaves go straight to the player; containers push a detail page.
+    private func open(_ item: MediaItem) {
+        switch item.kind {
+        case .movie, .episode, .video:
+            playingItem = item
+        default:
+            path.append(item)
+        }
+    }
+}
+
+/// Search tab with its own navigation stack: Search → Detail and full-screen
+/// player presentation, mirroring `HomeTab`'s wiring.
+private struct SearchTab: View {
+    let provider: any MediaProvider
+    let captionSettings: CaptionSettings
+    let spoilerSettings: SpoilerSettings
+    let ratingsProvider: any ExternalRatingsProviding
+
+    @State private var path = NavigationPath()
+    @State private var playingItem: MediaItem?
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            SearchView(
+                viewModel: SearchViewModel(provider: provider),
+                spoilerSettings: spoilerSettings,
+                onSelect: { open($0) }
+            )
+            .navigationDestination(for: MediaItem.self) { item in
+                ItemDetailView(
+                    viewModel: ItemDetailViewModel(provider: provider, itemID: item.id, ratingsProvider: ratingsProvider),
+                    spoilerSettings: spoilerSettings,
+                    onPlay: { playingItem = $0 },
+                    onSelectChild: { open($0) }
+                )
+            }
+        }
+        .fullScreenCover(item: $playingItem) { item in
+            PlayerView(
+                viewModel: PlayerViewModel(
+                    provider: provider,
+                    itemID: item.id,
+                    captionSettings: captionSettings
+                )
+            )
         }
     }
 

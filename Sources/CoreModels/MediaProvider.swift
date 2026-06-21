@@ -51,6 +51,15 @@ public protocol MediaProvider: Sendable {
     /// the sort means restarting paging from `startIndex` 0.
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage
 
+    // MARK: Search
+
+    /// Search the user's libraries for items matching a free-text query.
+    ///
+    /// Implementations search across the playable content types (movies, series,
+    /// episodes) and return at most `limit` items. Callers debounce input and
+    /// guard against stale responses, so this need only perform a single query.
+    func search(query: String, limit: Int) async throws -> [MediaItem]
+
     // MARK: Playback
 
     /// Resolve a playable stream (+ tracks + resume point) for an item.

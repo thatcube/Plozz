@@ -45,6 +45,8 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
         )
     }
 
+    func search(query: String, limit: Int) async throws -> [MediaItem] { [] }
+
     func playbackInfo(for itemID: String) async throws -> PlaybackRequest { throw AppError.notFound }
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {}
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? { nil }

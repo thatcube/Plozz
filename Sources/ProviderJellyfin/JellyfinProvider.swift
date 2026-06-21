@@ -18,7 +18,8 @@ public struct JellyfinProvider: MediaProvider {
             baseURL: session.server.baseURL,
             deviceProfile: JellyfinDeviceProfile(deviceID: session.deviceID),
             token: session.accessToken,
-            http: http
+            http: http,
+            capabilityProfile: .detected()
         )
     }
 
@@ -58,7 +59,7 @@ public struct JellyfinProvider: MediaProvider {
         let info = try await client.playbackInfo(userID: session.userID, itemID: itemID)
         guard let source = info.MediaSources.first else { throw AppError.notFound }
 
-        let streamURL = try resolveStreamURL(itemID: itemID, source: source)
+        let streamURL = try resolveStreamURL(itemID: itemID, source: source, playSessionID: info.PlaySessionId)
         let mappedItem = map(item: detail)
 
         let streams = source.MediaStreams ?? detail.MediaStreams ?? []
@@ -85,12 +86,17 @@ public struct JellyfinProvider: MediaProvider {
 
     // MARK: - Mapping
 
-    private func resolveStreamURL(itemID: String, source: MediaSourceInfo) throws -> URL {
-        // Prefer server-provided transcode/HLS URL when present (handles
-        // unsupported codecs); otherwise direct-stream the original container.
+    private func resolveStreamURL(itemID: String, source: MediaSourceInfo, playSessionID: String?) throws -> URL {
+        // Prefer the server-provided HLS transcode/remux URL when present: the
+        // server returns one whenever the file can't be direct-played for this
+        // device profile (e.g. MKV, or an unsupported codec). HLS (fMP4 segments,
+        // BreakOnNonKeyFrames) is fully seekable in AVPlayer, which fixes far
+        // seeks that fail on non-fragmented direct streams.
         if let transcoding = source.TranscodingUrl, let url = absoluteURL(fromServerPath: transcoding) {
             return url
         }
+        // DirectPlay: stream the original container as-is. Preferred for local
+        // servers (no transcode, best quality).
         let container = source.Container ?? "mp4"
         let sourceID = source.Id ?? itemID
         guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
@@ -98,11 +104,18 @@ public struct JellyfinProvider: MediaProvider {
         }
         let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
         components.path = basePath + "/Videos/\(itemID)/stream.\(container)"
-        components.queryItems = [
+        var query = [
             URLQueryItem(name: "static", value: "true"),
             URLQueryItem(name: "mediaSourceId", value: sourceID),
             URLQueryItem(name: "api_key", value: session.accessToken)
         ]
+        if let playSessionID, !playSessionID.isEmpty {
+            query.append(URLQueryItem(name: "playSessionId", value: playSessionID))
+        }
+        if let tag = source.ETag, !tag.isEmpty {
+            query.append(URLQueryItem(name: "tag", value: tag))
+        }
+        components.queryItems = query
         guard let url = components.url else { throw AppError.invalidResponse }
         return url
     }

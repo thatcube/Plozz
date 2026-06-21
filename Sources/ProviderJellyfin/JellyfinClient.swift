@@ -13,22 +13,25 @@ public struct JellyfinClient: Sendable {
     public let deviceProfile: JellyfinDeviceProfile
     private let token: String?
     private let http: HTTPClient
+    private let capabilityProfile: JellyfinCapabilityProfile
 
     public init(
         baseURL: URL,
         deviceProfile: JellyfinDeviceProfile,
         token: String? = nil,
-        http: HTTPClient = URLSessionHTTPClient()
+        http: HTTPClient = URLSessionHTTPClient(),
+        capabilityProfile: JellyfinCapabilityProfile = .detected()
     ) {
         self.baseURL = baseURL
         self.deviceProfile = deviceProfile
         self.token = token
         self.http = http
+        self.capabilityProfile = capabilityProfile
     }
 
     /// Returns a copy of this client carrying an auth token.
     public func authenticated(token: String) -> JellyfinClient {
-        JellyfinClient(baseURL: baseURL, deviceProfile: deviceProfile, token: token, http: http)
+        JellyfinClient(baseURL: baseURL, deviceProfile: deviceProfile, token: token, http: http, capabilityProfile: capabilityProfile)
     }
 
     // MARK: Header
@@ -175,12 +178,18 @@ public struct JellyfinClient: Sendable {
     // MARK: Playback
 
     func playbackInfo(userID: String, itemID: String) async throws -> PlaybackInfoResponse {
-        let endpoint = Endpoint(
+        var endpoint = Endpoint(
             method: .post,
             path: "/Items/\(itemID)/PlaybackInfo",
             queryItems: [URLQueryItem(name: "UserId", value: userID)],
             headers: authHeaders
         )
+        endpoint = try endpoint.jsonBody(PlaybackInfoBody(
+            UserId: userID,
+            MaxStreamingBitrate: capabilityProfile.maxStreamingBitrate,
+            AutoOpenLiveStream: true,
+            DeviceProfile: capabilityProfile
+        ))
         return try await http.decode(PlaybackInfoResponse.self, from: endpoint, baseURL: baseURL)
     }
 

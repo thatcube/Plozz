@@ -80,11 +80,23 @@ struct PlaybackInfoResponse: Decodable {
 
 struct MediaSourceInfo: Decodable {
     let Id: String?
+    let ETag: String?
     let TranscodingUrl: String?
+    let TranscodingSubProtocol: String?
     let SupportsDirectPlay: Bool?
     let SupportsDirectStream: Bool?
+    let SupportsTranscoding: Bool?
     let Container: String?
     let MediaStreams: [MediaStreamDto]?
+}
+
+/// Body of `POST /Items/{id}/PlaybackInfo`. Carrying a `DeviceProfile` is what
+/// lets the server choose DirectPlay vs a seekable HLS transcode for this device.
+struct PlaybackInfoBody: Encodable {
+    let UserId: String
+    let MaxStreamingBitrate: Int
+    let AutoOpenLiveStream: Bool
+    let DeviceProfile: JellyfinCapabilityProfile
 }
 
 struct MediaStreamDto: Decodable {

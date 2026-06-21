@@ -12,6 +12,7 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
     var responses: [(suffix: String, stub: Stub)] = []
     var error: AppError?
     private(set) var sentPaths: [String] = []
+    private(set) var sentBodies: [String: Data] = [:]
 
     func stub(pathSuffix: String, json: String, status: Int = 200) {
         responses.append((pathSuffix, Stub(status: status, body: Data(json.utf8))))
@@ -19,6 +20,7 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
 
     func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
         sentPaths.append(endpoint.path)
+        if let body = endpoint.body { sentBodies[endpoint.path] = body }
         if let error { throw error }
         guard let match = responses.first(where: { endpoint.path.hasSuffix($0.suffix) })?.stub else {
             throw AppError.notFound

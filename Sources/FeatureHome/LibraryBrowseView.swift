@@ -12,15 +12,18 @@ import CoreUI
 public struct LibraryBrowseView: View {
     @State private var viewModel: LibraryBrowseViewModel
     private let title: String
+    private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
 
     public init(
         viewModel: LibraryBrowseViewModel,
         title: String,
+        spoilerSettings: SpoilerSettings = .default,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         _viewModel = State(initialValue: viewModel)
         self.title = title
+        self.spoilerSettings = spoilerSettings
         self.onSelect = onSelect
     }
 
@@ -40,7 +43,7 @@ public struct LibraryBrowseView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.rowSpacing) {
                     ForEach(items) { item in
-                        PosterCardView(item: item) { onSelect(item) }
+                        PosterCardView(item: item, spoilerSettings: spoilerSettings) { onSelect(item) }
                             .task { await viewModel.loadMoreIfNeeded(currentItemID: item.id) }
                     }
                 }

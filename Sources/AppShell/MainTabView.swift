@@ -66,6 +66,7 @@ private struct HomeTab: View {
                 LibraryBrowseView(
                     viewModel: LibraryBrowseViewModel(provider: provider, containerID: library.id),
                     title: library.title,
+                    spoilerSettings: spoilerSettings,
                     onSelect: { open($0) }
                 )
             }

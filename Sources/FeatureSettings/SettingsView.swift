@@ -3,42 +3,47 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// Settings: account info, full caption customization, and sign out.
+/// Settings: account management, caption customization, spoiler protection, and
+/// sign out.
 ///
 /// Uses only tvOS-supported controls — `Toggle`, `Picker`, `Button` — since
-/// `Slider` isn't available on tvOS. Caption changes apply immediately and
-/// persist via `CaptionSettingsModel`.
+/// `Slider` isn't available on tvOS. Caption/spoiler changes apply immediately
+/// and persist via their models. The Accounts section lists every signed-in
+/// account and lets the user add another server or remove one.
 public struct SettingsView: View {
     @State private var captions: CaptionSettingsModel
     @State private var spoilers: SpoilerSettingsModel
-    private let userName: String
-    private let serverName: String
-    private let serverURL: String
+    private let accounts: [Account]
+    private let activeAccountID: String?
     private let appVersion: String
     private let appBuild: String
     private let repoURL: String
-    private let onSignOut: () -> Void
+    private let onAddAccount: () -> Void
+    private let onRemoveAccount: (Account) -> Void
+    private let onSignOutAll: () -> Void
 
     public init(
         captions: CaptionSettingsModel,
         spoilers: SpoilerSettingsModel,
-        userName: String,
-        serverName: String,
-        serverURL: String,
+        accounts: [Account],
+        activeAccountID: String?,
         appVersion: String,
         appBuild: String,
         repoURL: String,
-        onSignOut: @escaping () -> Void
+        onAddAccount: @escaping () -> Void,
+        onRemoveAccount: @escaping (Account) -> Void,
+        onSignOutAll: @escaping () -> Void
     ) {
         _captions = State(initialValue: captions)
         _spoilers = State(initialValue: spoilers)
-        self.userName = userName
-        self.serverName = serverName
-        self.serverURL = serverURL
+        self.accounts = accounts
+        self.activeAccountID = activeAccountID
         self.appVersion = appVersion
         self.appBuild = appBuild
         self.repoURL = repoURL
-        self.onSignOut = onSignOut
+        self.onAddAccount = onAddAccount
+        self.onRemoveAccount = onRemoveAccount
+        self.onSignOutAll = onSignOutAll
     }
 
     private let fontScales: [Double] = [0.75, 1.0, 1.25, 1.5, 2.0]
@@ -56,10 +61,17 @@ public struct SettingsView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                Section("Account") {
-                    LabeledContent("Signed in as", value: userName)
-                    LabeledContent("Server", value: serverName)
-                    LabeledContent("Address", value: serverURL)
+                Section {
+                    ForEach(accounts) { account in
+                        accountRow(account)
+                    }
+                    Button(action: onAddAccount) {
+                        Label("Add Account", systemImage: "plus.circle")
+                    }
+                } header: {
+                    Text(accounts.count == 1 ? "Account" : "Accounts")
+                } footer: {
+                    Text("Add another Jellyfin server to switch between libraries.")
                 }
 
                 Section("Captions") {
@@ -119,9 +131,11 @@ public struct SettingsView: View {
                     }
                 }
 
-                Section {
-                    Button(role: .destructive, action: onSignOut) {
-                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                if !accounts.isEmpty {
+                    Section {
+                        Button(role: .destructive, action: onSignOutAll) {
+                            Label("Sign Out of All Accounts", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
                     }
                 }
 
@@ -135,6 +149,34 @@ public struct SettingsView: View {
             }
             .navigationTitle("Settings")
         }
+    }
+
+    private func accountRow(_ account: Account) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(account.userName).font(.headline)
+                    Text(account.server.name)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(account.server.baseURL.absoluteString)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if account.id == activeAccountID {
+                    Label("Active", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.green)
+                }
+            }
+            Button(role: .destructive) {
+                onRemoveAccount(account)
+            } label: {
+                Label("Remove", systemImage: "trash")
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

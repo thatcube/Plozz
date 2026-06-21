@@ -121,7 +121,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         "UserData":{"PlaybackPositionTicks":0}}
         """)
         stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
-        {"MediaSources":[{"Id":"src1","Container":"mkv","SupportsDirectPlay":true,
+        {"MediaSources":[{"Id":"src1","ETag":"etag9","Container":"mp4","SupportsDirectPlay":true,
         "MediaStreams":[{"Index":1,"Type":"Audio","Language":"eng","DisplayTitle":"English"},
         {"Index":2,"Type":"Subtitle","Language":"eng","DisplayTitle":"English (SRT)"}]}],
         "PlaySessionId":"ps1"}
@@ -132,9 +132,83 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(request.playSessionID, "ps1")
         XCTAssertEqual(request.audioTracks.count, 1)
         XCTAssertEqual(request.subtitleTracks.count, 1)
-        XCTAssertTrue(request.streamURL.absoluteString.contains("/Videos/i1/stream.mkv"))
-        XCTAssertTrue(request.streamURL.absoluteString.contains("api_key=TOKEN"))
-        XCTAssertTrue(request.streamURL.absoluteString.contains("mediaSourceId=src1"))
+        let url = request.streamURL.absoluteString
+        XCTAssertTrue(url.contains("/Videos/i1/stream.mp4"))
+        XCTAssertTrue(url.contains("api_key=TOKEN"))
+        XCTAssertTrue(url.contains("mediaSourceId=src1"))
+        XCTAssertTrue(url.contains("playSessionId=ps1"))
+        XCTAssertTrue(url.contains("tag=etag9"))
+    }
+
+    func testPlaybackInfoPrefersTranscodingHLSURL() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0}
+        """)
+        // MKV that the server decided to remux: it returns a relative HLS URL.
+        stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mkv","SupportsDirectPlay":false,
+        "SupportsTranscoding":true,"TranscodingSubProtocol":"hls",
+        "TranscodingUrl":"/videos/i1/master.m3u8?api_key=TOKEN&PlaySessionId=ps1"}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "i1")
+        let url = request.streamURL.absoluteString
+        XCTAssertTrue(url.contains("/videos/i1/master.m3u8"), url)
+        XCTAssertTrue(url.hasPrefix("http://host:8096"), url)
+        XCTAssertFalse(url.contains("static=true"))
+    }
+
+    func testStopReleasesActiveEncoding() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Sessions/Playing/Stopped", json: "{}")
+        stub.stub(pathSuffix: "/Videos/ActiveEncodings", json: "")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.reportPlayback(
+            PlaybackProgress(itemID: "i1", playSessionID: "ps1", positionSeconds: 120, isPaused: true),
+            event: .stop
+        )
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Sessions/Playing/Stopped") })
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Videos/ActiveEncodings") })
+    }
+
+    func testProgressDoesNotReleaseActiveEncoding() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Sessions/Playing/Progress", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.reportPlayback(
+            PlaybackProgress(itemID: "i1", playSessionID: "ps1", positionSeconds: 30, isPaused: false),
+            event: .progress
+        )
+
+        XCTAssertFalse(stub.sentPaths.contains { $0.hasSuffix("/Videos/ActiveEncodings") })
+    }
+
+    func testPlaybackInfoSendsDeviceProfile() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0}
+        """)
+        stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+        _ = try await provider.playbackInfo(for: "i1")
+
+        let bodyEntry = try XCTUnwrap(stub.sentBodies.first { $0.key.hasSuffix("/Items/i1/PlaybackInfo") })
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyEntry.value) as? [String: Any])
+        XCTAssertEqual(json["UserId"] as? String, "u1")
+        XCTAssertEqual(json["AutoOpenLiveStream"] as? Bool, true)
+        let deviceProfile = try XCTUnwrap(json["DeviceProfile"] as? [String: Any])
+        let direct = try XCTUnwrap(deviceProfile["DirectPlayProfiles"] as? [[String: Any]])
+        XCTAssertFalse(direct.isEmpty)
+        XCTAssertNotNil(deviceProfile["TranscodingProfiles"])
     }
 }
 

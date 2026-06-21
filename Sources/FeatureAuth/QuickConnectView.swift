@@ -21,6 +21,9 @@ public struct QuickConnectView: View {
     private let onCancel: () -> Void
     private let secondaryAction: SecondaryAction?
 
+    @FocusState private var focused: Control?
+    private enum Control: Hashable { case cancel, retry, secondary }
+
     public init(
         viewModel: QuickConnectViewModel,
         serverName: String,
@@ -31,6 +34,11 @@ public struct QuickConnectView: View {
         self.serverName = serverName
         self.onCancel = onCancel
         self.secondaryAction = secondaryAction
+    }
+
+    private func cancel() {
+        viewModel.cancel()
+        onCancel()
     }
 
     public var body: some View {
@@ -53,15 +61,21 @@ public struct QuickConnectView: View {
                 Button {
                     secondaryAction.handler()
                 } label: {
-                    Text(secondaryAction.title).font(.callout)
+                    Label(secondaryAction.title, systemImage: "person.fill")
+                        .font(.callout)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .buttonStyle(.bordered)
+                .focused($focused, equals: .secondary)
                 .padding(.top, 4)
             }
         }
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Default focus lands on Cancel, not the low-priority sign-in link, so a
+        // press of the remote backs out rather than opening password entry.
+        .defaultFocus($focused, .cancel)
+        // The remote's Menu/back button should return to the server picker.
+        .onExitCommand { cancel() }
         .onAppear { viewModel.start() }
         .onDisappear { viewModel.cancel() }
     }
@@ -108,11 +122,11 @@ public struct QuickConnectView: View {
     private var controls: some View {
         HStack(spacing: 24) {
             Button(role: .cancel) {
-                viewModel.cancel()
-                onCancel()
+                cancel()
             } label: {
                 Text("Cancel").frame(minWidth: 200)
             }
+            .focused($focused, equals: .cancel)
 
             if case .error = viewModel.phase {
                 Button {
@@ -121,6 +135,7 @@ public struct QuickConnectView: View {
                     Text("Try Again").frame(minWidth: 200)
                 }
                 .buttonStyle(.borderedProminent)
+                .focused($focused, equals: .retry)
             }
         }
     }

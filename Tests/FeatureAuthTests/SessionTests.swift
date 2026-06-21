@@ -42,6 +42,13 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .selectingServer)
     }
 
+    func testCancelFromAuthenticatingReturnsToPicker() {
+        // Cancel/Menu on the auth screen must back out to the picker.
+        var m = SessionStateMachine(state: .authenticating(server))
+        m.apply(.signedOut)
+        XCTAssertEqual(m.state, .selectingServer)
+    }
+
     func testIllegalTransitionIsIgnored() {
         var m = SessionStateMachine(state: .selectingServer)
         m.apply(.authenticated(session)) // not legal from selectingServer

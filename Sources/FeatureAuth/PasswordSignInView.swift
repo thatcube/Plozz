@@ -34,10 +34,11 @@ public struct PasswordSignInView: View {
                     .frame(maxWidth: 900)
             }
 
-            VStack(spacing: 20) {
+            // A Form gives the native tvOS grouped-row appearance and the
+            // standard full-screen keyboard when a field is selected.
+            Form {
                 TextField("Username", text: $viewModel.username)
                     .textContentType(.username)
-                    .textInputAutocapitalization(.never)
                     .submitLabel(.next)
                     .focused($focusedField, equals: .username)
                     .onSubmit { focusedField = .password }
@@ -48,7 +49,7 @@ public struct PasswordSignInView: View {
                     .focused($focusedField, equals: .password)
                     .onSubmit { viewModel.submit() }
             }
-            .frame(maxWidth: 700)
+            .frame(maxWidth: 700, maxHeight: 320)
 
             if case let .error(message) = viewModel.phase {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -60,8 +61,7 @@ public struct PasswordSignInView: View {
 
             HStack(spacing: 24) {
                 Button(role: .cancel) {
-                    viewModel.cancel()
-                    onBack()
+                    back()
                 } label: {
                     Text("Back").frame(minWidth: 200)
                 }
@@ -84,8 +84,15 @@ public struct PasswordSignInView: View {
         }
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The remote's Menu/back button returns to the Quick Connect screen.
+        .onExitCommand { back() }
         .onAppear { focusedField = .username }
         .onDisappear { viewModel.cancel() }
+    }
+
+    private func back() {
+        viewModel.cancel()
+        onBack()
     }
 }
 

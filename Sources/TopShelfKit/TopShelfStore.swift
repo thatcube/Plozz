@@ -5,7 +5,7 @@ import Foundation
 public enum TopShelf {
     /// App Group shared between the app and the Top Shelf extension. Must match
     /// the `com.apple.security.application-groups` entitlement on both targets.
-    public static let appGroupID = "group.com.plozz.app"
+    public static let appGroupID = "group.com.thatcube.Plozz"
 
     /// File name of the snapshot inside the shared container.
     public static let snapshotFileName = "topshelf-snapshot.json"

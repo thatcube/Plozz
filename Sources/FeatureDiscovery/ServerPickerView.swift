@@ -91,7 +91,7 @@ public struct ServerPickerView: View {
                 Label("Your saved server above is online and ready.", systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
             } else {
-                Label("No servers found. Enter an address below.", systemImage: "magnifyingglass")
+                Label("No servers found yet. Make sure your Jellyfin server is on and that Plozz is allowed Local Network access (tvOS Settings ▸ General ▸ Privacy), then rescan — or enter an address below.", systemImage: "magnifyingglass")
                     .foregroundStyle(.secondary)
             }
         }

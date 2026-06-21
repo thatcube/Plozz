@@ -118,6 +118,19 @@ public extension URLSession {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
     }
+
+    /// Session for probing discovery candidates: very short timeouts so we can
+    /// race several candidate URLs per server and fail fast on the wrong ones
+    /// without stalling the scan. Does not wait for connectivity.
+    static var plozzDiscovery: URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 2.5
+        config.timeoutIntervalForResource = 3
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.waitsForConnectivity = false
+        config.allowsConstrainedNetworkAccess = true
+        return URLSession(configuration: config)
+    }
 }
 
 public extension JSONDecoder {

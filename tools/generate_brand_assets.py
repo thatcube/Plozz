@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOGO_SVG = os.path.join(REPO, "App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg")
-BRAND = os.path.join(REPO, "App/Resources/Assets.xcassets/AppIcon.brandassets")
+BRAND = os.path.join(REPO, "App/Resources/Assets.xcassets/App Icon & Top Shelf Image.brandassets")
 
 # Jellyfin brand gradient endpoints (purple -> blue).
 PURPLE = (170, 92, 195)

@@ -15,12 +15,12 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>$(MARKETING_VERSION)</string>
+	<string>0.1</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.plozz.app.deeplink</string>
+			<string>com.thatcube.Plozz.deeplink</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>plozz</string>

@@ -81,7 +81,7 @@ public struct ServerPickerView: View {
                 Label("Searching for Jellyfin servers…", systemImage: "antenna.radiowaves.left.and.right")
                     .foregroundStyle(.secondary)
             } else {
-                Label("No servers found. Enter an address below.", systemImage: "magnifyingglass")
+                Label("No servers found yet. Make sure your Jellyfin server is on and that Plozz is allowed Local Network access (tvOS Settings ▸ General ▸ Privacy), then rescan — or enter an address below.", systemImage: "magnifyingglass")
                     .foregroundStyle(.secondary)
             }
         }

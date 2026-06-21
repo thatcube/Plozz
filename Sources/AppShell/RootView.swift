@@ -28,16 +28,13 @@ public struct RootView: View {
                 LaunchView()
 
             case let .onboarding(.selectingServer, canReturnToApp):
-                ServerPickerView { server in
-                    appState.selectServer(server)
-                }
-                // When adding another account, allow backing out to the app.
-                .overlay(alignment: .topLeading) {
-                    if canReturnToApp {
-                        Button("Cancel") { appState.cancelAuthentication() }
-                            .padding()
-                    }
-                }
+                AddAccountView(
+                    deviceID: appState.deviceID,
+                    canReturnToApp: canReturnToApp,
+                    onJellyfinServerSelected: { server in appState.selectServer(server) },
+                    onPlexAuthenticated: { session in appState.didAuthenticatePlex(session) },
+                    onCancel: { appState.cancelAuthentication() }
+                )
 
             case let .onboarding(.authenticating(server), _):
                 AuthView(

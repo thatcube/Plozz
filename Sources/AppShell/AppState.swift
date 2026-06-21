@@ -4,6 +4,7 @@ import CoreModels
 import FeatureAuth
 import FeatureDiscovery
 import ProviderJellyfin
+import ProviderPlex
 import RatingsService
 import TopShelfKit
 
@@ -71,13 +72,15 @@ public final class AppState {
         #endif
     }
 
-    /// Registers the providers this build links. Adding Plex (branch G) is a
-    /// single additional `register(.plex, …)` here — nothing else in core
-    /// changes.
+    /// Registers the providers this build links. Each backend is a single
+    /// `register(kind, …)` line; nothing else in core changes.
     private static func makeDefaultRegistry() -> ProviderRegistry {
         let registry = ProviderRegistry()
         registry.register(.jellyfin) { session in
             JellyfinProvider(session: session)
+        }
+        registry.register(.plex) { session in
+            PlexProvider(session: session)
         }
         return registry
     }
@@ -150,6 +153,18 @@ public final class AppState {
         }
         reloadAccounts()
         apply(.accountAuthenticated)
+    }
+
+    /// Completes a Plex sign-in started from the provider chooser.
+    ///
+    /// The Plex PIN-link flow resolves the chosen server only *after* the user
+    /// links the code, so — unlike the Jellyfin path — no server was selected up
+    /// front. Drive the state machine through `.serverSelected` first so the
+    /// subsequent `.accountAuthenticated` transition is legal, then persist the
+    /// account exactly like any other provider.
+    public func didAuthenticatePlex(_ session: UserSession) {
+        apply(.serverSelected(session.server))
+        didAuthenticate(session)
     }
 
     /// Begins adding another account from inside the signed-in app.

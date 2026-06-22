@@ -65,7 +65,8 @@ struct SeriesDetailView: View {
                     spoilerSettings: spoilerSettings,
                     playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                     onPlay: playTarget.map { target in { onPlay(target) } },
-                    onPlayTrailer: trailerButtonAction
+                    onPlayTrailer: trailerButtonAction,
+                    fallbackTechnicalBadges: representativeTechnicalBadges
                 )
 
                 if !seasons.isEmpty {
@@ -179,6 +180,17 @@ struct SeriesDetailView: View {
             return episodes
         }
         return seasons.isEmpty ? looseEpisodes : []
+    }
+
+    /// A representative tech-badge set (best resolution/HDR/audio) derived from
+    /// every episode loaded so far. The series/season hero has no media file of
+    /// its own, so this summarises the show's peak capabilities — and because it
+    /// aggregates across all loaded seasons, it only grows toward the true peak
+    /// as more seasons are browsed.
+    private var representativeTechnicalBadges: [MediaBadge] {
+        let loaded = viewModel.seasonEpisodes.values.flatMap { $0 }
+        let episodes = loaded.isEmpty ? looseEpisodes : loaded
+        return episodes.representativeTechnicalBadges
     }
 
     /// Header for the episode rail. A selected season's name is already shown on

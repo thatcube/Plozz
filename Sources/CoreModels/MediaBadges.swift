@@ -144,9 +144,7 @@ public extension MediaSourceMetadata {
         badges.append(contentsOf: dynamicRangeBadges)
         badges.append(contentsOf: audioBadges)
         return badges
-    }
-
-    /// A surround-channel label (`7.1`, `5.1`) from a layout string or channel
+    }    /// A surround-channel label (`7.1`, `5.1`) from a layout string or channel
     /// count. Returns `nil` for stereo/mono (not a highlight) or unknown.
     private static func surroundLabel(channelLayout: String?, channels: Int?) -> String? {
         if let layout = channelLayout?.lowercased() {
@@ -193,6 +191,111 @@ public extension MediaItem {
         if let runtimeText = runtime?.runtimeBadgeText { parts.append(runtimeText) }
         parts.append(contentsOf: genres.prefix(maxGenres))
         return parts
+    }
+}
+
+// MARK: - Representative badges for a collection (series ← episodes)
+
+public extension Sequence where Element == MediaItem {
+    /// A representative technical-badge summary for a group of items — typically
+    /// every loaded episode of a series or season. It reports the single best
+    /// resolution, dynamic range and audio capabilities found anywhere in the
+    /// group, mirroring how Apple TV summarises a show's top capabilities on its
+    /// detail page (e.g. a show with one Dolby Vision / Atmos episode reads as
+    /// "4K · Dolby Vision · Dolby Atmos"). Empty when no item carries stream
+    /// metadata, so a series whose episodes lack media info shows nothing.
+    var representativeTechnicalBadges: [MediaBadge] {
+        MediaSourceMetadata.representativeTechnicalBadges(from: compactMap(\.mediaInfo))
+    }
+}
+
+public extension MediaSourceMetadata {
+    /// The best-of-each-category technical badge set across many sources. Unlike
+    /// a single item's `technicalBadges`, this maximises resolution, dynamic
+    /// range and audio independently so the summary reflects the group's peak
+    /// capabilities rather than any one file's.
+    static func representativeTechnicalBadges(from sources: [MediaSourceMetadata]) -> [MediaBadge] {
+        guard !sources.isEmpty else { return [] }
+        var badges: [MediaBadge] = []
+
+        if let resolution = sources
+            .compactMap(\.resolutionBadge)
+            .max(by: { resolutionRank($0.label) < resolutionRank($1.label) }) {
+            badges.append(resolution)
+        }
+
+        if let range = sources
+            .flatMap(\.dynamicRangeBadges)
+            .max(by: { dynamicRangeRank($0.label) < dynamicRangeRank($1.label) }) {
+            badges.append(range)
+        }
+
+        // Maximise the headline audio format and the surround layout separately,
+        // then suppress the channel badge when the winning format already implies
+        // surround (Atmos/DTS:X/TrueHD), matching the single-item rule.
+        let audioBadges = sources.flatMap(\.audioBadges)
+        let bestFormat = audioBadges
+            .filter { audioFormatRank($0.label) > 0 }
+            .max(by: { audioFormatRank($0.label) < audioFormatRank($1.label) })
+        let bestChannels = audioBadges
+            .filter { channelRank($0.label) > 0 }
+            .max(by: { channelRank($0.label) < channelRank($1.label) })
+        if let bestFormat {
+            badges.append(bestFormat)
+            if !formatImpliesSurround(bestFormat.label), let bestChannels {
+                badges.append(bestChannels)
+            }
+        } else if let bestChannels {
+            badges.append(bestChannels)
+        }
+
+        return badges
+    }
+
+    private static func resolutionRank(_ label: String) -> Int {
+        switch label {
+        case "4K": return 5
+        case "1440p": return 4
+        case "1080p": return 3
+        case "720p": return 2
+        case "SD": return 1
+        default: return 0
+        }
+    }
+
+    private static func dynamicRangeRank(_ label: String) -> Int {
+        switch label {
+        case "Dolby Vision": return 5
+        case "HDR10+": return 4
+        case "HDR10": return 3
+        case "HLG": return 2
+        case "HDR": return 1
+        default: return 0
+        }
+    }
+
+    private static func audioFormatRank(_ label: String) -> Int {
+        switch label {
+        case "Dolby Atmos": return 6
+        case "DTS:X": return 5
+        case "Dolby TrueHD": return 4
+        case "DTS-HD": return 3
+        case "Dolby Digital+": return 2
+        case "Dolby Digital": return 1
+        default: return 0
+        }
+    }
+
+    private static func channelRank(_ label: String) -> Int {
+        switch label {
+        case "7.1": return 2
+        case "5.1": return 1
+        default: return 0
+        }
+    }
+
+    private static func formatImpliesSurround(_ label: String) -> Bool {
+        label == "Dolby Atmos" || label == "DTS:X" || label == "Dolby TrueHD"
     }
 }
 

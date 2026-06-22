@@ -115,6 +115,51 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertTrue(series.technicalBadges.isEmpty)
     }
 
+    // MARK: Representative (series ← episodes) aggregation
+
+    func testRepresentativeBadgesPicksBestOfEachCategory() {
+        let episodes = [
+            // 1080p SDR stereo.
+            MediaItem(id: "1", title: "E1", kind: .episode,
+                      mediaInfo: .init(video: .init(width: 1920, height: 1080),
+                                       audio: .init(codec: "aac", channels: 2))),
+            // 4K Dolby Vision, Dolby Digital+ 5.1.
+            MediaItem(id: "2", title: "E2", kind: .episode,
+                      mediaInfo: .init(video: .init(width: 3840, height: 2160, videoRangeType: "DOVI"),
+                                       audio: .init(codec: "eac3", channels: 6, channelLayout: "5.1"))),
+            // 1080p HDR10, Dolby Atmos.
+            MediaItem(id: "3", title: "E3", kind: .episode,
+                      mediaInfo: .init(video: .init(width: 1920, height: 1080, videoRange: "HDR", videoRangeType: "HDR10"),
+                                       audio: .init(codec: "eac3", profile: "Dolby Atmos", channels: 8))),
+        ]
+        // 4K (best resolution), Dolby Vision (best range), Dolby Atmos (best
+        // audio, which implies surround so no channel badge).
+        XCTAssertEqual(episodes.representativeTechnicalBadges.map(\.label),
+                       ["4K", "Dolby Vision", "Dolby Atmos"])
+    }
+
+    func testRepresentativeBadgesAddSurroundWhenFormatDoesNotImplyIt() {
+        let episodes = [
+            MediaItem(id: "1", title: "E1", kind: .episode,
+                      mediaInfo: .init(video: .init(width: 1920, height: 1080),
+                                       audio: .init(codec: "eac3", channels: 6, channelLayout: "5.1"))),
+            MediaItem(id: "2", title: "E2", kind: .episode,
+                      mediaInfo: .init(audio: .init(codec: "eac3", channels: 8, channelLayout: "7.1"))),
+        ]
+        // Dolby Digital+ doesn't imply surround, so the best channel layout (7.1)
+        // is added alongside it.
+        XCTAssertEqual(episodes.representativeTechnicalBadges.map(\.label),
+                       ["1080p", "Dolby Digital+", "7.1"])
+    }
+
+    func testRepresentativeBadgesEmptyWhenNoMediaInfo() {
+        let episodes = [
+            MediaItem(id: "1", title: "E1", kind: .episode),
+            MediaItem(id: "2", title: "E2", kind: .episode),
+        ]
+        XCTAssertTrue(episodes.representativeTechnicalBadges.isEmpty)
+    }
+
     // MARK: Rating badge
 
     func testRatingBadgeFromOfficialRating() {

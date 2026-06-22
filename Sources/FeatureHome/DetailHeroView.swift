@@ -27,6 +27,11 @@ struct DetailHeroView: View {
     let onPlay: (() -> Void)?
     /// When non-`nil`, a secondary "Trailer" button is shown next to Play.
     var onPlayTrailer: (() -> Void)? = nil
+    /// Technical badges to show when the focused item carries none of its own —
+    /// a series or season hero has no media file, so the parent derives a
+    /// representative set from the loaded episodes (best resolution/HDR/audio)
+    /// and passes it here so a show still advertises 4K/Dolby Vision/Atmos.
+    var fallbackTechnicalBadges: [MediaBadge] = []
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
@@ -38,7 +43,12 @@ struct DetailHeroView: View {
     /// rating still shows while scrubbing episodes — matching Apple TV.
     private var featureBadges: [MediaBadge] {
         let rating = item.ratingBadge ?? backdrop.ratingBadge
-        return (rating.map { [$0] } ?? []) + item.technicalBadges
+        // Prefer the focused item's own tech badges; fall back to the derived
+        // series-level set for a series/season hero (or an episode whose stream
+        // info hasn't loaded), so tech badges are present on every kind.
+        let ownTech = item.technicalBadges
+        let tech = ownTech.isEmpty ? fallbackTechnicalBadges : ownTech
+        return (rating.map { [$0] } ?? []) + tech
     }
 
     /// External ratings to show. Falls back to the backdrop item (the series)

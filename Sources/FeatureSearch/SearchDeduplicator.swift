@@ -60,6 +60,14 @@ public enum SearchDeduplicator {
     }
 
     private static func titleIdentity(for item: MediaItem) -> SearchIdentity? {
+        // Title-based dedup is only safe for **movies**. Two films with the same
+        // title and year are almost certainly the same release. Series must NOT
+        // be matched by title: shows with the same name are routinely different
+        // productions (anime vs live-action, original vs remake). When year
+        // metadata is wrong on any server, a title+year match silently collapses
+        // two distinct series into one card. Series identity must rely solely on
+        // external catalogue IDs (IMDb/TMDb/TVDb).
+        guard item.kind == .movie else { return nil }
         guard let year = item.productionYear else { return nil }
         let normalized = normalizedTitle(item.title)
         guard !normalized.isEmpty else { return nil }

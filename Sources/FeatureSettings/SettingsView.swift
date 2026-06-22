@@ -150,6 +150,7 @@ public struct SettingsView: View {
                     HStack(spacing: 8) {
                         Spacer(minLength: 0)
                         Label("Add Account", systemImage: "plus.circle")
+                        Spacer(minLength: 0)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -103,6 +103,8 @@ public struct SettingsView: View {
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 40)
             }
+            // Never clip a focused control's lift, shadow or border.
+            .scrollClipDisabled()
             .task { await reloadLibraries() }
         }
     }

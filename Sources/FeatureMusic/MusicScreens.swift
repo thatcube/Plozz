@@ -39,6 +39,8 @@ struct MusicLandingView: View {
                 }
                 .padding(.vertical, PlozzTheme.Metrics.rowSpacing)
             }
+            // Never clip a focused card's lift, shadow or border.
+            .scrollClipDisabled()
         }
         .navigationTitle("Music")
         .task { if case .idle = viewModel.state { await viewModel.load() } }
@@ -47,7 +49,7 @@ struct MusicLandingView: View {
     private var entryTiles: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Browse")
-                .font(.title2.weight(.semibold))
+                .font(.system(size: 32, weight: .bold))
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 28) {
@@ -59,6 +61,8 @@ struct MusicLandingView: View {
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 12)
             }
+            // Never clip a focused tile's lift, shadow or border.
+            .scrollClipDisabled()
         }
     }
 }
@@ -89,7 +93,7 @@ private struct MusicRow<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text(title).font(.title2.weight(.semibold))
+                Text(title).font(.system(size: 32, weight: .bold))
                 Spacer()
                 if let seeAll {
                     Button("See All", action: seeAll)
@@ -106,6 +110,8 @@ private struct MusicRow<Content: View>: View {
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, PlozzTheme.Metrics.railVerticalPadding)
             }
+            // Never clip a focused card's lift, shadow or border.
+            .scrollClipDisabled()
         }
     }
 }
@@ -132,6 +138,8 @@ struct MusicGridView: View {
                         .padding()
                 }
             }
+            // Never clip a focused card's lift, shadow or border.
+            .scrollClipDisabled()
         }
         .navigationTitle(title)
         .task { await viewModel.loadFirstPageIfNeeded() }
@@ -217,7 +225,7 @@ struct ArtistDetailView: View {
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
 
-                Text("Albums").font(.title2.weight(.semibold))
+                Text("Albums").font(.system(size: 32, weight: .bold))
                     .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
 
                 LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.rowSpacing) {
@@ -230,6 +238,7 @@ struct ArtistDetailView: View {
             .padding(.vertical, PlozzTheme.Metrics.rowSpacing)
         }
         .navigationTitle(viewModel.artist.name)
+        .scrollClipDisabled()
         .task { await viewModel.load() }
     }
 }
@@ -253,6 +262,7 @@ struct AlbumDetailView: View {
             .padding(PlozzTheme.Metrics.screenPadding)
         }
         .navigationTitle(viewModel.album.title)
+        .scrollClipDisabled()
         .task { await viewModel.load() }
     }
 
@@ -315,6 +325,7 @@ struct PlaylistDetailView: View {
             .padding(PlozzTheme.Metrics.screenPadding)
         }
         .navigationTitle(viewModel.playlist.title)
+        .scrollClipDisabled()
         .task { await viewModel.load() }
     }
 

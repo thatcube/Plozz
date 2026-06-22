@@ -135,6 +135,7 @@ public struct ProfileEditorView: View {
                                     .tag(String?.some(account.id))
                             }
                         }
+                        .pickerStyle(.navigationLink)
                     } header: {
                         Text("Linked Account")
                     } footer: {
@@ -164,6 +165,7 @@ public struct ProfileEditorView: View {
                 }
             }
         }
+        .frame(minWidth: 1500, minHeight: 920)
     }
 
     private var avatarGrid: some View {
@@ -269,6 +271,7 @@ public struct ProfileEditorView: View {
                             .tag(String?.some(user.id))
                     }
                 }
+                .pickerStyle(.navigationLink)
             }
         } header: {
             Text("Plex User")

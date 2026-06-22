@@ -88,6 +88,10 @@ public final class PlayerViewModel {
     /// Guards the automatic transcode fallback so it only ever fires once — a
     /// second failure surfaces the error instead of looping.
     private var hasAttemptedTranscodeFallback = false
+    /// Tracks whether the first routed engine has been committed. We avoid
+    /// bumping `engineToken` for this first selection to prevent an unnecessary
+    /// host re-build during initial SwiftUI bring-up.
+    private var hasCommittedInitialEngine = false
 
     /// Current in-player track-menu selection, so the menu can show a checkmark.
     /// `selectedSubtitleTrackID == nil` represents "Off".
@@ -154,6 +158,25 @@ public final class PlayerViewModel {
         currentEngineKind = kind
         configureEngineCallbacks()
         engineToken = UUID()
+    }
+
+    /// Commits the first routed engine without forcing a host `.id` rebuild.
+    /// Subsequent swaps use the normal token-bumping `switchEngine` path.
+    private func commitEngineForPlayback(_ kind: PlaybackEngineKind) {
+        guard hasCommittedInitialEngine else {
+            hasCommittedInitialEngine = true
+            guard kind != currentEngineKind else {
+                plozzTrace("initial engine commit: already \(kind); no host rebuild")
+                return
+            }
+            plozzTrace("initial engine commit: \(currentEngineKind) -> \(kind); no token bump")
+            engine.stop()
+            engine = makeEngine(kind)
+            currentEngineKind = kind
+            configureEngineCallbacks()
+            return
+        }
+        switchEngine(to: kind)
     }
 
     /// The engine to try when the current one fails: the opposite engine, but
@@ -242,11 +265,7 @@ public final class PlayerViewModel {
         startPosition: TimeInterval
     ) async {
         plozzTrace("playResolved: engineKind=\(engineKind) start=\(startPosition) (current=\(currentEngineKind))")
-        switchEngine(to: engineKind)
-        // Make diagnostics available immediately — the overlay can now show the
-        // engine + source facts during loading and even if load() never reaches
-        // ready (the user's "let me see why it failed" request).
-        diagnosticsToken = UUID()
+        commitEngineForPlayback(engineKind)
         // Arm the stall watchdog around load() so a hang that never reports an
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)
@@ -255,6 +274,9 @@ public final class PlayerViewModel {
         await engine.load(request: request, startPosition: startPosition)
         plozzTrace("playResolved: engine.load() RETURNED; setting phase=.ready")
         phase = .ready
+        // Publish diagnostics after the engine load attempt returns, so the
+        // diagnostics sampler doesn't churn SwiftUI layout during mpv init.
+        diagnosticsToken = UUID()
         plozzTrace("playResolved: phase=.ready set; about to report(.start)")
         await report(event: .start, isPaused: false)
         plozzTrace("playResolved: report(.start) done")

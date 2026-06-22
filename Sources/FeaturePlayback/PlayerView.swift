@@ -65,11 +65,9 @@ public struct PlayerView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            // Show diagnostics in every phase (loading / ready / failed), not just
-            // while playing, so the user can see the Engine + Source + codec rows
-            // when a file is stuck loading or has failed — the key signal for
-            // why a particular file won't play.
-            if showDiagnostics {
+            // Keep diagnostics off during load/failure while mpv is initializing;
+            // this avoids extra SwiftUI preference/layout churn on the crash path.
+            if showDiagnostics, viewModel.phase == .ready {
                 PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
                     .environment(\.themePalette, themePalette)
                     .allowsHitTesting(false)

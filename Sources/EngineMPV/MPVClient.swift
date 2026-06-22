@@ -42,6 +42,16 @@ final class MPVClient: @unchecked Sendable {
         return mpv_initialize(handle)
     }
 
+    /// Runs `mpv_initialize` off the main queue. This avoids forcing renderer
+    /// bring-up in the same main-thread turn as SwiftUI layout reconciliation.
+    func initializeAsync() async -> Int32 {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: self.initialize())
+            }
+        }
+    }
+
     /// Tears the handle down. After this the client is inert until `create()`.
     func destroy() {
         lock.lock()

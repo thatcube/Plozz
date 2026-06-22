@@ -62,7 +62,7 @@ final class MPVRenderView: UIView {
         super.init(frame: .zero)
         backgroundColor = .black
         metalLayer.backgroundColor = UIColor.black.cgColor
-        metalLayer.framebufferOnly = true
+        metalLayer.framebufferOnly = false
         metalLayer.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : UIScreen.main.scale
         if metalLayer.device == nil {
             metalLayer.device = MTLCreateSystemDefaultDevice()

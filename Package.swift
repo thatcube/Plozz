@@ -235,7 +235,6 @@ let package = Package(
                 "CoreModels",
                 "CoreNetworking",
                 "CoreUI",
-                "EngineVLCKit",
                 "EngineMPV",
                 "FeatureDiscovery",
                 "FeatureAuth",
@@ -408,13 +407,13 @@ let package = Package(
         ),
         .binaryTarget(
             name: "lcms2",
-            url: "https://github.com/mpvkit/lcms2-build/releases/download/2.17.0/lcms2.xcframework.zip",
-            checksum: "dc0dce0606f6ab6841a8ec5a6bd4448e2f3ef00661a050460f806c9393dc6982"
+            url: "https://github.com/mpvkit/libplacebo-build/releases/download/7.349.0/lcms2.xcframework.zip",
+            checksum: "bd2c27366f8b7adfe7bf652a922599891c55b82f5c519bcc4eece1ccff57c889"
         ),
         .binaryTarget(
             name: "Libplacebo",
-            url: "https://github.com/mpvkit/libplacebo-build/releases/download/7.360.1/Libplacebo.xcframework.zip",
-            checksum: "2fa3d54cb81f302d6f11c7b2f509af30944381c3b11ee9d35096eb4637a6e2dd"
+            url: "https://github.com/mpvkit/libplacebo-build/releases/download/7.351.0-fix/Libplacebo.xcframework.zip",
+            checksum: "99ca0b86e2a5a99c445d3e41df6f2fc08294e1a004b03f6a5645f299f06bf378"
         ),
         .binaryTarget(
             name: "Libdav1d",

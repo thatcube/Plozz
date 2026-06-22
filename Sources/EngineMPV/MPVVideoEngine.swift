@@ -174,6 +174,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         plozzTrace("MPV.load: client.create OK")
 
         client.requestLogMessages("no")
+        let hdrMode = MPVHDR.mode(from: request.sourceMetadata?.video)
 
         // Hand mpv the metal layer as its render surface (must precede init).
         let layerPointer = Int64(Int(bitPattern: Unmanaged.passUnretained(metalLayer).toOpaque()))
@@ -181,30 +182,17 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
         // Render + decode configuration (mirrors MPVKit's reference tvOS player).
         client.setOptionString("vo", "gpu-next")
-        // Prefer native Metal on tvOS. The prior Vulkan+MoltenVK path crashes
-        // during mpv_initialize() on-device; using gpu-next over Metal keeps the
-        // libplacebo pipeline without the MoltenVK bring-up.
-        client.setOptionString("gpu-api", "metal")
+        client.setOptionString("gpu-api", "vulkan")
+        client.setOptionString("gpu-context", "moltenvk")
         client.setOptionString("hwdec", "videotoolbox")
         client.setOptionString("video-rotate", "no")
 
-        // HDR: pick the surface colorimetry from the provider's source metadata
-        // and drive libplacebo's output to match. `target-colorspace-hint=yes`
-        // makes mpv hint the target transfer/primaries from the *actual* render
-        // surface, so if MoltenVK can't hand us a 10-bit surface we degrade to
-        // correct SDR (the DoVi/HDR RPU is still parsed + tonemapped by
-        // libplacebo) instead of failing or going black.
-        // TEMP: force SDR surface while diagnosing tvOS init crash. If this is
-        // stable, the remaining issue is in HDR/PQ surface + display-mode setup.
-        let hdrMode: MPVHDRMode = .sdr
+        // Pick surface colorimetry from source metadata.
         plozzTrace("MPV.load: hdrMode=\(hdrMode); configuring metalLayer")
         metalLayer.configure(for: hdrMode)
         plozzTrace("MPV.load: metalLayer.configure done")
         client.setOptionString("target-colorspace-hint", "yes")
         if let trc = MPVHDR.mpvTargetTRC(for: hdrMode) {
-            // For HDR content also state the target transfer / primaries
-            // explicitly so libplacebo emits PQ/HLG BT.2020 onto the HDR surface
-            // configured above. (Harmless no-op for SDR, which leaves these unset.)
             client.setOptionString("target-trc", trc)
             client.setOptionString("target-prim", "bt.2020")
         }
@@ -230,10 +218,6 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             return
         }
         plozzTrace("MPV.load: render surface ready (window + drawable + device)")
-        // Give SwiftUI/CoreAnimation one extra turn to settle any pending layout
-        // work before mpv's heavy renderer initialization.
-        try? await Task.sleep(nanoseconds: 200_000_000)
-        plozzTrace("MPV.load: post-ready settle delay elapsed")
 
         plozzTrace("MPV.load: calling client.initialize() NOW")
 

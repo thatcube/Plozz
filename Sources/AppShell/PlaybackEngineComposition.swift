@@ -4,9 +4,6 @@ import FeaturePlayback
 #if canImport(UIKit)
 import EngineMPV
 #endif
-#if canImport(VLCKitSPM) && canImport(UIKit)
-import EngineVLCKit
-#endif
 
 /// The single composition switch for Plozz's dual-engine playback.
 ///
@@ -23,20 +20,17 @@ import EngineVLCKit
 ///     `PlayerViewModel`, which routes to it per the resolved source.
 ///
 /// The hybrid engine is **mpv** (libmpv + libplacebo): it processes Dolby Vision
-/// RPU (so Profile 5/8 render correctly, not green) and outputs HDR10/HLG, which
-/// VLCKit cannot. VLCKit stays linked purely as a manual escape hatch
-/// (``preferredEngine`` = `.vlckit`) in case the mpv Metal/MoltenVK render path
-/// misbehaves on a given device — flip the constant and rebuild, no other change.
+/// RPU (so Profile 5/8 render correctly, not green) and outputs HDR10/HLG.
 ///
 /// When no UIKit engine is linked (e.g. a macOS unit-test build), everything
 /// collapses to the native-only path, so behaviour is byte-for-byte today's.
 enum HybridPlayback {
     /// Which on-device engine backs hybrid playback when one is linked.
-    enum Engine { case mpv, vlckit }
+    enum Engine { case mpv }
 
-    /// The hybrid engine to use. Keep VLCKit as the stable default while the
-    /// tvOS mpv initialize crash is unresolved.
-    static let preferredEngine: Engine = .vlckit
+    /// The hybrid engine to use. mpv is the target default; flip to `.vlckit`
+    /// as an escape hatch when diagnosing regressions.
+    static let preferredEngine: Engine = .mpv
 
     /// Whether this build links an engine for AVPlayer-incompatible media.
     static var enabled: Bool {
@@ -55,12 +49,6 @@ enum HybridPlayback {
         switch preferredEngine {
         case .mpv:
             return EngineFactory(makeHybrid: { _ in MPVVideoEngineFactory.makeEngine() })
-        case .vlckit:
-            #if canImport(VLCKitSPM)
-            return EngineFactory(makeHybrid: { VLCKitVideoEngineFactory.makeEngine(captionSettings: $0) })
-            #else
-            return EngineFactory(makeHybrid: { _ in MPVVideoEngineFactory.makeEngine() })
-            #endif
         }
         #else
         return .native

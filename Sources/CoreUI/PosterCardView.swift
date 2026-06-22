@@ -162,11 +162,12 @@ public struct PosterCardView: View {
 
     /// Secondary line — subtitle facts plus card runtime/remaining when available.
     private var subtitleText: String? {
-        let parts = [item.subtitle, item.cardRuntimeText].compactMap {
-            guard let text = $0?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-                return nil
-            }
-            return text
+        var parts: [String] = []
+        if let subtitle = item.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !subtitle.isEmpty {
+            parts.append(subtitle)
+        }
+        if let runtime = item.cardRuntimeText?.trimmingCharacters(in: .whitespacesAndNewlines), !runtime.isEmpty {
+            parts.append(runtime)
         }
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " · ")

@@ -189,6 +189,10 @@ public final class PlayerViewModel {
     /// play). Read by the playback diagnostics overlay.
     public var isTranscoding: Bool { request?.isTranscoding ?? false }
 
+    /// Provider source facts (codec/HDR/channels/…) for the playing item, used
+    /// to populate the playback diagnostics overlay.
+    public var sourceMetadata: MediaSourceMetadata? { request?.sourceMetadata }
+
     // MARK: - Subtitle selection & auto-download
 
     /// Chooses the default legible (subtitle) option on the player item to honour

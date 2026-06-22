@@ -28,7 +28,7 @@ struct PlaybackDiagnosticsOverlay: View {
             }
         }
         .padding(24)
-        .frame(maxWidth: 560, alignment: .leading)
+        .frame(maxWidth: 680, alignment: .leading)
         .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -40,21 +40,31 @@ struct PlaybackDiagnosticsOverlay: View {
     @ViewBuilder
     private func grid(for d: PlaybackDiagnostics) -> some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 24, verticalSpacing: 6) {
-            row("Resolution", d.resolutionText)
-            row("Frame rate", d.frameRateText)
-            row("HDR", d.hdr.displayName)
-            row("Video", d.videoCodecText)
-            row("Audio", d.audioCodecText)
+            optionalRow("Container", d.containerText)
+            optionalRow("Video", d.videoLineText)
+            optionalRow("Audio", d.audioLineText)
+            optionalRow("Subtitles", d.subtitleText)
             row("Source", sourceText(d))
-            row("Bitrate", "\(d.indicatedBitrateText) ⋅ obs \(d.observedBitrateText)")
-            row("Buffer", "\(d.bufferText) ahead")
+            row("Buffer", d.bufferStatusText)
+            row("Network", d.observedBitrateText)
             row("Dropped", "\(d.droppedFramesText) frames")
+            optionalRow("Device", d.deviceText)
+            optionalRow("Disk", d.diskText)
         }
     }
 
     private func sourceText(_ d: PlaybackDiagnostics) -> String {
         guard let container = d.container, !container.isEmpty else { return d.mode.displayName }
-        return "\(d.mode.displayName) · \(container)"
+        return "\(d.mode.displayName) · \(PlaybackDiagnostics.friendlyContainerName(container) ?? container)"
+    }
+
+    /// A row that's hidden entirely when its value is the placeholder, so static
+    /// facts the provider didn't report don't clutter the panel.
+    @ViewBuilder
+    private func optionalRow(_ label: String, _ value: String) -> some View {
+        if value != PlaybackDiagnostics.placeholder {
+            row(label, value)
+        }
     }
 
     private func row(_ label: String, _ value: String) -> some View {

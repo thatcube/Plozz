@@ -52,12 +52,20 @@ public struct PlayerView: View {
         .task {
             await viewModel.load()
             if showDiagnostics, let player = viewModel.player {
-                diagnosticsSampler.start(player: player, isTranscoding: viewModel.isTranscoding)
+                diagnosticsSampler.start(
+                    player: player,
+                    isTranscoding: viewModel.isTranscoding,
+                    metadata: viewModel.sourceMetadata
+                )
             }
         }
         .onChange(of: showDiagnostics) { _, enabled in
             if enabled, let player = viewModel.player {
-                diagnosticsSampler.start(player: player, isTranscoding: viewModel.isTranscoding)
+                diagnosticsSampler.start(
+                    player: player,
+                    isTranscoding: viewModel.isTranscoding,
+                    metadata: viewModel.sourceMetadata
+                )
             } else {
                 diagnosticsSampler.stop()
             }

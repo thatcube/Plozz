@@ -60,6 +60,16 @@ targets:
         # Jellyfin servers are often plain HTTP on the LAN. Allow local networking.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            # Tailscale local daemon API — allows HTTP to the well-known Tailscale
+            # service IP so TailscaleDiscovery can enumerate Tailscale peers.
+            100.100.100.100:
+              NSExceptionAllowsInsecureHTTPLoads: true
+            # Tailscale MagicDNS — allows HTTP to *.ts.net hostnames so Jellyfin
+            # servers behind Tailscale (without HTTPS) are reachable.
+            ts.net:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
         # Deep links that launch the app straight into playback, used by the
         # Top Shelf extension's cards (e.g. plozz://item/<id>).
         CFBundleURLTypes:

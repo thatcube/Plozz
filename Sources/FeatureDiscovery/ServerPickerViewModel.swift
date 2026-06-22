@@ -16,6 +16,8 @@ public final class ServerPickerViewModel {
 
     public private(set) var phase: Phase = .idle
     public private(set) var discoveredServers: [MediaServer] = []
+    /// Servers discovered on the Tailscale network (populated in parallel with LAN scan).
+    public private(set) var tailscaleServers: [MediaServer] = []
     /// Reachability of `lastServer`: `nil` while unknown/checking, then the
     /// result of a live probe (or `true` the moment LAN discovery re-finds it).
     public private(set) var lastServerReachable: Bool?
@@ -23,28 +25,34 @@ public final class ServerPickerViewModel {
 
     private let discovery: ServerDiscovering
     private let validator: ServerValidator
+    private let tailscaleDiscovery: TailscaleDiscovery
     private var store: LastServerStoring
     private var scanTask: Task<Void, Never>?
+    private var tailscaleTask: Task<Void, Never>?
     private var reachabilityTask: Task<Void, Never>?
 
     #if canImport(Network)
     public init(
         discovery: ServerDiscovering = UDPServerDiscovery(),
         validator: ServerValidator = ServerValidator(),
+        tailscaleDiscovery: TailscaleDiscovery = TailscaleDiscovery(),
         store: LastServerStoring = UserDefaultsLastServerStore()
     ) {
         self.discovery = discovery
         self.validator = validator
+        self.tailscaleDiscovery = tailscaleDiscovery
         self.store = store
     }
     #else
     public init(
         discovery: ServerDiscovering,
         validator: ServerValidator = ServerValidator(),
+        tailscaleDiscovery: TailscaleDiscovery = TailscaleDiscovery(),
         store: LastServerStoring = UserDefaultsLastServerStore()
     ) {
         self.discovery = discovery
         self.validator = validator
+        self.tailscaleDiscovery = tailscaleDiscovery
         self.store = store
     }
     #endif
@@ -54,11 +62,14 @@ public final class ServerPickerViewModel {
 
     /// Starts a LAN scan, appending servers as they answer. In parallel, probes
     /// the saved server directly so we can tell the user whether it's online
-    /// even when broadcast discovery comes back empty.
+    /// even when broadcast discovery comes back empty. Also runs Tailscale peer
+    /// discovery concurrently.
     public func startScan(timeout: TimeInterval = 6) {
         scanTask?.cancel()
+        tailscaleTask?.cancel()
         reachabilityTask?.cancel()
         discoveredServers = []
+        tailscaleServers = []
         phase = .scanning
 
         if store.lastServer != nil {
@@ -74,11 +85,22 @@ public final class ServerPickerViewModel {
             }
             if case .scanning = self.phase { self.phase = .idle }
         }
+
+        let ts = tailscaleDiscovery
+        tailscaleTask = Task { [weak self] in
+            guard let self else { return }
+            for await server in ts.discover(timeout: timeout) {
+                if Task.isCancelled { break }
+                self.mergeTailscale(server)
+            }
+        }
     }
 
     public func stopScan() {
         scanTask?.cancel()
         scanTask = nil
+        tailscaleTask?.cancel()
+        tailscaleTask = nil
         reachabilityTask?.cancel()
         reachabilityTask = nil
         if case .scanning = phase { phase = .idle }
@@ -107,6 +129,20 @@ public final class ServerPickerViewModel {
         }
         if !discoveredServers.contains(where: { isSameServer($0, server) }) {
             discoveredServers.append(server)
+        }
+    }
+
+    /// Merges a Tailscale-discovered server, skipping it if it is already known
+    /// from the last-used server or LAN discovery (same server, different path).
+    private func mergeTailscale(_ server: MediaServer) {
+        if isLastServer(server) {
+            lastServerReachable = true
+            return
+        }
+        let alreadyFound = discoveredServers.contains(where: { isSameServer($0, server) })
+            || tailscaleServers.contains(where: { isSameServer($0, server) })
+        if !alreadyFound {
+            tailscaleServers.append(server)
         }
     }
 

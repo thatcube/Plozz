@@ -157,6 +157,8 @@ struct MediaStreamDto: Decodable {
     let Index: Int
     let `Type`: String       // "Audio", "Subtitle", "Video"
     let Codec: String?
+    /// Container codec FourCC (`codec_tag_string`), e.g. `hvc1`/`hev1` for HEVC.
+    let CodecTag: String?
     let Profile: String?
     let Language: String?
     let DisplayTitle: String?
@@ -170,6 +172,7 @@ struct MediaStreamDto: Decodable {
     // Video facts
     let Width: Int?
     let Height: Int?
+    let BitDepth: Int?
     let BitRate: Int?
     let RealFrameRate: Double?
     let AverageFrameRate: Double?

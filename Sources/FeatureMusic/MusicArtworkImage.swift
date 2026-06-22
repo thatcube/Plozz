@@ -31,6 +31,7 @@ struct MusicArtworkImage: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .plozzMediaEdge(cornerRadius: cornerRadius)
     }
 
     private var placeholder: some View {

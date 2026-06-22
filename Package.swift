@@ -21,6 +21,7 @@ let package = Package(
         .library(name: "CoreModels", targets: ["CoreModels"]),
         .library(name: "CoreNetworking", targets: ["CoreNetworking"]),
         .library(name: "CoreUI", targets: ["CoreUI"]),
+        .library(name: "EngineVLCKit", targets: ["EngineVLCKit"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
@@ -35,6 +36,14 @@ let package = Package(
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
+    dependencies: [
+        // Official prebuilt VLCKit (TVVLCKit) republished as a SwiftPM
+        // `.binaryTarget` `.xcframework`. Backs the second, on-device decoding
+        // engine (`EngineVLCKit`) for MKV / DTS / DTS-HD / TrueHD / odd codecs
+        // AVPlayer can't demux or decode. Pinned to the version proven to build
+        // for tvOS in the P2 spike.
+        .package(url: "https://github.com/tylerjonesio/vlckit-spm.git", exact: "3.6.0")
+    ],
     targets: [
         // MARK: Core
         .target(name: "CoreModels"),
@@ -47,6 +56,26 @@ let package = Package(
         .target(
             name: "CoreUI",
             dependencies: ["CoreModels"]
+        ),
+
+        // MARK: VLCKit-backed engine (second, on-device decoding path)
+        //
+        // Implements `VLCKitVideoEngine: VideoEngine` over VLCMediaPlayer so the
+        // app CAN decode MKV/DTS/TrueHD/odd-codec files on device. Only this
+        // module imports VLCKit; FeaturePlayback never does. It depends on
+        // FeaturePlayback purely to *see* the `VideoEngine` protocol — this is
+        // NOT a cycle because FeaturePlayback does not depend on EngineVLCKit
+        // (AppShell injects the engine via a factory in a later phase). Engine
+        // routing is intentionally NOT wired yet; the default engine remains
+        // `NativeVideoEngine` (AVPlayer). (The protocol may later be extracted
+        // into a leaf module once its view/transport seam settles.)
+        .target(
+            name: "EngineVLCKit",
+            dependencies: [
+                "CoreModels",
+                "FeaturePlayback",
+                .product(name: "VLCKitSPM", package: "vlckit-spm")
+            ]
         ),
 
         // MARK: Providers
@@ -122,6 +151,7 @@ let package = Package(
                 "CoreModels",
                 "CoreNetworking",
                 "CoreUI",
+                "EngineVLCKit",
                 "FeatureDiscovery",
                 "FeatureAuth",
                 "ProviderJellyfin",

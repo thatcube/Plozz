@@ -32,7 +32,10 @@ struct SeriesDetailView: View {
     /// hero's own Play button) keeps the last meaningful context.
     @State private var heroItem: MediaItem
     @FocusState private var focusedSeasonID: String?
-    @Environment(\.themePalette) private var palette
+    /// Scopes the season tab bar so directional focus entering it from the
+    /// episode rail below lands on the *selected* season (see
+    /// `prefersDefaultFocus`), not whichever tab happens to sit nearest.
+    @Namespace private var seasonBar
 
     init(
         series: MediaItem,
@@ -85,6 +88,7 @@ struct SeriesDetailView: View {
             // Headroom for the focused chip's lift so it is never clipped.
             .padding(.vertical, 12)
         }
+        .focusScope(seasonBar)
         .onChange(of: focusedSeasonID) { _, newValue in
             guard let id = newValue, let season = seasons.first(where: { $0.id == id }) else { return }
             select(season)
@@ -92,34 +96,27 @@ struct SeriesDetailView: View {
         }
     }
 
-    /// A small liquid-glass season "pill". Mirrors the player control buttons:
-    /// glass surface via `plozzGlassCard` (which honours the active theme and the
-    /// Reduce Transparency setting), a focus lift, and an accent ring marking the
-    /// season the rail is currently showing.
+    /// A small liquid-glass season pill, styled to match the Twozz player
+    /// control / chat-settings buttons (native Liquid Glass, no focus outline;
+    /// opaque themed pill under Reduce Transparency). The season whose episodes
+    /// are currently shown renders prominent (brand accent).
     private func seasonChip(_ season: MediaItem) -> some View {
-        let isFocused = focusedSeasonID == season.id
         let isSelected = selectedSeasonID == season.id
         return Button {
             select(season)
             heroItem = season
         } label: {
             Text(season.title)
-                .font(.callout.weight(.semibold))
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
                 .lineLimit(1)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 12)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .buttonStyle(.plain)
+        .plozzGlassPillButton(isSelected: isSelected)
+        .buttonBorderShape(.capsule)
         .focused($focusedSeasonID, equals: season.id)
-        .focusEffectDisabled()
-        .plozzGlassCard(cornerRadius: 100, isFocused: isFocused)
-        .overlay {
-            if isSelected && !isFocused {
-                Capsule().strokeBorder(palette.accent.opacity(0.8), lineWidth: 2)
-            }
-        }
-        .scaleEffect(isFocused ? 1.06 : 1)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        // When focus enters the season bar from the episode rail below, prefer
+        // the season currently on screen so "up" always returns to it.
+        .prefersDefaultFocus(isSelected, in: seasonBar)
     }
 
     /// Selects `season`: marks it active and kicks off (cached) episode loading

@@ -267,7 +267,7 @@ final class EngineRoutingTests: XCTestCase {
     func testHEVCMain10StaysNative() {
         // Main 10 (4:2:0 10-bit) is HW-decodable and the basis of HDR — must stay native.
         let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hvc1",
-                         videoProfile: "Main 10", videoBitDepth: 10, videoRangeType: "SDR", audioCodec: "aac")
+                         videoBitDepth: 10, videoProfile: "Main 10", videoRangeType: "SDR", audioCodec: "aac")
         XCTAssertEqual(route(mp4), .native)
     }
 

@@ -37,7 +37,16 @@ public protocol ProfilePersisting: Sendable {
 
 public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     private let defaults: UserDefaults
+    /// When non-nil, the **shared** bits (profile list + per-profile active
+    /// accounts) live here instead of `UserDefaults`. In production this is the
+    /// user-independent Keychain so the household's profile set is visible to
+    /// every Apple TV system user; the active *selection* stays per-user in
+    /// `UserDefaults`. `nil` (tests/previews) keeps the all-`UserDefaults`
+    /// behavior.
+    private let secureStore: SecureStoring?
     private let lock = NSLock()
+    /// Guards the one-time `UserDefaults` → shared store migration.
+    private var didMigrateShared = false
 
     private let profilesKey = "com.plozz.profiles.v1"
     private let activeProfileIDKey = "com.plozz.profiles.activeID"
@@ -46,8 +55,9 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     /// same across launches and its `isDefault` status is unambiguous.
     public static let defaultProfileID = "com.plozz.profile.default"
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard, secureStore: SecureStoring? = nil) {
         self.defaults = defaults
+        self.secureStore = secureStore
     }
 
     // MARK: Profiles
@@ -84,7 +94,7 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
 
     public func activeAccountIDs(forProfile profileID: String) -> [String]? {
         lock.lock(); defer { lock.unlock() }
-        guard let data = defaults.data(forKey: accountsKey(profileID)),
+        guard let data = sharedData(forKey: accountsKey(profileID)),
               let ids = try? JSONDecoder().decode([String].self, from: data) else {
             return nil
         }
@@ -94,7 +104,7 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     public func setActiveAccountIDs(_ ids: [String], forProfile profileID: String) {
         lock.lock(); defer { lock.unlock() }
         if let data = try? JSONEncoder().encode(ids) {
-            defaults.set(data, forKey: accountsKey(profileID))
+            setSharedData(data, forKey: accountsKey(profileID))
         }
     }
 
@@ -112,10 +122,13 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
             createdAt: Date(timeIntervalSince1970: 0) // sorts first, ahead of any later profile
         )
         saveProfilesLocked([profile])
-        defaults.set(profile.id, forKey: activeProfileIDKey)
+        // Intentionally does *not* persist `activeProfileIDKey`: creating the
+        // default profile is not an explicit user pick. The active id is only
+        // stored when a system user actually selects a profile, so a fresh
+        // Apple TV user still gets the launch picker (no "remembered" selection).
         if !defaultActiveAccountIDs.isEmpty {
             if let data = try? JSONEncoder().encode(defaultActiveAccountIDs) {
-                defaults.set(data, forKey: accountsKey(profile.id))
+                setSharedData(data, forKey: accountsKey(profile.id))
             }
         }
         return [profile]
@@ -126,7 +139,8 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     private func accountsKey(_ profileID: String) -> String { perProfileActiveAccountsPrefix + profileID }
 
     private func loadProfilesLocked() -> [Profile] {
-        guard let data = defaults.data(forKey: profilesKey),
+        ensureSharedMigratedLocked()
+        guard let data = sharedData(forKey: profilesKey),
               let profiles = try? JSONDecoder().decode([Profile].self, from: data) else {
             return []
         }
@@ -136,8 +150,55 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     private func saveProfilesLocked(_ profiles: [Profile]) {
         let ordered = profiles.sorted { $0.createdAt < $1.createdAt }
         if let data = try? JSONEncoder().encode(ordered) {
-            defaults.set(data, forKey: profilesKey)
+            setSharedData(data, forKey: profilesKey)
         }
+    }
+
+    // MARK: Shared-store routing
+
+    /// Reads a shared blob from the `SecureStoring` (production) or `UserDefaults`
+    /// (tests/previews, when no secure store is injected).
+    private func sharedData(forKey key: String) -> Data? {
+        if let secureStore {
+            return secureStore.string(for: key)?.data(using: .utf8)
+        }
+        return defaults.data(forKey: key)
+    }
+
+    private func setSharedData(_ data: Data, forKey key: String) {
+        if let secureStore {
+            if let json = String(data: data, encoding: .utf8) {
+                try? secureStore.setString(json, for: key)
+            }
+        } else {
+            defaults.set(data, forKey: key)
+        }
+    }
+
+    /// One-time copy of an existing install's profile set from per-user
+    /// `UserDefaults` into the shared `SecureStoring`, so every Apple TV system
+    /// user sees the same household profiles once the `user-management`
+    /// entitlement starts partitioning `UserDefaults`. The active *selection*
+    /// stays per-user and is intentionally not migrated. Caller holds `lock`.
+    private func ensureSharedMigratedLocked() {
+        guard !didMigrateShared else { return }
+        didMigrateShared = true
+        guard let secureStore, secureStore.string(for: profilesKey) == nil,
+              let data = defaults.data(forKey: profilesKey),
+              let json = String(data: data, encoding: .utf8) else { return }
+
+        try? secureStore.setString(json, for: profilesKey)
+        if let profiles = try? JSONDecoder().decode([Profile].self, from: data) {
+            for profile in profiles {
+                let key = accountsKey(profile.id)
+                if let accData = defaults.data(forKey: key),
+                   let accJSON = String(data: accData, encoding: .utf8) {
+                    try? secureStore.setString(accJSON, for: key)
+                    defaults.removeObject(forKey: key)
+                }
+            }
+        }
+        defaults.removeObject(forKey: profilesKey)
     }
 }
 
@@ -153,6 +214,11 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
 public final class ProfilesModel {
     public private(set) var profiles: [Profile]
     public private(set) var activeProfileID: String
+    /// Whether the current Apple TV system user already has a *stored* profile
+    /// pick (vs. the in-memory default). Drives the launch picker: with system
+    /// multi-user support, a user with no remembered pick still sees the picker
+    /// even though `activeProfile` resolves to a sensible default.
+    public private(set) var hasRememberedSelection: Bool
 
     private let store: ProfilePersisting
 
@@ -171,9 +237,11 @@ public final class ProfilesModel {
             defaultActiveAccountIDs: defaultActiveAccountIDs
         )
         self.profiles = migrated
-        self.activeProfileID = store.activeProfileID() ?? migrated.first?.id ?? ProfileStore.defaultProfileID
-        // Persist a resolved selection so relaunch is deterministic.
-        store.setActiveProfileID(activeProfileID)
+        let remembered = store.activeProfileID()
+        self.hasRememberedSelection = remembered != nil
+        self.activeProfileID = remembered ?? migrated.first?.id ?? ProfileStore.defaultProfileID
+        // Intentionally does *not* persist a defaulted selection: leaving it
+        // unstored is what lets a fresh Apple TV system user get the picker.
     }
 
     /// The currently-selected profile (falls back to the first profile).
@@ -197,6 +265,7 @@ public final class ProfilesModel {
     public func select(_ id: String) {
         guard profiles.contains(where: { $0.id == id }) else { return }
         activeProfileID = id
+        hasRememberedSelection = true
         store.setActiveProfileID(id)
     }
 

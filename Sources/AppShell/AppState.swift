@@ -82,7 +82,7 @@ public final class AppState {
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
         profilesModel: ProfilesModel? = nil,
-        systemBridge: SystemProfileBridging = AppOwnedProfileBridge(),
+        systemBridge: SystemProfileBridging? = nil,
         captionModel: CaptionSettingsModel? = nil,
         spoilerModel: SpoilerSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
@@ -92,8 +92,8 @@ public final class AppState {
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
-        self.profilesModel = profilesModel ?? ProfilesModel()
-        self.systemBridge = systemBridge
+        self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
+        self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
 
         // If the caller supplied any settings model, treat them all as injected
@@ -114,9 +114,31 @@ public final class AppState {
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
         #if canImport(Security)
-        return AccountStore()
+        return AccountStore(secureStore: KeychainStore())
         #else
         return AccountStore(secureStore: InMemorySecureStore())
+        #endif
+    }
+
+    /// Builds the household profiles model, backing the shared profile set with
+    /// the user-independent Keychain on Apple platforms so every Apple TV system
+    /// user sees the same profiles (the active selection stays per-user).
+    private static func makeDefaultProfilesModel() -> ProfilesModel {
+        #if canImport(Security)
+        return ProfilesModel(store: ProfileStore(secureStore: KeychainStore(service: "com.plozz.app.household")))
+        #else
+        return ProfilesModel()
+        #endif
+    }
+
+    /// Selects the tvOS system-user bridge when TVServices is available, so the
+    /// launch picker can honor each Apple TV user's remembered profile; falls
+    /// back to the app-owned no-op elsewhere (tests/previews/non-tvOS).
+    private static func makeDefaultSystemBridge() -> SystemProfileBridging {
+        #if canImport(TVServices)
+        return TVSystemProfileBridge()
+        #else
+        return AppOwnedProfileBridge()
         #endif
     }
 
@@ -139,9 +161,13 @@ public final class AppState {
     public func bootstrap() {
         accountStore.migrateLegacySessionIfNeeded()
         reloadAccounts()
-        // Prompt for a profile at launch only when the household has more than
-        // one; a single (default) profile goes straight in.
-        isChoosingProfile = profilesModel.profiles.count > 1
+        // Show the launch picker when the household has more than one profile,
+        // unless the current Apple TV system user already has a remembered pick
+        // that the system says we may honor (per `shouldStorePreferencesForCurrentUser`).
+        // On single-Apple-TV-user devices the system signal is false, preserving
+        // the original "always show the picker for >1 profile" behavior.
+        let systemRemembers = mayRememberProfileSelection && profilesModel.hasRememberedSelection
+        isChoosingProfile = profilesModel.profiles.count > 1 && !systemRemembers
         apply(.restored(accounts))
     }
 
@@ -149,9 +175,9 @@ public final class AppState {
     public var deviceID: String { accountStore.deviceID() }
 
     /// Whether the environment permits remembering the selected profile for the
-    /// current Apple TV system user (see `SystemProfileBridging`). v1 shows the
-    /// launch picker for >1 profile regardless; this surfaces the one surviving,
-    /// non-deprecated tvOS system signal for future tuning.
+    /// current Apple TV system user (see `SystemProfileBridging`). Wired in
+    /// Phase 1: combined with `ProfilesModel.hasRememberedSelection`, it lets the
+    /// launch picker auto-skip for a system user who already chose a profile.
     public var mayRememberProfileSelection: Bool { systemBridge.mayRememberProfileSelection }
 
     public var lastServerStore: LastServerStoring { UserDefaultsLastServerStore() }

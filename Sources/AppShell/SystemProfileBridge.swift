@@ -2,20 +2,21 @@ import Foundation
 
 /// Optional, isolated seam onto tvOS's *system* multi-user support.
 ///
-/// ## Why this is a thin, deferred adapter
-/// Research against Apple's current docs shows almost all of `TVUserManager`
-/// (TVServices) is **deprecated** — `currentUserIdentifier`,
-/// `currentUserIdentifierDidChangeNotification`, `presentProfilePreferencePanel`,
-/// `TVAppProfileDescriptor`, `userIdentifiersForCurrentProfile`. The only
-/// non-deprecated signal is `shouldStorePreferencesForCurrentUser`, and it
-/// requires the `com.apple.developer.user-management` ("Runs as Current User")
-/// entitlement, which also reshapes how `UserDefaults`/Keychain containers are
-/// isolated per Apple TV system user.
+/// ## What's wired (Phase 1)
+/// Plozz now adopts the `com.apple.developer.user-management` entitlement
+/// (`runs-as-current-user-with-user-independent-keychain`). On tvOS 16+ this
+/// partitions `UserDefaults`/Keychain per Apple TV system user; the household's
+/// shared sign-in and profile set are kept visible to all of them via the
+/// user-independent Keychain (see `FeatureAuth.KeychainStore`,
+/// `FeatureAuth.AccountStore`, `CoreModels.ProfileStore`).
 ///
-/// Plozz's profiles are therefore **app-owned** (they work on every tvOS 17
-/// device with no entitlement). This protocol is the honest, future-proof hook:
-/// a default no-op today, and the single place to opt into the system signal
-/// later without touching the rest of the app.
+/// The one surviving, non-deprecated `TVUserManager` signal is
+/// `shouldStorePreferencesForCurrentUser`; `TVSystemProfileBridge` exposes it so
+/// `AppState` can remember each system user's selected profile and skip the
+/// launch picker for a returning user. The rest of `TVUserManager`
+/// (`currentUserIdentifier`, `currentUserIdentifierDidChangeNotification`,
+/// `presentProfilePreferencePanel`, `TVAppProfileDescriptor`,
+/// `userIdentifiersForCurrentProfile`) is deprecated and intentionally unused.
 public protocol SystemProfileBridging: Sendable {
     /// Whether the app may *persist* the selected profile for the current Apple
     /// TV system user. When `false`, the app should show the picker each session
@@ -35,12 +36,12 @@ public struct AppOwnedProfileBridge: SystemProfileBridging {
 import TVServices
 
 /// tvOS-backed bridge that consults the one surviving, non-deprecated
-/// `TVUserManager` signal. Falls back to "remember" when the API is unavailable
-/// (e.g. the entitlement isn't present), so behavior degrades gracefully.
+/// `TVUserManager` signal. Falls back to "remember" when the API is unavailable,
+/// so behavior degrades gracefully.
 ///
-/// Not wired by default — adopting it requires adding the
-/// `com.apple.developer.user-management` capability. Kept here so the
-/// integration is a one-line swap rather than a rewrite.
+/// Wired by default on tvOS (see `AppState.makeDefaultSystemBridge`). Requires
+/// the `com.apple.developer.user-management` capability, which Plozz declares in
+/// `App/Resources/Plozz.entitlements`.
 public struct TVSystemProfileBridge: SystemProfileBridging {
     public init() {}
 

@@ -221,6 +221,29 @@ final class AccountStoreTests: XCTestCase {
         XCTAssertFalse(store.migrateLegacySessionIfNeeded())
         XCTAssertEqual(store.loadAccounts().map(\.id), ["a1"])
     }
+
+    /// Existing installs kept account metadata in `UserDefaults`. Once the
+    /// `user-management` entitlement partitions `UserDefaults` per Apple TV user,
+    /// that metadata must be lifted into the shared `SecureStore` so the
+    /// household stays signed in.
+    func testMigratesUserDefaultsMetadataIntoSecureStore() throws {
+        let defaults = makeDefaults()
+        let acc = account("a1")
+        defaults.set(try JSONEncoder().encode([acc]), forKey: "com.plozz.accounts.v1")
+        defaults.set(try JSONEncoder().encode(["a1"]), forKey: "com.plozz.accounts.activeIDs")
+        defaults.set("device-123", forKey: "com.plozz.session.deviceID")
+
+        let secure = InMemorySecureStore()
+        let store = AccountStore(secureStore: secure, defaults: defaults)
+        // Reading triggers the one-time UserDefaults → SecureStore lift.
+        XCTAssertEqual(store.loadAccounts(), [acc])
+        XCTAssertEqual(store.activeAccountIDs(), ["a1"])
+        XCTAssertEqual(store.deviceID(), "device-123")
+        // Metadata now lives in the shared store and is cleared from per-user defaults.
+        XCTAssertNotNil(secure.string(for: "com.plozz.accounts.v1"))
+        XCTAssertNil(defaults.data(forKey: "com.plozz.accounts.v1"))
+        XCTAssertNil(defaults.string(forKey: "com.plozz.session.deviceID"))
+    }
 }
 
 final class SessionStoreTests: XCTestCase {

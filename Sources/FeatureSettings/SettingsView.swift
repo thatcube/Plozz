@@ -15,6 +15,11 @@ import CoreUI
 /// is a `ScrollView` of focusable content, which also fixes the previously
 /// unreachable (and therefore unreadable) About section on tvOS.
 public struct SettingsView: View {
+    private enum FocusTarget: Hashable {
+        case switchProfile
+    }
+
+    @FocusState private var focusedControl: FocusTarget?
     @State private var captions: CaptionSettingsModel
     @State private var spoilers: SpoilerSettingsModel
     @State private var theme: ThemeSettingsModel
@@ -103,6 +108,7 @@ public struct SettingsView: View {
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 40)
             }
+            .defaultFocus($focusedControl, .switchProfile)
             // Never clip a focused control's lift, shadow or border.
             .scrollClipDisabled()
             .task { await reloadLibraries() }
@@ -131,6 +137,7 @@ public struct SettingsView: View {
                 Button(action: onSwitchProfile) {
                     Label("Switch Profile", systemImage: "person.2.circle")
                 }
+                .focused($focusedControl, equals: .switchProfile)
             }
         }
     }

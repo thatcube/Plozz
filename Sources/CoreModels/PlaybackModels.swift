@@ -173,6 +173,10 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// from the provider, used to populate the playback-diagnostics overlay even
     /// when the streamed (transcoded) asset exposes no track metadata.
     public var sourceMetadata: MediaSourceMetadata?
+    /// Scrubbing-preview thumbnails for this item, when the server has generated
+    /// them. `nil` (or an unusable manifest) means the custom player simply shows
+    /// no scrub preview — it never blocks playback.
+    public var trickplay: TrickplayManifest?
 
     public init(
         item: MediaItem,
@@ -182,7 +186,8 @@ public struct PlaybackRequest: Hashable, Sendable {
         subtitleTracks: [MediaTrack] = [],
         startPosition: TimeInterval = 0,
         isTranscoding: Bool = false,
-        sourceMetadata: MediaSourceMetadata? = nil
+        sourceMetadata: MediaSourceMetadata? = nil,
+        trickplay: TrickplayManifest? = nil
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -192,6 +197,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.startPosition = startPosition
         self.isTranscoding = isTranscoding
         self.sourceMetadata = sourceMetadata
+        self.trickplay = trickplay
     }
 }
 

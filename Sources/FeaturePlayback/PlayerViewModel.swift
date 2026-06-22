@@ -25,6 +25,11 @@ public final class PlayerViewModel {
     public private(set) var phase: Phase = .loading
     public private(set) var player: AVPlayer?
 
+    /// Shared, observable transport state for the custom player overlay. The
+    /// view model writes live playback facts here; the input controller writes
+    /// scrub state; the SwiftUI overlay reads.
+    public let controls = PlayerControlsModel()
+
     private let provider: any MediaProvider
     private let itemID: String
     private let captionSettings: CaptionSettings
@@ -46,6 +51,8 @@ public final class PlayerViewModel {
     private var hasAttemptedTranscodeFallback = false
     private var fallbackMonitorTask: Task<Void, Never>?
     private var audioSessionConfigured = false
+    private var cachedAudibleGroup: AVMediaSelectionGroup?
+    private var cachedLegibleGroup: AVMediaSelectionGroup?
     #if !os(macOS)
     private var routeChangeObserver: NSObjectProtocol?
     #endif
@@ -87,6 +94,8 @@ public final class PlayerViewModel {
             player.allowsExternalPlayback = true
             self.player = player
 
+            configureControls(for: request)
+
             // An explicit override wins over the provider's resume point so the
             // caller can force "start over" (0) or resume from a chosen second.
             let startPosition = resumeOverride ?? startPositionOverride ?? request.startPosition
@@ -107,6 +116,7 @@ public final class PlayerViewModel {
             // Best-effort, never blocking play(): pick the default subtitle for
             // the user's mode/language, and (if enabled) fetch a missing one.
             await applyDefaultSubtitleSelection(for: item)
+            await loadTrackOptions(for: item)
             startAutoSubtitleDownloadIfNeeded(request: request)
         } catch let error as AppError {
             phase = .failed(error)
@@ -223,7 +233,18 @@ public final class PlayerViewModel {
     /// stalling on an exact-frame seek (which can fail on transcoded HLS).
     public func seek(to seconds: TimeInterval) async {
         guard let player else { return }
+        controls.isSeeking = true
+        // Reflect the target immediately so the bar doesn't snap backwards while
+        // the (possibly slow) seek resolves.
+        controls.currentSeconds = max(0, seconds)
         await seek(player: player, to: seconds)
+        controls.isSeeking = false
+    }
+
+    /// Toggles play/pause from the custom transport, keeping `controls` in sync.
+    public func togglePlayPause() {
+        guard let player else { return }
+        setPaused(player.timeControlStatus != .paused)
     }
 
     /// Waits (briefly) for the player item to become ready before seeking. A
@@ -264,15 +285,50 @@ public final class PlayerViewModel {
     }
 
     private func installTimeObserver(on player: AVPlayer) {
-        let interval = CMTime(seconds: 1, preferredTimescale: 1)
+        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
             if time.seconds.isFinite { self.lastKnownPosition = max(0, time.seconds) }
+            self.publishPlaybackState(at: time)
             let seconds = Int(time.seconds)
             guard seconds != self.lastReportedSecond, seconds % Int(self.reportInterval) == 0 else { return }
             self.lastReportedSecond = seconds
             Task { await self.report(event: .progress, isPaused: false) }
         }
+    }
+
+    /// Mirrors the player's live position/duration/buffer/paused state into the
+    /// observable `controls` model that drives the transport overlay.
+    private func publishPlaybackState(at time: CMTime) {
+        guard let player else { return }
+        if time.seconds.isFinite {
+            controls.currentSeconds = max(0, time.seconds)
+        }
+        let duration = currentDurationSeconds()
+        if duration > 0 { controls.duration = duration }
+        controls.bufferedSeconds = bufferedPositionSeconds()
+        controls.isPaused = player.timeControlStatus == .paused
+    }
+
+    /// The item's duration when the asset reports a finite one, else the
+    /// provider-known runtime (HLS transcodes can report the duration late).
+    private func currentDurationSeconds() -> TimeInterval {
+        if let seconds = player?.currentItem?.duration.seconds, seconds.isFinite, seconds > 0 {
+            return seconds
+        }
+        return request?.item.runtime ?? 0
+    }
+
+    /// Furthest buffered position across the loaded ranges, for the scrub bar.
+    private func bufferedPositionSeconds() -> TimeInterval {
+        guard let ranges = player?.currentItem?.loadedTimeRanges else { return 0 }
+        var end: TimeInterval = 0
+        for value in ranges {
+            let range = value.timeRangeValue
+            let rangeEnd = (range.start + range.duration).seconds
+            if rangeEnd.isFinite { end = max(end, rangeEnd) }
+        }
+        return end
     }
 
     /// Reports the current position. Best-effort: a failed report must never
@@ -295,6 +351,7 @@ public final class PlayerViewModel {
     public func setPaused(_ paused: Bool) {
         guard let player else { return }
         if paused { player.pause() } else { player.play() }
+        controls.isPaused = paused
         Task { await report(event: paused ? .pause : .unpause, isPaused: paused) }
     }
 
@@ -337,6 +394,95 @@ public final class PlayerViewModel {
     /// Provider source facts (codec/HDR/channels/…) for the playing item, used
     /// to populate the playback diagnostics overlay.
     public var sourceMetadata: MediaSourceMetadata? { request?.sourceMetadata }
+
+    /// Scrubbing-preview thumbnails for the playing item, if the server has them.
+    public var trickplay: TrickplayManifest? { request?.trickplay }
+
+    // MARK: - Custom transport configuration
+
+    /// Seeds the transport overlay with title/subtitle/duration/track facts when
+    /// a stream resolves, so the controls are correct from the first frame.
+    private func configureControls(for request: PlaybackRequest) {
+        controls.title = request.item.title
+        controls.subtitle = Self.subtitleText(for: request.item)
+        controls.hasTrickplay = request.trickplay?.isUsable ?? false
+        controls.duration = currentDurationSeconds()
+        controls.currentSeconds = 0
+        controls.bufferedSeconds = 0
+        controls.isScrubbing = false
+        controls.previewImage = nil
+        controls.isPaused = false
+    }
+
+    /// A short secondary line for the transport bar (series · SxEx for episodes).
+    private static func subtitleText(for item: MediaItem) -> String {
+        var parts: [String] = []
+        if let parent = item.parentTitle, !parent.isEmpty { parts.append(parent) }
+        if let season = item.seasonNumber, let episode = item.episodeNumber {
+            parts.append("S\(season)E\(episode)")
+        } else if let episode = item.episodeNumber {
+            parts.append("Episode \(episode)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: - Track selection (custom player menu)
+
+    /// Loads the asset's audible/legible selection groups and publishes the
+    /// current options into `controls` for the in-player track menu.
+    private func loadTrackOptions(for item: AVPlayerItem) async {
+        cachedAudibleGroup = try? await item.asset.loadMediaSelectionGroup(for: .audible)
+        cachedLegibleGroup = try? await item.asset.loadMediaSelectionGroup(for: .legible)
+        refreshTrackOptions()
+    }
+
+    private func refreshTrackOptions() {
+        guard let item = player?.currentItem else { return }
+        let selection = item.currentMediaSelection
+
+        if let group = cachedAudibleGroup {
+            let selected = selection.selectedMediaOption(in: group)
+            controls.audioOptions = group.options.enumerated().map { index, option in
+                PlayerTrackOption(
+                    id: index,
+                    title: option.displayName,
+                    isSelected: option == selected
+                )
+            }
+        } else {
+            controls.audioOptions = []
+        }
+
+        if let group = cachedLegibleGroup, !group.options.isEmpty {
+            let selected = selection.selectedMediaOption(in: group)
+            var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: "Off", isSelected: selected == nil)]
+            options.append(contentsOf: group.options.enumerated().map { index, option in
+                PlayerTrackOption(id: index, title: option.displayName, isSelected: option == selected)
+            })
+            controls.subtitleOptions = options
+        } else {
+            controls.subtitleOptions = []
+        }
+    }
+
+    /// Selects an audio option (index into the audible group) from the menu.
+    public func selectAudioOption(id: Int) {
+        guard let item = player?.currentItem, let group = cachedAudibleGroup,
+              group.options.indices.contains(id) else { return }
+        item.select(group.options[id], in: group)
+        refreshTrackOptions()
+    }
+
+    /// Selects a subtitle option, or turns subtitles off (`PlayerTrackOption.offID`).
+    public func selectSubtitleOption(id: Int) {
+        guard let item = player?.currentItem, let group = cachedLegibleGroup else { return }
+        if id == PlayerTrackOption.offID {
+            item.select(nil, in: group)
+        } else if group.options.indices.contains(id) {
+            item.select(group.options[id], in: group)
+        }
+        refreshTrackOptions()
+    }
 
     // MARK: - Subtitle selection & auto-download
 

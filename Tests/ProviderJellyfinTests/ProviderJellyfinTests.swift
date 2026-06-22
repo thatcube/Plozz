@@ -357,6 +357,50 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertFalse(stub.sentPaths.contains { $0.hasSuffix("/Videos/ActiveEncodings") })
     }
 
+    func testPlaybackInfoParsesTrickplayManifest() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0,
+        "Trickplay":{"src1":{"320":{"Width":320,"Height":180,"TileWidth":10,"TileHeight":10,
+        "ThumbnailCount":250,"Interval":10000,"Bandwidth":1000}}}}
+        """)
+        stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "i1")
+        let manifest = try XCTUnwrap(request.trickplay)
+        XCTAssertEqual(manifest.thumbnailWidth, 320)
+        XCTAssertEqual(manifest.thumbnailHeight, 180)
+        XCTAssertEqual(manifest.tileColumns, 10)
+        XCTAssertEqual(manifest.tileRows, 10)
+        XCTAssertEqual(manifest.thumbnailCount, 250)
+        XCTAssertEqual(manifest.intervalMs, 10000)
+        // 250 thumbs / 100 per tile -> 3 tiles.
+        XCTAssertEqual(manifest.tileURLs.count, 3)
+        let first = manifest.tileURLs[0].absoluteString
+        XCTAssertTrue(first.contains("/Videos/i1/Trickplay/320/0.jpg"), first)
+        XCTAssertTrue(first.contains("api_key=TOKEN"), first)
+        XCTAssertTrue(first.contains("mediaSourceId=src1"), first)
+    }
+
+    func testPlaybackInfoHasNoTrickplayWhenServerOmitsIt() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0}
+        """)
+        stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "i1")
+        XCTAssertNil(request.trickplay)
+    }
+
     func testPlaybackInfoSendsDeviceProfile() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """

@@ -71,6 +71,10 @@ struct BaseItemDto: Decodable {
     let MediaStreams: [MediaStreamDto]?
     let ImageTags: [String: String]?
     let BackdropImageTags: [String]?
+    /// Trickplay (scrubbing-thumbnail) manifests, keyed by media-source id then
+    /// by thumbnail width. Present only when `Trickplay` is requested in `Fields`
+    /// and the server has generated trickplay images for the item.
+    let Trickplay: [String: [String: TrickplayInfoDto]]?
 
     // MARK: Music fields (additive, all optional)
     //
@@ -104,6 +108,20 @@ struct UserItemDataDto: Decodable {
     let PlaybackPositionTicks: Int64?
     let PlayedPercentage: Double?
     let Played: Bool?
+}
+
+/// Jellyfin trickplay tile-group metadata (`BaseItemDto.Trickplay[srcId][width]`).
+/// Geometry for the pre-generated scrubbing thumbnails: each tile image packs
+/// `TileWidth × TileHeight` thumbnails of `Width × Height` px, one thumbnail per
+/// `Interval` ms.
+struct TrickplayInfoDto: Decodable {
+    let Width: Int?
+    let Height: Int?
+    let TileWidth: Int?
+    let TileHeight: Int?
+    let ThumbnailCount: Int?
+    let Interval: Int?
+    let Bandwidth: Int?
 }
 
 struct PlaybackInfoResponse: Decodable {

@@ -136,7 +136,57 @@ public struct JellyfinProvider: MediaProvider {
             subtitleTracks: subs,
             startPosition: mappedItem.resumePosition ?? 0,
             isTranscoding: source.TranscodingUrl != nil,
-            sourceMetadata: Self.sourceMetadata(container: source.Container, streams: streams)
+            sourceMetadata: Self.sourceMetadata(container: source.Container, streams: streams),
+            trickplay: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay)
+        )
+    }
+
+    /// Builds a provider-agnostic `TrickplayManifest` from Jellyfin's per-source,
+    /// per-width trickplay metadata, picking the highest-resolution thumbnail set
+    /// available and pre-resolving every tile-image URL. Returns `nil` whenever
+    /// the server hasn't generated usable trickplay for the item.
+    func trickplayManifest(
+        itemID: String,
+        source: MediaSourceInfo,
+        trickplay: [String: [String: TrickplayInfoDto]]?
+    ) -> TrickplayManifest? {
+        guard let trickplay, !trickplay.isEmpty else { return nil }
+        let sourceID = source.Id ?? itemID
+        guard let widthMap = trickplay[sourceID] ?? trickplay.first?.value, !widthMap.isEmpty else {
+            return nil
+        }
+        // Highest available thumbnail width = best preview quality (servers
+        // usually generate just one, so this is a safe default).
+        let chosen = widthMap
+            .compactMap { key, info -> (width: Int, info: TrickplayInfoDto)? in
+                guard let width = Int(key) else { return nil }
+                return (width, info)
+            }
+            .max { $0.width < $1.width }
+        guard let chosen,
+              let thumbWidth = chosen.info.Width, thumbWidth > 0,
+              let thumbHeight = chosen.info.Height, thumbHeight > 0,
+              let tileColumns = chosen.info.TileWidth, tileColumns > 0,
+              let tileRows = chosen.info.TileHeight, tileRows > 0,
+              let count = chosen.info.ThumbnailCount, count > 0,
+              let interval = chosen.info.Interval, interval > 0
+        else { return nil }
+
+        let perTile = tileColumns * tileRows
+        let tileCount = (count + perTile - 1) / perTile
+        let tileURLs = (0..<tileCount).compactMap {
+            client.trickplayTileURL(itemID: itemID, mediaSourceID: sourceID, width: chosen.width, tileIndex: $0)
+        }
+        guard tileURLs.count == tileCount else { return nil }
+
+        return TrickplayManifest(
+            thumbnailWidth: thumbWidth,
+            thumbnailHeight: thumbHeight,
+            tileColumns: tileColumns,
+            tileRows: tileRows,
+            thumbnailCount: count,
+            intervalMs: interval,
+            tileURLs: tileURLs
         )
     }
 

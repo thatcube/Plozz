@@ -4,13 +4,13 @@ import AVKit
 import CoreModels
 import CoreUI
 
-/// Full-screen playback using the **native** `AVPlayerViewController`.
-///
-/// Using the system player gives Plozz the platform-standard transport bar,
-/// scrubbing, Siri Remote gestures, and the built-in audio/subtitle picker
-/// (populated from the stream's media selection groups) for free — we only
-/// deviate from native where the spec requires (in-app caption styling, resume,
-/// and progress reporting, handled by `PlayerViewModel`).
+/// Full-screen playback using Plozz's **custom** player: an `AVPlayer` rendered
+/// into an `AVPlayerLayer` with a hand-built transport overlay and Siri Remote
+/// handling (`CustomPlayerContainer`). Going custom is what lets us show
+/// Infuse-style trickplay scrubbing thumbnails — the native
+/// `AVPlayerViewController` exposes no hook for server-provided scrub previews.
+/// `PlayerViewModel` still owns resume, progress reporting, the transcode
+/// fallback, and caption styling.
 public struct PlayerView: View {
     @State private var viewModel: PlayerViewModel
     @State private var diagnosticsSampler = PlaybackDiagnosticsSampler()
@@ -36,8 +36,22 @@ public struct PlayerView: View {
 
             case .ready:
                 if let player = viewModel.player {
-                    SystemPlayerView(player: player)
-                        .ignoresSafeArea()
+                    CustomPlayerContainer(
+                        player: player,
+                        model: viewModel.controls,
+                        actions: PlayerActions(
+                            seek: { target in Task { await viewModel.seek(to: target) } },
+                            togglePlayPause: { viewModel.togglePlayPause() },
+                            selectAudio: { viewModel.selectAudioOption(id: $0) },
+                            selectSubtitle: { viewModel.selectSubtitleOption(id: $0) },
+                            dismiss: { dismiss() }
+                        ),
+                        trickplay: viewModel.trickplay,
+                        themePalette: ThemePaletteBox(makeOverlay: { model in
+                            AnyView(PlayerControlsOverlay(model: model, palette: themePalette))
+                        })
+                    )
+                    .ignoresSafeArea()
                 }
 
             case let .failed(error):
@@ -111,25 +125,6 @@ private struct PlaybackErrorView: View {
                 .frame(maxWidth: 800)
             Button("Back", action: onDismiss)
                 .buttonStyle(.borderedProminent)
-        }
-    }
-}
-
-/// Thin `UIViewControllerRepresentable` bridge to `AVPlayerViewController`.
-private struct SystemPlayerView: UIViewControllerRepresentable {
-    let player: AVPlayer
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.player = player
-        // Native transport + info panels; keep the platform experience.
-        controller.allowsPictureInPicturePlayback = false
-        return controller
-    }
-
-    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
-        if controller.player !== player {
-            controller.player = player
         }
     }
 }

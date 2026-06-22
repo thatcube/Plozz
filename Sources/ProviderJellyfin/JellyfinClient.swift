@@ -156,7 +156,7 @@ public struct JellyfinClient: Sendable {
     func item(userID: String, id: String) async throws -> BaseItemDto {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/\(id)",
-            queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,ProviderIds")],
+            queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,ProviderIds,Trickplay")],
             headers: authHeaders
         )
         return try await http.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)
@@ -490,6 +490,22 @@ public struct JellyfinClient: Sendable {
         if let maxWidth {
             components.queryItems = [URLQueryItem(name: "maxWidth", value: String(maxWidth))]
         }
+        return components.url
+    }
+
+    /// Absolute URL for one trickplay tile image
+    /// (`GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`). The endpoint
+    /// requires auth, so we embed the token as `api_key` because image loaders
+    /// (URLSession data tasks here) don't carry our auth headers.
+    func trickplayTileURL(itemID: String, mediaSourceID: String?, width: Int, tileIndex: Int) -> URL? {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/Videos/\(itemID)/Trickplay/\(width)/\(tileIndex).jpg"
+        var query = [URLQueryItem(name: "api_key", value: token ?? "")]
+        if let mediaSourceID, !mediaSourceID.isEmpty {
+            query.append(URLQueryItem(name: "mediaSourceId", value: mediaSourceID))
+        }
+        components.queryItems = query
         return components.url
     }
 }

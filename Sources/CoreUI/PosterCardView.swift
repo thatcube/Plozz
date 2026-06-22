@@ -283,13 +283,27 @@ public struct PosterCardView: View {
     @ViewBuilder
     private var watchedBadge: some View {
         if item.isPlayed && !hideThumbnail {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 30))
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, palette.accent)
+            Image(systemName: "checkmark")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(ThemePalette.brandBlue))
+                .overlay {
+                    Circle()
+                        .inset(by: -0.5)
+                        .stroke(watchedBadgeRim, lineWidth: 1.5)
+                }
                 .padding(8)
                 .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
         }
+    }
+
+    /// Glass rim for the watched badge. Unlike the card's `mediaEdgeColor` (which
+    /// blends with the surrounding card surface), the badge floats on artwork, so
+    /// it wants a translucent glass edge that reads against the poster: a bright
+    /// white highlight on dark / OLED, a soft dark edge on Light.
+    private var watchedBadgeRim: Color {
+        palette.isLight ? .black.opacity(0.15) : .white.opacity(0.4)
     }
 
     @ViewBuilder

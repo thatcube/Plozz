@@ -11,7 +11,7 @@ public enum PlozzTheme {
         public static let landscapeWidth: CGFloat = 480
         public static let landscapeHeight: CGFloat = 270
         public static let rowSpacing: CGFloat = 40
-        public static let cardSpacing: CGFloat = 32
+        public static let cardSpacing: CGFloat = 40
         /// Tighter spacing for dense multi-column library grids — small,
         /// consistent gutters so posters read as a dense wall, not islands.
         public static let gridSpacing: CGFloat = 24

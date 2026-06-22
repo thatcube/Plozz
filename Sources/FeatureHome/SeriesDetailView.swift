@@ -32,10 +32,6 @@ struct SeriesDetailView: View {
     /// hero's own Play button) keeps the last meaningful context.
     @State private var heroItem: MediaItem
     @FocusState private var focusedSeasonID: String?
-    /// Scopes the season tab bar so directional focus entering it from the
-    /// episode rail below lands on the *selected* season (see
-    /// `prefersDefaultFocus`), not whichever tab happens to sit nearest.
-    @Namespace private var seasonBar
 
     init(
         series: MediaItem,
@@ -79,7 +75,7 @@ struct SeriesDetailView: View {
 
     private var seasonTabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 ForEach(seasons) { season in
                     seasonChip(season)
                 }
@@ -88,7 +84,11 @@ struct SeriesDetailView: View {
             // Headroom for the focused chip's lift so it is never clipped.
             .padding(.vertical, 12)
         }
-        .focusScope(seasonBar)
+        // Treat the whole tab bar as one focus section so pressing "up" from any
+        // episode — even when the rail is scrolled far to the right and no tab
+        // sits directly above — reliably enters the bar and lands on the season
+        // it last had focused (the one currently on screen).
+        .focusSection()
         .onChange(of: focusedSeasonID) { _, newValue in
             guard let id = newValue, let season = seasons.first(where: { $0.id == id }) else { return }
             select(season)
@@ -96,10 +96,10 @@ struct SeriesDetailView: View {
         }
     }
 
-    /// A small liquid-glass season pill, styled to match the Twozz player
-    /// control / chat-settings buttons (native Liquid Glass, no focus outline;
-    /// opaque themed pill under Reduce Transparency). The season whose episodes
-    /// are currently shown renders prominent (brand accent).
+    /// A single season tab. It reads as text-only until focused or active, then
+    /// lifts into a Liquid-glass pill (matching the Twozz player controls). The
+    /// style is applied unconditionally so selection never changes the tab's
+    /// identity — that is what keeps left/right focus moving between tabs.
     private func seasonChip(_ season: MediaItem) -> some View {
         let isSelected = selectedSeasonID == season.id
         return Button {
@@ -107,16 +107,13 @@ struct SeriesDetailView: View {
             heroItem = season
         } label: {
             Text(season.title)
-                .font(.subheadline.weight(isSelected ? .semibold : .regular))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
-        .plozzGlassPillButton(isSelected: isSelected)
-        .buttonBorderShape(.capsule)
+        .buttonStyle(PlozzSeasonTabStyle(isSelected: isSelected))
+        // No system focus ring — the pill + scale is the focus treatment.
+        .focusEffectDisabled()
         .focused($focusedSeasonID, equals: season.id)
-        // When focus enters the season bar from the episode rail below, prefer
-        // the season currently on screen so "up" always returns to it.
-        .prefersDefaultFocus(isSelected, in: seasonBar)
     }
 
     /// Selects `season`: marks it active and kicks off (cached) episode loading

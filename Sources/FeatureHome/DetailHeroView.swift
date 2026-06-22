@@ -17,6 +17,8 @@ struct DetailHeroView: View {
     let playTitle: String?
     let onPlay: (() -> Void)?
 
+    @Environment(\.themePalette) private var palette
+
     var body: some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
@@ -31,12 +33,22 @@ struct DetailHeroView: View {
             .clipped()
             .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
             .overlay(
+                // Fade the backdrop down into the app's own background colour so
+                // the hero reads as full-bleed and dissolves seamlessly into the
+                // page right where the season tabs begin — no hard seam.
                 LinearGradient(
-                    colors: [.black.opacity(0.0), .black.opacity(0.85)],
+                    stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: palette.backgroundBase.opacity(0.55), location: 0.6),
+                        .init(color: palette.backgroundBase, location: 1.0)
+                    ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
             )
+            // Break out of the tvOS overscan safe area so the backdrop spans the
+            // full screen width edge to edge.
+            .ignoresSafeArea(edges: .horizontal)
 
             VStack(alignment: .leading, spacing: 16) {
                 Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)

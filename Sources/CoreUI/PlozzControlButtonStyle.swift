@@ -51,6 +51,80 @@ struct PlozzGlassPillButtonModifier: ViewModifier {
     }
 }
 
+/// Season-tab styling: a single, **identity-stable** button style for the series
+/// detail season tabs. Unlike swapping `.glass` ↔ `.glassProminent` by selection
+/// (which changes the view's identity and makes tvOS snap focus back to the first
+/// tab — see Twozz's `settingPillStyle`), this style is applied unconditionally
+/// and varies only *animatable* properties (opacity, fill, weight, scale). That
+/// keeps the focused tab's identity intact so left/right navigation never breaks.
+///
+/// Visually: a tab reads as **text-only** when it is neither focused nor the
+/// active (selected) season, and lifts into a Liquid Glass pill when focused or
+/// selected — matching the reference where only the current season is a pill.
+public struct PlozzSeasonTabStyle: ButtonStyle {
+    var isSelected: Bool
+
+    public init(isSelected: Bool) {
+        self.isSelected = isSelected
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        TabBody(configuration: configuration, isSelected: isSelected)
+    }
+
+    private struct TabBody: View {
+        let configuration: ButtonStyle.Configuration
+        let isSelected: Bool
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+        @Environment(\.themePalette) private var palette
+
+        /// Whether the tab shows its pill (focused tab, or the active season).
+        private var active: Bool { isFocused || isSelected }
+
+        private var foreground: Color {
+            if reduceTransparency && isFocused { return .black }
+            if active { return palette.primaryText }
+            return palette.secondaryText
+        }
+
+        var body: some View {
+            configuration.label
+                .font(.subheadline.weight(active ? .semibold : .regular))
+                .foregroundStyle(foreground)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(pill)
+                .scaleEffect(configuration.isPressed ? 0.96 : (isFocused ? 1.06 : 1.0))
+                .animation(.easeOut(duration: 0.16), value: isFocused)
+                .animation(.easeOut(duration: 0.16), value: isSelected)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+        }
+
+        /// The pill is *always* present in the tree (stable identity); only its
+        /// opacity animates, so a tab fades between text-only and pill without a
+        /// structural change that would disturb focus.
+        private var pill: some View {
+            let shape = Capsule(style: .continuous)
+            return pillFill(shape).opacity(active ? 1 : 0)
+        }
+
+        // The branch here keys off Reduce Transparency / OS availability — both
+        // stable while navigating — never off focus or selection, so focus moves
+        // freely.
+        @ViewBuilder
+        private func pillFill(_ shape: Capsule) -> some View {
+            if reduceTransparency {
+                shape.fill(isFocused ? Color.white : palette.cardSurface)
+            } else if #available(tvOS 26.0, *) {
+                shape.fill(.clear).glassEffect(.regular, in: shape)
+            } else {
+                shape.fill(.ultraThinMaterial)
+            }
+        }
+    }
+}
+
 /// Opaque, theme-aware pill used when Liquid Glass is unavailable/disabled.
 /// Ported from Twozz's `TwozzOpaquePillButtonStyle`: reads the button's own focus
 /// state and flips to the standard tvOS focused look (white fill + dark label),

@@ -187,6 +187,52 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertEqual(item.metadataComponents(), ["2010", "2h 28m", "Action", "Adventure", "Sci-Fi"])
     }
 
+    // MARK: Card runtime text
+
+    func testCardRuntimeTextShowsOverallRuntimeWhenNotInProgress() {
+        let item = MediaItem(id: "1", title: "Movie", kind: .movie, runtime: 5400)
+        XCTAssertEqual(item.cardRuntimeText, "1h 30m")
+    }
+
+    func testCardRuntimeTextShowsRemainingWhenResumePositionExists() {
+        let item = MediaItem(
+            id: "1",
+            title: "Movie",
+            kind: .movie,
+            runtime: 7200,
+            resumePosition: 1800
+        )
+        XCTAssertEqual(item.cardRuntimeText, "1h 30m left")
+    }
+
+    func testCardRuntimeTextShowsRemainingWhenOnlyPercentageExists() {
+        let item = MediaItem(
+            id: "1",
+            title: "Episode",
+            kind: .episode,
+            runtime: 1800,
+            playedPercentage: 0.5
+        )
+        XCTAssertEqual(item.cardRuntimeText, "15m left")
+    }
+
+    func testCardRuntimeTextUsesOverallWhenMarkedPlayed() {
+        let item = MediaItem(
+            id: "1",
+            title: "Movie",
+            kind: .movie,
+            runtime: 7200,
+            resumePosition: 1800,
+            isPlayed: true
+        )
+        XCTAssertEqual(item.cardRuntimeText, "2h")
+    }
+
+    func testCardRuntimeTextNilForUnsupportedKinds() {
+        let item = MediaItem(id: "1", title: "Library", kind: .folder, runtime: 3600)
+        XCTAssertNil(item.cardRuntimeText)
+    }
+
     // MARK: Dolby format word
 
     func testDolbyFormatWordStripsBrand() {

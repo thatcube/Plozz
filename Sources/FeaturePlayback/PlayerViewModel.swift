@@ -184,12 +184,30 @@ public final class PlayerViewModel {
             let startPosition = resumeOverride ?? startPositionOverride ?? request.startPosition
 
             // Pick the engine from the resolved source facts (pure decision).
-            let kind = EngineRouter.selectEngine(
+            var kind = EngineRouter.selectEngine(
                 source: request.sourceMetadata,
                 capabilities: capabilities,
                 isTranscoding: request.isTranscoding,
                 hybridAvailable: engineFactory.hybridAvailable
             )
+
+            // If the subtitle that would be shown by default is image-based
+            // (PGS/VOBSUB), AVPlayer can't render it — route to the hybrid engine
+            // so it appears, but only when we're direct-playing and a hybrid
+            // engine is available. (A file with a text-subtitle equivalent stays
+            // native; see `defaultSubtitleNeedsHybridEngine`.)
+            if kind == .native, !request.isTranscoding, engineFactory.hybridAvailable,
+               request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
+                   mode: captionSettings.subtitleMode,
+                   preferredLanguage: captionSettings.resolvedPreferredLanguage) {
+                PlozzLog.playback.info("Default subtitle is image-based; routing to the hybrid engine so it can be rendered")
+                kind = .hybrid
+                // Reflect the auto-selected image subtitle in the track menu.
+                selectedSubtitleTrackID = request.subtitleTracks.defaultSubtitleSelection(
+                    mode: captionSettings.subtitleMode,
+                    preferredLanguage: captionSettings.resolvedPreferredLanguage)?.id
+            }
+
             await playResolved(request, engineKind: kind, startPosition: startPosition)
 
             // Best-effort, never blocking play(): (if enabled) fetch a missing
@@ -468,10 +486,36 @@ public final class PlayerViewModel {
         if id == PlayerTrackOption.offID {
             engine.selectSubtitleTrack(nil)
             selectedSubtitleTrackID = nil
-        } else if let track = engine.subtitleTracks.first(where: { $0.id == id }) {
-            engine.selectSubtitleTrack(track)
-            selectedSubtitleTrackID = id
+            loadTrackOptions()
+            return
         }
+        guard let track = engine.subtitleTracks.first(where: { $0.id == id }) else { return }
+
+        // Image-based subtitles (no text delivery URL — PGS/VOBSUB) can't be
+        // rendered by AVPlayer. If the user picks one while on the native engine,
+        // swap to the hybrid engine at the current position and apply the
+        // selection there so the subtitle actually shows.
+        if track.deliveryURL == nil, currentEngineKind == .native,
+           let request, !request.isTranscoding, engineFactory.hybridAvailable {
+            selectedSubtitleTrackID = id
+            Task { await swapEngineForImageSubtitle(track) }
+            return
+        }
+
+        engine.selectSubtitleTrack(track)
+        selectedSubtitleTrackID = id
+        loadTrackOptions()
+    }
+
+    /// Swaps from the native engine to the hybrid engine (preserving position) so
+    /// an image-based subtitle the user manually selected can be rendered, then
+    /// applies that selection on the new engine.
+    private func swapEngineForImageSubtitle(_ track: MediaTrack) async {
+        guard let request else { return }
+        let resume = max(engine.furthestObservedPosition, engine.currentTime)
+        await playResolved(request, engineKind: .hybrid, startPosition: resume > 1 ? resume : 0)
+        engine.selectSubtitleTrack(track)
+        selectedSubtitleTrackID = track.id
         loadTrackOptions()
     }
 

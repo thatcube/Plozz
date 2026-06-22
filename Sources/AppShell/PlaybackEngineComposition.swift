@@ -36,7 +36,7 @@ enum HybridPlayback {
     @MainActor
     static func engineFactory() -> EngineFactory {
         #if canImport(VLCKitSPM) && canImport(UIKit)
-        return EngineFactory(makeHybrid: { _ in VLCKitVideoEngineFactory.makeEngine() })
+        return EngineFactory(makeHybrid: { VLCKitVideoEngineFactory.makeEngine(captionSettings: $0) })
         #else
         return .native
         #endif

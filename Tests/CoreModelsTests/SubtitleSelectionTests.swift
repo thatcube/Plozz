@@ -67,6 +67,61 @@ final class SubtitleSelectionTests: XCTestCase {
     }
 }
 
+final class ImageSubtitleRoutingTests: XCTestCase {
+    private func textSub(_ id: Int, _ lang: String?, forced: Bool = false, isDefault: Bool = false) -> MediaTrack {
+        MediaTrack(id: id, kind: .subtitle, displayTitle: lang ?? "Sub", language: lang,
+                   isDefault: isDefault, isForced: forced,
+                   deliveryURL: URL(string: "https://example.com/sub/\(id).vtt"))
+    }
+    private func imageSub(_ id: Int, _ lang: String?, forced: Bool = false, isDefault: Bool = false) -> MediaTrack {
+        MediaTrack(id: id, kind: .subtitle, displayTitle: lang ?? "PGS", language: lang,
+                   isDefault: isDefault, isForced: forced, deliveryURL: nil)
+    }
+
+    func testImageOnlySubtitleNeedsHybrid() {
+        let tracks = [imageSub(2, "en")]
+        XCTAssertTrue(tracks.defaultSubtitleNeedsHybridEngine(mode: .all, preferredLanguage: "en"))
+    }
+
+    func testTextSubtitleStaysNative() {
+        let tracks = [textSub(2, "en")]
+        XCTAssertFalse(tracks.defaultSubtitleNeedsHybridEngine(mode: .all, preferredLanguage: "en"))
+    }
+
+    func testImageSubtitleWithTextEquivalentStaysNative() {
+        // Same language + forced-ness available as text → native can show that.
+        let tracks = [imageSub(2, "en"), textSub(3, "en")]
+        XCTAssertFalse(tracks.defaultSubtitleNeedsHybridEngine(mode: .all, preferredLanguage: "en"))
+    }
+
+    func testImageSubtitleWithDifferentLanguageTextStillNeedsHybrid() {
+        // The user's language is only available as an image sub.
+        let tracks = [imageSub(2, "en"), textSub(3, "fr")]
+        XCTAssertTrue(tracks.defaultSubtitleNeedsHybridEngine(mode: .all, preferredLanguage: "en"))
+    }
+
+    func testNoSubtitleSelectedDoesNotNeedHybrid() {
+        // mode .all, no language match, no default → nothing selected.
+        let tracks = [imageSub(2, "fr"), imageSub(3, "de")]
+        XCTAssertFalse(tracks.defaultSubtitleNeedsHybridEngine(mode: .all, preferredLanguage: "en"))
+    }
+
+    func testForcedImageSubtitleNeedsHybridInForcedOnlyMode() {
+        let tracks = [textSub(2, "en"), imageSub(3, "en", forced: true)]
+        XCTAssertTrue(tracks.defaultSubtitleNeedsHybridEngine(mode: .forcedOnly, preferredLanguage: "en"))
+    }
+
+    func testDefaultSubtitleSelectionReturnsChosenTrack() {
+        let tracks = [textSub(2, "fr"), imageSub(3, "en")]
+        XCTAssertEqual(tracks.defaultSubtitleSelection(mode: .all, preferredLanguage: "en")?.id, 3)
+    }
+
+    func testEmptyTracksDoNotNeedHybrid() {
+        let tracks: [MediaTrack] = []
+        XCTAssertFalse(tracks.defaultSubtitleNeedsHybridEngine(mode: .all, preferredLanguage: "en"))
+    }
+}
+
 final class LanguageMatchTests: XCTestCase {
     func testMatchesTwoAndThreeLetterCodes() {
         XCTAssertTrue(LanguageMatch.matches("en", "eng"))

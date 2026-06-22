@@ -220,13 +220,34 @@ public struct JellyfinProvider: MediaProvider {
             seriesPosterURL: dto.SeriesId.flatMap {
                 client.imageURL(itemID: $0, kind: .primary, maxWidth: 500)
             },
-            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280),
+            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1920),
             fallbackArtworkURL: dto.SeriesId.flatMap {
-                client.imageURL(itemID: $0, kind: .backdrop, maxWidth: 1280)
+                client.imageURL(itemID: $0, kind: .backdrop, maxWidth: 1920)
             },
+            logoURL: Self.logoURL(for: dto, client: client),
             ratings: Self.ratings(from: dto),
             providerIDs: dto.ProviderIds ?? [:]
         )
+    }
+
+    /// Resolves the stylized title/logo art URL for the detail hero.
+    ///
+    /// For a series or movie we point at the item's own `Logo` image, but only
+    /// when it actually advertises one (`ImageTags["Logo"]`), avoiding a
+    /// guaranteed 404. For an episode or season the logo belongs to the owning
+    /// series, so we use `SeriesId`; we can't see the series' image tags from
+    /// here, so the URL is provided unconditionally and a 404 simply falls
+    /// through to the TMDb/text fallback in the hero.
+    private static func logoURL(for dto: BaseItemDto, client: JellyfinClient) -> URL? {
+        switch kind(forItemType: dto.`Type`) {
+        case .episode, .season:
+            return dto.SeriesId.flatMap {
+                client.imageURL(itemID: $0, kind: .logo, maxWidth: 720)
+            }
+        default:
+            guard dto.ImageTags?["Logo"] != nil else { return nil }
+            return client.imageURL(itemID: dto.Id, kind: .logo, maxWidth: 720)
+        }
     }
 
     /// Maps Jellyfin's native rating fields onto provider-agnostic ratings.

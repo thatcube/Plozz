@@ -48,6 +48,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// (e.g. an episode with no thumbnail falls back to its series' backdrop).
     /// Never an episode's own frame, so it is safe to show even under spoilers.
     public var fallbackArtworkURL: URL?
+    /// Stylized title/logo art (a transparent "clearLogo" PNG) for the detail
+    /// hero. For episodes/seasons this is the owning series' logo. `nil` when the
+    /// provider has no logo; callers then fall back to TMDb or plain text.
+    public var logoURL: URL?
 
     /// External/critical ratings (IMDb, Rotten Tomatoes, …), in their native
     /// scales. May be enriched asynchronously after the item first loads.
@@ -98,6 +102,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seriesPosterURL: URL? = nil,
         backdropURL: URL? = nil,
         fallbackArtworkURL: URL? = nil,
+        logoURL: URL? = nil,
         ratings: [ExternalRating] = [],
         providerIDs: [String: String] = [:],
         sourceAccountID: String? = nil,
@@ -119,6 +124,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.seriesPosterURL = seriesPosterURL
         self.backdropURL = backdropURL
         self.fallbackArtworkURL = fallbackArtworkURL
+        self.logoURL = logoURL
         self.ratings = ratings
         self.providerIDs = providerIDs
         self.sourceAccountID = sourceAccountID
@@ -146,6 +152,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seriesPosterURL = try container.decodeIfPresent(URL.self, forKey: .seriesPosterURL)
         backdropURL = try container.decodeIfPresent(URL.self, forKey: .backdropURL)
         fallbackArtworkURL = try container.decodeIfPresent(URL.self, forKey: .fallbackArtworkURL)
+        logoURL = try container.decodeIfPresent(URL.self, forKey: .logoURL)
         ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []
         providerIDs = try container.decodeIfPresent([String: String].self, forKey: .providerIDs) ?? [:]
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)

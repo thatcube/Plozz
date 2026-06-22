@@ -18,9 +18,14 @@ public actor TMDbArtworkResolver {
 
     private let token: String?
     private let imageBase = "https://image.tmdb.org/t/p/w500"
+    /// Logos are transparent PNGs; `w500` keeps them crisp at hero size without
+    /// pulling multi-megabyte originals.
+    private let logoImageBase = "https://image.tmdb.org/t/p/w500"
     /// Session cache. A present value of `nil` is a negative result, so we never
     /// re-query a title that TMDb couldn't resolve.
     private var cache: [String: URL?] = [:]
+    /// Separate cache for logo lookups, same negative-result semantics.
+    private var logoCache: [String: URL?] = [:]
 
     public init(token: String? = TMDbArtworkResolver.tokenFromBundle()) {
         self.token = token
@@ -47,6 +52,111 @@ public actor TMDbArtworkResolver {
         let resolved = await fetchPosterURL(title: trimmed, year: year, isTV: isTV, token: token)
         cache[key] = resolved
         return resolved
+    }
+
+    /// Returns a TMDb logo (clearLogo-style transparent PNG) URL for the given
+    /// title, or `nil` if disabled, not found, or the network call fails.
+    ///
+    /// Used by the detail hero as a fallback when the provider has no `Logo`
+    /// image. Resolves the TMDb id from `tmdbID` when known (skipping a search),
+    /// otherwise looks it up by title, then reads the images endpoint and picks
+    /// the best logo (English first, then language-neutral; `.svg` skipped).
+    /// - Parameters:
+    ///   - title: Movie title, or — for TV — the *series* title.
+    ///   - year: Release year (movies only; pass `nil` for TV).
+    ///   - isTV: Use the `tv` namespace instead of `movie`.
+    ///   - tmdbID: A known TMDb numeric id (from `providerIDs["Tmdb"]`), if any.
+    public func logoURL(title: String, year: Int?, isTV: Bool, tmdbID: String?) async -> URL? {
+        guard let token else { return nil }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = tmdbID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || (id?.isEmpty == false) else { return nil }
+
+        let key = "\(isTV ? "tv" : "movie")|\(id ?? "")|\(trimmed.lowercased())|\(year.map(String.init) ?? "")"
+        if let cached = logoCache[key] { return cached }
+
+        let resolved = await fetchLogoURL(title: trimmed, year: year, isTV: isTV, tmdbID: id, token: token)
+        logoCache[key] = resolved
+        return resolved
+    }
+
+    private func fetchLogoURL(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> URL? {
+        let id: String?
+        if let tmdbID, !tmdbID.isEmpty {
+            id = tmdbID
+        } else {
+            id = await fetchID(title: title, year: year, isTV: isTV, token: token)
+        }
+        guard let id else { return nil }
+
+        guard let url = URL(string: "https://api.themoviedb.org/3/\(isTV ? "tv" : "movie")/\(id)/images") else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(ImagesResponse.self, from: data)
+        else {
+            return nil
+        }
+        guard let path = Self.bestLogoPath(decoded.logos) else { return nil }
+        return URL(string: logoImageBase + path)
+    }
+
+    /// Picks the best logo: skip unrenderable `.svg`, prefer English, then
+    /// language-neutral, then anything; break ties by `vote_average`.
+    private static func bestLogoPath(_ logos: [ImagesResponse.Image]) -> String? {
+        let usable = logos.filter {
+            guard let p = $0.file_path, !p.isEmpty else { return false }
+            return !p.lowercased().hasSuffix(".svg")
+        }
+        guard !usable.isEmpty else { return nil }
+        func rank(_ image: ImagesResponse.Image) -> Int {
+            switch image.iso_639_1 {
+            case "en": return 0
+            case nil, "": return 1
+            default: return 2
+            }
+        }
+        return usable.sorted {
+            let (lr, rr) = (rank($0), rank($1))
+            if lr != rr { return lr < rr }
+            return ($0.vote_average ?? 0) > ($1.vote_average ?? 0)
+        }.first?.file_path
+    }
+
+    /// Resolves a TMDb id by title search (returns the first result's id).
+    private func fetchID(title: String, year: Int?, isTV: Bool, token: String) async -> String? {
+        guard var components = URLComponents(string: "https://api.themoviedb.org/3/search/\(isTV ? "tv" : "movie")") else {
+            return nil
+        }
+        var query = [
+            URLQueryItem(name: "query", value: title),
+            URLQueryItem(name: "include_adult", value: "false")
+        ]
+        if let year {
+            query.append(URLQueryItem(name: isTV ? "first_air_date_year" : "year", value: String(year)))
+        }
+        components.queryItems = query
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(IDSearchResponse.self, from: data),
+              let id = decoded.results.first?.id
+        else {
+            return nil
+        }
+        return String(id)
     }
 
     private func fetchPosterURL(title: String, year: Int?, isTV: Bool, token: String) async -> URL? {
@@ -92,6 +202,20 @@ public actor TMDbArtworkResolver {
     private struct SearchResponse: Decodable {
         let results: [Result]
         struct Result: Decodable { let poster_path: String? }
+    }
+
+    private struct IDSearchResponse: Decodable {
+        let results: [Result]
+        struct Result: Decodable { let id: Int }
+    }
+
+    private struct ImagesResponse: Decodable {
+        let logos: [Image]
+        struct Image: Decodable {
+            let file_path: String?
+            let iso_639_1: String?
+            let vote_average: Double?
+        }
     }
 }
 #endif

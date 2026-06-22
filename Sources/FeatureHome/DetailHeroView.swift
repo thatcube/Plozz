@@ -51,8 +51,16 @@ struct DetailHeroView: View {
             .ignoresSafeArea(edges: .horizontal)
 
             VStack(alignment: .leading, spacing: 16) {
-                Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
-                    .font(.system(size: 64, weight: .bold))
+                if hideText {
+                    titleText(hideText: hideText)
+                } else {
+                    HeroLogoArtwork(
+                        primaryURL: item.logoURL,
+                        asyncFallbackURL: tmdbLogoFallback
+                    ) {
+                        titleText(hideText: hideText)
+                    }
+                }
                 if let subtitle = item.subtitle {
                     Text(subtitle).font(.title3).foregroundStyle(.secondary)
                 }
@@ -85,6 +93,49 @@ struct DetailHeroView: View {
         // Cross-fade the hero text as the focused context changes, while the
         // backdrop swaps underneath it.
         .animation(.easeInOut(duration: 0.2), value: item.id)
+    }
+
+    /// The plain text title, used both under spoilers and as the fallback when no
+    /// logo art can be resolved.
+    private func titleText(hideText: Bool) -> some View {
+        Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
+            .font(.system(size: 64, weight: .bold))
+    }
+
+    /// Last-resort title art for the hero: look the show/movie up on TMDb and use
+    /// its logo. TV uses the *series* title (never an episode name); inert when no
+    /// TMDb token is configured.
+    private var tmdbLogoFallback: (@Sendable () async -> URL?)? {
+        let isTV: Bool
+        let queryTitle: String
+        let tmdbID: String?
+        switch item.kind {
+        case .movie, .video:
+            isTV = false
+            queryTitle = item.title
+            tmdbID = item.providerIDs["Tmdb"]
+        case .series:
+            isTV = true
+            queryTitle = item.title
+            tmdbID = item.providerIDs["Tmdb"]
+        case .season, .episode:
+            isTV = true
+            queryTitle = item.parentTitle ?? item.title
+            // The item's own TMDb id is the episode/season, not the series, so
+            // fall back to a title search for the show logo.
+            tmdbID = nil
+        case .folder, .collection, .unknown:
+            return nil
+        }
+        let year = isTV ? nil : item.productionYear
+        return {
+            await TMDbArtworkResolver.shared.logoURL(
+                title: queryTitle,
+                year: year,
+                isTV: isTV,
+                tmdbID: tmdbID
+            )
+        }
     }
 }
 

@@ -31,6 +31,20 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// or Jellyfin account). Seeds the name/avatar and narrows the active set;
     /// `nil` for a plain app-owned profile.
     public var linkedAccountID: String?
+    /// When this profile maps to a **Plex Home** user ("Who's watching?"), the
+    /// Home user's `uuid`. Activating the profile switches the Plex identity for
+    /// `plexHomeUserAccountID` to this user. `nil` = not mapped to a Plex user.
+    public var plexHomeUserID: String?
+    /// Display name of the linked Plex Home user (cached so the picker/editor can
+    /// label it without a network fetch).
+    public var plexHomeUserName: String?
+    /// The `Account.id` of the Plex account whose Home this user belongs to. The
+    /// account's stored (admin) token authorizes the switch.
+    public var plexHomeUserAccountID: String?
+    /// Whether switching to the linked Plex Home user needs a PIN. Cached from
+    /// the Home-users list so Plozz knows to prompt without refetching. The PIN
+    /// itself is never stored.
+    public var plexHomeUserRequiresPIN: Bool?
 
     public init(
         id: String = UUID().uuidString,
@@ -38,7 +52,11 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         avatarSymbol: String = Profile.defaultAvatarSymbols[0],
         colorIndex: Int = 0,
         createdAt: Date = Date(),
-        linkedAccountID: String? = nil
+        linkedAccountID: String? = nil,
+        plexHomeUserID: String? = nil,
+        plexHomeUserName: String? = nil,
+        plexHomeUserAccountID: String? = nil,
+        plexHomeUserRequiresPIN: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -46,6 +64,10 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.colorIndex = colorIndex
         self.createdAt = createdAt
         self.linkedAccountID = linkedAccountID
+        self.plexHomeUserID = plexHomeUserID
+        self.plexHomeUserName = plexHomeUserName
+        self.plexHomeUserAccountID = plexHomeUserAccountID
+        self.plexHomeUserRequiresPIN = plexHomeUserRequiresPIN
     }
 
     /// Stable namespace used to scope this profile's settings stores. The

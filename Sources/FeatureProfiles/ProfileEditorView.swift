@@ -14,6 +14,11 @@ public struct ProfileDraft: Equatable, Sendable {
     public var linkedAccountID: String?
     /// The account subset this profile uses (household account ids).
     public var activeAccountIDs: [String]
+    /// The linked Plex Home user's `uuid` (when mapped), and cached metadata.
+    public var plexHomeUserID: String?
+    public var plexHomeUserName: String?
+    public var plexHomeUserAccountID: String?
+    public var plexHomeUserRequiresPIN: Bool?
 
     public init(
         id: String?,
@@ -21,7 +26,11 @@ public struct ProfileDraft: Equatable, Sendable {
         avatarSymbol: String,
         colorIndex: Int,
         linkedAccountID: String?,
-        activeAccountIDs: [String]
+        activeAccountIDs: [String],
+        plexHomeUserID: String? = nil,
+        plexHomeUserName: String? = nil,
+        plexHomeUserAccountID: String? = nil,
+        plexHomeUserRequiresPIN: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -29,6 +38,10 @@ public struct ProfileDraft: Equatable, Sendable {
         self.colorIndex = colorIndex
         self.linkedAccountID = linkedAccountID
         self.activeAccountIDs = activeAccountIDs
+        self.plexHomeUserID = plexHomeUserID
+        self.plexHomeUserName = plexHomeUserName
+        self.plexHomeUserAccountID = plexHomeUserAccountID
+        self.plexHomeUserRequiresPIN = plexHomeUserRequiresPIN
     }
 }
 
@@ -41,18 +54,25 @@ public struct ProfileEditorView: View {
     private let onSave: (ProfileDraft) -> Void
     private let onDelete: (() -> Void)?
     private let onCancel: () -> Void
+    /// Loads the Plex Home users for a given account id (async). `nil` hides the
+    /// "Plex User" section (e.g. previews/tests without a Plex account).
+    private let loadPlexHomeUsers: ((String) async -> [PlexHomeUser])?
 
     @State private var name: String
     @State private var avatarSymbol: String
     @State private var colorIndex: Int
     @State private var linkedAccountID: String?
     @State private var selectedAccountIDs: Set<String>
+    @State private var plexHomeUserID: String?
+    @State private var plexHomeUsers: [PlexHomeUser] = []
+    @State private var isLoadingPlexUsers = false
 
     public init(
         editingProfile: Profile? = nil,
         accounts: [Account],
         selectedAccountIDs: [String],
         canDelete: Bool = false,
+        loadPlexHomeUsers: ((String) async -> [PlexHomeUser])? = nil,
         onSave: @escaping (ProfileDraft) -> Void,
         onDelete: (() -> Void)? = nil,
         onCancel: @escaping () -> Void
@@ -60,6 +80,7 @@ public struct ProfileEditorView: View {
         self.editingProfile = editingProfile
         self.accounts = accounts
         self.canDelete = canDelete
+        self.loadPlexHomeUsers = loadPlexHomeUsers
         self.onSave = onSave
         self.onDelete = onDelete
         self.onCancel = onCancel
@@ -68,11 +89,19 @@ public struct ProfileEditorView: View {
         _colorIndex = State(initialValue: editingProfile?.colorIndex ?? 0)
         _linkedAccountID = State(initialValue: editingProfile?.linkedAccountID)
         _selectedAccountIDs = State(initialValue: Set(selectedAccountIDs))
+        _plexHomeUserID = State(initialValue: editingProfile?.plexHomeUserID)
     }
 
     private var isEditing: Bool { editingProfile != nil }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSave: Bool { !trimmedName.isEmpty }
+
+    /// The "Backed by" account when it is a Plex login — the Home whose users we
+    /// can map this profile to.
+    private var linkedPlexAccount: Account? {
+        guard let linkedAccountID else { return nil }
+        return accounts.first { $0.id == linkedAccountID && $0.server.provider == .plex }
+    }
 
     public var body: some View {
         NavigationStack {
@@ -110,6 +139,10 @@ public struct ProfileEditorView: View {
                         Text("Linked Account")
                     } footer: {
                         Text("Optionally tie this profile to a Plex or Jellyfin login. The linked account is included in the profile's accounts.")
+                    }
+
+                    if let plexAccount = linkedPlexAccount, loadPlexHomeUsers != nil {
+                        plexUserSection(for: plexAccount)
                     }
                 }
 
@@ -218,16 +251,75 @@ public struct ProfileEditorView: View {
         }
     }
 
+    private func plexUserSection(for plexAccount: Account) -> some View {
+        Section {
+            if isLoadingPlexUsers {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading Plex users…").foregroundStyle(.secondary)
+                }
+            } else if plexHomeUsers.isEmpty {
+                Text("No Plex Home users found for this account.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker("Plex User", selection: $plexHomeUserID) {
+                    Text("None").tag(String?.none)
+                    ForEach(plexHomeUsers) { user in
+                        Text(user.requiresPIN ? "\(user.name)  🔒" : user.name)
+                            .tag(String?.some(user.id))
+                    }
+                }
+            }
+        } header: {
+            Text("Plex User")
+        } footer: {
+            Text("Map this profile to a Plex Home user. Switching to this profile shows that user's library and watch state. PIN-protected users are asked for their PIN each time they're switched to.")
+        }
+        .task(id: plexAccount.id) { await loadUsers(for: plexAccount.id) }
+    }
+
+    private func loadUsers(for accountID: String) async {
+        guard let loadPlexHomeUsers else { return }
+        isLoadingPlexUsers = true
+        let users = await loadPlexHomeUsers(accountID)
+        plexHomeUsers = users
+        isLoadingPlexUsers = false
+        // Drop a stale selection no longer present in the fetched list.
+        if let id = plexHomeUserID, !users.contains(where: { $0.id == id }) {
+            plexHomeUserID = nil
+        }
+    }
+
+    /// Resolves the Plex-user fields to persist, preserving an existing mapping
+    /// when the Home-users list couldn't be (re)loaded.
+    private func resolvedPlexFields() -> (id: String?, name: String?, account: String?, requiresPIN: Bool?) {
+        guard let plexAccount = linkedPlexAccount, let id = plexHomeUserID else {
+            return (nil, nil, nil, nil)
+        }
+        if let user = plexHomeUsers.first(where: { $0.id == id }) {
+            return (id, user.name, plexAccount.id, user.requiresPIN)
+        }
+        if id == editingProfile?.plexHomeUserID {
+            return (id, editingProfile?.plexHomeUserName, plexAccount.id, editingProfile?.plexHomeUserRequiresPIN)
+        }
+        return (id, nil, plexAccount.id, nil)
+    }
+
     private func save() {
         var ids = selectedAccountIDs
         if let linkedAccountID { ids.insert(linkedAccountID) }
+        let plex = resolvedPlexFields()
         onSave(ProfileDraft(
             id: editingProfile?.id,
             name: trimmedName,
             avatarSymbol: avatarSymbol,
             colorIndex: colorIndex,
             linkedAccountID: linkedAccountID,
-            activeAccountIDs: Array(ids)
+            activeAccountIDs: Array(ids),
+            plexHomeUserID: plex.id,
+            plexHomeUserName: plex.name,
+            plexHomeUserAccountID: plex.account,
+            plexHomeUserRequiresPIN: plex.requiresPIN
         ))
     }
 }

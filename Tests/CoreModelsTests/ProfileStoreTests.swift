@@ -191,6 +191,44 @@ final class ProfilesModelTests: XCTestCase {
         let relaunched = ProfilesModel(store: ProfileStore(defaults: defaults))
         XCTAssertFalse(relaunched.hasRememberedSelection)
     }
+
+    // MARK: Plex Home user mapping
+
+    func testAddPersistsPlexHomeUserFields() {
+        let defaults = makeDefaults()
+        let model = ProfilesModel(store: ProfileStore(defaults: defaults))
+        let kid = model.add(
+            name: "Kiddo",
+            linkedAccountID: "acct-1",
+            plexHomeUserID: "kid-uuid",
+            plexHomeUserName: "Kiddo",
+            plexHomeUserAccountID: "acct-1",
+            plexHomeUserRequiresPIN: true
+        )
+        XCTAssertEqual(kid.plexHomeUserID, "kid-uuid")
+        XCTAssertEqual(kid.plexHomeUserAccountID, "acct-1")
+        XCTAssertEqual(kid.plexHomeUserRequiresPIN, true)
+        // Survives a relaunch (re-decoded from the same store).
+        let relaunched = ProfilesModel(store: ProfileStore(defaults: defaults))
+        let stored = relaunched.profiles.first { $0.id == kid.id }
+        XCTAssertEqual(stored?.plexHomeUserID, "kid-uuid")
+        XCTAssertEqual(stored?.plexHomeUserName, "Kiddo")
+        XCTAssertEqual(stored?.plexHomeUserRequiresPIN, true)
+    }
+
+    func testLegacyProfileJSONDecodesWithNilPlexFields() throws {
+        // A profile persisted before Phase 2 has no Plex keys; decoding must
+        // default them to nil rather than fail.
+        let legacy = #"""
+        {"id":"p1","name":"Me","avatarSymbol":"person.fill","colorIndex":0,"createdAt":0}
+        """#
+        let profile = try JSONDecoder().decode(Profile.self, from: Data(legacy.utf8))
+        XCTAssertEqual(profile.name, "Me")
+        XCTAssertNil(profile.plexHomeUserID)
+        XCTAssertNil(profile.plexHomeUserName)
+        XCTAssertNil(profile.plexHomeUserAccountID)
+        XCTAssertNil(profile.plexHomeUserRequiresPIN)
+    }
 }
 
 /// Verifies the per-profile namespacing of the settings stores, including the

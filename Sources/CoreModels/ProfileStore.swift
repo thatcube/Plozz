@@ -276,13 +276,21 @@ public final class ProfilesModel {
         avatarSymbol: String = Profile.defaultAvatarSymbols[0],
         colorIndex: Int = 0,
         linkedAccountID: String? = nil,
-        activeAccountIDs: [String] = []
+        activeAccountIDs: [String] = [],
+        plexHomeUserID: String? = nil,
+        plexHomeUserName: String? = nil,
+        plexHomeUserAccountID: String? = nil,
+        plexHomeUserRequiresPIN: Bool? = nil
     ) -> Profile {
         let profile = Profile(
             name: name,
             avatarSymbol: avatarSymbol,
             colorIndex: colorIndex,
-            linkedAccountID: linkedAccountID
+            linkedAccountID: linkedAccountID,
+            plexHomeUserID: plexHomeUserID,
+            plexHomeUserName: plexHomeUserName,
+            plexHomeUserAccountID: plexHomeUserAccountID,
+            plexHomeUserRequiresPIN: plexHomeUserRequiresPIN
         )
         profiles.append(profile)
         profiles.sort { $0.createdAt < $1.createdAt }

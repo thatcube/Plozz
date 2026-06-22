@@ -49,6 +49,7 @@ struct ProfileSelectionView: View {
                 accounts: appState.accounts,
                 selectedAccountIDs: appState.accounts.map(\.id),
                 canDelete: false,
+                loadPlexHomeUsers: { await appState.plexHomeUsers(forAccountID: $0) },
                 onSave: { draft in
                     appState.saveProfile(draft)
                     editorContext = nil
@@ -61,6 +62,7 @@ struct ProfileSelectionView: View {
                 accounts: appState.accounts,
                 selectedAccountIDs: appState.activeAccountIDs(forProfile: profile.id),
                 canDelete: !appState.profilesModel.isDefault(profile),
+                loadPlexHomeUsers: { await appState.plexHomeUsers(forAccountID: $0) },
                 onSave: { draft in
                     appState.saveProfile(draft)
                     editorContext = nil

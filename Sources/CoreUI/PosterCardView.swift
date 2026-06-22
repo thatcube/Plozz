@@ -58,9 +58,10 @@ public struct PosterCardView: View {
     private var posterCard: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
-                artwork
+                Color.clear
                     .aspectRatio(2.0 / 3.0, contentMode: .fit)
                     .frame(maxWidth: .infinity)
+                    .overlay { artwork }
                     .overlay(alignment: .bottom) { progressBar(height: 8) }
                     .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
 
@@ -147,6 +148,12 @@ public struct PosterCardView: View {
     private var artworkCandidates: [URL] {
         switch style {
         case .poster:
+            // A poster grid always wants the vertical show/movie poster. For an
+            // episode that means the *series* poster, never the episode's own
+            // 16:9 still (which would render as a wide card).
+            if item.kind == .episode {
+                return [item.seriesPosterURL, item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
+            }
             return [item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
         case .landscape:
             if item.kind == .episode {

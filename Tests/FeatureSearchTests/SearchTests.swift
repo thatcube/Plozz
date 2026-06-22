@@ -255,38 +255,16 @@ final class SearchDeduplicatorTests: XCTestCase {
         XCTAssertEqual(merged.map(\.id), ["a", "b"], "A reboot with a different year is a different title")
     }
 
-    func testDoesNotMergeSameTitleWhenYearIsNil() {
-        // Two shows with the same name but no year metadata must not be collapsed —
-        // one could be an anime (1999) and one its live-action remake (2023) where
-        // neither has a productionYear populated in the library.
+    func testDoesNotMergeSameTitleWhenYearIsNilAndNoExternalIDs() {
+        // Two shows with the same name, no year metadata, and no external IDs
+        // must not be collapsed by title identity.
         let anime = movie("anime", title: "One Piece", account: "acct-jellyfin")
         let liveAction = movie("live", title: "One Piece", account: "acct-plex")
 
         let merged = SearchDeduplicator.deduplicate([anime, liveAction])
 
         XCTAssertEqual(merged.map(\.id), ["anime", "live"],
-                       "Without a year, same-titled shows must not be collapsed by title identity")
-    }
-
-    func testDoesNotTransitivelyMergeViaSharedNilYearTitleIdentity() {
-        // Reproduce the One Piece bug: live-action on Plex has no year, anime on
-        // Jellyfin has no year — they share a title identity. Live-action on both
-        // servers share a TMDb id. Without the nil-year guard all four items would
-        // collapse into one card.
-        let liveJF = movie("lj", title: "One Piece", year: 2023, account: "acct-jf",
-                           providerIDs: ["Tmdb": "392768"])
-        let livePX = movie("lp", title: "One Piece", account: "acct-px",
-                           providerIDs: ["Tmdb": "392768"])   // missing year
-        let animeJF = movie("aj", title: "One Piece", account: "acct-jf2")  // missing year
-        let animePX = movie("ap", title: "One Piece", year: 1999, account: "acct-px2",
-                            providerIDs: ["Tmdb": "37854"])
-
-        let merged = SearchDeduplicator.deduplicate([liveJF, livePX, animeJF, animePX])
-
-        // live-action pair collapses to one card, anime pair collapses to one card.
-        XCTAssertEqual(merged.count, 2, "Anime and live-action must remain as separate results")
-        XCTAssertEqual(merged[0].id, "lj", "Live-action first (round-robin order)")
-        XCTAssertEqual(merged[1].id, "aj", "Anime second")
+                       "Without a year or external IDs, same-titled shows must not be collapsed")
     }
 
     func testMergesOnSharedExternalIDDespiteTitleDifferences() {
@@ -311,16 +289,38 @@ final class SearchDeduplicatorTests: XCTestCase {
     }
 
     func testTransitiveMergeAcrossThreeServers() {
-        // a↔b share an IMDb id; b↔c share title+year ⇒ all three are one card.
+        // a↔b share an IMDb id ⇒ merged. c shares the same IMDb id too ⇒ all three collapse.
+        // (Under the new rules, title identity is suppressed when external IDs are present,
+        // so the bridge must come from a shared external ID, not title+year.)
         let a = movie("a", title: "The Matrix", account: "acct-a", providerIDs: ["Imdb": "tt0133093"])
         let b = movie("b", title: "The Matrix", year: 1999, account: "acct-b", providerIDs: ["Imdb": "tt0133093"])
-        let c = movie("c", title: "the  matrix", year: 1999, account: "acct-c")
+        let c = movie("c", title: "the  matrix", year: 1999, account: "acct-c", providerIDs: ["Imdb": "tt0133093"])
 
         let merged = SearchDeduplicator.deduplicate([a, b, c])
 
         XCTAssertEqual(merged.count, 1)
         XCTAssertEqual(merged[0].id, "a")
         XCTAssertEqual(merged[0].additionalSourceAccountIDs, ["acct-b", "acct-c"])
+    }
+
+    func testDoesNotTransitiveBridgeViaSharedYearWhenExternalIDsDiffer() {
+        // The One Piece / live-action scenario: live-action has bad metadata (year=1999)
+        // matching the anime's real start year. Without the external-ID-only guard,
+        // both would share .title("one piece", 1999, .series) and collapse.
+        let liveJF = movie("lj", title: "One Piece", year: 1999, account: "acct-jf",
+                           providerIDs: ["Tmdb": "392768"])  // bad year on this server
+        let livePX = movie("lp", title: "One Piece", year: 2023, account: "acct-px",
+                           providerIDs: ["Tmdb": "392768"])
+        let animeJF = movie("aj", title: "One Piece", year: 1999, account: "acct-jf2",
+                            providerIDs: ["Tmdb": "37854"])
+        let animePX = movie("ap", title: "One Piece", year: 1999, account: "acct-px2",
+                            providerIDs: ["Tmdb": "37854"])
+
+        let merged = SearchDeduplicator.deduplicate([liveJF, livePX, animeJF, animePX])
+
+        XCTAssertEqual(merged.count, 2, "Anime and live-action must remain separate even when year metadata is wrong")
+        XCTAssertEqual(merged[0].id, "lj", "Live-action card (first seen)")
+        XCTAssertEqual(merged[1].id, "aj", "Anime card")
     }
 
     func testNormalizationIgnoresPunctuationDiacriticsAndCase() {

@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreUI
 
 /// Square async artwork for a music node, with a symbol placeholder while
 /// loading or when no image exists. Mirrors CoreUI's fallback-image behaviour but
@@ -50,8 +51,6 @@ struct MusicCard<Caption: View>: View {
     let action: () -> Void
     @ViewBuilder var caption: () -> Caption
 
-    @FocusState private var isFocused: Bool
-
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
@@ -61,7 +60,7 @@ struct MusicCard<Caption: View>: View {
                     .frame(width: width, alignment: .leading)
             }
         }
-        .buttonStyle(.card)
+        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
     }
 
     @ViewBuilder

@@ -4,12 +4,23 @@ import AVFoundation
 import Observation
 import CoreModels
 import CoreNetworking
+#if canImport(UIKit)
+import UIKit
+#endif
 
-/// Owns the `AVPlayer` for a single playback session.
+/// Orchestrates a single playback session over a `VideoEngine`.
+///
+/// The view model owns the provider-facing concerns — resolving a
+/// `PlaybackRequest`, reporting progress so resume points stay in sync, the
+/// automatic transcode fallback policy, and auto subtitle download — and drives a
+/// `VideoEngine` (a `NativeVideoEngine` by default) for the actual playback
+/// mechanics. The engine knows nothing about the provider; it reports *when*
+/// something happens (a report-cadence tick, a playback failure) and the view
+/// model decides what to do about it.
 ///
 /// Responsibilities:
 ///  * resolve a `PlaybackRequest` via the provider;
-///  * seek to the saved resume position on start;
+///  * seek to the saved resume position on start (delegated to the engine);
 ///  * report progress to the server periodically + on pause/stop so resume
 ///    points stay in sync (Phase 1 requirement);
 ///  * surface a graceful error state instead of a blank screen.
@@ -23,7 +34,6 @@ public final class PlayerViewModel {
     }
 
     public private(set) var phase: Phase = .loading
-    public private(set) var player: AVPlayer?
 
     private let provider: any MediaProvider
     private let itemID: String
@@ -32,23 +42,14 @@ public final class PlayerViewModel {
     /// point when set. `nil` keeps the default behaviour (derive from the
     /// `PlaybackRequest`); `0` forces "start over"; a positive value resumes.
     private let startPositionOverride: TimeInterval?
+
+    private let engine: any VideoEngine
     private var request: PlaybackRequest?
-    private var timeObserver: Any?
-    private let reportInterval: TimeInterval = 10
-    private var lastReportedSecond: Int = -1
     private var subtitleDownloadTask: Task<Void, Never>?
 
-    /// Furthest position (seconds) we've observed, so a transcode-fallback retry
-    /// can resume where the failed direct-play attempt left the viewer.
-    private var lastKnownPosition: TimeInterval = 0
     /// Guards the automatic transcode fallback so it only ever fires once — a
     /// second failure surfaces the error instead of looping.
     private var hasAttemptedTranscodeFallback = false
-    private var fallbackMonitorTask: Task<Void, Never>?
-    private var audioSessionConfigured = false
-    #if !os(macOS)
-    private var routeChangeObserver: NSObjectProtocol?
-    #endif
 
     public init(
         provider: any MediaProvider,
@@ -60,6 +61,19 @@ public final class PlayerViewModel {
         self.itemID = itemID
         self.captionSettings = captionSettings
         self.startPositionOverride = startPosition
+        self.engine = NativeVideoEngine(captionSettings: captionSettings)
+        configureEngineCallbacks()
+    }
+
+    private func configureEngineCallbacks() {
+        engine.onProgress = { [weak self] in
+            guard let self else { return }
+            Task { await self.report(event: .progress, isPaused: false) }
+        }
+        engine.onFailure = { [weak self] error in
+            guard let self else { return }
+            Task { await self.handleDirectPlayFailure(error) }
+        }
     }
 
     /// Loads stream info, configures the player, and seeks to resume.
@@ -73,40 +87,20 @@ public final class PlayerViewModel {
     /// retry resumes there instead of the provider's stale resume point.
     private func startPlayback(forceTranscode: Bool, resumeOverride: TimeInterval?) async {
         phase = .loading
-        configureAudioSession()
         do {
             let request = try await provider.playbackInfo(for: itemID, forceTranscode: forceTranscode)
             self.request = request
 
-            let asset = AVURLAsset(url: request.streamURL)
-            let item = AVPlayerItem(asset: asset)
-            // Apply in-app caption styling overrides if the user set any.
-            item.textStyleRules = captionSettings.textStyleRules()
-
-            let player = AVPlayer(playerItem: item)
-            player.allowsExternalPlayback = true
-            self.player = player
-
             // An explicit override wins over the provider's resume point so the
             // caller can force "start over" (0) or resume from a chosen second.
             let startPosition = resumeOverride ?? startPositionOverride ?? request.startPosition
-            lastKnownPosition = max(lastKnownPosition, startPosition)
-            if startPosition > 1 {
-                await seekWhenReady(player: player, to: startPosition)
-            }
 
-            // Watch for a direct-play item that can't actually be decoded so we
-            // can transparently re-resolve via a server transcode.
-            monitorForTranscodeFallback(item: item)
-
-            installTimeObserver(on: player)
+            await engine.load(request: request, startPosition: startPosition)
             phase = .ready
-            player.play()
             await report(event: .start, isPaused: false)
 
-            // Best-effort, never blocking play(): pick the default subtitle for
-            // the user's mode/language, and (if enabled) fetch a missing one.
-            await applyDefaultSubtitleSelection(for: item)
+            // Best-effort, never blocking play(): (if enabled) fetch a missing
+            // subtitle in the preferred language.
             startAutoSubtitleDownloadIfNeeded(request: request)
         } catch let error as AppError {
             phase = .failed(error)
@@ -115,174 +109,35 @@ public final class PlayerViewModel {
         }
     }
 
-    // MARK: - Audio session
+    // MARK: - Transcode fallback policy
 
-    /// Best-effort: configure the shared audio session for video playback so
-    /// multichannel/Atmos passthrough and spatialization route correctly. Never
-    /// blocks or fails playback — any error is swallowed.
-    private func configureAudioSession() {
-        #if !os(macOS)
-        guard !audioSessionConfigured else { return }
-        audioSessionConfigured = true
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .moviePlayback)
-            try session.setActive(true)
-        } catch {
-            PlozzLog.playback.debug("Audio session configuration failed (non-fatal)")
-        }
-        observeAudioRouteChanges(session)
-        #endif
-    }
-
-    #if !os(macOS)
-    /// Re-asserts the active session when the audio route changes (e.g. an AVR or
-    /// TV is switched mid-playback) so multichannel routing follows the new
-    /// output. Best-effort and crash-safe.
-    private func observeAudioRouteChanges(_ session: AVAudioSession) {
-        guard routeChangeObserver == nil else { return }
-        routeChangeObserver = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.routeChangeNotification,
-            object: session,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                try? AVAudioSession.sharedInstance().setActive(true)
-                PlozzLog.playback.debug("Audio route changed; re-activated session")
-            }
-        }
-    }
-    #endif
-
-    // MARK: - Transcode fallback
-
-    /// Polls the new player item's status; if it fails to load on a direct-play
-    /// stream, re-resolves playback forcing a server transcode and resumes from
-    /// the last known position. Fires at most once and never for an item that was
-    /// already transcoding.
-    private func monitorForTranscodeFallback(item: AVPlayerItem) {
-        fallbackMonitorTask?.cancel()
-        fallbackMonitorTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                switch item.status {
-                case .failed:
-                    await self.handleDirectPlayFailure()
-                    return
-                case .readyToPlay:
-                    return
-                default:
-                    try? await Task.sleep(nanoseconds: 200_000_000)
-                }
-            }
-        }
-    }
-
-    private func handleDirectPlayFailure() async {
+    /// Decides what to do when the engine reports a playback failure: re-resolve
+    /// forcing a server transcode (once) and resume from the last known position,
+    /// or surface the error. Fires at most once; a second failure surfaces the
+    /// error instead of looping.
+    private func handleDirectPlayFailure(_ error: AppError) async {
         guard let request, !request.isTranscoding, !hasAttemptedTranscodeFallback else {
             // Already transcoding, already retried, or no request: surface the
             // error rather than looping.
-            phase = .failed(currentPlayerError())
+            phase = .failed(error)
             return
         }
         hasAttemptedTranscodeFallback = true
-        let resumeFrom = max(lastKnownPosition, currentPositionSeconds())
+        let resumeFrom = max(engine.furthestObservedPosition, engine.currentTime)
         PlozzLog.playback.info("Direct play failed; retrying with server transcode")
-        teardownPlayerForRetry()
         await startPlayback(forceTranscode: true, resumeOverride: resumeFrom > 1 ? resumeFrom : nil)
     }
 
-    /// Tears the failed player down without reporting a stop — playback is being
-    /// retried under a new stream, not ended.
-    private func teardownPlayerForRetry() {
-        if let timeObserver, let player {
-            player.removeTimeObserver(timeObserver)
-        }
-        timeObserver = nil
-        player?.pause()
-        player = nil
-        lastReportedSecond = -1
-    }
-
-    private func currentPlayerError() -> AppError {
-        if player?.currentItem?.error != nil {
-            return .invalidResponse
-        }
-        return .unknown("")
-    }
-
-    /// The player's current position in seconds, or `0` when unknown/non-finite.
-    private func currentPositionSeconds() -> TimeInterval {
-        guard let seconds = player?.currentTime().seconds, seconds.isFinite else { return 0 }
-        return max(0, seconds)
-    }
-
-    /// Seeks to `seconds`, clamped into the stream's seekable range. Tolerances
-    /// are non-zero so far seeks resolve to the nearest keyframe instead of
-    /// stalling on an exact-frame seek (which can fail on transcoded HLS).
-    public func seek(to seconds: TimeInterval) async {
-        guard let player else { return }
-        await seek(player: player, to: seconds)
-    }
-
-    /// Waits (briefly) for the player item to become ready before seeking. A
-    /// resume seek issued before the asset is ready — common for far positions —
-    /// is silently dropped by AVPlayer, leaving playback at 0.
-    private func seekWhenReady(player: AVPlayer, to seconds: TimeInterval) async {
-        guard let item = player.currentItem else { return }
-        let deadline = Date().addingTimeInterval(5)
-        while item.status != .readyToPlay, Date() < deadline {
-            if item.status == .failed { return }
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-        await seek(player: player, to: seconds)
-    }
-
-    private func seek(player: AVPlayer, to seconds: TimeInterval) async {
-        let target = clampToSeekableRange(seconds, item: player.currentItem)
-        let time = CMTime(seconds: target, preferredTimescale: 600)
-        // Allow a small tolerance: exact (.zero) seeks can stall or fail on
-        // transcoded HLS, which is exactly the far-seek failure we're fixing.
-        let tolerance = CMTime(seconds: 1, preferredTimescale: 600)
-        await player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
-    }
-
-    /// Clamps a target time into the item's seekable range when one is known, so
-    /// a seek past the currently-available range doesn't error out.
-    private func clampToSeekableRange(_ seconds: TimeInterval, item: AVPlayerItem?) -> TimeInterval {
-        guard let ranges = item?.seekableTimeRanges, !ranges.isEmpty else { return max(0, seconds) }
-        var lower = TimeInterval.greatestFiniteMagnitude
-        var upper = 0.0
-        for value in ranges {
-            let range = value.timeRangeValue
-            lower = min(lower, range.start.seconds)
-            upper = max(upper, (range.start + range.duration).seconds)
-        }
-        guard upper > 0 else { return max(0, seconds) }
-        return min(max(seconds, lower), upper)
-    }
-
-    private func installTimeObserver(on player: AVPlayer) {
-        let interval = CMTime(seconds: 1, preferredTimescale: 1)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self else { return }
-            if time.seconds.isFinite { self.lastKnownPosition = max(0, time.seconds) }
-            let seconds = Int(time.seconds)
-            guard seconds != self.lastReportedSecond, seconds % Int(self.reportInterval) == 0 else { return }
-            self.lastReportedSecond = seconds
-            Task { await self.report(event: .progress, isPaused: false) }
-        }
-    }
+    // MARK: - Progress reporting
 
     /// Reports the current position. Best-effort: a failed report must never
     /// interrupt playback, so errors are swallowed (and never logged with data).
     private func report(event: PlaybackEvent, isPaused: Bool) async {
-        guard let player, let request else { return }
+        guard let request else { return }
         let progress = PlaybackProgress(
             itemID: itemID,
             playSessionID: request.playSessionID,
-            positionSeconds: player.currentTime().seconds,
+            positionSeconds: engine.currentTime,
             isPaused: isPaused
         )
         do {
@@ -292,33 +147,32 @@ public final class PlayerViewModel {
         }
     }
 
+    // MARK: - Transport
+
+    public func seek(to seconds: TimeInterval) async {
+        await engine.seek(to: seconds)
+    }
+
     public func setPaused(_ paused: Bool) {
-        guard let player else { return }
-        if paused { player.pause() } else { player.play() }
+        if paused { engine.pause() } else { engine.play() }
         Task { await report(event: paused ? .pause : .unpause, isPaused: paused) }
     }
 
     /// Call when leaving playback: report a final stop so the server records the
-    /// resume point, then tear the player down.
+    /// resume point, then tear the engine down.
     public func stop() async {
         await report(event: .stop, isPaused: true)
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = nil
-        fallbackMonitorTask?.cancel()
-        fallbackMonitorTask = nil
-        #if !os(macOS)
-        if let routeChangeObserver {
-            NotificationCenter.default.removeObserver(routeChangeObserver)
-        }
-        routeChangeObserver = nil
-        #endif
-        if let timeObserver, let player {
-            player.removeTimeObserver(timeObserver)
-        }
-        timeObserver = nil
-        player?.pause()
-        player = nil
+        engine.stop()
     }
+
+    // MARK: - View / diagnostics access
+
+    /// The live `AVPlayer` backing the active (native) engine, exposed for the
+    /// AVFoundation-specific diagnostics sampler and the system player view.
+    /// Returns `nil` for a non-AVFoundation engine (diagnostics is best-effort).
+    public var player: AVPlayer? { (engine as? NativeVideoEngine)?.underlyingPlayer }
 
     /// A stable identity for the active player instance, so views can restart
     /// player-bound work (e.g. the diagnostics sampler) when the transcode
@@ -326,6 +180,14 @@ public final class PlayerViewModel {
     public var playerInstanceID: ObjectIdentifier? {
         player.map(ObjectIdentifier.init)
     }
+
+    #if canImport(UIKit)
+    /// The engine-vended view controller to render. Stable across transcode
+    /// fallbacks (the engine re-points it at the new player internally).
+    public func makePlayerViewController() -> UIViewController {
+        engine.makePlayerViewController()
+    }
+    #endif
 
     public var availableSubtitleTracks: [MediaTrack] { request?.subtitleTracks ?? [] }
     public var availableAudioTracks: [MediaTrack] { request?.audioTracks ?? [] }
@@ -338,43 +200,7 @@ public final class PlayerViewModel {
     /// to populate the playback diagnostics overlay.
     public var sourceMetadata: MediaSourceMetadata? { request?.sourceMetadata }
 
-    // MARK: - Subtitle selection & auto-download
-
-    /// Chooses the default legible (subtitle) option on the player item to honour
-    /// the user's subtitle mode + preferred language, using the asset's own
-    /// AVMediaSelectionGroup. Best-effort: any failure leaves AVPlayer's default
-    /// selection untouched and never affects playback.
-    private func applyDefaultSubtitleSelection(for item: AVPlayerItem) async {
-        guard let group = await legibleGroup(for: item.asset) else { return }
-
-        let options = group.options
-        let candidates: [SubtitleCandidate] = options.enumerated().map { index, option in
-            SubtitleCandidate(
-                id: index,
-                languageCode: option.extendedLanguageTag ?? option.locale?.identifier,
-                isForced: option.hasMediaCharacteristic(.containsOnlyForcedSubtitles),
-                isDefault: group.defaultOption == option
-            )
-        }
-
-        let decision = SubtitleSelector.decide(
-            candidates: candidates,
-            mode: captionSettings.subtitleMode,
-            preferredLanguage: captionSettings.resolvedPreferredLanguage
-        )
-
-        switch decision {
-        case .none:
-            item.select(nil, in: group)
-        case .select(let id):
-            guard options.indices.contains(id) else { return }
-            item.select(options[id], in: group)
-        }
-    }
-
-    private func legibleGroup(for asset: AVAsset) async -> AVMediaSelectionGroup? {
-        try? await asset.loadMediaSelectionGroup(for: .legible)
-    }
+    // MARK: - Auto subtitle download
 
     /// If auto-download is enabled and the item lacks a suitable subtitle in the
     /// preferred language, kicks off a detached background search+download so the

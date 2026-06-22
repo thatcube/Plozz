@@ -178,6 +178,7 @@ public struct PlexProvider: MediaProvider {
             playedPercentage: percentage,
             isPlayed: viewCount > 0 && (resume ?? 0) == 0,
             posterURL: client.imageURL(path: posterPath, maxWidth: 500),
+            seriesPosterURL: isEpisode ? client.imageURL(path: dto.grandparentThumb, maxWidth: 500) : nil,
             backdropURL: client.imageURL(path: dto.art, maxWidth: 1280),
             ratings: [],
             providerIDs: [:]

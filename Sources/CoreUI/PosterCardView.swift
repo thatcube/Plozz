@@ -58,9 +58,10 @@ public struct PosterCardView: View {
     private var posterCard: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
-                artwork
+                Color.clear
                     .aspectRatio(2.0 / 3.0, contentMode: .fit)
                     .frame(maxWidth: .infinity)
+                    .overlay { artwork }
                     .overlay(alignment: .bottom) { progressBar(height: 8) }
                     .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
 
@@ -147,6 +148,12 @@ public struct PosterCardView: View {
     private var artworkCandidates: [URL] {
         switch style {
         case .poster:
+            // A poster grid always wants the vertical show/movie poster. For an
+            // episode that means the *series* poster, never the episode's own
+            // 16:9 still (which would render as a wide card).
+            if item.kind == .episode {
+                return [item.seriesPosterURL, item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
+            }
             return [item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
         case .landscape:
             if item.kind == .episode {
@@ -173,8 +180,50 @@ public struct PosterCardView: View {
     }
 
     private var realArtwork: some View {
-        FallbackAsyncImage(urls: artworkCandidates) {
+        FallbackAsyncImage(
+            urls: artworkCandidates,
+            maxAspectRatio: posterAspectGuard,
+            asyncFallbackURL: tmdbPosterFallback
+        ) {
             neutralPlaceholder
+        }
+    }
+
+    /// Poster cards reject any source image wider than ~0.9:1 (a real poster is
+    /// ~0.67:1), so 16:9 stills and wide composites fall through to the clean
+    /// placeholder. Landscape/backdrop art has no guard.
+    private var posterAspectGuard: CGFloat? {
+        style == .poster ? 0.9 : nil
+    }
+
+    /// Last-resort poster source for poster cards whose provider art is missing
+    /// or junk: look the title up on TMDb (movies by title+year; series/episodes
+    /// by the *series* title). Inert when no TMDb token is configured.
+    private var tmdbPosterFallback: (@Sendable () async -> URL?)? {
+        guard style == .poster else { return nil }
+        let isTV: Bool
+        let queryTitle: String
+        switch item.kind {
+        case .movie, .video:
+            isTV = false
+            queryTitle = item.title
+        case .series, .season:
+            isTV = true
+            queryTitle = item.parentTitle ?? item.title
+        case .episode:
+            isTV = true
+            // Use the series title (never the episode name) for the show poster.
+            queryTitle = item.parentTitle ?? item.title
+        case .folder, .collection, .unknown:
+            return nil
+        }
+        let year = item.productionYear
+        return {
+            await TMDbArtworkResolver.shared.posterURL(
+                title: queryTitle,
+                year: isTV ? nil : year,
+                isTV: isTV
+            )
         }
     }
 

@@ -217,6 +217,9 @@ public struct JellyfinProvider: MediaProvider {
             playedPercentage: dto.UserData?.PlayedPercentage.map { $0 / 100.0 },
             isPlayed: dto.UserData?.Played ?? false,
             posterURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 500),
+            seriesPosterURL: dto.SeriesId.flatMap {
+                client.imageURL(itemID: $0, kind: .primary, maxWidth: 500)
+            },
             backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280),
             fallbackArtworkURL: dto.SeriesId.flatMap {
                 client.imageURL(itemID: $0, kind: .backdrop, maxWidth: 1280)

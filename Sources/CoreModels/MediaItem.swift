@@ -38,6 +38,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
 
     /// Primary (poster) artwork.
     public var posterURL: URL?
+    /// The owning series' vertical poster, for episodes. Lets episode cards shown
+    /// in a poster grid (Home "Recently Added", library) display the show poster
+    /// instead of the episode's own 16:9 still. `nil` for non-episodes.
+    public var seriesPosterURL: URL?
     /// Wide/backdrop artwork.
     public var backdropURL: URL?
     /// Spoiler-safe parent artwork to use when this item has no image of its own
@@ -91,6 +95,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         playedPercentage: Double? = nil,
         isPlayed: Bool = false,
         posterURL: URL? = nil,
+        seriesPosterURL: URL? = nil,
         backdropURL: URL? = nil,
         fallbackArtworkURL: URL? = nil,
         ratings: [ExternalRating] = [],
@@ -111,6 +116,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.playedPercentage = playedPercentage
         self.isPlayed = isPlayed
         self.posterURL = posterURL
+        self.seriesPosterURL = seriesPosterURL
         self.backdropURL = backdropURL
         self.fallbackArtworkURL = fallbackArtworkURL
         self.ratings = ratings
@@ -137,6 +143,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         playedPercentage = try container.decodeIfPresent(Double.self, forKey: .playedPercentage)
         isPlayed = try container.decodeIfPresent(Bool.self, forKey: .isPlayed) ?? false
         posterURL = try container.decodeIfPresent(URL.self, forKey: .posterURL)
+        seriesPosterURL = try container.decodeIfPresent(URL.self, forKey: .seriesPosterURL)
         backdropURL = try container.decodeIfPresent(URL.self, forKey: .backdropURL)
         fallbackArtworkURL = try container.decodeIfPresent(URL.self, forKey: .fallbackArtworkURL)
         ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []

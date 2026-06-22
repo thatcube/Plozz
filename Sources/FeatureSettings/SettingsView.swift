@@ -148,8 +148,8 @@ public struct SettingsView: View {
                 }
                 Button(action: onAddAccount) {
                     HStack(spacing: 8) {
-                        Label("Add Account", systemImage: "plus.circle")
                         Spacer(minLength: 0)
+                        Label("Add Account", systemImage: "plus.circle")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -174,6 +174,7 @@ public struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
+            Spacer(minLength: 8)
             if account.id == activeAccountID {
                 Label("Active", systemImage: "checkmark.circle.fill")
                     .labelStyle(.iconOnly)

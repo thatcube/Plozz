@@ -143,11 +143,23 @@ public final class PlaybackDiagnosticsSampler {
             }
         }
 
-        if info.audioCodec == nil,
-           let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first,
+        if let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first,
            let descriptions = try? await audioTrack.load(.formatDescriptions), let desc = descriptions.first {
-            let codec = Self.fourCCString(CMFormatDescriptionGetMediaSubType(desc))
-            info.audioCodec = PlaybackDiagnostics.friendlyCodecName(codec)
+            // Provider source facts are authoritative; only fill from the played
+            // (possibly transcoded) asset when the provider gave us nothing, so
+            // the overlay still surfaces the active audio format / channel layout.
+            if info.audioCodec == nil {
+                let codec = Self.fourCCString(CMFormatDescriptionGetMediaSubType(desc))
+                info.audioCodec = PlaybackDiagnostics.friendlyCodecName(codec)
+            }
+            if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc)?.pointee {
+                if info.audioChannels == nil, asbd.mChannelsPerFrame > 0 {
+                    info.audioChannels = Int(asbd.mChannelsPerFrame)
+                }
+                if info.audioSampleRate == nil, asbd.mSampleRate > 0 {
+                    info.audioSampleRate = Int(asbd.mSampleRate.rounded())
+                }
+            }
         }
 
         staticDiagnostics = info

@@ -262,11 +262,19 @@ public struct JellyfinClient: Sendable {
 
     // MARK: Playback
 
-    func playbackInfo(userID: String, itemID: String) async throws -> PlaybackInfoResponse {
+    func playbackInfo(userID: String, itemID: String, forceTranscode: Bool = false) async throws -> PlaybackInfoResponse {
+        var queryItems = [URLQueryItem(name: "UserId", value: userID)]
+        // Forcing a transcode: tell the server not to offer direct play/stream so
+        // it returns a TranscodingUrl. Used as the player's fallback when a
+        // direct-play stream fails to load in AVPlayer.
+        if forceTranscode {
+            queryItems.append(URLQueryItem(name: "EnableDirectPlay", value: "false"))
+            queryItems.append(URLQueryItem(name: "EnableDirectStream", value: "false"))
+        }
         var endpoint = Endpoint(
             method: .post,
             path: "/Items/\(itemID)/PlaybackInfo",
-            queryItems: [URLQueryItem(name: "UserId", value: userID)],
+            queryItems: queryItems,
             headers: authHeaders
         )
         endpoint = try endpoint.jsonBody(PlaybackInfoBody(

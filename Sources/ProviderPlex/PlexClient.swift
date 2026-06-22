@@ -136,7 +136,17 @@ public struct PlexClient: Sendable {
     /// container (e.g. MKV) or codec must be remuxed/transcoded to HLS, because
     /// AVPlayer cannot play it directly. Handing AVPlayer the raw MKV part was
     /// why Plex items "didn't play" while the same files played via Jellyfin.
-    func playbackURL(ratingKey: String, media: PlexMedia, part: PlexPart, sessionID: String) -> (url: URL, isTranscoding: Bool)? {
+    func playbackURL(ratingKey: String, media: PlexMedia, part: PlexPart, sessionID: String, forceTranscode: Bool = false) -> (url: URL, isTranscoding: Bool)? {
+        // Forcing a transcode (player fallback after a failed direct play): skip
+        // the direct-play path entirely and go straight to the universal
+        // transcoder. If even that can't be built, fail rather than silently
+        // handing back the same direct URL that just failed.
+        if forceTranscode {
+            if let transcode = transcodeURL(ratingKey: ratingKey, sessionID: sessionID) {
+                return (transcode, true)
+            }
+            return nil
+        }
         if Self.canDirectPlay(media: media, part: part), let key = part.key, let direct = streamURL(forPartKey: key) {
             return (direct, false)
         }

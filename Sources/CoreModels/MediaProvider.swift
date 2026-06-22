@@ -65,6 +65,15 @@ public protocol MediaProvider: Sendable {
     /// Resolve a playable stream (+ tracks + resume point) for an item.
     func playbackInfo(for itemID: String) async throws -> PlaybackRequest
 
+    /// Resolve a playable stream, optionally forcing the server to transcode.
+    ///
+    /// When `forceTranscode` is `true`, the provider bypasses direct play/stream
+    /// and asks the server for a transcoded stream. This is the automatic
+    /// fallback the player uses when a direct-play stream fails to load in
+    /// AVPlayer. Providers that can't force a transcode inherit a default that
+    /// ignores the flag (so this stays additive — `false` == current behaviour).
+    func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest
+
     /// Report progress so the server keeps resume points in sync.
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws
 
@@ -92,6 +101,13 @@ public protocol MediaProvider: Sendable {
 public extension MediaProvider {
     func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] { [] }
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {}
+
+    /// Default: ignore `forceTranscode` and resolve normally. Providers that can
+    /// force a server-side transcode (Jellyfin, Plex) override this; test doubles
+    /// and other conformers inherit the safe pass-through.
+    func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
+        try await playbackInfo(for: itemID)
+    }
 }
 
 /// A request for one page of a container's children.

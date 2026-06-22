@@ -50,6 +50,37 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         case .critic: return 7
         }
     }
+
+    /// A compact icon glyph for the badge, mirroring the source's real-world
+    /// branding: the Rotten Tomatoes critic score is a tomato, its audience score
+    /// is a popcorn bucket, and user/community scores are a star. `nil` sources
+    /// fall back to their wordmark (`displayName`). Kept here (not in the UI
+    /// layer) so the choice is one provider-agnostic, testable decision.
+    public var glyph: String? {
+        switch self {
+        case .rottenTomatoes, .critic: return "🍅"
+        case .rottenTomatoesAudience: return "🍿"
+        case .imdb, .tmdb, .community, .letterboxd: return "⭐️"
+        case .metacritic: return nil
+        }
+    }
+
+    /// Whether this source carries Rotten Tomatoes-style fresh/rotten state, so
+    /// the UI can tint the score red (fresh) or green (rotten).
+    public var hasFreshness: Bool {
+        switch self {
+        case .rottenTomatoes, .rottenTomatoesAudience, .critic: return true
+        default: return false
+        }
+    }
+}
+
+/// Rotten Tomatoes-style fresh/rotten state derived from a percentage score.
+public enum RatingFreshness: String, Sendable, Hashable {
+    case fresh
+    case rotten
+    /// Not a freshness-bearing source (e.g. IMDb, Metacritic, user scores).
+    case none
 }
 
 /// The native scale a raw rating value is expressed in.
@@ -117,6 +148,15 @@ public struct ExternalRating: Codable, Hashable, Sendable, Identifiable {
             return String(Int(value))
         }
         return String(format: "%.1f", value)
+    }
+
+    /// Rotten Tomatoes-style freshness for this rating: fresh at ≥ 60% (on the
+    /// normalized 0…1 scale), rotten below, and `.none` for sources that don't
+    /// carry freshness (IMDb, Metacritic, user scores). The 60% cutoff matches
+    /// Rotten Tomatoes' own "Fresh" threshold.
+    public var freshness: RatingFreshness {
+        guard source.hasFreshness else { return .none }
+        return normalized >= 0.6 ? .fresh : .rotten
     }
 }
 

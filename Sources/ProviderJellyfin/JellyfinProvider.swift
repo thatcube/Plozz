@@ -447,6 +447,8 @@ public struct JellyfinProvider: MediaProvider {
             seasonNumber: dto.ParentIndexNumber,
             episodeNumber: dto.IndexNumber,
             productionYear: dto.ProductionYear,
+            officialRating: dto.OfficialRating,
+            genres: dto.Genres ?? [],
             seriesID: dto.SeriesId,
             seasonID: dto.SeasonId,
             runtime: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
@@ -464,7 +466,11 @@ public struct JellyfinProvider: MediaProvider {
             },
             logoURL: Self.logoURL(for: dto, client: client),
             ratings: Self.ratings(from: dto),
-            providerIDs: dto.ProviderIds ?? [:]
+            providerIDs: dto.ProviderIds ?? [:],
+            mediaInfo: Self.sourceMetadata(
+                container: dto.MediaSources?.first?.Container,
+                streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? []
+            )
         )
     }
 

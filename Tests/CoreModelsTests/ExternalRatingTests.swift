@@ -48,6 +48,29 @@ final class ExternalRatingTests: XCTestCase {
         XCTAssertEqual(ExternalRating(source: .letterboxd, value: 4.1, scale: .outOfFive).displayValue, "4.1/5")
     }
 
+    // MARK: Iconography & freshness
+
+    func testGlyphs() {
+        XCTAssertEqual(RatingSource.rottenTomatoes.glyph, "🍅")
+        XCTAssertEqual(RatingSource.rottenTomatoesAudience.glyph, "🍿")
+        XCTAssertEqual(RatingSource.imdb.glyph, "⭐️")
+        XCTAssertNil(RatingSource.metacritic.glyph)
+    }
+
+    func testFreshnessFreshAtThreshold() {
+        XCTAssertEqual(ExternalRating(source: .rottenTomatoes, value: 60, scale: .percent).freshness, .fresh)
+        XCTAssertEqual(ExternalRating(source: .rottenTomatoes, value: 89, scale: .percent).freshness, .fresh)
+    }
+
+    func testFreshnessRottenBelowThreshold() {
+        XCTAssertEqual(ExternalRating(source: .rottenTomatoes, value: 42, scale: .percent).freshness, .rotten)
+    }
+
+    func testFreshnessNoneForNonFreshnessSources() {
+        XCTAssertEqual(ExternalRating(source: .imdb, value: 9, scale: .outOfTen).freshness, .none)
+        XCTAssertEqual(ExternalRating(source: .metacritic, value: 90, scale: .outOfHundred).freshness, .none)
+    }
+
     // MARK: OMDb value parsing
 
     func testParseOMDbOutOfTen() {

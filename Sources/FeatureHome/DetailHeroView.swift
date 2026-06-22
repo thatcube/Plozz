@@ -31,6 +31,19 @@ struct DetailHeroView: View {
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
+    /// The capability badges shown above the ratings: the content-rating
+    /// certificate (e.g. `TV-14`) leading, then resolution/HDR/audio badges.
+    private var featureBadges: [MediaBadge] {
+        (item.ratingBadge.map { [$0] } ?? []) + item.technicalBadges
+    }
+
+    /// True when `subtitle` is just the production year — the richer metadata
+    /// line below already opens with the year, so we drop the duplicate.
+    private func isYearOnlySubtitle(_ subtitle: String) -> Bool {
+        guard let year = item.productionYear else { return false }
+        return subtitle == String(year)
+    }
+
     var body: some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
@@ -91,8 +104,17 @@ struct DetailHeroView: View {
                         titleText(hideText: hideText)
                     }
                 }
-                if let subtitle = item.subtitle {
+                if let subtitle = item.subtitle, !isYearOnlySubtitle(subtitle) {
                     Text(subtitle).font(.title3).foregroundStyle(.secondary)
+                }
+                let metadata = item.metadataComponents()
+                if !metadata.isEmpty {
+                    Text(metadata.joined(separator: "  ·  "))
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                if !featureBadges.isEmpty {
+                    MediaBadgeRow(badges: featureBadges)
                 }
                 if !item.ratings.isEmpty {
                     RatingsBadgeRow(ratings: item.ratings)

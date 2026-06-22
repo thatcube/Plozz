@@ -128,14 +128,17 @@ public struct ProfileEditorView: View {
                     }
 
                     Section {
-                        Picker("Backed by", selection: $linkedAccountID) {
-                            Text("None").tag(String?.none)
-                            ForEach(accounts) { account in
-                                Text("\(account.userName) · \(account.server.provider.displayName)")
-                                    .tag(String?.some(account.id))
+                        selectableRow(title: "None", selected: linkedAccountID == nil) {
+                            linkedAccountID = nil
+                        }
+                        ForEach(accounts) { account in
+                            selectableRow(
+                                title: "\(account.userName) · \(account.server.provider.displayName)",
+                                selected: linkedAccountID == account.id
+                            ) {
+                                linkedAccountID = account.id
                             }
                         }
-                        .pickerStyle(.navigationLink)
                     } header: {
                         Text("Linked Account")
                     } footer: {
@@ -155,6 +158,8 @@ public struct ProfileEditorView: View {
                     }
                 }
             }
+            .padding(.horizontal, 80)
+            .padding(.vertical, 40)
             .navigationTitle(isEditing ? "Edit Profile" : "New Profile")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -253,6 +258,20 @@ public struct ProfileEditorView: View {
         }
     }
 
+    /// A tappable selection row that toggles a single-choice value inline (no
+    /// navigation push — the pushed-picker style renders blank in a tvOS sheet).
+    private func selectableRow(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                Spacer()
+                if selected {
+                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                }
+            }
+        }
+    }
+
     private func plexUserSection(for plexAccount: Account) -> some View {
         Section {
             if isLoadingPlexUsers {
@@ -264,14 +283,17 @@ public struct ProfileEditorView: View {
                 Text("No Plex Home users found for this account.")
                     .foregroundStyle(.secondary)
             } else {
-                Picker("Plex User", selection: $plexHomeUserID) {
-                    Text("None").tag(String?.none)
-                    ForEach(plexHomeUsers) { user in
-                        Text(user.requiresPIN ? "\(user.name)  🔒" : user.name)
-                            .tag(String?.some(user.id))
+                selectableRow(title: "None", selected: plexHomeUserID == nil) {
+                    plexHomeUserID = nil
+                }
+                ForEach(plexHomeUsers) { user in
+                    selectableRow(
+                        title: user.requiresPIN ? "\(user.name)  🔒" : user.name,
+                        selected: plexHomeUserID == user.id
+                    ) {
+                        plexHomeUserID = user.id
                     }
                 }
-                .pickerStyle(.navigationLink)
             }
         } header: {
             Text("Plex User")

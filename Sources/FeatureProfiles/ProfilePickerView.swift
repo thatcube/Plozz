@@ -70,6 +70,7 @@ public struct ProfilePickerView: View {
                     Button("Cancel", action: onCancel)
                 }
             }
+            .frame(maxWidth: .infinity)
             .padding(.top, 8)
             .focusSection()
         }

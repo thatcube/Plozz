@@ -172,7 +172,8 @@ private struct HomeTab: View {
                     itemID: request.item.id,
                     captionSettings: captionSettings,
                     startPosition: request.startPosition
-                )
+                ),
+                showDiagnostics: showDiagnostics
             )
         }
         .resumePrompt(item: $resumePrompt) { item, startPosition in

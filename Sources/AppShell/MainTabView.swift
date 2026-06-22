@@ -3,6 +3,7 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import FeatureHome
+import FeatureMusic
 import FeaturePlayback
 import FeatureSearch
 import FeatureSettings
@@ -35,6 +36,8 @@ struct MainTabView: View {
     let onSwitchProfile: () -> Void
 
     @State private var discovery = LibraryDiscoveryModel()
+    @State private var audioController = AudioPlaybackController()
+    @State private var musicAvailability = MusicAvailabilityModel()
 
     var body: some View {
         TabView {
@@ -58,6 +61,17 @@ struct MainTabView: View {
             )
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
+            // Conditional Music tab: present only when at least one signed-in
+            // account exposes a music library. Video-only users see no tab and no
+            // mini-player — the app is byte-for-byte unchanged for them.
+            if musicAvailability.hasMusic {
+                MusicTabView(
+                    accounts: musicAvailability.detectedAccounts,
+                    controller: audioController
+                )
+                .tabItem { Label("Music", systemImage: "music.note") }
+            }
+
             SettingsView(
                 captions: captionModel,
                 spoilers: spoilerModel,
@@ -79,6 +93,9 @@ struct MainTabView: View {
                 onSwitchProfile: onSwitchProfile
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+        }
+        .task(id: accounts.map(\.account.id)) {
+            await musicAvailability.probe(accounts: accounts)
         }
     }
 }

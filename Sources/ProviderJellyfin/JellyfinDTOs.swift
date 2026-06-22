@@ -71,6 +71,33 @@ struct BaseItemDto: Decodable {
     let MediaStreams: [MediaStreamDto]?
     let ImageTags: [String: String]?
     let BackdropImageTags: [String]?
+
+    // MARK: Music fields (additive, all optional)
+    //
+    // Present on `MusicArtist`/`MusicAlbum`/`Audio`/`Playlist`/`MusicGenre`
+    // responses; absent (and ignored) for video items.
+    /// The album title an `Audio` track belongs to.
+    let Album: String?
+    /// The id of the album an `Audio` track belongs to.
+    let AlbumId: String?
+    /// The primary album artist (for an album or a track).
+    let AlbumArtist: String?
+    /// The id of the album's primary artist, when reported via `AlbumArtists`.
+    let AlbumArtists: [NameGuidPairDto]?
+    /// Performing artists for a track/album.
+    let Artists: [String]?
+    /// Artist items with ids, used to link a track/album back to its artist.
+    let ArtistItems: [NameGuidPairDto]?
+    /// Genre names for an artist/album/track.
+    let Genres: [String]?
+    /// Number of children (e.g. albums for an artist, tracks for an album).
+    let ChildCount: Int?
+}
+
+/// A Jellyfin `{ Name, Id }` reference pair (used for artists, genres, …).
+struct NameGuidPairDto: Decodable {
+    let Name: String?
+    let Id: String?
 }
 
 struct UserItemDataDto: Decodable {

@@ -44,6 +44,8 @@ import Libmpv
 public final class MPVVideoEngine: NSObject, VideoEngine {
     // MARK: Observable state
 
+    public let displayName = "mpv"
+
     public private(set) var status: VideoEngineStatus = .idle
     public private(set) var isPaused: Bool = false
     public private(set) var currentTime: TimeInterval = 0

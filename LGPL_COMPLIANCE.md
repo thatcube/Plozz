@@ -149,3 +149,18 @@ MPV_RELEASE_DIR=<MPVKit>/dist/release \
 grep -E 'FFMPEG_LICENSE|CONFIG_NONFREE|CONFIG_GPL ' \
   "$(find Frameworks/mpv/Libavformat.xcframework -name config.h | head -1)"
 ```
+
+### Day-to-day: staging into a fresh worktree (no rebuild)
+
+The ~9-minute `build-mpv-tvos.sh` only needs to run **once per machine**. To make
+any worktree or branch buildable, run:
+
+```bash
+tools/setup-mpv.sh    # clones Frameworks/mpv/ from a shared cache; instant (<1s)
+```
+
+It populates the gitignored `Frameworks/mpv/` from
+`~/Library/Caches/plozz-mpv/mpv` using an APFS copy-on-write clone (no disk
+duplication), self-seeding that cache the first time from a sibling worktree, the
+build zips, or — only as a last resort — a full `build-mpv-tvos.sh`. Re-seed the
+cache after a rebuild with `tools/setup-mpv.sh --refresh`.

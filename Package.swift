@@ -236,6 +236,7 @@ let package = Package(
                 "CoreNetworking",
                 "CoreUI",
                 "EngineVLCKit",
+                "EngineMPV",
                 "FeatureDiscovery",
                 "FeatureAuth",
                 "ProviderJellyfin",

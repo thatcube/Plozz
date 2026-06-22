@@ -78,6 +78,13 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     private var lastReportedSecond: Int = -1
     private var hasFailed = false
 
+    /// The opaque, *retained* `self` pointer handed to mpv's wakeup callback.
+    /// Retaining (rather than passing unretained) guarantees the engine can't be
+    /// deallocated while a wakeup is mid-flight on another thread; the matching
+    /// `release` happens in `teardownClient()` after the handle (and its callback)
+    /// are gone.
+    private var wakeupCtx: UnsafeMutableRawPointer?
+
     /// Background queue that drains the mpv event loop (kept off the main actor).
     private let eventQueue = DispatchQueue(label: "com.thatcube.Plozz.mpv.events", qos: .userInitiated)
 
@@ -87,10 +94,11 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     }
 
     deinit {
-        // Safety net: ensure the mpv handle (and its wakeup callback, which holds
-        // an unretained pointer to `self`) is torn down before the engine is
-        // freed, even if `stop()` was never called. `destroy()` is nonisolated and
-        // thread-safe.
+        // Safety net. With a retained wakeup ctx the engine normally can't reach
+        // deinit until `teardownClient()` has released that ref (after destroying
+        // the handle), so by here the handle is already gone — this `destroy()` is
+        // an idempotent no-op that just guards the (impossible-in-normal-flow)
+        // path where a handle was created but never torn down.
         client.destroy()
     }
 
@@ -134,7 +142,9 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         }
 
         // Wakeup callback + property observation (before init so nothing is missed).
-        let ctx = Unmanaged.passUnretained(self).toOpaque()
+        // Retain `self` for mpv; balanced by the release in `teardownClient()`.
+        let ctx = Unmanaged.passRetained(self).toOpaque()
+        wakeupCtx = ctx
         client.setWakeup(ctx: ctx, callback: mpvWakeupCallback)
         client.observeDouble(MPVProperty.timePos)
         client.observeDouble(MPVProperty.duration)
@@ -142,6 +152,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         client.observeFlag(MPVProperty.eofReached)
 
         guard client.initialize() >= 0 else {
+            teardownClient()
             fail(.unknown("mpv: failed to initialize player"))
             return
         }
@@ -176,6 +187,13 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     private func teardownClient() {
         if client.isAlive {
             client.destroy()
+        }
+        // Balance the `passRetained(self)` from `load()`. `destroy()` has already
+        // cleared the wakeup callback, so no further wakeup can resurrect `self`
+        // after this release.
+        if let ctx = wakeupCtx {
+            wakeupCtx = nil
+            Unmanaged<MPVVideoEngine>.fromOpaque(ctx).release()
         }
         lastReportedSecond = -1
     }
@@ -318,7 +336,8 @@ private enum MPVProperty {
 // MARK: - C wakeup callback
 
 /// Global C callback registered with `mpv_set_wakeup_callback`. `ctx` is the
-/// unretained `MPVVideoEngine` pointer; it just nudges the engine to drain.
+/// retained `MPVVideoEngine` pointer (kept alive by `wakeupCtx`); we take it
+/// *unretained* here since the engine owns that +1, then just nudge a drain.
 private let mpvWakeupCallback: @convention(c) (UnsafeMutableRawPointer?) -> Void = { ctx in
     guard let ctx else { return }
     let engine = Unmanaged<MPVVideoEngine>.fromOpaque(ctx).takeUnretainedValue()

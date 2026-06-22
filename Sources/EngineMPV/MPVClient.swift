@@ -14,6 +14,11 @@ import Libmpv
 final class MPVClient: @unchecked Sendable {
     private let lock = NSLock()
     private var handle: OpaquePointer?
+    /// Bumped on every `create()`. A background drain binds the generation it
+    /// started on and exits the moment it changes, so a stale drain from a prior
+    /// session can never latch onto a freshly-created handle (the same
+    /// `MPVClient` is reused across `load()`/`stop()`).
+    private var generation: UInt64 = 0
 
     var isAlive: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -27,6 +32,7 @@ final class MPVClient: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard handle == nil else { return true }
         handle = mpv_create()
+        if handle != nil { generation &+= 1 }
         return handle != nil
     }
 
@@ -41,6 +47,9 @@ final class MPVClient: @unchecked Sendable {
         lock.lock()
         let h = handle
         handle = nil
+        // Unregister the wakeup callback *before* terminating so no further
+        // wakeups can be delivered referencing a soon-to-be-freed owner.
+        if let h { mpv_set_wakeup_callback(h, nil, nil) }
         lock.unlock()
         if let h { mpv_terminate_destroy(h) }
     }
@@ -158,36 +167,61 @@ final class MPVClient: @unchecked Sendable {
     /// when the queue is empty (`MPV_EVENT_NONE`). Safe to call off the main
     /// thread; that's the point.
     func drainEvents(_ onEvent: (MPVEvent) -> Void) {
+        lock.lock()
+        let boundGen = generation
+        let alive = handle != nil
+        lock.unlock()
+        guard alive else { return }
+
         while true {
             lock.lock()
-            guard let handle else { lock.unlock(); return }
+            // Bail if the handle was torn down, or replaced by a newer session
+            // (generation bumped) — otherwise we'd consume the new session's
+            // events from this stale drain.
+            guard let handle, generation == boundGen else { lock.unlock(); return }
             let eventPtr = mpv_wait_event(handle, 0)
-            lock.unlock()
-            guard let event = eventPtr?.pointee, event.event_id != MPV_EVENT_NONE else { return }
-
-            switch event.event_id {
-            case MPV_EVENT_PROPERTY_CHANGE:
-                if let prop = UnsafePointer<mpv_event_property>(OpaquePointer(event.data))?.pointee {
-                    let name = String(cString: prop.name)
-                    onEvent(.propertyChanged(name))
-                }
-            case MPV_EVENT_FILE_LOADED:
-                onEvent(.fileLoaded)
-            case MPV_EVENT_END_FILE:
-                if let endFile = UnsafePointer<mpv_event_end_file>(OpaquePointer(event.data))?.pointee {
-                    // `error` is negative for a real failure; `reason == ERROR`
-                    // also signals a decode/IO failure rather than a clean EOF.
-                    let isError = endFile.error < 0 || endFile.reason == MPV_END_FILE_REASON_ERROR
-                    onEvent(.endFile(isError: isError))
-                } else {
-                    onEvent(.endFile(isError: false))
-                }
-            case MPV_EVENT_SHUTDOWN:
-                onEvent(.shutdown)
+            guard let raw = eventPtr?.pointee, raw.event_id != MPV_EVENT_NONE else {
+                lock.unlock()
                 return
-            default:
-                break
             }
+            // `mpv_wait_event` returns a pointer into mpv-owned storage that is
+            // only valid until the next `mpv_wait_event` / `mpv_terminate_destroy`.
+            // Fully project it into a `Sendable` `MPVEvent` *while still holding the
+            // lock*, so a concurrent `destroy()` can't free it mid-read.
+            let parsed = Self.parse(raw)
+            let isShutdown = raw.event_id == MPV_EVENT_SHUTDOWN
+            lock.unlock()
+
+            // `onEvent` only marshals to the main actor; it never touches mpv, so
+            // it's safe (and avoids holding the lock across the hop).
+            if let parsed { onEvent(parsed) }
+            if isShutdown { return }
+        }
+    }
+
+    /// Projects a raw mpv event into a `Sendable` value. Must be called while the
+    /// lock is held (it dereferences `event.data`, which is mpv-owned).
+    private static func parse(_ event: mpv_event) -> MPVEvent? {
+        switch event.event_id {
+        case MPV_EVENT_PROPERTY_CHANGE:
+            if let prop = UnsafePointer<mpv_event_property>(OpaquePointer(event.data))?.pointee {
+                return .propertyChanged(String(cString: prop.name))
+            }
+            return nil
+        case MPV_EVENT_FILE_LOADED:
+            return .fileLoaded
+        case MPV_EVENT_END_FILE:
+            if let endFile = UnsafePointer<mpv_event_end_file>(OpaquePointer(event.data))?.pointee {
+                // `error` is negative for a real failure; `reason == ERROR`
+                // also signals a decode/IO failure rather than a clean EOF.
+                let isError = endFile.error < 0 || endFile.reason == MPV_END_FILE_REASON_ERROR
+                return .endFile(isError: isError)
+            }
+            return .endFile(isError: false)
+        case MPV_EVENT_SHUTDOWN:
+            return .shutdown
+        default:
+            return nil
         }
     }
 }

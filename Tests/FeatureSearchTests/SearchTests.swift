@@ -255,6 +255,40 @@ final class SearchDeduplicatorTests: XCTestCase {
         XCTAssertEqual(merged.map(\.id), ["a", "b"], "A reboot with a different year is a different title")
     }
 
+    func testDoesNotMergeSameTitleWhenYearIsNil() {
+        // Two shows with the same name but no year metadata must not be collapsed —
+        // one could be an anime (1999) and one its live-action remake (2023) where
+        // neither has a productionYear populated in the library.
+        let anime = movie("anime", title: "One Piece", account: "acct-jellyfin")
+        let liveAction = movie("live", title: "One Piece", account: "acct-plex")
+
+        let merged = SearchDeduplicator.deduplicate([anime, liveAction])
+
+        XCTAssertEqual(merged.map(\.id), ["anime", "live"],
+                       "Without a year, same-titled shows must not be collapsed by title identity")
+    }
+
+    func testDoesNotTransitivelyMergeViaSharedNilYearTitleIdentity() {
+        // Reproduce the One Piece bug: live-action on Plex has no year, anime on
+        // Jellyfin has no year — they share a title identity. Live-action on both
+        // servers share a TMDb id. Without the nil-year guard all four items would
+        // collapse into one card.
+        let liveJF = movie("lj", title: "One Piece", year: 2023, account: "acct-jf",
+                           providerIDs: ["Tmdb": "392768"])
+        let livePX = movie("lp", title: "One Piece", account: "acct-px",
+                           providerIDs: ["Tmdb": "392768"])   // missing year
+        let animeJF = movie("aj", title: "One Piece", account: "acct-jf2")  // missing year
+        let animePX = movie("ap", title: "One Piece", year: 1999, account: "acct-px2",
+                            providerIDs: ["Tmdb": "37854"])
+
+        let merged = SearchDeduplicator.deduplicate([liveJF, livePX, animeJF, animePX])
+
+        // live-action pair collapses to one card, anime pair collapses to one card.
+        XCTAssertEqual(merged.count, 2, "Anime and live-action must remain as separate results")
+        XCTAssertEqual(merged[0].id, "lj", "Live-action first (round-robin order)")
+        XCTAssertEqual(merged[1].id, "aj", "Anime second")
+    }
+
     func testMergesOnSharedExternalIDDespiteTitleDifferences() {
         // Different display titles / years but the same IMDb id ⇒ same film.
         let plex = movie("p1", title: "Spider-Man", account: "acct-plex", providerIDs: ["Imdb": "tt0145487"])

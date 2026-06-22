@@ -164,6 +164,32 @@ struct PlexUserDTO: Decodable {
     let email: String?
 }
 
+// MARK: Plex.tv: Home users
+
+/// `GET /api/v2/home/users` — wrapper around the Home's user list.
+struct PlexHomeUsersDTO: Decodable {
+    let users: [PlexHomeUserDTO]
+}
+
+/// One Plex Home user. `protected`/`hasPassword` mean a PIN is needed to switch.
+struct PlexHomeUserDTO: Decodable {
+    let id: Int?
+    let uuid: String?
+    let title: String?
+    let username: String?
+    let admin: Bool?
+    let restricted: Bool?
+    let protected: Bool?
+    let hasPassword: Bool?
+}
+
+/// `POST /api/v2/home/users/{uuid}/switch` — returns the switched-to user,
+/// carrying that user's auth token (key spelling varies by API surface).
+struct PlexHomeSwitchDTO: Decodable {
+    let authToken: String?
+    let authenticationToken: String?
+}
+
 // MARK: Plex.tv: resources (servers)
 
 /// One device returned by `GET /api/v2/resources`. Plozz only cares about those

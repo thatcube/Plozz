@@ -17,7 +17,9 @@ final class ProfileStoreTests: XCTestCase {
         XCTAssertEqual(profiles.count, 1)
         XCTAssertEqual(profiles.first?.id, ProfileStore.defaultProfileID)
         XCTAssertEqual(profiles.first?.name, "Me")
-        XCTAssertEqual(store.activeProfileID(), ProfileStore.defaultProfileID)
+        // Migration creates the default profile but records no explicit pick,
+        // so a fresh Apple TV system user still gets the launch picker.
+        XCTAssertNil(store.activeProfileID())
         XCTAssertEqual(store.activeAccountIDs(forProfile: ProfileStore.defaultProfileID), ["a1"])
     }
 
@@ -66,6 +68,50 @@ final class ProfileStoreTests: XCTestCase {
         XCTAssertEqual(store.activeAccountIDs(forProfile: "p2"), ["x1", "x2"])
         XCTAssertNil(store.activeAccountIDs(forProfile: "unknown"))
     }
+
+    // MARK: Shared (user-independent Keychain) backing
+
+    func testProfilesPersistInSecureStoreNotDefaults() {
+        let defaults = makeDefaults()
+        let secure = InMemorySecureStoringDouble()
+        let store = ProfileStore(defaults: defaults, secureStore: secure)
+        let p = Profile(name: "Mom")
+        store.saveProfiles([p])
+        store.setActiveAccountIDs(["a1"], forProfile: p.id)
+        // Shared bits live in the secure store, never UserDefaults.
+        XCTAssertNotNil(secure.string(for: "com.plozz.profiles.v1"))
+        XCTAssertNil(defaults.data(forKey: "com.plozz.profiles.v1"))
+        // A new store over a *different* (per-user) defaults but the same shared
+        // secure store still sees the household profiles + account subsets.
+        let other = ProfileStore(defaults: makeDefaults(), secureStore: secure)
+        XCTAssertEqual(other.loadProfiles().map(\.name), ["Mom"])
+        XCTAssertEqual(other.activeAccountIDs(forProfile: p.id), ["a1"])
+    }
+
+    func testMigratesExistingProfilesFromDefaultsToSecureStore() throws {
+        let defaults = makeDefaults()
+        // Seed an existing (pre-entitlement) install's profiles in UserDefaults.
+        let legacy = ProfileStore(defaults: defaults)
+        let p = legacy.migrateLegacyIfNeeded(defaultName: "Me", defaultActiveAccountIDs: ["acc"]).first!
+        XCTAssertNotNil(defaults.data(forKey: "com.plozz.profiles.v1"))
+
+        // First launch with the shared store wired migrates them across.
+        let secure = InMemorySecureStoringDouble()
+        let migrated = ProfileStore(defaults: defaults, secureStore: secure)
+        XCTAssertEqual(migrated.loadProfiles().map(\.id), [p.id])
+        XCTAssertEqual(migrated.activeAccountIDs(forProfile: p.id), ["acc"])
+        // Old UserDefaults copies are retired so they don't linger per-user.
+        XCTAssertNil(defaults.data(forKey: "com.plozz.profiles.v1"))
+        XCTAssertNotNil(secure.string(for: "com.plozz.profiles.v1"))
+    }
+}
+
+/// In-memory `SecureStoring` double for exercising the shared-store path.
+private final class InMemorySecureStoringDouble: SecureStoring, @unchecked Sendable {
+    private var storage: [String: String] = [:]
+    func setString(_ value: String, for key: String) throws { storage[key] = value }
+    func string(for key: String) -> String? { storage[key] }
+    func removeValue(for key: String) throws { storage[key] = nil }
 }
 
 @MainActor
@@ -121,6 +167,67 @@ final class ProfilesModelTests: XCTestCase {
         XCTAssertEqual(model.activeAccountIDs(for: id, fallback: ["g1", "g2"]), ["g1", "g2"])
         model.setActiveAccountIDs(["only"], for: id)
         XCTAssertEqual(model.activeAccountIDs(for: id, fallback: ["g1", "g2"]), ["only"])
+    }
+
+    func testHasRememberedSelectionTracksAnExplicitPick() {
+        let defaults = makeDefaults()
+        // Fresh household: a default profile exists but no system user has picked.
+        let model = ProfilesModel(store: ProfileStore(defaults: defaults))
+        XCTAssertFalse(model.hasRememberedSelection)
+        let kid = model.add(name: "Kid")
+        model.select(kid.id)
+        XCTAssertTrue(model.hasRememberedSelection)
+        // The pick is persisted, so a relaunch (new model over same store) remembers it.
+        let relaunched = ProfilesModel(store: ProfileStore(defaults: defaults))
+        XCTAssertTrue(relaunched.hasRememberedSelection)
+        XCTAssertEqual(relaunched.activeProfile.id, kid.id)
+    }
+
+    func testDefaultedSelectionIsNotRemembered() {
+        let defaults = makeDefaults()
+        // Building a model without ever calling `select` must not persist a pick,
+        // so a fresh Apple TV system user still gets the launch picker.
+        _ = ProfilesModel(store: ProfileStore(defaults: defaults))
+        let relaunched = ProfilesModel(store: ProfileStore(defaults: defaults))
+        XCTAssertFalse(relaunched.hasRememberedSelection)
+    }
+
+    // MARK: Plex Home user mapping
+
+    func testAddPersistsPlexHomeUserFields() {
+        let defaults = makeDefaults()
+        let model = ProfilesModel(store: ProfileStore(defaults: defaults))
+        let kid = model.add(
+            name: "Kiddo",
+            linkedAccountID: "acct-1",
+            plexHomeUserID: "kid-uuid",
+            plexHomeUserName: "Kiddo",
+            plexHomeUserAccountID: "acct-1",
+            plexHomeUserRequiresPIN: true
+        )
+        XCTAssertEqual(kid.plexHomeUserID, "kid-uuid")
+        XCTAssertEqual(kid.plexHomeUserAccountID, "acct-1")
+        XCTAssertEqual(kid.plexHomeUserRequiresPIN, true)
+        // Survives a relaunch (re-decoded from the same store).
+        let relaunched = ProfilesModel(store: ProfileStore(defaults: defaults))
+        let stored = relaunched.profiles.first { $0.id == kid.id }
+        XCTAssertEqual(stored?.plexHomeUserID, "kid-uuid")
+        XCTAssertEqual(stored?.plexHomeUserName, "Kiddo")
+        XCTAssertEqual(stored?.plexHomeUserRequiresPIN, true)
+    }
+
+    func testLegacyProfileJSONDecodesWithNilPlexFields() throws {
+        // A profile persisted before Phase 2 has no Plex keys; decoding must
+        // default them to nil rather than fail.
+        let legacy = #"""
+        {"id":"p1","name":"Me","avatarSymbol":"person.fill","colorIndex":0,"createdAt":0}
+        """#
+        let profile = try JSONDecoder().decode(Profile.self, from: Data(legacy.utf8))
+        XCTAssertEqual(profile.name, "Me")
+        XCTAssertNil(profile.plexHomeUserID)
+        XCTAssertNil(profile.plexHomeUserName)
+        XCTAssertNil(profile.plexHomeUserAccountID)
+        XCTAssertNil(profile.plexHomeUserRequiresPIN)
     }
 }
 

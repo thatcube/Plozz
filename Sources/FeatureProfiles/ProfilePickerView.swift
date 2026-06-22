@@ -60,6 +60,7 @@ public struct ProfilePickerView: View {
                 AddProfileTile(action: onAddProfile)
             }
             .padding(.horizontal, 80)
+            .focusSection()
 
             HStack(spacing: 24) {
                 Button(isEditing ? "Done" : "Edit Profiles") {
@@ -69,7 +70,9 @@ public struct ProfilePickerView: View {
                     Button("Cancel", action: onCancel)
                 }
             }
+            .frame(maxWidth: .infinity)
             .padding(.top, 8)
+            .focusSection()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 80)

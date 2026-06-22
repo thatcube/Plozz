@@ -16,6 +16,11 @@ public final class ServerPickerViewModel {
 
     public private(set) var phase: Phase = .idle
     public private(set) var discoveredServers: [MediaServer] = []
+    /// Whether this Apple TV is currently connected to a Tailscale network.
+    /// Drives the conditional Tailscale guidance in the picker.
+    public private(set) var isOnTailscale: Bool = false
+    /// This device's own Tailscale IPv4 address when connected, for display.
+    public private(set) var tailscaleIP: String?
     /// Reachability of `lastServer`: `nil` while unknown/checking, then the
     /// result of a live probe (or `true` the moment LAN discovery re-finds it).
     public private(set) var lastServerReachable: Bool?
@@ -60,6 +65,7 @@ public final class ServerPickerViewModel {
         reachabilityTask?.cancel()
         discoveredServers = []
         phase = .scanning
+        refreshTailscaleState()
 
         if store.lastServer != nil {
             lastServerReachable = nil
@@ -82,6 +88,13 @@ public final class ServerPickerViewModel {
         reachabilityTask?.cancel()
         reachabilityTask = nil
         if case .scanning = phase { phase = .idle }
+    }
+
+    /// Re-evaluates whether this device is on a tailnet by inspecting local
+    /// network interfaces. Cheap and synchronous, so it runs on each scan.
+    private func refreshTailscaleState() {
+        tailscaleIP = TailscaleDetector.localTailscaleIP()
+        isOnTailscale = tailscaleIP != nil
     }
 
     /// Directly hits the saved server's public endpoint to confirm it's online.

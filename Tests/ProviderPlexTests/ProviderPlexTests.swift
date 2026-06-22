@@ -410,6 +410,66 @@ final class PlexAuthClientTests: XCTestCase {
         XCTAssertEqual(user.id, "uuid-9")
         XCTAssertEqual(user.userName, "Alice T")
     }
+
+    func testHomeUsersParsesAndMapsFlags() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/api/v2/home/users", json: """
+        {"users":[
+          {"id":1,"uuid":"owner-uuid","title":"Brandon","admin":true,"protected":false,"restricted":false},
+          {"id":2,"uuid":"kid-uuid","title":"Kiddo","admin":false,"protected":true,"restricted":true}
+        ]}
+        """)
+        let users = try await client(stub).homeUsers(authToken: "ADMIN_TOKEN")
+        XCTAssertEqual(users.count, 2)
+        XCTAssertEqual(users[0].id, "owner-uuid")
+        XCTAssertEqual(users[0].name, "Brandon")
+        XCTAssertTrue(users[0].isAdmin)
+        XCTAssertFalse(users[0].requiresPIN)
+        XCTAssertEqual(users[1].id, "kid-uuid")
+        XCTAssertTrue(users[1].requiresPIN)
+        XCTAssertTrue(users[1].isRestricted)
+        XCTAssertEqual(stub.method(forPathSuffix: "/api/v2/home/users"), .get)
+    }
+
+    func testHomeUsersTreatsHasPasswordAsRequiresPIN() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/api/v2/home/users", json: """
+        {"users":[{"uuid":"u","title":"Guest","hasPassword":true}]}
+        """)
+        let users = try await client(stub).homeUsers(authToken: "ADMIN_TOKEN")
+        XCTAssertEqual(users.count, 1)
+        XCTAssertTrue(users[0].requiresPIN)
+    }
+
+    func testSwitchHomeUserPassesPinAndReturnsToken() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/kid-uuid/switch", json: #"{"authToken":"KID_TOKEN"}"#)
+        let token = try await client(stub).switchHomeUser(uuid: "kid-uuid", pin: "1234", authToken: "ADMIN_TOKEN")
+        XCTAssertEqual(token, "KID_TOKEN")
+        XCTAssertEqual(stub.method(forPathSuffix: "/kid-uuid/switch"), .post)
+        let pin = stub.queryItems(forPathSuffix: "/kid-uuid/switch")?.first { $0.name == "pin" }
+        XCTAssertEqual(pin?.value, "1234")
+    }
+
+    func testSwitchHomeUserOmitsPinWhenNil() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/owner-uuid/switch", json: #"{"authenticationToken":"OWNER_TOKEN"}"#)
+        let token = try await client(stub).switchHomeUser(uuid: "owner-uuid", pin: nil, authToken: "ADMIN_TOKEN")
+        XCTAssertEqual(token, "OWNER_TOKEN")
+        let query = stub.queryItems(forPathSuffix: "/owner-uuid/switch")
+        XCTAssertNil(query?.first { $0.name == "pin" })
+    }
+
+    func testSwitchHomeUserUnauthorizedWhenNoToken() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/kid-uuid/switch", json: #"{"authToken":null}"#)
+        do {
+            _ = try await client(stub).switchHomeUser(uuid: "kid-uuid", pin: "0000", authToken: "ADMIN_TOKEN")
+            XCTFail("Expected unauthorized")
+        } catch let error as AppError {
+            XCTAssertEqual(error, .unauthorized)
+        }
+    }
 }
 
 // MARK: - Capability-driven direct play

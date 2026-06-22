@@ -103,4 +103,51 @@ public struct PlexAuthClient: Sendable {
             )
         }
     }
+
+    // MARK: Home users ("Who's watching?")
+
+    /// `GET /api/v2/home/users` — the Plex Home users reachable from this
+    /// account's (admin) token. Use the returned `id` (uuid) with
+    /// `switchHomeUser` to assume that user's identity.
+    public func homeUsers(authToken: String) async throws -> [PlexHomeUser] {
+        let endpoint = Endpoint(
+            path: "/api/v2/home/users",
+            headers: deviceProfile.headers(token: authToken)
+        )
+        let dto = try await http.decode(PlexHomeUsersDTO.self, from: endpoint, baseURL: baseURL)
+        return dto.users.compactMap { user in
+            guard let id = user.uuid ?? user.id.map(String.init) else { return nil }
+            return PlexHomeUser(
+                id: id,
+                name: user.title ?? user.username ?? "Plex User",
+                requiresPIN: user.protected ?? user.hasPassword ?? false,
+                isAdmin: user.admin ?? false,
+                isRestricted: user.restricted ?? false
+            )
+        }
+    }
+
+    /// `POST /api/v2/home/users/{uuid}/switch` — assume a Home user, returning
+    /// **that user's** auth token (derived from the admin token).
+    ///
+    /// `pin` must be supplied for protected users and omitted otherwise. A
+    /// missing/incorrect PIN surfaces as `AppError.unauthorized`. Plozz never
+    /// stores the PIN — it is passed straight through on each switch.
+    public func switchHomeUser(uuid: String, pin: String?, authToken: String) async throws -> String {
+        var queryItems: [URLQueryItem] = []
+        if let pin, !pin.isEmpty {
+            queryItems.append(URLQueryItem(name: "pin", value: pin))
+        }
+        let endpoint = Endpoint(
+            method: .post,
+            path: "/api/v2/home/users/\(uuid)/switch",
+            queryItems: queryItems,
+            headers: deviceProfile.headers(token: authToken)
+        )
+        let dto = try await http.decode(PlexHomeSwitchDTO.self, from: endpoint, baseURL: baseURL)
+        guard let token = dto.authToken ?? dto.authenticationToken, !token.isEmpty else {
+            throw AppError.unauthorized
+        }
+        return token
+    }
 }

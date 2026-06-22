@@ -4,15 +4,22 @@ import CoreNetworking
 
 /// Persists and restores the set of signed-in `Account`s and the active set.
 ///
-/// Storage is split by sensitivity, exactly like the legacy single-session
-/// `SessionStore`:
+/// Storage is split by sensitivity:
 ///  * **access tokens** → Keychain (`SecureStore`), one item per account keyed
 ///    by the account `id`;
 ///  * **non-secret metadata** (the `[Account]` list + active id set + device id)
-///    → `UserDefaults`.
+///    → also the `SecureStore`.
 ///
-/// Tokens are therefore never written to a plist or logged. Relaunch restores
-/// every account without re-login.
+/// Routing the metadata through the same store (rather than `UserDefaults`) is
+/// deliberate: in production the injected store is the **user-independent
+/// Keychain** (see `KeychainStore`), so the whole household's sign-in is shared
+/// across Apple TV system users — sign in once. Under the
+/// `com.apple.developer.user-management` entitlement `UserDefaults` would
+/// otherwise be partitioned per system user, which would hide a primary user's
+/// accounts from everyone else. `UserDefaults` is kept only for reading legacy
+/// keys during the one-time upgrade migration.
+///
+/// Tokens and metadata are therefore never written to a plist or logged.
 public protocol AccountPersisting: Sendable {
     /// Stable per-install device id, generated once and reused for all auth.
     func deviceID() -> String
@@ -39,6 +46,8 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     private let secureStore: SecureStore
     private let defaults: UserDefaults
     private let lock = NSLock()
+    /// Guards the one-time `UserDefaults` → `SecureStore` metadata migration.
+    private var didMigrateMetadata = false
 
     // New multi-account keys.
     private let accountsKey = "com.plozz.accounts.v1"
@@ -66,9 +75,10 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
 
     public func deviceID() -> String {
         lock.lock(); defer { lock.unlock() }
-        if let existing = defaults.string(forKey: deviceIDKey) { return existing }
+        ensureMetadataMigratedLocked()
+        if let existing = secureStore.string(for: deviceIDKey) { return existing }
         let generated = UUID().uuidString
-        defaults.set(generated, forKey: deviceIDKey)
+        try? secureStore.setString(generated, for: deviceIDKey)
         return generated
     }
 
@@ -83,8 +93,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let accounts = loadAccountsLocked()
         let known = Set(accounts.map(\.id))
-        guard let data = defaults.data(forKey: activeIDsKey),
-              let ids = try? JSONDecoder().decode([String].self, from: data) else {
+        guard let ids = decodeIDs(secureStore.string(for: activeIDsKey)) else {
             // Default active set = every account.
             return accounts.map(\.id)
         }
@@ -95,10 +104,7 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     public func setActiveAccountIDs(_ ids: [String]) {
         lock.lock(); defer { lock.unlock() }
         let known = Set(loadAccountsLocked().map(\.id))
-        let filtered = ids.filter { known.contains($0) }
-        if let data = try? JSONEncoder().encode(filtered) {
-            defaults.set(data, forKey: activeIDsKey)
-        }
+        persistActiveLocked(ids.filter { known.contains($0) })
     }
 
     public func token(for accountID: String) -> String? {
@@ -139,8 +145,8 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         for account in loadAccountsLocked() {
             try secureStore.removeValue(for: tokenKey(account.id))
         }
-        defaults.removeObject(forKey: accountsKey)
-        defaults.removeObject(forKey: activeIDsKey)
+        try? secureStore.removeValue(for: accountsKey)
+        try? secureStore.removeValue(for: activeIDsKey)
         PlozzLog.auth.info("Cleared all accounts")
     }
 
@@ -149,8 +155,9 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     @discardableResult
     public func migrateLegacySessionIfNeeded() -> Bool {
         lock.lock(); defer { lock.unlock() }
-        // Already on the new schema → nothing to do (idempotent).
-        guard defaults.data(forKey: accountsKey) == nil else { return false }
+        ensureMetadataMigratedLocked()
+        // Already have accounts (new schema) → nothing to do (idempotent).
+        guard secureStore.string(for: accountsKey) == nil else { return false }
         guard let data = defaults.data(forKey: legacyMetadataKey),
               let metadata = try? JSONDecoder().decode(LegacyMetadata.self, from: data),
               let token = secureStore.string(for: legacyTokenAccount) else {
@@ -178,12 +185,53 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
         }
     }
 
+    /// One-time copy of pre-entitlement metadata from `UserDefaults` into the
+    /// (now household-shared) `SecureStore`. Keeps existing installs signed in
+    /// when the `user-management` entitlement starts partitioning `UserDefaults`
+    /// per Apple TV system user. Caller holds `lock`.
+    private func ensureMetadataMigratedLocked() {
+        guard !didMigrateMetadata else { return }
+        didMigrateMetadata = true
+
+        if secureStore.string(for: accountsKey) == nil,
+           let json = string(fromDefaultsData: accountsKey) {
+            try? secureStore.setString(json, for: accountsKey)
+            if let activeJSON = string(fromDefaultsData: activeIDsKey) {
+                try? secureStore.setString(activeJSON, for: activeIDsKey)
+            }
+            defaults.removeObject(forKey: accountsKey)
+            defaults.removeObject(forKey: activeIDsKey)
+        }
+
+        if secureStore.string(for: deviceIDKey) == nil,
+           let legacyDeviceID = defaults.string(forKey: deviceIDKey) {
+            try? secureStore.setString(legacyDeviceID, for: deviceIDKey)
+            defaults.removeObject(forKey: deviceIDKey)
+        }
+    }
+
     // MARK: Locked helpers (caller holds `lock`)
 
     private func tokenKey(_ accountID: String) -> String { tokenAccountPrefix + accountID }
 
+    /// Reads a `UserDefaults` JSON `Data` value back as a UTF-8 string (used only
+    /// by the upgrade migration above).
+    private func string(fromDefaultsData key: String) -> String? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func decodeIDs(_ json: String?) -> [String]? {
+        guard let data = json?.data(using: .utf8),
+              let ids = try? JSONDecoder().decode([String].self, from: data) else {
+            return nil
+        }
+        return ids
+    }
+
     private func loadAccountsLocked() -> [Account] {
-        guard let data = defaults.data(forKey: accountsKey),
+        ensureMetadataMigratedLocked()
+        guard let data = secureStore.string(for: accountsKey)?.data(using: .utf8),
               let accounts = try? JSONDecoder().decode([Account].self, from: data) else {
             return []
         }
@@ -193,13 +241,15 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     private func saveAccountsLocked(_ accounts: [Account]) throws {
         let ordered = accounts.sorted { $0.addedAt < $1.addedAt }
         let data = try JSONEncoder().encode(ordered)
-        defaults.set(data, forKey: accountsKey)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw AccountStoreError.encodingFailed
+        }
+        try secureStore.setString(json, for: accountsKey)
     }
 
     private func activeIDsLocked(within accounts: [Account]) -> [String] {
         let known = Set(accounts.map(\.id))
-        guard let data = defaults.data(forKey: activeIDsKey),
-              let ids = try? JSONDecoder().decode([String].self, from: data) else {
+        guard let ids = decodeIDs(secureStore.string(for: activeIDsKey)) else {
             return accounts.map(\.id)
         }
         return ids.filter { known.contains($0) }
@@ -212,10 +262,17 @@ public final class AccountStore: AccountPersisting, @unchecked Sendable {
     }
 
     private func persistActiveLocked(_ ids: [String]) {
-        if let data = try? JSONEncoder().encode(ids) {
-            defaults.set(data, forKey: activeIDsKey)
+        if let data = try? JSONEncoder().encode(ids),
+           let json = String(data: data, encoding: .utf8) {
+            try? secureStore.setString(json, for: activeIDsKey)
         }
     }
+}
+
+/// Errors local to `AccountStore` (kept module-portable; `KeychainError` only
+/// exists where `Security` is importable).
+private enum AccountStoreError: Error {
+    case encodingFailed
 }
 
 /// Mirror of the legacy `SessionStore.Metadata` shape, decoded only to migrate.

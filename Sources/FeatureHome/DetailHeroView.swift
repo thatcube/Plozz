@@ -11,6 +11,12 @@ import CoreUI
 /// whole hero animates to reflect the newly focused context.
 struct DetailHeroView: View {
     let item: MediaItem
+    /// The item whose artwork fills the backdrop. Defaults to `item`. A series
+    /// page pins this to the series itself so the background stays a single,
+    /// stable, high-quality image even as `item` (the focused season/episode)
+    /// drives the logo, title, overview and Play button. Swapping the backdrop
+    /// per focused episode reads as distracting flicker, so we don't.
+    var backdropItem: MediaItem?
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
@@ -19,12 +25,15 @@ struct DetailHeroView: View {
 
     @Environment(\.themePalette) private var palette
 
+    /// The item supplying the backdrop artwork (the pinned series, when set).
+    private var backdrop: MediaItem { backdropItem ?? item }
+
     var body: some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
         ZStack(alignment: .bottomLeading) {
             FallbackAsyncImage(
-                urls: [item.heroBackdropURL, item.backdropURL, item.posterURL].compactMap { $0 },
+                urls: [backdrop.heroBackdropURL, backdrop.backdropURL, backdrop.posterURL].compactMap { $0 },
                 maxAspectRatio: 3.0
             ) {
                 Rectangle().fill(.tertiary)
@@ -48,8 +57,9 @@ struct DetailHeroView: View {
                 )
             )
             // Break out of the tvOS overscan safe area so the backdrop spans the
-            // full screen width edge to edge.
-            .ignoresSafeArea(edges: .horizontal)
+            // full screen edge to edge — across the top as well, otherwise the
+            // top overscan inset shows through as a black bar above the artwork.
+            .ignoresSafeArea(edges: [.top, .horizontal])
 
             VStack(alignment: .leading, spacing: 16) {
                 if hideText {

@@ -55,6 +55,7 @@ struct SeriesDetailView: View {
             VStack(alignment: .leading, spacing: 32) {
                 DetailHeroView(
                     item: heroItem,
+                    backdropItem: series,
                     spoilerSettings: spoilerSettings,
                     playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                     onPlay: playTarget.map { target in { onPlay(target) } }

@@ -415,7 +415,7 @@ public struct JellyfinProvider: MediaProvider {
                 client.imageURL(itemID: $0, kind: .primary, maxWidth: 500)
             },
             backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280),
-            heroBackdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1920),
+            heroBackdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 3840),
             fallbackArtworkURL: dto.SeriesId.flatMap {
                 client.imageURL(itemID: $0, kind: .backdrop, maxWidth: 1280)
             },

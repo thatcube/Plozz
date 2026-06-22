@@ -109,8 +109,16 @@ public struct JellyfinProvider: MediaProvider {
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
+        try await playbackInfo(for: itemID, forceTranscode: false)
+    }
+
+    public func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
         let detail = try await client.item(userID: session.userID, id: itemID)
-        let info = try await client.playbackInfo(userID: session.userID, itemID: itemID)
+        let info = try await client.playbackInfo(
+            userID: session.userID,
+            itemID: itemID,
+            forceTranscode: forceTranscode
+        )
         guard let source = info.MediaSources.first else { throw AppError.notFound }
 
         let streamURL = try resolveStreamURL(itemID: itemID, source: source, playSessionID: info.PlaySessionId)

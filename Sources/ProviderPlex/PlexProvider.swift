@@ -87,6 +87,10 @@ public struct PlexProvider: MediaProvider {
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
+        try await playbackInfo(for: itemID, forceTranscode: false)
+    }
+
+    public func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
         let detail = try await client.metadata(ratingKey: itemID)
         guard let media = detail.Media?.first,
               let part = media.Part?.first else {
@@ -99,7 +103,8 @@ public struct PlexProvider: MediaProvider {
             ratingKey: itemID,
             media: media,
             part: part,
-            sessionID: transcodeSessionID
+            sessionID: transcodeSessionID,
+            forceTranscode: forceTranscode
         ) else {
             throw AppError.notFound
         }

@@ -73,6 +73,17 @@ public struct PlayerView: View {
                 diagnosticsSampler.stop()
             }
         }
+        .onChange(of: viewModel.playerInstanceID) { _, _ in
+            // The transcode fallback swaps in a new player; restart sampling so
+            // diagnostics keep tracking the live stream.
+            if showDiagnostics, let player = viewModel.player {
+                diagnosticsSampler.start(
+                    player: player,
+                    isTranscoding: viewModel.isTranscoding,
+                    metadata: viewModel.sourceMetadata
+                )
+            }
+        }
         .onDisappear {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }

@@ -182,6 +182,19 @@ public extension MediaItem {
         }
     }
 
+    /// Runtime text for poster/landscape cards:
+    /// - overall runtime for movies/TV when not started;
+    /// - remaining runtime (`"… left"`) while in progress.
+    ///
+    /// Hidden for non-video kinds and when runtime is unknown.
+    var cardRuntimeText: String? {
+        guard cardRuntimeEligible, let runtime, runtime > 0 else { return nil }
+        if let remaining = remainingCardRuntimeText(for: runtime) {
+            return remaining
+        }
+        return runtime.runtimeBadgeText
+    }
+
     /// The dotted metadata line components for the detail hero, in order:
     /// production year, formatted runtime, then up to `maxGenres` genres. The UI
     /// joins these with a `·` separator. Empty entries are omitted.
@@ -191,6 +204,39 @@ public extension MediaItem {
         if let runtimeText = runtime?.runtimeBadgeText { parts.append(runtimeText) }
         parts.append(contentsOf: genres.prefix(maxGenres))
         return parts
+    }
+
+    private var cardRuntimeEligible: Bool {
+        switch kind {
+        case .movie, .series, .season, .episode:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var cardProgressFraction: Double? {
+        guard !isPlayed else { return nil }
+        if let runtime, runtime > 0, let resume = resumePosition, resume > 0 {
+            return min(1, max(0, resume / runtime))
+        }
+        if let percentage = playedPercentage, percentage > 0, percentage < 1 {
+            return min(1, max(0, percentage))
+        }
+        return nil
+    }
+
+    private func remainingCardRuntimeText(for runtime: TimeInterval) -> String? {
+        guard let progress = cardProgressFraction, progress > 0, progress < 1 else {
+            return nil
+        }
+        let remainingSeconds = max(0, runtime * (1 - progress))
+        guard remainingSeconds > 0 else { return nil }
+        // Round up so in-progress cards don't show "0m left" near completion.
+        let roundedUpMinutes = max(1, Int(ceil(remainingSeconds / 60)))
+        let roundedRemaining = TimeInterval(roundedUpMinutes * 60)
+        guard let label = roundedRemaining.runtimeBadgeText else { return nil }
+        return "\(label) left"
     }
 }
 

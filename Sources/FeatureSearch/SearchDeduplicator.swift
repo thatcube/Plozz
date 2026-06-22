@@ -54,9 +54,13 @@ public enum SearchDeduplicator {
     }
 
     private static func titleIdentity(for item: MediaItem) -> SearchIdentity? {
+        // Require a year — without one, same-named shows (e.g. an anime and its
+        // live-action remake) would falsely collapse via the union-find's
+        // transitivity even when their external ids are completely different.
+        guard let year = item.productionYear else { return nil }
         let normalized = normalizedTitle(item.title)
         guard !normalized.isEmpty else { return nil }
-        return .title(normalizedTitle: normalized, year: item.productionYear, kind: item.kind)
+        return .title(normalizedTitle: normalized, year: year, kind: item.kind)
     }
 
     /// Canonical title form: lower-cased, accent-folded, punctuation removed and

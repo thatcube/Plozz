@@ -180,7 +180,11 @@ public struct PosterCardView: View {
     }
 
     private var realArtwork: some View {
-        FallbackAsyncImage(urls: artworkCandidates, maxAspectRatio: posterAspectGuard) {
+        FallbackAsyncImage(
+            urls: artworkCandidates,
+            maxAspectRatio: posterAspectGuard,
+            asyncFallbackURL: tmdbPosterFallback
+        ) {
             neutralPlaceholder
         }
     }
@@ -190,6 +194,37 @@ public struct PosterCardView: View {
     /// placeholder. Landscape/backdrop art has no guard.
     private var posterAspectGuard: CGFloat? {
         style == .poster ? 0.9 : nil
+    }
+
+    /// Last-resort poster source for poster cards whose provider art is missing
+    /// or junk: look the title up on TMDb (movies by title+year; series/episodes
+    /// by the *series* title). Inert when no TMDb token is configured.
+    private var tmdbPosterFallback: (@Sendable () async -> URL?)? {
+        guard style == .poster else { return nil }
+        let isTV: Bool
+        let queryTitle: String
+        switch item.kind {
+        case .movie, .video:
+            isTV = false
+            queryTitle = item.title
+        case .series, .season:
+            isTV = true
+            queryTitle = item.parentTitle ?? item.title
+        case .episode:
+            isTV = true
+            // Use the series title (never the episode name) for the show poster.
+            queryTitle = item.parentTitle ?? item.title
+        case .folder, .collection, .unknown:
+            return nil
+        }
+        let year = item.productionYear
+        return {
+            await TMDbArtworkResolver.shared.posterURL(
+                title: queryTitle,
+                year: isTV ? nil : year,
+                isTV: isTV
+            )
+        }
     }
 
     /// Spoiler-safe art for `.placeholder` mode: only ever the series fallback

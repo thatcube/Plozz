@@ -48,6 +48,11 @@ targets:
         # → optional, gitignored Config/Secrets.local.xcconfig). Empty by default,
         # which disables OMDb enrichment and shows only Jellyfin-native ratings.
         OMDBAPIKey: "$(OMDB_API_KEY)"
+        # TMDb API Read Access Token (v4 bearer). Powers the canonical-poster
+        # fallback for items whose provider artwork is missing or junk. Substituted
+        # from the TMDB_BEARER_TOKEN build setting (gitignored Config/Secrets.local.xcconfig).
+        # Empty by default, which disables the TMDb fallback.
+        TMDBBearerToken: "$(TMDB_BEARER_TOKEN)"
         # Local network access is required for LAN server discovery on tvOS.
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:
@@ -78,6 +83,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
     configFiles:
       Debug: Config/Secrets.xcconfig
+      Release: Config/Secrets.xcconfig
       Release: Config/Secrets.xcconfig
     dependencies:
       - package: Plozz

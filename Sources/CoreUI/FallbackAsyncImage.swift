@@ -19,22 +19,30 @@ import UIKit
 struct FallbackAsyncImage<Placeholder: View>: View {
     private let urls: [URL]
     private let maxAspectRatio: CGFloat?
+    private let asyncFallbackURL: (@Sendable () async -> URL?)?
     private let placeholder: () -> Placeholder
 
     init(
         urls: [URL],
         maxAspectRatio: CGFloat? = nil,
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.urls = urls
         self.maxAspectRatio = maxAspectRatio
+        self.asyncFallbackURL = asyncFallbackURL
         self.placeholder = placeholder
     }
 
     var body: some View {
         #if canImport(UIKit)
-        if let maxAspectRatio {
-            FilteredArtworkImage(urls: urls, maxAspectRatio: maxAspectRatio, placeholder: placeholder)
+        if maxAspectRatio != nil || asyncFallbackURL != nil {
+            FilteredArtworkImage(
+                urls: urls,
+                maxAspectRatio: maxAspectRatio,
+                asyncFallbackURL: asyncFallbackURL,
+                placeholder: placeholder
+            )
         } else {
             SequentialAsyncImage(urls: urls, placeholder: placeholder)
         }
@@ -83,7 +91,8 @@ private struct SequentialAsyncImage<Placeholder: View>: View {
 /// Anything wider is skipped. Falls back to the placeholder when none qualify.
 private struct FilteredArtworkImage<Placeholder: View>: View {
     let urls: [URL]
-    let maxAspectRatio: CGFloat
+    let maxAspectRatio: CGFloat?
+    let asyncFallbackURL: (@Sendable () async -> URL?)?
     let placeholder: () -> Placeholder
 
     @State private var image: UIImage?
@@ -107,17 +116,31 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
     private func resolve() async {
         resolved = false
         image = nil
+        // 1) Try provider candidates in order, skipping any that are too wide.
         for url in urls {
             guard let loaded = await Self.load(url) else { continue }
-            let size = loaded.size
-            guard size.height > 0 else { continue }
-            if size.width / size.height <= maxAspectRatio {
-                image = loaded
-                resolved = true
-                return
-            }
+            guard let size = Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) else { continue }
+            _ = size
+            image = loaded
+            resolved = true
+            return
+        }
+        // 2) Nothing usable from the provider — try the async fallback (TMDb).
+        if let asyncFallbackURL, let url = await asyncFallbackURL(), let loaded = await Self.load(url) {
+            image = loaded
+            resolved = true
+            return
         }
         resolved = true
+    }
+
+    /// Returns the image's size when it is acceptable for this context, or `nil`
+    /// when it should be skipped (wider than `maxAspectRatio`).
+    private static func usableSize(_ image: UIImage, maxAspectRatio: CGFloat?) -> CGSize? {
+        let size = image.size
+        guard size.height > 0 else { return nil }
+        if let maxAspectRatio, size.width / size.height > maxAspectRatio { return nil }
+        return size
     }
 
     private static func load(_ url: URL) async -> UIImage? {

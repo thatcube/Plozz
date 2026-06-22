@@ -168,12 +168,13 @@ public struct SettingsView: View {
 
     private func accountRow(_ account: Account) -> some View {
         HStack(spacing: 16) {
+            accountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 40)
             VStack(alignment: .leading, spacing: 4) {
                 Text(account.userName).font(.headline)
                 HStack(spacing: 6) {
                     Text(account.server.name)
                     Text("·")
-                    Text(account.server.provider.displayName)
+                    providerLabel(account.server.provider)
                     Text("·")
                     Text(account.server.baseURL.host ?? account.server.baseURL.absoluteString)
                         .truncationMode(.middle)
@@ -240,14 +241,23 @@ public struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(groupedLibraries(libraries), id: \.id) { group in
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(group.header)
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: 10) {
+                                accountAvatar(name: group.accountName, imageURL: group.accountAvatarURL, size: 30)
+                                Text("\(group.accountName) · \(group.serverName)")
+                                    .font(.headline)
+                                    .foregroundStyle(.secondary)
+                                providerLabel(group.providerKind)
+                            }
                             ForEach(group.libraries) { aggregated in
-                                Toggle(aggregated.library.title, isOn: Binding(
+                                Toggle(isOn: Binding(
                                     get: { homeVisibility.isVisible(aggregated.key) },
                                     set: { homeVisibility.setVisible($0, for: aggregated.key) }
-                                ))
+                                )) {
+                                    HStack(spacing: 8) {
+                                        providerIcon(aggregated.providerKind, size: 16)
+                                        Text(aggregated.library.title)
+                                    }
+                                }
                             }
                         }
                     }
@@ -258,13 +268,17 @@ public struct SettingsView: View {
 
     private struct LibraryGroup: Identifiable {
         let id: String
-        let header: String
+        let accountName: String
+        let serverName: String
+        let providerKind: ProviderKind
+        let accountAvatarURL: URL?
         let libraries: [AggregatedLibrary]
     }
 
     /// Groups discovered libraries by their owning account, preserving discovery
     /// order, with a "user · server (provider)" header per group.
     private func groupedLibraries(_ libraries: [AggregatedLibrary]) -> [LibraryGroup] {
+        let accountByID = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
         var order: [String] = []
         var groups: [String: [AggregatedLibrary]] = [:]
         for library in libraries {
@@ -273,8 +287,90 @@ public struct SettingsView: View {
         }
         return order.compactMap { accountID in
             guard let libs = groups[accountID], let first = libs.first else { return nil }
-            let header = "\(first.accountName) · \(first.serverName) (\(first.providerKind.displayName))"
-            return LibraryGroup(id: accountID, header: header, libraries: libs)
+            return LibraryGroup(
+                id: accountID,
+                accountName: first.accountName,
+                serverName: first.serverName,
+                providerKind: first.providerKind,
+                accountAvatarURL: accountByID[accountID].flatMap(resolvedAvatarURL),
+                libraries: libs
+            )
+        }
+    }
+
+    private func resolvedAvatarURL(for account: Account) -> URL? {
+        if let avatarURL = account.avatarURL {
+            return avatarURL
+        }
+        guard account.server.provider == .jellyfin,
+              var components = URLComponents(url: account.server.baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/Users/\(account.userID)/Images/Primary"
+        return components.url
+    }
+
+    @ViewBuilder
+    private func providerLabel(_ provider: ProviderKind) -> some View {
+        HStack(spacing: 4) {
+            providerIcon(provider, size: 14)
+            Text(provider.displayName)
+        }
+        .fixedSize()
+    }
+
+    private func providerIcon(_ provider: ProviderKind, size: CGFloat) -> some View {
+        ZStack {
+            Circle().fill(providerTint(provider).opacity(0.18))
+            Image(systemName: provider == .jellyfin ? "drop.fill" : "chevron.forward")
+                .font(.system(size: provider == .jellyfin ? size * 0.58 : size * 0.52, weight: .bold))
+                .foregroundStyle(providerTint(provider))
+        }
+        .frame(width: size, height: size)
+    }
+
+    private func providerTint(_ provider: ProviderKind) -> Color {
+        switch provider {
+        case .jellyfin:
+            return Color(red: 0.53, green: 0.38, blue: 0.95)
+        case .plex:
+            return Color(red: 0xE5 / 255, green: 0xA0 / 255, blue: 0x0D / 255)
+        }
+    }
+
+    private func accountAvatar(name: String, imageURL: URL?, size: CGFloat) -> some View {
+        Group {
+            if let imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty, .failure:
+                        avatarPlaceholder(name: name)
+                    @unknown default:
+                        avatarPlaceholder(name: name)
+                    }
+                }
+            } else {
+                avatarPlaceholder(name: name)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(
+            Circle().strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private func avatarPlaceholder(name: String) -> some View {
+        ZStack {
+            Circle().fill(Color.primary.opacity(0.10))
+            Text(String(name.prefix(1)).uppercased())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
     }
 

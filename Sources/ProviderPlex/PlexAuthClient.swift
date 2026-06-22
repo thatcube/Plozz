@@ -68,12 +68,15 @@ public struct PlexAuthClient: Sendable {
     // MARK: Account + servers
 
     /// `GET /api/v2/user` — the signed-in account identity.
-    public func user(authToken: String) async throws -> (id: String, userName: String) {
+    public func user(authToken: String) async throws -> (id: String, userName: String, avatarURL: URL?) {
         let endpoint = Endpoint(path: "/api/v2/user", headers: deviceProfile.headers(token: authToken))
         let dto = try await http.decode(PlexUserDTO.self, from: endpoint, baseURL: baseURL)
         let id = dto.uuid ?? dto.id.map(String.init) ?? "plex-user"
         let name = dto.title ?? dto.username ?? "Plex"
-        return (id, name)
+        let avatarURL = dto.thumb.flatMap { thumb in
+            URL(string: thumb, relativeTo: baseURL)?.absoluteURL
+        }
+        return (id, name, avatarURL)
     }
 
     /// `GET /api/v2/resources?includeHttps=1` — the servers this account can

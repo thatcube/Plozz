@@ -82,6 +82,7 @@ public struct QuickConnectService: Sendable {
                     server: resolvedServer,
                     userID: auth.userID,
                     userName: auth.userName,
+                    avatarURL: client.userAvatarURL(userID: auth.userID, maxWidth: 120, token: auth.token),
                     deviceID: deviceID,
                     accessToken: auth.token
                 )

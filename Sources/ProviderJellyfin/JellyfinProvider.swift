@@ -132,6 +132,11 @@ public struct JellyfinProvider: MediaProvider {
         let originalContainer = source.Container
         let originalStreams = source.MediaStreams ?? detail.MediaStreams ?? []
 
+        // Track whether we deliberately swapped to a server **remux** (DirectStream,
+        // video stream-copied) so diagnostics can report it as a lossless remux
+        // rather than a quality-reducing re-encode.
+        var didRemux = false
+
         // True Dolby Vision path: when the server would direct-play a DoVi MKV
         // (which only reaches the on-device hybrid engine → HDR10), ask it instead
         // to remux the container to seekable fMP4 HLS with the video **copied**
@@ -149,6 +154,7 @@ public struct JellyfinProvider: MediaProvider {
                remuxSource.TranscodingUrl != nil {
                 info = remuxInfo
                 source = remuxSource
+                didRemux = true
             }
         }
 
@@ -170,6 +176,7 @@ public struct JellyfinProvider: MediaProvider {
             subtitleTracks: subs,
             startPosition: mappedItem.resumePosition ?? 0,
             isTranscoding: source.TranscodingUrl != nil,
+            deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
             sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
             trickplay: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay)
         )
@@ -222,6 +229,17 @@ public struct JellyfinProvider: MediaProvider {
             intervalMs: interval,
             tileURLs: tileURLs
         )
+    }
+
+    /// Classifies how the server is delivering the stream for the diagnostics
+    /// overlay. We can only assert a **remux** (lossless, video stream-copied)
+    /// when we deliberately requested DirectStream and the server honored it with
+    /// a `TranscodingUrl` (`didRemux`). Any other `TranscodingUrl` came from the
+    /// server's own `auto`/forced decision, which may re-encode — so we
+    /// conservatively label it `transcode` rather than over-claiming "lossless".
+    static func deliveryMode(transcoding: Bool, didRemux: Bool) -> PlaybackDiagnostics.PlaybackMode {
+        if !transcoding { return .directPlay }
+        return didRemux ? .remux : .transcode
     }
 
     /// Whether to ask the server to remux (rather than direct-play) this source so

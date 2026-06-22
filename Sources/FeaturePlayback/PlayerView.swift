@@ -107,7 +107,7 @@ public struct PlayerView: View {
     private func startSampling() {
         diagnosticsSampler.start(
             player: viewModel.player,
-            isTranscoding: viewModel.isTranscoding,
+            mode: viewModel.deliveryMode,
             metadata: viewModel.sourceMetadata,
             engineName: viewModel.engineDisplayName
         )

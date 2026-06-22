@@ -381,6 +381,10 @@ public final class PlayerViewModel {
     /// play). Read by the playback diagnostics overlay.
     public var isTranscoding: Bool { request?.isTranscoding ?? false }
 
+    /// How the server is delivering the active stream (direct play / remux /
+    /// transcode). Read by the playback diagnostics overlay's Source row.
+    public var deliveryMode: PlaybackDiagnostics.PlaybackMode { request?.deliveryMode ?? .unknown }
+
     /// Provider source facts (codec/HDR/channels/…) for the playing item, used
     /// to populate the playback diagnostics overlay.
     public var sourceMetadata: MediaSourceMetadata? { request?.sourceMetadata }

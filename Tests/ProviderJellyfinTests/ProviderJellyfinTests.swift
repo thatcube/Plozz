@@ -565,3 +565,26 @@ final class JellyfinWatchStateTests: XCTestCase {
         XCTAssertEqual(stub.method(forPathSuffix: "/Users/u1/PlayedItems/i1"), .delete)
     }
 }
+
+final class JellyfinDeliveryModeTests: XCTestCase {
+    func testDirectPlayWhenNoTranscodingUrl() {
+        XCTAssertEqual(
+            JellyfinProvider.deliveryMode(transcoding: false, didRemux: false),
+            .directPlay
+        )
+    }
+
+    func testRemuxWhenWeRequestedDirectStream() {
+        XCTAssertEqual(
+            JellyfinProvider.deliveryMode(transcoding: true, didRemux: true),
+            .remux
+        )
+    }
+
+    func testTranscodeWhenServerChoseItWithoutOurRemux() {
+        XCTAssertEqual(
+            JellyfinProvider.deliveryMode(transcoding: true, didRemux: false),
+            .transcode
+        )
+    }
+}

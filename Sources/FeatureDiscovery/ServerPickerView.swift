@@ -45,6 +45,14 @@ public struct ServerPickerView: View {
                     }
                 }
 
+                if viewModel.isOnTailscale {
+                    Section {
+                        tailscaleGuidance
+                    } header: {
+                        Text("Tailscale")
+                    }
+                }
+
                 Section {
                     TextField("Server address", text: $viewModel.manualURLText)
                         .focused($manualFieldFocused)
@@ -95,6 +103,30 @@ public struct ServerPickerView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Tailscale-specific guidance, shown only when this Apple TV is on a
+    /// tailnet. Explains how to reach a Jellyfin server over Tailscale, since
+    /// such servers can't be auto-discovered from a sandboxed tvOS app.
+    private var tailscaleGuidance: some View {
+        HStack(alignment: .top, spacing: 24) {
+            TailscaleLogo()
+                .frame(width: 56, height: 56)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("This Apple TV is on Tailscale")
+                    .font(.headline)
+                Text("Enter your server's Tailscale address in the field below — either its Tailscale IP (e.g. 100.101.102.103:8096) or its MagicDNS name (e.g. jellyfin.your-tailnet.ts.net).")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let ip = viewModel.tailscaleIP {
+                    Label("This device: \(ip)", systemImage: "checkmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                }
+            }
+        }
+        .padding(.vertical, 8)
     }
 
     /// Subtitle for the saved server, reflecting live reachability.

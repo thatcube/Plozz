@@ -50,8 +50,12 @@ public struct HomeView: View {
             .scrollClipDisabled()
         }
         .task { if viewModel.state.value == nil { await viewModel.load() } }
-        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { _ in
-            Task { await viewModel.load() }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+            if let mutation = MediaItemMutation.from(note) {
+                viewModel.applyWatchedState(mutation)
+            } else {
+                Task { await viewModel.load() }
+            }
         }
     }
 

@@ -238,6 +238,8 @@ public struct PlexProvider: MediaProvider {
             seasonNumber: isEpisode ? dto.parentIndex : nil,
             episodeNumber: isEpisode ? dto.index : nil,
             productionYear: dto.year,
+            seriesID: isEpisode ? dto.grandparentRatingKey : nil,
+            seasonID: isEpisode ? dto.parentRatingKey : nil,
             runtime: runtime,
             resumePosition: resume,
             playedPercentage: percentage,

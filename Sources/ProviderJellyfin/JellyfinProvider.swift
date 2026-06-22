@@ -324,6 +324,8 @@ public struct JellyfinProvider: MediaProvider {
             seasonNumber: dto.ParentIndexNumber,
             episodeNumber: dto.IndexNumber,
             productionYear: dto.ProductionYear,
+            seriesID: dto.SeriesId,
+            seasonID: dto.SeasonId,
             runtime: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
             resumePosition: JellyfinTicks.seconds(fromTicks: dto.UserData?.PlaybackPositionTicks),
             playedPercentage: dto.UserData?.PlayedPercentage.map { $0 / 100.0 },

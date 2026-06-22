@@ -6,9 +6,18 @@ final class MediaItemActionCatalogTests: XCTestCase {
         id: String,
         kind: MediaItemKind,
         isPlayed: Bool = false,
-        episodeNumber: Int? = nil
+        episodeNumber: Int? = nil,
+        seasonID: String? = nil
     ) -> MediaItem {
-        MediaItem(id: id, title: id, kind: kind, episodeNumber: episodeNumber, isPlayed: isPlayed)
+        MediaItem(
+            id: id,
+            title: id,
+            kind: kind,
+            seasonNumber: nil,
+            episodeNumber: episodeNumber,
+            seasonID: seasonID,
+            isPlayed: isPlayed
+        )
     }
 
     // MARK: - Capability gating
@@ -101,5 +110,40 @@ final class MediaItemActionCatalogTests: XCTestCase {
         let e1 = item(id: "e1", kind: .episode, episodeNumber: 1)
         let stray = item(id: "zz", kind: .episode, episodeNumber: 9)
         XCTAssertTrue(MediaItemActionCatalog.siblingsToMarkUpToHere(stray, in: [e1]).isEmpty)
+    }
+
+    // MARK: - Go to Season
+
+    func testGoToSeasonOfferedForEpisodeOutsideSeasonList() {
+        let episode = item(id: "e", kind: .episode, episodeNumber: 3, seasonID: "s1")
+        // No orderedSiblings == not on the season's own page (e.g. Continue Watching).
+        let actions = MediaItemActionCatalog.actions(for: episode, supportsWatchState: true)
+        XCTAssertTrue(actions.contains(.goToSeason))
+    }
+
+    func testGoToSeasonHiddenWhenAlreadyInSeasonList() {
+        let e1 = item(id: "e1", kind: .episode, episodeNumber: 1, seasonID: "s1")
+        let e2 = item(id: "e2", kind: .episode, episodeNumber: 2, seasonID: "s1")
+        let context = MediaItemActionContext(orderedSiblings: [e1, e2])
+        let actions = MediaItemActionCatalog.actions(for: e2, supportsWatchState: true, context: context)
+        XCTAssertFalse(actions.contains(.goToSeason))
+    }
+
+    func testGoToSeasonHiddenWhenSeasonIDMissing() {
+        let episode = item(id: "e", kind: .episode, episodeNumber: 3, seasonID: nil)
+        let actions = MediaItemActionCatalog.actions(for: episode, supportsWatchState: true)
+        XCTAssertFalse(actions.contains(.goToSeason))
+    }
+
+    func testGoToSeasonOfferedEvenWithoutWatchStateSupport() {
+        let episode = item(id: "e", kind: .episode, episodeNumber: 3, seasonID: "s1")
+        let actions = MediaItemActionCatalog.actions(for: episode, supportsWatchState: false)
+        XCTAssertEqual(actions, [.goToSeason])
+    }
+
+    func testGoToSeasonNotOfferedForMovies() {
+        let movie = item(id: "m", kind: .movie, seasonID: "s1")
+        let actions = MediaItemActionCatalog.actions(for: movie, supportsWatchState: true)
+        XCTAssertFalse(actions.contains(.goToSeason))
     }
 }

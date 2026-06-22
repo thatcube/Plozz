@@ -43,8 +43,12 @@ public struct ItemDetailView: View {
         // Detail is a full-screen sub-page: hide the top tab bar.
         .toolbar(.hidden, for: .tabBar)
         .task { if viewModel.state.value == nil { await viewModel.load() } }
-        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { _ in
-            Task { await viewModel.reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+            if let mutation = MediaItemMutation.from(note) {
+                viewModel.applyWatchedState(mutation)
+            } else {
+                Task { await viewModel.reload() }
+            }
         }
     }
 

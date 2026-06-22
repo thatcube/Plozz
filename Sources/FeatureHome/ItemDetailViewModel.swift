@@ -67,6 +67,31 @@ public final class ItemDetailViewModel {
         seasonEpisodes[seasonID]
     }
 
+    /// Applies a watched-state mutation to the loaded detail, its children and
+    /// any loaded season episodes **in place** — flipping only the `isPlayed`
+    /// flag on the affected items. Because the arrays keep their identity and
+    /// order (no refetch, no momentary emptying), SwiftUI updates just the
+    /// watched badges and the user's focus stays exactly where it was.
+    public func applyWatchedState(_ mutation: MediaItemMutation) {
+        if case var .loaded(detail) = state {
+            if mutation.itemIDs.contains(detail.item.id) {
+                detail.item.isPlayed = mutation.played
+            }
+            detail.children = detail.children.map { apply(mutation, to: $0) }
+            state = .loaded(detail)
+        }
+        for (seasonID, episodes) in seasonEpisodes {
+            seasonEpisodes[seasonID] = episodes.map { apply(mutation, to: $0) }
+        }
+    }
+
+    private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {
+        guard mutation.itemIDs.contains(item.id) else { return item }
+        var copy = item
+        copy.isPlayed = mutation.played
+        return copy
+    }
+
     /// Quietly re-fetches the detail, its children, and any season episode lists
     /// already shown, **without** dropping to a full-screen loading state. Used
     /// after a context-menu action (e.g. mark watched) so the hero, child rail

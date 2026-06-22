@@ -41,16 +41,35 @@ public enum MediaItemActionCatalog {
         supportsWatchState: Bool,
         context: MediaItemActionContext = .none
     ) -> [MediaItemAction] {
-        guard supportsWatchState, isWatchStateEligible(item) else { return [] }
+        var actions: [MediaItemAction] = []
 
-        var actions: [MediaItemAction] = [item.isPlayed ? .markUnwatched : .markWatched]
+        // Watched-state actions: only when the provider can mutate them and the
+        // item is a kind that carries a watched state.
+        if supportsWatchState, isWatchStateEligible(item) {
+            actions.append(item.isPlayed ? .markUnwatched : .markWatched)
 
-        // "Up to here" only makes sense for an episode whose position in its
-        // list is known and where something up to that point is still unwatched.
-        if item.kind == .episode, hasUnwatchedUpToHere(item, in: context) {
-            actions.append(.markWatchedUpToHere)
+            // "Up to here" only makes sense for an episode whose position in its
+            // list is known and where something up to that point is still
+            // unwatched.
+            if item.kind == .episode, hasUnwatchedUpToHere(item, in: context) {
+                actions.append(.markWatchedUpToHere)
+            }
         }
+
+        // Navigation actions: independent of watched-state capability.
+        if canGoToSeason(item, in: context) {
+            actions.append(.goToSeason)
+        }
+
         return actions
+    }
+
+    /// Whether "Go to Season" applies: an episode that knows its season id and is
+    /// shown *outside* its season's own list (so it isn't redundant). We treat an
+    /// empty `orderedSiblings` as "not already on the season page" — Continue
+    /// Watching, Recently Added, Search and Top Shelf deep links all qualify.
+    private static func canGoToSeason(_ item: MediaItem, in context: MediaItemActionContext) -> Bool {
+        item.kind == .episode && item.seasonID != nil && context.orderedSiblings.isEmpty
     }
 
     /// The siblings "mark watched up to here" should mark watched: every sibling

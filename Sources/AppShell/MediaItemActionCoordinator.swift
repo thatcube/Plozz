@@ -43,19 +43,23 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         using watch: any WatchStateProviding
     ) async {
         do {
+            let played: Bool
+            var affectedIDs: Set<String> = [item.id]
             switch action {
             case .markWatched:
+                played = true
                 try await watch.setPlayed(true, itemID: item.id)
             case .markUnwatched:
+                played = false
                 try await watch.setPlayed(false, itemID: item.id)
             case .markWatchedUpToHere:
-                try await markUpToHere(item, context: context, using: watch)
+                played = true
+                affectedIDs = try await markUpToHere(item, context: context, using: watch)
+            case .goToSeason:
+                // Navigation is handled in the view layer, never here.
+                return
             }
-            NotificationCenter.default.post(
-                name: .mediaItemDidMutate,
-                object: nil,
-                userInfo: ["itemID": item.id]
-            )
+            MediaItemMutation(itemIDs: affectedIDs, played: played).post()
         } catch {
             // Best-effort: a failed toggle simply won't reflect on the next
             // refresh. Never surface a transient network error for a background
@@ -66,19 +70,24 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
 
     /// Marks every earlier season in full, then each preceding episode in the
     /// current season up to and including the target. Per-item failures are
-    /// tolerated so one unreachable episode doesn't abort the rest.
+    /// tolerated so one unreachable episode doesn't abort the rest. Returns every
+    /// id that was marked watched so screens can update them in place.
     private func markUpToHere(
         _ item: MediaItem,
         context: MediaItemActionContext,
         using watch: any WatchStateProviding
-    ) async throws {
+    ) async throws -> Set<String> {
+        var affected: Set<String> = []
         for containerID in context.precedingContainerIDs {
             try? await watch.setPlayed(true, itemID: containerID)
+            affected.insert(containerID)
         }
         let episodes = MediaItemActionCatalog.siblingsToMarkUpToHere(item, in: context.orderedSiblings)
         for episode in episodes {
             try? await watch.setPlayed(true, itemID: episode.id)
+            affected.insert(episode.id)
         }
+        return affected
     }
 
     // MARK: - Provider resolution

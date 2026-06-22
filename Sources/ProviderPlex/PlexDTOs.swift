@@ -45,6 +45,10 @@ struct PlexMetadata: Decodable {
     let title: String?
     let parentTitle: String?
     let grandparentTitle: String?
+    /// For an episode, the ratingKey of its season (parent) and series
+    /// (grandparent) — used to offer "Go to Season" / "Go to Series" jumps.
+    let parentRatingKey: String?
+    let grandparentRatingKey: String?
     let summary: String?
     let index: Int?            // episode number (or season index)
     let parentIndex: Int?      // season number for an episode

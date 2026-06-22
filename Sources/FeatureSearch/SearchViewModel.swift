@@ -65,6 +65,21 @@ public final class SearchViewModel {
         }
     }
 
+    /// Applies a watched-state mutation to the loaded result sections **in place**
+    /// so affected cards just flip their watched badge, keeping the grid and the
+    /// user's focus stable (no re-search).
+    public func applyWatchedState(_ mutation: MediaItemMutation) {
+        guard case let .loaded(sections) = state else { return }
+        state = .loaded(sections.map { section in
+            SearchSection(title: section.title, items: section.items.map { item in
+                guard mutation.itemIDs.contains(item.id) else { return item }
+                var copy = item
+                copy.isPlayed = mutation.played
+                return copy
+            })
+        })
+    }
+
     /// Searches every active account concurrently and round-robin interleaves the
     /// per-account hits, tagging each with its owning account so a tapped result
     /// routes to the right provider. Resilient: if some accounts fail their hits

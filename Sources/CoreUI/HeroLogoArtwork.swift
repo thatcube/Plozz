@@ -114,7 +114,52 @@ private struct LoadedLogo<TextFallback: View>: View {
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             return nil
         }
-        return UIImage(data: data)
+        guard let image = UIImage(data: data) else { return nil }
+        // Logos ship with wildly inconsistent baked-in transparent margins, which
+        // is why some appear indented while others hug the edge. Trim the
+        // transparent border so every logo aligns by its visible content.
+        return image.trimmingTransparentPixels() ?? image
+    }
+}
+
+private extension UIImage {
+    /// Returns a copy cropped to the bounding box of its non-transparent pixels,
+    /// removing baked-in transparent padding so logos align consistently. `nil`
+    /// when there is no backing image or it is entirely transparent.
+    func trimmingTransparentPixels(alphaThreshold: UInt8 = 10) -> UIImage? {
+        guard let cg = cgImage, cg.width > 0, cg.height > 0 else { return nil }
+        let width = cg.width
+        let height = cg.height
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var data = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
+        guard let ctx = CGContext(
+            data: &data,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in 0..<height {
+            let rowStart = y * bytesPerRow
+            for x in 0..<width {
+                if data[rowStart + x * bytesPerPixel + 3] > alphaThreshold {
+                    if x < minX { minX = x }
+                    if x > maxX { maxX = x }
+                    if y < minY { minY = y }
+                    if y > maxY { maxY = y }
+                }
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+        let cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+        guard let cropped = cg.cropping(to: cropRect) else { return nil }
+        return UIImage(cgImage: cropped, scale: scale, orientation: imageOrientation)
     }
 }
 #endif

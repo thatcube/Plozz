@@ -46,17 +46,32 @@ public enum SearchDeduplicator {
             }
         }
 
-        // Title fallback (only when there is an actual title to key on).
-        if let titleIdentity = titleIdentity(for: item) {
+        // Title fallback — ONLY when no strong external IDs are present.
+        // An item with a TMDb/IMDb/TVDb ID has a well-defined catalogue identity;
+        // adding a title key on top risks bridging two completely different shows
+        // that happen to share a name (and year) via false transitive merges.
+        // E.g. an anime (tvdb=A, year=1999) and its live-action remake
+        // (tvdb=B, year=1999-in-bad-metadata) would otherwise collapse because
+        // they share .title("one piece", 1999, .series).
+        if result.isEmpty, let titleIdentity = titleIdentity(for: item) {
             result.append(titleIdentity)
         }
         return result
     }
 
     private static func titleIdentity(for item: MediaItem) -> SearchIdentity? {
+        // Title-based dedup is only safe for **movies**. Two films with the same
+        // title and year are almost certainly the same release. Series must NOT
+        // be matched by title: shows with the same name are routinely different
+        // productions (anime vs live-action, original vs remake). When year
+        // metadata is wrong on any server, a title+year match silently collapses
+        // two distinct series into one card. Series identity must rely solely on
+        // external catalogue IDs (IMDb/TMDb/TVDb).
+        guard item.kind == .movie else { return nil }
+        guard let year = item.productionYear else { return nil }
         let normalized = normalizedTitle(item.title)
         guard !normalized.isEmpty else { return nil }
-        return .title(normalizedTitle: normalized, year: item.productionYear, kind: item.kind)
+        return .title(normalizedTitle: normalized, year: year, kind: item.kind)
     }
 
     /// Canonical title form: lower-cased, accent-folded, punctuation removed and

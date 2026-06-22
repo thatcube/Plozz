@@ -66,6 +66,7 @@ struct BaseItemDto: Decodable {
     let ParentIndexNumber: Int?
     let ProductionYear: Int?
     let RunTimeTicks: Int64?
+    let OfficialRating: String?
     let CommunityRating: Double?
     let CriticRating: Double?
     let ProviderIds: [String: String]?

@@ -160,8 +160,18 @@ public struct PosterCardView: View {
         return item.title
     }
 
-    /// Secondary line — e.g. `S1 · E3` for episodes or the production year.
-    private var subtitleText: String? { item.subtitle }
+    /// Secondary line — subtitle facts plus card runtime/remaining when available.
+    private var subtitleText: String? {
+        var parts: [String] = []
+        if let subtitle = item.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !subtitle.isEmpty {
+            parts.append(subtitle)
+        }
+        if let runtime = item.cardRuntimeText?.trimmingCharacters(in: .whitespacesAndNewlines), !runtime.isEmpty {
+            parts.append(runtime)
+        }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " · ")
+    }
 
     // MARK: Artwork
 

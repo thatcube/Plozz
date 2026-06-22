@@ -133,10 +133,22 @@ public struct MediaItemContextMenu: ViewModifier {
 }
 
 private extension MediaItem {
-    /// A minimal season `MediaItem` to navigate to from this episode, or `nil`
-    /// when the season id is unknown. The detail screen reloads full data by id,
-    /// so only id, kind and owning account need to be accurate here.
+    /// The destination for "Go to Season". Preferred: the full **series** detail
+    /// page (rich hero, badges, season tabs, episode rail) with this episode's
+    /// season pre-selected, carried in `seasonID`. Falls back to a bare season
+    /// page only when the series id is unknown. The destination screen reloads
+    /// full data by `id`, so only `id`, `kind`, the season hint and the owning
+    /// account need to be accurate here.
     var seasonNavigationTarget: MediaItem? {
+        if let seriesID {
+            return MediaItem(
+                id: seriesID,
+                title: parentTitle ?? "Series",
+                kind: .series,
+                seasonID: seasonID,
+                sourceAccountID: sourceAccountID
+            )
+        }
         guard let seasonID else { return nil }
         let title = seasonNumber.map { "Season \($0)" } ?? "Season"
         return MediaItem(

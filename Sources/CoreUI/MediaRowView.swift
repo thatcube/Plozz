@@ -84,8 +84,12 @@ public struct MediaRowView: View {
         // Poster cards are flexible-width (they stretch to fill a grid column);
         // in a horizontal rail we pin them to the standard poster width so the
         // row lays out consistently. Landscape cards keep their intrinsic size.
+        // Pin every card to a known width so a `LazyHStack` can compute the
+        // offset of a far-off initial-focus target (e.g. episode 132 of a long
+        // season) without first realising every card in between — which is what
+        // made focusing the "next up" episode lag on huge seasons.
         let card = PosterCardView(item: item, style: style, spoilerSettings: spoilerSettings) { onSelect(item) }
-            .frame(width: style == .poster ? PlozzTheme.Metrics.posterWidth : nil)
+            .frame(width: style == .poster ? PlozzTheme.Metrics.posterWidth : PlozzTheme.Metrics.landscapeWidth)
             .id(item.id)
         if tracksFocus {
             card.focused($focusedID, equals: item.id)

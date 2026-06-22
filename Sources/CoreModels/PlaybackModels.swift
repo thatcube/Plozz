@@ -48,8 +48,8 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
 /// transcodes, the `AVPlayer` stream exposes almost no track metadata, so we
 /// rely on these provider-reported facts (codec, HDR, resolution, bitrate,
 /// channels, …) instead — the same source a client like Infuse reads.
-public struct MediaSourceMetadata: Hashable, Sendable {
-    public struct VideoStream: Hashable, Sendable {
+public struct MediaSourceMetadata: Hashable, Sendable, Codable {
+    public struct VideoStream: Hashable, Sendable, Codable {
         /// Raw codec token from the provider, e.g. `hevc`, `h264`, `av1`.
         public var codec: String?
         /// Container codec FourCC tag, e.g. `hvc1`/`hev1` for HEVC. AVPlayer only
@@ -101,7 +101,7 @@ public struct MediaSourceMetadata: Hashable, Sendable {
         }
     }
 
-    public struct AudioStream: Hashable, Sendable {
+    public struct AudioStream: Hashable, Sendable, Codable {
         /// Raw codec token, e.g. `eac3`, `aac`, `dts`.
         public var codec: String?
         /// Codec profile, e.g. `Dolby Atmos`, `DTS-HD MA`.
@@ -134,7 +134,7 @@ public struct MediaSourceMetadata: Hashable, Sendable {
         }
     }
 
-    public struct SubtitleStream: Hashable, Sendable {
+    public struct SubtitleStream: Hashable, Sendable, Codable {
         public var codec: String?
         public var language: String?
         public var title: String?

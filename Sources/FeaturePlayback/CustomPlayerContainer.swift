@@ -29,15 +29,45 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
     let themePalette: ThemePaletteBox
 
     func makeUIViewController(context: Context) -> PlayerInputViewController {
+        plozzTrace("CustomPlayerContainer.makeUIViewController: ENTER (engine=\(type(of: engine)))")
         let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
         controller.configureTrickplay(trickplay)
         controller.attachVideoSurface()
         controller.attachOverlay(themePalette: themePalette)
+        plozzTrace("CustomPlayerContainer.makeUIViewController: EXIT")
         return controller
     }
 
     func updateUIViewController(_ controller: PlayerInputViewController, context: Context) {
         controller.actions = actions
+    }
+}
+
+/// Minimal, controls-free host for an engine's bare video surface. Used during
+/// loading so engines that require an attached/windowed render target (mpv)
+/// can initialize before playback reaches `.ready`.
+struct VideoSurfaceContainer: UIViewRepresentable {
+    let engine: any VideoEngine
+
+    func makeUIView(context: Context) -> UIView {
+        let root = UIView(frame: .zero)
+        root.backgroundColor = .black
+        attachSurface(to: root)
+        return root
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        attachSurface(to: uiView)
+    }
+
+    private func attachSurface(to root: UIView) {
+        let surface = engine.makeVideoOutputView()
+        guard surface.superview !== root else { return }
+        surface.removeFromSuperview()
+        surface.frame = root.bounds
+        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        surface.isUserInteractionEnabled = false
+        root.insertSubview(surface, at: 0)
     }
 }
 
@@ -123,14 +153,18 @@ final class PlayerInputViewController: UIViewController {
     /// Hosts the engine's bare video surface as the backmost, non-interactive
     /// layer. The engine keeps it fed across reloads, so we add it once.
     func attachVideoSurface() {
+        plozzTrace("attachVideoSurface: requesting engine.makeVideoOutputView()")
         let surface = engine.makeVideoOutputView()
+        plozzTrace("attachVideoSurface: inserting surface \(type(of: surface)) at index 0")
         surface.frame = view.bounds
         surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         surface.isUserInteractionEnabled = false
         view.insertSubview(surface, at: 0)
+        plozzTrace("attachVideoSurface: done")
     }
 
     func attachOverlay(themePalette: ThemePaletteBox) {
+        plozzTrace("attachOverlay: building UIHostingController(overlay)")
         let host = UIHostingController(rootView: themePalette.makeOverlay(model))
         host.view.backgroundColor = .clear
         // Presentational only — never let the overlay steal remote focus from
@@ -142,6 +176,7 @@ final class PlayerInputViewController: UIViewController {
         view.addSubview(host.view)
         host.didMove(toParent: self)
         overlayHost = host
+        plozzTrace("attachOverlay: done")
     }
 
     // MARK: Engine state refresh

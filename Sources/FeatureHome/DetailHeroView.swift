@@ -27,9 +27,43 @@ struct DetailHeroView: View {
     let onPlay: (() -> Void)?
     /// When non-`nil`, a secondary "Trailer" button is shown next to Play.
     var onPlayTrailer: (() -> Void)? = nil
+    /// Technical badges to show when the focused item carries none of its own —
+    /// a series or season hero has no media file, so the parent derives a
+    /// representative set from the loaded episodes (best resolution/HDR/audio)
+    /// and passes it here so a show still advertises 4K/Dolby Vision/Atmos.
+    var fallbackTechnicalBadges: [MediaBadge] = []
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
+
+    /// The capability badges shown above the ratings: the content-rating
+    /// certificate (e.g. `TV-14`) leading, then resolution/HDR/audio badges.
+    /// When the focused item is an episode without its own certificate, the
+    /// rating falls back to the backdrop item (the series), so a show's TV
+    /// rating still shows while scrubbing episodes — matching Apple TV.
+    private var featureBadges: [MediaBadge] {
+        let rating = item.ratingBadge ?? backdrop.ratingBadge
+        // Prefer the focused item's own tech badges; fall back to the derived
+        // series-level set for a series/season hero (or an episode whose stream
+        // info hasn't loaded), so tech badges are present on every kind.
+        let ownTech = item.technicalBadges
+        let tech = ownTech.isEmpty ? fallbackTechnicalBadges : ownTech
+        return (rating.map { [$0] } ?? []) + tech
+    }
+
+    /// External ratings to show. Falls back to the backdrop item (the series)
+    /// when the focused item (an episode) carries none of its own, so a show's
+    /// rating stays visible while scrubbing episodes.
+    private var heroRatings: [ExternalRating] {
+        item.ratings.isEmpty ? backdrop.ratings : item.ratings
+    }
+
+    /// True when `subtitle` is just the production year — the richer metadata
+    /// line below already opens with the year, so we drop the duplicate.
+    private func isYearOnlySubtitle(_ subtitle: String) -> Bool {
+        guard let year = item.productionYear else { return false }
+        return subtitle == String(year)
+    }
 
     var body: some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
@@ -80,7 +114,7 @@ struct DetailHeroView: View {
             // top overscan inset shows through as a black bar above the artwork.
             .ignoresSafeArea(edges: [.top, .horizontal])
 
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 if hideText {
                     titleText(hideText: hideText)
                 } else {
@@ -91,23 +125,38 @@ struct DetailHeroView: View {
                         titleText(hideText: hideText)
                     }
                 }
-                if let subtitle = item.subtitle {
-                    Text(subtitle).font(.title3).foregroundStyle(.secondary)
+                if let subtitle = item.subtitle, !isYearOnlySubtitle(subtitle) {
+                    Text(subtitle)
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
-                if !item.ratings.isEmpty {
-                    RatingsBadgeRow(ratings: item.ratings)
+                let metadata = item.metadataComponents()
+                if !metadata.isEmpty {
+                    Text(metadata.joined(separator: "  ·  "))
+                        .font(.system(size: 23, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                if !featureBadges.isEmpty {
+                    MediaBadgeRow(badges: featureBadges)
+                }
+                if !heroRatings.isEmpty {
+                    RatingsBadgeRow(ratings: heroRatings)
                 }
                 if hideText {
                     Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
-                        .font(.title3)
+                        .font(.system(size: 22))
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: 1100, alignment: .leading)
+                        .frame(maxWidth: 960, alignment: .topLeading)
                 } else if let overview = item.overview {
                     Text(overview)
-                        .font(.title3)
+                        .font(.system(size: 22))
                         .foregroundStyle(.secondary)
-                        .lineLimit(4)
-                        .frame(maxWidth: 1100, alignment: .leading)
+                        .lineSpacing(2)
+                        // Reserve three lines of height even when the text is
+                        // shorter, so swapping the focused item never makes the
+                        // controls below jump up and down.
+                        .lineLimit(3, reservesSpace: true)
+                        .frame(maxWidth: 960, alignment: .topLeading)
                 }
                 if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
                     HStack(spacing: 24) {
@@ -128,7 +177,9 @@ struct DetailHeroView: View {
                     .padding(.top, 8)
                 }
             }
-            .padding(PlozzTheme.Metrics.screenPadding)
+            .padding(.vertical, PlozzTheme.Metrics.screenPadding)
+            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
         }
         // Cross-fade the hero text as the focused context changes, while the
         // backdrop swaps underneath it.

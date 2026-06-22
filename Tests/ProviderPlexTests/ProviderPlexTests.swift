@@ -171,6 +171,51 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.posterURL?.absoluteString, "https://plex.host:32400/photo/:/transcode?width=500&height=750&minSize=1&upscale=1&url=%2Fshow.png%3FX-Plex-Token%3DTOKEN&X-Plex-Token=TOKEN")
     }
 
+    func testItemMapsTechBadgesRatingGenresAndRatings() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/77", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"77","type":"movie","title":"Dune","year":2021,
+           "contentRating":"PG-13","summary":"Spice.",
+           "rating":8.3,"ratingImage":"rottentomatoes://image.rating.ripe",
+           "audienceRating":9.0,"audienceRatingImage":"imdb://image.rating",
+           "Genre":[{"tag":"Sci-Fi"},{"tag":"Adventure"}],
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
+               {"streamType":1,"codec":"hevc","width":3840,"height":2160,"colorTrc":"smpte2084"},
+               {"streamType":2,"codec":"eac3","channels":8,"audioChannelLayout":"7.1","extendedDisplayTitle":"Dolby Digital+ Atmos 7.1"}
+             ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "77")
+        XCTAssertEqual(item.officialRating, "PG-13")
+        XCTAssertEqual(item.genres, ["Sci-Fi", "Adventure"])
+        // 4K + HDR10 (from smpte2084 transfer) + Dolby Atmos (from the title hint).
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10", "Dolby Atmos"])
+        // RT critic rendered as a percentage; IMDb audience stays 0–10.
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "83%")
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "9")
+    }
+
+    func testItemFallsBackToMediaLevelFactsWithoutStreams() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/88", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"88","type":"episode","title":"Ep","index":1,"parentIndex":1,
+           "Media":[{"id":1,"container":"mkv","videoCodec":"h264","audioCodec":"eac3",
+             "videoResolution":"4k","width":3840,"height":2160,"audioChannels":6,
+             "Part":[{"id":2,"key":"/p","container":"mkv"}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "88")
+        // No Stream array: resolution + surround come from Media-level facts.
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "Dolby Digital+", "5.1"])
+    }
+
     func testItemsPagePassesContainerParamsAndType() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/sections/1/all", json: """

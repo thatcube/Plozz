@@ -40,7 +40,7 @@ final class MediaBadgesTests: XCTestCase {
     func testDolbyVisionFromRangeType() {
         let meta = MediaSourceMetadata(video: .init(videoRangeType: "DOVIWithHDR10"))
         XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["Dolby Vision"])
-        XCTAssertEqual(meta.dynamicRangeBadges.first?.style, .prominent)
+        XCTAssertEqual(meta.dynamicRangeBadges.first?.style, .dolby)
     }
 
     func testHDR10Plus() {
@@ -73,7 +73,7 @@ final class MediaBadgesTests: XCTestCase {
     func testDolbyAtmosSuppressesChannelBadge() {
         let meta = MediaSourceMetadata(audio: .init(codec: "eac3", profile: "Dolby Atmos", channels: 8, channelLayout: "7.1"))
         XCTAssertEqual(meta.audioBadges.map(\.label), ["Dolby Atmos"])
-        XCTAssertEqual(meta.audioBadges.first?.style, .prominent)
+        XCTAssertEqual(meta.audioBadges.first?.style, .dolby)
     }
 
     func testDTSXHeadline() {
@@ -120,7 +120,7 @@ final class MediaBadgesTests: XCTestCase {
     func testRatingBadgeFromOfficialRating() {
         let item = MediaItem(id: "1", title: "M", kind: .movie, officialRating: "TV-14")
         XCTAssertEqual(item.ratingBadge?.label, "TV-14")
-        XCTAssertEqual(item.ratingBadge?.style, .outlined)
+        XCTAssertEqual(item.ratingBadge?.style, .rating)
     }
 
     func testRatingBadgeNilWhenBlank() {
@@ -142,8 +142,19 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertEqual(item.metadataComponents(), ["2010", "2h 28m", "Action", "Adventure", "Sci-Fi"])
     }
 
-    func testRuntimeBadgeText() {
-        XCTAssertEqual((8880 as TimeInterval).runtimeBadgeText, "2h 28m")
+    // MARK: Dolby format word
+
+    func testDolbyFormatWordStripsBrand() {
+        XCTAssertEqual(MediaBadge("Dolby Atmos", style: .dolby).dolbyFormatWord, "Atmos")
+        XCTAssertEqual(MediaBadge("Dolby Vision", style: .dolby).dolbyFormatWord, "Vision")
+        XCTAssertEqual(MediaBadge("Dolby Digital+", style: .dolby).dolbyFormatWord, "Digital+")
+    }
+
+    func testNonDolbyFormatWordIsFullLabel() {
+        XCTAssertEqual(MediaBadge("4K", style: .spec).dolbyFormatWord, "4K")
+    }
+
+    func testRuntimeBadgeText() {        XCTAssertEqual((8880 as TimeInterval).runtimeBadgeText, "2h 28m")
         XCTAssertEqual((2820 as TimeInterval).runtimeBadgeText, "47m")
         XCTAssertEqual((3600 as TimeInterval).runtimeBadgeText, "1h")
         XCTAssertNil((0 as TimeInterval).runtimeBadgeText)

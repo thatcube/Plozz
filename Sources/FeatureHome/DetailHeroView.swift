@@ -33,8 +33,12 @@ struct DetailHeroView: View {
 
     /// The capability badges shown above the ratings: the content-rating
     /// certificate (e.g. `TV-14`) leading, then resolution/HDR/audio badges.
+    /// When the focused item is an episode without its own certificate, the
+    /// rating falls back to the backdrop item (the series), so a show's TV
+    /// rating still shows while scrubbing episodes — matching Apple TV.
     private var featureBadges: [MediaBadge] {
-        (item.ratingBadge.map { [$0] } ?? []) + item.technicalBadges
+        let rating = item.ratingBadge ?? backdrop.ratingBadge
+        return (rating.map { [$0] } ?? []) + item.technicalBadges
     }
 
     /// True when `subtitle` is just the production year — the richer metadata
@@ -93,7 +97,7 @@ struct DetailHeroView: View {
             // top overscan inset shows through as a black bar above the artwork.
             .ignoresSafeArea(edges: [.top, .horizontal])
 
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 if hideText {
                     titleText(hideText: hideText)
                 } else {
@@ -105,12 +109,14 @@ struct DetailHeroView: View {
                     }
                 }
                 if let subtitle = item.subtitle, !isYearOnlySubtitle(subtitle) {
-                    Text(subtitle).font(.title3).foregroundStyle(.secondary)
+                    Text(subtitle)
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
                 let metadata = item.metadataComponents()
                 if !metadata.isEmpty {
                     Text(metadata.joined(separator: "  ·  "))
-                        .font(.title3)
+                        .font(.system(size: 23, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 if !featureBadges.isEmpty {
@@ -121,15 +127,16 @@ struct DetailHeroView: View {
                 }
                 if hideText {
                     Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
-                        .font(.title3)
+                        .font(.system(size: 22))
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: 1100, alignment: .leading)
+                        .frame(maxWidth: 960, alignment: .leading)
                 } else if let overview = item.overview {
                     Text(overview)
-                        .font(.title3)
+                        .font(.system(size: 22))
                         .foregroundStyle(.secondary)
-                        .lineLimit(4)
-                        .frame(maxWidth: 1100, alignment: .leading)
+                        .lineSpacing(2)
+                        .lineLimit(3)
+                        .frame(maxWidth: 960, alignment: .leading)
                 }
                 if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
                     HStack(spacing: 24) {

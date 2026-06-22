@@ -168,7 +168,7 @@ public struct JellyfinClient: Sendable {
             queryItems: [
                 URLQueryItem(name: "ParentId", value: parentID),
                 URLQueryItem(name: "SortBy", value: "SortName"),
-                URLQueryItem(name: "Fields", value: "Overview")
+                URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,Genres")
             ],
             headers: authHeaders
         )

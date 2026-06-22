@@ -157,7 +157,9 @@ struct DetailHeroView: View {
                     .padding(.top, 8)
                 }
             }
-            .padding(PlozzTheme.Metrics.screenPadding)
+            .padding(.vertical, PlozzTheme.Metrics.screenPadding)
+            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
         }
         // Cross-fade the hero text as the focused context changes, while the
         // backdrop swaps underneath it.

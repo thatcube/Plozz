@@ -200,7 +200,8 @@ private struct HomeTab: View {
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
-                    onSelectChild: { navigate($0) }
+                    onSelectChild: { navigate($0) },
+                    initialSeasonID: item.seasonID
                 )
             }
         }
@@ -325,7 +326,8 @@ private struct SearchTab: View {
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
-                    onSelectChild: { open($0) }
+                    onSelectChild: { open($0) },
+                    initialSeasonID: item.seasonID
                 )
             }
         }

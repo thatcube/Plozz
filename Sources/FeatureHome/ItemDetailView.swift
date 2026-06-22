@@ -9,17 +9,22 @@ public struct ItemDetailView: View {
     private let spoilerSettings: SpoilerSettings
     private let onPlay: (MediaItem) -> Void
     private let onSelectChild: (MediaItem) -> Void
+    /// When this detail is a series opened via "Go to Season", the season to
+    /// pre-select on the series page. Ignored for non-series items.
+    private let initialSeasonID: String?
 
     public init(
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings = .default,
         onPlay: @escaping (MediaItem) -> Void,
-        onSelectChild: @escaping (MediaItem) -> Void
+        onSelectChild: @escaping (MediaItem) -> Void,
+        initialSeasonID: String? = nil
     ) {
         _viewModel = State(initialValue: viewModel)
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
         self.onSelectChild = onSelectChild
+        self.initialSeasonID = initialSeasonID
     }
 
     public var body: some View {
@@ -34,7 +39,8 @@ public struct ItemDetailView: View {
                     looseEpisodes: detail.children.filter { $0.kind == .episode },
                     viewModel: viewModel,
                     spoilerSettings: spoilerSettings,
-                    onPlay: onPlay
+                    onPlay: onPlay,
+                    initialSeasonID: initialSeasonID
                 )
             } else {
                 container(detail)

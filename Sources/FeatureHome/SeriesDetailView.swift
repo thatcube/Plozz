@@ -39,7 +39,8 @@ struct SeriesDetailView: View {
         looseEpisodes: [MediaItem],
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings,
-        onPlay: @escaping (MediaItem) -> Void
+        onPlay: @escaping (MediaItem) -> Void,
+        initialSeasonID: String? = nil
     ) {
         self.series = series
         self.seasons = seasons
@@ -47,7 +48,12 @@ struct SeriesDetailView: View {
         self.viewModel = viewModel
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
-        _heroItem = State(initialValue: series)
+        // When opened via "Go to Season", pre-select that season (and front it in
+        // the hero) so the page lands on the requested season rather than the
+        // default one.
+        let initialSeason = initialSeasonID.flatMap { id in seasons.first { $0.id == id } }
+        _selectedSeasonID = State(initialValue: initialSeason?.id)
+        _heroItem = State(initialValue: initialSeason ?? series)
     }
 
     var body: some View {
@@ -199,10 +205,13 @@ struct SeriesDetailView: View {
         return { onPlay(trailer) }
     }
 
-    /// Picks the season to open on first appearance — the one holding the user's
-    /// "next up" episode if we can tell, else the first season — and preloads it.
+    /// Picks the season to open on first appearance — the one pre-selected via
+    /// "Go to Season" if any, otherwise the first season — and preloads it.
     private func prepareInitialSeason() async {
-        guard selectedSeasonID == nil else { return }
+        if let id = selectedSeasonID {
+            await viewModel.loadEpisodes(for: id)
+            return
+        }
         guard let first = seasons.first else { return }
         selectedSeasonID = first.id
         await viewModel.loadEpisodes(for: first.id)

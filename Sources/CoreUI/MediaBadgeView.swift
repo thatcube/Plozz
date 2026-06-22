@@ -98,9 +98,11 @@ public struct DolbyDoubleD: Shape {
         let rightRect = CGRect(x: startX + dWidth + gap, y: rect.minY, width: dWidth, height: h)
 
         var path = Path()
-        // Left D is mirrored: its straight edge faces the centre (right side).
-        path.addPath(dShape(in: leftRect, mirrored: true))
-        path.addPath(dShape(in: rightRect, mirrored: false))
+        // Right-side D is normal; left-side D mirrors it. Their curved bellies
+        // meet toward the centre and the straight stems sit on the outer edges —
+        // the orientation of the real Dolby double-D mark.
+        path.addPath(dShape(in: leftRect, mirrored: false))
+        path.addPath(dShape(in: rightRect, mirrored: true))
         return path
     }
 

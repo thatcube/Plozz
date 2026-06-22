@@ -7,6 +7,9 @@ import CoreNetworking
 #if canImport(UIKit)
 import UIKit
 #endif
+#if os(tvOS)
+import AVKit
+#endif
 
 /// `AVPlayer`-backed implementation of `VideoEngine`.
 ///
@@ -87,6 +90,16 @@ public final class NativeVideoEngine: VideoEngine {
     /// surface instead of forcing the SwiftUI layer to rebuild it.
     @ObservationIgnored private var videoOutputView: PlayerLayerView?
     #endif
+    #if os(tvOS)
+    /// The dynamic-range display switch tvOS should request for the current
+    /// source (Dolby Vision / HDR10 / HLG). `nil` for SDR or before a load.
+    /// Retained so it can be (re)applied once the output view is in a window.
+    @ObservationIgnored private var pendingDisplayCriteria: AVDisplayCriteria?
+    /// The window whose `AVDisplayManager` we last drove, so teardown can clear
+    /// the preference even after the view has left its window — otherwise the TV
+    /// can be stranded in a forced HDR/DoVi mode.
+    @ObservationIgnored private weak var displayCriteriaWindow: UIWindow?
+    #endif
 
     public init(captionSettings: CaptionSettings = .default) {
         self.captionSettings = captionSettings
@@ -115,6 +128,9 @@ public final class NativeVideoEngine: VideoEngine {
         let item = AVPlayerItem(asset: asset)
         // Apply in-app caption styling overrides if the user set any.
         item.textStyleRules = captionSettings.textStyleRules()
+        // Drive the tvOS display into the right dynamic range (true Dolby
+        // Vision / HDR10 / HLG) for this source before playback begins.
+        configureDynamicRange(for: request, item: item)
 
         let player = AVPlayer(playerItem: item)
         player.allowsExternalPlayback = true
@@ -140,6 +156,41 @@ public final class NativeVideoEngine: VideoEngine {
         // Best-effort: pick the default subtitle for the user's mode/language.
         await applyDefaultSubtitleSelection(for: item)
     }
+
+    // MARK: - Dynamic range / Dolby Vision display switch
+
+    /// Classifies the source's dynamic range and, on tvOS, requests the matching
+    /// display mode so the Apple TV negotiates true Dolby Vision / HDR10 / HLG
+    /// (or returns to SDR) with the panel. `appliesPerFrameHDRDisplayMetadata`
+    /// is enabled for HDR/DoVi so per-frame RPU/HDR metadata is forwarded to the
+    /// display. All best-effort and crash-safe: failures never block playback.
+    private func configureDynamicRange(for request: PlaybackRequest, item: AVPlayerItem) {
+        let mode = HDRDisplayMode(request.sourceMetadata)
+        item.appliesPerFrameHDRDisplayMetadata = mode.isHDR
+        #if os(tvOS)
+        pendingDisplayCriteria = makeDisplayCriteria(mode: mode, metadata: request.sourceMetadata)
+        applyDisplayCriteria()
+        #endif
+    }
+
+    #if os(tvOS)
+    /// Pushes `pendingDisplayCriteria` onto the output view's window manager. Safe
+    /// to call before the view is in a window — it re-runs from the view's
+    /// `onWindowChange` hook once a window is available.
+    private func applyDisplayCriteria() {
+        guard let window = videoOutputView?.window else { return }
+        displayCriteriaWindow = window
+        window.avDisplayManager.preferredDisplayCriteria = pendingDisplayCriteria
+    }
+
+    /// Clears any forced display mode so the TV isn't stranded in HDR/DoVi after
+    /// playback stops.
+    private func clearDisplayCriteria() {
+        pendingDisplayCriteria = nil
+        displayCriteriaWindow?.avDisplayManager.preferredDisplayCriteria = nil
+        displayCriteriaWindow = nil
+    }
+    #endif
 
     // MARK: - Asset construction
 
@@ -199,6 +250,9 @@ public final class NativeVideoEngine: VideoEngine {
         routeChangeObserver = nil
         #endif
         teardownPlayer()
+        #if os(tvOS)
+        clearDisplayCriteria()
+        #endif
         #if canImport(UIKit)
         videoOutputView?.player = nil
         videoOutputView = nil
@@ -434,6 +488,13 @@ public final class NativeVideoEngine: VideoEngine {
         view.backgroundColor = .black
         view.playerLayer.videoGravity = .resizeAspect
         view.player = player
+        #if os(tvOS)
+        // Re-apply the pending display switch once the surface has a window
+        // (the criteria may have been computed in load() before attachment).
+        view.onWindowChange = { [weak self] _ in
+            self?.applyDisplayCriteria()
+        }
+        #endif
         videoOutputView = view
         return view
     }
@@ -451,6 +512,15 @@ final class PlayerLayerView: UIView {
         get { playerLayer.player }
         set { playerLayer.player = newValue }
     }
+    #if os(tvOS)
+    /// Invoked when the view moves to (or away from) a window, so the engine can
+    /// drive that window's `AVDisplayManager` for the Dolby Vision / HDR switch.
+    var onWindowChange: ((UIWindow?) -> Void)?
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onWindowChange?(window)
+    }
+    #endif
 }
 #endif
 #endif

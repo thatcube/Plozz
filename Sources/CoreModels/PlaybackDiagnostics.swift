@@ -264,6 +264,17 @@ public extension PlaybackDiagnostics {
         }
     }
 
+    /// Container label for the overlay, pairing the friendly name with the raw
+    /// extension when they differ, e.g. `Matroska (MKV)`. When the friendly name
+    /// already is the bare token (e.g. `MP4`), no parenthetical is added.
+    static func containerLabel(_ container: String?) -> String? {
+        guard let raw = container?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+        let friendly = friendlyContainerName(raw) ?? raw.uppercased()
+        let token = raw.uppercased()
+        if friendly.uppercased() == token { return friendly }
+        return "\(friendly) (\(token))"
+    }
+
     /// Best display name for an audio track, preferring a descriptive spatial
     /// profile (Dolby Atmos, DTS:X) over the bare codec name.
     static func friendlyAudioName(codec: String?, profile: String?) -> String? {
@@ -447,8 +458,8 @@ public extension PlaybackDiagnostics {
     var audioCodecText: String { audioCodec ?? Self.placeholder }
     var droppedFramesText: String { droppedVideoFrames.map(String.init) ?? Self.placeholder }
 
-    /// Friendly container name, e.g. `Matroska`.
-    var containerText: String { Self.friendlyContainerName(container) ?? Self.placeholder }
+    /// Friendly container name, e.g. `Matroska (MKV)`.
+    var containerText: String { Self.containerLabel(container) ?? Self.placeholder }
 
     /// Composite video line, e.g. `HEVC · Dolby Vision · 1920×1080 · 4.8 Mbps · 24.00 fps`.
     var videoLineText: String {

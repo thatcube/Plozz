@@ -1,45 +1,45 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreUI
 
 /// A compact, **non-interactive** heads-up panel that overlays the player with
 /// live stream diagnostics.
 ///
-/// Tuned for the living room: monospaced digits for stable columns, a
-/// semi-opaque dark background for legibility over any frame, and large enough
-/// type to read from ~10 feet. `allowsHitTesting(false)` is applied by the host
-/// (`PlayerView`) so it never steals focus from the transport controls.
+/// Tuned for the living room: monospaced digits for stable columns, a Liquid
+/// Glass surface (with a faint theme-aware scrim) for legibility over any frame,
+/// and type sized to read from the couch. `allowsHitTesting(false)` is applied
+/// by the host (`PlayerView`) so it never steals focus from the transport
+/// controls.
 struct PlaybackDiagnosticsOverlay: View {
     let diagnostics: PlaybackDiagnostics?
 
+    @Environment(\.themePalette) private var palette
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Playback Diagnostics")
-                .font(.headline)
-                .foregroundStyle(.white)
-                .padding(.bottom, 2)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(palette.primaryText)
+                .padding(.bottom, 1)
 
             if let diagnostics {
                 grid(for: diagnostics)
             } else {
                 Text("Gathering metrics…")
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(palette.secondaryText)
             }
         }
-        .padding(24)
-        .frame(maxWidth: 680, alignment: .leading)
-        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
-        )
-        .padding(48)
+        .padding(16)
+        .frame(maxWidth: 520, alignment: .leading)
+        .plozzGlassPanel(cornerRadius: 14)
+        .padding(36)
     }
 
     @ViewBuilder
     private func grid(for d: PlaybackDiagnostics) -> some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 24, verticalSpacing: 6) {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 4) {
             optionalRow("Container", d.containerText)
             optionalRow("Video", d.videoLineText)
             optionalRow("Audio", d.audioLineText)
@@ -54,8 +54,8 @@ struct PlaybackDiagnosticsOverlay: View {
     }
 
     private func sourceText(_ d: PlaybackDiagnostics) -> String {
-        guard let container = d.container, !container.isEmpty else { return d.mode.displayName }
-        return "\(d.mode.displayName) · \(PlaybackDiagnostics.friendlyContainerName(container) ?? container)"
+        guard let label = PlaybackDiagnostics.containerLabel(d.container) else { return d.mode.displayName }
+        return "\(d.mode.displayName) · \(label)"
     }
 
     /// A row that's hidden entirely when its value is the placeholder, so static
@@ -70,12 +70,12 @@ struct PlaybackDiagnosticsOverlay: View {
     private func row(_ label: String, _ value: String) -> some View {
         GridRow {
             Text(label)
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.6))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(palette.secondaryText)
                 .gridColumnAlignment(.leading)
             Text(value)
-                .font(.system(.callout, design: .monospaced).weight(.semibold))
-                .foregroundStyle(.white)
+                .font(.system(.caption, design: .monospaced).weight(.semibold))
+                .foregroundStyle(palette.primaryText)
                 .gridColumnAlignment(.leading)
         }
     }

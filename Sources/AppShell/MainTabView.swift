@@ -38,6 +38,11 @@ struct MainTabView: View {
     @State private var discovery = LibraryDiscoveryModel()
     @State private var audioController = AudioPlaybackController()
     @State private var musicAvailability = MusicAvailabilityModel()
+    @Environment(\.colorScheme) private var systemColorScheme
+
+    private var resolvedPalette: ThemePalette {
+        ThemePalette.palette(for: themeModel.theme, systemColorScheme: systemColorScheme)
+    }
 
     var body: some View {
         TabView {
@@ -47,6 +52,7 @@ struct MainTabView: View {
                 captionSettings: captionModel.settings,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
+                themePalette: resolvedPalette,
                 ratingsProvider: ratingsProvider,
                 pendingPlayItemID: $pendingPlayItemID
             )
@@ -57,6 +63,7 @@ struct MainTabView: View {
                 captionSettings: captionModel.settings,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
+                themePalette: resolvedPalette,
                 ratingsProvider: ratingsProvider
             )
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
@@ -119,6 +126,7 @@ private struct HomeTab: View {
     let captionSettings: CaptionSettings
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
+    let themePalette: ThemePalette
     let ratingsProvider: any ExternalRatingsProviding
     @Binding var pendingPlayItemID: String?
 
@@ -173,7 +181,8 @@ private struct HomeTab: View {
                     captionSettings: captionSettings,
                     startPosition: request.startPosition
                 ),
-                showDiagnostics: showDiagnostics
+                showDiagnostics: showDiagnostics,
+                themePalette: themePalette
             )
         }
         .resumePrompt(item: $resumePrompt) { item, startPosition in
@@ -261,6 +270,7 @@ private struct SearchTab: View {
     let captionSettings: CaptionSettings
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
+    let themePalette: ThemePalette
     let ratingsProvider: any ExternalRatingsProviding
 
     @State private var path = NavigationPath()
@@ -294,7 +304,8 @@ private struct SearchTab: View {
                     itemID: item.id,
                     captionSettings: captionSettings
                 ),
-                showDiagnostics: showDiagnostics
+                showDiagnostics: showDiagnostics,
+                themePalette: themePalette
             )
         }
     }

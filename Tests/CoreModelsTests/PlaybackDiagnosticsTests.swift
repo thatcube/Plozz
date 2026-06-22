@@ -69,6 +69,15 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
         XCTAssertNil(PlaybackDiagnostics.friendlyContainerName(nil))
     }
 
+    func testContainerLabelPairsFriendlyNameWithRawToken() {
+        XCTAssertEqual(PlaybackDiagnostics.containerLabel("mkv"), "Matroska (MKV)")
+        XCTAssertEqual(PlaybackDiagnostics.containerLabel("webm"), "WebM")
+        XCTAssertEqual(PlaybackDiagnostics.containerLabel("mp4"), "MP4")
+        XCTAssertEqual(PlaybackDiagnostics.containerLabel("xyz"), "XYZ")
+        XCTAssertNil(PlaybackDiagnostics.containerLabel(nil))
+        XCTAssertNil(PlaybackDiagnostics.containerLabel("  "))
+    }
+
     func testFriendlyAudioNamePrefersSpatialProfile() {
         XCTAssertEqual(PlaybackDiagnostics.friendlyAudioName(codec: "eac3", profile: "Dolby Atmos"), "Dolby Atmos")
         XCTAssertEqual(PlaybackDiagnostics.friendlyAudioName(codec: "dts", profile: "DTS:X"), "DTS:X")
@@ -204,7 +213,7 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
         )
         let d = PlaybackDiagnostics.base(from: metadata, mode: .directPlay)
 
-        XCTAssertEqual(d.containerText, "Matroska")
+        XCTAssertEqual(d.containerText, "Matroska (MKV)")
         XCTAssertEqual(d.hdr, .dolbyVision)
         XCTAssertEqual(d.videoLineText, "HEVC · Dolby Vision · 1920×1080 · 4.8 Mbps · 24.00 fps")
         XCTAssertEqual(d.audioLineText, "Dolby Atmos · 48 kHz · 5.1 · 768 Kbps")

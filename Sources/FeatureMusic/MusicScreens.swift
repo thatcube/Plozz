@@ -80,7 +80,7 @@ private struct EntryTile: View {
             }
             .frame(width: 280, height: 160)
         }
-        .buttonStyle(.card)
+        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
     }
 }
 
@@ -194,7 +194,7 @@ private struct GenreCard: View {
             }
             .frame(width: 280, height: 160)
         }
-        .buttonStyle(.card)
+        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
     }
 }
 

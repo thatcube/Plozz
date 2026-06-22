@@ -70,10 +70,58 @@ private extension Color {
     static let plozzOpaqueCardFocused = Color(white: 0.26)
 }
 
+/// tvOS button style for focusable browsing **cards** (Home's library
+/// shortcuts, Music tiles, genre/category cards). Replaces the platform's
+/// default `.card` style — whose focus state paints a stark **white** plate —
+/// with Plozz's Twozz-ported liquid-glass focus surface: a subtle, theme-tinted
+/// lift that deepens on focus, draws a hairline border, and respects Reduce
+/// Transparency. Drive it through `.plozzCardButton(cornerRadius:)`, which also
+/// disables the system focus effect so no white halo bleeds through.
+public struct PlozzCardButtonStyle: ButtonStyle {
+    private let cornerRadius: CGFloat
+    private let focusedScale: CGFloat
+
+    public init(cornerRadius: CGFloat, focusedScale: CGFloat = PlozzTheme.Metrics.mediumFocusedCardScale) {
+        self.cornerRadius = cornerRadius
+        self.focusedScale = focusedScale
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        CardBody(configuration: configuration, cornerRadius: cornerRadius, focusedScale: focusedScale)
+    }
+
+    private struct CardBody: View {
+        let configuration: ButtonStyle.Configuration
+        let cornerRadius: CGFloat
+        let focusedScale: CGFloat
+        @Environment(\.isFocused) private var isFocused
+
+        var body: some View {
+            configuration.label
+                .plozzGlassCard(cornerRadius: cornerRadius, isFocused: isFocused)
+                .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+                .scaleEffect(isFocused ? (configuration.isPressed ? focusedScale * 0.97 : focusedScale) : 1)
+                .animation(.easeOut(duration: 0.18), value: isFocused)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+        }
+    }
+}
+
 public extension View {
     /// Wraps the view in the shared Plozz liquid-glass browsing-card surface.
     func plozzGlassCard(cornerRadius: CGFloat, isFocused: Bool) -> some View {
         modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, isFocused: isFocused))
+    }
+
+    /// Styles a `Button` as a Plozz browsing card: the Twozz-ported liquid-glass
+    /// focus surface in place of tvOS's white `.card` focus plate, with the
+    /// system focus effect disabled so no white halo remains.
+    func plozzCardButton(
+        cornerRadius: CGFloat = PlozzTheme.Metrics.cornerRadius,
+        focusedScale: CGFloat = PlozzTheme.Metrics.mediumFocusedCardScale
+    ) -> some View {
+        buttonStyle(PlozzCardButtonStyle(cornerRadius: cornerRadius, focusedScale: focusedScale))
+            .focusEffectDisabled()
     }
 
     /// Wraps the view in a non-interactive Liquid Glass *panel* surface (HUDs,

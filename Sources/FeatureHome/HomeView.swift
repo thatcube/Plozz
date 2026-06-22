@@ -88,7 +88,7 @@ public struct HomeView: View {
                             .frame(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
                             .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
                         }
-                        .buttonStyle(.card)
+                        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
                     }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

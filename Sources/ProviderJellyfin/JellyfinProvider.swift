@@ -122,12 +122,49 @@ public struct JellyfinProvider: MediaProvider {
 
     public func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
         let detail = try await client.item(userID: session.userID, id: itemID)
-        let info = try await client.playbackInfo(
+        var info = try await client.playbackInfo(
             userID: session.userID,
             itemID: itemID,
-            forceTranscode: forceTranscode
+            mode: forceTranscode ? .transcode : .auto
         )
-        guard let source = info.MediaSources.first else { throw AppError.notFound }
+        guard var source = info.MediaSources.first else { throw AppError.notFound }
+
+        // Capture the original source facts (true container + DoVi/HDR range)
+        // BEFORE any remux swap below, so diagnostics and the native engine's
+        // Dolby Vision display switch see the real source even if the server's
+        // remux response describes the output container instead.
+        let originalContainer = source.Container
+        let originalStreams = source.MediaStreams ?? detail.MediaStreams ?? []
+
+        // Track whether we deliberately swapped to a server **remux** (DirectStream,
+        // video stream-copied) so diagnostics can report it as a lossless remux
+        // rather than a quality-reducing re-encode.
+        var didRemux = false
+
+        // Container-only remux to reach AVPlayer losslessly. Two cases:
+        //  1. True Dolby Vision: a DoVi MKV the server would direct-play only
+        //     reaches the on-device hybrid engine → HDR10. Remuxing to seekable
+        //     fMP4 HLS with the video **copied** (DoVi RPU/dvcC preserved, tagged
+        //     `dvh1`) reaches AVPlayer — the only tvOS engine that outputs true
+        //     Dolby Vision.
+        //  2. HEVC `hev1`: AVPlayer can't render HEVC tagged `hev1` (audio plays,
+        //     black screen). Jellyfin's fMP4 remux re-tags the copied bitstream to
+        //     `hvc1` (`-c copy -tag:v hvc1`), fixing it with no re-encode.
+        // Both route to AVPlayer automatically via `isTranscoding`. Best-effort: if
+        // the remux fails or the server offers no stream URL, fall back to direct
+        // play (the router then sends `hev1` to the on-device engine as a net).
+        if !forceTranscode, Self.shouldRequestDoViRemux(source) || Self.shouldRequestHvc1Remux(source) {
+            if let remuxInfo = try? await client.playbackInfo(
+                userID: session.userID,
+                itemID: itemID,
+                mode: .remux
+            ), let remuxSource = remuxInfo.MediaSources.first,
+               remuxSource.TranscodingUrl != nil {
+                info = remuxInfo
+                source = remuxSource
+                didRemux = true
+            }
+        }
 
         let streamURL = try resolveStreamURL(itemID: itemID, source: source, playSessionID: info.PlaySessionId)
         let mappedItem = map(item: detail)
@@ -147,7 +184,8 @@ public struct JellyfinProvider: MediaProvider {
             subtitleTracks: subs,
             startPosition: mappedItem.resumePosition ?? 0,
             isTranscoding: source.TranscodingUrl != nil,
-            sourceMetadata: Self.sourceMetadata(container: source.Container, streams: streams),
+            deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
+            sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
             trickplay: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay)
         )
     }
@@ -201,6 +239,81 @@ public struct JellyfinProvider: MediaProvider {
         )
     }
 
+    /// Classifies how the server is delivering the stream for the diagnostics
+    /// overlay. We can only assert a **remux** (lossless, video stream-copied)
+    /// when we deliberately requested DirectStream and the server honored it with
+    /// a `TranscodingUrl` (`didRemux`). Any other `TranscodingUrl` came from the
+    /// server's own `auto`/forced decision, which may re-encode — so we
+    /// conservatively label it `transcode` rather than over-claiming "lossless".
+    static func deliveryMode(transcoding: Bool, didRemux: Bool) -> PlaybackDiagnostics.PlaybackMode {
+        if !transcoding { return .directPlay }
+        return didRemux ? .remux : .transcode
+    }
+
+    /// Whether to ask the server to remux (rather than direct-play) this source so
+    /// it reaches AVPlayer for true Dolby Vision. True only for a **Dolby Vision
+    /// HEVC stream in a Matroska container with Apple-compatible audio** that the
+    /// server currently wants to direct-play (no `TranscodingUrl`). Those are the
+    /// sources where a container-only remux (video copied) lifts the file from the
+    /// on-device hybrid engine's HDR10 ceiling to native DoVi, with no re-encode.
+    /// HEVC + Apple-compatible audio is required so the server can stream-copy both
+    /// tracks; otherwise forcing direct-play off would trigger a wasteful transcode.
+    static func shouldRequestDoViRemux(_ source: MediaSourceInfo) -> Bool {
+        // Only intervene when the server chose direct play (raw container).
+        guard source.TranscodingUrl == nil else { return false }
+
+        let container = (source.Container ?? "").lowercased()
+        let isMatroska = container.contains("mkv")
+            || container.contains("matroska")
+            || container.contains("webm")
+        guard isMatroska else { return false }
+
+        let streams = source.MediaStreams ?? []
+        let video = streams.first { $0.`Type` == "Video" }
+        guard (video?.Codec ?? "").lowercased() == "hevc" else { return false }
+        guard (video?.VideoRangeType ?? "").uppercased().hasPrefix("DOVI") else { return false }
+
+        let audio = streams.first { $0.`Type` == "Audio" && ($0.IsDefault ?? false) }
+            ?? streams.first { $0.`Type` == "Audio" }
+        // No audio → still safe to remux video-only.
+        guard let audioCodec = audio?.Codec?.lowercased() else { return true }
+        let appleCompatibleAudio: Set<String> = ["aac", "ac3", "eac3", "alac", "mp3", "flac", "opus"]
+        return appleCompatibleAudio.contains(audioCodec)
+    }
+
+    /// Whether to ask the server to remux (rather than direct-play) an HEVC source
+    /// tagged `hev1`. AVPlayer/VideoToolbox only decode HEVC tagged `hvc1`; `hev1`
+    /// (in-band parameter sets) plays audio with a **black screen**. Jellyfin's
+    /// fMP4 HLS remux stream-copies the bitstream and re-tags it to `hvc1`
+    /// (`-c copy -tag:v hvc1`) — lossless, no re-encode — which AVPlayer then
+    /// renders. True only for a **`hev1` HEVC stream in an Apple/MP4-family
+    /// container** the server currently wants to direct-play. `hev1` in Matroska
+    /// is excluded: it routes to the on-device hybrid engine (which decodes `hev1`
+    /// directly), so no remux is needed.
+    static func shouldRequestHvc1Remux(_ source: MediaSourceInfo) -> Bool {
+        // Only intervene when the server chose direct play (raw container).
+        guard source.TranscodingUrl == nil else { return false }
+
+        let container = (source.Container ?? "").lowercased()
+        let isMatroska = container.contains("mkv")
+            || container.contains("matroska")
+            || container.contains("webm")
+        guard !isMatroska else { return false }
+
+        let streams = source.MediaStreams ?? []
+        let video = streams.first { $0.`Type` == "Video" }
+        let codec = (video?.Codec ?? "").lowercased()
+        guard codec == "hevc" || codec == "h265" else { return false }
+        guard (video?.CodecTag ?? "").lowercased() == "hev1" else { return false }
+
+        let audio = streams.first { $0.`Type` == "Audio" && ($0.IsDefault ?? false) }
+            ?? streams.first { $0.`Type` == "Audio" }
+        // No audio → still safe to remux video-only.
+        guard let audioCodec = audio?.Codec?.lowercased() else { return true }
+        let appleCompatibleAudio: Set<String> = ["aac", "ac3", "eac3", "alac", "mp3", "flac", "opus"]
+        return appleCompatibleAudio.contains(audioCodec)
+    }
+
     /// Builds provider-agnostic source facts (codec/HDR/resolution/channels/…)
     /// from the original file's media streams, so the diagnostics overlay stays
     /// accurate even when the server transcodes to a metadata-poor HLS stream.
@@ -214,9 +327,11 @@ public struct JellyfinProvider: MediaProvider {
         let videoStream = video.map { v in
             MediaSourceMetadata.VideoStream(
                 codec: v.Codec,
+                codecTag: v.CodecTag,
                 profile: v.Profile,
                 width: v.Width,
                 height: v.Height,
+                bitDepth: v.BitDepth,
                 bitrate: v.BitRate,
                 frameRate: v.RealFrameRate ?? v.AverageFrameRate,
                 videoRange: v.VideoRange,
@@ -266,7 +381,6 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     // MARK: Subtitles
-
     public func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] {
         try await client.remoteSubtitleSearch(itemID: itemID, language: language).map(map(remoteSubtitle:))
     }
@@ -333,6 +447,8 @@ public struct JellyfinProvider: MediaProvider {
             seasonNumber: dto.ParentIndexNumber,
             episodeNumber: dto.IndexNumber,
             productionYear: dto.ProductionYear,
+            seriesID: dto.SeriesId,
+            seasonID: dto.SeasonId,
             runtime: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
             resumePosition: JellyfinTicks.seconds(fromTicks: dto.UserData?.PlaybackPositionTicks),
             playedPercentage: dto.UserData?.PlayedPercentage.map { $0 / 100.0 },
@@ -469,5 +585,15 @@ public struct JellyfinProvider: MediaProvider {
         case "boxsets": return .collection
         default: return .folder
         }
+    }
+}
+
+// MARK: - Watched state
+
+extension JellyfinProvider: WatchStateProviding {
+    /// Toggles an item's played/watched state on the server. For a season or
+    /// series id Jellyfin cascades the change to the contained episodes.
+    public func setPlayed(_ played: Bool, itemID: String) async throws {
+        try await client.setItemPlayed(played, userID: session.userID, itemID: itemID)
     }
 }

@@ -249,6 +249,8 @@ public struct PlexProvider: MediaProvider {
             seasonNumber: isEpisode ? dto.parentIndex : nil,
             episodeNumber: isEpisode ? dto.index : nil,
             productionYear: dto.year,
+            seriesID: isEpisode ? dto.grandparentRatingKey : nil,
+            seasonID: isEpisode ? dto.parentRatingKey : nil,
             runtime: runtime,
             resumePosition: resume,
             playedPercentage: percentage,
@@ -315,5 +317,15 @@ public struct PlexProvider: MediaProvider {
         case .series: return 2
         default: return nil
         }
+    }
+}
+
+// MARK: - Watched state
+
+extension PlexProvider: WatchStateProviding {
+    /// Toggles an item's watched state via Plex scrobble/unscrobble. Scrobbling a
+    /// season or series ratingKey marks the contained episodes too.
+    public func setPlayed(_ played: Bool, itemID: String) async throws {
+        try await client.setWatched(played, ratingKey: itemID)
     }
 }

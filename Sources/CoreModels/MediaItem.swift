@@ -28,6 +28,16 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var episodeNumber: Int?
     public var productionYear: Int?
 
+    /// For an episode, the id of its owning series, enabling a "Go to Series"
+    /// jump from anywhere the episode appears. `nil` for non-episodes or when the
+    /// provider doesn't report it.
+    public var seriesID: String?
+
+    /// For an episode, the id of its owning season, enabling a "Go to Season"
+    /// jump (e.g. from a Continue Watching card). `nil` for non-episodes or when
+    /// the provider doesn't report it.
+    public var seasonID: String?
+
     /// Total runtime in seconds, if known.
     public var runtime: TimeInterval?
     /// Saved resume position in seconds.
@@ -98,6 +108,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
         productionYear: Int? = nil,
+        seriesID: String? = nil,
+        seasonID: String? = nil,
         runtime: TimeInterval? = nil,
         resumePosition: TimeInterval? = nil,
         playedPercentage: Double? = nil,
@@ -121,6 +133,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.productionYear = productionYear
+        self.seriesID = seriesID
+        self.seasonID = seasonID
         self.runtime = runtime
         self.resumePosition = resumePosition
         self.playedPercentage = playedPercentage
@@ -150,6 +164,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
         episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         productionYear = try container.decodeIfPresent(Int.self, forKey: .productionYear)
+        seriesID = try container.decodeIfPresent(String.self, forKey: .seriesID)
+        seasonID = try container.decodeIfPresent(String.self, forKey: .seasonID)
         runtime = try container.decodeIfPresent(TimeInterval.self, forKey: .runtime)
         resumePosition = try container.decodeIfPresent(TimeInterval.self, forKey: .resumePosition)
         playedPercentage = try container.decodeIfPresent(Double.self, forKey: .playedPercentage)

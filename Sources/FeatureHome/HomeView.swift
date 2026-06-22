@@ -50,6 +50,13 @@ public struct HomeView: View {
             .scrollClipDisabled()
         }
         .task { if viewModel.state.value == nil { await viewModel.load() } }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+            if let mutation = MediaItemMutation.from(note) {
+                viewModel.applyWatchedState(mutation)
+            } else {
+                Task { await viewModel.load() }
+            }
+        }
     }
 
     private func librariesRow(_ libraries: [AggregatedLibrary]) -> some View {
@@ -80,8 +87,9 @@ public struct HomeView: View {
                             }
                             .frame(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
                             .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
+                            .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.cornerRadius)
                         }
-                        .buttonStyle(.card)
+                        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
                     }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

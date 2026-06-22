@@ -81,6 +81,11 @@ targets:
         # exchange the published snapshot.
         CODE_SIGN_ENTITLEMENTS: App/Resources/Plozz.entitlements
         GENERATE_INFOPLIST_FILE: NO
+        # Force-keep the AVKit load command. AVKit is only used via the dynamic
+        # `UIWindow.avDisplayManager` ObjC category (for the Dolby Vision / HDR
+        # display-mode switch), so the linker's default `-dead_strip_dylibs`
+        # otherwise drops it and the selector is unrecognized at runtime (crash).
+        OTHER_LDFLAGS: "-Wl,-needed_framework,AVKit"
     configFiles:
       Debug: Config/Secrets.xcconfig
       Release: Config/Secrets.xcconfig

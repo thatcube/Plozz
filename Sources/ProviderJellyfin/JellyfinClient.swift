@@ -277,12 +277,31 @@ public struct JellyfinClient: Sendable {
 
     // MARK: Playback
 
-    func playbackInfo(userID: String, itemID: String, forceTranscode: Bool = false) async throws -> PlaybackInfoResponse {
+    /// How the server should deliver a media source: let it decide (`auto`),
+    /// remux the container with codecs copied (`remux` — preserves Dolby Vision),
+    /// or fully transcode (`transcode`).
+    enum PlaybackStreamMode: Sendable {
+        case auto
+        case remux
+        case transcode
+    }
+
+    func playbackInfo(userID: String, itemID: String, mode: PlaybackStreamMode = .auto) async throws -> PlaybackInfoResponse {
         var queryItems = [URLQueryItem(name: "UserId", value: userID)]
-        // Forcing a transcode: tell the server not to offer direct play/stream so
-        // it returns a TranscodingUrl. Used as the player's fallback when a
-        // direct-play stream fails to load in AVPlayer.
-        if forceTranscode {
+        switch mode {
+        case .auto:
+            // Let the server pick: DirectPlay > DirectStream > transcode.
+            break
+        case .remux:
+            // Disable direct play but keep direct stream: the server remuxes the
+            // container to seekable fMP4 HLS while **copying** the video/audio
+            // codecs (no re-encode), which preserves Dolby Vision (RPU/dvcC,
+            // tagged `dvh1`). Used to route a DoVi MKV to AVPlayer for true DoVi.
+            queryItems.append(URLQueryItem(name: "EnableDirectPlay", value: "false"))
+            queryItems.append(URLQueryItem(name: "EnableDirectStream", value: "true"))
+        case .transcode:
+            // Force a full transcode: neither direct play nor direct stream. Used
+            // as the player's fallback when a direct stream fails to load.
             queryItems.append(URLQueryItem(name: "EnableDirectPlay", value: "false"))
             queryItems.append(URLQueryItem(name: "EnableDirectStream", value: "false"))
         }
@@ -315,6 +334,18 @@ public struct JellyfinClient: Sendable {
             PositionTicks: JellyfinTicks.ticks(fromSeconds: progress.positionSeconds),
             IsPaused: progress.isPaused
         ))
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
+    /// `POST`/`DELETE /Users/{userId}/PlayedItems/{itemId}` — marks an item
+    /// played (POST) or unplayed (DELETE) for the user. For a season/series id
+    /// Jellyfin cascades the change to the contained episodes.
+    func setItemPlayed(_ played: Bool, userID: String, itemID: String) async throws {
+        let endpoint = Endpoint(
+            method: played ? .post : .delete,
+            path: "/Users/\(userID)/PlayedItems/\(itemID)",
+            headers: authHeaders
+        )
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 

@@ -558,3 +558,107 @@ final class JellyfinRemoteSubtitleTests: XCTestCase {
         XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Items/i1/RemoteSearch/Subtitles/sub-1") })
     }
 }
+
+final class JellyfinWatchStateTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testSetPlayedTruePostsToPlayedItems() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/PlayedItems/i1", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(true, itemID: "i1")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Users/u1/PlayedItems/i1") })
+        XCTAssertEqual(stub.method(forPathSuffix: "/Users/u1/PlayedItems/i1"), .post)
+    }
+
+    func testSetPlayedFalseDeletesPlayedItems() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/PlayedItems/i1", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(false, itemID: "i1")
+
+        XCTAssertEqual(stub.method(forPathSuffix: "/Users/u1/PlayedItems/i1"), .delete)
+    }
+}
+
+final class JellyfinDeliveryModeTests: XCTestCase {
+    func testDirectPlayWhenNoTranscodingUrl() {
+        XCTAssertEqual(
+            JellyfinProvider.deliveryMode(transcoding: false, didRemux: false),
+            .directPlay
+        )
+    }
+
+    func testRemuxWhenWeRequestedDirectStream() {
+        XCTAssertEqual(
+            JellyfinProvider.deliveryMode(transcoding: true, didRemux: true),
+            .remux
+        )
+    }
+
+    func testTranscodeWhenServerChoseItWithoutOurRemux() {
+        XCTAssertEqual(
+            JellyfinProvider.deliveryMode(transcoding: true, didRemux: false),
+            .transcode
+        )
+    }
+}
+
+final class JellyfinHvc1RemuxTests: XCTestCase {
+    private func source(_ json: String) throws -> MediaSourceInfo {
+        try JSONDecoder().decode(MediaSourceInfo.self, from: Data(json.utf8))
+    }
+
+    func testHev1HevcInMP4WithAppleAudioRequestsRemux() throws {
+        let s = try source(#"""
+        {"Container":"mp4","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"},
+          {"Index":1,"Type":"Audio","Codec":"aac","IsDefault":true}]}
+        """#)
+        XCTAssertTrue(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testHvc1HevcIsNotRemuxed() throws {
+        let s = try source(#"""
+        {"Container":"mp4","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hvc1"}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testHev1InMatroskaIsNotRemuxed() throws {
+        // hev1 in MKV routes to the on-device hybrid engine instead.
+        let s = try source(#"""
+        {"Container":"mkv","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testAlreadyTranscodingIsNotRemuxed() throws {
+        let s = try source(#"""
+        {"Container":"mp4","TranscodingUrl":"/v.m3u8","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testHev1WithIncompatibleAudioIsNotRemuxed() throws {
+        // DTS can't be stream-copied into fMP4 → forcing the remux would transcode
+        // audio, so we leave it for the on-device engine net instead.
+        let s = try source(#"""
+        {"Container":"mp4","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"},
+          {"Index":1,"Type":"Audio","Codec":"dts","IsDefault":true}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+}

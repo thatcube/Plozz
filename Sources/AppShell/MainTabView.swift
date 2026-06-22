@@ -26,6 +26,7 @@ struct MainTabView: View {
     let diagnosticsModel: DiagnosticsSettingsModel
     let homeVisibility: HomeLibraryVisibilityModel
     let ratingsProvider: any ExternalRatingsProviding
+    let mediaItemActionHandler: any MediaItemActionHandling
     let displayAccounts: [Account]
     let activeAccountID: String?
     let profiles: [Profile]
@@ -105,6 +106,7 @@ struct MainTabView: View {
         .task(id: accounts.map(\.account.id)) {
             await musicAvailability.probe(accounts: accounts)
         }
+        .mediaItemActionHandler(mediaItemActionHandler)
     }
 }
 
@@ -217,6 +219,7 @@ private struct HomeTab: View {
             playRequest = PlayRequest(item: item, startPosition: startPosition)
         }
         .task(id: pendingPlayItemID) { await handleDeepLink() }
+        .mediaItemNavigator { navigate($0) }
     }
 
     /// Resolves a deep-linked item id (from a Top Shelf card) and routes to it,
@@ -326,6 +329,7 @@ private struct SearchTab: View {
                 )
             }
         }
+        .mediaItemNavigator { path.append($0) }
         .fullScreenCover(item: $playRequest) { request in
             PlayerView(
                 viewModel: makePlayerViewModel(

@@ -60,7 +60,11 @@ public struct PlayerView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            if showDiagnostics, case .ready = viewModel.phase {
+            // Show diagnostics in every phase (loading / ready / failed), not just
+            // while playing, so the user can see the Engine + Source + codec rows
+            // when a file is stuck loading or has failed — the key signal for
+            // why a particular file won't play.
+            if showDiagnostics {
                 PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
                     .environment(\.themePalette, themePalette)
                     .allowsHitTesting(false)
@@ -78,15 +82,16 @@ public struct PlayerView: View {
                 diagnosticsSampler.stop()
             }
         }
-        .onChange(of: viewModel.playerInstanceID) { _, _ in
-            // The transcode fallback swaps in a new AVPlayer; restart sampling so
-            // diagnostics keep tracking the live stream.
+        .onChange(of: viewModel.diagnosticsToken) { _, _ in
+            // A request resolved (initial load, cross-engine swap, or transcode
+            // retry) and the engine is committed — seed the overlay with the
+            // engine + source facts now, even before/if load() reaches ready.
             if showDiagnostics { startSampling() }
         }
-        .onChange(of: viewModel.engineToken) { _, _ in
-            // A cross-engine swap (e.g. native → VLCKit) replaces the engine and
-            // its video surface; restart sampling so the overlay reflects the new
-            // engine (name, and AVPlayer vs. metadata-only metrics).
+        .onChange(of: viewModel.playerInstanceID) { _, _ in
+            // The native engine created its live AVPlayer (initial load or
+            // transcode fallback); restart sampling to pick up live per-tick
+            // metrics now that there's a player to read.
             if showDiagnostics { startSampling() }
         }
         .onDisappear {
@@ -102,7 +107,7 @@ public struct PlayerView: View {
     private func startSampling() {
         diagnosticsSampler.start(
             player: viewModel.player,
-            isTranscoding: viewModel.isTranscoding,
+            mode: viewModel.deliveryMode,
             metadata: viewModel.sourceMetadata,
             engineName: viewModel.engineDisplayName
         )

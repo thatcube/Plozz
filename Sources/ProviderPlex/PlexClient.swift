@@ -20,8 +20,8 @@ public struct PlexClient: Sendable {
     private let capabilities: MediaCapabilities
     /// Whether the dual-engine (VLCKit) build is active. When `true`,
     /// `canDirectPlay` additionally accepts the **extra** formats the on-device
-    /// hybrid engine handles — the Matroska / WebM container (SDR only; DoVi/HDR
-    /// in an MKV still transcodes so it renders on `AVPlayer`) and DTS / DTS-HD /
+    /// hybrid engine handles — the Matroska / WebM container (every display-
+    /// supported range, including Dolby Vision, decoded on-device) and DTS / DTS-HD /
     /// TrueHD audio (decoded on-device, no passthrough required). Defaults to
     /// `false`, preserving today's native-only direct-play decisions. Must stay in
     /// lockstep with `EngineRouter`: every extra format accepted here is one the
@@ -145,6 +145,22 @@ public struct PlexClient: Sendable {
             query.append(URLQueryItem(name: "duration", value: String(durationMs)))
         }
         let endpoint = Endpoint(path: "/:/timeline", queryItems: query, headers: headers)
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
+    /// `GET /:/scrobble` (watched) or `GET /:/unscrobble` (unwatched) — toggles
+    /// an item's watched state. Scrobbling a season/series ratingKey marks the
+    /// contained episodes too.
+    func setWatched(_ watched: Bool, ratingKey: String) async throws {
+        let endpoint = Endpoint(
+            path: watched ? "/:/scrobble" : "/:/unscrobble",
+            queryItems: [
+                URLQueryItem(name: "key", value: ratingKey),
+                URLQueryItem(name: "identifier", value: "com.plexapp.plugins.library"),
+                URLQueryItem(name: "X-Plex-Token", value: token)
+            ],
+            headers: headers
+        )
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
@@ -297,10 +313,11 @@ public struct PlexClient: Sendable {
             return false
         }
 
-        // Range gate. A raw MKV is restricted to SDR so DoVi/HDR transcodes and
-        // renders on AVPlayer; Apple containers use the display-aware HDR policy.
+        // Range gate. A raw MKV is direct-played on the on-device engine for SDR
+        // and display-supported HDR10/HLG, but Dolby Vision still transcodes so it
+        // renders on AVPlayer. Apple containers use the display-aware HDR policy.
         if isMatroska {
-            guard isSDRVideo(part: part) else { return false }
+            guard isHybridDirectPlayableRange(part: part) else { return false }
         } else {
             guard canDirectPlayVideoRange(part: part) else { return false }
         }
@@ -392,15 +409,26 @@ public struct PlexClient: Sendable {
         }
     }
 
-    /// Strict SDR check used to gate Matroska direct play: a raw MKV is sent to
-    /// the hybrid engine only when it carries no Dolby Vision / HDR signal, so
-    /// DoVi/HDR-in-MKV transcodes to HLS and renders correctly on AVPlayer.
-    private func isSDRVideo(part: PlexPart) -> Bool {
+    /// Range gate for a raw MKV sent to the on-device engine: allows SDR and any
+    /// **display-supported** range, including HDR10 / HLG **and Dolby Vision** —
+    /// the on-device engine decodes the HEVC base layer (HDR10/SDR base for
+    /// Profile 8, tone-mapped for Profile 5), so DoVi-in-MKV plays without the
+    /// unreliable server transcode AVPlayer would otherwise need (it can't demux
+    /// MKV). Matches Infuse and mirrors `EngineRouter` (DoVi-in-MKV → hybrid).
+    private func isHybridDirectPlayableRange(part: PlexPart) -> Bool {
         guard let video = part.Stream?.first(where: { $0.streamType == 1 }) else { return true }
-        if video.DOVIPresent == true { return false }
+        let allowed = Set(capabilities.allowedHDRRanges)
+        if video.DOVIPresent == true {
+            // Decoded on-device whenever the display supports Dolby Vision (which,
+            // on an Apple TV 4K, tracks HEVC hardware decode — effectively always).
+            let doviRanges: Set<HDRRange> = [.dolbyVision, .dolbyVisionWithHDR10, .dolbyVisionWithHLG, .dolbyVisionWithSDR]
+            return !allowed.isDisjoint(with: doviRanges)
+        }
         switch video.colorTrc?.lowercased() {
-        case "smpte2084", "pq", "arib-std-b67", "hlg":
-            return false
+        case "smpte2084", "pq":
+            return allowed.contains(.hdr10)
+        case "arib-std-b67", "hlg":
+            return allowed.contains(.hlg)
         default:
             return true
         }

@@ -43,6 +43,13 @@ public struct ItemDetailView: View {
         // Detail is a full-screen sub-page: hide the top tab bar.
         .toolbar(.hidden, for: .tabBar)
         .task { if viewModel.state.value == nil { await viewModel.load() } }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+            if let mutation = MediaItemMutation.from(note) {
+                viewModel.applyWatchedState(mutation)
+            } else {
+                Task { await viewModel.reload() }
+            }
+        }
     }
 
     /// Layout for non-series detail: a hero plus, for seasons/folders/collections,
@@ -66,12 +73,21 @@ public struct ItemDetailView: View {
                         initialFocusID: nextUpFocusID(for: detail),
                         onSelect: onSelectChild
                     )
+                    .mediaItemActionContext(childrenActionContext(for: detail))
                 }
             }
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }
         // Never clip a focused card's lift, shadow or border.
         .scrollClipDisabled()
+    }
+
+    /// For a season opened directly, the episode rail is an ordered list, so we
+    /// supply it as context to enable "mark watched up to here". Other container
+    /// kinds (series shows seasons, folders, collections) carry no ordering.
+    private func childrenActionContext(for detail: ItemDetailViewModel.Detail) -> MediaItemActionContext {
+        guard detail.item.kind == .season else { return .none }
+        return MediaItemActionContext(orderedSiblings: detail.children)
     }
 
     private func isPlayable(_ item: MediaItem) -> Bool {

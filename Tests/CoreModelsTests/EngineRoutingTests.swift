@@ -8,6 +8,9 @@ final class EngineRoutingTests: XCTestCase {
     private func source(
         container: String? = nil,
         videoCodec: String? = nil,
+        videoCodecTag: String? = nil,
+        videoBitDepth: Int? = nil,
+        videoProfile: String? = nil,
         videoRange: String? = nil,
         videoRangeType: String? = nil,
         colorTransfer: String? = nil,
@@ -17,6 +20,9 @@ final class EngineRoutingTests: XCTestCase {
             container: container,
             video: MediaSourceMetadata.VideoStream(
                 codec: videoCodec,
+                codecTag: videoCodecTag,
+                profile: videoProfile,
+                bitDepth: videoBitDepth,
                 videoRange: videoRange,
                 videoRangeType: videoRangeType,
                 colorTransfer: colorTransfer
@@ -62,7 +68,27 @@ final class EngineRoutingTests: XCTestCase {
         XCTAssertEqual(route(mp4), .native)
     }
 
-    // MARK: Dolby Vision / HDR → native
+    // MARK: HEVC hev1 (AVPlayer can't render) → on-device hybrid net
+
+    func testHevcHev1InMP4RoutesToHybrid() {
+        // AVPlayer plays audio with a black screen for hev1; the on-device engine
+        // decodes it. (Only reached when it wasn't remuxed to hvc1 first.)
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hev1", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testHevcHvc1InMP4StaysNative() {
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hvc1", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    func testHevcHev1ButTranscodingStaysNative() {
+        // A successful hev1→hvc1 remux arrives as a transcode → AVPlayer.
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hev1", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4, isTranscoding: true), .native)
+    }
+
+    // MARK: Dolby Vision in an Apple container → native; DoVi in an MKV → hybrid
 
     func testDolbyVisionMP4IsNative() {
         let mp4 = source(container: "mp4", videoCodec: "hevc", videoRangeType: "DOVIWithHDR10", audioCodec: "eac3")
@@ -74,12 +100,16 @@ final class EngineRoutingTests: XCTestCase {
         XCTAssertEqual(route(mp4), .native)
     }
 
-    func testDolbyVisionAlwaysNativeEvenInMatroska() {
-        // "DoVi MUST always go native" wins over the matroska rule. The capability
-        // layer keeps DoVi-MKV out of direct play (it transcodes), so this only
-        // ever fires on a (mis)advertised raw file — and we still pick native.
+    func testDolbyVisionMatroskaIsHybrid() {
+        // AVPlayer can't demux MKV and a DoVi transcode is unreliable, so DoVi in
+        // an MKV is decoded on-device (HEVC base layer) — like Infuse.
         let mkv = source(container: "mkv", videoCodec: "hevc", videoRange: "DOVI", videoRangeType: "DOVI", audioCodec: "truehd")
-        XCTAssertEqual(route(mkv), .native)
+        XCTAssertEqual(route(mkv), .hybrid)
+    }
+
+    func testDolbyVisionProfile8MatroskaIsHybrid() {
+        let mkv = source(container: "mkv", videoCodec: "hevc", videoRangeType: "DOVIWithHDR10", audioCodec: "ac3")
+        XCTAssertEqual(route(mkv), .hybrid)
     }
 
     func testHLGViaColorTransferIsNative() {
@@ -97,6 +127,33 @@ final class EngineRoutingTests: XCTestCase {
     func testWebMIsHybrid() {
         let webm = source(container: "webm", videoCodec: "vp9", audioCodec: "opus")
         XCTAssertEqual(route(webm), .hybrid)
+    }
+
+    // MARK: Plain HDR10 / HLG in an MKV → hybrid (DoVi-only forces native)
+
+    func testHDR10MatroskaIsHybrid() {
+        // Plain HDR10 (not DoVi) in an MKV is decoded on-device — no transcode.
+        let mkv = source(container: "mkv", videoCodec: "hevc", videoRangeType: "HDR10", colorTransfer: "smpte2084", audioCodec: "eac3")
+        XCTAssertEqual(route(mkv), .hybrid)
+    }
+
+    func testHLGMatroskaIsHybrid() {
+        let mkv = source(container: "mkv", videoCodec: "hevc", videoRangeType: "HLG", colorTransfer: "arib-std-b67", audioCodec: "ac3")
+        XCTAssertEqual(route(mkv), .hybrid)
+    }
+
+    func testAV1MatroskaIsHybrid() {
+        // AV1 has no AVPlayer hardware path on Apple TV; the on-device engine
+        // software-decodes it from an MKV.
+        let mkv = source(container: "mkv", videoCodec: "av1", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mkv), .hybrid)
+    }
+
+    func testHDR10MatroskaWithColorTransferOnlyIsHybrid() {
+        // Even when only the coarse color-transfer signals HDR (no range token),
+        // a non-DoVi HDR MKV still routes to the on-device engine.
+        let mkv = source(container: "mkv", videoCodec: "hevc", colorTransfer: "smpte2084", audioCodec: "ac3")
+        XCTAssertEqual(route(mkv), .hybrid)
     }
 
     // MARK: DTS / TrueHD audio → hybrid (unless DTS passthrough → native)
@@ -128,6 +185,62 @@ final class EngineRoutingTests: XCTestCase {
 
     func testUnknownCodecFallsBackToNative() {
         let mp4 = source(container: "mp4", videoCodec: "some_future_codec", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    // MARK: AV1 → hybrid unless hardware-decodable
+
+    func testAV1InMP4IsHybridWithoutHardwareSupport() {
+        // Apple TV 4K has no AV1 hardware decoder; default caps report no support.
+        let mp4 = source(container: "mp4", videoCodec: "av1", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4, caps: .default), .hybrid)
+    }
+
+    func testAV1StaysNativeWhenHardwareSupported() {
+        // A future device that reports AV1 hardware support keeps it on AVPlayer.
+        let mp4 = source(container: "mp4", videoCodec: "av01", videoRangeType: "SDR", audioCodec: "aac")
+        let av1Caps = MediaCapabilities(supportsAV1: true)
+        XCTAssertEqual(route(mp4, caps: av1Caps), .native)
+    }
+
+    // MARK: 10-bit H.264 → hybrid (8-bit H.264 / 10-bit HEVC stay native)
+
+    func test10BitH264IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoBitDepth: 10, videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func test10BitH264ViaProfileIsHybrid() {
+        // When bit depth isn't reported, the "High 10" profile string is the tell.
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoProfile: "High 10", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func test8BitH264StaysNative() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoBitDepth: 8, videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    func test10BitHEVCStaysNative() {
+        // HEVC Main 10 is the basis of HDR and is fully supported on AVPlayer.
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hvc1", videoBitDepth: 10, videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    // MARK: Opus / Vorbis audio in MP4 → hybrid
+
+    func testOpusAudioInMP4IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "opus")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testVorbisAudioInMP4IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "vorbis")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testAACAudioInMP4StaysNative() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "aac")
         XCTAssertEqual(route(mp4), .native)
     }
 }

@@ -61,6 +61,13 @@ public final class AppState {
     /// detail so ratings are fetched async without blocking the screen.
     public let ratingsProvider: any ExternalRatingsProviding
 
+    /// The handler behind every card's press-and-hold context menu. Lazily
+    /// created so it can capture `self`; resolves the owning provider per item
+    /// and performs watched-state (and future) actions against the server.
+    @ObservationIgnored
+    public private(set) lazy var mediaItemActionHandler: any MediaItemActionHandling =
+        MediaItemActionCoordinator(appState: self)
+
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry

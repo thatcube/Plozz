@@ -33,6 +33,13 @@ public struct SearchView: View {
         content
             .searchable(text: $viewModel.query, prompt: "Search movies, shows, and episodes")
             .task(id: viewModel.query) { await viewModel.search() }
+            .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+                if let mutation = MediaItemMutation.from(note) {
+                    viewModel.applyWatchedState(mutation)
+                } else {
+                    Task { await viewModel.search() }
+                }
+            }
     }
 
     @ViewBuilder

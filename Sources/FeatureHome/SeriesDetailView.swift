@@ -143,6 +143,23 @@ struct SeriesDetailView: View {
             },
             onSelect: onPlay
         )
+        .mediaItemActionContext(
+            MediaItemActionContext(
+                orderedSiblings: episodes,
+                precedingContainerIDs: precedingSeasonIDs
+            )
+        )
+    }
+
+    /// The ids of seasons that come before the one whose rail is showing, so
+    /// "mark watched up to here" can also clear every earlier season in full.
+    private var precedingSeasonIDs: [String] {
+        guard let id = selectedSeasonID,
+              let current = seasons.first(where: { $0.id == id }),
+              let currentNumber = current.seasonNumber else { return [] }
+        return seasons
+            .filter { ($0.seasonNumber ?? .max) < currentNumber }
+            .map(\.id)
     }
 
     /// Episodes the rail should show: the selected season's loaded episodes, or

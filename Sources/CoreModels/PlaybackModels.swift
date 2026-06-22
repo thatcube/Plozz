@@ -52,10 +52,17 @@ public struct MediaSourceMetadata: Hashable, Sendable {
     public struct VideoStream: Hashable, Sendable {
         /// Raw codec token from the provider, e.g. `hevc`, `h264`, `av1`.
         public var codec: String?
+        /// Container codec FourCC tag, e.g. `hvc1`/`hev1` for HEVC. AVPlayer only
+        /// decodes HEVC tagged `hvc1`; `hev1` plays audio with a black screen, so
+        /// this drives a re-tag remux (Jellyfin) or an on-device engine fallback.
+        public var codecTag: String?
         /// Codec profile, e.g. `Main 10`, `High`.
         public var profile: String?
         public var width: Int?
         public var height: Int?
+        /// Bits per luma sample, e.g. `8`, `10`, `12`. AVPlayer cannot decode
+        /// 10-bit **H.264** (High 10), so this drives an on-device engine fallback.
+        public var bitDepth: Int?
         /// Declared video bitrate in bits/sec.
         public var bitrate: Int?
         public var frameRate: Double?
@@ -69,9 +76,11 @@ public struct MediaSourceMetadata: Hashable, Sendable {
 
         public init(
             codec: String? = nil,
+            codecTag: String? = nil,
             profile: String? = nil,
             width: Int? = nil,
             height: Int? = nil,
+            bitDepth: Int? = nil,
             bitrate: Int? = nil,
             frameRate: Double? = nil,
             videoRange: String? = nil,
@@ -79,9 +88,11 @@ public struct MediaSourceMetadata: Hashable, Sendable {
             colorTransfer: String? = nil
         ) {
             self.codec = codec
+            self.codecTag = codecTag
             self.profile = profile
             self.width = width
             self.height = height
+            self.bitDepth = bitDepth
             self.bitrate = bitrate
             self.frameRate = frameRate
             self.videoRange = videoRange
@@ -177,6 +188,12 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// used) rather than direct-playing the original file. Surfaced by the
     /// playback diagnostics overlay.
     public var isTranscoding: Bool
+    /// How the server is delivering the stream — direct play, **remux** (lossless
+    /// container change, no re-encode), or **transcode** (re-encode). Surfaced by
+    /// the diagnostics overlay so the user can tell a lossless DoVi remux apart
+    /// from a quality-reducing re-encode. Defaults from `isTranscoding` when a
+    /// provider doesn't classify it explicitly.
+    public var deliveryMode: PlaybackDiagnostics.PlaybackMode
     /// Source-of-truth media facts (codec, HDR, resolution, channels, …) read
     /// from the provider, used to populate the playback-diagnostics overlay even
     /// when the streamed (transcoded) asset exposes no track metadata.
@@ -194,6 +211,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         subtitleTracks: [MediaTrack] = [],
         startPosition: TimeInterval = 0,
         isTranscoding: Bool = false,
+        deliveryMode: PlaybackDiagnostics.PlaybackMode? = nil,
         sourceMetadata: MediaSourceMetadata? = nil,
         trickplay: TrickplayManifest? = nil
     ) {
@@ -204,6 +222,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.subtitleTracks = subtitleTracks
         self.startPosition = startPosition
         self.isTranscoding = isTranscoding
+        self.deliveryMode = deliveryMode ?? (isTranscoding ? .transcode : .directPlay)
         self.sourceMetadata = sourceMetadata
         self.trickplay = trickplay
     }

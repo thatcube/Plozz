@@ -59,6 +59,9 @@ struct BaseItemDto: Decodable {
     /// For an episode, the id of its parent series (used to fall back to series
     /// artwork when the episode itself has no image).
     let SeriesId: String?
+    /// For an episode, the id of its parent season (used to offer a "Go to
+    /// Season" jump from cards shown outside the season's own list).
+    let SeasonId: String?
     let IndexNumber: Int?
     let ParentIndexNumber: Int?
     let ProductionYear: Int?
@@ -154,6 +157,8 @@ struct MediaStreamDto: Decodable {
     let Index: Int
     let `Type`: String       // "Audio", "Subtitle", "Video"
     let Codec: String?
+    /// Container codec FourCC (`codec_tag_string`), e.g. `hvc1`/`hev1` for HEVC.
+    let CodecTag: String?
     let Profile: String?
     let Language: String?
     let DisplayTitle: String?
@@ -167,6 +172,7 @@ struct MediaStreamDto: Decodable {
     // Video facts
     let Width: Int?
     let Height: Int?
+    let BitDepth: Int?
     let BitRate: Int?
     let RealFrameRate: Double?
     let AverageFrameRate: Double?

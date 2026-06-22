@@ -9,16 +9,25 @@ import Foundation
 /// `AVPlayerItem`/`AVPlayer` and hands plain strings/numbers to the pure
 /// helpers below.
 public struct PlaybackDiagnostics: Equatable, Sendable {
-    /// Whether the server is streaming the original file or transcoding it.
+    /// How the **server** is delivering the stream. The distinction matters for
+    /// quality and Dolby Vision: a `remux` repackages the original bitstream into
+    /// a new container with **no re-encode** (lossless, preserves the DoVi RPU),
+    /// while a `transcode` re-encodes the video (quality loss, heavy server CPU).
     public enum PlaybackMode: String, Sendable {
+        /// Server sends the original file untouched (no container change).
         case directPlay
+        /// Server repackages the original video/audio bitstream into a new
+        /// container (e.g. MKV → fMP4 HLS) with no re-encode. Lossless.
+        case remux
+        /// Server re-encodes the video and/or audio.
         case transcode
         case unknown
 
         public var displayName: String {
             switch self {
             case .directPlay: return "Direct Play"
-            case .transcode: return "Transcode"
+            case .remux: return "Remux (server, lossless)"
+            case .transcode: return "Transcode (server)"
             case .unknown: return "Unknown"
             }
         }

@@ -7,6 +7,9 @@ import CoreNetworking
 #if canImport(UIKit)
 import UIKit
 #endif
+#if os(tvOS)
+import AVKit
+#endif
 
 /// `AVPlayer`-backed implementation of `VideoEngine`.
 ///
@@ -74,6 +77,13 @@ public final class NativeVideoEngine: VideoEngine {
     @ObservationIgnored private let reportInterval: TimeInterval = 10
     @ObservationIgnored private var lastReportedSecond: Int = -1
     @ObservationIgnored private var fallbackMonitorTask: Task<Void, Never>?
+    /// Detects an item that decodes audio but renders **no video frames** (e.g.
+    /// HEVC AVPlayer can't display) so we can swap to the on-device engine.
+    @ObservationIgnored private var missingVideoProbeTask: Task<Void, Never>?
+    /// Inspects the real container video format the moment it loads (concurrently
+    /// with playback start) so a known AVPlayer-hostile codec can swap instantly
+    /// instead of waiting out the no-frames probe.
+    @ObservationIgnored private var formatInspectTask: Task<Void, Never>?
     @ObservationIgnored private var audioSessionConfigured = false
     /// Retains the resource-loader delegate that serves injected subtitle
     /// playlists; `AVAssetResourceLoader` holds it only weakly.
@@ -86,6 +96,16 @@ public final class NativeVideoEngine: VideoEngine {
     /// `AVPlayer` is live, so a transcode-fallback swap re-points the existing
     /// surface instead of forcing the SwiftUI layer to rebuild it.
     @ObservationIgnored private var videoOutputView: PlayerLayerView?
+    #endif
+    #if os(tvOS)
+    /// The dynamic-range display switch tvOS should request for the current
+    /// source (Dolby Vision / HDR10 / HLG). `nil` for SDR or before a load.
+    /// Retained so it can be (re)applied once the output view is in a window.
+    @ObservationIgnored private var pendingDisplayCriteria: AVDisplayCriteria?
+    /// The window whose `AVDisplayManager` we last drove, so teardown can clear
+    /// the preference even after the view has left its window — otherwise the TV
+    /// can be stranded in a forced HDR/DoVi mode.
+    @ObservationIgnored private weak var displayCriteriaWindow: UIWindow?
     #endif
 
     public init(captionSettings: CaptionSettings = .default) {
@@ -115,6 +135,9 @@ public final class NativeVideoEngine: VideoEngine {
         let item = AVPlayerItem(asset: asset)
         // Apply in-app caption styling overrides if the user set any.
         item.textStyleRules = captionSettings.textStyleRules()
+        // Drive the tvOS display into the right dynamic range (true Dolby
+        // Vision / HDR10 / HLG) for this source before playback begins.
+        configureDynamicRange(for: request, item: item)
 
         let player = AVPlayer(playerItem: item)
         player.allowsExternalPlayback = true
@@ -132,6 +155,15 @@ public final class NativeVideoEngine: VideoEngine {
         // transparently re-resolve via a server transcode.
         monitorForTranscodeFallback(item: item)
 
+        // Watch for an item that plays audio but renders no video (e.g. an HEVC
+        // stream AVPlayer can't display) so we can swap to the on-device engine.
+        monitorForMissingVideo(item: item, request: request)
+
+        // Inspect the *real* container video format as soon as it loads (in
+        // parallel — adds no startup delay) so a known AVPlayer-hostile codec can
+        // swap to the on-device engine near-instantly, before the no-frames probe.
+        inspectVideoFormat(asset: asset, request: request)
+
         installTimeObserver(on: player)
         status = .ready
         isPaused = false
@@ -140,6 +172,51 @@ public final class NativeVideoEngine: VideoEngine {
         // Best-effort: pick the default subtitle for the user's mode/language.
         await applyDefaultSubtitleSelection(for: item)
     }
+
+    // MARK: - Dynamic range / Dolby Vision display switch
+
+    /// Classifies the source's dynamic range and, on tvOS, requests the matching
+    /// display mode so the Apple TV negotiates true Dolby Vision / HDR10 / HLG
+    /// (or returns to SDR) with the panel. `appliesPerFrameHDRDisplayMetadata`
+    /// is enabled for HDR/DoVi so per-frame RPU/HDR metadata is forwarded to the
+    /// display. All best-effort and crash-safe: failures never block playback.
+    private func configureDynamicRange(for request: PlaybackRequest, item: AVPlayerItem) {
+        let mode = HDRDisplayMode(request.sourceMetadata)
+        item.appliesPerFrameHDRDisplayMetadata = mode.isHDR
+        #if os(tvOS)
+        pendingDisplayCriteria = makeDisplayCriteria(mode: mode, metadata: request.sourceMetadata)
+        applyDisplayCriteria()
+        #endif
+    }
+
+    #if os(tvOS)
+    /// Pushes `pendingDisplayCriteria` onto the output view's window manager. Safe
+    /// to call before the view is in a window — it re-runs from the view's
+    /// `onWindowChange` hook once a window is available.
+    private func applyDisplayCriteria() {
+        guard let window = videoOutputView?.window, Self.windowHasDisplayManager(window) else { return }
+        displayCriteriaWindow = window
+        window.avDisplayManager.preferredDisplayCriteria = pendingDisplayCriteria
+    }
+
+    /// Clears any forced display mode so the TV isn't stranded in HDR/DoVi after
+    /// playback stops.
+    private func clearDisplayCriteria() {
+        pendingDisplayCriteria = nil
+        if let window = displayCriteriaWindow, Self.windowHasDisplayManager(window) {
+            window.avDisplayManager.preferredDisplayCriteria = nil
+        }
+        displayCriteriaWindow = nil
+    }
+
+    /// Safety net: the `avDisplayManager` accessor comes from AVKit's
+    /// `UIWindow (AVAdditions)` category. If that framework somehow isn't linked,
+    /// the selector is unrecognized and calling it would crash — so verify it's
+    /// present first and degrade to a no-op (no display switch) instead.
+    private static func windowHasDisplayManager(_ window: UIWindow) -> Bool {
+        window.responds(to: Selector(("avDisplayManager")))
+    }
+    #endif
 
     // MARK: - Asset construction
 
@@ -199,6 +276,9 @@ public final class NativeVideoEngine: VideoEngine {
         routeChangeObserver = nil
         #endif
         teardownPlayer()
+        #if os(tvOS)
+        clearDisplayCriteria()
+        #endif
         #if canImport(UIKit)
         videoOutputView?.player = nil
         videoOutputView = nil
@@ -277,12 +357,156 @@ public final class NativeVideoEngine: VideoEngine {
         return .unknown("")
     }
 
+    /// Reads the actual **video and audio** codec FourCCs from the asset's track
+    /// format descriptions and, if either is one AVPlayer can't handle (e.g. HEVC
+    /// `hev1` → black screen, Opus → silent), swaps to the on-device engine
+    /// immediately. Runs concurrently with playback start so it adds **no startup
+    /// delay**: the happy path keeps playing while this resolves (typically
+    /// sub-second, before the first frame paints), and a hostile codec swaps
+    /// near-instantly rather than after the slower no-frames probe.
+    ///
+    /// This asks the container itself rather than trusting server metadata (which
+    /// for some files reports no codec tag at all). Scoped to **SDR** so the
+    /// validated AVPlayer Dolby Vision/HDR path is left untouched.
+    private func inspectVideoFormat(asset: AVAsset, request: PlaybackRequest) {
+        formatInspectTask?.cancel()
+        guard HDRDisplayMode(request.sourceMetadata) == .sdr else { return }
+        let expectsVideo = request.sourceMetadata?.video != nil
+
+        formatInspectTask = Task { [weak self] in
+            // Video: an AVPlayer-hostile codec (e.g. HEVC `hev1`) plays audio over
+            // a black screen.
+            if expectsVideo, let videoFourCC = await Self.firstCodecFourCC(of: asset, mediaType: .video) {
+                guard let self, !Task.isCancelled else { return }
+                PlozzLog.playback.info("Direct-play video codec FourCC: \(videoFourCC)")
+                if Self.isAVPlayerHostileVideoFourCC(videoFourCC) {
+                    PlozzLog.playback.info("Video FourCC \(videoFourCC) is not reliably rendered by AVPlayer; swapping to the on-device engine")
+                    self.onFailure?(.invalidResponse)
+                    return
+                }
+            }
+
+            // Audio: a codec AVPlayer can't decode (Opus/Vorbis) plays video with
+            // no sound — the no-frames probe can't catch this, so check it here.
+            if let audioFourCC = await Self.firstCodecFourCC(of: asset, mediaType: .audio) {
+                guard let self, !Task.isCancelled else { return }
+                PlozzLog.playback.info("Direct-play audio codec FourCC: \(audioFourCC)")
+                if Self.isAVPlayerHostileAudioFourCC(audioFourCC) {
+                    PlozzLog.playback.info("Audio FourCC \(audioFourCC) is not decodable by AVPlayer; swapping to the on-device engine")
+                    self.onFailure?(.invalidResponse)
+                }
+            }
+        }
+    }
+
+    /// Loads the first track of `mediaType`'s codec FourCC from the container.
+    private static func firstCodecFourCC(of asset: AVAsset, mediaType: AVMediaType) async -> String? {
+        do {
+            let tracks = try await asset.loadTracks(withMediaType: mediaType)
+            guard let track = tracks.first else { return nil }
+            let formats = try await track.load(.formatDescriptions)
+            guard let format = formats.first else { return nil }
+            return fourCCString(CMFormatDescriptionGetMediaSubType(format))
+        } catch {
+            return nil
+        }
+    }
+
+    /// HEVC tagged `hev1` (in-band parameter sets) in an MP4-family container
+    /// plays audio with a black screen on AVPlayer/VideoToolbox. `hvc1`/`avc1`
+    /// are fine. (DoVi is excluded upstream via the SDR gate.)
+    private static func isAVPlayerHostileVideoFourCC(_ fourCC: String) -> Bool {
+        fourCC.lowercased() == "hev1"
+    }
+
+    /// Audio FourCCs AVPlayer can't decode (Opus `Opus`, Vorbis). AAC `mp4a`,
+    /// AC-3 `ac-3`, E-AC-3 `ec-3`, ALAC, FLAC, LPCM etc. are all fine.
+    private static func isAVPlayerHostileAudioFourCC(_ fourCC: String) -> Bool {
+        let lowered = fourCC.lowercased()
+        return lowered == "opus" || lowered.contains("vorbis")
+    }
+
+    private static func fourCCString(_ code: FourCharCode) -> String {
+        let bytes = [
+            UInt8((code >> 24) & 0xFF),
+            UInt8((code >> 16) & 0xFF),
+            UInt8((code >> 8) & 0xFF),
+            UInt8(code & 0xFF)
+        ]
+        let scalars = bytes.map { Character(UnicodeScalar($0)) }
+        return String(scalars).trimmingCharacters(in: .whitespaces)
+    }
+
+
+    /// and decodes audio, but **no video frame ever decodes** (e.g. an HEVC stream
+    /// tagged `hev1`, or a profile VideoToolbox rejects). Because AVPlayer never
+    /// errors, the normal failure path never fires — so we attach a lightweight
+    /// `AVPlayerItemVideoOutput` and, if several seconds of playback advance with
+    /// zero decoded frames, hand off to the on-device hybrid engine (which decodes
+    /// these directly) via the standard engine-swap fallback.
+    ///
+    /// Scoped to **SDR** sources: HDR/Dolby Vision is the validated AVPlayer-only
+    /// path (and DoVi/HDR HEVC is always `hvc1`, so it never hits this), so it's
+    /// left completely untouched. The probe removes itself the moment a real frame
+    /// appears, so healthy playback pays almost nothing.
+    private func monitorForMissingVideo(item: AVPlayerItem, request: PlaybackRequest) {
+        missingVideoProbeTask?.cancel()
+        // Only meaningful when the source is expected to have video.
+        guard request.sourceMetadata?.video != nil else { return }
+        // Never probe HDR/Dolby Vision — protect the validated AVPlayer HDR path.
+        guard HDRDisplayMode(request.sourceMetadata) == .sdr else { return }
+
+        let output = AVPlayerItemVideoOutput(outputSettings: nil)
+        item.add(output)
+
+        missingVideoProbeTask = Task { [weak self] in
+            // Require this many seconds of *advancing* playback with no video frame
+            // before declaring the video undecodable (generous, to avoid tripping
+            // on slow starts / buffering).
+            let requiredAdvance: Double = 4
+            var advanced: Double = 0
+            var lastSeconds = Double.nan
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard let self, let player = self.player,
+                      player.currentItem === item else { return }
+
+                // A decoded frame appeared → video is fine; drop the probe.
+                if output.hasNewPixelBuffer(forItemTime: player.currentTime()) {
+                    item.remove(output)
+                    return
+                }
+
+                // Only accrue progress while genuinely playing (ignore pause/seek/
+                // buffering), so the threshold reflects real played-through time.
+                guard player.timeControlStatus == .playing else { continue }
+                let now = player.currentTime().seconds
+                if now.isFinite, lastSeconds.isFinite, now > lastSeconds {
+                    advanced += now - lastSeconds
+                }
+                if now.isFinite { lastSeconds = now }
+
+                if advanced >= requiredAdvance {
+                    item.remove(output)
+                    PlozzLog.playback.info("AVPlayer rendered no video after \(Int(requiredAdvance))s of audio; swapping to the on-device engine")
+                    self.onFailure?(.invalidResponse)
+                    return
+                }
+            }
+        }
+    }
+
     /// Tears the current player down without touching the audio-session or
     /// route-change observers. Used both when reloading for a retry and as part
     /// of `stop()`.
     private func teardownPlayer() {
         fallbackMonitorTask?.cancel()
         fallbackMonitorTask = nil
+        missingVideoProbeTask?.cancel()
+        missingVideoProbeTask = nil
+        formatInspectTask?.cancel()
+        formatInspectTask = nil
         subtitleLoader = nil
         if let timeObserver, let player {
             player.removeTimeObserver(timeObserver)
@@ -434,6 +658,13 @@ public final class NativeVideoEngine: VideoEngine {
         view.backgroundColor = .black
         view.playerLayer.videoGravity = .resizeAspect
         view.player = player
+        #if os(tvOS)
+        // Re-apply the pending display switch once the surface has a window
+        // (the criteria may have been computed in load() before attachment).
+        view.onWindowChange = { [weak self] _ in
+            self?.applyDisplayCriteria()
+        }
+        #endif
         videoOutputView = view
         return view
     }
@@ -451,6 +682,15 @@ final class PlayerLayerView: UIView {
         get { playerLayer.player }
         set { playerLayer.player = newValue }
     }
+    #if os(tvOS)
+    /// Invoked when the view moves to (or away from) a window, so the engine can
+    /// drive that window's `AVDisplayManager` for the Dolby Vision / HDR switch.
+    var onWindowChange: ((UIWindow?) -> Void)?
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onWindowChange?(window)
+    }
+    #endif
 }
 #endif
 #endif

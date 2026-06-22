@@ -99,6 +99,55 @@ public final class ItemDetailViewModel {
         trailers = resolved
     }
 
+    /// Applies a watched-state mutation to the loaded detail, its children and
+    /// any loaded season episodes **in place** — flipping only the `isPlayed`
+    /// flag on the affected items. Because the arrays keep their identity and
+    /// order (no refetch, no momentary emptying), SwiftUI updates just the
+    /// watched badges and the user's focus stays exactly where it was.
+    public func applyWatchedState(_ mutation: MediaItemMutation) {
+        if case var .loaded(detail) = state {
+            if mutation.itemIDs.contains(detail.item.id) {
+                detail.item.isPlayed = mutation.played
+            }
+            detail.children = detail.children.map { apply(mutation, to: $0) }
+            state = .loaded(detail)
+        }
+        for (seasonID, episodes) in seasonEpisodes {
+            seasonEpisodes[seasonID] = episodes.map { apply(mutation, to: $0) }
+        }
+    }
+
+    private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {
+        guard mutation.itemIDs.contains(item.id) else { return item }
+        var copy = item
+        copy.isPlayed = mutation.played
+        return copy
+    }
+
+    /// Quietly re-fetches the detail, its children, and any season episode lists
+    /// already shown, **without** dropping to a full-screen loading state. Used
+    /// after a context-menu action (e.g. mark watched) so the hero, child rail
+    /// and watched badges reflect the new server state in place.
+    public func reload() async {
+        guard case .loaded = state else { await load(); return }
+        guard let item = try? await provider.item(id: itemID) else { return }
+        let children: [MediaItem]
+        switch item.kind {
+        case .series, .season, .folder, .collection:
+            children = (try? await provider.children(of: itemID)) ?? []
+        default:
+            children = []
+        }
+        state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
+        // Refresh the episode lists that were already loaded for visible seasons.
+        let loadedSeasonIDs = Array(seasonEpisodes.keys)
+        seasonEpisodes = [:]
+        for seasonID in loadedSeasonIDs {
+            await loadEpisodes(for: seasonID)
+        }
+        await enrichRatings(for: item)
+    }
+
     /// Lazily fetches and caches the episodes of one season. Idempotent: a season
     /// already loaded (or in flight) is a no-op, so callers may invoke it freely
     /// whenever a season tab gains focus. Fetch failures cache an empty list so a

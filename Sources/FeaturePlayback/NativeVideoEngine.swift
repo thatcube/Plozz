@@ -77,6 +77,9 @@ public final class NativeVideoEngine: VideoEngine {
     @ObservationIgnored private let reportInterval: TimeInterval = 10
     @ObservationIgnored private var lastReportedSecond: Int = -1
     @ObservationIgnored private var fallbackMonitorTask: Task<Void, Never>?
+    /// Detects an item that decodes audio but renders **no video frames** (e.g.
+    /// HEVC AVPlayer can't display) so we can swap to the on-device engine.
+    @ObservationIgnored private var missingVideoProbeTask: Task<Void, Never>?
     @ObservationIgnored private var audioSessionConfigured = false
     /// Retains the resource-loader delegate that serves injected subtitle
     /// playlists; `AVAssetResourceLoader` holds it only weakly.
@@ -147,6 +150,10 @@ public final class NativeVideoEngine: VideoEngine {
         // Watch for a direct-play item that can't actually be decoded so we can
         // transparently re-resolve via a server transcode.
         monitorForTranscodeFallback(item: item)
+
+        // Watch for an item that plays audio but renders no video (e.g. an HEVC
+        // stream AVPlayer can't display) so we can swap to the on-device engine.
+        monitorForMissingVideo(item: item, request: request)
 
         installTimeObserver(on: player)
         status = .ready
@@ -341,12 +348,74 @@ public final class NativeVideoEngine: VideoEngine {
         return .unknown("")
     }
 
+    /// Detects the "audio plays, black screen" failure: AVPlayer reports success
+    /// and decodes audio, but **no video frame ever decodes** (e.g. an HEVC stream
+    /// tagged `hev1`, or a profile VideoToolbox rejects). Because AVPlayer never
+    /// errors, the normal failure path never fires — so we attach a lightweight
+    /// `AVPlayerItemVideoOutput` and, if several seconds of playback advance with
+    /// zero decoded frames, hand off to the on-device hybrid engine (which decodes
+    /// these directly) via the standard engine-swap fallback.
+    ///
+    /// Scoped to **SDR** sources: HDR/Dolby Vision is the validated AVPlayer-only
+    /// path (and DoVi/HDR HEVC is always `hvc1`, so it never hits this), so it's
+    /// left completely untouched. The probe removes itself the moment a real frame
+    /// appears, so healthy playback pays almost nothing.
+    private func monitorForMissingVideo(item: AVPlayerItem, request: PlaybackRequest) {
+        missingVideoProbeTask?.cancel()
+        // Only meaningful when the source is expected to have video.
+        guard request.sourceMetadata?.video != nil else { return }
+        // Never probe HDR/Dolby Vision — protect the validated AVPlayer HDR path.
+        guard HDRDisplayMode(request.sourceMetadata) == .sdr else { return }
+
+        let output = AVPlayerItemVideoOutput(outputSettings: nil)
+        item.add(output)
+
+        missingVideoProbeTask = Task { [weak self] in
+            // Require this many seconds of *advancing* playback with no video frame
+            // before declaring the video undecodable (generous, to avoid tripping
+            // on slow starts / buffering).
+            let requiredAdvance: Double = 4
+            var advanced: Double = 0
+            var lastSeconds = Double.nan
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard let self, let player = self.player,
+                      player.currentItem === item else { return }
+
+                // A decoded frame appeared → video is fine; drop the probe.
+                if output.hasNewPixelBuffer(forItemTime: player.currentTime()) {
+                    item.remove(output)
+                    return
+                }
+
+                // Only accrue progress while genuinely playing (ignore pause/seek/
+                // buffering), so the threshold reflects real played-through time.
+                guard player.timeControlStatus == .playing else { continue }
+                let now = player.currentTime().seconds
+                if now.isFinite, lastSeconds.isFinite, now > lastSeconds {
+                    advanced += now - lastSeconds
+                }
+                if now.isFinite { lastSeconds = now }
+
+                if advanced >= requiredAdvance {
+                    item.remove(output)
+                    PlozzLog.playback.info("AVPlayer rendered no video after \(Int(requiredAdvance))s of audio; swapping to the on-device engine")
+                    self.onFailure?(.invalidResponse)
+                    return
+                }
+            }
+        }
+    }
+
     /// Tears the current player down without touching the audio-session or
     /// route-change observers. Used both when reloading for a retry and as part
     /// of `stop()`.
     private func teardownPlayer() {
         fallbackMonitorTask?.cancel()
         fallbackMonitorTask = nil
+        missingVideoProbeTask?.cancel()
+        missingVideoProbeTask = nil
         subtitleLoader = nil
         if let timeObserver, let player {
             player.removeTimeObserver(timeObserver)

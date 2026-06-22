@@ -45,17 +45,28 @@ extension JellyfinCapabilityProfile {
     /// Builds the native (AVFoundation / `AVPlayer`) profile for Apple TV,
     /// mirroring Swiftfin's `.native` profile, from the shared
     /// ``CoreModels/MediaCapabilities`` source of truth.
+    ///
+    /// - Parameter hybridEngineEnabled: when `true`, the dual-engine (VLCKit)
+    ///   build is active, so the profile additionally advertises the **extra**
+    ///   direct-play formats the on-device hybrid engine can handle — the MKV /
+    ///   WebM container (SDR only; DoVi/HDR still transcode so they reach
+    ///   `AVPlayer`) and DTS / DTS-HD / TrueHD audio (decoded on-device, no
+    ///   passthrough required). Defaults to `false`, which emits **byte-for-byte**
+    ///   the current native-only profile (non-regression). This must stay in
+    ///   lockstep with `EngineRouter`: every extra format advertised here is one
+    ///   the router sends to the hybrid engine.
     public static func appleTV(
         capabilities: MediaCapabilities = .default,
+        hybridEngineEnabled: Bool = false,
         maxBitrate: Int = defaultMaxBitrate
     ) -> JellyfinCapabilityProfile {
         JellyfinCapabilityProfile(
             maxStreamingBitrate: maxBitrate,
             maxStaticBitrate: maxBitrate,
             musicStreamingTranscodingBitrate: 384_000,
-            directPlayProfiles: directPlay(capabilities),
+            directPlayProfiles: directPlay(capabilities, hybrid: hybridEngineEnabled),
             transcodingProfiles: [transcoding(capabilities)],
-            codecProfiles: codec(capabilities),
+            codecProfiles: codec(capabilities, hybrid: hybridEngineEnabled),
             subtitleProfiles: subtitles()
         )
     }
@@ -63,13 +74,16 @@ extension JellyfinCapabilityProfile {
     /// Probes the real hardware/audio route via
     /// ``CoreModels/MediaCapabilities/detected()`` where available, otherwise
     /// falls back to ``CoreModels/MediaCapabilities/default``.
-    public static func detected(maxBitrate: Int = defaultMaxBitrate) -> JellyfinCapabilityProfile {
-        appleTV(capabilities: .detected(), maxBitrate: maxBitrate)
+    public static func detected(
+        hybridEngineEnabled: Bool = false,
+        maxBitrate: Int = defaultMaxBitrate
+    ) -> JellyfinCapabilityProfile {
+        appleTV(capabilities: .detected(), hybridEngineEnabled: hybridEngineEnabled, maxBitrate: maxBitrate)
     }
 
     // MARK: Profile sections
 
-    private static func directPlay(_ caps: MediaCapabilities) -> [DirectPlayProfile] {
+    private static func directPlay(_ caps: MediaCapabilities, hybrid: Bool) -> [DirectPlayProfile] {
         let videoCodecs = caps.allowedDirectPlayVideoCodecs
         let supportsHEVC = videoCodecs.contains(.hevc)
         let supportsAV1 = videoCodecs.contains(.av1)
@@ -86,34 +100,36 @@ extension JellyfinCapabilityProfile {
 
         // DTS / DTS-HD only direct-play when the route can passthrough the
         // bitstream to an external decoder (Apple TV can't decode DTS itself).
-        // `dca` is ffmpeg's alternate name for the DTS family.
+        // `dca` is ffmpeg's alternate name for the DTS family. When the hybrid
+        // engine is available it decodes DTS / DTS-HD / TrueHD on-device, so those
+        // are advertised regardless of passthrough.
         let passthrough = caps.allowedPassthroughAudioCodecs
-        let dtsTokens = (passthrough.contains(.dts) || passthrough.contains(.dtsHD))
-            ? ["dts", "dca"]
-            : []
+        let canBitstreamDTS = passthrough.contains(.dts) || passthrough.contains(.dtsHD)
+        let dtsTokens = (hybrid || canBitstreamDTS) ? ["dts", "dca"] : []
+        let trueHDTokens = hybrid ? ["truehd", "mlp"] : []
 
-        func audio(_ base: [String], allowDTS: Bool) -> String {
-            (allowDTS ? base + dtsTokens : base).joined(separator: ",")
+        func audio(_ base: [String], allowExtras: Bool) -> String {
+            (allowExtras ? base + dtsTokens + trueHDTokens : base).joined(separator: ",")
         }
 
-        return [
+        var profiles = [
             DirectPlayProfile(
                 type: "Video",
                 container: "mp4,m4v",
                 videoCodec: mp4Video.joined(separator: ","),
-                audioCodec: audio(["aac", "ac3", "alac", "eac3", "flac", "mp3", "opus"], allowDTS: true)
+                audioCodec: audio(["aac", "ac3", "alac", "eac3", "flac", "mp3", "opus"], allowExtras: true)
             ),
             DirectPlayProfile(
                 type: "Video",
                 container: "mov",
                 videoCodec: movVideo.joined(separator: ","),
-                audioCodec: audio(["aac", "ac3", "alac", "eac3", "mp3", "pcm_s16be", "pcm_s16le", "pcm_s24be", "pcm_s24le"], allowDTS: true)
+                audioCodec: audio(["aac", "ac3", "alac", "eac3", "mp3", "pcm_s16be", "pcm_s16le", "pcm_s24be", "pcm_s24le"], allowExtras: true)
             ),
             DirectPlayProfile(
                 type: "Video",
                 container: "mpegts",
                 videoCodec: tsVideo.joined(separator: ","),
-                audioCodec: audio(["aac", "ac3", "eac3", "mp3"], allowDTS: true)
+                audioCodec: audio(["aac", "ac3", "eac3", "mp3"], allowExtras: true)
             ),
             DirectPlayProfile(
                 type: "Video",
@@ -131,6 +147,32 @@ extension JellyfinCapabilityProfile {
             DirectPlayProfile(type: "Audio", container: "mp3", audioCodec: "mp3"),
             DirectPlayProfile(type: "Audio", container: "flac", audioCodec: "flac")
         ]
+
+        // Hybrid engine: advertise the Matroska / WebM container the on-device
+        // VLCKit engine demuxes. The companion codec profiles
+        // (see `codec(_:hybrid:)`) constrain MKV HEVC/AV1 to SDR so DoVi/HDR in an
+        // MKV still transcodes to HLS and renders on AVPlayer — keeping the
+        // "DoVi/HDR always native" guarantee intact.
+        if hybrid {
+            var mkvVideo = ["h264", "mpeg4", "vc1", "mpeg2video", "vp8", "vp9"]
+            if supportsHEVC { mkvVideo.append("hevc") }
+            if supportsAV1 { mkvVideo.append("av1") }
+            let mkvAudio = [
+                "aac", "ac3", "eac3", "dts", "dca", "truehd", "mlp",
+                "flac", "alac", "mp3", "opus", "vorbis",
+                "pcm_s16le", "pcm_s24le"
+            ]
+            profiles.append(
+                DirectPlayProfile(
+                    type: "Video",
+                    container: "mkv,webm",
+                    videoCodec: mkvVideo.joined(separator: ","),
+                    audioCodec: mkvAudio.joined(separator: ",")
+                )
+            )
+        }
+
+        return profiles
     }
 
     private static func transcoding(_ caps: MediaCapabilities) -> TranscodingProfile {
@@ -154,7 +196,7 @@ extension JellyfinCapabilityProfile {
         )
     }
 
-    private static func codec(_ caps: MediaCapabilities) -> [CodecProfile] {
+    private static func codec(_ caps: MediaCapabilities, hybrid: Bool) -> [CodecProfile] {
         let allowed = caps.allowedDirectPlayVideoCodecs
         var profiles: [CodecProfile] = [
             CodecProfile(type: "Video", codec: "h264", conditions: [
@@ -189,6 +231,29 @@ extension JellyfinCapabilityProfile {
                     ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false)
                 ])
             )
+        }
+
+        // Hybrid engine: a raw MKV is decoded on-device by VLCKit, but Dolby
+        // Vision / HDR must still render on AVPlayer. Constrain MKV/WebM HEVC and
+        // AV1 to SDR so any DoVi/HDR-in-MKV fails direct play and transcodes to an
+        // HLS stream AVPlayer plays — these container-scoped profiles AND with the
+        // global codec profiles above, so a non-SDR HEVC/AV1 MKV is disqualified.
+        if hybrid {
+            let mkvContainer = "mkv,webm"
+            if allowed.contains(.hevc) {
+                profiles.append(
+                    CodecProfile(type: "Video", codec: "hevc", container: mkvContainer, conditions: [
+                        ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: "SDR", isRequired: false)
+                    ])
+                )
+            }
+            if allowed.contains(.av1) {
+                profiles.append(
+                    CodecProfile(type: "Video", codec: "av1", container: mkvContainer, conditions: [
+                        ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: "SDR", isRequired: false)
+                    ])
+                )
+            }
         }
 
         return profiles
@@ -259,12 +324,34 @@ public struct TranscodingProfile: Encodable, Sendable, Equatable {
 public struct CodecProfile: Encodable, Sendable, Equatable {
     public var type: String
     public var codec: String
+    /// Optional comma-separated container scope (e.g. `mkv,webm`). When set, the
+    /// profile's conditions apply only to that codec **inside** those containers,
+    /// letting the dual-engine build constrain MKV HEVC/AV1 to SDR without
+    /// affecting the global (Apple-container) codec profiles. Omitted from the
+    /// JSON when `nil`, so the default native-only profile is byte-for-byte today.
+    public var container: String?
     public var conditions: [ProfileCondition]
+
+    public init(type: String, codec: String, container: String? = nil, conditions: [ProfileCondition]) {
+        self.type = type
+        self.codec = codec
+        self.container = container
+        self.conditions = conditions
+    }
 
     enum CodingKeys: String, CodingKey {
         case type = "Type"
         case codec = "Codec"
+        case container = "Container"
         case conditions = "Conditions"
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encode(codec, forKey: .codec)
+        try c.encodeIfPresent(container, forKey: .container)
+        try c.encode(conditions, forKey: .conditions)
     }
 }
 

@@ -12,14 +12,18 @@ public struct JellyfinProvider: MediaProvider {
     public let session: UserSession
     let client: JellyfinClient
 
-    public init(session: UserSession, http: HTTPClient = URLSessionHTTPClient()) {
+    public init(
+        session: UserSession,
+        http: HTTPClient = URLSessionHTTPClient(),
+        hybridEngineEnabled: Bool = false
+    ) {
         self.session = session
         self.client = JellyfinClient(
             baseURL: session.server.baseURL,
             deviceProfile: JellyfinDeviceProfile(deviceID: session.deviceID),
             token: session.accessToken,
             http: http,
-            capabilityProfile: .detected()
+            capabilityProfile: .detected(hybridEngineEnabled: hybridEngineEnabled)
         )
     }
 

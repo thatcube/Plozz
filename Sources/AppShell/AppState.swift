@@ -118,10 +118,10 @@ public final class AppState {
     private static func makeDefaultRegistry() -> ProviderRegistry {
         let registry = ProviderRegistry()
         registry.register(.jellyfin) { session in
-            JellyfinProvider(session: session)
+            JellyfinProvider(session: session, hybridEngineEnabled: HybridPlayback.enabled)
         }
         registry.register(.plex) { session in
-            PlexProvider(session: session)
+            PlexProvider(session: session, hybridEngineEnabled: HybridPlayback.enabled)
         }
         return registry
     }

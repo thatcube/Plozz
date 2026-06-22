@@ -179,7 +179,8 @@ private struct HomeTab: View {
                     provider: resolveProvider(request.item.sourceAccountID, in: accounts),
                     itemID: request.item.id,
                     captionSettings: captionSettings,
-                    startPosition: request.startPosition
+                    startPosition: request.startPosition,
+                    engineFactory: HybridPlayback.engineFactory()
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
@@ -304,7 +305,8 @@ private struct SearchTab: View {
                     provider: resolveProvider(request.item.sourceAccountID, in: accounts),
                     itemID: request.item.id,
                     captionSettings: captionSettings,
-                    startPosition: request.startPosition
+                    startPosition: request.startPosition,
+                    engineFactory: HybridPlayback.engineFactory()
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette

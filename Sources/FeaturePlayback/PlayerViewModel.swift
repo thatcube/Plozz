@@ -48,10 +48,27 @@ public final class PlayerViewModel {
     /// `PlaybackRequest`); `0` forces "start over"; a positive value resumes.
     private let startPositionOverride: TimeInterval?
 
-    private let engine: any VideoEngine
+    /// Builds the engine for a routed ``PlaybackEngineKind``. Injected by the
+    /// composition root so this module never depends on the VLCKit engine.
+    private let engineFactory: EngineFactory
+    /// Device/display/audio policy the router uses to pick an engine.
+    private let capabilities: MediaCapabilities
+
+    /// The active engine. A `var` so the cross-engine fallback can swap engines
+    /// at runtime (e.g. a failed VLCKit attempt → native, or vice-versa).
+    private var engine: any VideoEngine
+    /// Which engine ``engine`` currently is, so swaps know the alternate.
+    private var currentEngineKind: PlaybackEngineKind = .native
+    /// Bumped whenever ``engine`` is swapped, so the SwiftUI player re-hosts the
+    /// new engine's bare video surface (`.id(engineToken)`).
+    public private(set) var engineToken = UUID()
+
     private var request: PlaybackRequest?
     private var subtitleDownloadTask: Task<Void, Never>?
 
+    /// Guards the cross-engine swap so it only ever fires once: a chosen engine's
+    /// failure swaps to the *other* engine exactly once before escalating.
+    private var hasTriedAlternateEngine = false
     /// Guards the automatic transcode fallback so it only ever fires once — a
     /// second failure surfaces the error instead of looping.
     private var hasAttemptedTranscodeFallback = false
@@ -65,13 +82,18 @@ public final class PlayerViewModel {
         provider: any MediaProvider,
         itemID: String,
         captionSettings: CaptionSettings = .default,
-        startPosition: TimeInterval? = nil
+        startPosition: TimeInterval? = nil,
+        engineFactory: EngineFactory = .native,
+        capabilities: MediaCapabilities = .detected()
     ) {
         self.provider = provider
         self.itemID = itemID
         self.captionSettings = captionSettings
         self.startPositionOverride = startPosition
-        self.engine = NativeVideoEngine(captionSettings: captionSettings)
+        self.engineFactory = engineFactory
+        self.capabilities = capabilities
+        self.engine = engineFactory.makeNative(captionSettings)
+        self.currentEngineKind = .native
         configureEngineCallbacks()
     }
 
@@ -82,7 +104,46 @@ public final class PlayerViewModel {
         }
         engine.onFailure = { [weak self] error in
             guard let self else { return }
-            Task { await self.handleDirectPlayFailure(error) }
+            Task { await self.handleEngineFailure(error) }
+        }
+    }
+
+    // MARK: - Engine selection / swapping
+
+    /// Instantiates the engine for `kind`, falling back to native if a hybrid
+    /// engine was requested but isn't wired in (defensive — the router never
+    /// asks for hybrid unless it's available).
+    private func makeEngine(_ kind: PlaybackEngineKind) -> any VideoEngine {
+        switch kind {
+        case .hybrid:
+            if let makeHybrid = engineFactory.makeHybrid {
+                return makeHybrid(captionSettings)
+            }
+            return engineFactory.makeNative(captionSettings)
+        case .native:
+            return engineFactory.makeNative(captionSettings)
+        }
+    }
+
+    /// Swaps the active engine when the routed kind differs from the current one,
+    /// tearing the old engine down and re-pointing the UI at the new surface.
+    private func switchEngine(to kind: PlaybackEngineKind) {
+        guard kind != currentEngineKind else { return }
+        engine.stop()
+        engine = makeEngine(kind)
+        currentEngineKind = kind
+        configureEngineCallbacks()
+        engineToken = UUID()
+    }
+
+    /// The engine to try when the current one fails: the opposite engine, but
+    /// only if it's actually available (no hybrid → nothing to swap to).
+    private var alternateEngineKind: PlaybackEngineKind? {
+        switch currentEngineKind {
+        case .native:
+            return engineFactory.hybridAvailable ? .hybrid : nil
+        case .hybrid:
+            return .native
         }
     }
 
@@ -106,13 +167,14 @@ public final class PlayerViewModel {
             // caller can force "start over" (0) or resume from a chosen second.
             let startPosition = resumeOverride ?? startPositionOverride ?? request.startPosition
 
-            await engine.load(request: request, startPosition: startPosition)
-            phase = .ready
-            await report(event: .start, isPaused: false)
-
-            // Seed the in-player track menu from the engine's track lists (the
-            // engine has already applied the user's default subtitle selection).
-            loadTrackOptions()
+            // Pick the engine from the resolved source facts (pure decision).
+            let kind = EngineRouter.selectEngine(
+                source: request.sourceMetadata,
+                capabilities: capabilities,
+                isTranscoding: request.isTranscoding,
+                hybridAvailable: engineFactory.hybridAvailable
+            )
+            await playResolved(request, engineKind: kind, startPosition: startPosition)
 
             // Best-effort, never blocking play(): (if enabled) fetch a missing
             // subtitle in the preferred language.
@@ -124,23 +186,60 @@ public final class PlayerViewModel {
         }
     }
 
-    // MARK: - Transcode fallback policy
+    /// Loads an already-resolved request on the routed engine and finishes the
+    /// bring-up (ready state, start report, track menu). Shared by the initial
+    /// load and the cross-engine fallback (which re-uses the same request on the
+    /// other engine without re-resolving).
+    private func playResolved(
+        _ request: PlaybackRequest,
+        engineKind: PlaybackEngineKind,
+        startPosition: TimeInterval
+    ) async {
+        switchEngine(to: engineKind)
+        await engine.load(request: request, startPosition: startPosition)
+        phase = .ready
+        await report(event: .start, isPaused: false)
 
-    /// Decides what to do when the engine reports a playback failure: re-resolve
-    /// forcing a server transcode (once) and resume from the last known position,
-    /// or surface the error. Fires at most once; a second failure surfaces the
-    /// error instead of looping.
-    private func handleDirectPlayFailure(_ error: AppError) async {
-        guard let request, !request.isTranscoding, !hasAttemptedTranscodeFallback else {
-            // Already transcoding, already retried, or no request: surface the
-            // error rather than looping.
+        // Seed the in-player track menu from the engine's track lists (the
+        // engine has already applied the user's default subtitle selection).
+        loadTrackOptions()
+    }
+
+    // MARK: - Cross-engine fallback policy
+
+    /// Decides what to do when the active engine reports a playback failure,
+    /// following the fallback chain: the chosen engine's failure swaps to the
+    /// *other* engine (once) at the last known position; if that also fails, force
+    /// a server transcode (once); if even that fails, surface the error. Each step
+    /// fires at most once so the chain can never loop.
+    private func handleEngineFailure(_ error: AppError) async {
+        guard let request else {
             phase = .failed(error)
             return
         }
-        hasAttemptedTranscodeFallback = true
         let resumeFrom = max(engine.furthestObservedPosition, engine.currentTime)
-        PlozzLog.playback.info("Direct play failed; retrying with server transcode")
-        await startPlayback(forceTranscode: true, resumeOverride: resumeFrom > 1 ? resumeFrom : nil)
+        let resume = resumeFrom > 1 ? resumeFrom : (startPositionOverride ?? request.startPosition)
+
+        // 1) Direct play failed on the chosen engine → try the other engine once,
+        //    re-using the same raw stream (no re-resolve needed).
+        if !request.isTranscoding, !hasTriedAlternateEngine, let alternate = alternateEngineKind {
+            hasTriedAlternateEngine = true
+            PlozzLog.playback.info("Engine failed; swapping to the alternate engine")
+            await playResolved(request, engineKind: alternate, startPosition: resume)
+            return
+        }
+
+        // 2) Both engines exhausted (or none to swap to) → force a server
+        //    transcode once, resuming where the failed attempt left off.
+        if !request.isTranscoding, !hasAttemptedTranscodeFallback {
+            hasAttemptedTranscodeFallback = true
+            PlozzLog.playback.info("Direct play failed; retrying with server transcode")
+            await startPlayback(forceTranscode: true, resumeOverride: resume > 1 ? resume : nil)
+            return
+        }
+
+        // 3) Already transcoding (or out of options): surface the error.
+        phase = .failed(error)
     }
 
     // MARK: - Progress reporting

@@ -12,13 +12,18 @@ public struct PlexProvider: MediaProvider {
     public let session: UserSession
     private let client: PlexClient
 
-    public init(session: UserSession, http: HTTPClient = URLSessionHTTPClient()) {
+    public init(
+        session: UserSession,
+        http: HTTPClient = URLSessionHTTPClient(),
+        hybridEngineEnabled: Bool = false
+    ) {
         self.session = session
         self.client = PlexClient(
             baseURL: session.server.baseURL,
             deviceProfile: PlexDeviceProfile(clientIdentifier: session.deviceID),
             token: session.accessToken,
-            http: http
+            http: http,
+            hybridEngineEnabled: hybridEngineEnabled
         )
     }
 

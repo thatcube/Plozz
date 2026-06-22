@@ -50,6 +50,9 @@ public struct PlayerView: View {
                         AnyView(PlayerControlsOverlay(model: model, palette: themePalette))
                     })
                 )
+                // Rebuild the host when the engine is swapped (cross-engine
+                // fallback) so it re-hosts the new engine's bare video surface.
+                .id(viewModel.engineToken)
                 .ignoresSafeArea()
 
             case let .failed(error):

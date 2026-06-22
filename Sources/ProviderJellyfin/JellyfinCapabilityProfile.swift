@@ -1,7 +1,5 @@
 import Foundation
-#if canImport(VideoToolbox)
-import VideoToolbox
-#endif
+import CoreModels
 
 /// The Jellyfin **DeviceProfile** Plozz sends in the body of
 /// `POST /Items/{id}/PlaybackInfo` so the server can decide, per media source,
@@ -37,40 +35,6 @@ public struct JellyfinCapabilityProfile: Encodable, Sendable, Equatable {
     }
 }
 
-// MARK: - Hardware capabilities
-
-extension JellyfinCapabilityProfile {
-    /// What the running device's video hardware can decode. Injected explicitly
-    /// so the produced profile JSON is deterministic and unit-testable; use
-    /// ``detected(maxBitrate:)`` to probe the real hardware at runtime.
-    public struct DecoderCapabilities: Sendable, Equatable {
-        public var supportsHEVC: Bool
-        public var supportsAV1: Bool
-        public var supportsHDR10: Bool
-        public var supportsHLG: Bool
-        public var supportsDolbyVision: Bool
-
-        public init(
-            supportsHEVC: Bool = true,
-            supportsAV1: Bool = false,
-            supportsHDR10: Bool = true,
-            supportsHLG: Bool = true,
-            supportsDolbyVision: Bool = false
-        ) {
-            self.supportsHEVC = supportsHEVC
-            self.supportsAV1 = supportsAV1
-            self.supportsHDR10 = supportsHDR10
-            self.supportsHLG = supportsHLG
-            self.supportsDolbyVision = supportsDolbyVision
-        }
-
-        /// A conservative default used on platforms where we can't probe the
-        /// hardware (e.g. Linux CI). HEVC is assumed (every Apple TV 4K decodes
-        /// it); AV1 is not.
-        public static let `default` = DecoderCapabilities()
-    }
-}
-
 // MARK: - Builders
 
 extension JellyfinCapabilityProfile {
@@ -79,9 +43,10 @@ extension JellyfinCapabilityProfile {
     public static let defaultMaxBitrate = 120_000_000
 
     /// Builds the native (AVFoundation / `AVPlayer`) profile for Apple TV,
-    /// mirroring Swiftfin's `.native` profile.
+    /// mirroring Swiftfin's `.native` profile, from the shared
+    /// ``CoreModels/MediaCapabilities`` source of truth.
     public static func appleTV(
-        capabilities: DecoderCapabilities = .default,
+        capabilities: MediaCapabilities = .default,
         maxBitrate: Int = defaultMaxBitrate
     ) -> JellyfinCapabilityProfile {
         JellyfinCapabilityProfile(
@@ -95,64 +60,60 @@ extension JellyfinCapabilityProfile {
         )
     }
 
-    /// Probes the real video hardware (VideoToolbox) where available, otherwise
-    /// falls back to ``DecoderCapabilities/default``.
+    /// Probes the real hardware/audio route via
+    /// ``CoreModels/MediaCapabilities/detected()`` where available, otherwise
+    /// falls back to ``CoreModels/MediaCapabilities/default``.
     public static func detected(maxBitrate: Int = defaultMaxBitrate) -> JellyfinCapabilityProfile {
-        appleTV(capabilities: detectedCapabilities(), maxBitrate: maxBitrate)
-    }
-
-    static func detectedCapabilities() -> DecoderCapabilities {
-        #if canImport(VideoToolbox)
-        let hevc = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
-        let av1: Bool
-        if #available(tvOS 16.0, iOS 16.0, macOS 13.0, *) {
-            av1 = VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)
-        } else {
-            av1 = false
-        }
-        return DecoderCapabilities(
-            supportsHEVC: hevc,
-            supportsAV1: av1,
-            supportsHDR10: hevc,
-            supportsHLG: hevc,
-            supportsDolbyVision: hevc
-        )
-        #else
-        return .default
-        #endif
+        appleTV(capabilities: .detected(), maxBitrate: maxBitrate)
     }
 
     // MARK: Profile sections
 
-    private static func directPlay(_ caps: DecoderCapabilities) -> [DirectPlayProfile] {
+    private static func directPlay(_ caps: MediaCapabilities) -> [DirectPlayProfile] {
+        let videoCodecs = caps.allowedDirectPlayVideoCodecs
+        let supportsHEVC = videoCodecs.contains(.hevc)
+        let supportsAV1 = videoCodecs.contains(.av1)
+
         var mp4Video = ["h264", "mpeg4"]
-        if caps.supportsHEVC { mp4Video.append("hevc") }
-        if caps.supportsAV1 { mp4Video.append("av1") }
+        if supportsHEVC { mp4Video.append("hevc") }
+        if supportsAV1 { mp4Video.append("av1") }
 
         var movVideo = ["h264", "mjpeg", "mpeg4"]
-        if caps.supportsHEVC { movVideo.append("hevc") }
+        if supportsHEVC { movVideo.append("hevc") }
 
         var tsVideo = ["h264"]
-        if caps.supportsHEVC { tsVideo.append("hevc") }
+        if supportsHEVC { tsVideo.append("hevc") }
+
+        // DTS / DTS-HD only direct-play when the route can passthrough the
+        // bitstream to an external decoder (Apple TV can't decode DTS itself).
+        // `dca` is ffmpeg's alternate name for the DTS family.
+        let passthrough = caps.allowedPassthroughAudioCodecs
+        let dtsTokens = (passthrough.contains(.dts) || passthrough.contains(.dtsHD))
+            ? ["dts", "dca"]
+            : []
+
+        func audio(_ base: [String], allowDTS: Bool) -> String {
+            (allowDTS ? base + dtsTokens : base).joined(separator: ",")
+        }
 
         return [
             DirectPlayProfile(
                 type: "Video",
                 container: "mp4,m4v",
                 videoCodec: mp4Video.joined(separator: ","),
-                audioCodec: "aac,ac3,alac,eac3,flac,mp3,opus"
+                audioCodec: audio(["aac", "ac3", "alac", "eac3", "flac", "mp3", "opus"], allowDTS: true)
             ),
             DirectPlayProfile(
                 type: "Video",
                 container: "mov",
                 videoCodec: movVideo.joined(separator: ","),
-                audioCodec: "aac,ac3,alac,eac3,mp3,pcm_s16be,pcm_s16le,pcm_s24be,pcm_s24le"
+                audioCodec: audio(["aac", "ac3", "alac", "eac3", "mp3", "pcm_s16be", "pcm_s16le", "pcm_s24be", "pcm_s24le"], allowDTS: true)
             ),
             DirectPlayProfile(
                 type: "Video",
                 container: "mpegts",
                 videoCodec: tsVideo.joined(separator: ","),
-                audioCodec: "aac,ac3,eac3,mp3"
+                audioCodec: audio(["aac", "ac3", "eac3", "mp3"], allowDTS: true)
             ),
             DirectPlayProfile(
                 type: "Video",
@@ -172,10 +133,11 @@ extension JellyfinCapabilityProfile {
         ]
     }
 
-    private static func transcoding(_ caps: DecoderCapabilities) -> TranscodingProfile {
+    private static func transcoding(_ caps: MediaCapabilities) -> TranscodingProfile {
+        let allowed = caps.allowedDirectPlayVideoCodecs
         var videoCodecs = ["h264"]
-        if caps.supportsHEVC { videoCodecs.insert("hevc", at: 0) }
-        if caps.supportsAV1 { videoCodecs.insert("av1", at: 0) }
+        if allowed.contains(.hevc) { videoCodecs.insert("hevc", at: 0) }
+        if allowed.contains(.av1) { videoCodecs.insert("av1", at: 0) }
         videoCodecs.append("mpeg4")
 
         return TranscodingProfile(
@@ -188,11 +150,12 @@ extension JellyfinCapabilityProfile {
             breakOnNonKeyFrames: true,
             enableSubtitlesInManifest: true,
             minSegments: 2,
-            maxAudioChannels: "8"
+            maxAudioChannels: String(caps.recommendedMaxAudioChannels)
         )
     }
 
-    private static func codec(_ caps: DecoderCapabilities) -> [CodecProfile] {
+    private static func codec(_ caps: MediaCapabilities) -> [CodecProfile] {
+        let allowed = caps.allowedDirectPlayVideoCodecs
         var profiles: [CodecProfile] = [
             CodecProfile(type: "Video", codec: "h264", conditions: [
                 ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
@@ -202,23 +165,24 @@ extension JellyfinCapabilityProfile {
             ])
         ]
 
-        if caps.supportsHEVC {
-            var ranges = ["SDR"]
-            if caps.supportsHLG { ranges += ["HLG"] }
-            if caps.supportsHDR10 { ranges += ["HDR10", "HDR10Plus"] }
-            if caps.supportsDolbyVision { ranges += ["DOVI", "DOVIWithHDR10", "DOVIWithHLG", "DOVIWithSDR"] }
+        if allowed.contains(.hevc) {
+            // VideoRangeType comes straight from the shared HDR policy: SDR plus
+            // any supported HLG/HDR10, and (only when DoVi is supported) the
+            // Profile 5 / Profile 8 cross-compatible tokens. This deliberately
+            // omits HDR10Plus and Profile 7, which Apple TV cannot present.
+            let ranges = caps.allowedHDRRanges.map(\.rawValue).joined(separator: "|")
             profiles.append(
                 CodecProfile(type: "Video", codec: "hevc", conditions: [
                     ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
                     ProfileCondition(condition: "EqualsAny", property: "VideoProfile", value: "main|main 10", isRequired: false),
                     ProfileCondition(condition: "LessThanEqual", property: "VideoLevel", value: "183", isRequired: false),
                     ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false),
-                    ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: ranges.joined(separator: "|"), isRequired: false)
+                    ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: ranges, isRequired: false)
                 ])
             )
         }
 
-        if caps.supportsAV1 {
+        if allowed.contains(.av1) {
             profiles.append(
                 CodecProfile(type: "Video", codec: "av1", conditions: [
                     ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),

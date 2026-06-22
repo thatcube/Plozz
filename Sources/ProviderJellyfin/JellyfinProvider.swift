@@ -126,7 +126,10 @@ public struct JellyfinProvider: MediaProvider {
 
         let streams = source.MediaStreams ?? detail.MediaStreams ?? []
         let audio = streams.filter { $0.`Type` == "Audio" }.map(map(stream:))
-        let subs = streams.filter { $0.`Type` == "Subtitle" }.map(map(stream:))
+        let sourceID = source.Id ?? itemID
+        let subs = streams.filter { $0.`Type` == "Subtitle" }.map { stream in
+            map(subtitleStream: stream, itemID: itemID, sourceID: sourceID)
+        }
 
         return PlaybackRequest(
             item: mappedItem,
@@ -385,6 +388,43 @@ public struct JellyfinProvider: MediaProvider {
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false
         )
+    }
+
+    /// Maps a subtitle stream, attaching a WebVTT delivery URL for text-based
+    /// subtitles so the player can inject them into the native picker even on
+    /// direct play. Image-based subs (PGS/VOBSUB) get no URL — they need server
+    /// burn-in, which the native picker can't drive.
+    private func map(subtitleStream dto: MediaStreamDto, itemID: String, sourceID: String) -> MediaTrack {
+        let isText = dto.IsTextSubtitleStream ?? isTextSubtitleCodec(dto.Codec)
+        let deliveryURL = isText ? subtitleVTTURL(itemID: itemID, sourceID: sourceID, streamIndex: dto.Index) : nil
+        return MediaTrack(
+            id: dto.Index,
+            kind: .subtitle,
+            displayTitle: dto.DisplayTitle ?? dto.Language ?? dto.Codec ?? "Track \(dto.Index)",
+            language: dto.Language,
+            isDefault: dto.IsDefault ?? false,
+            isForced: dto.IsForced ?? false,
+            deliveryURL: deliveryURL
+        )
+    }
+
+    /// Fallback text-subtitle detection when the server omits
+    /// `IsTextSubtitleStream`, based on the codec token.
+    private func isTextSubtitleCodec(_ codec: String?) -> Bool {
+        guard let codec = codec?.lowercased() else { return false }
+        return ["subrip", "srt", "ass", "ssa", "webvtt", "vtt", "mov_text", "text", "ttml", "subviewer", "sami", "smi"].contains(codec)
+    }
+
+    /// `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/0/Stream.vtt` —
+    /// the server converts SRT/ASS/embedded-text subtitles to WebVTT on the fly.
+    private func subtitleVTTURL(itemID: String, sourceID: String, streamIndex: Int) -> URL? {
+        guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/Videos/\(itemID)/\(sourceID)/Subtitles/\(streamIndex)/0/Stream.vtt"
+        components.queryItems = [URLQueryItem(name: "api_key", value: session.accessToken)]
+        return components.url
     }
 
     private func map(remoteSubtitle dto: RemoteSubtitleInfoDto) -> RemoteSubtitle {

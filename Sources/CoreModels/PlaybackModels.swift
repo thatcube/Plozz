@@ -15,6 +15,12 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     public var language: String?
     public var isDefault: Bool
     public var isForced: Bool
+    /// For subtitle tracks: an absolute URL that yields the subtitle text
+    /// (WebVTT, or SRT which the player normalises to WebVTT). When non-`nil`
+    /// the player can inject this track into the native picker even on direct
+    /// play. `nil` for audio tracks and for subtitles that can't be delivered
+    /// as text (e.g. image-based PGS/VOBSUB, which need server burn-in).
+    public var deliveryURL: URL?
 
     public init(
         id: Int,
@@ -22,7 +28,8 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         displayTitle: String,
         language: String? = nil,
         isDefault: Bool = false,
-        isForced: Bool = false
+        isForced: Bool = false,
+        deliveryURL: URL? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -30,6 +37,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.language = language
         self.isDefault = isDefault
         self.isForced = isForced
+        self.deliveryURL = deliveryURL
     }
 }
 

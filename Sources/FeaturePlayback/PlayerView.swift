@@ -1,6 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
-import AVKit
+import AVFoundation
 import CoreModels
 import CoreUI
 
@@ -35,24 +35,22 @@ public struct PlayerView: View {
                     .tint(.white)
 
             case .ready:
-                if let player = viewModel.player {
-                    CustomPlayerContainer(
-                        player: player,
-                        model: viewModel.controls,
-                        actions: PlayerActions(
-                            seek: { target in Task { await viewModel.seek(to: target) } },
-                            togglePlayPause: { viewModel.togglePlayPause() },
-                            selectAudio: { viewModel.selectAudioOption(id: $0) },
-                            selectSubtitle: { viewModel.selectSubtitleOption(id: $0) },
-                            dismiss: { dismiss() }
-                        ),
-                        trickplay: viewModel.trickplay,
-                        themePalette: ThemePaletteBox(makeOverlay: { model in
-                            AnyView(PlayerControlsOverlay(model: model, palette: themePalette))
-                        })
-                    )
-                    .ignoresSafeArea()
-                }
+                CustomPlayerContainer(
+                    engine: viewModel.videoEngine,
+                    model: viewModel.controls,
+                    actions: PlayerActions(
+                        seek: { target in Task { await viewModel.seek(to: target) } },
+                        togglePlayPause: { viewModel.togglePlayPause() },
+                        selectAudio: { viewModel.selectAudioOption(id: $0) },
+                        selectSubtitle: { viewModel.selectSubtitleOption(id: $0) },
+                        dismiss: { dismiss() }
+                    ),
+                    trickplay: viewModel.trickplay,
+                    themePalette: ThemePaletteBox(makeOverlay: { model in
+                        AnyView(PlayerControlsOverlay(model: model, palette: themePalette))
+                    })
+                )
+                .ignoresSafeArea()
 
             case let .failed(error):
                 PlaybackErrorView(message: error.userMessage) { dismiss() }

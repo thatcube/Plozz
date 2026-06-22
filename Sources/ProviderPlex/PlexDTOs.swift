@@ -89,6 +89,10 @@ struct PlexStream: Decodable {
     let selected: Bool?
     let `default`: Bool?
     let forced: Bool?
+    /// Server-relative key for an external/sidecar subtitle file (e.g.
+    /// `/library/streams/12345`). Present for external subs; `nil` for embedded
+    /// streams. Used to deliver the subtitle text to the player.
+    let key: String?
     // Video facts
     let width: Int?
     let height: Int?

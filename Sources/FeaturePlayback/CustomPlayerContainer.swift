@@ -1,7 +1,6 @@
 #if canImport(UIKit)
 import UIKit
 import SwiftUI
-import AVFoundation
 import CoreModels
 
 /// Callbacks the input controller invokes on the owning view model. Kept as a
@@ -15,27 +14,30 @@ struct PlayerActions {
     var dismiss: () -> Void = {}
 }
 
-/// SwiftUI bridge to the custom player: an `AVPlayerLayer` video surface with a
-/// SwiftUI controls overlay on top and all Siri Remote input handled in UIKit
-/// (the only reliable way to get analog touch-surface scrubbing on tvOS).
+/// The shared, **engine-agnostic** custom player UI: it hosts whatever bare video
+/// surface the active `VideoEngine` vends (`makeVideoOutputView()`), layers a
+/// SwiftUI controls overlay on top, and handles all Siri Remote input in UIKit
+/// (the only reliable way to get analog touch-surface scrubbing on tvOS). It
+/// drives playback purely through the `VideoEngine` protocol and the
+/// `PlayerActions` closures, so any engine (AVPlayer today, libmpv/VLCKit later)
+/// reuses it without change.
 struct CustomPlayerContainer: UIViewControllerRepresentable {
-    let player: AVPlayer?
+    let engine: any VideoEngine
     let model: PlayerControlsModel
     let actions: PlayerActions
     let trickplay: TrickplayManifest?
     let themePalette: ThemePaletteBox
 
     func makeUIViewController(context: Context) -> PlayerInputViewController {
-        let controller = PlayerInputViewController(model: model, actions: actions)
+        let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
         controller.configureTrickplay(trickplay)
+        controller.attachVideoSurface()
         controller.attachOverlay(themePalette: themePalette)
-        controller.setPlayer(player)
         return controller
     }
 
     func updateUIViewController(_ controller: PlayerInputViewController, context: Context) {
         controller.actions = actions
-        controller.setPlayer(player)
     }
 }
 
@@ -46,30 +48,34 @@ struct ThemePaletteBox {
     let makeOverlay: (PlayerControlsModel) -> AnyView
 }
 
-/// The video surface: a UIView whose backing layer is the `AVPlayerLayer`, made
-/// focusable so it receives Siri Remote presses and indirect-touch pans.
-final class PlayerSurfaceView: UIView {
-    override class var layerClass: AnyClass { AVPlayerLayer.self }
-    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+/// The focusable root view that receives Siri Remote presses and indirect-touch
+/// pans. The engine's video surface and the controls overlay are added as
+/// non-interactive subviews, so focus always stays here.
+final class PlayerInputView: UIView {
     override var canBecomeFocused: Bool { true }
 }
 
-/// Owns the video layer, the SwiftUI controls overlay, and every Siri Remote
-/// gesture. Scrubbing is preview-only — the underlying `AVPlayer` is never
-/// seeked until the viewer commits (Select), so the scrub stays perfectly
-/// smooth regardless of stream/seek latency.
+/// Owns the focusable input surface, hosts the engine's bare video output view,
+/// the SwiftUI controls overlay, and every Siri Remote gesture. Scrubbing is
+/// preview-only — the engine is never seeked until the viewer commits (Select),
+/// so the scrub stays perfectly smooth regardless of stream/seek latency. All
+/// playback is driven through the `VideoEngine` protocol + `PlayerActions`, never
+/// a concrete player, so this UI is reused verbatim by every engine.
 final class PlayerInputViewController: UIViewController {
     var actions: PlayerActions
+    private let engine: any VideoEngine
     private let model: PlayerControlsModel
     private var thumbnailLoader: TrickplayThumbnailLoader?
     private var overlayHost: UIHostingController<AnyView>?
 
     private var autoHideTask: Task<Void, Never>?
     private var thumbnailTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
     private var scrubBaseSeconds: TimeInterval = 0
     private var resumeAfterScrub = false
 
-    init(model: PlayerControlsModel, actions: PlayerActions) {
+    init(engine: any VideoEngine, model: PlayerControlsModel, actions: PlayerActions) {
+        self.engine = engine
         self.model = model
         self.actions = actions
         super.init(nibName: nil, bundle: nil)
@@ -78,27 +84,32 @@ final class PlayerInputViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private var surfaceView: PlayerSurfaceView { view as! PlayerSurfaceView }
-
     override func loadView() {
-        view = PlayerSurfaceView()
-        view.backgroundColor = .black
+        let inputView = PlayerInputView()
+        inputView.backgroundColor = .black
+        view = inputView
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        surfaceView.playerLayer.videoGravity = .resizeAspect
         installGestures()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // Make sure the video surface owns the focus so the Siri Remote's
-        // presses and indirect-touch pans reach our gesture recognizers.
+        // Make sure our input surface owns the focus so the Siri Remote's presses
+        // and indirect-touch pans reach our gesture recognizers.
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
+        startRefreshLoop()
         // Briefly reveal the transport on entry, then let it auto-hide.
         flashControls()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        refreshTask?.cancel()
+        refreshTask = nil
     }
 
     override var canBecomeFirstResponder: Bool { true }
@@ -109,11 +120,21 @@ final class PlayerInputViewController: UIViewController {
         }
     }
 
+    /// Hosts the engine's bare video surface as the backmost, non-interactive
+    /// layer. The engine keeps it fed across reloads, so we add it once.
+    func attachVideoSurface() {
+        let surface = engine.makeVideoOutputView()
+        surface.frame = view.bounds
+        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        surface.isUserInteractionEnabled = false
+        view.insertSubview(surface, at: 0)
+    }
+
     func attachOverlay(themePalette: ThemePaletteBox) {
         let host = UIHostingController(rootView: themePalette.makeOverlay(model))
         host.view.backgroundColor = .clear
         // Presentational only — never let the overlay steal remote focus from
-        // the video surface that drives scrubbing.
+        // the input surface that drives scrubbing.
         host.view.isUserInteractionEnabled = false
         addChild(host)
         host.view.frame = view.bounds
@@ -123,14 +144,35 @@ final class PlayerInputViewController: UIViewController {
         overlayHost = host
     }
 
-    func setPlayer(_ player: AVPlayer?) {
-        guard surfaceView.playerLayer.player !== player else { return }
-        surfaceView.playerLayer.player = player
+    // MARK: Engine state refresh
+
+    /// Polls the engine on a light cadence and mirrors its live state into the
+    /// observable `controls` model the overlay reads. Engine-agnostic: it only
+    /// touches the `VideoEngine` protocol, so it works for any engine.
+    private func startRefreshLoop() {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.refreshFromEngine()
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+        }
+    }
+
+    private func refreshFromEngine() {
+        let duration = engine.duration
+        if duration > 0 { model.duration = duration }
+        // Don't fight the scrub head or an in-flight committed seek.
+        if !model.isScrubbing && !model.isSeeking {
+            model.currentSeconds = engine.currentTime
+        }
+        model.bufferedSeconds = engine.bufferedPosition
+        model.isPaused = engine.isPaused
     }
 
     // MARK: Focus
 
-    override var preferredFocusEnvironments: [UIFocusEnvironment] { [surfaceView] }
+    override var preferredFocusEnvironments: [UIFocusEnvironment] { [view] }
 
     // MARK: Gestures
 
@@ -343,6 +385,7 @@ final class PlayerInputViewController: UIViewController {
     deinit {
         autoHideTask?.cancel()
         thumbnailTask?.cancel()
+        refreshTask?.cancel()
     }
 }
 #endif

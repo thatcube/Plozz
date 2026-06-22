@@ -181,6 +181,10 @@ let package = Package(
         .testTarget(
             name: "FeatureMusicTests",
             dependencies: ["FeatureMusic", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeaturePlaybackTests",
+            dependencies: ["FeaturePlayback", "CoreModels"]
         )
     ]
 )

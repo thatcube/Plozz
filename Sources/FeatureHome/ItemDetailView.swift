@@ -27,21 +27,17 @@ public struct ItemDetailView: View {
             state: viewModel.state,
             onRetry: { Task { await viewModel.load() } }
         ) { detail in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 32) {
-                    hero(detail.item)
-                    if !detail.children.isEmpty {
-                        MediaRowView(
-                            title: childrenTitle(for: detail.item),
-                            items: detail.children,
-                            style: detail.item.kind == .series ? .poster : .landscape,
-                            spoilerSettings: spoilerSettings,
-                            initialFocusID: nextUpFocusID(for: detail),
-                            onSelect: onSelectChild
-                        )
-                    }
-                }
-                .padding(.bottom, PlozzTheme.Metrics.screenPadding)
+            if detail.item.kind == .series {
+                SeriesDetailView(
+                    series: detail.item,
+                    seasons: detail.children.filter { $0.kind == .season },
+                    looseEpisodes: detail.children.filter { $0.kind == .episode },
+                    viewModel: viewModel,
+                    spoilerSettings: spoilerSettings,
+                    onPlay: onPlay
+                )
+            } else {
+                container(detail)
             }
         }
         // Detail is a full-screen sub-page: hide the top tab bar.
@@ -49,59 +45,29 @@ public struct ItemDetailView: View {
         .task { if viewModel.state.value == nil { await viewModel.load() } }
     }
 
-    private func hero(_ item: MediaItem) -> some View {
-        let hideText = spoilerSettings.shouldHideText(for: item)
-        let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
-        return ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: item.backdropURL ?? item.posterURL) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Rectangle().fill(.tertiary)
-            }
-            .frame(height: 720)
-            .clipped()
-            .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
-            .overlay(
-                LinearGradient(
-                    colors: [.black.opacity(0.0), .black.opacity(0.85)],
-                    startPoint: .top,
-                    endPoint: .bottom
+    /// Layout for non-series detail: a hero plus, for seasons/folders/collections,
+    /// a single rail of children. Movies and episodes show just the hero + Play.
+    private func container(_ detail: ItemDetailViewModel.Detail) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 32) {
+                DetailHeroView(
+                    item: detail.item,
+                    spoilerSettings: spoilerSettings,
+                    playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
+                    onPlay: isPlayable(detail.item) ? { onPlay(detail.item) } : nil
                 )
-            )
-
-            VStack(alignment: .leading, spacing: 16) {
-                Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
-                    .font(.system(size: 64, weight: .bold))
-                if let subtitle = item.subtitle {
-                    Text(subtitle).font(.title3).foregroundStyle(.secondary)
-                }
-                if !item.ratings.isEmpty {
-                    RatingsBadgeRow(ratings: item.ratings)
-                }
-                if hideText {
-                    Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: 1100, alignment: .leading)
-                } else if let overview = item.overview {
-                    Text(overview)
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(4)
-                        .frame(maxWidth: 1100, alignment: .leading)
-                }
-                if isPlayable(item) {
-                    Button {
-                        onPlay(item)
-                    } label: {
-                        Label(viewModel.playButtonTitle(for: item), systemImage: "play.fill")
-                            .frame(minWidth: 260)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, 8)
+                if !detail.children.isEmpty {
+                    MediaRowView(
+                        title: childrenTitle(for: detail.item),
+                        items: detail.children,
+                        style: detail.item.kind == .series ? .poster : .landscape,
+                        spoilerSettings: spoilerSettings,
+                        initialFocusID: nextUpFocusID(for: detail),
+                        onSelect: onSelectChild
+                    )
                 }
             }
-            .padding(PlozzTheme.Metrics.screenPadding)
+            .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }
     }
 

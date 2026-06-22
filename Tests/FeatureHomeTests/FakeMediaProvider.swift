@@ -9,6 +9,11 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
 
     /// Full backing list a container pages through.
     var allItems: [MediaItem]
+    /// Optional per-parent children for `children(of:)`. When `nil`, the legacy
+    /// behaviour (return `allItems`) is preserved for existing tests.
+    var childrenByParent: [String: [MediaItem]]?
+    /// How many times `children(of:)` was called for each parent id.
+    private(set) var childrenCallCount: [String: Int] = [:]
     /// Optional start index at which `items(in:page:)` throws once.
     var failAtStartIndex: Int?
     private(set) var requestedPages: [PageRequest] = []
@@ -28,7 +33,13 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
         guard let item = allItems.first(where: { $0.id == id }) else { throw AppError.notFound }
         return item
     }
-    func children(of itemID: String) async throws -> [MediaItem] { allItems }
+    func children(of itemID: String) async throws -> [MediaItem] {
+        childrenCallCount[itemID, default: 0] += 1
+        if let childrenByParent {
+            return childrenByParent[itemID] ?? []
+        }
+        return allItems
+    }
 
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         requestedPages.append(page)

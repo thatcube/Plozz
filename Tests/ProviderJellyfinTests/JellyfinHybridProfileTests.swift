@@ -63,18 +63,42 @@ final class JellyfinHybridProfileTests: XCTestCase {
         XCTAssertFalse(audio.contains("truehd"))
     }
 
-    // MARK: DoVi/HDR-in-MKV stays out of direct play (lockstep invariant)
+    // MARK: DoVi-in-MKV stays out of direct play; HDR10/HLG now allowed (lockstep)
 
-    func testHybridOnConstrainsMatroskaHEVCToSDR() throws {
+    func testHybridOnConstrainsMatroskaHEVCToNonDoViRanges() throws {
         let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: true))
         let codecs = try XCTUnwrap(json["CodecProfiles"] as? [[String: Any]])
-        // There must be an mkv/webm-scoped hevc profile requiring SDR.
+        // There must be an mkv/webm-scoped hevc profile whose VideoRangeType allows
+        // SDR + display-supported HDR10/HLG but NEVER Dolby Vision (DoVi-in-MKV must
+        // transcode so it reaches AVPlayer).
         let mkvHevc = try XCTUnwrap(codecs.first {
             ($0["Codec"] as? String) == "hevc" && (($0["Container"] as? String) ?? "").contains("mkv")
         })
         let conditions = try XCTUnwrap(mkvHevc["Conditions"] as? [[String: Any]])
         let rangeCondition = try XCTUnwrap(conditions.first { ($0["Property"] as? String) == "VideoRangeType" })
-        XCTAssertEqual(rangeCondition["Value"] as? String, "SDR")
+        let value = try XCTUnwrap(rangeCondition["Value"] as? String)
+        XCTAssertTrue(value.contains("SDR"))
+        XCTAssertTrue(value.contains("HDR10"))
+        XCTAssertTrue(value.contains("HLG"))
+        XCTAssertFalse(value.contains("DOVI"), "DoVi must never be advertised for MKV direct play")
+    }
+
+    func testHybridOnAdvertisesAV1Matroska() throws {
+        // AV1-in-MKV must be advertised for on-device decode even though the Apple
+        // TV has no AV1 hardware decoder — the on-device engine software-decodes it.
+        let noAV1 = MediaCapabilities(supportsHEVC: true, supportsAV1: false)
+        let json = try encoded(.appleTV(capabilities: noAV1, hybridEngineEnabled: true))
+
+        let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
+        let mkv = try XCTUnwrap(direct.first {
+            ($0["Type"] as? String) == "Video" && (($0["Container"] as? String) ?? "").contains("mkv")
+        })
+        XCTAssertTrue(try XCTUnwrap(mkv["VideoCodec"] as? String).contains("av1"))
+
+        let codecs = try XCTUnwrap(json["CodecProfiles"] as? [[String: Any]])
+        XCTAssertTrue(codecs.contains {
+            ($0["Codec"] as? String) == "av1" && (($0["Container"] as? String) ?? "").contains("mkv")
+        }, "an mkv-scoped av1 codec profile must exist so AV1-MKV is direct-playable")
     }
 
     func testHybridOffHasNoContainerScopedCodecProfiles() throws {

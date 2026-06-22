@@ -63,6 +63,22 @@ public final class PlayerViewModel {
     /// new engine's bare video surface (`.id(engineToken)`).
     public private(set) var engineToken = UUID()
 
+    /// Bumped the moment a request resolves and the engine is committed (before
+    /// the engine's `load()` is even awaited), so the diagnostics overlay can
+    /// populate its Engine / Source / codec rows during loading and on failure —
+    /// not just once playback reaches `.ready`. Lets the user see *why* a file is
+    /// stuck instead of an opaque spinner.
+    public private(set) var diagnosticsToken = UUID()
+
+    /// Watches the active engine for stalled start-up: if playback never makes
+    /// real progress within a deadline, it converts a silent "loads forever" hang
+    /// into an engine failure so the cross-engine / transcode fallback chain runs.
+    private var watchdogTask: Task<Void, Never>?
+
+    /// How long the watchdog waits for the first real progress before declaring a
+    /// stall. Generous enough for legitimate 4K start-up buffering.
+    private let watchdogTimeout: TimeInterval = 30
+
     private var request: PlaybackRequest?
     private var subtitleDownloadTask: Task<Void, Never>?
 
@@ -196,6 +212,13 @@ public final class PlayerViewModel {
         startPosition: TimeInterval
     ) async {
         switchEngine(to: engineKind)
+        // Make diagnostics available immediately — the overlay can now show the
+        // engine + source facts during loading and even if load() never reaches
+        // ready (the user's "let me see why it failed" request).
+        diagnosticsToken = UUID()
+        // Arm the stall watchdog around load() so a hang that never reports an
+        // error still triggers the fallback chain instead of spinning forever.
+        armPlaybackWatchdog(startPosition: startPosition)
         await engine.load(request: request, startPosition: startPosition)
         phase = .ready
         await report(event: .start, isPaused: false)
@@ -203,6 +226,46 @@ public final class PlayerViewModel {
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
         loadTrackOptions()
+    }
+
+    // MARK: - Stall watchdog
+
+    /// Starts (or restarts) the playback watchdog for the current engine. Polls
+    /// the engine's `currentTime`; if it never advances past `startPosition`
+    /// within ``watchdogTimeout``, the engine is treated as stalled and the
+    /// failure chain runs. Cancelled/replaced on every `playResolved`, on pause,
+    /// and on `stop()`. The once-only fallback guards keep this from looping.
+    private func armPlaybackWatchdog(startPosition: TimeInterval) {
+        watchdogTask?.cancel()
+        let timeout = watchdogTimeout
+        let threshold = startPosition + 0.5
+        watchdogTask = Task { [weak self] in
+            let pollNanos: UInt64 = 2_000_000_000
+            var waited: TimeInterval = 0
+            while waited < timeout {
+                try? await Task.sleep(nanoseconds: pollNanos)
+                if Task.isCancelled { return }
+                guard let self else { return }
+                // Real progress → healthy, stop watching.
+                if self.engine.currentTime > threshold { return }
+                // User paused (or playback hasn't been asked to play) → not a
+                // stall; stop watching rather than fire a false positive.
+                if self.engine.isPaused { return }
+                waited += 2
+            }
+            if Task.isCancelled { return }
+            guard let self else { return }
+            // Still no progress after the deadline → treat as a stalled stream.
+            if self.engine.currentTime <= threshold, !self.engine.isPaused {
+                PlozzLog.playback.info("Playback watchdog: no progress before deadline; triggering fallback")
+                await self.handleEngineFailure(.invalidResponse)
+            }
+        }
+    }
+
+    private func cancelWatchdog() {
+        watchdogTask?.cancel()
+        watchdogTask = nil
     }
 
     // MARK: - Cross-engine fallback policy
@@ -280,6 +343,9 @@ public final class PlayerViewModel {
 
     public func setPaused(_ paused: Bool) {
         if paused { engine.pause() } else { engine.play() }
+        // A user pause means "no progress" is expected — don't let the stall
+        // watchdog misfire.
+        if paused { cancelWatchdog() }
         controls.isPaused = paused
         Task { await report(event: paused ? .pause : .unpause, isPaused: paused) }
     }
@@ -287,6 +353,7 @@ public final class PlayerViewModel {
     /// Call when leaving playback: report a final stop so the server records the
     /// resume point, then tear the engine down.
     public func stop() async {
+        cancelWatchdog()
         await report(event: .stop, isPaused: true)
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = nil

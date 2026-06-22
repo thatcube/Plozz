@@ -67,7 +67,9 @@ final class PlexHybridDirectPlayTests: XCTestCase {
                        "DoVi-in-MKV must transcode to HLS so it renders on AVPlayer")
     }
 
-    func testHDR10MatroskaTranscodesEvenWithHybridOn() throws {
+    func testHDR10MatroskaDirectPlaysOnHDRDisplayWithHybridOn() throws {
+        // Plain HDR10 (not DoVi) in an MKV is decoded on-device and presented on an
+        // HDR10-capable display — no needless server transcode (matches Infuse).
         let json = """
         {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"dts",
          "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
@@ -76,6 +78,20 @@ final class PlexHybridDirectPlayTests: XCTestCase {
          ]}]}
         """
         let caps = MediaCapabilities(supportsHEVC: true, supportsHDR10: true)
+        XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: true))
+    }
+
+    func testHDR10MatroskaTranscodesOnSDRDisplay() throws {
+        // On a display that can't present HDR10, the HDR10 MKV transcodes (the
+        // server tonemaps) rather than direct-playing into an SDR panel.
+        let json = """
+        {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"dts",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc","colorTrc":"smpte2084"},
+           {"id":11,"streamType":2,"index":1,"codec":"dts"}
+         ]}]}
+        """
+        let caps = MediaCapabilities(supportsHEVC: true, supportsHDR10: false, supportsHLG: false)
         XCTAssertFalse(try canDirectPlay(json, caps: caps, hybrid: true))
     }
 

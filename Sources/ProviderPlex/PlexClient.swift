@@ -20,8 +20,9 @@ public struct PlexClient: Sendable {
     private let capabilities: MediaCapabilities
     /// Whether the dual-engine (VLCKit) build is active. When `true`,
     /// `canDirectPlay` additionally accepts the **extra** formats the on-device
-    /// hybrid engine handles — the Matroska / WebM container (SDR only; DoVi/HDR
-    /// in an MKV still transcodes so it renders on `AVPlayer`) and DTS / DTS-HD /
+    /// hybrid engine handles — the Matroska / WebM container (SDR and display-
+    /// supported HDR10/HLG; only Dolby Vision in an MKV still transcodes so it
+    /// renders on `AVPlayer`) and DTS / DTS-HD /
     /// TrueHD audio (decoded on-device, no passthrough required). Defaults to
     /// `false`, preserving today's native-only direct-play decisions. Must stay in
     /// lockstep with `EngineRouter`: every extra format accepted here is one the
@@ -287,10 +288,11 @@ public struct PlexClient: Sendable {
             return false
         }
 
-        // Range gate. A raw MKV is restricted to SDR so DoVi/HDR transcodes and
-        // renders on AVPlayer; Apple containers use the display-aware HDR policy.
+        // Range gate. A raw MKV is direct-played on the on-device engine for SDR
+        // and display-supported HDR10/HLG, but Dolby Vision still transcodes so it
+        // renders on AVPlayer. Apple containers use the display-aware HDR policy.
         if isMatroska {
-            guard isSDRVideo(part: part) else { return false }
+            guard isHybridDirectPlayableRange(part: part) else { return false }
         } else {
             guard canDirectPlayVideoRange(part: part) else { return false }
         }
@@ -382,15 +384,21 @@ public struct PlexClient: Sendable {
         }
     }
 
-    /// Strict SDR check used to gate Matroska direct play: a raw MKV is sent to
-    /// the hybrid engine only when it carries no Dolby Vision / HDR signal, so
-    /// DoVi/HDR-in-MKV transcodes to HLS and renders correctly on AVPlayer.
-    private func isSDRVideo(part: PlexPart) -> Bool {
+    /// Range gate for a raw MKV sent to the on-device engine: rejects Dolby
+    /// Vision (which must transcode to HLS so it renders correctly on AVPlayer)
+    /// but allows SDR and **display-supported** HDR10 / HLG — the on-device engine
+    /// decodes them and the display presents them, matching Infuse and avoiding a
+    /// needless server transcode. Mirrors `EngineRouter`: DoVi → native (via
+    /// transcode), plain HDR10/HLG in an MKV → hybrid.
+    private func isHybridDirectPlayableRange(part: PlexPart) -> Bool {
         guard let video = part.Stream?.first(where: { $0.streamType == 1 }) else { return true }
         if video.DOVIPresent == true { return false }
+        let allowed = Set(capabilities.allowedHDRRanges)
         switch video.colorTrc?.lowercased() {
-        case "smpte2084", "pq", "arib-std-b67", "hlg":
-            return false
+        case "smpte2084", "pq":
+            return allowed.contains(.hdr10)
+        case "arib-std-b67", "hlg":
+            return allowed.contains(.hlg)
         default:
             return true
         }

@@ -26,14 +26,15 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
 /// handles well; use the VLCKit hybrid engine **only** for what AVPlayer can't
 /// direct-play without a server transcode:
 ///
-///   * **Dolby Vision / HDR, or an Apple-compatible container+codec** → ``PlaybackEngineKind/native``.
-///     AVPlayer is the *only* engine that renders Dolby Vision correctly on tvOS,
-///     so DoVi/HDR always goes native. The capability layer keeps DoVi/HDR out of
-///     non-Apple (e.g. MKV) direct-play, so an HDR file only ever reaches the
-///     router as either an Apple-container direct-play (native) or a transcoded
-///     HLS stream (also native).
-///   * **Matroska, DTS/DTS-HD/TrueHD audio, or an AVPlayer-incompatible video
-///     codec** → ``PlaybackEngineKind/hybrid`` (decode on-device, no transcode).
+///   * **Dolby Vision** → ``PlaybackEngineKind/native``. AVPlayer is the *only*
+///     engine that renders Dolby Vision correctly on tvOS, so DoVi always goes
+///     native. The capability layer keeps DoVi out of non-Apple (e.g. MKV)
+///     direct-play, so a DoVi file only ever reaches the router as either an
+///     Apple-container direct-play (native) or a transcoded HLS stream (native).
+///   * **Matroska, plain HDR10/HLG in an MKV, AV1, DTS/DTS-HD/TrueHD audio, or an
+///     AVPlayer-incompatible video codec** → ``PlaybackEngineKind/hybrid`` (decode
+///     on-device, no transcode). Plain HDR10/HLG in an *Apple* container stays
+///     native — AVPlayer renders it on the efficient hardware path.
 ///   * **Ambiguous/unknown, already transcoding, or no hybrid engine available**
 ///     → ``PlaybackEngineKind/native`` (it carries the server-transcode safety net).
 ///
@@ -41,7 +42,8 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
 /// The router and the provider capability profiles must advertise the *same* set
 /// of formats as direct-play: never advertise something the router can't route to
 /// a working engine. The capability expansion (gated by the same hybrid flag that
-/// sets `hybridAvailable` here) advertises raw MKV only for SDR, and DTS/TrueHD,
+/// sets `hybridAvailable` here) advertises raw MKV for SDR **and display-supported
+/// HDR10/HLG** (never DoVi, which transcodes → native), plus DTS/TrueHD and AV1,
 /// which is exactly what the rules below send to the hybrid engine.
 public enum EngineRouter {
 
@@ -72,10 +74,13 @@ public enum EngineRouter {
         // No source facts → ambiguous → native (safety net handles surprises).
         guard let source else { return .native }
 
-        // Dolby Vision / HDR must always render on AVPlayer. The capability layer
-        // keeps DoVi/HDR out of non-Apple direct-play, so anything HDR reaching
-        // here is an Apple-container direct-play that AVPlayer renders correctly.
-        if isDolbyVisionOrHDR(source.video) { return .native }
+        // Dolby Vision must ALWAYS render on AVPlayer — it is the only engine that
+        // renders DoVi correctly on tvOS. (Plain HDR10/HLG are NOT forced native:
+        // AVPlayer plays them in an Apple container, and the on-device engine plays
+        // them in an MKV — see the container rule below. The capability layer keeps
+        // *DoVi* out of MKV direct-play, so DoVi only ever reaches here as an
+        // Apple-container direct-play or a transcoded HLS stream.)
+        if isDolbyVision(source.video) { return .native }
 
         // AVPlayer cannot demux Matroska/WebM; the hybrid engine can.
         if isMatroska(source.container) { return .hybrid }
@@ -109,6 +114,25 @@ public enum EngineRouter {
         return container == "mkv"
             || container == "webm"
             || container.contains("matroska")
+    }
+
+    /// True when the video stream carries a **Dolby Vision** signal (any profile).
+    /// Only DoVi forces the native engine; plain HDR10/HLG follow the container
+    /// rules (Apple container → native, MKV → on-device hybrid).
+    static func isDolbyVision(_ video: MediaSourceMetadata.VideoStream?) -> Bool {
+        guard let video else { return false }
+
+        // Jellyfin VideoRangeType DoVi tokens: DOVI, DOVIWithHDR10/HLG/SDR.
+        if let rangeType = video.videoRangeType?.uppercased(), rangeType.hasPrefix("DOVI") {
+            return true
+        }
+
+        // Coarse VideoRange token (Jellyfin: "DOVI") / Plex maps DOVIPresent here.
+        if let range = video.videoRange?.uppercased(), range == "DOVI" {
+            return true
+        }
+
+        return false
     }
 
     /// True when the video stream carries any HDR or Dolby Vision signal.

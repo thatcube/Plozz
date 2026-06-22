@@ -31,63 +31,74 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
 
     func perform(_ action: MediaItemAction, on item: MediaItem, context: MediaItemActionContext) {
         guard let watch = provider(for: item) as? WatchStateProviding else { return }
-        Task { await run(action, on: item, context: context, using: watch) }
+        guard let plan = mutationPlan(for: action, item: item, context: context) else { return }
+
+        // Optimistic update: reflect the change in the UI immediately so the
+        // watched badge flips the instant the menu dismisses, instead of after
+        // the server round-trip. The network call then runs in the background and
+        // only the rare failure case reconciles (reverts) the badge.
+        MediaItemMutation(itemIDs: plan.affectedIDs, played: plan.played).post()
+        Task { await commit(plan, using: watch) }
     }
 
     // MARK: - Execution
 
-    private func run(
-        _ action: MediaItemAction,
-        on item: MediaItem,
-        context: MediaItemActionContext,
-        using watch: any WatchStateProviding
-    ) async {
-        do {
-            let played: Bool
-            var affectedIDs: Set<String> = [item.id]
-            switch action {
-            case .markWatched:
-                played = true
-                try await watch.setPlayed(true, itemID: item.id)
-            case .markUnwatched:
-                played = false
-                try await watch.setPlayed(false, itemID: item.id)
-            case .markWatchedUpToHere:
-                played = true
-                affectedIDs = try await markUpToHere(item, context: context, using: watch)
-            case .goToSeason:
-                // Navigation is handled in the view layer, never here.
-                return
-            }
-            MediaItemMutation(itemIDs: affectedIDs, played: played).post()
-        } catch {
-            // Best-effort: a failed toggle simply won't reflect on the next
-            // refresh. Never surface a transient network error for a background
-            // menu action on tvOS.
-            PlozzLog.app.error("Media item action \(action.rawValue) failed")
+    /// What a watched-state action changes, computed synchronously (no network)
+    /// so the UI can update optimistically before the request is sent.
+    private struct MutationPlan {
+        let action: MediaItemAction
+        let targetID: String
+        let affectedIDs: Set<String>
+        let played: Bool
+        /// Whether a failed request should roll the optimistic change back. Only
+        /// the single-item toggles do; "up to here" is best-effort per item.
+        let revertOnFailure: Bool
+    }
+
+    private func mutationPlan(
+        for action: MediaItemAction,
+        item: MediaItem,
+        context: MediaItemActionContext
+    ) -> MutationPlan? {
+        switch action {
+        case .markWatched:
+            return MutationPlan(action: action, targetID: item.id, affectedIDs: [item.id], played: true, revertOnFailure: true)
+        case .markUnwatched:
+            return MutationPlan(action: action, targetID: item.id, affectedIDs: [item.id], played: false, revertOnFailure: true)
+        case .markWatchedUpToHere:
+            var ids = Set(context.precedingContainerIDs)
+            ids.formUnion(MediaItemActionCatalog.siblingsToMarkUpToHere(item, in: context.orderedSiblings).map(\.id))
+            ids.insert(item.id)
+            return MutationPlan(action: action, targetID: item.id, affectedIDs: ids, played: true, revertOnFailure: false)
+        case .goToSeason:
+            // Navigation is handled in the view layer, never here.
+            return nil
         }
     }
 
-    /// Marks every earlier season in full, then each preceding episode in the
-    /// current season up to and including the target. Per-item failures are
-    /// tolerated so one unreachable episode doesn't abort the rest. Returns every
-    /// id that was marked watched so screens can update them in place.
-    private func markUpToHere(
-        _ item: MediaItem,
-        context: MediaItemActionContext,
-        using watch: any WatchStateProviding
-    ) async throws -> Set<String> {
-        var affected: Set<String> = []
-        for containerID in context.precedingContainerIDs {
-            try? await watch.setPlayed(true, itemID: containerID)
-            affected.insert(containerID)
+    /// Sends the watched-state change(s) to the server. On failure of a
+    /// revertible action, posts a compensating mutation so the optimistic badge
+    /// flips back to its true state.
+    private func commit(_ plan: MutationPlan, using watch: any WatchStateProviding) async {
+        do {
+            switch plan.action {
+            case .markWatched, .markUnwatched:
+                try await watch.setPlayed(plan.played, itemID: plan.targetID)
+            case .markWatchedUpToHere:
+                // Best-effort per item so one unreachable episode doesn't abort
+                // the rest; the optimistic UI already reflects the intent.
+                for id in plan.affectedIDs {
+                    try? await watch.setPlayed(true, itemID: id)
+                }
+            case .goToSeason:
+                break
+            }
+        } catch {
+            PlozzLog.app.error("Media item action \(plan.action.rawValue) failed")
+            if plan.revertOnFailure {
+                MediaItemMutation(itemIDs: plan.affectedIDs, played: !plan.played).post()
+            }
         }
-        let episodes = MediaItemActionCatalog.siblingsToMarkUpToHere(item, in: context.orderedSiblings)
-        for episode in episodes {
-            try? await watch.setPlayed(true, itemID: episode.id)
-            affected.insert(episode.id)
-        }
-        return affected
     }
 
     // MARK: - Provider resolution

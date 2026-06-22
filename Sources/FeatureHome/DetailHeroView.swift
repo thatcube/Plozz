@@ -265,7 +265,8 @@ struct DetailHeroView: View {
                 title: queryTitle,
                 year: year,
                 isTV: isTV,
-                tmdbID: tmdbID
+                tmdbID: tmdbID,
+                large: true
             )
         }
     }

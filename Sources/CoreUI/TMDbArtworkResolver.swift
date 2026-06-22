@@ -20,6 +20,12 @@ public actor TMDbArtworkResolver {
     private let imageBase = "https://image.tmdb.org/t/p/w500"
     /// Backdrops feed the full-bleed detail hero, so pull a large width.
     private let backdropImageBase = "https://image.tmdb.org/t/p/w1280"
+    /// Full-resolution backdrop base for the hero, which spans the whole (up to
+    /// 4K) screen — `w1280` upscaled there looks soft, so the hero uses `original`.
+    private let backdropOriginalBase = "https://image.tmdb.org/t/p/original"
+    /// Backdrop path cache, keyed independent of size. A present value of `nil`
+    /// is a negative result, so we never re-query a title TMDb couldn't resolve.
+    private var backdropCache: [String: String?] = [:]
     /// Logos are transparent PNGs; `w500` keeps them crisp at hero size without
     /// pulling multi-megabyte originals.
     private let logoImageBase = "https://image.tmdb.org/t/p/w500"
@@ -28,8 +34,6 @@ public actor TMDbArtworkResolver {
     private var cache: [String: URL?] = [:]
     /// Separate cache for logo lookups, same negative-result semantics.
     private var logoCache: [String: URL?] = [:]
-    /// Separate cache for backdrop lookups, same negative-result semantics.
-    private var backdropCache: [String: URL?] = [:]
 
     public init(token: String? = TMDbArtworkResolver.tokenFromBundle()) {
         self.token = token
@@ -94,21 +98,29 @@ public actor TMDbArtworkResolver {
     ///   - year: Release year (movies only; pass `nil` for TV).
     ///   - isTV: Use the `tv` namespace instead of `movie`.
     ///   - tmdbID: A known TMDb numeric id (from `providerIDs["Tmdb"]`), if any.
-    public func backdropURL(title: String, year: Int?, isTV: Bool, tmdbID: String?) async -> URL? {
+    ///   - large: When `true`, returns the full-resolution `original` image (for
+    ///     the full-bleed detail hero); otherwise a `w1280` image (rail/card sized).
+    public func backdropURL(title: String, year: Int?, isTV: Bool, tmdbID: String?, large: Bool = false) async -> URL? {
         guard let token else { return nil }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = tmdbID?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || (id?.isEmpty == false) else { return nil }
 
+        // The cache key is size-independent: the hero (original) and the episode
+        // cards (w1280) of the same show share one network lookup.
         let key = "\(isTV ? "tv" : "movie")|\(id ?? "")|\(trimmed.lowercased())|\(year.map(String.init) ?? "")"
-        if let cached = backdropCache[key] { return cached }
-
-        let resolved = await fetchBackdropURL(title: trimmed, year: year, isTV: isTV, tmdbID: id, token: token)
-        backdropCache[key] = resolved
-        return resolved
+        let path: String?
+        if let cached = backdropCache[key] {
+            path = cached
+        } else {
+            path = await fetchBackdropPath(title: trimmed, year: year, isTV: isTV, tmdbID: id, token: token)
+            backdropCache[key] = path
+        }
+        guard let path else { return nil }
+        return URL(string: (large ? backdropOriginalBase : backdropImageBase) + path)
     }
 
-    private func fetchBackdropURL(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> URL? {
+    private func fetchBackdropPath(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> String? {
         let id: String?
         if let tmdbID, !tmdbID.isEmpty {
             id = tmdbID
@@ -131,8 +143,7 @@ public actor TMDbArtworkResolver {
         else {
             return nil
         }
-        guard let path = Self.bestBackdropPath(decoded.backdrops) else { return nil }
-        return URL(string: backdropImageBase + path)
+        return Self.bestBackdropPath(decoded.backdrops)
     }
 
     /// Picks the best backdrop: prefer language-neutral fanart (no on-image text)

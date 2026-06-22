@@ -285,7 +285,11 @@ public struct PosterCardView: View {
         case .season, .episode:
             isTV = true
             queryTitle = item.parentTitle ?? item.title
-            tmdbID = nil
+            // An episode/season carries its *own* TMDb id (not the show's), which
+            // is useless for a series backdrop. The series page stamps the show's
+            // id under "SeriesTmdb" so we can resolve the same backdrop the hero
+            // uses by id (a plain title search often misses anime titles).
+            tmdbID = item.providerIDs["SeriesTmdb"]
         case .folder, .collection, .unknown:
             return nil
         }

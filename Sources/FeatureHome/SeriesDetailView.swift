@@ -137,6 +137,11 @@ struct SeriesDetailView: View {
         // sits directly above — reliably enters the bar and lands on the season
         // it last had focused (the one currently on screen).
         .focusSection()
+        // Entering the bar (down from Play, or up from the episode row) should
+        // land on the *active* season's tab, not the first/nearest one. Once
+        // inside, left/right moves between seasons normally (which updates the
+        // selection, so re-entry keeps landing on whatever is active).
+        .defaultFocus($focusedSeasonID, selectedSeasonID)
         .onChange(of: focusedSeasonID) { _, newValue in
             guard let id = newValue, let season = seasons.first(where: { $0.id == id }) else { return }
             select(season)
@@ -209,12 +214,25 @@ struct SeriesDetailView: View {
     }
 
     /// Episodes the rail should show: the selected season's loaded episodes, or
-    /// the series' loose episodes when there are no season containers.
+    /// the series' loose episodes when there are no season containers. Each is
+    /// stamped with the series' TMDb id (under `SeriesTmdb`) so episode cards can
+    /// resolve the show's backdrop as a thumbnail fallback when the server has no
+    /// per-episode still (common for anime via Shoko/AniDB).
     private var currentEpisodes: [MediaItem] {
+        let base: [MediaItem]
         if let id = selectedSeasonID, let episodes = viewModel.episodes(for: id) {
-            return episodes
+            base = episodes
+        } else {
+            base = seasons.isEmpty ? looseEpisodes : []
         }
-        return seasons.isEmpty ? looseEpisodes : []
+        guard let seriesTmdb = series.providerIDs["Tmdb"], !seriesTmdb.isEmpty else { return base }
+        return base.map { episode in
+            var copy = episode
+            if copy.providerIDs["SeriesTmdb"] == nil {
+                copy.providerIDs["SeriesTmdb"] = seriesTmdb
+            }
+            return copy
+        }
     }
 
     /// A representative tech-badge set (best resolution/HDR/audio) derived from

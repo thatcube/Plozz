@@ -62,7 +62,7 @@ final class EngineRoutingTests: XCTestCase {
         XCTAssertEqual(route(mp4), .native)
     }
 
-    // MARK: Dolby Vision → native; HDR10/HLG in an Apple container → native
+    // MARK: Dolby Vision in an Apple container → native; DoVi in an MKV → hybrid
 
     func testDolbyVisionMP4IsNative() {
         let mp4 = source(container: "mp4", videoCodec: "hevc", videoRangeType: "DOVIWithHDR10", audioCodec: "eac3")
@@ -74,12 +74,16 @@ final class EngineRoutingTests: XCTestCase {
         XCTAssertEqual(route(mp4), .native)
     }
 
-    func testDolbyVisionAlwaysNativeEvenInMatroska() {
-        // "DoVi MUST always go native" wins over the matroska rule. The capability
-        // layer keeps DoVi-MKV out of direct play (it transcodes), so this only
-        // ever fires on a (mis)advertised raw file — and we still pick native.
+    func testDolbyVisionMatroskaIsHybrid() {
+        // AVPlayer can't demux MKV and a DoVi transcode is unreliable, so DoVi in
+        // an MKV is decoded on-device (HEVC base layer) — like Infuse.
         let mkv = source(container: "mkv", videoCodec: "hevc", videoRange: "DOVI", videoRangeType: "DOVI", audioCodec: "truehd")
-        XCTAssertEqual(route(mkv), .native)
+        XCTAssertEqual(route(mkv), .hybrid)
+    }
+
+    func testDolbyVisionProfile8MatroskaIsHybrid() {
+        let mkv = source(container: "mkv", videoCodec: "hevc", videoRangeType: "DOVIWithHDR10", audioCodec: "ac3")
+        XCTAssertEqual(route(mkv), .hybrid)
     }
 
     func testHLGViaColorTransferIsNative() {

@@ -177,6 +177,12 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// used) rather than direct-playing the original file. Surfaced by the
     /// playback diagnostics overlay.
     public var isTranscoding: Bool
+    /// How the server is delivering the stream — direct play, **remux** (lossless
+    /// container change, no re-encode), or **transcode** (re-encode). Surfaced by
+    /// the diagnostics overlay so the user can tell a lossless DoVi remux apart
+    /// from a quality-reducing re-encode. Defaults from `isTranscoding` when a
+    /// provider doesn't classify it explicitly.
+    public var deliveryMode: PlaybackDiagnostics.PlaybackMode
     /// Source-of-truth media facts (codec, HDR, resolution, channels, …) read
     /// from the provider, used to populate the playback-diagnostics overlay even
     /// when the streamed (transcoded) asset exposes no track metadata.
@@ -194,6 +200,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         subtitleTracks: [MediaTrack] = [],
         startPosition: TimeInterval = 0,
         isTranscoding: Bool = false,
+        deliveryMode: PlaybackDiagnostics.PlaybackMode? = nil,
         sourceMetadata: MediaSourceMetadata? = nil,
         trickplay: TrickplayManifest? = nil
     ) {
@@ -204,6 +211,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.subtitleTracks = subtitleTracks
         self.startPosition = startPosition
         self.isTranscoding = isTranscoding
+        self.deliveryMode = deliveryMode ?? (isTranscoding ? .transcode : .directPlay)
         self.sourceMetadata = sourceMetadata
         self.trickplay = trickplay
     }

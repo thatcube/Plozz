@@ -54,17 +54,36 @@ final class PlexHybridDirectPlayTests: XCTestCase {
 
     // MARK: DoVi/HDR-in-MKV must stay out of direct play even with hybrid on
 
-    func testDolbyVisionMatroskaTranscodesEvenWithHybridOn() throws {
+    // MARK: DoVi-in-MKV is decoded on-device when the device supports Dolby Vision
+
+    func testDolbyVisionMatroskaDirectPlaysWhenHybridOn() throws {
+        // AVPlayer can't demux MKV and a DoVi transcode is unreliable, so a DoVi
+        // MKV is decoded on-device (HEVC base layer) when the device supports DoVi —
+        // matching Infuse.
         let json = """
-        {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"truehd",
+        {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"ac3",
          "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
            {"id":10,"streamType":1,"index":0,"codec":"hevc","DOVIPresent":true,"DOVIProfile":8},
-           {"id":11,"streamType":2,"index":1,"codec":"truehd"}
+           {"id":11,"streamType":2,"index":1,"codec":"ac3"}
          ]}]}
         """
         let caps = MediaCapabilities(supportsHEVC: true, supportsDolbyVision: true)
-        XCTAssertFalse(try canDirectPlay(json, caps: caps, hybrid: true),
-                       "DoVi-in-MKV must transcode to HLS so it renders on AVPlayer")
+        XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: true),
+                      "DoVi-in-MKV must direct-play on the on-device engine, not transcode")
+    }
+
+    func testDolbyVisionMatroskaTranscodesWhenDeviceLacksDoVi() throws {
+        // If the device can't present Dolby Vision, fall back to a transcode rather
+        // than direct-playing a DoVi signal it can't handle.
+        let json = """
+        {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"ac3",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc","DOVIPresent":true,"DOVIProfile":8},
+           {"id":11,"streamType":2,"index":1,"codec":"ac3"}
+         ]}]}
+        """
+        let caps = MediaCapabilities(supportsHEVC: true, supportsDolbyVision: false)
+        XCTAssertFalse(try canDirectPlay(json, caps: caps, hybrid: true))
     }
 
     func testHDR10MatroskaDirectPlaysOnHDRDisplayWithHybridOn() throws {

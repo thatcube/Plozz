@@ -154,7 +154,8 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
 
     func testModeAndHDRDisplayNames() {
         XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.directPlay.displayName, "Direct Play")
-        XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.transcode.displayName, "Transcode")
+        XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.remux.displayName, "Remux (server, lossless)")
+        XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.transcode.displayName, "Transcode (server)")
         XCTAssertEqual(PlaybackDiagnostics.HDRFormat.dolbyVision.displayName, "Dolby Vision")
         XCTAssertEqual(PlaybackDiagnostics.HDRFormat.hdr10.displayName, "HDR10 (PQ)")
         XCTAssertEqual(PlaybackDiagnostics.HDRFormat.hlg.displayName, "HDR (HLG)")

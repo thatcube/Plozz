@@ -36,7 +36,8 @@ public final class PlaybackDiagnosticsSampler {
     ///
     /// - Parameters:
     ///   - player: the active player to sample.
-    ///   - isTranscoding: whether the server is transcoding (vs direct play).
+    ///   - mode: how the server delivers the stream (direct play / remux /
+    ///     transcode), shown verbatim in the overlay's Source row.
     ///   - metadata: provider source facts (codec/HDR/channels/…). These are the
     ///     authoritative baseline; the transcoded asset itself exposes little,
     ///     so this is what makes the overlay match a direct-play client.
@@ -48,10 +49,10 @@ public final class PlaybackDiagnosticsSampler {
     /// presentation size) are skipped, but the authoritative baseline from
     /// `metadata` — container, codecs, HDR, mode, and the engine name — is still
     /// published so the overlay works on every engine.
-    public func start(player: AVPlayer?, isTranscoding: Bool, metadata: MediaSourceMetadata? = nil, engineName: String? = nil) {
+    public func start(player: AVPlayer?, mode: PlaybackDiagnostics.PlaybackMode, metadata: MediaSourceMetadata? = nil, engineName: String? = nil) {
         stop()
         self.player = player
-        var base = PlaybackDiagnostics.base(from: metadata, mode: isTranscoding ? .transcode : .directPlay)
+        var base = PlaybackDiagnostics.base(from: metadata, mode: mode)
         base.engineName = engineName
         Self.fillDeviceInfo(into: &base)
         staticDiagnostics = base

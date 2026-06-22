@@ -118,12 +118,45 @@ public struct JellyfinProvider: MediaProvider {
 
     public func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
         let detail = try await client.item(userID: session.userID, id: itemID)
-        let info = try await client.playbackInfo(
+        var info = try await client.playbackInfo(
             userID: session.userID,
             itemID: itemID,
-            forceTranscode: forceTranscode
+            mode: forceTranscode ? .transcode : .auto
         )
-        guard let source = info.MediaSources.first else { throw AppError.notFound }
+        guard var source = info.MediaSources.first else { throw AppError.notFound }
+
+        // Capture the original source facts (true container + DoVi/HDR range)
+        // BEFORE any remux swap below, so diagnostics and the native engine's
+        // Dolby Vision display switch see the real source even if the server's
+        // remux response describes the output container instead.
+        let originalContainer = source.Container
+        let originalStreams = source.MediaStreams ?? detail.MediaStreams ?? []
+
+        // Track whether we deliberately swapped to a server **remux** (DirectStream,
+        // video stream-copied) so diagnostics can report it as a lossless remux
+        // rather than a quality-reducing re-encode.
+        var didRemux = false
+
+        // True Dolby Vision path: when the server would direct-play a DoVi MKV
+        // (which only reaches the on-device hybrid engine → HDR10), ask it instead
+        // to remux the container to seekable fMP4 HLS with the video **copied**
+        // (preserving the DoVi RPU/dvcC, tagged `dvh1`). That HLS stream reaches
+        // AVPlayer — the only engine that outputs true Dolby Vision on tvOS — and
+        // routes there automatically via `isTranscoding`. Best-effort: if the
+        // remux request fails or the server won't offer a stream URL, fall back to
+        // the original (direct-play) source.
+        if !forceTranscode, Self.shouldRequestDoViRemux(source) {
+            if let remuxInfo = try? await client.playbackInfo(
+                userID: session.userID,
+                itemID: itemID,
+                mode: .remux
+            ), let remuxSource = remuxInfo.MediaSources.first,
+               remuxSource.TranscodingUrl != nil {
+                info = remuxInfo
+                source = remuxSource
+                didRemux = true
+            }
+        }
 
         let streamURL = try resolveStreamURL(itemID: itemID, source: source, playSessionID: info.PlaySessionId)
         let mappedItem = map(item: detail)
@@ -143,7 +176,8 @@ public struct JellyfinProvider: MediaProvider {
             subtitleTracks: subs,
             startPosition: mappedItem.resumePosition ?? 0,
             isTranscoding: source.TranscodingUrl != nil,
-            sourceMetadata: Self.sourceMetadata(container: source.Container, streams: streams),
+            deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
+            sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
             trickplay: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay)
         )
     }
@@ -195,6 +229,48 @@ public struct JellyfinProvider: MediaProvider {
             intervalMs: interval,
             tileURLs: tileURLs
         )
+    }
+
+    /// Classifies how the server is delivering the stream for the diagnostics
+    /// overlay. We can only assert a **remux** (lossless, video stream-copied)
+    /// when we deliberately requested DirectStream and the server honored it with
+    /// a `TranscodingUrl` (`didRemux`). Any other `TranscodingUrl` came from the
+    /// server's own `auto`/forced decision, which may re-encode — so we
+    /// conservatively label it `transcode` rather than over-claiming "lossless".
+    static func deliveryMode(transcoding: Bool, didRemux: Bool) -> PlaybackDiagnostics.PlaybackMode {
+        if !transcoding { return .directPlay }
+        return didRemux ? .remux : .transcode
+    }
+
+    /// Whether to ask the server to remux (rather than direct-play) this source so
+    /// it reaches AVPlayer for true Dolby Vision. True only for a **Dolby Vision
+    /// HEVC stream in a Matroska container with Apple-compatible audio** that the
+    /// server currently wants to direct-play (no `TranscodingUrl`). Those are the
+    /// sources where a container-only remux (video copied) lifts the file from the
+    /// on-device hybrid engine's HDR10 ceiling to native DoVi, with no re-encode.
+    /// HEVC + Apple-compatible audio is required so the server can stream-copy both
+    /// tracks; otherwise forcing direct-play off would trigger a wasteful transcode.
+    static func shouldRequestDoViRemux(_ source: MediaSourceInfo) -> Bool {
+        // Only intervene when the server chose direct play (raw container).
+        guard source.TranscodingUrl == nil else { return false }
+
+        let container = (source.Container ?? "").lowercased()
+        let isMatroska = container.contains("mkv")
+            || container.contains("matroska")
+            || container.contains("webm")
+        guard isMatroska else { return false }
+
+        let streams = source.MediaStreams ?? []
+        let video = streams.first { $0.`Type` == "Video" }
+        guard (video?.Codec ?? "").lowercased() == "hevc" else { return false }
+        guard (video?.VideoRangeType ?? "").uppercased().hasPrefix("DOVI") else { return false }
+
+        let audio = streams.first { $0.`Type` == "Audio" && ($0.IsDefault ?? false) }
+            ?? streams.first { $0.`Type` == "Audio" }
+        // No audio → still safe to remux video-only.
+        guard let audioCodec = audio?.Codec?.lowercased() else { return true }
+        let appleCompatibleAudio: Set<String> = ["aac", "ac3", "eac3", "alac", "mp3", "flac", "opus"]
+        return appleCompatibleAudio.contains(audioCodec)
     }
 
     /// Builds provider-agnostic source facts (codec/HDR/resolution/channels/…)

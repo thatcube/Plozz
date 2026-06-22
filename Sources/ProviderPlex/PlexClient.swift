@@ -20,9 +20,8 @@ public struct PlexClient: Sendable {
     private let capabilities: MediaCapabilities
     /// Whether the dual-engine (VLCKit) build is active. When `true`,
     /// `canDirectPlay` additionally accepts the **extra** formats the on-device
-    /// hybrid engine handles — the Matroska / WebM container (SDR and display-
-    /// supported HDR10/HLG; only Dolby Vision in an MKV still transcodes so it
-    /// renders on `AVPlayer`) and DTS / DTS-HD /
+    /// hybrid engine handles — the Matroska / WebM container (every display-
+    /// supported range, including Dolby Vision, decoded on-device) and DTS / DTS-HD /
     /// TrueHD audio (decoded on-device, no passthrough required). Defaults to
     /// `false`, preserving today's native-only direct-play decisions. Must stay in
     /// lockstep with `EngineRouter`: every extra format accepted here is one the
@@ -400,16 +399,21 @@ public struct PlexClient: Sendable {
         }
     }
 
-    /// Range gate for a raw MKV sent to the on-device engine: rejects Dolby
-    /// Vision (which must transcode to HLS so it renders correctly on AVPlayer)
-    /// but allows SDR and **display-supported** HDR10 / HLG — the on-device engine
-    /// decodes them and the display presents them, matching Infuse and avoiding a
-    /// needless server transcode. Mirrors `EngineRouter`: DoVi → native (via
-    /// transcode), plain HDR10/HLG in an MKV → hybrid.
+    /// Range gate for a raw MKV sent to the on-device engine: allows SDR and any
+    /// **display-supported** range, including HDR10 / HLG **and Dolby Vision** —
+    /// the on-device engine decodes the HEVC base layer (HDR10/SDR base for
+    /// Profile 8, tone-mapped for Profile 5), so DoVi-in-MKV plays without the
+    /// unreliable server transcode AVPlayer would otherwise need (it can't demux
+    /// MKV). Matches Infuse and mirrors `EngineRouter` (DoVi-in-MKV → hybrid).
     private func isHybridDirectPlayableRange(part: PlexPart) -> Bool {
         guard let video = part.Stream?.first(where: { $0.streamType == 1 }) else { return true }
-        if video.DOVIPresent == true { return false }
         let allowed = Set(capabilities.allowedHDRRanges)
+        if video.DOVIPresent == true {
+            // Decoded on-device whenever the display supports Dolby Vision (which,
+            // on an Apple TV 4K, tracks HEVC hardware decode — effectively always).
+            let doviRanges: Set<HDRRange> = [.dolbyVision, .dolbyVisionWithHDR10, .dolbyVisionWithHLG, .dolbyVisionWithSDR]
+            return !allowed.isDisjoint(with: doviRanges)
+        }
         switch video.colorTrc?.lowercased() {
         case "smpte2084", "pq":
             return allowed.contains(.hdr10)

@@ -57,19 +57,14 @@ targets:
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:
           - _jellyfin._tcp
-        # Jellyfin servers are often plain HTTP on the LAN. Allow local networking.
+        # Jellyfin servers are user-controlled and frequently plain HTTP — on the
+        # LAN, behind a reverse proxy, or over Tailscale (the 100.64.0.0/10 CGNAT
+        # range, which is NOT covered by NSAllowsLocalNetworking). Since the user
+        # explicitly enters their own server address, allow arbitrary HTTP loads
+        # so Tailscale IPs (http://100.x.x.x:8096) and MagicDNS names resolve.
         NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
-          NSExceptionDomains:
-            # Tailscale local daemon API — allows HTTP to the well-known Tailscale
-            # service IP so TailscaleDiscovery can enumerate Tailscale peers.
-            100.100.100.100:
-              NSExceptionAllowsInsecureHTTPLoads: true
-            # Tailscale MagicDNS — allows HTTP to *.ts.net hostnames so Jellyfin
-            # servers behind Tailscale (without HTTPS) are reachable.
-            ts.net:
-              NSExceptionAllowsInsecureHTTPLoads: true
-              NSIncludesSubdomains: true
         # Deep links that launch the app straight into playback, used by the
         # Top Shelf extension's cards (e.g. plozz://item/<id>).
         CFBundleURLTypes:

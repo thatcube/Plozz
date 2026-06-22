@@ -45,14 +45,6 @@ public struct ServerPickerView: View {
                     }
                 }
 
-                if !viewModel.tailscaleServers.isEmpty {
-                    Section("Tailscale") {
-                        ForEach(viewModel.tailscaleServers) { server in
-                            serverRow(server, subtitle: server.baseURL.host)
-                        }
-                    }
-                }
-
                 Section {
                     TextField("Server address", text: $viewModel.manualURLText)
                         .focused($manualFieldFocused)
@@ -63,7 +55,7 @@ public struct ServerPickerView: View {
                 } header: {
                     Text("Enter address")
                 } footer: {
-                    Text("Enter an IP address or URL, e.g. 192.168.1.10 or jelly.example.com. For Tailscale, use your server's MagicDNS name, e.g. server.tailnet-name.ts.net")
+                    Text("Enter an IP address or URL, e.g. 192.168.1.10 or jelly.example.com.\n\nUsing Tailscale? Make sure the Tailscale app is installed and connected on this Apple TV, then enter your server's Tailscale IP (e.g. 100.x.x.x:8096) or MagicDNS name (e.g. server.tailnet-name.ts.net).")
                 }
 
                 if case let .error(message) = viewModel.phase {

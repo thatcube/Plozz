@@ -12,19 +12,26 @@ public struct ItemDetailView: View {
     /// When this detail is a series opened via "Go to Season", the season to
     /// pre-select on the series page. Ignored for non-series items.
     private let initialSeasonID: String?
+    /// When a series is opened by tapping one of its episodes (rather than the
+    /// series itself), the tapped episode. The series page then opens with this
+    /// episode fronted in the hero (Play targets it), its season selected, the
+    /// episode row pre-scrolled to it, and focus on the hero Play button.
+    private let initialEpisode: MediaItem?
 
     public init(
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings = .default,
         onPlay: @escaping (MediaItem) -> Void,
         onSelectChild: @escaping (MediaItem) -> Void,
-        initialSeasonID: String? = nil
+        initialSeasonID: String? = nil,
+        initialEpisode: MediaItem? = nil
     ) {
         _viewModel = State(initialValue: viewModel)
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
         self.onSelectChild = onSelectChild
         self.initialSeasonID = initialSeasonID
+        self.initialEpisode = initialEpisode
     }
 
     public var body: some View {
@@ -40,7 +47,8 @@ public struct ItemDetailView: View {
                     viewModel: viewModel,
                     spoilerSettings: spoilerSettings,
                     onPlay: onPlay,
-                    initialSeasonID: initialSeasonID
+                    initialSeasonID: initialSeasonID ?? initialEpisode?.seasonID,
+                    initialEpisode: initialEpisode
                 )
             } else {
                 container(detail)

@@ -23,6 +23,10 @@ struct SeriesDetailView: View {
     let viewModel: ItemDetailViewModel
     let spoilerSettings: SpoilerSettings
     let onPlay: (MediaItem) -> Void
+    /// When the page was opened by tapping a specific episode, that episode. The
+    /// page then fronts it in the hero, selects its season, pre-scrolls the
+    /// episode row to it, and parks focus on the hero Play button.
+    let initialEpisode: MediaItem?
 
     /// Which season's episodes the rail is currently showing. Driven by season
     /// tab focus; seeded to the "next up" season on first appearance.
@@ -32,6 +36,10 @@ struct SeriesDetailView: View {
     /// hero's own Play button) keeps the last meaningful context.
     @State private var heroItem: MediaItem
     @FocusState private var focusedSeasonID: String?
+    /// Drives initial focus onto the hero Play button when the page is opened
+    /// targeting a specific episode, so focus lands at the top rather than down
+    /// in the episode row.
+    @FocusState private var playFocused: Bool
 
     init(
         series: MediaItem,
@@ -40,7 +48,8 @@ struct SeriesDetailView: View {
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings,
         onPlay: @escaping (MediaItem) -> Void,
-        initialSeasonID: String? = nil
+        initialSeasonID: String? = nil,
+        initialEpisode: MediaItem? = nil
     ) {
         self.series = series
         self.seasons = seasons
@@ -48,15 +57,41 @@ struct SeriesDetailView: View {
         self.viewModel = viewModel
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
+        self.initialEpisode = initialEpisode
         // When opened via "Go to Season", pre-select that season (and front it in
         // the hero) so the page lands on the requested season rather than the
-        // default one.
-        let initialSeason = initialSeasonID.flatMap { id in seasons.first { $0.id == id } }
+        // default one. When opened by tapping an episode, front that episode and
+        // select its season instead.
+        let seasonID = initialEpisode?.seasonID ?? initialSeasonID
+        let initialSeason = seasonID.flatMap { id in seasons.first { $0.id == id } }
         _selectedSeasonID = State(initialValue: initialSeason?.id)
-        _heroItem = State(initialValue: initialSeason ?? series)
+        _heroItem = State(initialValue: initialEpisode ?? initialSeason ?? series)
     }
 
+    /// Whether the page was opened targeting a specific episode.
+    private var isTargetingEpisode: Bool { initialEpisode != nil }
+
     var body: some View {
+        scrollContent
+            // Never clip a focused card's lift, shadow or border.
+            .scrollClipDisabled()
+            // Let the hero bleed into the top overscan inset instead of the
+            // ScrollView reserving it as a blank bar above the backdrop.
+            .ignoresSafeArea(.container, edges: .top)
+            .task { await prepareInitialSeason() }
+    }
+
+    @ViewBuilder
+    private var scrollContent: some View {
+        if isTargetingEpisode {
+            // Land focus on the hero Play button (top) rather than the episode row.
+            scroll.defaultFocus($playFocused, true)
+        } else {
+            scroll
+        }
+    }
+
+    private var scroll: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
                 DetailHeroView(
@@ -66,7 +101,8 @@ struct SeriesDetailView: View {
                     playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                     onPlay: playTarget.map { target in { onPlay(target) } },
                     onPlayTrailer: trailerButtonAction,
-                    fallbackTechnicalBadges: representativeTechnicalBadges
+                    fallbackTechnicalBadges: representativeTechnicalBadges,
+                    playButtonFocus: isTargetingEpisode ? $playFocused : nil
                 )
 
                 if !seasons.isEmpty {
@@ -79,12 +115,6 @@ struct SeriesDetailView: View {
             }
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }
-        // Never clip a focused card's lift, shadow or border.
-        .scrollClipDisabled()
-        // Let the hero bleed into the top overscan inset instead of the
-        // ScrollView reserving it as a blank bar above the backdrop.
-        .ignoresSafeArea(.container, edges: .top)
-        .task { await prepareInitialSeason() }
     }
 
     // MARK: Season tabs
@@ -150,7 +180,10 @@ struct SeriesDetailView: View {
             items: episodes,
             style: .landscape,
             spoilerSettings: spoilerSettings,
-            initialFocusID: SeriesResume.nextUp(in: episodes)?.id,
+            // When targeting a tapped episode, pre-scroll the row to it but keep
+            // focus on the hero Play button; otherwise surface "next up" focused.
+            initialFocusID: isTargetingEpisode ? nil : SeriesResume.nextUp(in: episodes)?.id,
+            initialScrollID: isTargetingEpisode ? initialEpisode?.id : nil,
             onFocusChange: { focused in
                 if let focused { heroItem = focused }
             },
@@ -220,15 +253,34 @@ struct SeriesDetailView: View {
     }
 
     /// Picks the season to open on first appearance — the one pre-selected via
-    /// "Go to Season" if any, otherwise the first season — and preloads it.
+    /// "Go to Season"/episode tap if any, otherwise the first season — and
+    /// preloads it. When targeting a tapped episode, swaps the hero to the richer
+    /// loaded copy of that episode once its season's episodes are available.
     private func prepareInitialSeason() async {
         if let id = selectedSeasonID {
             await viewModel.loadEpisodes(for: id)
+            await frontTargetEpisodeIfNeeded(in: id)
             return
         }
-        guard let first = seasons.first else { return }
+        guard let first = seasons.first else {
+            await frontTargetEpisodeIfNeeded(in: nil)
+            return
+        }
         selectedSeasonID = first.id
         await viewModel.loadEpisodes(for: first.id)
+        await frontTargetEpisodeIfNeeded(in: first.id)
+    }
+
+    /// After episodes load, replace the hero's tapped-episode placeholder with the
+    /// fully-loaded episode (richer overview/badges) so the hero and Play target
+    /// reflect complete metadata. No-op unless the page is targeting an episode.
+    @MainActor
+    private func frontTargetEpisodeIfNeeded(in seasonID: String?) async {
+        guard let target = initialEpisode else { return }
+        let pool = seasonID.flatMap { viewModel.episodes(for: $0) } ?? (seasons.isEmpty ? looseEpisodes : [])
+        if let loaded = pool.first(where: { $0.id == target.id }) {
+            heroItem = loaded
+        }
     }
 }
 

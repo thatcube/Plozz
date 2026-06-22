@@ -32,6 +32,11 @@ struct DetailHeroView: View {
     /// representative set from the loaded episodes (best resolution/HDR/audio)
     /// and passes it here so a show still advertises 4K/Dolby Vision/Atmos.
     var fallbackTechnicalBadges: [MediaBadge] = []
+    /// When provided, the hero's Play button binds to this focus state (as
+    /// `true`), letting a parent give Play initial focus — used when a page is
+    /// opened targeting a specific episode so focus lands on Play at the top
+    /// rather than down in the episode row.
+    var playButtonFocus: FocusState<Bool>.Binding? = nil
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
@@ -71,7 +76,8 @@ struct DetailHeroView: View {
         ZStack(alignment: .bottomLeading) {
             FallbackAsyncImage(
                 urls: [backdrop.heroBackdropURL, backdrop.backdropURL, backdrop.posterURL].compactMap { $0 },
-                maxAspectRatio: 3.0
+                maxAspectRatio: 3.0,
+                asyncFallbackURL: tmdbBackdropFallback
             ) {
                 Rectangle().fill(.tertiary)
             }
@@ -169,11 +175,7 @@ struct DetailHeroView: View {
                 if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
                     HStack(spacing: 24) {
                         if let playTitle, let onPlay {
-                            Button(action: onPlay) {
-                                Label(playTitle, systemImage: "play.fill")
-                                    .frame(minWidth: 260)
-                            }
-                            .buttonStyle(.borderedProminent)
+                            playButton(title: playTitle, action: onPlay)
                         }
                         if let onPlayTrailer {
                             Button(action: onPlayTrailer) {
@@ -194,6 +196,23 @@ struct DetailHeroView: View {
         .animation(.easeInOut(duration: 0.2), value: item.id)
     }
 
+    /// The hero Play button. Extracted so the optional initial-focus binding can
+    /// be applied to it conditionally (a `nil` binding leaves default focus
+    /// behaviour untouched).
+    @ViewBuilder
+    private func playButton(title: String, action: @escaping () -> Void) -> some View {
+        let button = Button(action: action) {
+            Label(title, systemImage: "play.fill")
+                .frame(minWidth: 260)
+        }
+        .buttonStyle(.borderedProminent)
+        if let playButtonFocus {
+            button.focused(playButtonFocus, equals: true)
+        } else {
+            button
+        }
+    }
+
     /// The plain text title, used both under spoilers and as the fallback when no
     /// logo art can be resolved.
     private func titleText(hideText: Bool) -> some View {
@@ -210,6 +229,45 @@ struct DetailHeroView: View {
         #else
         return 1080
         #endif
+    }
+
+    /// Last-resort backdrop art for the hero: look the show/movie up on TMDb and
+    /// use a wide fanart image. Many anime (via Shoko/AniDB) ship no backdrop, so
+    /// this fills the otherwise-empty hero. Uses the *backdrop* item (the series,
+    /// when pinned) and its TMDb id when that id refers to the show itself; for an
+    /// episode/season backdrop it queries by series title. Inert without a token.
+    private var tmdbBackdropFallback: (@Sendable () async -> URL?)? {
+        let source = backdrop
+        let isTV: Bool
+        let queryTitle: String
+        let tmdbID: String?
+        switch source.kind {
+        case .movie, .video:
+            isTV = false
+            queryTitle = source.title
+            tmdbID = source.providerIDs["Tmdb"]
+        case .series:
+            isTV = true
+            queryTitle = source.title
+            tmdbID = source.providerIDs["Tmdb"]
+        case .season, .episode:
+            isTV = true
+            queryTitle = source.parentTitle ?? source.title
+            // The item's own TMDb id is the episode/season, not the series.
+            tmdbID = nil
+        case .folder, .collection, .unknown:
+            return nil
+        }
+        guard !queryTitle.isEmpty || (tmdbID?.isEmpty == false) else { return nil }
+        let year = isTV ? nil : source.productionYear
+        return {
+            await TMDbArtworkResolver.shared.backdropURL(
+                title: queryTitle,
+                year: year,
+                isTV: isTV,
+                tmdbID: tmdbID
+            )
+        }
     }
 
     /// Last-resort title art for the hero: look the show/movie up on TMDb and use

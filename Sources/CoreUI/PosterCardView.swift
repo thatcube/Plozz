@@ -214,10 +214,16 @@ public struct PosterCardView: View {
         FallbackAsyncImage(
             urls: artworkCandidates,
             maxAspectRatio: posterAspectGuard,
-            asyncFallbackURL: tmdbPosterFallback
+            asyncFallbackURL: asyncArtworkFallback
         ) {
             neutralPlaceholder
         }
+    }
+
+    /// The async (TMDb) last-resort source for whichever card shape this is: a
+    /// vertical poster for poster cards, a wide backdrop for landscape cards.
+    private var asyncArtworkFallback: (@Sendable () async -> URL?)? {
+        style == .poster ? tmdbPosterFallback : tmdbBackdropFallback
     }
 
     /// Poster cards reject any source image wider than ~0.9:1 (a real poster is
@@ -254,6 +260,43 @@ public struct PosterCardView: View {
                 title: queryTitle,
                 year: isTV ? nil : year,
                 isTV: isTV
+            )
+        }
+    }
+
+    /// Last-resort backdrop source for landscape cards whose provider thumbnail is
+    /// missing (common for anime episodes via Shoko/AniDB): look the show up on
+    /// TMDb and use a wide fanart image. Episodes/seasons query by the *series*
+    /// title; movies/series by their own. Inert without a TMDb token.
+    private var tmdbBackdropFallback: (@Sendable () async -> URL?)? {
+        guard style == .landscape else { return nil }
+        let isTV: Bool
+        let queryTitle: String
+        let tmdbID: String?
+        switch item.kind {
+        case .movie, .video:
+            isTV = false
+            queryTitle = item.title
+            tmdbID = item.providerIDs["Tmdb"]
+        case .series:
+            isTV = true
+            queryTitle = item.title
+            tmdbID = item.providerIDs["Tmdb"]
+        case .season, .episode:
+            isTV = true
+            queryTitle = item.parentTitle ?? item.title
+            tmdbID = nil
+        case .folder, .collection, .unknown:
+            return nil
+        }
+        guard !queryTitle.isEmpty || (tmdbID?.isEmpty == false) else { return nil }
+        let year = isTV ? nil : item.productionYear
+        return {
+            await TMDbArtworkResolver.shared.backdropURL(
+                title: queryTitle,
+                year: year,
+                isTV: isTV,
+                tmdbID: tmdbID
             )
         }
     }

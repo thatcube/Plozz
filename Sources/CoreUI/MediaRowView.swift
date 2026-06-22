@@ -13,6 +13,11 @@ public struct MediaRowView: View {
     /// first time it appears (used by series/season detail to surface the
     /// "next up" episode). `nil` keeps the platform's default focus behaviour.
     private let initialFocusID: String?
+    /// When set, the row scrolls so the matching item is leading-aligned the first
+    /// time it appears, **without** moving focus onto it. Used when focus should
+    /// stay elsewhere (e.g. the hero's Play button) while the row is still
+    /// pre-positioned at a chosen episode. Ignored when `initialFocusID` is set.
+    private let initialScrollID: String?
     private let onSelect: (MediaItem) -> Void
     /// Called whenever focus moves onto a card (with that item) or off the row
     /// entirely (`nil`). Used by series detail to mirror the focused episode into
@@ -28,6 +33,7 @@ public struct MediaRowView: View {
         style: PosterCardView.Style = .poster,
         spoilerSettings: SpoilerSettings = .default,
         initialFocusID: String? = nil,
+        initialScrollID: String? = nil,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -36,6 +42,7 @@ public struct MediaRowView: View {
         self.style = style
         self.spoilerSettings = spoilerSettings
         self.initialFocusID = initialFocusID
+        self.initialScrollID = initialScrollID
         self.onFocusChange = onFocusChange
         self.onSelect = onSelect
     }
@@ -98,16 +105,29 @@ public struct MediaRowView: View {
         }
     }
 
-    /// Scrolls to and focuses `initialFocusID` exactly once, after the row first
-    /// lays out. The focus assignment is deferred a runloop tick so SwiftUI has
-    /// installed the focusable cards before we move focus onto one.
+    /// Scrolls to and focuses `initialFocusID`, or — when only `initialScrollID`
+    /// is set — scrolls to the target without moving focus onto it. Runs exactly
+    /// once, after the row first lays out. The focus assignment is deferred a
+    /// runloop tick so SwiftUI has installed the focusable cards before we move
+    /// focus onto one.
     private func applyInitialFocus(using proxy: ScrollViewProxy) {
-        guard let target = initialFocusID,
-              !didApplyInitialFocus,
-              items.contains(where: { $0.id == target }) else { return }
-        didApplyInitialFocus = true
-        proxy.scrollTo(target, anchor: .leading)
-        DispatchQueue.main.async { focusedID = target }
+        if let target = initialFocusID,
+           !didApplyInitialFocus,
+           items.contains(where: { $0.id == target }) {
+            didApplyInitialFocus = true
+            proxy.scrollTo(target, anchor: .leading)
+            DispatchQueue.main.async { focusedID = target }
+            return
+        }
+        if let target = initialScrollID,
+           !didApplyInitialFocus,
+           items.contains(where: { $0.id == target }) {
+            didApplyInitialFocus = true
+            // Defer a tick so the LazyHStack has realised enough cards to compute
+            // the target's offset before we scroll; focus is deliberately left
+            // wherever it currently is (typically the hero Play button).
+            DispatchQueue.main.async { proxy.scrollTo(target, anchor: .leading) }
+        }
     }
 }
 

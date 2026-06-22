@@ -32,6 +32,7 @@ struct SeriesDetailView: View {
     /// hero's own Play button) keeps the last meaningful context.
     @State private var heroItem: MediaItem
     @FocusState private var focusedSeasonID: String?
+    @Environment(\.themePalette) private var palette
 
     init(
         series: MediaItem,
@@ -75,33 +76,50 @@ struct SeriesDetailView: View {
 
     private var seasonTabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 24) {
+            HStack(spacing: 16) {
                 ForEach(seasons) { season in
-                    Button {
-                        select(season)
-                    } label: {
-                        Text(season.title)
-                            .font(.headline)
-                            .padding(.horizontal, 28)
-                            .padding(.vertical, 14)
-                    }
-                    .buttonStyle(.bordered)
-                    .background(
-                        season.id == selectedSeasonID
-                            ? Capsule().fill(.tint.opacity(0.25))
-                            : nil
-                    )
-                    .focused($focusedSeasonID, equals: season.id)
+                    seasonChip(season)
                 }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 8)
+            // Headroom for the focused chip's lift so it is never clipped.
+            .padding(.vertical, 12)
         }
         .onChange(of: focusedSeasonID) { _, newValue in
             guard let id = newValue, let season = seasons.first(where: { $0.id == id }) else { return }
             select(season)
             heroItem = season
         }
+    }
+
+    /// A small liquid-glass season "pill". Mirrors the player control buttons:
+    /// glass surface via `plozzGlassCard` (which honours the active theme and the
+    /// Reduce Transparency setting), a focus lift, and an accent ring marking the
+    /// season the rail is currently showing.
+    private func seasonChip(_ season: MediaItem) -> some View {
+        let isFocused = focusedSeasonID == season.id
+        let isSelected = selectedSeasonID == season.id
+        return Button {
+            select(season)
+            heroItem = season
+        } label: {
+            Text(season.title)
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+        .focused($focusedSeasonID, equals: season.id)
+        .focusEffectDisabled()
+        .plozzGlassCard(cornerRadius: 100, isFocused: isFocused)
+        .overlay {
+            if isSelected && !isFocused {
+                Capsule().strokeBorder(palette.accent.opacity(0.8), lineWidth: 2)
+            }
+        }
+        .scaleEffect(isFocused ? 1.06 : 1)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 
     /// Selects `season`: marks it active and kicks off (cached) episode loading

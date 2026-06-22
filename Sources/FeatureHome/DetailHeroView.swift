@@ -136,6 +136,14 @@ struct DetailHeroView: View {
                         .font(.system(size: 23, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
+                if !hideText, let tagline = item.tagline {
+                    Text(tagline)
+                        .font(.system(size: 24, weight: .medium))
+                        .italic()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: 960, alignment: .topLeading)
+                }
                 if !featureBadges.isEmpty {
                     MediaBadgeRow(badges: featureBadges)
                 }

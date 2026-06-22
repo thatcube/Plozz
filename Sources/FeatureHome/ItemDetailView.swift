@@ -82,6 +82,7 @@ public struct ItemDetailView: View {
                     )
                     .mediaItemActionContext(childrenActionContext(for: detail))
                 }
+                DetailExtrasView(item: detail.item)
             }
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }

@@ -70,6 +70,19 @@ struct BaseItemDto: Decodable {
     let CommunityRating: Double?
     let CriticRating: Double?
     let ProviderIds: [String: String]?
+    /// Cast & crew. Present only when `People` is requested in `Fields`. Each
+    /// entry is an actor/director/writer/etc.; for anime the `Actor` entries are
+    /// the voice cast with `Role` holding the character voiced.
+    let People: [BaseItemPersonDto]?
+    /// Production studios (e.g. `MAPPA`, `Wit Studio`). Present only when
+    /// `Studios` is requested in `Fields`.
+    let Studios: [NameGuidPairDto]?
+    /// Free-form tags the server/metadata provider attached (e.g. `Isekai`,
+    /// `Shounen`). Present only when `Tags` is requested in `Fields`.
+    let Tags: [String]?
+    /// Short marketing taglines. Present only when `Taglines` is requested in
+    /// `Fields`.
+    let Taglines: [String]?
     let UserData: UserItemDataDto?
     let MediaSources: [MediaSourceInfo]?
     let MediaStreams: [MediaStreamDto]?
@@ -106,6 +119,18 @@ struct BaseItemDto: Decodable {
 struct NameGuidPairDto: Decodable {
     let Name: String?
     let Id: String?
+}
+
+/// One cast/crew member from `BaseItemDto.People`. `Type` is the role kind
+/// (`Actor`, `GuestStar`, `Director`, `Writer`, `Producer`, …) and `Role` is the
+/// character name for actors (the voiced character, for anime). `PrimaryImageTag`
+/// is present only when the person has a headshot on the server.
+struct BaseItemPersonDto: Decodable {
+    let Id: String?
+    let Name: String?
+    let Role: String?
+    let `Type`: String?
+    let PrimaryImageTag: String?
 }
 
 struct UserItemDataDto: Decodable {

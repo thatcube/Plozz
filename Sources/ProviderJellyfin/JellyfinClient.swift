@@ -156,7 +156,7 @@ public struct JellyfinClient: Sendable {
     func item(userID: String, id: String) async throws -> BaseItemDto {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/\(id)",
-            queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,ProviderIds,Trickplay,Genres")],
+            queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,ProviderIds,Trickplay,Genres,People,Studios,Tags,Taglines")],
             headers: authHeaders
         )
         return try await http.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)

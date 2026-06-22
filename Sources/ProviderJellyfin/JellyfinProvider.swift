@@ -449,6 +449,10 @@ public struct JellyfinProvider: MediaProvider {
             productionYear: dto.ProductionYear,
             officialRating: dto.OfficialRating,
             genres: dto.Genres ?? [],
+            people: Self.people(from: dto, client: client),
+            studios: dto.Studios?.compactMap(\.Name).filter { !$0.isEmpty } ?? [],
+            tags: dto.Tags ?? [],
+            taglines: dto.Taglines ?? [],
             seriesID: dto.SeriesId,
             seasonID: dto.SeasonId,
             runtime: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
@@ -472,6 +476,27 @@ public struct JellyfinProvider: MediaProvider {
                 streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? []
             )
         )
+    }
+
+    /// Maps Jellyfin `People` onto provider-agnostic `MediaPerson`s, preserving
+    /// billing order. A headshot URL is built only when the person advertises a
+    /// `PrimaryImageTag`, so we never point an avatar at a guaranteed 404.
+    /// Entries without a usable id/name are dropped.
+    private static func people(from dto: BaseItemDto, client: JellyfinClient) -> [MediaPerson] {
+        guard let people = dto.People else { return [] }
+        return people.compactMap { person in
+            guard let id = person.Id, let name = person.Name, !name.isEmpty else { return nil }
+            let imageURL = person.PrimaryImageTag != nil
+                ? client.imageURL(itemID: id, kind: .primary, maxWidth: 300)
+                : nil
+            return MediaPerson(
+                id: id,
+                name: name,
+                role: person.Role.flatMap { $0.isEmpty ? nil : $0 },
+                kind: person.`Type`,
+                imageURL: imageURL
+            )
+        }
     }
 
     /// Resolves the stylized title/logo art URL for the detail hero.

@@ -74,6 +74,8 @@ struct SeriesDetailView: View {
                 }
 
                 episodeRail
+
+                DetailExtrasView(item: series)
             }
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }

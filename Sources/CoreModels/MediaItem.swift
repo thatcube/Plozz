@@ -12,6 +12,42 @@ public enum MediaItemKind: String, Codable, Sendable {
     case unknown
 }
 
+/// A provider-agnostic cast/crew member shown on a detail page. For anime the
+/// `Actor` entries are the voice cast, with `role` holding the voiced character.
+public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    /// The character played/voiced, when the provider reports one (actors only).
+    public var role: String?
+    /// Provider-native role kind, e.g. `Actor`, `GuestStar`, `Director`,
+    /// `Writer`, `Producer`. Used to separate cast from crew in the UI.
+    public var kind: String?
+    /// Headshot artwork, when the person has an image on the server.
+    public var imageURL: URL?
+
+    public init(
+        id: String,
+        name: String,
+        role: String? = nil,
+        kind: String? = nil,
+        imageURL: URL? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.kind = kind
+        self.imageURL = imageURL
+    }
+
+    /// True for on-screen/voice talent (vs. crew), used to build the "Cast" row.
+    public var isCast: Bool {
+        switch kind?.lowercased() {
+        case "actor", "gueststar", nil: return true
+        default: return false
+        }
+    }
+}
+
 /// A provider-agnostic media item.
 ///
 /// Providers map their native item shapes (Jellyfin `BaseItemDto`, later Plex
@@ -36,6 +72,21 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// Genre labels for the item, e.g. `["Action", "Adventure"]`. Ordered as the
     /// provider returns them; the detail metadata line shows the first few.
     public var genres: [String]
+
+    /// Cast & crew, ordered as the provider returns them (billing order). Only
+    /// populated on the detail fetch; empty for items loaded as rows/cards.
+    public var people: [MediaPerson]
+
+    /// Production studios (e.g. `MAPPA`, `Wit Studio`). Only populated on the
+    /// detail fetch.
+    public var studios: [String]
+
+    /// Free-form tags (e.g. `Isekai`, `Shounen`). Only populated on the detail
+    /// fetch.
+    public var tags: [String]
+
+    /// Short marketing taglines. Only populated on the detail fetch.
+    public var taglines: [String]
 
     /// For an episode, the id of its owning series, enabling a "Go to Series"
     /// jump from anywhere the episode appears. `nil` for non-episodes or when the
@@ -127,6 +178,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         productionYear: Int? = nil,
         officialRating: String? = nil,
         genres: [String] = [],
+        people: [MediaPerson] = [],
+        studios: [String] = [],
+        tags: [String] = [],
+        taglines: [String] = [],
         seriesID: String? = nil,
         seasonID: String? = nil,
         runtime: TimeInterval? = nil,
@@ -155,6 +210,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.productionYear = productionYear
         self.officialRating = officialRating
         self.genres = genres
+        self.people = people
+        self.studios = studios
+        self.tags = tags
+        self.taglines = taglines
         self.seriesID = seriesID
         self.seasonID = seasonID
         self.runtime = runtime
@@ -189,6 +248,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         productionYear = try container.decodeIfPresent(Int.self, forKey: .productionYear)
         officialRating = try container.decodeIfPresent(String.self, forKey: .officialRating)
         genres = try container.decodeIfPresent([String].self, forKey: .genres) ?? []
+        people = try container.decodeIfPresent([MediaPerson].self, forKey: .people) ?? []
+        studios = try container.decodeIfPresent([String].self, forKey: .studios) ?? []
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        taglines = try container.decodeIfPresent([String].self, forKey: .taglines) ?? []
         seriesID = try container.decodeIfPresent(String.self, forKey: .seriesID)
         seasonID = try container.decodeIfPresent(String.self, forKey: .seasonID)
         runtime = try container.decodeIfPresent(TimeInterval.self, forKey: .runtime)
@@ -224,6 +287,16 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         if let parentTitle { return parentTitle }
         if let productionYear { return String(productionYear) }
         return nil
+    }
+
+    /// On-screen / voice talent, in billing order (crew filtered out).
+    public var cast: [MediaPerson] {
+        people.filter(\.isCast)
+    }
+
+    /// The first marketing tagline, when present.
+    public var tagline: String? {
+        taglines.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 }
 

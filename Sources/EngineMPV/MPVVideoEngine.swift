@@ -1,6 +1,9 @@
 #if canImport(Libmpv) && canImport(UIKit)
 import Foundation
 import UIKit
+import AVKit
+import CoreMedia
+import os
 import CoreModels
 import FeaturePlayback
 import Libmpv
@@ -87,6 +90,25 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     /// are gone.
     private var wakeupCtx: UnsafeMutableRawPointer?
 
+    /// What the HDR path realized for the current stream (for diagnostics). Read
+    /// it after `load()` to see the targeted mode, the surface format/colorspace,
+    /// and whether a display-mode switch was requested/allowed.
+    public private(set) var hdrStatus = MPVHDRStatus()
+
+    /// A pending HDR display-mode switch awaiting a live `UIWindow`. Applied as
+    /// soon as the output view is in a window; `nil` for SDR content.
+    private var pendingDisplayCriteria: AVDisplayCriteria?
+    /// Whether we currently hold an applied `preferredDisplayCriteria` that must
+    /// be cleared on teardown so the TV isn't left stuck in a forced mode.
+    private var didApplyDisplayCriteria = false
+    /// The display manager we set `preferredDisplayCriteria` on. Captured at apply
+    /// time so we can always clear on the *same* manager even if the output view
+    /// has since left its window (otherwise the switch would leak and strand the
+    /// TV in a forced mode). Weak so a dead window isn't kept alive by us.
+    private weak var appliedDisplayManager: AVDisplayManager?
+
+    private let log = Logger(subsystem: "com.thatcube.Plozz", category: "EngineMPV")
+
     /// Background queue that drains the mpv event loop (kept off the main actor).
     private let eventQueue = DispatchQueue(label: "com.thatcube.Plozz.mpv.events", qos: .userInitiated)
 
@@ -135,6 +157,30 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         client.setOptionString("gpu-context", "moltenvk")
         client.setOptionString("hwdec", "videotoolbox")
         client.setOptionString("video-rotate", "no")
+
+        // HDR: pick the surface colorimetry from the provider's source metadata
+        // and drive libplacebo's output to match. `target-colorspace-hint=yes`
+        // makes mpv hint the target transfer/primaries from the *actual* render
+        // surface, so if MoltenVK can't hand us a 10-bit surface we degrade to
+        // correct SDR (the DoVi/HDR RPU is still parsed + tonemapped by
+        // libplacebo) instead of failing or going black.
+        let hdrMode = MPVHDR.mode(from: request.sourceMetadata?.video)
+        metalLayer.configure(for: hdrMode)
+        client.setOptionString("target-colorspace-hint", "yes")
+        if let trc = MPVHDR.mpvTargetTRC(for: hdrMode) {
+            // For HDR content also state the target transfer / primaries
+            // explicitly so libplacebo emits PQ/HLG BT.2020 onto the HDR surface
+            // configured above. (Harmless no-op for SDR, which leaves these unset.)
+            client.setOptionString("target-trc", trc)
+            client.setOptionString("target-prim", "bt.2020")
+        }
+        // Prepare (but don't yet apply) the tvOS display-mode switch for HDR; it
+        // needs a live UIWindow and is gated to HDR content so SDR never yanks the
+        // TV into HDR. Applied after init / once the view is in a window.
+        pendingDisplayCriteria = MPVHDR.formatDescription(for: hdrMode, video: request.sourceMetadata?.video).map {
+            AVDisplayCriteria(refreshRate: Float(request.sourceMetadata?.video?.frameRate ?? 0), formatDescription: $0)
+        }
+
         // Match-OS-language subtitle/audio defaults, harmless when tracks are
         // explicitly selected later by the view model.
         client.setOptionString("subs-match-os-language", "yes")
@@ -158,6 +204,11 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             fail(.unknown("mpv: failed to initialize player"))
             return
         }
+
+        // Apply the HDR display switch now (the view is usually already in a
+        // window during playback); otherwise it lands via `onWindowChange`.
+        applyDisplayCriteriaIfPossible()
+        updateHDRStatus(mode: hdrMode)
 
         // Resume via a per-file `start=` option so playback opens at the right
         // spot without a separate post-load seek.
@@ -197,7 +248,59 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             wakeupCtx = nil
             Unmanaged<MPVVideoEngine>.fromOpaque(ctx).release()
         }
+        // Release any HDR display-mode switch so the TV isn't left stuck in a
+        // forced mode after playback stops.
+        clearDisplayCriteria()
+        pendingDisplayCriteria = nil
+        hdrStatus = MPVHDRStatus()
         lastReportedSecond = -1
+    }
+
+    // MARK: - HDR display-mode switching
+
+    /// Applies the pending HDR `preferredDisplayCriteria` if we have one and the
+    /// output view is in a window. Gated to HDR content (SDR leaves
+    /// `pendingDisplayCriteria` nil), so SDR playback never switches the display.
+    private func applyDisplayCriteriaIfPossible() {
+        guard let criteria = pendingDisplayCriteria,
+              let manager = outputView?.window?.avDisplayManager else { return }
+        manager.preferredDisplayCriteria = criteria
+        appliedDisplayManager = manager
+        didApplyDisplayCriteria = true
+        log.info("HDR: requested display-mode switch (matchingEnabled=\(manager.isDisplayCriteriaMatchingEnabled, privacy: .public))")
+    }
+
+    /// Clears our `preferredDisplayCriteria` (passing `nil` returns the display to
+    /// a mode suitable for mixed/UI content). Only touches the manager if we
+    /// actually applied a switch. Clears via the *captured* manager so it still
+    /// works after the output view has left its window — otherwise the forced
+    /// mode would leak and strand the TV.
+    private func clearDisplayCriteria() {
+        guard didApplyDisplayCriteria else { return }
+        guard let manager = appliedDisplayManager ?? outputView?.window?.avDisplayManager else {
+            // No handle to the manager (window torn down before we captured it).
+            // Nothing reachable to clear; drop our state so we don't loop.
+            log.error("HDR: could not clear display criteria — manager unreachable")
+            appliedDisplayManager = nil
+            didApplyDisplayCriteria = false
+            return
+        }
+        manager.preferredDisplayCriteria = nil
+        appliedDisplayManager = nil
+        didApplyDisplayCriteria = false
+    }
+
+    /// Snapshots the realized HDR state for diagnostics and logs it.
+    private func updateHDRStatus(mode: MPVHDRMode) {
+        let info = metalLayer.realizedColorInfo
+        let matchingEnabled = outputView?.window?.avDisplayManager.isDisplayCriteriaMatchingEnabled ?? false
+        hdrStatus = MPVHDRStatus(
+            requestedMode: mode.rawValue,
+            layerPixelFormat: info.pixelFormat,
+            layerColorspace: info.colorspace,
+            displaySwitchRequested: didApplyDisplayCriteria,
+            displayMatchingEnabled: matchingEnabled)
+        log.info("HDR status mode=\(mode.rawValue, privacy: .public) surface=\(info.pixelFormat, privacy: .public) colorspace=\(info.colorspace ?? "nil", privacy: .public) switchRequested=\(self.didApplyDisplayCriteria, privacy: .public) matchingEnabled=\(matchingEnabled, privacy: .public)")
     }
 
     // MARK: - Seeking
@@ -252,6 +355,19 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     public func makeVideoOutputView() -> UIView {
         if let outputView { return outputView }
         let view = MPVRenderView(metalLayer: metalLayer)
+        view.onWindowChange = { [weak self] window in
+            guard let self else { return }
+            // Once we're in a window, apply any pending HDR switch (covers the
+            // case where load() ran before the view was in a hierarchy).
+            if window != nil {
+                self.applyDisplayCriteriaIfPossible()
+            } else {
+                // The view is leaving its window. If a switch is currently
+                // applied, clear it now while the manager is still reachable so
+                // the TV isn't stranded in a forced mode after dismissal.
+                self.clearDisplayCriteria()
+            }
+        }
         outputView = view
         return view
     }

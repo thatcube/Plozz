@@ -19,6 +19,24 @@ final class MPVMetalLayer: CAMetalLayer {
             }
         }
     }
+
+    /// Applies the colorimetry for `mode` to this surface, to be called *before*
+    /// mpv (re)creates its MoltenVK swapchain on the next `load()`. On tvOS HDR is
+    /// expressed purely through the drawable format + BT.2020 PQ/HLG colorspace
+    /// (there is no `wantsExtendedDynamicRangeContent`); the actual HDR display
+    /// switch is driven separately via `AVDisplayManager`.
+    func configure(for mode: MPVHDRMode) {
+        pixelFormat = MPVHDR.metalPixelFormat(for: mode)
+        colorspace = MPVHDR.colorspace(for: mode)
+    }
+
+    /// The format/colorspace the layer actually holds, for diagnostics. Note this
+    /// reflects what we *requested*; if MoltenVK overrides the swapchain format
+    /// the realized drawable may differ — libplacebo still adapts (via
+    /// `target-colorspace-hint`) and degrades to correct SDR rather than failing.
+    var realizedColorInfo: (pixelFormat: String, colorspace: String?) {
+        (pixelFormat.debugName, colorspace?.name as String?)
+    }
 }
 
 /// The engine's **bare** video-output surface: a plain `UIView` that hosts the
@@ -33,6 +51,11 @@ final class MPVMetalLayer: CAMetalLayer {
 final class MPVRenderView: UIView {
     private let metalLayer: MPVMetalLayer
 
+    /// Invoked whenever the view's `window` changes (including `nil` on removal).
+    /// The engine uses this to apply / clear the HDR display-mode switch, which
+    /// requires a live `UIWindow` (`avDisplayManager`).
+    var onWindowChange: (@MainActor (UIWindow?) -> Void)?
+
     init(metalLayer: MPVMetalLayer) {
         self.metalLayer = metalLayer
         super.init(frame: .zero)
@@ -45,6 +68,11 @@ final class MPVRenderView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onWindowChange?(window)
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()

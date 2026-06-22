@@ -72,6 +72,8 @@ struct SeriesDetailView: View {
             }
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }
+        // Never clip a focused card's lift, shadow or border.
+        .scrollClipDisabled()
         .task { await prepareInitialSeason() }
     }
 
@@ -88,6 +90,8 @@ struct SeriesDetailView: View {
             // Headroom for the focused chip's lift so it is never clipped.
             .padding(.vertical, 12)
         }
+        // Never clip a focused chip's lift, shadow or border.
+        .scrollClipDisabled()
         .focusScope(seasonBar)
         .onChange(of: focusedSeasonID) { _, newValue in
             guard let id = newValue, let season = seasons.first(where: { $0.id == id }) else { return }

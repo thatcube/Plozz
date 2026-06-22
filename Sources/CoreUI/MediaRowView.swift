@@ -48,7 +48,7 @@ public struct MediaRowView: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 Text(title)
-                    .font(.title2).bold()
+                    .font(.system(size: 32, weight: .bold))
                     .padding(.leading, PlozzTheme.Metrics.screenPadding)
 
                 ScrollViewReader { proxy in
@@ -64,6 +64,9 @@ public struct MediaRowView: View {
                         .padding(.top, 16)
                         .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
                     }
+                    // Let a focused card's lift, drop shadow and border render
+                    // outside the rail's bounds instead of being clipped.
+                    .scrollClipDisabled()
                     .onAppear { applyInitialFocus(using: proxy) }
                     .onChange(of: focusedID) { _, newValue in
                         guard let onFocusChange else { return }

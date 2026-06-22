@@ -61,6 +61,8 @@ public struct LibraryBrowseView: View {
                 }
                 .padding(.top, 24)
             }
+            // Never clip a focused card's lift, shadow or border.
+            .scrollClipDisabled()
         }
         // Browse is a full-screen sub-page: hide the top tab bar so it reads as a
         // dedicated destination with no navigation chrome pinned at the top.

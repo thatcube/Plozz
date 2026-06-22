@@ -71,6 +71,9 @@ struct SeriesDetailView: View {
         }
         // Never clip a focused card's lift, shadow or border.
         .scrollClipDisabled()
+        // Let the hero bleed into the top overscan inset instead of the
+        // ScrollView reserving it as a blank bar above the backdrop.
+        .ignoresSafeArea(.container, edges: .top)
         .task { await prepareInitialSeason() }
     }
 

@@ -79,6 +79,9 @@ public struct ItemDetailView: View {
         }
         // Never clip a focused card's lift, shadow or border.
         .scrollClipDisabled()
+        // Let the hero bleed into the top overscan inset instead of the
+        // ScrollView reserving it as a blank bar above the backdrop.
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     /// For a season opened directly, the episode rail is an ordered list, so we

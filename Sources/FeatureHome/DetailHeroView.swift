@@ -2,6 +2,9 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The top "hero" section of a detail page: a full-bleed backdrop with the
 /// item's title, subtitle, ratings, overview, and an optional Play button.
@@ -23,8 +26,6 @@ struct DetailHeroView: View {
     let playTitle: String?
     let onPlay: (() -> Void)?
 
-    @Environment(\.themePalette) private var palette
-
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
@@ -38,19 +39,35 @@ struct DetailHeroView: View {
             ) {
                 Rectangle().fill(.tertiary)
             }
-            .frame(height: 720)
+            .frame(height: Self.heroHeight)
             .frame(maxWidth: .infinity)
             .clipped()
             .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
             .overlay(
-                // Fade the backdrop down into the app's own background colour so
-                // the hero reads as full-bleed and dissolves seamlessly into the
-                // page right where the season tabs begin — no hard seam.
+                // Legibility scrim: darken the lower image so the title/overview
+                // read clearly. It lives *under* the mask below, so it dissolves
+                // away with the image and never tints the revealed background.
                 LinearGradient(
                     stops: [
                         .init(color: .clear, location: 0.0),
-                        .init(color: palette.backgroundBase.opacity(0.55), location: 0.6),
-                        .init(color: palette.backgroundBase, location: 1.0)
+                        .init(color: .clear, location: 0.5),
+                        .init(color: .black.opacity(0.7), location: 1.0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            // Dissolve the backdrop's own alpha to transparent over the lower
+            // portion (top third stays a clean image) so the real `AppBackground`
+            // shows straight through. Because that is the *same* fixed surface the
+            // content below sits on, the transition is perfectly seamless — there
+            // is no second colour to mismatch, so no hard line ever appears.
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .white, location: 0.0),
+                        .init(color: .white, location: 0.33),
+                        .init(color: .clear, location: 1.0)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -111,6 +128,17 @@ struct DetailHeroView: View {
     private func titleText(hideText: Bool) -> some View {
         Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
             .font(.system(size: 64, weight: .bold))
+    }
+
+    /// Full-screen height for the backdrop so the hero reads as a cinematic,
+    /// edge-to-edge image rather than a fixed-height banner. Falls back to a
+    /// 1080p constant where UIKit isn't available (non-Apple toolchains/tests).
+    private static var heroHeight: CGFloat {
+        #if canImport(UIKit)
+        return UIScreen.main.bounds.height
+        #else
+        return 1080
+        #endif
     }
 
     /// Last-resort title art for the hero: look the show/movie up on TMDb and use

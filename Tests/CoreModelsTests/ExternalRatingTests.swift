@@ -50,11 +50,13 @@ final class ExternalRatingTests: XCTestCase {
 
     // MARK: Iconography & freshness
 
-    func testGlyphs() {
-        XCTAssertEqual(RatingSource.rottenTomatoes.glyph, "🍅")
-        XCTAssertEqual(RatingSource.rottenTomatoesAudience.glyph, "🍿")
-        XCTAssertEqual(RatingSource.imdb.glyph, "⭐️")
-        XCTAssertNil(RatingSource.metacritic.glyph)
+    func testIcons() {
+        XCTAssertEqual(RatingSource.rottenTomatoes.icon, .tomato)
+        XCTAssertEqual(RatingSource.critic.icon, .tomato)
+        XCTAssertEqual(RatingSource.rottenTomatoesAudience.icon, .popcorn)
+        XCTAssertEqual(RatingSource.imdb.icon, .star)
+        XCTAssertEqual(RatingSource.community.icon, .star)
+        XCTAssertEqual(RatingSource.metacritic.icon, .metacritic)
     }
 
     func testFreshnessFreshAtThreshold() {

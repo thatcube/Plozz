@@ -51,17 +51,16 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         }
     }
 
-    /// A compact icon glyph for the badge, mirroring the source's real-world
-    /// branding: the Rotten Tomatoes critic score is a tomato, its audience score
-    /// is a popcorn bucket, and user/community scores are a star. `nil` sources
-    /// fall back to their wordmark (`displayName`). Kept here (not in the UI
-    /// layer) so the choice is one provider-agnostic, testable decision.
-    public var glyph: String? {
+    /// The kind of icon a badge should render for this source, mirroring its
+    /// real-world branding. Kept here (not in the UI layer) so the choice is one
+    /// provider-agnostic, testable decision; the UI maps each case to a symbol,
+    /// emoji, or chip.
+    public var icon: RatingIcon {
         switch self {
-        case .rottenTomatoes, .critic: return "🍅"
-        case .rottenTomatoesAudience: return "🍿"
-        case .imdb, .tmdb, .community, .letterboxd: return "⭐️"
-        case .metacritic: return nil
+        case .rottenTomatoes, .critic: return .tomato
+        case .rottenTomatoesAudience: return .popcorn
+        case .imdb, .tmdb, .community, .letterboxd: return .star
+        case .metacritic: return .metacritic
         }
     }
 
@@ -81,6 +80,20 @@ public enum RatingFreshness: String, Sendable, Hashable {
     case rotten
     /// Not a freshness-bearing source (e.g. IMDb, Metacritic, user scores).
     case none
+}
+
+/// The visual treatment for a rating source's icon. The UI maps each case to a
+/// concrete symbol/emoji/chip; keeping it as an enum lets the choice be unit
+/// tested without importing SwiftUI.
+public enum RatingIcon: String, Sendable, Hashable {
+    /// A filled star — user/community/aggregate scores (IMDb, TMDB, …).
+    case star
+    /// Rotten Tomatoes critic "Tomatometer".
+    case tomato
+    /// Rotten Tomatoes audience score.
+    case popcorn
+    /// Metacritic's coloured Metascore chip.
+    case metacritic
 }
 
 /// The native scale a raw rating value is expressed in.

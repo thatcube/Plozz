@@ -13,7 +13,7 @@ public struct RatingsBadgeRow: View {
 
     public var body: some View {
         if !ratings.isEmpty {
-            HStack(spacing: 28) {
+            HStack(spacing: 22) {
                 ForEach(ratings) { rating in
                     RatingBadge(rating: rating)
                 }
@@ -22,23 +22,26 @@ public struct RatingsBadgeRow: View {
     }
 }
 
-/// A single source's rating: a branded icon (🍅 tomato for Rotten Tomatoes, 🍿
-/// popcorn for its audience score, ⭐️ for user scores, or a coloured Metacritic
-/// chip) beside the formatted score. Rotten Tomatoes scores tint red when fresh
-/// and green when rotten, mirroring the real badges.
+/// A single source's rating: a compact branded icon (a filled star for
+/// user/community scores, a tomato/popcorn for Rotten Tomatoes, or a coloured
+/// Metacritic chip) beside the formatted score. Rotten Tomatoes scores tint red
+/// when fresh and green when rotten, mirroring the real badges.
 public struct RatingBadge: View {
     private let rating: ExternalRating
+
+    /// Shared type scale so the icon and score line up to a compact cap height.
+    private static let valueFont = Font.system(size: 22, weight: .semibold)
+    private static let iconSize: CGFloat = 24
 
     public init(rating: ExternalRating) {
         self.rating = rating
     }
 
     public var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             icon
             Text(rating.displayValue)
-                .font(.title3)
-                .fontWeight(.bold)
+                .font(Self.valueFont)
                 .monospacedDigit()
                 .foregroundStyle(valueColor)
         }
@@ -46,32 +49,37 @@ public struct RatingBadge: View {
         .accessibilityLabel("\(rating.source.displayName) rating \(rating.displayValue)")
     }
 
-    /// The leading icon: the source glyph when it has one, a coloured score chip
-    /// for Metacritic, otherwise the source wordmark.
     @ViewBuilder
     private var icon: some View {
-        if rating.source == .metacritic {
+        switch rating.source.icon {
+        case .star:
+            Image(systemName: "star.fill")
+                .font(.system(size: Self.iconSize * 0.8, weight: .semibold))
+                .foregroundStyle(Self.starGold)
+        case .tomato:
+            emoji("🍅")
+        case .popcorn:
+            emoji("🍿")
+        case .metacritic:
             metacriticChip
-        } else if let glyph = rating.source.glyph {
-            Text(glyph)
-                .font(.title3)
-        } else {
-            Text(rating.source.displayName)
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
         }
+    }
+
+    /// An emoji icon sized to sit on the shared cap height. Emoji ignore
+    /// `foregroundStyle`, so they're only scaled, not tinted.
+    private func emoji(_ value: String) -> some View {
+        Text(value)
+            .font(.system(size: Self.iconSize * 0.82))
     }
 
     /// Metacritic's signature coloured square: green for favourable scores,
     /// yellow for mixed, red for unfavourable.
     private var metacriticChip: some View {
         Text(String(Int(rating.value.rounded())))
-            .font(.callout)
-            .fontWeight(.bold)
+            .font(.system(size: 18, weight: .bold))
             .monospacedDigit()
             .foregroundStyle(.white)
-            .frame(width: 40, height: 40)
+            .frame(width: 34, height: 34)
             .background(metacriticColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
@@ -92,7 +100,8 @@ public struct RatingBadge: View {
         return Self.metacriticRed
     }
 
-    // Rotten Tomatoes / Metacritic brand-ish colours.
+    // Brand-ish colours.
+    private static let starGold = Color(red: 0.96, green: 0.77, blue: 0.13)
     private static let freshRed = Color(red: 0.98, green: 0.27, blue: 0.20)
     private static let rottenGreen = Color(red: 0.18, green: 0.70, blue: 0.40)
     private static let metacriticGreen = Color(red: 0.40, green: 0.73, blue: 0.27)

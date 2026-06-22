@@ -41,6 +41,13 @@ struct DetailHeroView: View {
         return (rating.map { [$0] } ?? []) + item.technicalBadges
     }
 
+    /// External ratings to show. Falls back to the backdrop item (the series)
+    /// when the focused item (an episode) carries none of its own, so a show's
+    /// rating stays visible while scrubbing episodes.
+    private var heroRatings: [ExternalRating] {
+        item.ratings.isEmpty ? backdrop.ratings : item.ratings
+    }
+
     /// True when `subtitle` is just the production year — the richer metadata
     /// line below already opens with the year, so we drop the duplicate.
     private func isYearOnlySubtitle(_ subtitle: String) -> Bool {
@@ -122,21 +129,24 @@ struct DetailHeroView: View {
                 if !featureBadges.isEmpty {
                     MediaBadgeRow(badges: featureBadges)
                 }
-                if !item.ratings.isEmpty {
-                    RatingsBadgeRow(ratings: item.ratings)
+                if !heroRatings.isEmpty {
+                    RatingsBadgeRow(ratings: heroRatings)
                 }
                 if hideText {
                     Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
                         .font(.system(size: 22))
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: 960, alignment: .leading)
+                        .frame(maxWidth: 960, alignment: .topLeading)
                 } else if let overview = item.overview {
                     Text(overview)
                         .font(.system(size: 22))
                         .foregroundStyle(.secondary)
                         .lineSpacing(2)
-                        .lineLimit(3)
-                        .frame(maxWidth: 960, alignment: .leading)
+                        // Reserve three lines of height even when the text is
+                        // shorter, so swapping the focused item never makes the
+                        // controls below jump up and down.
+                        .lineLimit(3, reservesSpace: true)
+                        .frame(maxWidth: 960, alignment: .topLeading)
                 }
                 if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
                     HStack(spacing: 24) {

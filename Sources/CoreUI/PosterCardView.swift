@@ -95,7 +95,7 @@ public struct PosterCardView: View {
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
                 Text(subtitleText ?? " ")
-                    .font(.system(size: 17))
+                    .font(.system(size: 20))
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitleText == nil ? 0 : 1)

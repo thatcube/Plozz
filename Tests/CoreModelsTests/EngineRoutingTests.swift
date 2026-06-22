@@ -243,4 +243,66 @@ final class EngineRoutingTests: XCTestCase {
         let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "aac")
         XCTAssertEqual(route(mp4), .native)
     }
+
+    // MARK: - HEVC Range Extensions (4:2:2 / 4:4:4 / 12-bit)
+
+    func testHEVC422IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hvc1",
+                         videoProfile: "Main 4:2:2 10", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testHEVC444IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hvc1",
+                         videoProfile: "Main 4:4:4", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testHEVC12BitIsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hvc1",
+                         videoBitDepth: 12, videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testHEVCMain10StaysNative() {
+        // Main 10 (4:2:0 10-bit) is HW-decodable and the basis of HDR — must stay native.
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hvc1",
+                         videoProfile: "Main 10", videoBitDepth: 10, videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    // MARK: - Additional incompatible video codecs
+
+    func testVP9IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "vp9", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testTheoraIsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "theora", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testRealVideoIsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "rv40", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testMPEG4Part2StaysNative() {
+        // MPEG-4 Part 2 is AVFoundation-decodable and advertised as direct-play.
+        let mp4 = source(container: "mp4", videoCodec: "mpeg4", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    // MARK: - WMA audio
+
+    func testWMAProAudioInMP4IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "wmapro")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testWMAV2AudioInMP4IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "wmav2")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
 }

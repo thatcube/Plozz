@@ -14,6 +14,7 @@ public struct PlozzGlassCardModifier: ViewModifier {
     private let isFocused: Bool
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.themePalette) private var palette
 
     public init(cornerRadius: CGFloat, isFocused: Bool) {
         self.cornerRadius = cornerRadius
@@ -37,20 +38,24 @@ public struct PlozzGlassCardModifier: ViewModifier {
                     )
                 }
                 .clipShape(shape)
-        } else if #available(tvOS 26.0, *) {
-            content
-                .glassEffect(
-                    isFocused ? .regular.tint(.white.opacity(0.12)) : .regular,
-                    in: .rect(cornerRadius: cornerRadius)
-                )
-                .clipShape(shape)
         } else {
+            // Subtle, theme-tinted translucent surface (matches Twozz). The card
+            // picks up a faint wash of the active theme's own card colour — never
+            // a stark frosted-white panel — and deepens with a whisper of the
+            // brand accent on focus. Colours come from the resolved palette, so
+            // the tint tracks whichever theme (dark / OLED / light) is selected.
             content
                 .background {
-                    shape.fill(isFocused ? Color.primary.opacity(0.16) : Color.primary.opacity(0.07))
+                    shape.fill(palette.cardSurface.opacity(isFocused ? 0.85 : 0.5))
                 }
                 .overlay {
-                    shape.strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                    shape.fill(palette.accent.opacity(isFocused ? 0.12 : 0))
+                }
+                .overlay {
+                    shape.strokeBorder(
+                        palette.cardBorder.opacity(isFocused ? 1.0 : 0.55),
+                        lineWidth: 1
+                    )
                 }
                 .clipShape(shape)
         }

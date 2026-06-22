@@ -64,9 +64,16 @@ public struct CaptionSettingsCard: View {
             }
 
             labeledRow("Subtitle language") {
-                OptionCardRow(options: languageOptions, selection: languageSelection) { code in
-                    optionLabel(languageName(for: code))
+                Menu {
+                    Picker("Subtitle language", selection: languageSelection) {
+                        ForEach(languageOptions, id: \.self) { code in
+                            Text(languageName(for: code)).tag(code)
+                        }
+                    }
+                } label: {
+                    Label(languageName(for: languageSelection.wrappedValue), systemImage: "globe")
                 }
+                .menuStyle(.button)
             }
         }
     }

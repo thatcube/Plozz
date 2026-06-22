@@ -57,28 +57,37 @@ public struct PosterCardView: View {
 
     private var posterCard: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 artwork
-                    .frame(width: size.width, height: size.height)
+                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
                     .overlay(alignment: .bottom) { progressBar(height: 8) }
-                    .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
+                    .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primaryText)
                         .font(.headline)
                         .lineLimit(1)
-                    if let subtitle = subtitleText {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                    Text(subtitleText ?? " ")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .opacity(subtitleText == nil ? 0 : 1)
                 }
-                .frame(width: size.width, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+                .padding(.bottom, 4)
             }
+            .padding(10)
         }
-        // Native tvOS card styling gives the focus "lift"/parallax for free.
-        .buttonStyle(.card)
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, isFocused: isFocused)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .scaleEffect(isFocused ? PlozzTheme.Metrics.focusedCardScale : 1)
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 
     // MARK: Landscape (medium) card

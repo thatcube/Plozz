@@ -80,6 +80,10 @@ public final class NativeVideoEngine: VideoEngine {
     /// Detects an item that decodes audio but renders **no video frames** (e.g.
     /// HEVC AVPlayer can't display) so we can swap to the on-device engine.
     @ObservationIgnored private var missingVideoProbeTask: Task<Void, Never>?
+    /// Inspects the real container video format the moment it loads (concurrently
+    /// with playback start) so a known AVPlayer-hostile codec can swap instantly
+    /// instead of waiting out the no-frames probe.
+    @ObservationIgnored private var formatInspectTask: Task<Void, Never>?
     @ObservationIgnored private var audioSessionConfigured = false
     /// Retains the resource-loader delegate that serves injected subtitle
     /// playlists; `AVAssetResourceLoader` holds it only weakly.
@@ -154,6 +158,11 @@ public final class NativeVideoEngine: VideoEngine {
         // Watch for an item that plays audio but renders no video (e.g. an HEVC
         // stream AVPlayer can't display) so we can swap to the on-device engine.
         monitorForMissingVideo(item: item, request: request)
+
+        // Inspect the *real* container video format as soon as it loads (in
+        // parallel — adds no startup delay) so a known AVPlayer-hostile codec can
+        // swap to the on-device engine near-instantly, before the no-frames probe.
+        inspectVideoFormat(asset: asset, request: request)
 
         installTimeObserver(on: player)
         status = .ready
@@ -348,7 +357,64 @@ public final class NativeVideoEngine: VideoEngine {
         return .unknown("")
     }
 
-    /// Detects the "audio plays, black screen" failure: AVPlayer reports success
+    /// Reads the actual codec FourCC from the asset's video track format
+    /// description (`hvc1`/`hev1`/`avc1`/…) and, if it's one AVPlayer can't
+    /// reliably render, swaps to the on-device engine immediately. Runs
+    /// concurrently with playback start so it adds **no startup delay**: the
+    /// happy path keeps playing while this resolves (typically sub-second, before
+    /// the first frame paints), and a hostile codec swaps near-instantly rather
+    /// than after the slower no-frames probe.
+    ///
+    /// This asks the container itself rather than trusting server metadata (which
+    /// for some files reports no codec tag at all). Scoped to **SDR** so the
+    /// validated AVPlayer Dolby Vision/HDR path is left untouched.
+    private func inspectVideoFormat(asset: AVAsset, request: PlaybackRequest) {
+        formatInspectTask?.cancel()
+        guard request.sourceMetadata?.video != nil else { return }
+        guard HDRDisplayMode(request.sourceMetadata) == .sdr else { return }
+
+        formatInspectTask = Task { [weak self] in
+            guard let fourCC = await Self.firstVideoCodecFourCC(of: asset) else { return }
+            guard let self, !Task.isCancelled else { return }
+            PlozzLog.playback.info("Direct-play video codec FourCC: \(fourCC)")
+            guard Self.isAVPlayerHostileVideoFourCC(fourCC) else { return }
+            PlozzLog.playback.info("FourCC \(fourCC) is not reliably rendered by AVPlayer; swapping to the on-device engine")
+            self.onFailure?(.invalidResponse)
+        }
+    }
+
+    /// Loads the first video track's codec FourCC from the container, or nil.
+    private static func firstVideoCodecFourCC(of asset: AVAsset) async -> String? {
+        do {
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            guard let track = tracks.first else { return nil }
+            let formats = try await track.load(.formatDescriptions)
+            guard let format = formats.first else { return nil }
+            return fourCCString(CMFormatDescriptionGetMediaSubType(format))
+        } catch {
+            return nil
+        }
+    }
+
+    /// HEVC tagged `hev1` (in-band parameter sets) in an MP4-family container
+    /// plays audio with a black screen on AVPlayer/VideoToolbox. `hvc1`/`avc1`
+    /// are fine. (DoVi is excluded upstream via the SDR gate.)
+    private static func isAVPlayerHostileVideoFourCC(_ fourCC: String) -> Bool {
+        fourCC.lowercased() == "hev1"
+    }
+
+    private static func fourCCString(_ code: FourCharCode) -> String {
+        let bytes = [
+            UInt8((code >> 24) & 0xFF),
+            UInt8((code >> 16) & 0xFF),
+            UInt8((code >> 8) & 0xFF),
+            UInt8(code & 0xFF)
+        ]
+        let scalars = bytes.map { Character(UnicodeScalar($0)) }
+        return String(scalars).trimmingCharacters(in: .whitespaces)
+    }
+
+
     /// and decodes audio, but **no video frame ever decodes** (e.g. an HEVC stream
     /// tagged `hev1`, or a profile VideoToolbox rejects). Because AVPlayer never
     /// errors, the normal failure path never fires — so we attach a lightweight
@@ -416,6 +482,8 @@ public final class NativeVideoEngine: VideoEngine {
         fallbackMonitorTask = nil
         missingVideoProbeTask?.cancel()
         missingVideoProbeTask = nil
+        formatInspectTask?.cancel()
+        formatInspectTask = nil
         subtitleLoader = nil
         if let timeObserver, let player {
             player.removeTimeObserver(timeObserver)

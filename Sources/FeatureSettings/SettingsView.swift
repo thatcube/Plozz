@@ -142,7 +142,7 @@ public struct SettingsView: View {
             title: accounts.count == 1 ? "Account" : "Accounts",
             footer: "Add another Jellyfin or Plex server to combine their libraries on Home."
         ) {
-            VStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(accounts) { account in
                     accountRow(account)
                 }
@@ -155,31 +155,36 @@ public struct SettingsView: View {
     }
 
     private func accountRow(_ account: Account) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(account.userName).font(.headline)
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(account.userName).font(.headline)
+                HStack(spacing: 6) {
                     Text(account.server.name)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text(account.server.baseURL.absoluteString)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("·")
+                    Text(account.server.provider.displayName)
+                    Text("·")
+                    Text(account.server.baseURL.host ?? account.server.baseURL.absoluteString)
+                        .truncationMode(.middle)
                 }
-                Spacer()
-                if account.id == activeAccountID {
-                    Label("Active", systemImage: "checkmark.circle.fill")
-                        .labelStyle(.iconOnly)
-                        .foregroundStyle(.green)
-                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if account.id == activeAccountID {
+                Label("Active", systemImage: "checkmark.circle.fill")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(.green)
             }
             Button(role: .destructive) {
                 onRemoveAccount(account)
             } label: {
-                Label("Remove", systemImage: "trash")
+                Image(systemName: "trash")
             }
+            .accessibilityLabel("Remove \(account.userName)")
         }
-        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
     }
 
     // MARK: - Home libraries
@@ -368,9 +373,9 @@ private struct SettingsPanel<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(title)
-                .font(.title2.weight(.bold))
+                .font(.headline.weight(.semibold))
             content
             if let footer {
                 Text(footer)
@@ -380,7 +385,7 @@ private struct SettingsPanel<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(36)
+        .padding(28)
         .background(
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)

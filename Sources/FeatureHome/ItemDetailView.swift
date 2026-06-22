@@ -69,6 +69,8 @@ public struct ItemDetailView: View {
             }
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }
+        // Never clip a focused card's lift, shadow or border.
+        .scrollClipDisabled()
     }
 
     private func isPlayable(_ item: MediaItem) -> Bool {

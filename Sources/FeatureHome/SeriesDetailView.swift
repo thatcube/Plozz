@@ -68,6 +68,8 @@ struct SeriesDetailView: View {
             }
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }
+        // Never clip a focused card's lift, shadow or border.
+        .scrollClipDisabled()
         .task { await prepareInitialSeason() }
     }
 
@@ -84,6 +86,8 @@ struct SeriesDetailView: View {
             // Headroom for the focused chip's lift so it is never clipped.
             .padding(.vertical, 12)
         }
+        // Never clip a focused chip's lift, shadow or border.
+        .scrollClipDisabled()
         // Treat the whole tab bar as one focus section so pressing "up" from any
         // episode — even when the rail is scrolled far to the right and no tab
         // sits directly above — reliably enters the bar and lands on the season

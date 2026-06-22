@@ -163,6 +163,8 @@ struct NowPlayingView: View {
                         }
                     }
                 }
+                // Never clip a focused row's lift, shadow or border.
+                .scrollClipDisabled()
             }
         }
     }

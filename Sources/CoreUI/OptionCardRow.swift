@@ -40,6 +40,8 @@ public struct OptionCardRow<Option: Hashable, Label: View>: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 16)
         }
+        // Never clip a focused card's lift, shadow or border.
+        .scrollClipDisabled()
     }
 }
 

@@ -25,18 +25,27 @@ public final class PlaybackDiagnosticsSampler {
     public private(set) var latest: PlaybackDiagnostics?
 
     private weak var player: AVPlayer?
-    /// Immutable per-stream facts (codec/HDR/fps/mode/container) merged into
-    /// every dynamic sample.
+    /// Immutable per-stream facts (codec/HDR/fps/mode/container/device) merged
+    /// into every dynamic sample.
     private var staticDiagnostics = PlaybackDiagnostics()
     private var timerTask: Task<Void, Never>?
 
     public init() {}
 
     /// Begins sampling `player`. Idempotent — restarts cleanly if called again.
-    public func start(player: AVPlayer, isTranscoding: Bool) {
+    ///
+    /// - Parameters:
+    ///   - player: the active player to sample.
+    ///   - isTranscoding: whether the server is transcoding (vs direct play).
+    ///   - metadata: provider source facts (codec/HDR/channels/…). These are the
+    ///     authoritative baseline; the transcoded asset itself exposes little,
+    ///     so this is what makes the overlay match a direct-play client.
+    public func start(player: AVPlayer, isTranscoding: Bool, metadata: MediaSourceMetadata? = nil) {
         stop()
         self.player = player
-        staticDiagnostics = PlaybackDiagnostics(mode: isTranscoding ? .transcode : .directPlay)
+        var base = PlaybackDiagnostics.base(from: metadata, mode: isTranscoding ? .transcode : .directPlay)
+        Self.fillDeviceInfo(into: &base)
+        staticDiagnostics = base
         latest = staticDiagnostics
 
         Task { await loadStaticInfo() }
@@ -61,9 +70,13 @@ public final class PlaybackDiagnosticsSampler {
         guard let item = player?.currentItem else { return }
         var diagnostics = staticDiagnostics
 
-        let size = item.presentationSize
-        if size.width > 0, size.height > 0 {
-            diagnostics.resolution = .init(width: Int(size.width.rounded()), height: Int(size.height.rounded()))
+        // Source metadata resolution wins; only fall back to the rendered
+        // presentation size when the provider didn't report dimensions.
+        if diagnostics.resolution == nil {
+            let size = item.presentationSize
+            if size.width > 0, size.height > 0 {
+                diagnostics.resolution = .init(width: Int(size.width.rounded()), height: Int(size.height.rounded()))
+            }
         }
 
         if let event = item.accessLog()?.events.last {
@@ -100,7 +113,7 @@ public final class PlaybackDiagnosticsSampler {
         guard let asset = player?.currentItem?.asset else { return }
         var info = staticDiagnostics
 
-        if let urlAsset = asset as? AVURLAsset {
+        if info.container == nil, let urlAsset = asset as? AVURLAsset {
             let ext = urlAsset.url.pathExtension
             if !ext.isEmpty { info.container = ext.uppercased() }
         }
@@ -112,25 +125,75 @@ public final class PlaybackDiagnosticsSampler {
                     desc,
                     extensionKey: kCMFormatDescriptionExtension_TransferFunction
                 ) as? String
-                info.videoCodec = PlaybackDiagnostics.friendlyCodecName(codec)
-                info.hdr = PlaybackDiagnostics.classifyHDR(videoCodec: codec, transferFunction: transfer)
+                // Provider source facts are authoritative; only fill from the
+                // (possibly transcoded) asset when the provider gave us nothing.
+                if info.videoCodec == nil {
+                    info.videoCodec = PlaybackDiagnostics.friendlyCodecName(codec)
+                }
+                if info.hdr == .unknown {
+                    info.hdr = PlaybackDiagnostics.classifyHDR(videoCodec: codec, transferFunction: transfer)
+                }
             }
-            if let fps = try? await videoTrack.load(.nominalFrameRate), fps > 0 {
+            if info.frameRate == nil, let fps = try? await videoTrack.load(.nominalFrameRate), fps > 0 {
                 info.frameRate = Double(fps)
             }
-            if let size = try? await videoTrack.load(.naturalSize), size.width > 0, size.height > 0,
-               info.resolution == nil {
+            if info.resolution == nil,
+               let size = try? await videoTrack.load(.naturalSize), size.width > 0, size.height > 0 {
                 info.resolution = .init(width: Int(size.width.rounded()), height: Int(size.height.rounded()))
             }
         }
 
-        if let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first,
+        if info.audioCodec == nil,
+           let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first,
            let descriptions = try? await audioTrack.load(.formatDescriptions), let desc = descriptions.first {
             let codec = Self.fourCCString(CMFormatDescriptionGetMediaSubType(desc))
             info.audioCodec = PlaybackDiagnostics.friendlyCodecName(codec)
         }
 
         staticDiagnostics = info
+    }
+
+    // MARK: Device / disk facts (queried once)
+
+    /// Populates the device model, physical memory, and free/total disk space.
+    private static func fillDeviceInfo(into diagnostics: inout PlaybackDiagnostics) {
+        diagnostics.deviceModel = deviceModelName()
+        diagnostics.deviceMemoryBytes = Int64(ProcessInfo.processInfo.physicalMemory)
+
+        if let url = try? FileManager.default.url(
+            for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false
+        ) {
+            let values = try? url.resourceValues(forKeys: [
+                .volumeAvailableCapacityKey,
+                .volumeTotalCapacityKey
+            ])
+            if let free = values?.volumeAvailableCapacity {
+                diagnostics.freeDiskBytes = Int64(free)
+            }
+            if let total = values?.volumeTotalCapacity {
+                diagnostics.totalDiskBytes = Int64(total)
+            }
+        }
+    }
+
+    /// Friendly Apple TV model name from the hardware identifier (e.g.
+    /// `AppleTV14,1` → `Apple TV 4K (3rd gen)`).
+    private static func deviceModelName() -> String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let identifier = withUnsafeBytes(of: &systemInfo.machine) { raw -> String in
+            let bytes = raw.prefix { $0 != 0 }
+            return String(decoding: bytes, as: UTF8.self)
+        }
+        switch identifier {
+        case "AppleTV5,3": return "Apple TV HD"
+        case "AppleTV6,2": return "Apple TV 4K"
+        case "AppleTV11,1": return "Apple TV 4K (2nd gen)"
+        case "AppleTV14,1": return "Apple TV 4K (3rd gen)"
+        default:
+            // Simulators report e.g. "arm64"/"x86_64"; show something sensible.
+            return identifier.isEmpty || identifier.contains("64") ? "Apple TV" : identifier
+        }
     }
 
     /// Renders a CoreMedia FourCC code as its ASCII tag (e.g. `hvc1`).

@@ -136,10 +136,24 @@ struct MediaStreamDto: Decodable {
     let Index: Int
     let `Type`: String       // "Audio", "Subtitle", "Video"
     let Codec: String?
+    let Profile: String?
     let Language: String?
     let DisplayTitle: String?
     let IsDefault: Bool?
     let IsForced: Bool?
+    // Video facts
+    let Width: Int?
+    let Height: Int?
+    let BitRate: Int?
+    let RealFrameRate: Double?
+    let AverageFrameRate: Double?
+    let VideoRange: String?
+    let VideoRangeType: String?
+    let ColorTransfer: String?
+    // Audio facts
+    let Channels: Int?
+    let SampleRate: Int?
+    let ChannelLayout: String?
 }
 
 /// One result from `GET /Items/{id}/RemoteSearch/Subtitles/{language}`.

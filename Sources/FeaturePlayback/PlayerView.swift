@@ -16,10 +16,12 @@ public struct PlayerView: View {
     @State private var diagnosticsSampler = PlaybackDiagnosticsSampler()
     @Environment(\.dismiss) private var dismiss
     private let showDiagnostics: Bool
+    private let themePalette: ThemePalette
 
-    public init(viewModel: PlayerViewModel, showDiagnostics: Bool = false) {
+    public init(viewModel: PlayerViewModel, showDiagnostics: Bool = false, themePalette: ThemePalette = .dark) {
         _viewModel = State(initialValue: viewModel)
         self.showDiagnostics = showDiagnostics
+        self.themePalette = themePalette
     }
 
     public var body: some View {
@@ -45,6 +47,7 @@ public struct PlayerView: View {
         .overlay(alignment: .topLeading) {
             if showDiagnostics, case .ready = viewModel.phase {
                 PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
+                    .environment(\.themePalette, themePalette)
                     .allowsHitTesting(false)
                     .transition(.opacity)
             }
@@ -52,12 +55,20 @@ public struct PlayerView: View {
         .task {
             await viewModel.load()
             if showDiagnostics, let player = viewModel.player {
-                diagnosticsSampler.start(player: player, isTranscoding: viewModel.isTranscoding)
+                diagnosticsSampler.start(
+                    player: player,
+                    isTranscoding: viewModel.isTranscoding,
+                    metadata: viewModel.sourceMetadata
+                )
             }
         }
         .onChange(of: showDiagnostics) { _, enabled in
             if enabled, let player = viewModel.player {
-                diagnosticsSampler.start(player: player, isTranscoding: viewModel.isTranscoding)
+                diagnosticsSampler.start(
+                    player: player,
+                    isTranscoding: viewModel.isTranscoding,
+                    metadata: viewModel.sourceMetadata
+                )
             } else {
                 diagnosticsSampler.stop()
             }

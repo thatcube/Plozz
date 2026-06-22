@@ -40,6 +40,7 @@ struct PlaybackDiagnosticsOverlay: View {
     @ViewBuilder
     private func grid(for d: PlaybackDiagnostics) -> some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 4) {
+            optionalRow("Engine", d.engineName ?? PlaybackDiagnostics.placeholder)
             optionalRow("Container", d.containerText)
             optionalRow("Video", d.videoLineText)
             optionalRow("Audio", d.audioLineText)

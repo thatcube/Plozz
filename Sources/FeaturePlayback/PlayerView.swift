@@ -50,6 +50,9 @@ public struct PlayerView: View {
                         AnyView(PlayerControlsOverlay(model: model, palette: themePalette))
                     })
                 )
+                // Rebuild the host when the engine is swapped (cross-engine
+                // fallback) so it re-hosts the new engine's bare video surface.
+                .id(viewModel.engineToken)
                 .ignoresSafeArea()
 
             case let .failed(error):
@@ -57,7 +60,11 @@ public struct PlayerView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            if showDiagnostics, case .ready = viewModel.phase {
+            // Show diagnostics in every phase (loading / ready / failed), not just
+            // while playing, so the user can see the Engine + Source + codec rows
+            // when a file is stuck loading or has failed — the key signal for
+            // why a particular file won't play.
+            if showDiagnostics {
                 PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
                     .environment(\.themePalette, themePalette)
                     .allowsHitTesting(false)
@@ -66,40 +73,44 @@ public struct PlayerView: View {
         }
         .task {
             await viewModel.load()
-            if showDiagnostics, let player = viewModel.player {
-                diagnosticsSampler.start(
-                    player: player,
-                    isTranscoding: viewModel.isTranscoding,
-                    metadata: viewModel.sourceMetadata
-                )
-            }
+            if showDiagnostics { startSampling() }
         }
         .onChange(of: showDiagnostics) { _, enabled in
-            if enabled, let player = viewModel.player {
-                diagnosticsSampler.start(
-                    player: player,
-                    isTranscoding: viewModel.isTranscoding,
-                    metadata: viewModel.sourceMetadata
-                )
+            if enabled {
+                startSampling()
             } else {
                 diagnosticsSampler.stop()
             }
         }
+        .onChange(of: viewModel.diagnosticsToken) { _, _ in
+            // A request resolved (initial load, cross-engine swap, or transcode
+            // retry) and the engine is committed — seed the overlay with the
+            // engine + source facts now, even before/if load() reaches ready.
+            if showDiagnostics { startSampling() }
+        }
         .onChange(of: viewModel.playerInstanceID) { _, _ in
-            // The transcode fallback swaps in a new player; restart sampling so
-            // diagnostics keep tracking the live stream.
-            if showDiagnostics, let player = viewModel.player {
-                diagnosticsSampler.start(
-                    player: player,
-                    isTranscoding: viewModel.isTranscoding,
-                    metadata: viewModel.sourceMetadata
-                )
-            }
+            // The native engine created its live AVPlayer (initial load or
+            // transcode fallback); restart sampling to pick up live per-tick
+            // metrics now that there's a player to read.
+            if showDiagnostics { startSampling() }
         }
         .onDisappear {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }
         }
+    }
+
+    /// Starts the diagnostics sampler against the active engine. `viewModel.player`
+    /// is the live `AVPlayer` for the native engine and `nil` for VLCKit/mpv — in
+    /// the latter case the sampler publishes the metadata-only baseline plus the
+    /// engine name, so the overlay works on every engine.
+    private func startSampling() {
+        diagnosticsSampler.start(
+            player: viewModel.player,
+            isTranscoding: viewModel.isTranscoding,
+            metadata: viewModel.sourceMetadata,
+            engineName: viewModel.engineDisplayName
+        )
     }
 }
 

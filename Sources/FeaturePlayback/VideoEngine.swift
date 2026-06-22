@@ -61,6 +61,12 @@ public protocol VideoEngine: AnyObject {
 
     // MARK: Observable state
 
+    /// A short, human-readable name for the concrete engine (e.g. `AVPlayer`,
+    /// `VLCKit`, `mpv`), surfaced in the diagnostics overlay so the user can see
+    /// which engine is actually decoding the stream. Defaulted (see the protocol
+    /// extension) so engines that don't override it report a generic label.
+    var displayName: String { get }
+
     /// The engine's current lifecycle state.
     var status: VideoEngineStatus { get }
 
@@ -128,5 +134,8 @@ public protocol VideoEngine: AnyObject {
 public extension VideoEngine {
     /// Default: engines that don't track buffering report no buffer fill.
     var bufferedPosition: TimeInterval { 0 }
+
+    /// Default: a generic label for engines that don't name themselves.
+    var displayName: String { "Player" }
 }
 #endif

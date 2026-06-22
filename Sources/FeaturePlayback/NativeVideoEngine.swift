@@ -92,6 +92,8 @@ public final class NativeVideoEngine: VideoEngine {
         self.captionSettings = captionSettings
     }
 
+    public let displayName = "AVPlayer"
+
     /// The live `AVPlayer`, exposed for the AVFoundation-specific diagnostics
     /// sampler. Engine-agnostic callers must not depend on this; a future
     /// non-AVFoundation engine simply wouldn't offer it (diagnostics is

@@ -31,6 +31,7 @@ let package = Package(
         .library(name: "FeatureSearch", targets: ["FeatureSearch"]),
         .library(name: "FeatureSettings", targets: ["FeatureSettings"]),
         .library(name: "FeatureProfiles", targets: ["FeatureProfiles"]),
+        .library(name: "FeatureMusic", targets: ["FeatureMusic"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
@@ -92,6 +93,17 @@ let package = Package(
             dependencies: ["CoreModels", "CoreUI"]
         ),
 
+        // MARK: Music (browse + audio playback engine)
+        //
+        // Self-contained music experience: aggregator/view models, the conditional
+        // Music tab UI, and the app-scoped `AudioPlaybackController` (AVQueuePlayer
+        // + background audio + Now Playing). Depends only on CoreModels/CoreUI so
+        // it stays decoupled from the video feature modules.
+        .target(
+            name: "FeatureMusic",
+            dependencies: ["CoreModels", "CoreUI"]
+        ),
+
         // MARK: Top Shelf (shared with the tvOS Top Shelf extension)
         //
         // `TopShelfSnapshot` + `TopShelfStore` are Foundation-only and are also
@@ -120,6 +132,7 @@ let package = Package(
                 "FeatureSearch",
                 "FeatureSettings",
                 "FeatureProfiles",
+                "FeatureMusic",
                 "TopShelfKit"
             ]
         ),
@@ -164,6 +177,10 @@ let package = Package(
         .testTarget(
             name: "FeatureProfilesTests",
             dependencies: ["FeatureProfiles", "CoreModels"]
+        ),
+        .testTarget(
+            name: "FeatureMusicTests",
+            dependencies: ["FeatureMusic", "CoreModels"]
         )
     ]
 )

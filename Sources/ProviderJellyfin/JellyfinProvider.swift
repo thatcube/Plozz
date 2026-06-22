@@ -10,7 +10,7 @@ import CoreNetworking
 public struct JellyfinProvider: MediaProvider {
     public let kind: ProviderKind = .jellyfin
     public let session: UserSession
-    private let client: JellyfinClient
+    let client: JellyfinClient
 
     public init(session: UserSession, http: HTTPClient = URLSessionHTTPClient()) {
         self.session = session

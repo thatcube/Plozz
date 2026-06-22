@@ -337,6 +337,135 @@ public struct JellyfinClient: Sendable {
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
+    // MARK: Music
+
+    /// One page of music items from a container, using an explicit Jellyfin
+    /// `SortBy` (music needs multi-key sorts like `ParentIndexNumber,IndexNumber`
+    /// for album track order that the video `SortField` enum can't express).
+    func musicItems(
+        userID: String,
+        parentID: String?,
+        includeItemTypes: [String],
+        recursive: Bool,
+        startIndex: Int,
+        limit: Int,
+        sortBy: String,
+        sortOrder: String,
+        albumArtistID: String? = nil
+    ) async throws -> ItemsResponse {
+        var queryItems = [
+            URLQueryItem(name: "StartIndex", value: String(startIndex)),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "SortBy", value: sortBy),
+            URLQueryItem(name: "SortOrder", value: sortOrder),
+            URLQueryItem(name: "Fields", value: "Genres,ChildCount,PrimaryImageAspectRatio"),
+            URLQueryItem(name: "ImageTypeLimit", value: "1"),
+            URLQueryItem(name: "EnableTotalRecordCount", value: "true")
+        ]
+        if let parentID, !parentID.isEmpty {
+            queryItems.append(URLQueryItem(name: "ParentId", value: parentID))
+        }
+        if let albumArtistID, !albumArtistID.isEmpty {
+            queryItems.append(URLQueryItem(name: "AlbumArtistIds", value: albumArtistID))
+        }
+        if recursive {
+            queryItems.append(URLQueryItem(name: "Recursive", value: "true"))
+        }
+        if !includeItemTypes.isEmpty {
+            queryItems.append(URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")))
+        }
+        let endpoint = Endpoint(path: "/Users/\(userID)/Items", queryItems: queryItems, headers: authHeaders)
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// `GET /Artists` — the indexed artist list (optionally scoped to a library).
+    func artists(
+        userID: String,
+        parentID: String?,
+        startIndex: Int,
+        limit: Int,
+        sortOrder: String = "Ascending"
+    ) async throws -> ItemsResponse {
+        var queryItems = [
+            URLQueryItem(name: "UserId", value: userID),
+            URLQueryItem(name: "StartIndex", value: String(startIndex)),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "SortBy", value: "SortName"),
+            URLQueryItem(name: "SortOrder", value: sortOrder),
+            URLQueryItem(name: "Fields", value: "Genres,ChildCount"),
+            URLQueryItem(name: "ImageTypeLimit", value: "1"),
+            URLQueryItem(name: "EnableTotalRecordCount", value: "true")
+        ]
+        if let parentID, !parentID.isEmpty {
+            queryItems.append(URLQueryItem(name: "ParentId", value: parentID))
+        }
+        let endpoint = Endpoint(path: "/Artists", queryItems: queryItems, headers: authHeaders)
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// `GET /MusicGenres` — genres present in the music libraries.
+    func musicGenres(
+        userID: String,
+        parentID: String?,
+        startIndex: Int,
+        limit: Int
+    ) async throws -> ItemsResponse {
+        var queryItems = [
+            URLQueryItem(name: "UserId", value: userID),
+            URLQueryItem(name: "StartIndex", value: String(startIndex)),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "SortBy", value: "SortName"),
+            URLQueryItem(name: "SortOrder", value: "Ascending"),
+            URLQueryItem(name: "EnableTotalRecordCount", value: "true")
+        ]
+        if let parentID, !parentID.isEmpty {
+            queryItems.append(URLQueryItem(name: "ParentId", value: parentID))
+        }
+        let endpoint = Endpoint(path: "/MusicGenres", queryItems: queryItems, headers: authHeaders)
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// `GET /Playlists/{id}/Items` — a playlist's tracks in playlist order.
+    func playlistItems(userID: String, playlistID: String) async throws -> ItemsResponse {
+        let endpoint = Endpoint(
+            path: "/Playlists/\(playlistID)/Items",
+            queryItems: [
+                URLQueryItem(name: "UserId", value: userID),
+                URLQueryItem(name: "Fields", value: "Genres,PrimaryImageAspectRatio"),
+                URLQueryItem(name: "EnableTotalRecordCount", value: "true")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// Builds the `/Audio/{id}/universal` stream URL. The universal endpoint lets
+    /// the server pick direct-play vs an HLS transcode for the device, mirroring
+    /// the video `playbackInfo` decision but resolvable without a round-trip — it
+    /// is a deterministic, token-authenticated URL, so the audio engine can build
+    /// stream URLs for a whole queue without N PlaybackInfo calls.
+    func audioStreamURL(itemID: String, playSessionID: String) -> URL? {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/Audio/\(itemID)/universal"
+        var query = [
+            URLQueryItem(name: "DeviceId", value: deviceProfile.deviceID),
+            URLQueryItem(name: "MaxStreamingBitrate", value: String(capabilityProfile.maxStreamingBitrate)),
+            // Containers AVPlayer can direct-play; anything else the server
+            // transcodes down the HLS/AAC fallback below.
+            URLQueryItem(name: "Container", value: "mp3,aac,m4a,flac,alac,wav,m4b"),
+            URLQueryItem(name: "TranscodingContainer", value: "ts"),
+            URLQueryItem(name: "TranscodingProtocol", value: "hls"),
+            URLQueryItem(name: "AudioCodec", value: "aac"),
+            URLQueryItem(name: "PlaySessionId", value: playSessionID)
+        ]
+        if let token, !token.isEmpty {
+            query.append(URLQueryItem(name: "api_key", value: token))
+        }
+        components.queryItems = query
+        return components.url
+    }
+
     /// Builds an absolute image URL. Token is *not* required for images; the
     /// item id + image type is enough.
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? {

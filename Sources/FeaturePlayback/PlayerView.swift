@@ -35,10 +35,8 @@ public struct PlayerView: View {
                     .tint(.white)
 
             case .ready:
-                if let player = viewModel.player {
-                    SystemPlayerView(player: player)
-                        .ignoresSafeArea()
-                }
+                EnginePlayerView(viewModel: viewModel)
+                    .ignoresSafeArea()
 
             case let .failed(error):
                 PlaybackErrorView(message: error.userMessage) { dismiss() }
@@ -115,22 +113,20 @@ private struct PlaybackErrorView: View {
     }
 }
 
-/// Thin `UIViewControllerRepresentable` bridge to `AVPlayerViewController`.
-private struct SystemPlayerView: UIViewControllerRepresentable {
-    let player: AVPlayer
+/// Thin `UIViewControllerRepresentable` bridge to the engine-vended player view
+/// controller. The active `VideoEngine` owns the controller and keeps it fed by
+/// the live player (re-pointing it across a transcode-fallback swap), so this
+/// bridge just renders whatever the engine hands back without knowing the
+/// concrete player type.
+private struct EnginePlayerView: UIViewControllerRepresentable {
+    let viewModel: PlayerViewModel
 
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.player = player
-        // Native transport + info panels; keep the platform experience.
-        controller.allowsPictureInPicturePlayback = false
-        return controller
+    func makeUIViewController(context: Context) -> UIViewController {
+        viewModel.makePlayerViewController()
     }
 
-    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
-        if controller.player !== player {
-            controller.player = player
-        }
+    func updateUIViewController(_ controller: UIViewController, context: Context) {
+        // The engine manages the controller's player internally; nothing to do.
     }
 }
 

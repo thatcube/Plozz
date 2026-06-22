@@ -37,6 +37,9 @@ public final class PlayerViewModel {
     private let reportInterval: TimeInterval = 10
     private var lastReportedSecond: Int = -1
     private var subtitleDownloadTask: Task<Void, Never>?
+    /// Retains the resource-loader delegate that serves injected subtitle
+    /// playlists; `AVAssetResourceLoader` holds it only weakly.
+    private var subtitleLoader: SubtitleInjectingResourceLoader?
 
     /// Furthest position (seconds) we've observed, so a transcode-fallback retry
     /// can resume where the failed direct-play attempt left the viewer.
@@ -78,7 +81,7 @@ public final class PlayerViewModel {
             let request = try await provider.playbackInfo(for: itemID, forceTranscode: forceTranscode)
             self.request = request
 
-            let asset = AVURLAsset(url: request.streamURL)
+            let asset = makeAsset(for: request)
             let item = AVPlayerItem(asset: asset)
             // Apply in-app caption styling overrides if the user set any.
             item.textStyleRules = captionSettings.textStyleRules()
@@ -113,6 +116,42 @@ public final class PlayerViewModel {
         } catch {
             phase = .failed(.unknown(""))
         }
+    }
+
+    // MARK: - Asset construction
+
+    /// Builds the asset to play. When the server is direct-playing the original
+    /// file (not transcoding) and the item has text subtitles the player would
+    /// otherwise never see, wrap the stream in a synthesized HLS playlist that
+    /// adds those subtitles as selectable renditions. Otherwise play the stream
+    /// URL directly (transcoded HLS already carries subtitles in its manifest).
+    private func makeAsset(for request: PlaybackRequest) -> AVURLAsset {
+        subtitleLoader = nil
+        guard !request.isTranscoding else {
+            return AVURLAsset(url: request.streamURL)
+        }
+        let injectables: [InjectableSubtitle] = request.subtitleTracks.compactMap { track in
+            guard track.kind == .subtitle, let url = track.deliveryURL else { return nil }
+            return InjectableSubtitle(
+                index: track.id,
+                name: track.displayTitle,
+                languageTag: track.language,
+                isDefault: track.isDefault,
+                isForced: track.isForced,
+                sourceURL: url
+            )
+        }
+        guard !injectables.isEmpty, let duration = request.item.runtime, duration > 0 else {
+            return AVURLAsset(url: request.streamURL)
+        }
+        let composer = SubtitleHLSComposer(
+            videoURL: request.streamURL,
+            durationSeconds: duration,
+            subtitles: injectables
+        )
+        let loader = SubtitleInjectingResourceLoader(composer: composer)
+        subtitleLoader = loader
+        return loader.makeAsset()
     }
 
     // MARK: - Audio session
@@ -306,6 +345,7 @@ public final class PlayerViewModel {
         subtitleDownloadTask = nil
         fallbackMonitorTask?.cancel()
         fallbackMonitorTask = nil
+        subtitleLoader = nil
         #if !os(macOS)
         if let routeChangeObserver {
             NotificationCenter.default.removeObserver(routeChangeObserver)

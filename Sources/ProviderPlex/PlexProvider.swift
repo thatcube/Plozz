@@ -252,14 +252,28 @@ public struct PlexProvider: MediaProvider {
 
     private func map(stream dto: PlexStream) -> MediaTrack {
         let language = dto.languageTag ?? dto.language
+        let isSubtitle = dto.streamType == 3
+        // External/sidecar subtitles expose a `key` we can fetch as text and
+        // normalise to WebVTT for the native picker. Embedded subs (no key) and
+        // image-based subs can't be delivered this way.
+        let deliveryURL: URL? = (isSubtitle && isTextSubtitleCodec(dto.codec))
+            ? dto.key.flatMap { client.streamURL(forPartKey: $0) }
+            : nil
         return MediaTrack(
             id: dto.index ?? dto.id ?? 0,
-            kind: dto.streamType == 3 ? .subtitle : .audio,
+            kind: isSubtitle ? .subtitle : .audio,
             displayTitle: dto.extendedDisplayTitle ?? dto.displayTitle ?? language ?? dto.codec ?? "Track",
             language: language,
             isDefault: dto.default ?? dto.selected ?? false,
-            isForced: dto.forced ?? false
+            isForced: dto.forced ?? false,
+            deliveryURL: deliveryURL
         )
+    }
+
+    /// Whether a Plex subtitle codec token is text-based (deliverable as WebVTT).
+    private func isTextSubtitleCodec(_ codec: String?) -> Bool {
+        guard let codec = codec?.lowercased() else { return false }
+        return ["srt", "subrip", "ass", "ssa", "webvtt", "vtt", "mov_text", "text", "ttml", "smi", "sami"].contains(codec)
     }
 
     private static func kind(forItemType type: String?) -> MediaItemKind {

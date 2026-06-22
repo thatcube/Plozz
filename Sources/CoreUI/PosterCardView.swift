@@ -180,9 +180,16 @@ public struct PosterCardView: View {
     }
 
     private var realArtwork: some View {
-        FallbackAsyncImage(urls: artworkCandidates) {
+        FallbackAsyncImage(urls: artworkCandidates, maxAspectRatio: posterAspectGuard) {
             neutralPlaceholder
         }
+    }
+
+    /// Poster cards reject any source image wider than ~0.9:1 (a real poster is
+    /// ~0.67:1), so 16:9 stills and wide composites fall through to the clean
+    /// placeholder. Landscape/backdrop art has no guard.
+    private var posterAspectGuard: CGFloat? {
+        style == .poster ? 0.9 : nil
     }
 
     /// Spoiler-safe art for `.placeholder` mode: only ever the series fallback

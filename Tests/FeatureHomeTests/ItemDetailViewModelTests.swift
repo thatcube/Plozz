@@ -73,4 +73,24 @@ final class ItemDetailViewModelTests: XCTestCase {
         await vm.loadEpisodes(for: "s1")
         XCTAssertEqual(vm.episodes(for: "s1"), [])
     }
+
+    func testLoadFetchesTrailersTaggedWithSource() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        provider.trailersByItem = ["m1": [MediaItem(id: "t1", title: "Trailer", kind: .video)]]
+        let vm = ItemDetailViewModel(provider: provider, itemID: "m1", sourceAccountID: "acct-9")
+
+        await vm.load()
+
+        XCTAssertEqual(vm.trailers.map(\.id), ["t1"])
+        XCTAssertEqual(vm.trailers.first?.sourceAccountID, "acct-9")
+    }
+
+    func testLoadLeavesTrailersEmptyWhenNone() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        let vm = ItemDetailViewModel(provider: provider, itemID: "m1")
+
+        await vm.load()
+
+        XCTAssertTrue(vm.trailers.isEmpty)
+    }
 }

@@ -53,6 +53,12 @@ public struct PlexProvider: MediaProvider {
         map(metadata: try await client.metadata(ratingKey: id))
     }
 
+    public func trailers(for itemID: String) async throws -> [MediaItem] {
+        try await client.extras(ratingKey: itemID)
+            .filter { ($0.subtype ?? "").lowercased() == "trailer" }
+            .map(map(metadata:))
+    }
+
     public func children(of itemID: String) async throws -> [MediaItem] {
         try await client.children(ratingKey: itemID).map(map(metadata:))
     }

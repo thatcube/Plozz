@@ -52,6 +52,10 @@ public struct JellyfinProvider: MediaProvider {
         map(item: try await client.item(userID: session.userID, id: id))
     }
 
+    public func trailers(for itemID: String) async throws -> [MediaItem] {
+        try await client.localTrailers(userID: session.userID, id: itemID).map(map(item:))
+    }
+
     public func children(of itemID: String) async throws -> [MediaItem] {
         try await client.children(userID: session.userID, parentID: itemID).map(map(item:))
     }

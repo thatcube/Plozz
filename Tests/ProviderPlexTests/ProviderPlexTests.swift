@@ -99,6 +99,34 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(libs[1].kind, .series)
     }
 
+    func testTrailersFilterToTrailerSubtype() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/101/extras", json: """
+        {"MediaContainer":{"size":2,"Metadata":[
+          {"ratingKey":"e1","type":"clip","subtype":"trailer","title":"Trailer"},
+          {"ratingKey":"e2","type":"clip","subtype":"behindTheScenes","title":"Making Of"}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "101")
+
+        XCTAssertEqual(trailers.map(\.id), ["e1"])
+        XCTAssertEqual(trailers.first?.title, "Trailer")
+        XCTAssertEqual(trailers.first?.kind, .video)
+    }
+
+    func testTrailersEmptyWhenNoExtras() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/101/extras", json: """
+        {"MediaContainer":{"size":0}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "101")
+        XCTAssertTrue(trailers.isEmpty)
+    }
+
     func testContinueWatchingMapsResumeFields() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/onDeck", json: """

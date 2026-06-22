@@ -175,6 +175,21 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
+    /// `GET /Users/{userId}/Items/{itemId}/LocalTrailers` — the local trailer
+    /// files Jellyfin detected alongside an item. Each is a fully playable
+    /// `BaseItemDto` (its own item id), so it streams through the normal
+    /// playback path. Returns a bare array, not an `Items` envelope. Remote
+    /// (e.g. YouTube) trailers are intentionally not included — they aren't
+    /// directly playable in the tvOS player.
+    func localTrailers(userID: String, id: String) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items/\(id)/LocalTrailers",
+            queryItems: [URLQueryItem(name: "Fields", value: "Overview")],
+            headers: authHeaders
+        )
+        return try await http.decode([BaseItemDto].self, from: endpoint, baseURL: baseURL)
+    }
+
     /// One page of a container's items for library browsing.
     ///
     /// For typed libraries (movies/series) this uses Jellyfin's **recursive,

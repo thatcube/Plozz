@@ -105,6 +105,29 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Movie")
     }
 
+    func testTrailersMapLocalTrailers() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/m1/LocalTrailers", json: """
+        [{"Id":"t1","Name":"Official Trailer","Type":"Trailer","Container":"mp4"}]
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "m1")
+
+        XCTAssertEqual(trailers.map(\.id), ["t1"])
+        XCTAssertEqual(trailers.first?.title, "Official Trailer")
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Users/u1/Items/m1/LocalTrailers") })
+    }
+
+    func testTrailersEmptyWhenNoneReported() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/m1/LocalTrailers", json: "[]")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "m1")
+        XCTAssertTrue(trailers.isEmpty)
+    }
+
     func testItemsPageUsesSeriesTypeForTVLibrary() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)

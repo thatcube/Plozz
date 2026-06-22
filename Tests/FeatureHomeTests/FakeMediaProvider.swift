@@ -14,6 +14,9 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     var childrenByParent: [String: [MediaItem]]?
     /// How many times `children(of:)` was called for each parent id.
     private(set) var childrenCallCount: [String: Int] = [:]
+    /// Optional per-item trailers for `trailers(of:)`. Inherits the protocol's
+    /// empty default when `nil`.
+    var trailersByItem: [String: [MediaItem]]?
     /// Optional start index at which `items(in:page:)` throws once.
     var failAtStartIndex: Int?
     private(set) var requestedPages: [PageRequest] = []
@@ -39,6 +42,11 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
             return childrenByParent[itemID] ?? []
         }
         return allItems
+    }
+
+    func trailers(for itemID: String) async throws -> [MediaItem] {
+        guard let trailersByItem else { return [] }
+        return trailersByItem[itemID] ?? []
     }
 
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {

@@ -57,7 +57,8 @@ struct SeriesDetailView: View {
                     item: heroItem,
                     spoilerSettings: spoilerSettings,
                     playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
-                    onPlay: playTarget.map { target in { onPlay(target) } }
+                    onPlay: playTarget.map { target in { onPlay(target) } },
+                    onPlayTrailer: trailerButtonAction
                 )
 
                 if !seasons.isEmpty {
@@ -165,6 +166,14 @@ struct SeriesDetailView: View {
     private var playTarget: MediaItem? {
         if heroItem.kind == .episode { return heroItem }
         return SeriesResume.nextUp(in: currentEpisodes)
+    }
+
+    /// The series' trailer action, shown only while the hero is presenting the
+    /// series itself (not a focused season/episode), so the Trailer button reads
+    /// as belonging to the show. `nil` hides the button.
+    private var trailerButtonAction: (() -> Void)? {
+        guard heroItem.id == series.id, let trailer = viewModel.trailers.first else { return nil }
+        return { onPlay(trailer) }
     }
 
     /// Picks the season to open on first appearance — the one holding the user's

@@ -15,6 +15,11 @@ public final class ItemDetailViewModel {
 
     public private(set) var state: LoadState<Detail> = .idle
 
+    /// Playable trailers for this item, loaded alongside detail. Empty until
+    /// resolved (and when the backend has none). Each is tagged with this
+    /// detail's owning account so it routes back to the right provider.
+    public private(set) var trailers: [MediaItem] = []
+
     /// Episodes for each season of a series, loaded lazily the first time a
     /// season is shown/focused and cached so re-focusing a tab is instant. Keyed
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
@@ -54,6 +59,7 @@ public final class ItemDetailViewModel {
                 children = []
             }
             state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
+            await loadTrailers(for: item)
             await enrichRatings(for: item)
         } catch let error as AppError {
             state = .failed(error)
@@ -65,6 +71,16 @@ public final class ItemDetailViewModel {
     /// Already-loaded episodes for `seasonID`, or `nil` if not yet fetched.
     public func episodes(for seasonID: String) -> [MediaItem]? {
         seasonEpisodes[seasonID]
+    }
+
+    /// Fetches the item's trailers off the critical path and tags them with the
+    /// owning account so playback routes to the right provider. Best-effort: a
+    /// failure (or a backend with no trailers) simply leaves `trailers` empty and
+    /// the detail page hides its Trailer button.
+    private func loadTrailers(for item: MediaItem) async {
+        let fetched = (try? await provider.trailers(for: item.id)) ?? []
+        guard case let .loaded(detail) = state, detail.item.id == item.id else { return }
+        trailers = fetched.map(tagged)
     }
 
     /// Lazily fetches and caches the episodes of one season. Idempotent: a season

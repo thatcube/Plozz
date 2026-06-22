@@ -95,6 +95,10 @@ struct PlexStream: Decodable {
     let frameRate: Double?
     let colorTrc: String?
     let DOVIPresent: Bool?
+    /// Dolby Vision profile number (Plex reports it as a JSON number, same as
+    /// `width`/`height`). Apple TV can decode only single-layer **Profile 5** and
+    /// **Profile 8**; Profile 7 (and any unknown profile) must transcode.
+    let DOVIProfile: Int?
     // Audio facts
     let channels: Int?
     let samplingRate: Int?

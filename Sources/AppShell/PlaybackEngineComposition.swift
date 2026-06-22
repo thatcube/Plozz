@@ -25,11 +25,14 @@ import EngineMPV
 /// When no UIKit engine is linked (e.g. a macOS unit-test build), everything
 /// collapses to the native-only path, so behaviour is byte-for-byte today's.
 enum HybridPlayback {
-    /// Which on-device engine backs hybrid playback when one is linked.
+    /// Which on-device engine backs hybrid playback when one is linked. mpv is
+    /// the only engine today; VLCKit (the former alternative) is archived at the
+    /// `archive/vlckit-engine` git tag and can be restored from there if ever
+    /// needed. The enum is kept so a future engine can be added behind the same
+    /// composition switch.
     enum Engine { case mpv }
 
-    /// The hybrid engine to use. mpv is the target default; flip to `.vlckit`
-    /// as an escape hatch when diagnosing regressions.
+    /// The hybrid engine to use.
     static let preferredEngine: Engine = .mpv
 
     /// Whether this build links an engine for AVPlayer-incompatible media.

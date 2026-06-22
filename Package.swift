@@ -21,7 +21,6 @@ let package = Package(
         .library(name: "CoreModels", targets: ["CoreModels"]),
         .library(name: "CoreNetworking", targets: ["CoreNetworking"]),
         .library(name: "CoreUI", targets: ["CoreUI"]),
-        .library(name: "EngineVLCKit", targets: ["EngineVLCKit"]),
         .library(name: "EngineMPV", targets: ["EngineMPV"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
@@ -39,12 +38,6 @@ let package = Package(
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [
-        // Official prebuilt VLCKit (TVVLCKit) republished as a SwiftPM
-        // `.binaryTarget` `.xcframework`. Backs the second, on-device decoding
-        // engine (`EngineVLCKit`) for MKV / DTS / DTS-HD / TrueHD / odd codecs
-        // AVPlayer can't demux or decode. Pinned to the version proven to build
-        // for tvOS in the P2 spike.
-        .package(url: "https://github.com/tylerjonesio/vlckit-spm.git", exact: "3.6.0"),
         // Pure-Swift, dependency-free YouTube stream extractor. Backs online
         // trailer playback: TMDb hands us a YouTube video id, YouTubeKit resolves
         // a natively-playable progressive stream URL we feed straight to AVPlayer
@@ -66,37 +59,16 @@ let package = Package(
             dependencies: ["CoreModels"]
         ),
 
-        // MARK: VLCKit-backed engine (second, on-device decoding path)
-        //
-        // Implements `VLCKitVideoEngine: VideoEngine` over VLCMediaPlayer so the
-        // app CAN decode MKV/DTS/TrueHD/odd-codec files on device. Only this
-        // module imports VLCKit; FeaturePlayback never does. It depends on
-        // FeaturePlayback purely to *see* the `VideoEngine` protocol — this is
-        // NOT a cycle because FeaturePlayback does not depend on EngineVLCKit
-        // (AppShell injects the engine via a factory in a later phase). Engine
-        // routing is intentionally NOT wired yet; the default engine remains
-        // `NativeVideoEngine` (AVPlayer). (The protocol may later be extracted
-        // into a leaf module once its view/transport seam settles.)
-        .target(
-            name: "EngineVLCKit",
-            dependencies: [
-                "CoreModels",
-                "FeaturePlayback",
-                .product(name: "VLCKitSPM", package: "vlckit-spm")
-            ]
-        ),
-
-        // MARK: libmpv-backed engine (third, on-device decoding path)
+        // MARK: libmpv-backed engine (the on-device decoding path)
         //
         // Implements `MPVVideoEngine: VideoEngine` over libmpv (vo=gpu-next →
         // Vulkan → MoltenVK → Metal, hwdec=videotoolbox) for MKV/DTS/TrueHD/odd
-        // codecs with libplacebo HDR tone-mapping. Like EngineVLCKit it depends on
-        // FeaturePlayback purely to *see* the `VideoEngine` protocol (no cycle:
-        // FeaturePlayback never imports it) and is NOT linked into AppShell — it's
-        // a COMPILE-ONLY, optional engine module so the app isn't bloated with two
-        // heavy engines at once. A dedicated `EngineMPVProbe` tvOS target (see
-        // project.yml) links it to prove it compiles; the orchestrator decides the
-        // VLCKit→mpv swap separately.
+        // codecs with libplacebo HDR tone-mapping. It depends on FeaturePlayback
+        // purely to *see* the `VideoEngine` protocol (no cycle: FeaturePlayback
+        // never imports it). This is the app's sole on-device decode engine for
+        // AVPlayer-incompatible media — it replaced VLCKit, which is archived at
+        // the `archive/vlckit-engine` git tag. A dedicated `EngineMPVProbe` tvOS
+        // target (see project.yml) also links it as a compile/link gate.
         //
         // The FFmpeg + libmpv xcframeworks are LGPLv3 / decode-only (rebuilt by
         // tools/build-mpv-tvos.sh with `--disable-nonfree`, no `--enable-gpl`;

@@ -122,11 +122,12 @@ targets:
         # instantiates ContentProvider.
         LD_ENTRY_POINT: _NSExtensionMain
 
-  # COMPILE-ONLY harness target. EngineMPV is deliberately NOT linked into the
-  # Plozz app (avoids bundling two heavy decode engines, VLCKit + mpv, while mpv
-  # is still being validated). This tvOS framework links the EngineMPV package
-  # product so CI / the build gate can prove it compiles + links against the tvOS
-  # SDK with its libmpv + FFmpeg xcframeworks. Build via the EngineMPVProbe scheme.
+  # COMPILE/LINK gate target. This tvOS framework links the EngineMPV package
+  # product on its own so CI / the build gate can prove it compiles + links
+  # against the tvOS SDK with its libmpv + FFmpeg xcframeworks, independent of
+  # the full app. (EngineMPV is also linked into the Plozz app itself as the sole
+  # on-device decode engine; VLCKit was removed — see tag archive/vlckit-engine.)
+  # Build via the EngineMPVProbe scheme.
   EngineMPVProbe:
     type: framework
     platform: tvOS

@@ -108,6 +108,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var container: String?
     public var mode: PlaybackMode
     public var hdr: HDRFormat
+    /// Human-readable name of the engine decoding the stream (e.g. `AVPlayer`,
+    /// `VLCKit`, `mpv`). `nil` until the player wires it in.
+    public var engineName: String?
     /// Seconds of media buffered ahead of the current playback position.
     public var bufferedSecondsAhead: Double?
     /// Cumulative dropped video frames reported by the access log.
@@ -140,6 +143,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         container: String? = nil,
         mode: PlaybackMode = .unknown,
         hdr: HDRFormat = .unknown,
+        engineName: String? = nil,
         bufferedSecondsAhead: Double? = nil,
         droppedVideoFrames: Int? = nil,
         frameRate: Double? = nil,
@@ -164,6 +168,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.container = container
         self.mode = mode
         self.hdr = hdr
+        self.engineName = engineName
         self.bufferedSecondsAhead = bufferedSecondsAhead
         self.droppedVideoFrames = droppedVideoFrames
         self.frameRate = frameRate

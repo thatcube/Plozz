@@ -326,6 +326,10 @@ public final class PlayerViewModel {
     /// surface — without knowing the concrete engine type.
     public var videoEngine: any VideoEngine { engine }
 
+    /// A short, human-readable name for the active engine (e.g. `AVPlayer`,
+    /// `VLCKit`), surfaced in the diagnostics overlay.
+    public var engineDisplayName: String { engine.displayName }
+
     // MARK: - Custom transport configuration
 
     /// Seeds the transport overlay with title/subtitle/duration facts when a

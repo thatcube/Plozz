@@ -69,40 +69,43 @@ public struct PlayerView: View {
         }
         .task {
             await viewModel.load()
-            if showDiagnostics, let player = viewModel.player {
-                diagnosticsSampler.start(
-                    player: player,
-                    isTranscoding: viewModel.isTranscoding,
-                    metadata: viewModel.sourceMetadata
-                )
-            }
+            if showDiagnostics { startSampling() }
         }
         .onChange(of: showDiagnostics) { _, enabled in
-            if enabled, let player = viewModel.player {
-                diagnosticsSampler.start(
-                    player: player,
-                    isTranscoding: viewModel.isTranscoding,
-                    metadata: viewModel.sourceMetadata
-                )
+            if enabled {
+                startSampling()
             } else {
                 diagnosticsSampler.stop()
             }
         }
         .onChange(of: viewModel.playerInstanceID) { _, _ in
-            // The transcode fallback swaps in a new player; restart sampling so
+            // The transcode fallback swaps in a new AVPlayer; restart sampling so
             // diagnostics keep tracking the live stream.
-            if showDiagnostics, let player = viewModel.player {
-                diagnosticsSampler.start(
-                    player: player,
-                    isTranscoding: viewModel.isTranscoding,
-                    metadata: viewModel.sourceMetadata
-                )
-            }
+            if showDiagnostics { startSampling() }
+        }
+        .onChange(of: viewModel.engineToken) { _, _ in
+            // A cross-engine swap (e.g. native → VLCKit) replaces the engine and
+            // its video surface; restart sampling so the overlay reflects the new
+            // engine (name, and AVPlayer vs. metadata-only metrics).
+            if showDiagnostics { startSampling() }
         }
         .onDisappear {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }
         }
+    }
+
+    /// Starts the diagnostics sampler against the active engine. `viewModel.player`
+    /// is the live `AVPlayer` for the native engine and `nil` for VLCKit/mpv — in
+    /// the latter case the sampler publishes the metadata-only baseline plus the
+    /// engine name, so the overlay works on every engine.
+    private func startSampling() {
+        diagnosticsSampler.start(
+            player: viewModel.player,
+            isTranscoding: viewModel.isTranscoding,
+            metadata: viewModel.sourceMetadata,
+            engineName: viewModel.engineDisplayName
+        )
     }
 }
 

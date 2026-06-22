@@ -49,6 +49,8 @@ public final class VLCKitVideoEngine: NSObject, VideoEngine {
     public private(set) var status: VideoEngineStatus = .idle
     public private(set) var isPaused: Bool = false
 
+    public let displayName = "VLCKit"
+
     public var currentTime: TimeInterval {
         guard let player = mediaPlayer else { return 0 }
         return max(0, TimeInterval(player.time.intValue) / 1000)

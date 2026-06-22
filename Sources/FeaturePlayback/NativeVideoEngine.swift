@@ -178,7 +178,7 @@ public final class NativeVideoEngine: VideoEngine {
     /// to call before the view is in a window — it re-runs from the view's
     /// `onWindowChange` hook once a window is available.
     private func applyDisplayCriteria() {
-        guard let window = videoOutputView?.window else { return }
+        guard let window = videoOutputView?.window, Self.windowHasDisplayManager(window) else { return }
         displayCriteriaWindow = window
         window.avDisplayManager.preferredDisplayCriteria = pendingDisplayCriteria
     }
@@ -187,8 +187,18 @@ public final class NativeVideoEngine: VideoEngine {
     /// playback stops.
     private func clearDisplayCriteria() {
         pendingDisplayCriteria = nil
-        displayCriteriaWindow?.avDisplayManager.preferredDisplayCriteria = nil
+        if let window = displayCriteriaWindow, Self.windowHasDisplayManager(window) {
+            window.avDisplayManager.preferredDisplayCriteria = nil
+        }
         displayCriteriaWindow = nil
+    }
+
+    /// Safety net: the `avDisplayManager` accessor comes from AVKit's
+    /// `UIWindow (AVAdditions)` category. If that framework somehow isn't linked,
+    /// the selector is unrecognized and calling it would crash — so verify it's
+    /// present first and degrade to a no-op (no display switch) instead.
+    private static func windowHasDisplayManager(_ window: UIWindow) -> Bool {
+        window.responds(to: Selector(("avDisplayManager")))
     }
     #endif
 

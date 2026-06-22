@@ -107,7 +107,16 @@ let package = Package(
         ),
         .target(
             name: "FeaturePlayback",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI"],
+            linkerSettings: [
+                // Force-link AVKit on tvOS so its `UIWindow (AVAdditions)`
+                // category (which adds `avDisplayManager`, used to drive the
+                // Dolby Vision / HDR display-mode switch) is registered at
+                // runtime. Swift's autolink hint for a category-only reference
+                // gets dropped through the SPM static-lib → app link, leaving the
+                // selector unrecognized (instant crash) unless linked explicitly.
+                .linkedFramework("AVKit", .when(platforms: [.tvOS]))
+            ]
         ),
         .target(
             name: "FeatureSearch",

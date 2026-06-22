@@ -128,6 +128,32 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
     // MARK: - Lifecycle
 
+    /// `mpv_initialize()` must run with a real, attached render target.
+    /// Wait for the mpv surface to be in a window and laid out to a non-trivial
+    /// drawable size before initializing the player.
+    private func waitForRenderableSurface(timeout: TimeInterval = 3) async -> Bool {
+        _ = makeVideoOutputView()
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let outputView {
+                outputView.layoutIfNeeded()
+            }
+            if isRenderableSurfaceReady {
+                return true
+            }
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 16_000_000)
+        }
+        return isRenderableSurfaceReady
+    }
+
+    private var isRenderableSurfaceReady: Bool {
+        guard let outputView, outputView.window != nil else { return false }
+        guard metalLayer.device != nil else { return false }
+        let size = metalLayer.drawableSize
+        return size.width > 1 && size.height > 1
+    }
+
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {
         plozzTrace("MPV.load: start (startPosition=\(startPosition))")
         status = .loading
@@ -155,8 +181,10 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
         // Render + decode configuration (mirrors MPVKit's reference tvOS player).
         client.setOptionString("vo", "gpu-next")
-        client.setOptionString("gpu-api", "vulkan")
-        client.setOptionString("gpu-context", "moltenvk")
+        // Prefer native Metal on tvOS. The prior Vulkan+MoltenVK path crashes
+        // during mpv_initialize() on-device; using gpu-next over Metal keeps the
+        // libplacebo pipeline without the MoltenVK bring-up.
+        client.setOptionString("gpu-api", "metal")
         client.setOptionString("hwdec", "videotoolbox")
         client.setOptionString("video-rotate", "no")
 
@@ -166,7 +194,9 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         // surface, so if MoltenVK can't hand us a 10-bit surface we degrade to
         // correct SDR (the DoVi/HDR RPU is still parsed + tonemapped by
         // libplacebo) instead of failing or going black.
-        let hdrMode = MPVHDR.mode(from: request.sourceMetadata?.video)
+        // TEMP: force SDR surface while diagnosing tvOS init crash. If this is
+        // stable, the remaining issue is in HDR/PQ surface + display-mode setup.
+        let hdrMode: MPVHDRMode = .sdr
         plozzTrace("MPV.load: hdrMode=\(hdrMode); configuring metalLayer")
         metalLayer.configure(for: hdrMode)
         plozzTrace("MPV.load: metalLayer.configure done")
@@ -193,8 +223,27 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             client.setOptionString(key, value)
         }
 
-        // Wakeup callback + property observation (before init so nothing is missed).
-        // Retain `self` for mpv; balanced by the release in `teardownClient()`.
+        plozzTrace("MPV.load: waiting for render surface readiness")
+        guard await waitForRenderableSurface() else {
+            teardownClient()
+            fail(.unknown("mpv: render surface was not ready in time"))
+            return
+        }
+        plozzTrace("MPV.load: render surface ready (window + drawable + device)")
+        // Give SwiftUI/CoreAnimation one extra turn to settle any pending layout
+        // work before mpv's heavy renderer initialization.
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        plozzTrace("MPV.load: post-ready settle delay elapsed")
+
+        plozzTrace("MPV.load: calling client.initialize() NOW")
+
+        guard client.initialize() >= 0 else {
+            teardownClient()
+            fail(.unknown("mpv: failed to initialize player"))
+            return
+        }
+        // Match MPVKit's ordering: initialize first, then register wakeup /
+        // observers. Registering before init has been unstable on tvOS.
         let ctx = Unmanaged.passRetained(self).toOpaque()
         wakeupCtx = ctx
         client.setWakeup(ctx: ctx, callback: mpvWakeupCallback)
@@ -202,14 +251,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         client.observeDouble(MPVProperty.duration)
         client.observeFlag(MPVProperty.pause)
         client.observeFlag(MPVProperty.eofReached)
-        plozzTrace("MPV.load: observers set; calling client.initialize() NOW")
-
-        guard client.initialize() >= 0 else {
-            teardownClient()
-            fail(.unknown("mpv: failed to initialize player"))
-            return
-        }
-        plozzTrace("MPV.load: client.initialize OK; applying display criteria")
+        plozzTrace("MPV.load: client.initialize OK; callbacks+observers set; applying display criteria")
 
         // Apply the HDR display switch now (the view is usually already in a
         // window during playback); otherwise it lands via `onWindowChange`.

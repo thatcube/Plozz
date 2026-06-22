@@ -167,6 +167,14 @@ public final class PlayerViewModel {
         }
     }
 
+    /// Yields one main-runloop turn so SwiftUI can reconcile engine-swap state
+    /// (including the loading-phase video surface host) before `engine.load()`.
+    private static func yieldToRunLoop() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+
     /// Loads stream info, configures the player, and seeks to resume.
     public func load() async {
         await startPlayback(forceTranscode: false, resumeOverride: nil)
@@ -242,7 +250,8 @@ public final class PlayerViewModel {
         // Arm the stall watchdog around load() so a hang that never reports an
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)
-        plozzTrace("playResolved: calling engine.load()")
+        await Self.yieldToRunLoop()
+        plozzTrace("playResolved: post-swap runloop turn reached; calling engine.load()")
         await engine.load(request: request, startPosition: startPosition)
         plozzTrace("playResolved: engine.load() RETURNED; setting phase=.ready")
         phase = .ready

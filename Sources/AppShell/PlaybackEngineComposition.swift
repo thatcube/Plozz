@@ -34,12 +34,8 @@ enum HybridPlayback {
     /// Which on-device engine backs hybrid playback when one is linked.
     enum Engine { case mpv, vlckit }
 
-    /// The hybrid engine to use. Currently **VLCKit**: mpv's gpu-next/MoltenVK
-    /// render bring-up crashes on device (`mpv_initialize()` re-enters
-    /// CoreAnimation/SwiftUI layout while bringing up its Vulkan swapchain on a
-    /// not-yet-in-window `CAMetalLayer`), so VLCKit remains the working hybrid
-    /// engine until that render path is fixed. Flip back to `.mpv` once the mpv
-    /// surface is initialized window-side.
+    /// The hybrid engine to use. Keep VLCKit as the stable default while the
+    /// tvOS mpv initialize crash is unresolved.
     static let preferredEngine: Engine = .vlckit
 
     /// Whether this build links an engine for AVPlayer-incompatible media.

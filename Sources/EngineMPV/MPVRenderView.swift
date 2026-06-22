@@ -1,6 +1,7 @@
 #if canImport(Libmpv) && canImport(UIKit)
 import UIKit
 import QuartzCore
+import Metal
 
 /// A `CAMetalLayer` subclass handed to libmpv as its render surface (`wid`).
 ///
@@ -63,6 +64,11 @@ final class MPVRenderView: UIView {
         metalLayer.backgroundColor = UIColor.black.cgColor
         metalLayer.framebufferOnly = true
         metalLayer.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : UIScreen.main.scale
+        if metalLayer.device == nil {
+            metalLayer.device = MTLCreateSystemDefaultDevice()
+        }
+        let scale = metalLayer.contentsScale
+        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         layer.addSublayer(metalLayer)
     }
 
@@ -83,6 +89,7 @@ final class MPVRenderView: UIView {
         metalLayer.frame = bounds
         let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : UIScreen.main.scale
         metalLayer.contentsScale = scale
+        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         CATransaction.commit()
     }
 }

@@ -43,6 +43,34 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
     }
 }
 
+/// Minimal, controls-free host for an engine's bare video surface. Used during
+/// loading so engines that require an attached/windowed render target (mpv)
+/// can initialize before playback reaches `.ready`.
+struct VideoSurfaceContainer: UIViewRepresentable {
+    let engine: any VideoEngine
+
+    func makeUIView(context: Context) -> UIView {
+        let root = UIView(frame: .zero)
+        root.backgroundColor = .black
+        attachSurface(to: root)
+        return root
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        attachSurface(to: uiView)
+    }
+
+    private func attachSurface(to root: UIView) {
+        let surface = engine.makeVideoOutputView()
+        guard surface.superview !== root else { return }
+        surface.removeFromSuperview()
+        surface.frame = root.bounds
+        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        surface.isUserInteractionEnabled = false
+        root.insertSubview(surface, at: 0)
+    }
+}
+
 /// A lightweight box so the SwiftUI `ThemePalette` (a CoreUI type) can cross the
 /// representable boundary without FeaturePlayback's UIKit layer depending on it
 /// structurally; the overlay uses it directly.

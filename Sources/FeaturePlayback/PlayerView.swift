@@ -30,9 +30,14 @@ public struct PlayerView: View {
 
             switch viewModel.phase {
             case .loading:
-                ProgressView("Loading…")
-                    .font(.title2)
-                    .tint(.white)
+                ZStack {
+                    VideoSurfaceContainer(engine: viewModel.videoEngine)
+                        .id(viewModel.engineToken)
+                        .ignoresSafeArea()
+                    ProgressView("Loading…")
+                        .font(.title2)
+                        .tint(.white)
+                }
 
             case .ready:
                 CustomPlayerContainer(

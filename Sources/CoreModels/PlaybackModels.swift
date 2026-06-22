@@ -60,6 +60,9 @@ public struct MediaSourceMetadata: Hashable, Sendable {
         public var profile: String?
         public var width: Int?
         public var height: Int?
+        /// Bits per luma sample, e.g. `8`, `10`, `12`. AVPlayer cannot decode
+        /// 10-bit **H.264** (High 10), so this drives an on-device engine fallback.
+        public var bitDepth: Int?
         /// Declared video bitrate in bits/sec.
         public var bitrate: Int?
         public var frameRate: Double?
@@ -77,6 +80,7 @@ public struct MediaSourceMetadata: Hashable, Sendable {
             profile: String? = nil,
             width: Int? = nil,
             height: Int? = nil,
+            bitDepth: Int? = nil,
             bitrate: Int? = nil,
             frameRate: Double? = nil,
             videoRange: String? = nil,
@@ -88,6 +92,7 @@ public struct MediaSourceMetadata: Hashable, Sendable {
             self.profile = profile
             self.width = width
             self.height = height
+            self.bitDepth = bitDepth
             self.bitrate = bitrate
             self.frameRate = frameRate
             self.videoRange = videoRange

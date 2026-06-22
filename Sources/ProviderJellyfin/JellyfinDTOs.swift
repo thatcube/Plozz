@@ -172,6 +172,7 @@ struct MediaStreamDto: Decodable {
     // Video facts
     let Width: Int?
     let Height: Int?
+    let BitDepth: Int?
     let BitRate: Int?
     let RealFrameRate: Double?
     let AverageFrameRate: Double?

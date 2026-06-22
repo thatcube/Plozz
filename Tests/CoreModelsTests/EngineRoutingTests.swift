@@ -9,6 +9,8 @@ final class EngineRoutingTests: XCTestCase {
         container: String? = nil,
         videoCodec: String? = nil,
         videoCodecTag: String? = nil,
+        videoBitDepth: Int? = nil,
+        videoProfile: String? = nil,
         videoRange: String? = nil,
         videoRangeType: String? = nil,
         colorTransfer: String? = nil,
@@ -19,6 +21,8 @@ final class EngineRoutingTests: XCTestCase {
             video: MediaSourceMetadata.VideoStream(
                 codec: videoCodec,
                 codecTag: videoCodecTag,
+                profile: videoProfile,
+                bitDepth: videoBitDepth,
                 videoRange: videoRange,
                 videoRangeType: videoRangeType,
                 colorTransfer: colorTransfer
@@ -181,6 +185,62 @@ final class EngineRoutingTests: XCTestCase {
 
     func testUnknownCodecFallsBackToNative() {
         let mp4 = source(container: "mp4", videoCodec: "some_future_codec", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    // MARK: AV1 → hybrid unless hardware-decodable
+
+    func testAV1InMP4IsHybridWithoutHardwareSupport() {
+        // Apple TV 4K has no AV1 hardware decoder; default caps report no support.
+        let mp4 = source(container: "mp4", videoCodec: "av1", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4, caps: .default), .hybrid)
+    }
+
+    func testAV1StaysNativeWhenHardwareSupported() {
+        // A future device that reports AV1 hardware support keeps it on AVPlayer.
+        let mp4 = source(container: "mp4", videoCodec: "av01", videoRangeType: "SDR", audioCodec: "aac")
+        let av1Caps = MediaCapabilities(supportsAV1: true)
+        XCTAssertEqual(route(mp4, caps: av1Caps), .native)
+    }
+
+    // MARK: 10-bit H.264 → hybrid (8-bit H.264 / 10-bit HEVC stay native)
+
+    func test10BitH264IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoBitDepth: 10, videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func test10BitH264ViaProfileIsHybrid() {
+        // When bit depth isn't reported, the "High 10" profile string is the tell.
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoProfile: "High 10", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func test8BitH264StaysNative() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoBitDepth: 8, videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    func test10BitHEVCStaysNative() {
+        // HEVC Main 10 is the basis of HDR and is fully supported on AVPlayer.
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hvc1", videoBitDepth: 10, videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    // MARK: Opus / Vorbis audio in MP4 → hybrid
+
+    func testOpusAudioInMP4IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "opus")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testVorbisAudioInMP4IsHybrid() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "vorbis")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testAACAudioInMP4StaysNative() {
+        let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "aac")
         XCTAssertEqual(route(mp4), .native)
     }
 }

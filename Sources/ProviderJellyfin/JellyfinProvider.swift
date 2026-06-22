@@ -327,6 +327,7 @@ public struct JellyfinProvider: MediaProvider {
                 profile: v.Profile,
                 width: v.Width,
                 height: v.Height,
+                bitDepth: v.BitDepth,
                 bitrate: v.BitRate,
                 frameRate: v.RealFrameRate ?? v.AverageFrameRate,
                 videoRange: v.VideoRange,

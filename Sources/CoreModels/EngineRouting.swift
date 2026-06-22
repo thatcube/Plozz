@@ -95,9 +95,25 @@ public enum EngineRouter {
         // `hev1` in Matroska already falls under the Matroska rule above.
         if isHevcHev1(source.video) { return .hybrid }
 
+        // AV1 has no hardware decoder on current Apple TV silicon, so AVPlayer
+        // can't render it (a software path doesn't exist on tvOS). Decode it on
+        // the on-device engine instead — but stay native on any future device
+        // that reports hardware AV1 support.
+        if isAV1(source.video), !capabilities.supportsAV1 { return .hybrid }
+
+        // AVPlayer/VideoToolbox can't decode 10-bit **H.264** (High 10 profile) —
+        // it plays audio over a black screen, exactly like `hev1`. (10-bit HEVC,
+        // i.e. Main 10, IS supported and is the basis of HDR, so this is H.264
+        // only.) Decode it on-device instead.
+        if isTenBitH264(source.video) { return .hybrid }
+
         if let audio = source.audio?.codec?.lowercased() {
             // AVPlayer can't decode TrueHD/MLP at all → hybrid.
             if isTrueHD(audio) { return .hybrid }
+            // Opus/Vorbis aren't decodable by AVPlayer in an MP4-family container
+            // (Matroska/WebM, where they usually live, already routed above) →
+            // the file plays video with **no sound**. Decode on-device instead.
+            if isAVPlayerIncompatibleAudio(audio) { return .hybrid }
             // DTS family: AVPlayer can only *passthrough* the bitstream to an
             // external decoder. With a passthrough-capable route, keep it native
             // (bitstream is best). Otherwise the hybrid engine decodes it on-device.
@@ -178,6 +194,32 @@ public enum EngineRouter {
         let codec = (video.codec ?? "").lowercased()
         guard codec == "hevc" || codec == "h265" else { return false }
         return (video.codecTag ?? "").lowercased() == "hev1"
+    }
+
+    /// True for an AV1 video stream. No current Apple TV has a hardware AV1
+    /// decoder, and tvOS has no software fallback, so AVPlayer can't render it.
+    static func isAV1(_ video: MediaSourceMetadata.VideoStream?) -> Bool {
+        let codec = (video?.codec ?? "").lowercased()
+        return codec == "av1" || codec == "av01"
+    }
+
+    /// True for **10-bit (or deeper) H.264**. AVPlayer/VideoToolbox decode 8-bit
+    /// H.264 only; High 10 plays audio over a black screen. (HEVC Main 10 is fine
+    /// and intentionally excluded — it's the basis of HDR.)
+    static func isTenBitH264(_ video: MediaSourceMetadata.VideoStream?) -> Bool {
+        guard let video else { return false }
+        let codec = (video.codec ?? "").lowercased()
+        guard codec == "h264" || codec == "avc" || codec == "avc1" else { return false }
+        if let depth = video.bitDepth { return depth >= 10 }
+        // Fall back to the profile string when bit depth wasn't reported.
+        return (video.profile ?? "").lowercased().contains("high 10")
+    }
+
+    /// Audio codecs AVPlayer can't decode in an MP4-family container (their usual
+    /// Matroska/WebM home is already routed to the hybrid engine by container).
+    static func isAVPlayerIncompatibleAudio(_ codec: String) -> Bool {
+        let codec = codec.lowercased()
+        return codec == "opus" || codec == "vorbis"
     }
 
     /// True for DTS / DTS-HD (incl. ffmpeg's `dca` alias and `dts-hd ma`).

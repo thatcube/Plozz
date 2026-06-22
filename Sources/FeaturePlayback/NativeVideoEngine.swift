@@ -357,36 +357,52 @@ public final class NativeVideoEngine: VideoEngine {
         return .unknown("")
     }
 
-    /// Reads the actual codec FourCC from the asset's video track format
-    /// description (`hvc1`/`hev1`/`avc1`/…) and, if it's one AVPlayer can't
-    /// reliably render, swaps to the on-device engine immediately. Runs
-    /// concurrently with playback start so it adds **no startup delay**: the
-    /// happy path keeps playing while this resolves (typically sub-second, before
-    /// the first frame paints), and a hostile codec swaps near-instantly rather
-    /// than after the slower no-frames probe.
+    /// Reads the actual **video and audio** codec FourCCs from the asset's track
+    /// format descriptions and, if either is one AVPlayer can't handle (e.g. HEVC
+    /// `hev1` → black screen, Opus → silent), swaps to the on-device engine
+    /// immediately. Runs concurrently with playback start so it adds **no startup
+    /// delay**: the happy path keeps playing while this resolves (typically
+    /// sub-second, before the first frame paints), and a hostile codec swaps
+    /// near-instantly rather than after the slower no-frames probe.
     ///
     /// This asks the container itself rather than trusting server metadata (which
     /// for some files reports no codec tag at all). Scoped to **SDR** so the
     /// validated AVPlayer Dolby Vision/HDR path is left untouched.
     private func inspectVideoFormat(asset: AVAsset, request: PlaybackRequest) {
         formatInspectTask?.cancel()
-        guard request.sourceMetadata?.video != nil else { return }
         guard HDRDisplayMode(request.sourceMetadata) == .sdr else { return }
+        let expectsVideo = request.sourceMetadata?.video != nil
 
         formatInspectTask = Task { [weak self] in
-            guard let fourCC = await Self.firstVideoCodecFourCC(of: asset) else { return }
-            guard let self, !Task.isCancelled else { return }
-            PlozzLog.playback.info("Direct-play video codec FourCC: \(fourCC)")
-            guard Self.isAVPlayerHostileVideoFourCC(fourCC) else { return }
-            PlozzLog.playback.info("FourCC \(fourCC) is not reliably rendered by AVPlayer; swapping to the on-device engine")
-            self.onFailure?(.invalidResponse)
+            // Video: an AVPlayer-hostile codec (e.g. HEVC `hev1`) plays audio over
+            // a black screen.
+            if expectsVideo, let videoFourCC = await Self.firstCodecFourCC(of: asset, mediaType: .video) {
+                guard let self, !Task.isCancelled else { return }
+                PlozzLog.playback.info("Direct-play video codec FourCC: \(videoFourCC)")
+                if Self.isAVPlayerHostileVideoFourCC(videoFourCC) {
+                    PlozzLog.playback.info("Video FourCC \(videoFourCC) is not reliably rendered by AVPlayer; swapping to the on-device engine")
+                    self.onFailure?(.invalidResponse)
+                    return
+                }
+            }
+
+            // Audio: a codec AVPlayer can't decode (Opus/Vorbis) plays video with
+            // no sound — the no-frames probe can't catch this, so check it here.
+            if let audioFourCC = await Self.firstCodecFourCC(of: asset, mediaType: .audio) {
+                guard let self, !Task.isCancelled else { return }
+                PlozzLog.playback.info("Direct-play audio codec FourCC: \(audioFourCC)")
+                if Self.isAVPlayerHostileAudioFourCC(audioFourCC) {
+                    PlozzLog.playback.info("Audio FourCC \(audioFourCC) is not decodable by AVPlayer; swapping to the on-device engine")
+                    self.onFailure?(.invalidResponse)
+                }
+            }
         }
     }
 
-    /// Loads the first video track's codec FourCC from the container, or nil.
-    private static func firstVideoCodecFourCC(of asset: AVAsset) async -> String? {
+    /// Loads the first track of `mediaType`'s codec FourCC from the container.
+    private static func firstCodecFourCC(of asset: AVAsset, mediaType: AVMediaType) async -> String? {
         do {
-            let tracks = try await asset.loadTracks(withMediaType: .video)
+            let tracks = try await asset.loadTracks(withMediaType: mediaType)
             guard let track = tracks.first else { return nil }
             let formats = try await track.load(.formatDescriptions)
             guard let format = formats.first else { return nil }
@@ -401,6 +417,13 @@ public final class NativeVideoEngine: VideoEngine {
     /// are fine. (DoVi is excluded upstream via the SDR gate.)
     private static func isAVPlayerHostileVideoFourCC(_ fourCC: String) -> Bool {
         fourCC.lowercased() == "hev1"
+    }
+
+    /// Audio FourCCs AVPlayer can't decode (Opus `Opus`, Vorbis). AAC `mp4a`,
+    /// AC-3 `ac-3`, E-AC-3 `ec-3`, ALAC, FLAC, LPCM etc. are all fine.
+    private static func isAVPlayerHostileAudioFourCC(_ fourCC: String) -> Bool {
+        let lowered = fourCC.lowercased()
+        return lowered == "opus" || lowered.contains("vorbis")
     }
 
     private static func fourCCString(_ code: FourCharCode) -> String {

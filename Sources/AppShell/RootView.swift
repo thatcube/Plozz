@@ -58,6 +58,7 @@ public struct RootView: View {
                         diagnosticsModel: appState.diagnosticsModel,
                         homeVisibility: appState.homeLibraryVisibilityModel,
                         ratingsProvider: appState.ratingsProvider,
+                        mediaItemActionHandler: appState.mediaItemActionHandler,
                         displayAccounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
                         profiles: appState.profilesModel.profiles,

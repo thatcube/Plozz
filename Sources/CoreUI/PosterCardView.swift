@@ -45,6 +45,12 @@ public struct PosterCardView: View {
     }
 
     public var body: some View {
+        cardBody
+            .mediaItemContextMenu(for: item)
+    }
+
+    @ViewBuilder
+    private var cardBody: some View {
         switch style {
         case .poster:
             posterCard
@@ -62,6 +68,7 @@ public struct PosterCardView: View {
                     .aspectRatio(2.0 / 3.0, contentMode: .fit)
                     .frame(maxWidth: .infinity)
                     .overlay { artwork }
+                    .overlay(alignment: .topTrailing) { watchedBadge }
                     .overlay(alignment: .bottom) { progressBar(height: 8) }
                     .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
 
@@ -98,6 +105,7 @@ public struct PosterCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 artwork
                     .frame(width: size.width, height: size.height)
+                    .overlay(alignment: .topTrailing) { watchedBadge }
                     .overlay(alignment: .bottom) { progressBar(height: 8) }
                     .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
 
@@ -255,6 +263,21 @@ public struct PosterCardView: View {
     }
 
     // MARK: Progress
+
+    /// A "watched" check shown in the artwork's top corner once an item is fully
+    /// played. Hidden under spoiler thumbnail-masking so it never reveals that an
+    /// unseen episode exists. Mirrors the watched state the context menu toggles.
+    @ViewBuilder
+    private var watchedBadge: some View {
+        if item.isPlayed && !hideThumbnail {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 30))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, Color.accentColor)
+                .padding(8)
+                .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
+        }
+    }
 
     @ViewBuilder
     private func progressBar(height: CGFloat) -> some View {

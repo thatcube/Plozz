@@ -33,6 +33,9 @@ public struct SearchView: View {
         content
             .searchable(text: $viewModel.query, prompt: "Search movies, shows, and episodes")
             .task(id: viewModel.query) { await viewModel.search() }
+            .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { _ in
+                Task { await viewModel.search() }
+            }
     }
 
     @ViewBuilder

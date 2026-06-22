@@ -50,6 +50,9 @@ public struct HomeView: View {
             .scrollClipDisabled()
         }
         .task { if viewModel.state.value == nil { await viewModel.load() } }
+        .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { _ in
+            Task { await viewModel.load() }
+        }
     }
 
     private func librariesRow(_ libraries: [AggregatedLibrary]) -> some View {

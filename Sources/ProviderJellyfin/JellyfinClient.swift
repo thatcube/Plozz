@@ -303,6 +303,18 @@ public struct JellyfinClient: Sendable {
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
+    /// `POST`/`DELETE /Users/{userId}/PlayedItems/{itemId}` — marks an item
+    /// played (POST) or unplayed (DELETE) for the user. For a season/series id
+    /// Jellyfin cascades the change to the contained episodes.
+    func setItemPlayed(_ played: Bool, userID: String, itemID: String) async throws {
+        let endpoint = Endpoint(
+            method: played ? .post : .delete,
+            path: "/Users/\(userID)/PlayedItems/\(itemID)",
+            headers: authHeaders
+        )
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
     /// Tells the server to tear down any active transcode/remux job for this
     /// play session. Harmless for direct-play sessions (no encoding exists), but
     /// essential for transcoded HLS so an ffmpeg job isn't left running on the

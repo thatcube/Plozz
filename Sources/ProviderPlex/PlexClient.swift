@@ -127,6 +127,22 @@ public struct PlexClient: Sendable {
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
+    /// `GET /:/scrobble` (watched) or `GET /:/unscrobble` (unwatched) — toggles
+    /// an item's watched state. Scrobbling a season/series ratingKey marks the
+    /// contained episodes too.
+    func setWatched(_ watched: Bool, ratingKey: String) async throws {
+        let endpoint = Endpoint(
+            path: watched ? "/:/scrobble" : "/:/unscrobble",
+            queryItems: [
+                URLQueryItem(name: "key", value: ratingKey),
+                URLQueryItem(name: "identifier", value: "com.plexapp.plugins.library"),
+                URLQueryItem(name: "X-Plex-Token", value: token)
+            ],
+            headers: headers
+        )
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
     // MARK: URLs
 
     /// Builds an absolute, token-bearing stream URL for a part `key` (which is

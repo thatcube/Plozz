@@ -535,3 +535,33 @@ final class JellyfinRemoteSubtitleTests: XCTestCase {
         XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Items/i1/RemoteSearch/Subtitles/sub-1") })
     }
 }
+
+final class JellyfinWatchStateTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testSetPlayedTruePostsToPlayedItems() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/PlayedItems/i1", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(true, itemID: "i1")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Users/u1/PlayedItems/i1") })
+        XCTAssertEqual(stub.method(forPathSuffix: "/Users/u1/PlayedItems/i1"), .post)
+    }
+
+    func testSetPlayedFalseDeletesPlayedItems() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/PlayedItems/i1", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(false, itemID: "i1")
+
+        XCTAssertEqual(stub.method(forPathSuffix: "/Users/u1/PlayedItems/i1"), .delete)
+    }
+}

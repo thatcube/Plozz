@@ -496,3 +496,42 @@ final class PlexDirectPlayCapabilityTests: XCTestCase {
         XCTAssertFalse(try canDirectPlay(json, caps: .default))
     }
 }
+
+final class PlexWatchStateTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "srv", name: "Home", baseURL: URL(string: "https://plex.host:32400")!, provider: .plex),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testSetPlayedTrueScrobbles() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/:/scrobble", json: "")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(true, itemID: "42")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/:/scrobble") })
+        let query = stub.queryItems(forPathSuffix: "/:/scrobble")
+        XCTAssertEqual(query?.first(where: { $0.name == "key" })?.value, "42")
+        XCTAssertEqual(
+            query?.first(where: { $0.name == "identifier" })?.value,
+            "com.plexapp.plugins.library"
+        )
+    }
+
+    func testSetPlayedFalseUnscrobbles() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/:/unscrobble", json: "")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(false, itemID: "42")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/:/unscrobble") })
+        XCTAssertEqual(
+            stub.queryItems(forPathSuffix: "/:/unscrobble")?.first(where: { $0.name == "key" })?.value,
+            "42"
+        )
+    }
+}

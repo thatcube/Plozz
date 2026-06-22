@@ -306,3 +306,13 @@ public struct PlexProvider: MediaProvider {
         }
     }
 }
+
+// MARK: - Watched state
+
+extension PlexProvider: WatchStateProviding {
+    /// Toggles an item's watched state via Plex scrobble/unscrobble. Scrobbling a
+    /// season or series ratingKey marks the contained episodes too.
+    public func setPlayed(_ played: Bool, itemID: String) async throws {
+        try await client.setWatched(played, ratingKey: itemID)
+    }
+}

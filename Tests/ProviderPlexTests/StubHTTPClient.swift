@@ -14,6 +14,7 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
     private var queues: [String: [Data]] = [:]
     var error: AppError?
     private(set) var sentPaths: [String] = []
+    private(set) var sentMethods: [HTTPMethod] = []
     private(set) var sentQueryItems: [[URLQueryItem]] = []
 
     func stub(pathSuffix: String, json: String, status: Int = 200) {
@@ -33,8 +34,17 @@ final class StubHTTPClient: HTTPClient, @unchecked Sendable {
         return nil
     }
 
+    /// The HTTP method of the most recent request whose path ends in `suffix`.
+    func method(forPathSuffix suffix: String) -> HTTPMethod? {
+        for (index, path) in sentPaths.enumerated().reversed() where path.hasSuffix(suffix) {
+            return sentMethods[index]
+        }
+        return nil
+    }
+
     func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
         sentPaths.append(endpoint.path)
+        sentMethods.append(endpoint.method)
         sentQueryItems.append(endpoint.queryItems)
         if let error { throw error }
 

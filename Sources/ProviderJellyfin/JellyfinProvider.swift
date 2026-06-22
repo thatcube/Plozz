@@ -258,7 +258,6 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     // MARK: Subtitles
-
     public func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] {
         try await client.remoteSubtitleSearch(itemID: itemID, language: language).map(map(remoteSubtitle:))
     }
@@ -461,5 +460,15 @@ public struct JellyfinProvider: MediaProvider {
         case "boxsets": return .collection
         default: return .folder
         }
+    }
+}
+
+// MARK: - Watched state
+
+extension JellyfinProvider: WatchStateProviding {
+    /// Toggles an item's played/watched state on the server. For a season or
+    /// series id Jellyfin cascades the change to the contained episodes.
+    public func setPlayed(_ played: Bool, itemID: String) async throws {
+        try await client.setItemPlayed(played, userID: session.userID, itemID: itemID)
     }
 }

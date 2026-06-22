@@ -25,6 +25,7 @@ struct MainTabView: View {
     let diagnosticsModel: DiagnosticsSettingsModel
     let homeVisibility: HomeLibraryVisibilityModel
     let ratingsProvider: any ExternalRatingsProviding
+    let mediaItemActionHandler: any MediaItemActionHandling
     let displayAccounts: [Account]
     let activeAccountID: String?
     let profiles: [Profile]
@@ -104,6 +105,7 @@ struct MainTabView: View {
         .task(id: accounts.map(\.account.id)) {
             await musicAvailability.probe(accounts: accounts)
         }
+        .mediaItemActionHandler(mediaItemActionHandler)
     }
 }
 

@@ -67,6 +67,30 @@ public final class ItemDetailViewModel {
         seasonEpisodes[seasonID]
     }
 
+    /// Quietly re-fetches the detail, its children, and any season episode lists
+    /// already shown, **without** dropping to a full-screen loading state. Used
+    /// after a context-menu action (e.g. mark watched) so the hero, child rail
+    /// and watched badges reflect the new server state in place.
+    public func reload() async {
+        guard case .loaded = state else { await load(); return }
+        guard let item = try? await provider.item(id: itemID) else { return }
+        let children: [MediaItem]
+        switch item.kind {
+        case .series, .season, .folder, .collection:
+            children = (try? await provider.children(of: itemID)) ?? []
+        default:
+            children = []
+        }
+        state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
+        // Refresh the episode lists that were already loaded for visible seasons.
+        let loadedSeasonIDs = Array(seasonEpisodes.keys)
+        seasonEpisodes = [:]
+        for seasonID in loadedSeasonIDs {
+            await loadEpisodes(for: seasonID)
+        }
+        await enrichRatings(for: item)
+    }
+
     /// Lazily fetches and caches the episodes of one season. Idempotent: a season
     /// already loaded (or in flight) is a no-op, so callers may invoke it freely
     /// whenever a season tab gains focus. Fetch failures cache an empty list so a

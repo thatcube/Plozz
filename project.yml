@@ -53,6 +53,14 @@ targets:
         # from the TMDB_BEARER_TOKEN build setting (gitignored Config/Secrets.local.xcconfig).
         # Empty by default, which disables the TMDb fallback.
         TMDBBearerToken: "$(TMDB_BEARER_TOKEN)"
+        # Trakt OAuth application credentials, powering watch-history sync
+        # (scrobbling). Substituted from the TRAKT_CLIENT_ID / TRAKT_CLIENT_SECRET
+        # build settings (gitignored Config/Secrets.local.xcconfig). Empty by
+        # default, which disables Trakt sync (the Settings panel shows it as
+        # unavailable and scrobbling is a no-op). Create an app at
+        # https://trakt.tv/oauth/applications to get these.
+        TraktClientID: "$(TRAKT_CLIENT_ID)"
+        TraktClientSecret: "$(TRAKT_CLIENT_SECRET)"
         # Local network access is required for LAN server discovery on tvOS.
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:

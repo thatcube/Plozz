@@ -7,6 +7,7 @@ import FeatureProfiles
 import ProviderJellyfin
 import ProviderPlex
 import RatingsService
+import TraktService
 import TopShelfKit
 
 /// The app's composition root and single source of truth for session state.
@@ -61,6 +62,11 @@ public final class AppState {
     /// detail so ratings are fetched async without blocking the screen.
     public let ratingsProvider: any ExternalRatingsProviding
 
+    /// Trakt sync: owns the connection lifecycle for Settings and exposes the
+    /// scrobbler the player uses to sync watches to the user's Trakt history.
+    /// A no-op when no Trakt client credentials are configured.
+    public let traktService: TraktService
+
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry
@@ -81,13 +87,15 @@ public final class AppState {
         themeModel: ThemeSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
-        ratingsProvider: (any ExternalRatingsProviding)? = nil
+        ratingsProvider: (any ExternalRatingsProviding)? = nil,
+        traktService: TraktService? = nil
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
         self.profilesModel = profilesModel ?? ProfilesModel()
         self.systemBridge = systemBridge
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
+        self.traktService = traktService ?? TraktServiceFactory.make()
 
         // If the caller supplied any settings model, treat them all as injected
         // (test path) and don't rebuild them on profile switch. Otherwise build

@@ -8,6 +8,7 @@ import FeaturePlayback
 import FeatureSearch
 import FeatureSettings
 import RatingsService
+import TraktService
 
 /// The signed-in experience: Home, Search and Settings tabs, with item-detail
 /// navigation and full-screen playback.
@@ -25,6 +26,7 @@ struct MainTabView: View {
     let diagnosticsModel: DiagnosticsSettingsModel
     let homeVisibility: HomeLibraryVisibilityModel
     let ratingsProvider: any ExternalRatingsProviding
+    let trakt: TraktService
     let displayAccounts: [Account]
     let activeAccountID: String?
     let profiles: [Profile]
@@ -54,6 +56,7 @@ struct MainTabView: View {
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
                 themePalette: resolvedPalette,
                 ratingsProvider: ratingsProvider,
+                scrobbler: trakt.scrobbler,
                 pendingPlayItemID: $pendingPlayItemID
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
@@ -64,7 +67,8 @@ struct MainTabView: View {
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
                 themePalette: resolvedPalette,
-                ratingsProvider: ratingsProvider
+                ratingsProvider: ratingsProvider,
+                scrobbler: trakt.scrobbler
             )
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
@@ -85,6 +89,7 @@ struct MainTabView: View {
                 theme: themeModel,
                 diagnostics: diagnosticsModel,
                 homeVisibility: homeVisibility,
+                trakt: trakt,
                 discoveredLibraries: discovery.state,
                 reloadLibraries: { await discovery.load(from: accounts) },
                 accounts: displayAccounts,
@@ -128,6 +133,7 @@ private struct HomeTab: View {
     let showDiagnostics: Bool
     let themePalette: ThemePalette
     let ratingsProvider: any ExternalRatingsProviding
+    let scrobbler: any TraktScrobbling
     @Binding var pendingPlayItemID: String?
 
     @State private var path = NavigationPath()
@@ -179,7 +185,8 @@ private struct HomeTab: View {
                     provider: resolveProvider(request.item.sourceAccountID, in: accounts),
                     itemID: request.item.id,
                     captionSettings: captionSettings,
-                    startPosition: request.startPosition
+                    startPosition: request.startPosition,
+                    scrobbler: scrobbler
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
@@ -272,6 +279,7 @@ private struct SearchTab: View {
     let showDiagnostics: Bool
     let themePalette: ThemePalette
     let ratingsProvider: any ExternalRatingsProviding
+    let scrobbler: any TraktScrobbling
 
     @State private var path = NavigationPath()
     @State private var playRequest: PlayRequest?
@@ -304,7 +312,8 @@ private struct SearchTab: View {
                     provider: resolveProvider(request.item.sourceAccountID, in: accounts),
                     itemID: request.item.id,
                     captionSettings: captionSettings,
-                    startPosition: request.startPosition
+                    startPosition: request.startPosition,
+                    scrobbler: scrobbler
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette

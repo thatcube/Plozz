@@ -4,6 +4,7 @@ import AVFoundation
 import Observation
 import CoreModels
 import CoreNetworking
+import TraktService
 
 /// Owns the `AVPlayer` for a single playback session.
 ///
@@ -28,6 +29,10 @@ public final class PlayerViewModel {
     private let provider: any MediaProvider
     private let itemID: String
     private let captionSettings: CaptionSettings
+    /// Best-effort Trakt scrobbler. Receives the same start/pause/stop lifecycle
+    /// as the in-app progress report so watches sync to Trakt. A no-op when Trakt
+    /// is unconfigured or disconnected.
+    private let scrobbler: any TraktScrobbling
     /// Explicit start position (seconds) that overrides the provider's resume
     /// point when set. `nil` keeps the default behaviour (derive from the
     /// `PlaybackRequest`); `0` forces "start over"; a positive value resumes.
@@ -54,12 +59,14 @@ public final class PlayerViewModel {
         provider: any MediaProvider,
         itemID: String,
         captionSettings: CaptionSettings = .default,
-        startPosition: TimeInterval? = nil
+        startPosition: TimeInterval? = nil,
+        scrobbler: any TraktScrobbling = DisabledTraktScrobbler()
     ) {
         self.provider = provider
         self.itemID = itemID
         self.captionSettings = captionSettings
         self.startPositionOverride = startPosition
+        self.scrobbler = scrobbler
     }
 
     /// Loads stream info, configures the player, and seeks to resume.
@@ -277,6 +284,8 @@ public final class PlayerViewModel {
 
     /// Reports the current position. Best-effort: a failed report must never
     /// interrupt playback, so errors are swallowed (and never logged with data).
+    /// The same lifecycle is forwarded to Trakt so watches sync to the user's
+    /// Trakt history.
     private func report(event: PlaybackEvent, isPaused: Bool) async {
         guard let player, let request else { return }
         let progress = PlaybackProgress(
@@ -290,6 +299,21 @@ public final class PlayerViewModel {
         } catch {
             PlozzLog.playback.debug("Progress report failed (non-fatal)")
         }
+        await scrobbler.scrobble(item: request.item, progress: watchedPercent(player: player), event: event)
+    }
+
+    /// Watched percentage (0...100) from the player's current position over the
+    /// item's duration, preferring the player's known duration and falling back
+    /// to the item runtime. `0` when neither is known.
+    private func watchedPercent(player: AVPlayer) -> Double {
+        let position = player.currentTime().seconds
+        guard position.isFinite, position >= 0 else { return 0 }
+        let playerDuration = player.currentItem?.duration.seconds
+        let duration = (playerDuration?.isFinite == true && (playerDuration ?? 0) > 0)
+            ? playerDuration
+            : request?.item.runtime
+        guard let duration, duration > 0 else { return 0 }
+        return min(max(position / duration * 100, 0), 100)
     }
 
     public func setPaused(_ paused: Bool) {

@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import TraktService
 
 /// Settings: account management, appearance, caption customization, spoiler
 /// protection, playback diagnostics, and sign out.
@@ -20,6 +21,7 @@ public struct SettingsView: View {
     @State private var theme: ThemeSettingsModel
     @State private var diagnostics: DiagnosticsSettingsModel
     @State private var homeVisibility: HomeLibraryVisibilityModel
+    private let trakt: TraktService
     private let discoveredLibraries: LoadState<[AggregatedLibrary]>
     private let reloadLibraries: () async -> Void
     private let accounts: [Account]
@@ -40,6 +42,7 @@ public struct SettingsView: View {
         theme: ThemeSettingsModel,
         diagnostics: DiagnosticsSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
+        trakt: TraktService,
         discoveredLibraries: LoadState<[AggregatedLibrary]>,
         reloadLibraries: @escaping () async -> Void,
         accounts: [Account],
@@ -59,6 +62,7 @@ public struct SettingsView: View {
         _theme = State(initialValue: theme)
         _diagnostics = State(initialValue: diagnostics)
         _homeVisibility = State(initialValue: homeVisibility)
+        self.trakt = trakt
         self.discoveredLibraries = discoveredLibraries
         self.reloadLibraries = reloadLibraries
         self.accounts = accounts
@@ -96,6 +100,7 @@ public struct SettingsView: View {
                     appearancePanel
                     captionsPanel
                     spoilerPanel
+                    traktPanel
                     playbackPanel
                     if !accounts.isEmpty { signOutPanel }
                     aboutPanel
@@ -319,8 +324,18 @@ public struct SettingsView: View {
         }
     }
 
-    // MARK: - Playback
+    // MARK: - Trakt
 
+    private var traktPanel: some View {
+        SettingsPanel(
+            title: "Trakt",
+            footer: "Connect Trakt to automatically scrobble what you watch to your Trakt.tv history."
+        ) {
+            TraktConnectionView(trakt: trakt)
+        }
+    }
+
+    // MARK: - Playback
     private var playbackPanel: some View {
         SettingsPanel(
             title: "Playback",
@@ -389,6 +404,111 @@ private struct SettingsPanel<Content: View>: View {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         )
+    }
+}
+
+/// The Trakt connect/disconnect flow rendered inside the Settings "Trakt" panel.
+///
+/// Driven entirely by the observable `TraktService.phase`, so connecting in one
+/// place and the live device-code prompt stay in sync. The device-code flow is
+/// the TV-friendly OAuth grant: we show a short code and the user approves it at
+/// `trakt.tv/activate` on a phone or computer.
+private struct TraktConnectionView: View {
+    let trakt: TraktService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            switch trakt.phase {
+            case .unknown:
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Checking Trakt connection…")
+                        .foregroundStyle(.secondary)
+                }
+
+            case .unavailable:
+                Text("Trakt sync isn't configured in this build. Add a Trakt client id and secret to enable it.")
+                    .foregroundStyle(.secondary)
+
+            case .disconnected:
+                Button(action: { trakt.connect() }) {
+                    Label("Connect to Trakt", systemImage: "link")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            case let .connecting(userCode, verificationURL, _):
+                connectingView(userCode: userCode, verificationURL: verificationURL)
+
+            case let .connected(username):
+                connectedView(username: username)
+
+            case let .error(message):
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.secondary)
+                    Button(action: { trakt.connect() }) {
+                        Label("Try Again", systemImage: "arrow.clockwise")
+                    }
+                }
+            }
+        }
+        .task { await trakt.refreshStatus() }
+    }
+
+    private func connectingView(userCode: String, verificationURL: String) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("On your phone or computer, go to **\(displayURL(verificationURL))** and enter this code:")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(userCode)
+                .font(.system(size: 64, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .tracking(10)
+                .padding(.horizontal, 36)
+                .padding(.vertical, 18)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+
+            HStack(spacing: 16) {
+                ProgressView()
+                Text("Waiting for you to approve…")
+                    .foregroundStyle(.secondary)
+            }
+
+            Button(role: .cancel, action: { trakt.cancelConnect() }) {
+                Text("Cancel")
+            }
+        }
+    }
+
+    private func connectedView(username: String) -> some View {
+        HStack(spacing: 16) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.title)
+                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(username).font(.headline)
+                Text("Your watches sync to Trakt")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive) {
+                Task { await trakt.disconnect() }
+            } label: {
+                Label("Disconnect", systemImage: "xmark.circle")
+            }
+        }
+    }
+
+    /// Strips the scheme so the on-screen URL reads as `trakt.tv/activate`.
+    private func displayURL(_ url: String) -> String {
+        var trimmed = url
+        for prefix in ["https://", "http://"] where trimmed.hasPrefix(prefix) {
+            trimmed.removeFirst(prefix.count)
+        }
+        return trimmed
     }
 }
 

@@ -66,10 +66,10 @@ public struct PosterCardView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primaryText)
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     Text(subtitleText ?? " ")
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .opacity(subtitleText == nil ? 0 : 1)

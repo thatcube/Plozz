@@ -7,6 +7,7 @@ import FeatureMusic
 import FeaturePlayback
 import FeatureSearch
 import FeatureSettings
+import ProviderTrailers
 import RatingsService
 
 /// The signed-in experience: Home, Search and Settings tabs, with item-detail
@@ -119,6 +120,34 @@ private func resolveProvider(_ accountID: String?, in accounts: [ResolvedAccount
     return accounts[0].provider
 }
 
+/// Builds the player for a play request. Online (TMDb → YouTube) trailers carry a
+/// YouTube video-id marker and have no backing account, so they are routed to
+/// ``YouTubeTrailerProvider`` (which extracts a playable stream); every other
+/// item resolves through its owning account provider as usual.
+@MainActor
+private func makePlayerViewModel(
+    for request: PlayRequest,
+    accounts: [ResolvedAccount],
+    captionSettings: CaptionSettings
+) -> PlayerViewModel {
+    if let videoID = request.item.youTubeTrailerVideoID {
+        return PlayerViewModel(
+            provider: YouTubeTrailerProvider(item: request.item, videoID: videoID),
+            itemID: videoID,
+            captionSettings: captionSettings,
+            startPosition: request.startPosition,
+            engineFactory: HybridPlayback.engineFactory()
+        )
+    }
+    return PlayerViewModel(
+        provider: resolveProvider(request.item.sourceAccountID, in: accounts),
+        itemID: request.item.id,
+        captionSettings: captionSettings,
+        startPosition: request.startPosition,
+        engineFactory: HybridPlayback.engineFactory()
+    )
+}
+
 /// Home tab with its own navigation stack: Home → Library (paged) → Detail and
 /// full-screen player presentation. Every destination resolves its provider from
 /// the tapped item/library's `sourceAccountID`.
@@ -177,12 +206,10 @@ private struct HomeTab: View {
         }
         .fullScreenCover(item: $playRequest) { request in
             PlayerView(
-                viewModel: PlayerViewModel(
-                    provider: resolveProvider(request.item.sourceAccountID, in: accounts),
-                    itemID: request.item.id,
-                    captionSettings: captionSettings,
-                    startPosition: request.startPosition,
-                    engineFactory: HybridPlayback.engineFactory()
+                viewModel: makePlayerViewModel(
+                    for: request,
+                    accounts: accounts,
+                    captionSettings: captionSettings
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
@@ -305,12 +332,10 @@ private struct SearchTab: View {
         .mediaItemNavigator { path.append($0) }
         .fullScreenCover(item: $playRequest) { request in
             PlayerView(
-                viewModel: PlayerViewModel(
-                    provider: resolveProvider(request.item.sourceAccountID, in: accounts),
-                    itemID: request.item.id,
-                    captionSettings: captionSettings,
-                    startPosition: request.startPosition,
-                    engineFactory: HybridPlayback.engineFactory()
+                viewModel: makePlayerViewModel(
+                    for: request,
+                    accounts: accounts,
+                    captionSettings: captionSettings
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette

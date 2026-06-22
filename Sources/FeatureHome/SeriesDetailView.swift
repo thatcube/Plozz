@@ -57,7 +57,8 @@ struct SeriesDetailView: View {
                     item: heroItem,
                     spoilerSettings: spoilerSettings,
                     playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
-                    onPlay: playTarget.map { target in { onPlay(target) } }
+                    onPlay: playTarget.map { target in { onPlay(target) } },
+                    onPlayTrailer: trailerButtonAction
                 )
 
                 if !seasons.isEmpty {
@@ -170,11 +171,13 @@ struct SeriesDetailView: View {
         return seasons.isEmpty ? looseEpisodes : []
     }
 
+    /// Header for the episode rail. A selected season's name is already shown on
+    /// its tab/chip above the rail, so the rail itself stays unlabelled to avoid
+    /// repeating it. The flat "loose episodes" case (no season tabs) keeps an
+    /// "Episodes" header since nothing else names it.
     private var railTitle: String {
-        if let id = selectedSeasonID, let season = seasons.first(where: { $0.id == id }) {
-            return season.title
-        }
-        return "Episodes"
+        if selectedSeasonID != nil { return "" }
+        return seasons.isEmpty ? "Episodes" : ""
     }
 
     /// The episode the hero's Play button acts on: the focused episode itself, or
@@ -182,6 +185,14 @@ struct SeriesDetailView: View {
     private var playTarget: MediaItem? {
         if heroItem.kind == .episode { return heroItem }
         return SeriesResume.nextUp(in: currentEpisodes)
+    }
+
+    /// The series' trailer action, shown only while the hero is presenting the
+    /// series itself (not a focused season/episode), so the Trailer button reads
+    /// as belonging to the show. `nil` hides the button.
+    private var trailerButtonAction: (() -> Void)? {
+        guard heroItem.id == series.id, let trailer = viewModel.trailers.first else { return nil }
+        return { onPlay(trailer) }
     }
 
     /// Picks the season to open on first appearance — the one holding the user's

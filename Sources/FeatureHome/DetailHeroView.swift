@@ -16,6 +16,8 @@ struct DetailHeroView: View {
     /// (e.g. a season with no resolved episodes yet).
     let playTitle: String?
     let onPlay: (() -> Void)?
+    /// When non-`nil`, a secondary "Trailer" button is shown next to Play.
+    var onPlayTrailer: (() -> Void)? = nil
 
     @Environment(\.themePalette) private var palette
 
@@ -80,12 +82,22 @@ struct DetailHeroView: View {
                         .lineLimit(4)
                         .frame(maxWidth: 1100, alignment: .leading)
                 }
-                if let playTitle, let onPlay {
-                    Button(action: onPlay) {
-                        Label(playTitle, systemImage: "play.fill")
-                            .frame(minWidth: 260)
+                if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
+                    HStack(spacing: 24) {
+                        if let playTitle, let onPlay {
+                            Button(action: onPlay) {
+                                Label(playTitle, systemImage: "play.fill")
+                                    .frame(minWidth: 260)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        if let onPlayTrailer {
+                            Button(action: onPlayTrailer) {
+                                Label("Trailer", systemImage: "film.fill")
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
                     .padding(.top, 8)
                 }
             }

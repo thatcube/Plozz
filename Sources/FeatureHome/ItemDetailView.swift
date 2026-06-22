@@ -61,7 +61,8 @@ public struct ItemDetailView: View {
                     item: detail.item,
                     spoilerSettings: spoilerSettings,
                     playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
-                    onPlay: isPlayable(detail.item) ? { onPlay(detail.item) } : nil
+                    onPlay: isPlayable(detail.item) ? { onPlay(detail.item) } : nil,
+                    onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } }
                 )
                 if !detail.children.isEmpty {
                     MediaRowView(

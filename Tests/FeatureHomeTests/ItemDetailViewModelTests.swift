@@ -73,4 +73,54 @@ final class ItemDetailViewModelTests: XCTestCase {
         await vm.loadEpisodes(for: "s1")
         XCTAssertEqual(vm.episodes(for: "s1"), [])
     }
+
+    func testLoadFetchesTrailersTaggedWithSource() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        provider.trailersByItem = ["m1": [MediaItem(id: "t1", title: "Trailer", kind: .video)]]
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            sourceAccountID: "acct-9",
+            onlineTrailerResolver: { _ in [MediaItem.youTubeTrailer(videoID: "yt1", title: "online")] }
+        )
+
+        await vm.load()
+
+        // Local trailer is preferred over the online fallback, and stays tagged.
+        XCTAssertEqual(vm.trailers.map(\.id), ["t1"])
+        XCTAssertEqual(vm.trailers.first?.sourceAccountID, "acct-9")
+        XCTAssertFalse(vm.trailers.first?.isYouTubeTrailer ?? true)
+    }
+
+    func testFallsBackToOnlineTrailerWhenNoLocal() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        // No local trailers configured → online fallback is used.
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            sourceAccountID: "acct-9",
+            onlineTrailerResolver: { item in
+                [MediaItem.youTubeTrailer(videoID: "yt1", title: "\(item.title) — Trailer")]
+            }
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.trailers.map(\.youTubeTrailerVideoID), ["yt1"])
+        // Online trailers are not tagged to an account — they route to YouTube.
+        XCTAssertNil(vm.trailers.first?.sourceAccountID)
+    }
+
+    func testLoadLeavesTrailersEmptyWhenNoLocalOrOnline() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            onlineTrailerResolver: { _ in [] }
+        )
+
+        await vm.load()
+
+        XCTAssertTrue(vm.trailers.isEmpty)
+    }
 }

@@ -137,15 +137,19 @@ public struct JellyfinProvider: MediaProvider {
         // rather than a quality-reducing re-encode.
         var didRemux = false
 
-        // True Dolby Vision path: when the server would direct-play a DoVi MKV
-        // (which only reaches the on-device hybrid engine → HDR10), ask it instead
-        // to remux the container to seekable fMP4 HLS with the video **copied**
-        // (preserving the DoVi RPU/dvcC, tagged `dvh1`). That HLS stream reaches
-        // AVPlayer — the only engine that outputs true Dolby Vision on tvOS — and
-        // routes there automatically via `isTranscoding`. Best-effort: if the
-        // remux request fails or the server won't offer a stream URL, fall back to
-        // the original (direct-play) source.
-        if !forceTranscode, Self.shouldRequestDoViRemux(source) {
+        // Container-only remux to reach AVPlayer losslessly. Two cases:
+        //  1. True Dolby Vision: a DoVi MKV the server would direct-play only
+        //     reaches the on-device hybrid engine → HDR10. Remuxing to seekable
+        //     fMP4 HLS with the video **copied** (DoVi RPU/dvcC preserved, tagged
+        //     `dvh1`) reaches AVPlayer — the only tvOS engine that outputs true
+        //     Dolby Vision.
+        //  2. HEVC `hev1`: AVPlayer can't render HEVC tagged `hev1` (audio plays,
+        //     black screen). Jellyfin's fMP4 remux re-tags the copied bitstream to
+        //     `hvc1` (`-c copy -tag:v hvc1`), fixing it with no re-encode.
+        // Both route to AVPlayer automatically via `isTranscoding`. Best-effort: if
+        // the remux fails or the server offers no stream URL, fall back to direct
+        // play (the router then sends `hev1` to the on-device engine as a net).
+        if !forceTranscode, Self.shouldRequestDoViRemux(source) || Self.shouldRequestHvc1Remux(source) {
             if let remuxInfo = try? await client.playbackInfo(
                 userID: session.userID,
                 itemID: itemID,
@@ -273,6 +277,39 @@ public struct JellyfinProvider: MediaProvider {
         return appleCompatibleAudio.contains(audioCodec)
     }
 
+    /// Whether to ask the server to remux (rather than direct-play) an HEVC source
+    /// tagged `hev1`. AVPlayer/VideoToolbox only decode HEVC tagged `hvc1`; `hev1`
+    /// (in-band parameter sets) plays audio with a **black screen**. Jellyfin's
+    /// fMP4 HLS remux stream-copies the bitstream and re-tags it to `hvc1`
+    /// (`-c copy -tag:v hvc1`) — lossless, no re-encode — which AVPlayer then
+    /// renders. True only for a **`hev1` HEVC stream in an Apple/MP4-family
+    /// container** the server currently wants to direct-play. `hev1` in Matroska
+    /// is excluded: it routes to the on-device hybrid engine (which decodes `hev1`
+    /// directly), so no remux is needed.
+    static func shouldRequestHvc1Remux(_ source: MediaSourceInfo) -> Bool {
+        // Only intervene when the server chose direct play (raw container).
+        guard source.TranscodingUrl == nil else { return false }
+
+        let container = (source.Container ?? "").lowercased()
+        let isMatroska = container.contains("mkv")
+            || container.contains("matroska")
+            || container.contains("webm")
+        guard !isMatroska else { return false }
+
+        let streams = source.MediaStreams ?? []
+        let video = streams.first { $0.`Type` == "Video" }
+        let codec = (video?.Codec ?? "").lowercased()
+        guard codec == "hevc" || codec == "h265" else { return false }
+        guard (video?.CodecTag ?? "").lowercased() == "hev1" else { return false }
+
+        let audio = streams.first { $0.`Type` == "Audio" && ($0.IsDefault ?? false) }
+            ?? streams.first { $0.`Type` == "Audio" }
+        // No audio → still safe to remux video-only.
+        guard let audioCodec = audio?.Codec?.lowercased() else { return true }
+        let appleCompatibleAudio: Set<String> = ["aac", "ac3", "eac3", "alac", "mp3", "flac", "opus"]
+        return appleCompatibleAudio.contains(audioCodec)
+    }
+
     /// Builds provider-agnostic source facts (codec/HDR/resolution/channels/…)
     /// from the original file's media streams, so the diagnostics overlay stays
     /// accurate even when the server transcodes to a metadata-poor HLS stream.
@@ -286,9 +323,11 @@ public struct JellyfinProvider: MediaProvider {
         let videoStream = video.map { v in
             MediaSourceMetadata.VideoStream(
                 codec: v.Codec,
+                codecTag: v.CodecTag,
                 profile: v.Profile,
                 width: v.Width,
                 height: v.Height,
+                bitDepth: v.BitDepth,
                 bitrate: v.BitRate,
                 frameRate: v.RealFrameRate ?? v.AverageFrameRate,
                 videoRange: v.VideoRange,

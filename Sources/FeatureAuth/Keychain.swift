@@ -97,16 +97,33 @@ public struct KeychainStore: SecureStore {
             return (status, result)
         }
 
-        var (status, result) = copy(useUserIndependent: userIndependent)
-        if shouldFallBack(status) { (status, result) = copy(useUserIndependent: false) }
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        let (status, result) = copy(useUserIndependent: userIndependent)
+        if status == errSecSuccess, let data = result as? Data {
+            return String(data: data, encoding: .utf8)
+        }
+
+        // Recovery: an upgrading install's secrets (e.g. access tokens) were
+        // written *before* the household/user-independent Keychain was adopted,
+        // so they live in the current user's per-user partition and the
+        // user-independent read above misses them (errSecItemNotFound), or the
+        // entitlement isn't provisioned (errSecMissingEntitlement/errSecParam).
+        // Read per-user and, when the shared store is usable, promote the value
+        // so every Apple TV system user sees it from then on.
+        guard userIndependent else { return nil }
+        let (fallbackStatus, fallbackResult) = copy(useUserIndependent: false)
+        guard fallbackStatus == errSecSuccess, let data = fallbackResult as? Data,
+              let value = String(data: data, encoding: .utf8) else { return nil }
+        try? setString(value, for: key) // self-heal into the shared partition
+        return value
     }
 
     public func removeValue(for key: String) throws {
         var status = SecItemDelete(baseQuery(for: key, userIndependent: userIndependent) as CFDictionary)
-        if shouldFallBack(status) {
-            status = SecItemDelete(baseQuery(for: key, userIndependent: false) as CFDictionary)
+        if userIndependent {
+            // Also clear any legacy per-user copy so a removed secret can't be
+            // resurrected by the read-time recovery path in `string(for:)`.
+            let perUser = SecItemDelete(baseQuery(for: key, userIndependent: false) as CFDictionary)
+            if status == errSecItemNotFound { status = perUser }
         }
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)

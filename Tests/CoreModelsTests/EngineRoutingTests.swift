@@ -8,6 +8,7 @@ final class EngineRoutingTests: XCTestCase {
     private func source(
         container: String? = nil,
         videoCodec: String? = nil,
+        videoCodecTag: String? = nil,
         videoRange: String? = nil,
         videoRangeType: String? = nil,
         colorTransfer: String? = nil,
@@ -17,6 +18,7 @@ final class EngineRoutingTests: XCTestCase {
             container: container,
             video: MediaSourceMetadata.VideoStream(
                 codec: videoCodec,
+                codecTag: videoCodecTag,
                 videoRange: videoRange,
                 videoRangeType: videoRangeType,
                 colorTransfer: colorTransfer
@@ -60,6 +62,26 @@ final class EngineRoutingTests: XCTestCase {
     func testCommonAppleFileIsNative() {
         let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "aac")
         XCTAssertEqual(route(mp4), .native)
+    }
+
+    // MARK: HEVC hev1 (AVPlayer can't render) → on-device hybrid net
+
+    func testHevcHev1InMP4RoutesToHybrid() {
+        // AVPlayer plays audio with a black screen for hev1; the on-device engine
+        // decodes it. (Only reached when it wasn't remuxed to hvc1 first.)
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hev1", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .hybrid)
+    }
+
+    func testHevcHvc1InMP4StaysNative() {
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hvc1", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    func testHevcHev1ButTranscodingStaysNative() {
+        // A successful hev1→hvc1 remux arrives as a transcode → AVPlayer.
+        let mp4 = source(container: "mp4", videoCodec: "hevc", videoCodecTag: "hev1", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(mp4, isTranscoding: true), .native)
     }
 
     // MARK: Dolby Vision in an Apple container → native; DoVi in an MKV → hybrid

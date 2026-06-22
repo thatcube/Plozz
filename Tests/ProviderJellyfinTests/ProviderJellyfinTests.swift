@@ -588,3 +588,54 @@ final class JellyfinDeliveryModeTests: XCTestCase {
         )
     }
 }
+
+final class JellyfinHvc1RemuxTests: XCTestCase {
+    private func source(_ json: String) throws -> MediaSourceInfo {
+        try JSONDecoder().decode(MediaSourceInfo.self, from: Data(json.utf8))
+    }
+
+    func testHev1HevcInMP4WithAppleAudioRequestsRemux() throws {
+        let s = try source(#"""
+        {"Container":"mp4","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"},
+          {"Index":1,"Type":"Audio","Codec":"aac","IsDefault":true}]}
+        """#)
+        XCTAssertTrue(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testHvc1HevcIsNotRemuxed() throws {
+        let s = try source(#"""
+        {"Container":"mp4","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hvc1"}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testHev1InMatroskaIsNotRemuxed() throws {
+        // hev1 in MKV routes to the on-device hybrid engine instead.
+        let s = try source(#"""
+        {"Container":"mkv","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testAlreadyTranscodingIsNotRemuxed() throws {
+        let s = try source(#"""
+        {"Container":"mp4","TranscodingUrl":"/v.m3u8","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testHev1WithIncompatibleAudioIsNotRemuxed() throws {
+        // DTS can't be stream-copied into fMP4 → forcing the remux would transcode
+        // audio, so we leave it for the on-device engine net instead.
+        let s = try source(#"""
+        {"Container":"mp4","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"},
+          {"Index":1,"Type":"Audio","Codec":"dts","IsDefault":true}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+}

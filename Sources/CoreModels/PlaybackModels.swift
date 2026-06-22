@@ -52,6 +52,10 @@ public struct MediaSourceMetadata: Hashable, Sendable {
     public struct VideoStream: Hashable, Sendable {
         /// Raw codec token from the provider, e.g. `hevc`, `h264`, `av1`.
         public var codec: String?
+        /// Container codec FourCC tag, e.g. `hvc1`/`hev1` for HEVC. AVPlayer only
+        /// decodes HEVC tagged `hvc1`; `hev1` plays audio with a black screen, so
+        /// this drives a re-tag remux (Jellyfin) or an on-device engine fallback.
+        public var codecTag: String?
         /// Codec profile, e.g. `Main 10`, `High`.
         public var profile: String?
         public var width: Int?
@@ -69,6 +73,7 @@ public struct MediaSourceMetadata: Hashable, Sendable {
 
         public init(
             codec: String? = nil,
+            codecTag: String? = nil,
             profile: String? = nil,
             width: Int? = nil,
             height: Int? = nil,
@@ -79,6 +84,7 @@ public struct MediaSourceMetadata: Hashable, Sendable {
             colorTransfer: String? = nil
         ) {
             self.codec = codec
+            self.codecTag = codecTag
             self.profile = profile
             self.width = width
             self.height = height

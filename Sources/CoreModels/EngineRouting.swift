@@ -87,6 +87,14 @@ public enum EngineRouter {
         // AVPlayer cannot demux Matroska/WebM; the hybrid engine can.
         if isMatroska(source.container) { return .hybrid }
 
+        // AVPlayer/VideoToolbox only decode HEVC tagged `hvc1`; an HEVC stream
+        // tagged `hev1` (in-band parameter sets) in an Apple/MP4-family container
+        // plays audio with a **black screen** on AVPlayer. When it hasn't been
+        // remuxed to `hvc1` (this branch only runs for non-transcoded sources),
+        // decode it on-device instead — the hybrid engine handles `hev1` fine.
+        // `hev1` in Matroska already falls under the Matroska rule above.
+        if isHevcHev1(source.video) { return .hybrid }
+
         if let audio = source.audio?.codec?.lowercased() {
             // AVPlayer can't decode TrueHD/MLP at all → hybrid.
             if isTrueHD(audio) { return .hybrid }
@@ -160,6 +168,16 @@ public enum EngineRouter {
         default:
             return false
         }
+    }
+
+    /// True for an HEVC stream tagged `hev1` (vs `hvc1`). AVPlayer can't render
+    /// `hev1`, so it's routed to the on-device hybrid engine when it reaches the
+    /// router without having been remuxed to `hvc1`.
+    static func isHevcHev1(_ video: MediaSourceMetadata.VideoStream?) -> Bool {
+        guard let video else { return false }
+        let codec = (video.codec ?? "").lowercased()
+        guard codec == "hevc" || codec == "h265" else { return false }
+        return (video.codecTag ?? "").lowercased() == "hev1"
     }
 
     /// True for DTS / DTS-HD (incl. ffmpeg's `dca` alias and `dts-hd ma`).

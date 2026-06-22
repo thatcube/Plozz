@@ -46,6 +46,8 @@ public struct HomeView: View {
                 }
                 .padding(.vertical, 40)
             }
+            // Never clip a focused card's lift, shadow or border.
+            .scrollClipDisabled()
         }
         .task { if viewModel.state.value == nil { await viewModel.load() } }
     }
@@ -53,7 +55,7 @@ public struct HomeView: View {
     private func librariesRow(_ libraries: [AggregatedLibrary]) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Libraries")
-                .font(.title2).bold()
+                .font(.system(size: 32, weight: .bold))
                 .padding(.leading, PlozzTheme.Metrics.screenPadding)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: PlozzTheme.Metrics.cardSpacing) {
@@ -85,6 +87,8 @@ public struct HomeView: View {
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 24)
             }
+            // Never clip a focused card's lift, shadow or border.
+            .scrollClipDisabled()
         }
     }
 }

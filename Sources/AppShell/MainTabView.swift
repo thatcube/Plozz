@@ -274,7 +274,8 @@ private struct SearchTab: View {
     let ratingsProvider: any ExternalRatingsProviding
 
     @State private var path = NavigationPath()
-    @State private var playingItem: MediaItem?
+    @State private var playRequest: PlayRequest?
+    @State private var resumePrompt: MediaItem?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -292,31 +293,46 @@ private struct SearchTab: View {
                         sourceAccountID: item.sourceAccountID
                     ),
                     spoilerSettings: spoilerSettings,
-                    onPlay: { playingItem = $0 },
+                    onPlay: { requestPlay($0) },
                     onSelectChild: { open($0) }
                 )
             }
         }
-        .fullScreenCover(item: $playingItem) { item in
+        .fullScreenCover(item: $playRequest) { request in
             PlayerView(
                 viewModel: PlayerViewModel(
-                    provider: resolveProvider(item.sourceAccountID, in: accounts),
-                    itemID: item.id,
-                    captionSettings: captionSettings
+                    provider: resolveProvider(request.item.sourceAccountID, in: accounts),
+                    itemID: request.item.id,
+                    captionSettings: captionSettings,
+                    startPosition: request.startPosition
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
             )
         }
+        .resumePrompt(item: $resumePrompt) { item, startPosition in
+            playRequest = PlayRequest(item: item, startPosition: startPosition)
+        }
     }
 
-    /// Playable leaves go straight to the player; containers push a detail page.
+    /// Playable leaves go straight to the player (in-progress ones prompt
+    /// Resume vs Start Over); containers push a detail page.
     private func open(_ item: MediaItem) {
         switch item.kind {
         case .movie, .episode, .video:
-            playingItem = item
+            requestPlay(item)
         default:
             path.append(item)
+        }
+    }
+
+    /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
+    /// play immediately from the start.
+    private func requestPlay(_ item: MediaItem) {
+        if let resume = item.resumePosition, resume > 1 {
+            resumePrompt = item
+        } else {
+            playRequest = PlayRequest(item: item, startPosition: 0)
         }
     }
 }

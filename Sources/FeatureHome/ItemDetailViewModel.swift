@@ -15,6 +15,12 @@ public final class ItemDetailViewModel {
 
     public private(set) var state: LoadState<Detail> = .idle
 
+    /// Episodes for each season of a series, loaded lazily the first time a
+    /// season is shown/focused and cached so re-focusing a tab is instant. Keyed
+    /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
+    public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
+    private var loadingSeasons: Set<String> = []
+
     private let provider: any MediaProvider
     private let itemID: String
     private let ratingsProvider: any ExternalRatingsProviding
@@ -54,6 +60,24 @@ public final class ItemDetailViewModel {
         } catch {
             state = .failed(.unknown(""))
         }
+    }
+
+    /// Already-loaded episodes for `seasonID`, or `nil` if not yet fetched.
+    public func episodes(for seasonID: String) -> [MediaItem]? {
+        seasonEpisodes[seasonID]
+    }
+
+    /// Lazily fetches and caches the episodes of one season. Idempotent: a season
+    /// already loaded (or in flight) is a no-op, so callers may invoke it freely
+    /// whenever a season tab gains focus. Fetch failures cache an empty list so a
+    /// missing season renders as "no episodes" rather than retrying on every
+    /// focus change.
+    public func loadEpisodes(for seasonID: String) async {
+        if seasonEpisodes[seasonID] != nil || loadingSeasons.contains(seasonID) { return }
+        loadingSeasons.insert(seasonID)
+        defer { loadingSeasons.remove(seasonID) }
+        let episodes = (try? await provider.children(of: seasonID)) ?? []
+        seasonEpisodes[seasonID] = episodes.map(tagged)
     }
 
     /// Stamps an item with this detail's owning account (if any) so navigation

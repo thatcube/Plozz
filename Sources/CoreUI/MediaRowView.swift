@@ -14,6 +14,10 @@ public struct MediaRowView: View {
     /// "next up" episode). `nil` keeps the platform's default focus behaviour.
     private let initialFocusID: String?
     private let onSelect: (MediaItem) -> Void
+    /// Called whenever focus moves onto a card (with that item) or off the row
+    /// entirely (`nil`). Used by series detail to mirror the focused episode into
+    /// the page hero. When set, every card becomes individually focus-tracked.
+    private let onFocusChange: ((MediaItem?) -> Void)?
 
     @FocusState private var focusedID: String?
     @State private var didApplyInitialFocus = false
@@ -24,6 +28,7 @@ public struct MediaRowView: View {
         style: PosterCardView.Style = .poster,
         spoilerSettings: SpoilerSettings = .default,
         initialFocusID: String? = nil,
+        onFocusChange: ((MediaItem?) -> Void)? = nil,
         onSelect: @escaping (MediaItem) -> Void
     ) {
         self.title = title
@@ -31,14 +36,19 @@ public struct MediaRowView: View {
         self.style = style
         self.spoilerSettings = spoilerSettings
         self.initialFocusID = initialFocusID
+        self.onFocusChange = onFocusChange
         self.onSelect = onSelect
     }
+
+    /// Whether each card needs an individual focus binding installed — required
+    /// both to drive initial focus and to report focus changes to the hero.
+    private var tracksFocus: Bool { initialFocusID != nil || onFocusChange != nil }
 
     public var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 Text(title)
-                    .font(.title2).bold()
+                    .font(.system(size: 32, weight: .bold))
                     .padding(.leading, PlozzTheme.Metrics.screenPadding)
 
                 ScrollViewReader { proxy in
@@ -54,7 +64,14 @@ public struct MediaRowView: View {
                         .padding(.top, 16)
                         .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
                     }
+                    // Let a focused card's lift, drop shadow and border render
+                    // outside the rail's bounds instead of being clipped.
+                    .scrollClipDisabled()
                     .onAppear { applyInitialFocus(using: proxy) }
+                    .onChange(of: focusedID) { _, newValue in
+                        guard let onFocusChange else { return }
+                        onFocusChange(items.first { $0.id == newValue })
+                    }
                 }
             }
         }
@@ -68,7 +85,7 @@ public struct MediaRowView: View {
         let card = PosterCardView(item: item, style: style, spoilerSettings: spoilerSettings) { onSelect(item) }
             .frame(width: style == .poster ? PlozzTheme.Metrics.posterWidth : nil)
             .id(item.id)
-        if initialFocusID != nil {
+        if tracksFocus {
             card.focused($focusedID, equals: item.id)
         } else {
             card

@@ -69,7 +69,7 @@ public struct SearchView: View {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: 16) {
                         Text(section.title)
-                            .font(.title2).bold()
+                            .font(.system(size: 32, weight: .bold))
                             .padding(.leading, PlozzTheme.Metrics.screenPadding)
 
                         LazyVGrid(columns: columns, alignment: .leading, spacing: PlozzTheme.Metrics.cardSpacing) {
@@ -88,6 +88,8 @@ public struct SearchView: View {
             }
             .padding(.vertical, 40)
         }
+        // Never clip a focused card's lift, shadow or border.
+        .scrollClipDisabled()
     }
 }
 

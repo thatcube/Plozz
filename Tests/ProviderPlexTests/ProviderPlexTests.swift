@@ -338,3 +338,161 @@ final class PlexAuthClientTests: XCTestCase {
         XCTAssertEqual(user.userName, "Alice T")
     }
 }
+
+// MARK: - Capability-driven direct play
+
+final class PlexDirectPlayCapabilityTests: XCTestCase {
+
+    private func makeClient(_ caps: MediaCapabilities) -> PlexClient {
+        PlexClient(
+            baseURL: URL(string: "https://plex.host:32400")!,
+            deviceProfile: PlexDeviceProfile(clientIdentifier: "dev1"),
+            token: "TOKEN",
+            http: StubHTTPClient(),
+            capabilities: caps
+        )
+    }
+
+    /// Decodes a single `Media`/`Part` pair from a Plex metadata JSON fragment.
+    private func decodeMedia(_ json: String) throws -> (PlexMedia, PlexPart) {
+        let wrapper = "{\"MediaContainer\":{\"Metadata\":[{\"ratingKey\":\"1\",\"Media\":[\(json)]}]}}"
+        let response = try JSONDecoder().decode(PlexMediaContainerResponse.self, from: Data(wrapper.utf8))
+        let media = try XCTUnwrap(response.MediaContainer.Metadata?.first?.Media?.first)
+        let part = try XCTUnwrap(media.Part?.first)
+        return (media, part)
+    }
+
+    private func canDirectPlay(_ json: String, caps: MediaCapabilities) throws -> Bool {
+        let (media, part) = try decodeMedia(json)
+        return makeClient(caps).canDirectPlay(media: media, part: part)
+    }
+
+    // The bread-and-butter case must be unaffected by the rework: an MP4 with
+    // h264 video + AAC audio direct-plays under the conservative default profile.
+    func testCommonH264AacMp4DirectPlaysUnderDefault() throws {
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264"},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        XCTAssertTrue(try canDirectPlay(json, caps: .default))
+    }
+
+    func testHevcGatedOnSupport() throws {
+        // Plex labels HEVC as "h265" here; it must fold onto .hevc.
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"h265","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc"},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        let hevcYes = MediaCapabilities(supportsHEVC: true)
+        let hevcNo = MediaCapabilities(supportsHEVC: false)
+        XCTAssertTrue(try canDirectPlay(json, caps: hevcYes))
+        XCTAssertFalse(try canDirectPlay(json, caps: hevcNo))
+    }
+
+    func testAV1GatedOnSupport() throws {
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"av1","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"av1"},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        let av1Yes = MediaCapabilities(supportsAV1: true)
+        XCTAssertFalse(try canDirectPlay(json, caps: .default), "AV1 must transcode without support")
+        XCTAssertTrue(try canDirectPlay(json, caps: av1Yes))
+    }
+
+    func testDTSDirectPlayOnlyWhenPassthroughSupported() throws {
+        // Plex commonly labels DTS as "dca"; it must fold onto .dts.
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"dca",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264"},
+           {"id":11,"streamType":2,"index":1,"codec":"dca"}
+         ]}]}
+        """
+        let dtsYes = MediaCapabilities(maxOutputChannels: 8, supportsDTSPassthrough: true)
+        XCTAssertFalse(try canDirectPlay(json, caps: .default), "stereo output must not claim DTS passthrough")
+        XCTAssertTrue(try canDirectPlay(json, caps: dtsYes))
+    }
+
+    func testEAC3AlwaysPassthroughEligible() throws {
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"eac3",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264"},
+           {"id":11,"streamType":2,"index":1,"codec":"eac3"}
+         ]}]}
+        """
+        XCTAssertTrue(try canDirectPlay(json, caps: .default))
+    }
+
+    func testDolbyVisionProfile7TranscodesEvenWithDoViDisplay() throws {
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"hevc","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc","DOVIPresent":true,"DOVIProfile":7},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        let doviDisplay = MediaCapabilities(supportsHEVC: true, supportsDolbyVision: true)
+        XCTAssertFalse(try canDirectPlay(json, caps: doviDisplay))
+    }
+
+    func testDolbyVisionProfile8DirectPlaysOnDoViDisplayOnly() throws {
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"hevc","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc","DOVIPresent":true,"DOVIProfile":8},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        let doviDisplay = MediaCapabilities(supportsHEVC: true, supportsDolbyVision: true)
+        XCTAssertTrue(try canDirectPlay(json, caps: doviDisplay))
+        XCTAssertFalse(try canDirectPlay(json, caps: .default), "non-DoVi display must transcode DoVi")
+    }
+
+    func testUnknownDolbyVisionProfileIsConservative() throws {
+        // DOVIPresent but no profile reported → don't assume P5/P8.
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"hevc","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc","DOVIPresent":true},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        let doviDisplay = MediaCapabilities(supportsHEVC: true, supportsDolbyVision: true)
+        XCTAssertFalse(try canDirectPlay(json, caps: doviDisplay))
+    }
+
+    func testHDR10GatedOnDisplay() throws {
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"hevc","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc","colorTrc":"smpte2084"},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        let hdrDisplay = MediaCapabilities(supportsHEVC: true, supportsHDR10: true)
+        let sdrOnly = MediaCapabilities(supportsHEVC: true, supportsHDR10: false, supportsHLG: false)
+        XCTAssertTrue(try canDirectPlay(json, caps: hdrDisplay))
+        XCTAssertFalse(try canDirectPlay(json, caps: sdrOnly))
+    }
+
+    func testUnsupportedContainerStillTranscodes() throws {
+        let json = """
+        {"id":1,"container":"mkv","videoCodec":"h264","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264"},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        XCTAssertFalse(try canDirectPlay(json, caps: .default))
+    }
+}

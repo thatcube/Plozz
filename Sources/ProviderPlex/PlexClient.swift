@@ -12,17 +12,25 @@ public struct PlexClient: Sendable {
     private let deviceProfile: PlexDeviceProfile
     private let token: String
     private let http: HTTPClient
+    /// What the running Apple TV + connected display/audio gear can actually
+    /// decode and present. Drives `canDirectPlay` so the direct-play vs. Plex
+    /// universal-transcode decision tracks the real hardware instead of fixed
+    /// sets. Defaults to a live `.detected()` probe (which falls back to the
+    /// conservative `.default` on Linux/CI).
+    private let capabilities: MediaCapabilities
 
     public init(
         baseURL: URL,
         deviceProfile: PlexDeviceProfile,
         token: String,
-        http: HTTPClient = URLSessionHTTPClient()
+        http: HTTPClient = URLSessionHTTPClient(),
+        capabilities: MediaCapabilities = .detected()
     ) {
         self.baseURL = baseURL
         self.deviceProfile = deviceProfile
         self.token = token
         self.http = http
+        self.capabilities = capabilities
     }
 
     private var headers: [String: String] { deviceProfile.headers(token: token) }
@@ -137,7 +145,7 @@ public struct PlexClient: Sendable {
     /// AVPlayer cannot play it directly. Handing AVPlayer the raw MKV part was
     /// why Plex items "didn't play" while the same files played via Jellyfin.
     func playbackURL(ratingKey: String, media: PlexMedia, part: PlexPart, sessionID: String) -> (url: URL, isTranscoding: Bool)? {
-        if Self.canDirectPlay(media: media, part: part), let key = part.key, let direct = streamURL(forPartKey: key) {
+        if canDirectPlay(media: media, part: part), let key = part.key, let direct = streamURL(forPartKey: key) {
             return (direct, false)
         }
         if let transcode = transcodeURL(ratingKey: ratingKey, sessionID: sessionID) {
@@ -210,21 +218,111 @@ public struct PlexClient: Sendable {
     // MARK: Direct-play capability
 
     /// Containers AVFoundation can demux from a direct file URL on tvOS.
+    ///
+    /// Kept to the MP4 family (`mp4`/`m4v`/`mov`) that AVFoundation demuxes
+    /// reliably from a plain file URL. We deliberately do **not** add `mpegts`:
+    /// AVFoundation's progressive-file demux of raw `.ts` is unreliable on tvOS
+    /// (no index → broken seeking), so transport-stream parts are better served
+    /// by Plex's HLS transcode, which repackages them into a seekable playlist.
     private static let directPlayContainers: Set<String> = ["mp4", "m4v", "mov"]
-    /// Video codecs AVFoundation decodes on Apple TV.
-    private static let directPlayVideoCodecs: Set<String> = ["h264", "hevc", "h265"]
-    /// Audio codecs Apple TV can play (incl. passthrough).
-    private static let directPlayAudioCodecs: Set<String> = ["aac", "ac3", "eac3", "mp3", "alac"]
 
-    /// True only when we can prove the original file plays natively in AVPlayer.
-    /// Unknown/missing container or codec info is treated as not direct-playable
-    /// so we fall back to a server transcode (matching server-side decisioning).
-    static func canDirectPlay(media: PlexMedia, part: PlexPart) -> Bool {
-        let container = (media.container ?? part.container ?? containerExtension(fromKey: part.key))?.lowercased()
-        guard let container, directPlayContainers.contains(container) else { return false }
-        if let video = media.videoCodec?.lowercased(), !directPlayVideoCodecs.contains(video) { return false }
-        if let audio = media.audioCodec?.lowercased(), !directPlayAudioCodecs.contains(audio) { return false }
+    /// Lossy audio codecs the Apple TV always decodes in software, regardless of
+    /// the connected receiver. These never need passthrough, so they're always
+    /// direct-playable.
+    private static let alwaysDecodableAudioCodecs: Set<String> = ["aac", "mp3", "alac"]
+
+    /// True only when we can prove the original file plays natively in AVPlayer
+    /// on **this** device + display/audio route. Unknown/missing container or
+    /// codec info, an unsupported codec for the current hardware, or HDR/Dolby
+    /// Vision the display can't accept all fall back to a server transcode
+    /// (matching server-side decisioning).
+    func canDirectPlay(media: PlexMedia, part: PlexPart) -> Bool {
+        let container = (media.container ?? part.container ?? Self.containerExtension(fromKey: part.key))?.lowercased()
+        guard let container, Self.directPlayContainers.contains(container) else { return false }
+
+        if let video = media.videoCodec?.lowercased() {
+            guard let mapped = Self.directPlayVideoCodec(forPlexCodec: video),
+                  capabilities.allowedDirectPlayVideoCodecs.contains(mapped) else { return false }
+        }
+
+        if let audio = media.audioCodec?.lowercased(), !canDirectPlayAudio(codec: audio) {
+            return false
+        }
+
+        guard canDirectPlayVideoRange(part: part) else { return false }
+
         return true
+    }
+
+    /// Maps a Plex `videoCodec` token onto a `MediaCapabilities` direct-play
+    /// codec. Plex labels HEVC as either `hevc` or `h265`; both fold to `.hevc`.
+    /// Returns `nil` for codecs that are never direct-playable (e.g. mpeg2,
+    /// vc1), forcing a transcode.
+    static func directPlayVideoCodec(forPlexCodec codec: String) -> DirectPlayVideoCodec? {
+        switch codec {
+        case "h264", "avc": return .h264
+        case "hevc", "h265": return .hevc
+        case "av1": return .av1
+        default: return nil
+        }
+    }
+
+    /// Whether an audio codec can be sent untouched to the output: either it's a
+    /// codec the Apple TV always decodes itself (`aac`/`mp3`/`alac`), or it's a
+    /// passthrough/bitstream codec the **current route** can carry. AC-3/E-AC-3
+    /// are always passthrough-eligible; DTS / DTS-HD only when the route reports
+    /// `supportsDTSPassthrough`, since Apple TV cannot decode DTS itself.
+    private func canDirectPlayAudio(codec: String) -> Bool {
+        if Self.alwaysDecodableAudioCodecs.contains(codec) { return true }
+        guard let passthrough = Self.passthroughAudioCodec(forPlexCodec: codec) else { return false }
+        return capabilities.allowedPassthroughAudioCodecs.contains(passthrough)
+    }
+
+    /// Maps a Plex `audioCodec` token onto a `MediaCapabilities` passthrough
+    /// codec. Plex labels DTS variants as `dca`/`dts` (core) and `dca-ma`/
+    /// `dts-hd`/`dtshd` (lossless), so both fold onto the DTS cases. Returns
+    /// `nil` for codecs that aren't passthrough-eligible.
+    static func passthroughAudioCodec(forPlexCodec codec: String) -> PassthroughAudioCodec? {
+        switch codec {
+        case "ac3": return .ac3
+        case "eac3", "ec3": return .eac3
+        case "dts", "dca": return .dts
+        case "dts-hd", "dtshd", "dca-ma": return .dtsHD
+        default: return nil
+        }
+    }
+
+    /// Gates direct play on the video stream's HDR/Dolby Vision range against
+    /// what the display can accept (`capabilities.allowedHDRRanges`).
+    ///
+    /// Policy (mirrors `MediaCapabilities`):
+    ///   * Dolby Vision is direct-played only for single-layer **Profile 5** and
+    ///     **Profile 8** *and* only when the display accepts Dolby Vision. An
+    ///     unknown DoVi profile is treated conservatively (transcode) rather than
+    ///     assumed to be P5/P8; Profile 7 (dual-layer) always transcodes.
+    ///   * Plain HDR10 (PQ) / HLG are direct-played only when the display
+    ///     advertises that range. We never special-case HDR10+ (it plays as its
+    ///     HDR10 base, already covered by `.hdr10`).
+    ///   * SDR or absent range info is always allowed (the codec gate already ran).
+    private func canDirectPlayVideoRange(part: PlexPart) -> Bool {
+        guard let video = part.Stream?.first(where: { $0.streamType == 1 }) else { return true }
+        let allowed = Set(capabilities.allowedHDRRanges)
+
+        if video.DOVIPresent == true {
+            guard let profile = video.DOVIProfile else { return false }
+            guard profile == 5 || profile == 8 else { return false }
+            let doviRanges: Set<HDRRange> = [.dolbyVision, .dolbyVisionWithHDR10, .dolbyVisionWithHLG, .dolbyVisionWithSDR]
+            return !allowed.isDisjoint(with: doviRanges)
+        }
+
+        switch video.colorTrc?.lowercased() {
+        case "smpte2084", "pq":
+            return allowed.contains(.hdr10)
+        case "arib-std-b67", "hlg":
+            return allowed.contains(.hlg)
+        default:
+            return true
+        }
     }
 
     /// Best-effort container guess from a part key's file extension

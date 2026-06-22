@@ -220,9 +220,10 @@ public struct JellyfinProvider: MediaProvider {
             seriesPosterURL: dto.SeriesId.flatMap {
                 client.imageURL(itemID: $0, kind: .primary, maxWidth: 500)
             },
-            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1920),
+            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280),
+            heroBackdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1920),
             fallbackArtworkURL: dto.SeriesId.flatMap {
-                client.imageURL(itemID: $0, kind: .backdrop, maxWidth: 1920)
+                client.imageURL(itemID: $0, kind: .backdrop, maxWidth: 1280)
             },
             logoURL: Self.logoURL(for: dto, client: client),
             ratings: Self.ratings(from: dto),

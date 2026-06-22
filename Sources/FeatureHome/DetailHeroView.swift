@@ -23,9 +23,10 @@ struct DetailHeroView: View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
         ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: item.backdropURL ?? item.posterURL) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
+            FallbackAsyncImage(
+                urls: [item.heroBackdropURL, item.backdropURL, item.posterURL].compactMap { $0 },
+                maxAspectRatio: 3.0
+            ) {
                 Rectangle().fill(.tertiary)
             }
             .frame(height: 720)

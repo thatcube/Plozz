@@ -44,6 +44,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var seriesPosterURL: URL?
     /// Wide/backdrop artwork.
     public var backdropURL: URL?
+    /// A higher-resolution backdrop sized for the full-bleed detail hero. Cards
+    /// keep using `backdropURL` (a smaller, rail-friendly size); only the hero
+    /// reaches for this. `nil` falls back to `backdropURL`.
+    public var heroBackdropURL: URL?
     /// Spoiler-safe parent artwork to use when this item has no image of its own
     /// (e.g. an episode with no thumbnail falls back to its series' backdrop).
     /// Never an episode's own frame, so it is safe to show even under spoilers.
@@ -101,6 +105,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         posterURL: URL? = nil,
         seriesPosterURL: URL? = nil,
         backdropURL: URL? = nil,
+        heroBackdropURL: URL? = nil,
         fallbackArtworkURL: URL? = nil,
         logoURL: URL? = nil,
         ratings: [ExternalRating] = [],
@@ -123,6 +128,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.posterURL = posterURL
         self.seriesPosterURL = seriesPosterURL
         self.backdropURL = backdropURL
+        self.heroBackdropURL = heroBackdropURL
         self.fallbackArtworkURL = fallbackArtworkURL
         self.logoURL = logoURL
         self.ratings = ratings
@@ -151,6 +157,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         posterURL = try container.decodeIfPresent(URL.self, forKey: .posterURL)
         seriesPosterURL = try container.decodeIfPresent(URL.self, forKey: .seriesPosterURL)
         backdropURL = try container.decodeIfPresent(URL.self, forKey: .backdropURL)
+        heroBackdropURL = try container.decodeIfPresent(URL.self, forKey: .heroBackdropURL)
         fallbackArtworkURL = try container.decodeIfPresent(URL.self, forKey: .fallbackArtworkURL)
         logoURL = try container.decodeIfPresent(URL.self, forKey: .logoURL)
         ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []

@@ -16,13 +16,13 @@ import UIKit
 /// poster grid rejects "junk" provider art (a 16:9 episode still, or a
 /// stills-grid composite Plex grabbed for an unmatched movie) and falls back to
 /// the clean title placeholder instead of showing a wrong, wide image.
-struct FallbackAsyncImage<Placeholder: View>: View {
+public struct FallbackAsyncImage<Placeholder: View>: View {
     private let urls: [URL]
     private let maxAspectRatio: CGFloat?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
     private let placeholder: () -> Placeholder
 
-    init(
+    public init(
         urls: [URL],
         maxAspectRatio: CGFloat? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
@@ -34,7 +34,7 @@ struct FallbackAsyncImage<Placeholder: View>: View {
         self.placeholder = placeholder
     }
 
-    var body: some View {
+    public var body: some View {
         #if canImport(UIKit)
         if maxAspectRatio != nil || asyncFallbackURL != nil {
             FilteredArtworkImage(

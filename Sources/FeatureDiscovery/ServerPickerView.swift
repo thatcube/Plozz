@@ -45,6 +45,14 @@ public struct ServerPickerView: View {
                     }
                 }
 
+                if viewModel.isOnTailscale {
+                    Section {
+                        tailscaleGuidance
+                    } header: {
+                        Text("Tailscale")
+                    }
+                }
+
                 Section {
                     TextField("Server address", text: $viewModel.manualURLText)
                         .focused($manualFieldFocused)
@@ -55,7 +63,7 @@ public struct ServerPickerView: View {
                 } header: {
                     Text("Enter address")
                 } footer: {
-                    Text("Enter an IP address or URL, e.g. 192.168.1.10 or jelly.example.com.\n\nUsing Tailscale? Make sure the Tailscale app is installed and connected on this Apple TV, then enter your server's Tailscale IP (e.g. 100.x.x.x:8096) or MagicDNS name (e.g. server.tailnet-name.ts.net).")
+                    Text("Enter an IP address or full URL, e.g. 192.168.1.10 or jelly.example.com")
                 }
 
                 if case let .error(message) = viewModel.phase {
@@ -95,6 +103,30 @@ public struct ServerPickerView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Tailscale-specific guidance, shown only when this Apple TV is on a
+    /// tailnet. Explains how to reach a Jellyfin server over Tailscale, since
+    /// such servers can't be auto-discovered from a sandboxed tvOS app.
+    private var tailscaleGuidance: some View {
+        HStack(alignment: .top, spacing: 24) {
+            TailscaleLogo()
+                .frame(width: 56, height: 56)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("This Apple TV is on Tailscale")
+                    .font(.headline)
+                Text("Enter your server's Tailscale address in the field below — either its Tailscale IP (e.g. 100.101.102.103:8096) or its MagicDNS name (e.g. jellyfin.your-tailnet.ts.net).")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let ip = viewModel.tailscaleIP {
+                    Label("This device: \(ip)", systemImage: "checkmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                }
+            }
+        }
+        .padding(.vertical, 8)
     }
 
     /// Subtitle for the saved server, reflecting live reachability.

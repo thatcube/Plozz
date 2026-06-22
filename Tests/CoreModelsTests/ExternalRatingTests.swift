@@ -48,6 +48,31 @@ final class ExternalRatingTests: XCTestCase {
         XCTAssertEqual(ExternalRating(source: .letterboxd, value: 4.1, scale: .outOfFive).displayValue, "4.1/5")
     }
 
+    // MARK: Iconography & freshness
+
+    func testIcons() {
+        XCTAssertEqual(RatingSource.rottenTomatoes.icon, .tomato)
+        XCTAssertEqual(RatingSource.critic.icon, .tomato)
+        XCTAssertEqual(RatingSource.rottenTomatoesAudience.icon, .popcorn)
+        XCTAssertEqual(RatingSource.imdb.icon, .star)
+        XCTAssertEqual(RatingSource.community.icon, .star)
+        XCTAssertEqual(RatingSource.metacritic.icon, .metacritic)
+    }
+
+    func testFreshnessFreshAtThreshold() {
+        XCTAssertEqual(ExternalRating(source: .rottenTomatoes, value: 60, scale: .percent).freshness, .fresh)
+        XCTAssertEqual(ExternalRating(source: .rottenTomatoes, value: 89, scale: .percent).freshness, .fresh)
+    }
+
+    func testFreshnessRottenBelowThreshold() {
+        XCTAssertEqual(ExternalRating(source: .rottenTomatoes, value: 42, scale: .percent).freshness, .rotten)
+    }
+
+    func testFreshnessNoneForNonFreshnessSources() {
+        XCTAssertEqual(ExternalRating(source: .imdb, value: 9, scale: .outOfTen).freshness, .none)
+        XCTAssertEqual(ExternalRating(source: .metacritic, value: 90, scale: .outOfHundred).freshness, .none)
+    }
+
     // MARK: OMDb value parsing
 
     func testParseOMDbOutOfTen() {

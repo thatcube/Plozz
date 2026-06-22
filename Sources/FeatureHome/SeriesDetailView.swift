@@ -39,7 +39,8 @@ struct SeriesDetailView: View {
         looseEpisodes: [MediaItem],
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings,
-        onPlay: @escaping (MediaItem) -> Void
+        onPlay: @escaping (MediaItem) -> Void,
+        initialSeasonID: String? = nil
     ) {
         self.series = series
         self.seasons = seasons
@@ -47,7 +48,12 @@ struct SeriesDetailView: View {
         self.viewModel = viewModel
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
-        _heroItem = State(initialValue: series)
+        // When opened via "Go to Season", pre-select that season (and front it in
+        // the hero) so the page lands on the requested season rather than the
+        // default one.
+        let initialSeason = initialSeasonID.flatMap { id in seasons.first { $0.id == id } }
+        _selectedSeasonID = State(initialValue: initialSeason?.id)
+        _heroItem = State(initialValue: initialSeason ?? series)
     }
 
     var body: some View {
@@ -59,7 +65,8 @@ struct SeriesDetailView: View {
                     spoilerSettings: spoilerSettings,
                     playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                     onPlay: playTarget.map { target in { onPlay(target) } },
-                    onPlayTrailer: trailerButtonAction
+                    onPlayTrailer: trailerButtonAction,
+                    fallbackTechnicalBadges: representativeTechnicalBadges
                 )
 
                 if !seasons.isEmpty {
@@ -175,6 +182,17 @@ struct SeriesDetailView: View {
         return seasons.isEmpty ? looseEpisodes : []
     }
 
+    /// A representative tech-badge set (best resolution/HDR/audio) derived from
+    /// every episode loaded so far. The series/season hero has no media file of
+    /// its own, so this summarises the show's peak capabilities — and because it
+    /// aggregates across all loaded seasons, it only grows toward the true peak
+    /// as more seasons are browsed.
+    private var representativeTechnicalBadges: [MediaBadge] {
+        let loaded = viewModel.seasonEpisodes.values.flatMap { $0 }
+        let episodes = loaded.isEmpty ? looseEpisodes : loaded
+        return episodes.representativeTechnicalBadges
+    }
+
     /// Header for the episode rail. A selected season's name is already shown on
     /// its tab/chip above the rail, so the rail itself stays unlabelled to avoid
     /// repeating it. The flat "loose episodes" case (no season tabs) keeps an
@@ -199,10 +217,13 @@ struct SeriesDetailView: View {
         return { onPlay(trailer) }
     }
 
-    /// Picks the season to open on first appearance — the one holding the user's
-    /// "next up" episode if we can tell, else the first season — and preloads it.
+    /// Picks the season to open on first appearance — the one pre-selected via
+    /// "Go to Season" if any, otherwise the first season — and preloads it.
     private func prepareInitialSeason() async {
-        guard selectedSeasonID == nil else { return }
+        if let id = selectedSeasonID {
+            await viewModel.loadEpisodes(for: id)
+            return
+        }
         guard let first = seasons.first else { return }
         selectedSeasonID = first.id
         await viewModel.loadEpisodes(for: first.id)

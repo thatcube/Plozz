@@ -62,7 +62,23 @@ struct PlexMetadata: Decodable {
     let art: String?
     let grandparentThumb: String?
     let parentThumb: String?
+    /// Content certificate, e.g. `TV-14`, `PG-13`, `R`.
+    let contentRating: String?
+    /// Critic score (0–10 on Plex's normalised scale); `ratingImage` names the
+    /// source, e.g. `rottentomatoes://image.rating.ripe` or `imdb://…`.
+    let rating: Double?
+    let ratingImage: String?
+    /// Audience score (0–10); `audienceRatingImage` names the source.
+    let audienceRating: Double?
+    let audienceRatingImage: String?
+    let Genre: [PlexTag]?
     let Media: [PlexMedia]?
+}
+
+/// A simple Plex tag element (genres, directors, …): only the display `tag` is
+/// used.
+struct PlexTag: Decodable {
+    let tag: String?
 }
 
 struct PlexMedia: Decodable {
@@ -71,6 +87,16 @@ struct PlexMedia: Decodable {
     let container: String?
     let videoCodec: String?
     let audioCodec: String?
+    /// Media-level facts Plex includes even in list/children responses (where
+    /// the per-stream `Stream` array may be omitted): a coarse resolution token
+    /// (`4k`, `1080`, `720`, `sd`), pixel dimensions and the audio channel
+    /// count. Used as a fallback so episode rails still earn resolution/audio
+    /// badges without a full per-item metadata fetch.
+    let videoResolution: String?
+    let width: Int?
+    let height: Int?
+    let audioChannels: Int?
+    let videoProfile: String?
     let Part: [PlexPart]?
 }
 

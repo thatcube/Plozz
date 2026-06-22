@@ -28,6 +28,15 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var episodeNumber: Int?
     public var productionYear: Int?
 
+    /// The content/age-classification certificate, e.g. `TV-14`, `PG-13`, `R`.
+    /// Provider-native string (Jellyfin `OfficialRating`); `nil` when unrated or
+    /// unreported. Rendered as an outlined badge on the detail hero.
+    public var officialRating: String?
+
+    /// Genre labels for the item, e.g. `["Action", "Adventure"]`. Ordered as the
+    /// provider returns them; the detail metadata line shows the first few.
+    public var genres: [String]
+
     /// For an episode, the id of its owning series, enabling a "Go to Series"
     /// jump from anywhere the episode appears. `nil` for non-episodes or when the
     /// provider doesn't report it.
@@ -75,6 +84,14 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// used by enrichment services to look up additional ratings/metadata.
     public var providerIDs: [String: String]
 
+    /// Source-of-truth technical facts about the underlying file (resolution,
+    /// HDR/Dolby Vision range, audio codec/channels, …) when the provider reports
+    /// them on the detail fetch. Powers the "4K · Dolby Vision · Dolby Atmos"
+    /// technical badge row on the detail hero. `nil` for items fetched without
+    /// stream metadata (e.g. rows/cards) and for containers (series/season) that
+    /// have no single media file.
+    public var mediaInfo: MediaSourceMetadata?
+
     /// The `Account.id` this item was fetched from, stamped by the Home/Search
     /// aggregator when content from several providers is merged into one row.
     ///
@@ -108,6 +125,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
         productionYear: Int? = nil,
+        officialRating: String? = nil,
+        genres: [String] = [],
         seriesID: String? = nil,
         seasonID: String? = nil,
         runtime: TimeInterval? = nil,
@@ -122,6 +141,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         logoURL: URL? = nil,
         ratings: [ExternalRating] = [],
         providerIDs: [String: String] = [:],
+        mediaInfo: MediaSourceMetadata? = nil,
         sourceAccountID: String? = nil,
         additionalSourceAccountIDs: [String] = []
     ) {
@@ -133,6 +153,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.productionYear = productionYear
+        self.officialRating = officialRating
+        self.genres = genres
         self.seriesID = seriesID
         self.seasonID = seasonID
         self.runtime = runtime
@@ -147,6 +169,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.logoURL = logoURL
         self.ratings = ratings
         self.providerIDs = providerIDs
+        self.mediaInfo = mediaInfo
         self.sourceAccountID = sourceAccountID
         self.additionalSourceAccountIDs = additionalSourceAccountIDs
     }
@@ -164,6 +187,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
         episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         productionYear = try container.decodeIfPresent(Int.self, forKey: .productionYear)
+        officialRating = try container.decodeIfPresent(String.self, forKey: .officialRating)
+        genres = try container.decodeIfPresent([String].self, forKey: .genres) ?? []
         seriesID = try container.decodeIfPresent(String.self, forKey: .seriesID)
         seasonID = try container.decodeIfPresent(String.self, forKey: .seasonID)
         runtime = try container.decodeIfPresent(TimeInterval.self, forKey: .runtime)
@@ -178,6 +203,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         logoURL = try container.decodeIfPresent(URL.self, forKey: .logoURL)
         ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []
         providerIDs = try container.decodeIfPresent([String: String].self, forKey: .providerIDs) ?? [:]
+        mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
     }

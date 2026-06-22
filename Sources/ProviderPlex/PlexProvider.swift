@@ -157,22 +157,50 @@ public struct PlexProvider: MediaProvider {
             ?? streams.first { $0.streamType == 3 }
 
         let videoStream = video.map { v in
-            MediaSourceMetadata.VideoStream(
+            // Plex only surfaces Dolby Vision explicitly (`DOVIPresent`); infer
+            // HDR10/HLG from the transfer characteristics so non-DV HDR still
+            // earns a badge. `smpte2084` is the PQ (HDR10) curve; `arib-std-b67`
+            // is HLG.
+            let dovi = v.DOVIPresent ?? false
+            let trc = (v.colorTrc ?? "").lowercased()
+            let rangeType: String?
+            if dovi {
+                rangeType = "DOVI"
+            } else if trc.contains("2084") || trc.contains("pq") {
+                rangeType = "HDR10"
+            } else if trc.contains("b67") || trc.contains("hlg") {
+                rangeType = "HLG"
+            } else {
+                rangeType = nil
+            }
+            return MediaSourceMetadata.VideoStream(
                 codec: v.codec,
                 profile: v.profile,
                 width: v.width,
                 height: v.height,
                 bitrate: bps(fromKbps: v.bitrate),
                 frameRate: v.frameRate,
-                videoRange: (v.DOVIPresent ?? false) ? "DOVI" : nil,
-                videoRangeType: (v.DOVIPresent ?? false) ? "DOVI" : nil,
+                videoRange: rangeType == nil ? nil : (dovi ? "DOVI" : "HDR"),
+                videoRangeType: rangeType,
                 colorTransfer: v.colorTrc
             )
         }
         let audioStream = audio.map { a in
-            MediaSourceMetadata.AudioStream(
+            // Plex doesn't expose an explicit object-based-audio flag on basic
+            // metadata; Atmos/DTS:X only appear in the (extended) display title,
+            // e.g. "Dolby TrueHD Atmos 7.1" or "DTS-HD MA → DTS:X 7.1". Fold that
+            // hint into the profile so the shared badge logic can surface the
+            // Dolby Atmos / DTS:X headline badge.
+            let title = (a.extendedDisplayTitle ?? a.displayTitle ?? "").lowercased()
+            var profileParts = [a.profile].compactMap { $0 }
+            if title.contains("atmos") { profileParts.append("Atmos") }
+            if title.contains("dts:x") || title.contains("dts-x") || title.contains("dtsx") {
+                profileParts.append("DTS:X")
+            }
+            let profile = profileParts.isEmpty ? nil : profileParts.joined(separator: " ")
+            return MediaSourceMetadata.AudioStream(
                 codec: a.codec,
-                profile: a.profile,
+                profile: profile,
                 channels: a.channels,
                 channelLayout: a.audioChannelLayout,
                 sampleRate: a.samplingRate,
@@ -249,6 +277,8 @@ public struct PlexProvider: MediaProvider {
             seasonNumber: isEpisode ? dto.parentIndex : nil,
             episodeNumber: isEpisode ? dto.index : nil,
             productionYear: dto.year,
+            officialRating: dto.contentRating,
+            genres: dto.Genre?.compactMap(\.tag) ?? [],
             seriesID: isEpisode ? dto.grandparentRatingKey : nil,
             seasonID: isEpisode ? dto.parentRatingKey : nil,
             runtime: runtime,
@@ -259,9 +289,90 @@ public struct PlexProvider: MediaProvider {
             seriesPosterURL: isEpisode ? client.imageURL(path: dto.grandparentThumb, maxWidth: 500) : nil,
             backdropURL: client.imageURL(path: dto.art, maxWidth: 1280),
             heroBackdropURL: client.imageURL(path: dto.art, maxWidth: 3840),
-            ratings: [],
-            providerIDs: [:]
+            ratings: Self.ratings(from: dto),
+            providerIDs: [:],
+            mediaInfo: Self.sourceMetadata(from: dto)
         )
+    }
+
+    /// Builds the playable source's technical metadata from an item's first
+    /// media part, so movie/episode detail heroes can show resolution/HDR/audio
+    /// badges. Returns `nil` for containers (shows/seasons) that have no part.
+    static func sourceMetadata(from dto: PlexMetadata) -> MediaSourceMetadata? {
+        guard let media = dto.Media?.first else { return nil }
+        let part = media.Part?.first
+        let streams = part?.Stream ?? []
+        if !streams.isEmpty {
+            return sourceMetadata(container: part?.container ?? media.container, streams: streams)
+        }
+        // List/children responses can omit the per-stream array; fall back to the
+        // coarser Media-level facts so episode rails still earn resolution/audio
+        // badges (HDR/Atmos need the stream detail and are simply absent here).
+        return mediaLevelMetadata(from: media)
+    }
+
+    /// A coarse `MediaSourceMetadata` from Plex's Media-element attributes, used
+    /// when the richer per-stream data isn't present in a listing.
+    static func mediaLevelMetadata(from media: PlexMedia) -> MediaSourceMetadata? {
+        let lines: Int?
+        switch (media.videoResolution ?? "").lowercased() {
+        case "4k": lines = 2160
+        case "1080": lines = 1080
+        case "720": lines = 720
+        case "480", "576", "sd": lines = 480
+        default: lines = media.height
+        }
+        let video: MediaSourceMetadata.VideoStream?
+        if media.width != nil || lines != nil || media.videoCodec != nil {
+            video = MediaSourceMetadata.VideoStream(
+                codec: media.videoCodec,
+                profile: media.videoProfile,
+                width: media.width,
+                height: lines
+            )
+        } else {
+            video = nil
+        }
+        let audio: MediaSourceMetadata.AudioStream?
+        if media.audioCodec != nil || media.audioChannels != nil {
+            audio = MediaSourceMetadata.AudioStream(
+                codec: media.audioCodec,
+                channels: media.audioChannels
+            )
+        } else {
+            audio = nil
+        }
+        let metadata = MediaSourceMetadata(container: media.container, video: video, audio: audio)
+        return metadata.isEmpty ? nil : metadata
+    }
+
+    /// Maps Plex's native rating fields onto provider-agnostic ratings. Plex
+    /// normalises every source to a 0–10 scale and names the source via the
+    /// rating image (`rottentomatoes://…`, `imdb://…`). Rotten Tomatoes scores
+    /// are rendered as the familiar percentage; user/critic scores stay 0–10.
+    static func ratings(from dto: PlexMetadata) -> [ExternalRating] {
+        var ratings: [ExternalRating] = []
+        if let critic = dto.rating {
+            let image = (dto.ratingImage ?? "").lowercased()
+            if image.contains("rottentomatoes") {
+                ratings.append(ExternalRating(source: .rottenTomatoes, value: critic * 10, scale: .percent))
+            } else if image.contains("imdb") {
+                ratings.append(ExternalRating(source: .imdb, value: critic, scale: .outOfTen))
+            } else {
+                ratings.append(ExternalRating(source: .critic, value: critic, scale: .outOfTen))
+            }
+        }
+        if let audience = dto.audienceRating {
+            let image = (dto.audienceRatingImage ?? "").lowercased()
+            if image.contains("rottentomatoes") {
+                ratings.append(ExternalRating(source: .rottenTomatoesAudience, value: audience * 10, scale: .percent))
+            } else if image.contains("imdb") {
+                ratings.append(ExternalRating(source: .imdb, value: audience, scale: .outOfTen))
+            } else {
+                ratings.append(ExternalRating(source: .community, value: audience, scale: .outOfTen))
+            }
+        }
+        return ratings
     }
 
     private func map(stream dto: PlexStream) -> MediaTrack {

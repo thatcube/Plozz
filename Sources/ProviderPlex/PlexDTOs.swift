@@ -42,6 +42,8 @@ struct PlexMetadata: Decodable {
     let ratingKey: String?
     let key: String?
     let type: String?          // "movie", "show", "season", "episode", "clip"
+    /// For extras/clips, the kind of extra, e.g. "trailer", "behindTheScenes".
+    let subtype: String?
     let title: String?
     let parentTitle: String?
     let grandparentTitle: String?

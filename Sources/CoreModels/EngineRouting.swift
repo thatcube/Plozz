@@ -107,6 +107,11 @@ public enum EngineRouter {
         // only.) Decode it on-device instead.
         if isTenBitH264(source.video) { return .hybrid }
 
+        // HEVC Range Extensions (4:2:2 / 4:4:4 chroma, or 12-bit) aren't part of
+        // VideoToolbox's Main/Main 10 hardware decode, so they black-screen on
+        // AVPlayer even under an `hvc1` tag. The on-device engine decodes them.
+        if isHevcRangeExtensions(source.video) { return .hybrid }
+
         if let audio = source.audio?.codec?.lowercased() {
             // AVPlayer can't decode TrueHD/MLP at all → hybrid.
             if isTrueHD(audio) { return .hybrid }
@@ -215,11 +220,29 @@ public enum EngineRouter {
         return (video.profile ?? "").lowercased().contains("high 10")
     }
 
+    /// True for HEVC **Range Extensions**: 4:2:2 / 4:4:4 chroma or 12-bit depth.
+    /// VideoToolbox hardware decode covers Main / Main 10 (4:2:0) only, so these
+    /// black-screen on AVPlayer even when tagged `hvc1`. Main 10 4:2:0 (HDR) is
+    /// intentionally excluded — only chroma/bit-depth beyond Main 10 qualifies.
+    static func isHevcRangeExtensions(_ video: MediaSourceMetadata.VideoStream?) -> Bool {
+        guard let video else { return false }
+        let codec = (video.codec ?? "").lowercased()
+        guard codec == "hevc" || codec == "h265" else { return false }
+        let profile = (video.profile ?? "").lowercased()
+        if profile.contains("4:2:2") || profile.contains("4:4:4")
+            || profile.contains("rext") || profile.contains("range extensions") {
+            return true
+        }
+        if let depth = video.bitDepth { return depth >= 12 }
+        return false
+    }
+
     /// Audio codecs AVPlayer can't decode in an MP4-family container (their usual
     /// Matroska/WebM home is already routed to the hybrid engine by container).
     static func isAVPlayerIncompatibleAudio(_ codec: String) -> Bool {
         let codec = codec.lowercased()
         return codec == "opus" || codec == "vorbis"
+            || codec.hasPrefix("wma")   // wmav1/wmav2/wmapro/wmalossless
     }
 
     /// True for DTS / DTS-HD (incl. ffmpeg's `dca` alias and `dts-hd ma`).
@@ -236,10 +259,14 @@ public enum EngineRouter {
 
     /// Video codecs AVPlayer can't decode on tvOS but the hybrid engine can.
     /// Deliberately a small, explicit set: anything not listed (including unknown
-    /// codecs) stays native, matching the "ambiguous → native" policy.
+    /// codecs) stays native, matching the "ambiguous → native" policy. (`mpeg4`
+    /// Part 2 and `mjpeg` are deliberately absent — AVFoundation decodes them and
+    /// both providers advertise them as direct-play.)
     static let nativeIncompatibleVideoCodecs: Set<String> = [
         "vc1", "vc-1", "wmv1", "wmv2", "wmv3",
         "mpeg1video", "mpeg2video", "mpeg2",
-        "msmpeg4v1", "msmpeg4v2", "msmpeg4v3"
+        "msmpeg4v1", "msmpeg4v2", "msmpeg4v3",
+        "vp8", "vp9", "theora",
+        "rv10", "rv20", "rv30", "rv40", "realvideo"
     ]
 }

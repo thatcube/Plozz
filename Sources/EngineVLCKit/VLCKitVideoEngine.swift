@@ -77,6 +77,10 @@ public final class VLCKitVideoEngine: NSObject, VideoEngine {
     /// Empty by default; a later phase can tune these for the Apple TV.
     private let options: [String]
 
+    /// The user's caption preferences, used to choose the default subtitle once
+    /// VLC has parsed the media's tracks (VLCKit exposes no tracks until then).
+    private let captionSettings: CaptionSettings
+
     // MARK: Private playback state
 
     private var mediaPlayer: VLCMediaPlayer?
@@ -84,14 +88,27 @@ public final class VLCKitVideoEngine: NSObject, VideoEngine {
     private let reportInterval: TimeInterval = 10
     private var lastReportedSecond: Int = -1
     private var hasReachedPlaying = false
+
+    /// What subtitle the engine should display. `.auto` applies the user's
+    /// caption-settings default once tracks are known; `.explicit` is a manual
+    /// pick (a `nil` track means "off"). Resolved lazily because VLC only exposes
+    /// its track list after parsing the media.
+    private enum SubtitleIntent {
+        case auto
+        case explicit(MediaTrack?)
+    }
+    private var subtitleIntent: SubtitleIntent = .auto
+    private var hasResolvedSubtitleIntent = false
     /// A single, stable bare `UIView` handed to VLCKit as its drawable. VLC
     /// renders video into it; the shared transport overlay hosts it. Reused
     /// across reloads so the SwiftUI layer never has to rebuild it.
     private var outputView: UIView?
 
     /// Creates a VLCKit engine. `options` are forwarded to `VLCMediaPlayer` as
-    /// libvlc arguments; the default is none.
-    public init(options: [String] = []) {
+    /// libvlc arguments; the default is none. `captionSettings` drives the
+    /// default subtitle chosen once VLC parses the media.
+    public init(captionSettings: CaptionSettings = .default, options: [String] = []) {
+        self.captionSettings = captionSettings
         self.options = options
         super.init()
     }
@@ -111,6 +128,8 @@ public final class VLCKitVideoEngine: NSObject, VideoEngine {
         self.request = request
         hasReachedPlaying = false
         lastReportedSecond = -1
+        subtitleIntent = .auto
+        hasResolvedSubtitleIntent = false
 
         let player = options.isEmpty ? VLCMediaPlayer() : VLCMediaPlayer(options: options)
         player.delegate = self
@@ -175,30 +194,88 @@ public final class VLCKitVideoEngine: NSObject, VideoEngine {
 
     // MARK: - Track selection
 
-    /// Best-effort audio selection: maps the provider track's stream index onto
-    /// VLC's own audio-track index when VLC exposes a matching one. `nil` leaves
-    /// VLC's default selection untouched.
+    /// Best-effort audio selection: maps the provider track onto VLC's own audio
+    /// track by ordinal position (VLC lists tracks in container order, matching
+    /// the provider). `nil` leaves VLC's default selection untouched.
     public func selectAudioTrack(_ track: MediaTrack?) {
         guard let player = mediaPlayer, let track else { return }
-        let vlcIndexes = player.audioTrackIndexes.compactMap { ($0 as? NSNumber)?.intValue }
-        if vlcIndexes.contains(track.id) {
-            player.currentAudioTrackIndex = Int32(track.id)
+        let providerAudio = (request?.audioTracks ?? []).filter { $0.kind == .audio }
+        let vlcIndexes = realTrackIndexes(player.audioTrackIndexes)
+        if let vlc = mapOrdinal(track: track, providerTracks: providerAudio, vlcIndexes: vlcIndexes) {
+            player.currentAudioTrackIndex = vlc
         }
     }
 
-    /// Best-effort subtitle selection: `nil` disables subtitles (VLC index -1);
-    /// otherwise maps the provider track's stream index onto VLC's own subtitle
-    /// index when VLC exposes a matching one.
+    /// Manual subtitle selection: records the intent and applies it as soon as
+    /// VLC has parsed the subtitle tracks. `nil` disables subtitles.
     public func selectSubtitleTrack(_ track: MediaTrack?) {
-        guard let player = mediaPlayer else { return }
-        guard let track else {
-            player.currentVideoSubTitleIndex = -1
-            return
+        subtitleIntent = .explicit(track)
+        hasResolvedSubtitleIntent = false
+        resolveSubtitleIntent()
+    }
+
+    /// Resolves the pending ``subtitleIntent`` against VLC's parsed track list.
+    /// No-ops (and stays pending) until VLC has exposed its subtitle indexes, so
+    /// a selection requested during `load()` lands once parsing completes. The
+    /// `.auto` intent applies the user's caption-settings default exactly once.
+    private func resolveSubtitleIntent() {
+        guard !hasResolvedSubtitleIntent, let player = mediaPlayer else { return }
+        let providerSubs = (request?.subtitleTracks ?? []).filter { $0.kind == .subtitle }
+        let vlcIndexes = realTrackIndexes(player.videoSubTitlesIndexes)
+
+        switch subtitleIntent {
+        case .auto:
+            // Nothing to choose from → done. Otherwise wait for VLC to parse.
+            guard !providerSubs.isEmpty else { hasResolvedSubtitleIntent = true; return }
+            guard !vlcIndexes.isEmpty else { return }
+            let chosen = providerSubs.defaultSubtitleSelection(
+                mode: captionSettings.subtitleMode,
+                preferredLanguage: captionSettings.resolvedPreferredLanguage)
+            applySubtitle(chosen, providerSubs: providerSubs, vlcIndexes: vlcIndexes, player: player)
+            hasResolvedSubtitleIntent = true
+
+        case .explicit(let track):
+            guard let track else {
+                player.currentVideoSubTitleIndex = -1
+                hasResolvedSubtitleIntent = true
+                return
+            }
+            guard !vlcIndexes.isEmpty else { return }
+            applySubtitle(track, providerSubs: providerSubs, vlcIndexes: vlcIndexes, player: player)
+            hasResolvedSubtitleIntent = true
         }
-        let vlcIndexes = player.videoSubTitlesIndexes.compactMap { ($0 as? NSNumber)?.intValue }
-        if vlcIndexes.contains(track.id) {
-            player.currentVideoSubTitleIndex = Int32(track.id)
+    }
+
+    private func applySubtitle(
+        _ track: MediaTrack?,
+        providerSubs: [MediaTrack],
+        vlcIndexes: [Int],
+        player: VLCMediaPlayer
+    ) {
+        guard let track else { player.currentVideoSubTitleIndex = -1; return }
+        if let vlc = mapOrdinal(track: track, providerTracks: providerSubs, vlcIndexes: vlcIndexes) {
+            player.currentVideoSubTitleIndex = vlc
         }
+    }
+
+    /// VLC's track-index arrays lead with a `-1` "Disable" pseudo-track; strip it
+    /// to get the real tracks in container order.
+    private func realTrackIndexes(_ raw: [Any]?) -> [Int] {
+        (raw ?? []).compactMap { ($0 as? NSNumber)?.intValue }.filter { $0 >= 0 }
+    }
+
+    /// Maps a provider track to VLC's own track index by **ordinal position**
+    /// among same-kind tracks — robust because VLC and the provider both list
+    /// embedded tracks in container order, even though their numeric ids differ.
+    /// Falls back to a direct id match when the counts disagree (e.g. an external
+    /// sidecar track shifts the alignment).
+    private func mapOrdinal(track: MediaTrack, providerTracks: [MediaTrack], vlcIndexes: [Int]) -> Int32? {
+        if let pos = providerTracks.firstIndex(where: { $0.id == track.id }),
+           providerTracks.count == vlcIndexes.count, vlcIndexes.indices.contains(pos) {
+            return Int32(vlcIndexes[pos])
+        }
+        if vlcIndexes.contains(track.id) { return Int32(track.id) }
+        return nil
     }
 
     // MARK: - View
@@ -232,10 +309,15 @@ public final class VLCKitVideoEngine: NSObject, VideoEngine {
         switch player.state {
         case .opening, .buffering, .esAdded:
             if status != .ready { status = .loading }
+            // Subtitle/audio tracks appear as elementary streams are added —
+            // try to apply the pending selection as soon as they exist.
+            resolveSubtitleIntent()
         case .playing:
             hasReachedPlaying = true
             status = .ready
             isPaused = false
+            // By now VLC has parsed the media; apply the default/pending subtitle.
+            resolveSubtitleIntent()
         case .paused:
             isPaused = true
         case .error:
@@ -281,8 +363,11 @@ extension VLCKitVideoEngine: VLCMediaPlayerDelegate {
 public enum VLCKitVideoEngineFactory {
     /// Builds a VLCKit-backed `VideoEngine`.
     @MainActor
-    public static func makeEngine(options: [String] = []) -> any VideoEngine {
-        VLCKitVideoEngine(options: options)
+    public static func makeEngine(
+        captionSettings: CaptionSettings = .default,
+        options: [String] = []
+    ) -> any VideoEngine {
+        VLCKitVideoEngine(captionSettings: captionSettings, options: options)
     }
 }
 #endif

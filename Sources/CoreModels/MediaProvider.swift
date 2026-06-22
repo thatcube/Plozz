@@ -30,6 +30,14 @@ public protocol MediaProvider: Sendable {
     /// Full detail for a single item.
     func item(id: String) async throws -> MediaItem
 
+    /// Trailers / preview clips for an item (movie or series).
+    ///
+    /// Returned items are ordinary playable `MediaItem`s whose `id` resolves to a
+    /// stream through this same provider's `playbackInfo(for:)`, so callers can
+    /// hand a trailer straight to the player like any other leaf. Empty when the
+    /// backend has no (playable) trailer for the item.
+    func trailers(for itemID: String) async throws -> [MediaItem]
+
     /// Children of a container (season → episodes, series → seasons, …).
     ///
     /// Intended for small containers whose contents fit comfortably in one
@@ -101,6 +109,11 @@ public protocol MediaProvider: Sendable {
 public extension MediaProvider {
     func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] { [] }
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {}
+
+    /// Default: no trailers. Providers that can surface them (Jellyfin local
+    /// trailers, Plex extras) override this; test doubles and other conformers
+    /// inherit the safe empty result, so adding the capability stays additive.
+    func trailers(for itemID: String) async throws -> [MediaItem] { [] }
 
     /// Default: ignore `forceTranscode` and resolve normally. Providers that can
     /// force a server-side transcode (Jellyfin, Plex) override this; test doubles

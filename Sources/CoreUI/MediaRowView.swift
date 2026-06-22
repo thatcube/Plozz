@@ -47,9 +47,11 @@ public struct MediaRowView: View {
     public var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
-                Text(title)
-                    .font(.system(size: 32, weight: .bold))
-                    .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                if !title.isEmpty {
+                    Text(title)
+                        .font(.system(size: 32, weight: .bold))
+                        .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                }
 
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {

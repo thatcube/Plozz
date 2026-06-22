@@ -25,6 +25,7 @@ let package = Package(
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
+        .library(name: "ProviderTrailers", targets: ["ProviderTrailers"]),
         .library(name: "RatingsService", targets: ["RatingsService"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
@@ -42,7 +43,13 @@ let package = Package(
         // engine (`EngineVLCKit`) for MKV / DTS / DTS-HD / TrueHD / odd codecs
         // AVPlayer can't demux or decode. Pinned to the version proven to build
         // for tvOS in the P2 spike.
-        .package(url: "https://github.com/tylerjonesio/vlckit-spm.git", exact: "3.6.0")
+        .package(url: "https://github.com/tylerjonesio/vlckit-spm.git", exact: "3.6.0"),
+        // Pure-Swift, dependency-free YouTube stream extractor. Backs online
+        // trailer playback: TMDb hands us a YouTube video id, YouTubeKit resolves
+        // a natively-playable progressive stream URL we feed straight to AVPlayer
+        // (the same approach Infuse uses). It includes an optional remote fallback
+        // so extraction keeps working when YouTube changes its internal API.
+        .package(url: "https://github.com/alexeichhorn/YouTubeKit.git", from: "0.4.8")
     ],
     targets: [
         // MARK: Core
@@ -86,6 +93,18 @@ let package = Package(
         .target(
             name: "ProviderPlex",
             dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        // Synthetic provider for online (TMDb → YouTube) trailers. Conforms to
+        // `MediaProvider` so a trailer can be played by the existing player; only
+        // `playbackInfo(for:)` does real work (YouTubeKit stream extraction), the
+        // rest are inert stubs. Kept in its own leaf module so YouTubeKit stays
+        // out of every other target's link graph.
+        .target(
+            name: "ProviderTrailers",
+            dependencies: [
+                "CoreModels",
+                .product(name: "YouTubeKit", package: "YouTubeKit")
+            ]
         ),
         .target(
             name: "RatingsService",
@@ -156,6 +175,7 @@ let package = Package(
                 "FeatureAuth",
                 "ProviderJellyfin",
                 "ProviderPlex",
+                "ProviderTrailers",
                 "RatingsService",
                 "FeatureHome",
                 "FeaturePlayback",
@@ -187,6 +207,10 @@ let package = Package(
         .testTarget(
             name: "ProviderPlexTests",
             dependencies: ["ProviderPlex", "CoreModels", "CoreNetworking"]
+        ),
+        .testTarget(
+            name: "ProviderTrailersTests",
+            dependencies: ["ProviderTrailers", "CoreModels"]
         ),
         .testTarget(
             name: "RatingsServiceTests",

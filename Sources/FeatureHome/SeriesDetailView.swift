@@ -154,11 +154,13 @@ struct SeriesDetailView: View {
         return seasons.isEmpty ? looseEpisodes : []
     }
 
+    /// Header for the episode rail. A selected season's name is already shown on
+    /// its tab/chip above the rail, so the rail itself stays unlabelled to avoid
+    /// repeating it. The flat "loose episodes" case (no season tabs) keeps an
+    /// "Episodes" header since nothing else names it.
     private var railTitle: String {
-        if let id = selectedSeasonID, let season = seasons.first(where: { $0.id == id }) {
-            return season.title
-        }
-        return "Episodes"
+        if selectedSeasonID != nil { return "" }
+        return seasons.isEmpty ? "Episodes" : ""
     }
 
     /// The episode the hero's Play button acts on: the focused episode itself, or

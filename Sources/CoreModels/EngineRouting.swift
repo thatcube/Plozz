@@ -5,15 +5,15 @@ import Foundation
 /// Which playback engine should handle a resolved stream.
 ///
 /// `CoreModels` only names the *decision*; mapping a kind onto a concrete engine
-/// (the `AVPlayer`-backed native engine vs. the VLCKit hybrid engine) happens up
+/// (the `AVPlayer`-backed native engine vs. the mpv hybrid engine) happens up
 /// in `FeaturePlayback`, which alone knows the engine types. Keeping the decision
 /// here means it stays pure, dependency-free, and unit-testable on Linux/CI.
 public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
     /// `NativeVideoEngine` (AVPlayer). The default, power-efficient path; the only
     /// engine that renders Dolby Vision correctly on tvOS.
     case native
-    /// `VLCKitVideoEngine`. Decodes AVPlayer-incompatible sources on-device (MKV,
-    /// DTS / DTS-HD / TrueHD, odd codecs) without a server transcode.
+    /// `MPVVideoEngine` (libmpv). Decodes AVPlayer-incompatible sources on-device
+    /// (MKV, DTS / DTS-HD / TrueHD, odd codecs) without a server transcode.
     case hybrid
 }
 
@@ -23,7 +23,7 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
 ///
 /// ## Policy (CONSERVATIVE)
 /// Preserve the rock-solid, power-efficient `AVPlayer` path for everything it
-/// handles well; use the VLCKit hybrid engine **only** for what AVPlayer can't
+/// handles well; use the mpv hybrid engine **only** for what AVPlayer can't
 /// direct-play without a server transcode:
 ///
 ///   * **Dolby Vision in an Apple container** → ``PlaybackEngineKind/native``.
@@ -57,7 +57,7 @@ public enum EngineRouter {
     ///     video codecs).
     ///   - isTranscoding: whether the resolved stream is a server transcode (HLS),
     ///     which AVPlayer always handles.
-    ///   - hybridAvailable: whether a hybrid (VLCKit) engine is actually wired in.
+    ///   - hybridAvailable: whether a hybrid (mpv) engine is actually wired in.
     ///     When `false` the result is always native — the non-regression default.
     public static func selectEngine(
         source: MediaSourceMetadata?,

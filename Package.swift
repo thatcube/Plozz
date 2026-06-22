@@ -21,7 +21,7 @@ let package = Package(
         .library(name: "CoreModels", targets: ["CoreModels"]),
         .library(name: "CoreNetworking", targets: ["CoreNetworking"]),
         .library(name: "CoreUI", targets: ["CoreUI"]),
-        .library(name: "EngineVLCKit", targets: ["EngineVLCKit"]),
+        .library(name: "EngineMPV", targets: ["EngineMPV"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
@@ -38,12 +38,6 @@ let package = Package(
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [
-        // Official prebuilt VLCKit (TVVLCKit) republished as a SwiftPM
-        // `.binaryTarget` `.xcframework`. Backs the second, on-device decoding
-        // engine (`EngineVLCKit`) for MKV / DTS / DTS-HD / TrueHD / odd codecs
-        // AVPlayer can't demux or decode. Pinned to the version proven to build
-        // for tvOS in the P2 spike.
-        .package(url: "https://github.com/tylerjonesio/vlckit-spm.git", exact: "3.6.0"),
         // Pure-Swift, dependency-free YouTube stream extractor. Backs online
         // trailer playback: TMDb hands us a YouTube video id, YouTubeKit resolves
         // a natively-playable progressive stream URL we feed straight to AVPlayer
@@ -65,23 +59,57 @@ let package = Package(
             dependencies: ["CoreModels"]
         ),
 
-        // MARK: VLCKit-backed engine (second, on-device decoding path)
+        // MARK: libmpv-backed engine (the on-device decoding path)
         //
-        // Implements `VLCKitVideoEngine: VideoEngine` over VLCMediaPlayer so the
-        // app CAN decode MKV/DTS/TrueHD/odd-codec files on device. Only this
-        // module imports VLCKit; FeaturePlayback never does. It depends on
-        // FeaturePlayback purely to *see* the `VideoEngine` protocol — this is
-        // NOT a cycle because FeaturePlayback does not depend on EngineVLCKit
-        // (AppShell injects the engine via a factory in a later phase). Engine
-        // routing is intentionally NOT wired yet; the default engine remains
-        // `NativeVideoEngine` (AVPlayer). (The protocol may later be extracted
-        // into a leaf module once its view/transport seam settles.)
+        // Implements `MPVVideoEngine: VideoEngine` over libmpv (vo=gpu-next →
+        // Vulkan → MoltenVK → Metal, hwdec=videotoolbox) for MKV/DTS/TrueHD/odd
+        // codecs with libplacebo HDR tone-mapping. It depends on FeaturePlayback
+        // purely to *see* the `VideoEngine` protocol (no cycle: FeaturePlayback
+        // never imports it). This is the app's sole on-device decode engine for
+        // AVPlayer-incompatible media — it replaced VLCKit, which is archived at
+        // the `archive/vlckit-engine` git tag. A dedicated `EngineMPVProbe` tvOS
+        // target (see project.yml) also links it as a compile/link gate.
+        //
+        // The FFmpeg + libmpv xcframeworks are LGPLv3 / decode-only (rebuilt by
+        // tools/build-mpv-tvos.sh with `--disable-nonfree`, no `--enable-gpl`;
+        // see LGPL_COMPLIANCE.md) and are referenced from local paths under
+        // Frameworks/mpv/ (gitignored, staged by tools/stage-mpv-frameworks.sh).
+        // The remaining prebuilt dependency xcframeworks are MPVKit's published,
+        // checksummed binaries (license-unaffected by the FFmpeg config) pulled by
+        // URL. Formal hosted/checksummed packaging of OUR FFmpeg/libmpv build is a
+        // later step.
         .target(
-            name: "EngineVLCKit",
+            name: "EngineMPV",
             dependencies: [
                 "CoreModels",
                 "FeaturePlayback",
-                .product(name: "VLCKitSPM", package: "vlckit-spm")
+                // LGPL-clean, locally-built FFmpeg + libmpv (local-path binaries).
+                "Libmpv", "Libavcodec", "Libavdevice", "Libavfilter",
+                "Libavformat", "Libavutil", "Libswresample", "Libswscale",
+                // Prebuilt dependency xcframeworks (MPVKit-published, hosted).
+                "Libssl", "Libcrypto", "Libass", "Libfreetype", "Libfribidi",
+                "Libharfbuzz", "MoltenVK", "Libshaderc_combined", "lcms2",
+                "Libplacebo", "Libdovi", "Libunibreak", "gmp", "nettle",
+                "hogweed", "gnutls", "Libdav1d", "Libuavs3d", "Libuchardet",
+                "Libbluray"
+            ],
+            linkerSettings: [
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("AVKit"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("AudioToolbox"),
+                .linkedFramework("CoreVideo"),
+                .linkedFramework("CoreFoundation"),
+                .linkedFramework("CoreMedia"),
+                .linkedFramework("Metal"),
+                .linkedFramework("VideoToolbox"),
+                .linkedLibrary("bz2"),
+                .linkedLibrary("iconv"),
+                .linkedLibrary("expat"),
+                .linkedLibrary("resolv"),
+                .linkedLibrary("xml2"),
+                .linkedLibrary("z"),
+                .linkedLibrary("c++")
             ]
         ),
 
@@ -179,7 +207,7 @@ let package = Package(
                 "CoreModels",
                 "CoreNetworking",
                 "CoreUI",
-                "EngineVLCKit",
+                "EngineMPV",
                 "FeatureDiscovery",
                 "FeatureAuth",
                 "ProviderJellyfin",
@@ -248,6 +276,126 @@ let package = Package(
         .testTarget(
             name: "FeaturePlaybackTests",
             dependencies: ["FeaturePlayback", "CoreModels"]
+        ),
+
+        // MARK: - EngineMPV binary dependencies
+        //
+        // Locally-built, LGPLv3 / decode-only FFmpeg + libmpv xcframeworks. Built
+        // by tools/build-mpv-tvos.sh (MPVKit 0.41.0-n8.1, `--disable-nonfree`, no
+        // `--enable-gpl`; verified FFMPEG_LICENSE == "LGPL version 3 or later").
+        // Staged under Frameworks/mpv/ (gitignored) by tools/stage-mpv-frameworks.sh.
+        // NOT committed — regenerate locally before building EngineMPV.
+        .binaryTarget(name: "Libmpv", path: "Frameworks/mpv/Libmpv.xcframework"),
+        .binaryTarget(name: "Libavcodec", path: "Frameworks/mpv/Libavcodec.xcframework"),
+        .binaryTarget(name: "Libavdevice", path: "Frameworks/mpv/Libavdevice.xcframework"),
+        .binaryTarget(name: "Libavfilter", path: "Frameworks/mpv/Libavfilter.xcframework"),
+        .binaryTarget(name: "Libavformat", path: "Frameworks/mpv/Libavformat.xcframework"),
+        .binaryTarget(name: "Libavutil", path: "Frameworks/mpv/Libavutil.xcframework"),
+        .binaryTarget(name: "Libswresample", path: "Frameworks/mpv/Libswresample.xcframework"),
+        .binaryTarget(name: "Libswscale", path: "Frameworks/mpv/Libswscale.xcframework"),
+
+        // Prebuilt dependency xcframeworks — MPVKit's published, checksummed
+        // binaries (independent libraries whose licenses are unaffected by the
+        // FFmpeg config). Pulled by URL; pinned exactly as MPVKit 0.41.0-n8.1.
+        .binaryTarget(
+            name: "Libcrypto",
+            url: "https://github.com/mpvkit/openssl-build/releases/download/3.3.5/Libcrypto.xcframework.zip",
+            checksum: "593283be2a90f7fd66f6e6ed331b2f099cf403e0926fe3b4ac09a7062b793965"
+        ),
+        .binaryTarget(
+            name: "Libssl",
+            url: "https://github.com/mpvkit/openssl-build/releases/download/3.3.5/Libssl.xcframework.zip",
+            checksum: "ff5ffd43d015d7285fd37e4a3145b25cbd8d2842740bd629a711c299a20e226a"
+        ),
+        .binaryTarget(
+            name: "gmp",
+            url: "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gmp.xcframework.zip",
+            checksum: "ad33c7a08f4cdcb9924c8f0e6d9a054dad33d7794b97667bf8b6fb2b236ae585"
+        ),
+        .binaryTarget(
+            name: "nettle",
+            url: "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/nettle.xcframework.zip",
+            checksum: "0fdf3ebf8bd7b8bc8eee837cf27261cb4c52ae520b6576a2f468656aa1691e02"
+        ),
+        .binaryTarget(
+            name: "hogweed",
+            url: "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/hogweed.xcframework.zip",
+            checksum: "25727c9fa67287fa0a4f4722f88bb8be669b23cd7e837e2d00870eb8a25d3f27"
+        ),
+        .binaryTarget(
+            name: "gnutls",
+            url: "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gnutls.xcframework.zip",
+            checksum: "3dbec5809339189bf9679e218c6cff387ebf8fb72745927835afc2678f5c9f4d"
+        ),
+        .binaryTarget(
+            name: "Libunibreak",
+            url: "https://github.com/mpvkit/libass-build/releases/download/0.17.4/Libunibreak.xcframework.zip",
+            checksum: "001087c0e927ae00f604422b539898b81eb77230ea7700597b70393cd51e946c"
+        ),
+        .binaryTarget(
+            name: "Libfreetype",
+            url: "https://github.com/mpvkit/libass-build/releases/download/0.17.4/Libfreetype.xcframework.zip",
+            checksum: "f2840aba1ce35e51c0595557eee82c908dac8e32108ecc0661301c06061e051c"
+        ),
+        .binaryTarget(
+            name: "Libfribidi",
+            url: "https://github.com/mpvkit/libass-build/releases/download/0.17.4/Libfribidi.xcframework.zip",
+            checksum: "4a55513792ef7a17893875f74cc84c56f3657e8768c07a7a96f563a11dc4b743"
+        ),
+        .binaryTarget(
+            name: "Libharfbuzz",
+            url: "https://github.com/mpvkit/libass-build/releases/download/0.17.4/Libharfbuzz.xcframework.zip",
+            checksum: "91558d8497d9d97bc11eeef8b744d104315893bfee8f17483d8002e14565f84b"
+        ),
+        .binaryTarget(
+            name: "Libass",
+            url: "https://github.com/mpvkit/libass-build/releases/download/0.17.4/Libass.xcframework.zip",
+            checksum: "1e41f5a69c74f6c6407aab84a65ccd0b34e73fa44465f488f99bf22bd61b070d"
+        ),
+        .binaryTarget(
+            name: "Libbluray",
+            url: "https://github.com/mpvkit/libbluray-build/releases/download/1.4.0/Libbluray.xcframework.zip",
+            checksum: "bc037d34e2b0b5ab7f202fb371f5fb298136cc66fdf406c2172185d06f53f18d"
+        ),
+        .binaryTarget(
+            name: "Libuavs3d",
+            url: "https://github.com/mpvkit/libuavs3d-build/releases/download/1.2.1-xcode/Libuavs3d.xcframework.zip",
+            checksum: "1e69250279be9334cd2f6849abdc884c8e4bb29212467b6f071fdc1ac2010b6b"
+        ),
+        .binaryTarget(
+            name: "Libdovi",
+            url: "https://github.com/mpvkit/libdovi-build/releases/download/3.3.2/Libdovi.xcframework.zip",
+            checksum: "e693e239808350868e79c5448ef9f02e2716bc822dd8632a41a368a1eae5ca7d"
+        ),
+        .binaryTarget(
+            name: "MoltenVK",
+            url: "https://github.com/mpvkit/moltenvk-build/releases/download/1.4.1/MoltenVK.xcframework.zip",
+            checksum: "9bd1ca1e4563bacd25d6e55d37b10341d50b2601bc2684bc332188e79daa2b79"
+        ),
+        .binaryTarget(
+            name: "Libshaderc_combined",
+            url: "https://github.com/mpvkit/libshaderc-build/releases/download/2025.5.0/Libshaderc_combined.xcframework.zip",
+            checksum: "758047b615708575b580eb960a2d083f760a29dc462d6eaa360416c946ce433b"
+        ),
+        .binaryTarget(
+            name: "lcms2",
+            url: "https://github.com/mpvkit/libplacebo-build/releases/download/7.349.0/lcms2.xcframework.zip",
+            checksum: "bd2c27366f8b7adfe7bf652a922599891c55b82f5c519bcc4eece1ccff57c889"
+        ),
+        .binaryTarget(
+            name: "Libplacebo",
+            url: "https://github.com/mpvkit/libplacebo-build/releases/download/7.351.0-fix/Libplacebo.xcframework.zip",
+            checksum: "99ca0b86e2a5a99c445d3e41df6f2fc08294e1a004b03f6a5645f299f06bf378"
+        ),
+        .binaryTarget(
+            name: "Libdav1d",
+            url: "https://github.com/mpvkit/libdav1d-build/releases/download/1.5.2-xcode/Libdav1d.xcframework.zip",
+            checksum: "8a8b78e23e28ecc213232805f3c1936141fc9befe113e87234f4f897f430a532"
+        ),
+        .binaryTarget(
+            name: "Libuchardet",
+            url: "https://github.com/mpvkit/libuchardet-build/releases/download/0.0.8-xcode/Libuchardet.xcframework.zip",
+            checksum: "503202caa0dafb6996b2443f53408a713b49f6c2d4a26d7856fd6143513a50d7"
         )
     ]
 )

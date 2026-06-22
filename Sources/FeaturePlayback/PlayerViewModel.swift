@@ -88,6 +88,10 @@ public final class PlayerViewModel {
     /// Guards the automatic transcode fallback so it only ever fires once — a
     /// second failure surfaces the error instead of looping.
     private var hasAttemptedTranscodeFallback = false
+    /// Tracks whether the first routed engine has been committed. We avoid
+    /// bumping `engineToken` for this first selection to prevent an unnecessary
+    /// host re-build during initial SwiftUI bring-up.
+    private var hasCommittedInitialEngine = false
 
     /// Current in-player track-menu selection, so the menu can show a checkmark.
     /// `selectedSubtitleTrackID == nil` represents "Off".
@@ -144,12 +148,35 @@ public final class PlayerViewModel {
     /// Swaps the active engine when the routed kind differs from the current one,
     /// tearing the old engine down and re-pointing the UI at the new surface.
     private func switchEngine(to kind: PlaybackEngineKind) {
-        guard kind != currentEngineKind else { return }
+        guard kind != currentEngineKind else {
+            plozzTrace("switchEngine: no-op, already \(kind)")
+            return
+        }
+        plozzTrace("switchEngine: \(currentEngineKind) -> \(kind); bumping engineToken (forces host rebuild)")
         engine.stop()
         engine = makeEngine(kind)
         currentEngineKind = kind
         configureEngineCallbacks()
         engineToken = UUID()
+    }
+
+    /// Commits the first routed engine without forcing a host `.id` rebuild.
+    /// Subsequent swaps use the normal token-bumping `switchEngine` path.
+    private func commitEngineForPlayback(_ kind: PlaybackEngineKind) {
+        guard hasCommittedInitialEngine else {
+            hasCommittedInitialEngine = true
+            guard kind != currentEngineKind else {
+                plozzTrace("initial engine commit: already \(kind); no host rebuild")
+                return
+            }
+            plozzTrace("initial engine commit: \(currentEngineKind) -> \(kind); no token bump")
+            engine.stop()
+            engine = makeEngine(kind)
+            currentEngineKind = kind
+            configureEngineCallbacks()
+            return
+        }
+        switchEngine(to: kind)
     }
 
     /// The engine to try when the current one fails: the opposite engine, but
@@ -160,6 +187,14 @@ public final class PlayerViewModel {
             return engineFactory.hybridAvailable ? .hybrid : nil
         case .hybrid:
             return .native
+        }
+    }
+
+    /// Yields one main-runloop turn so SwiftUI can reconcile engine-swap state
+    /// (including the loading-phase video surface host) before `engine.load()`.
+    private static func yieldToRunLoop() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { continuation.resume() }
         }
     }
 
@@ -208,12 +243,12 @@ public final class PlayerViewModel {
                     preferredLanguage: captionSettings.resolvedPreferredLanguage)?.id
             }
 
+            plozzTrace("startPlayback: routed initial engineKind=\(kind) (transcoding=\(request.isTranscoding))")
             await playResolved(request, engineKind: kind, startPosition: startPosition)
 
             // Best-effort, never blocking play(): (if enabled) fetch a missing
             // subtitle in the preferred language.
-            startAutoSubtitleDownloadIfNeeded(request: request)
-        } catch let error as AppError {
+            startAutoSubtitleDownloadIfNeeded(request: request)        } catch let error as AppError {
             phase = .failed(error)
         } catch {
             phase = .failed(.unknown(""))
@@ -229,17 +264,22 @@ public final class PlayerViewModel {
         engineKind: PlaybackEngineKind,
         startPosition: TimeInterval
     ) async {
-        switchEngine(to: engineKind)
-        // Make diagnostics available immediately — the overlay can now show the
-        // engine + source facts during loading and even if load() never reaches
-        // ready (the user's "let me see why it failed" request).
-        diagnosticsToken = UUID()
+        plozzTrace("playResolved: engineKind=\(engineKind) start=\(startPosition) (current=\(currentEngineKind))")
+        commitEngineForPlayback(engineKind)
         // Arm the stall watchdog around load() so a hang that never reports an
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)
+        await Self.yieldToRunLoop()
+        plozzTrace("playResolved: post-swap runloop turn reached; calling engine.load()")
         await engine.load(request: request, startPosition: startPosition)
+        plozzTrace("playResolved: engine.load() RETURNED; setting phase=.ready")
         phase = .ready
+        // Publish diagnostics after the engine load attempt returns, so the
+        // diagnostics sampler doesn't churn SwiftUI layout during mpv init.
+        diagnosticsToken = UUID()
+        plozzTrace("playResolved: phase=.ready set; about to report(.start)")
         await report(event: .start, isPaused: false)
+        plozzTrace("playResolved: report(.start) done")
 
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
@@ -294,6 +334,7 @@ public final class PlayerViewModel {
     /// a server transcode (once); if even that fails, surface the error. Each step
     /// fires at most once so the chain can never loop.
     private func handleEngineFailure(_ error: AppError) async {
+        plozzTrace("handleEngineFailure: \(error) (current=\(currentEngineKind), triedAlternate=\(hasTriedAlternateEngine))")
         guard let request else {
             phase = .failed(error)
             return

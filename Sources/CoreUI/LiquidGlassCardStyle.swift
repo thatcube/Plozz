@@ -25,49 +25,53 @@ public struct PlozzGlassCardModifier: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
         if reduceTransparency {
-            // Reduce Transparency on: never lean on translucency. Paint a solid
-            // surface that turns a touch lighter/opaque on focus.
+            // Reduce Transparency on: never lean on translucency. Paint an opaque
+            // surface — a strong white "lift" on focus, the theme's card colour at
+            // rest — exactly like Twozz's glass-disabled card path.
             content
                 .background {
-                    shape.fill(isFocused ? Color.plozzOpaqueCardFocused : Color.plozzOpaqueCard)
+                    shape.fill(isFocused ? palette.liftSurface : palette.cardOpaqueSurface)
                 }
                 .overlay {
                     shape.strokeBorder(
-                        isFocused ? Color.primary.opacity(0.35) : Color.primary.opacity(0.12),
+                        isFocused ? Color.clear : palette.cardOpaqueBorder,
                         lineWidth: 1
                     )
                 }
                 .clipShape(shape)
+        } else if #available(tvOS 26.0, *) {
+            // Native Liquid Glass, matching Twozz 1:1: focus picks up a faint
+            // theme-aware tint (dark/OLED brighten, light darkens) blended into
+            // the live glass, never a flat opacity fill.
+            content
+                .glassEffect(
+                    isFocused ? .regular.tint(palette.focusedCardGlassTint) : .regular,
+                    in: .rect(cornerRadius: cornerRadius)
+                )
+                .background {
+                    // A focused card casts a drop shadow. In Light mode the
+                    // translucent glass lets that shadow bleed *through*, reading
+                    // as a muddy haze inside the card. Give the focused Light card
+                    // an opaque backing so the shadow stays behind it. Dark/OLED
+                    // don't show this, so they keep pure translucent glass.
+                    if isFocused && palette.isLight {
+                        shape.fill(palette.cardOpaqueSurface)
+                    }
+                }
+                .clipShape(shape)
         } else {
-            // Subtle, theme-tinted translucent surface (matches Twozz). The card
-            // picks up a faint wash of the active theme's own card colour — never
-            // a stark frosted-white panel — and deepens with a whisper of the
-            // brand accent on focus. Colours come from the resolved palette, so
-            // the tint tracks whichever theme (dark / OLED / light) is selected.
+            // Pre-Liquid-Glass fallback: opaque lift on focus, light translucent
+            // wash at rest.
             content
                 .background {
-                    shape.fill(palette.cardSurface.opacity(isFocused ? 0.85 : 0.5))
+                    shape.fill(isFocused ? palette.liftSurface : Color.primary.opacity(0.07))
                 }
                 .overlay {
-                    shape.fill(palette.accent.opacity(isFocused ? 0.12 : 0))
-                }
-                .overlay {
-                    shape.strokeBorder(
-                        palette.cardBorder.opacity(isFocused ? 1.0 : 0.55),
-                        lineWidth: 1
-                    )
+                    shape.strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
                 }
                 .clipShape(shape)
         }
     }
-}
-
-private extension Color {
-    /// Solid card fill used when Reduce Transparency is on (resting state).
-    static let plozzOpaqueCard = Color(white: 0.16)
-    /// Solid card fill used when Reduce Transparency is on and the card is
-    /// focused — a clearly lighter, fully opaque surface.
-    static let plozzOpaqueCardFocused = Color(white: 0.26)
 }
 
 /// tvOS button style for focusable browsing **cards** (Home's library

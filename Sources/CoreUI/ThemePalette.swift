@@ -29,6 +29,28 @@ public struct ThemePalette: Equatable, Sendable {
     /// `nil` keeps a theme flat (e.g. OLED stays pure black).
     public let topGlow: Color?
 
+    // MARK: Focused-card glass treatment (ported 1:1 from Twozz)
+
+    /// Tint blended into a focused card's Liquid Glass so focus reads as a clear
+    /// lightness shift — not just the scale bump. Dark/OLED brighten toward
+    /// white; Light darkens toward black, so the focused tile always separates
+    /// from the page behind it. OLED uses a lighter wash than Dark because its
+    /// pure-black backdrop makes the same white tint read stronger. Only affects
+    /// the translucent-glass path; the Reduce Transparency path uses `liftSurface`.
+    public let focusedCardGlassTint: Color
+    /// Opaque fill behind a *focused* card when glass is disabled (Reduce
+    /// Transparency) — a strong high-contrast "lift".
+    public let liftSurface: Color
+    /// Opaque fill behind an *unfocused* card when glass is disabled. Theme-aware
+    /// so Light mode stays white instead of falling back to near-black.
+    public let cardOpaqueSurface: Color
+    /// Hairline border drawn around an unfocused opaque card so it reads against
+    /// a same-coloured background (e.g. white card on a white light-mode page).
+    public let cardOpaqueBorder: Color
+    /// Whether this is a light-appearance palette. Drives the focused-Light
+    /// opaque backing that stops the drop shadow bleeding through the glass.
+    public let isLight: Bool
+
     public init(
         backgroundBase: Color,
         backgroundSecondary: Color,
@@ -37,7 +59,12 @@ public struct ThemePalette: Equatable, Sendable {
         primaryText: Color,
         secondaryText: Color,
         accent: Color,
-        topGlow: Color?
+        topGlow: Color?,
+        focusedCardGlassTint: Color,
+        liftSurface: Color,
+        cardOpaqueSurface: Color,
+        cardOpaqueBorder: Color,
+        isLight: Bool
     ) {
         self.backgroundBase = backgroundBase
         self.backgroundSecondary = backgroundSecondary
@@ -47,6 +74,11 @@ public struct ThemePalette: Equatable, Sendable {
         self.secondaryText = secondaryText
         self.accent = accent
         self.topGlow = topGlow
+        self.focusedCardGlassTint = focusedCardGlassTint
+        self.liftSurface = liftSurface
+        self.cardOpaqueSurface = cardOpaqueSurface
+        self.cardOpaqueBorder = cardOpaqueBorder
+        self.isLight = isLight
     }
 }
 
@@ -76,7 +108,12 @@ public extension ThemePalette {
         primaryText: .white,
         secondaryText: Color.white.opacity(0.62),
         accent: ThemePalette.brandAccent,
-        topGlow: ThemePalette.brandBlue.opacity(0.075)
+        topGlow: ThemePalette.brandBlue.opacity(0.075),
+        focusedCardGlassTint: Color.white.opacity(0.13),
+        liftSurface: .white,
+        cardOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
+        cardOpaqueBorder: Color.white.opacity(0.16),
+        isLight: false
     )
 
     /// Pure-black OLED theme. Matches Twozz's `ThemePalette.oled`: both stops
@@ -89,7 +126,12 @@ public extension ThemePalette {
         primaryText: .white,
         secondaryText: Color.white.opacity(0.62),
         accent: ThemePalette.brandAccent,
-        topGlow: nil
+        topGlow: nil,
+        focusedCardGlassTint: Color.white.opacity(0.10),
+        liftSurface: .white,
+        cardOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
+        cardOpaqueBorder: Color.white.opacity(0.16),
+        isLight: false
     )
 
     /// Light theme. Uses the exact two-stop background gradient from my Twozz
@@ -103,7 +145,12 @@ public extension ThemePalette {
         primaryText: Color.black.opacity(0.90),
         secondaryText: Color.black.opacity(0.60),
         accent: ThemePalette.brandAccent,
-        topGlow: ThemePalette.brandBlue.opacity(0.14)
+        topGlow: ThemePalette.brandBlue.opacity(0.14),
+        focusedCardGlassTint: Color.black.opacity(0.05),
+        liftSurface: .white,
+        cardOpaqueSurface: .white,
+        cardOpaqueBorder: Color.black.opacity(0.12),
+        isLight: true
     )
 
     /// Resolves the concrete palette for a theme. `.system` defers to the

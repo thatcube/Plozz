@@ -6,10 +6,11 @@ import CoreModels
 /// progress bar, and title/subtitle. The standard building block of Home rows
 /// and library grids.
 ///
-/// The `.poster` style keeps tvOS's native `.card` focus parallax. The
-/// `.landscape` (medium) style is restyled to match the Twozz medium content
-/// card: a 16:9 media well, rounded glass surface, a focus lift with a
-/// focused-only drop shadow, and a series-aware title treatment for episodes.
+/// Both styles drive focus through a plain `.focusable` view (never a `Button`,
+/// whose tvOS focus *platter* paints a stark white plate over our glass) plus an
+/// `.onTapGesture` select handler. The focus visual is entirely our own
+/// Twozz-ported liquid-glass lift: a theme-tinted glass surface with a
+/// focused-only drop shadow and a series-aware title treatment for episodes.
 public struct PosterCardView: View {
     public enum Style { case poster, landscape }
 
@@ -19,6 +20,7 @@ public struct PosterCardView: View {
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     public init(
         item: MediaItem,
@@ -34,6 +36,20 @@ public struct PosterCardView: View {
 
     private var hideThumbnail: Bool { spoilerSettings.shouldHideThumbnail(for: item) }
     private var hideText: Bool { spoilerSettings.shouldHideText(for: item) }
+
+    /// When a focused card renders an opaque white "lift" surface (Reduce
+    /// Transparency on, or pre-Liquid-Glass tvOS) its title/subtitle must flip to
+    /// dark ink so they don't vanish into the white. On the translucent-glass
+    /// path (tvOS 26+) the text stays primary/secondary over the glass.
+    private var usesLiftText: Bool {
+        guard isFocused else { return false }
+        if reduceTransparency { return true }
+        if #available(tvOS 26.0, *) { return false }
+        return true
+    }
+
+    private var titleColor: Color { usesLiftText ? .black.opacity(0.9) : .primary }
+    private var subtitleColor: Color { usesLiftText ? .black.opacity(0.6) : .secondary }
 
     private var size: CGSize {
         switch style {
@@ -74,10 +90,11 @@ public struct PosterCardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(primaryText)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(titleColor)
                     .lineLimit(1)
                 Text(subtitleText ?? " ")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitleText == nil ? 0 : 1)
             }
@@ -107,11 +124,12 @@ public struct PosterCardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(primaryText)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(titleColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 Text(subtitleText ?? " ")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitleText == nil ? 0 : 1)
             }

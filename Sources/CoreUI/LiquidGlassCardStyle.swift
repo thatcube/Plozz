@@ -74,6 +74,27 @@ public struct PlozzGlassCardModifier: ViewModifier {
     }
 }
 
+/// Hairline frosted-glass rim drawn around a clipped media thumbnail, ported
+/// from Twozz's `mediaEdgeColor` overlay. Gives every card's artwork the same
+/// inner glass edge and covers the sub-pixel bleed a clipped image/video plane
+/// can show past rounded corners.
+public struct PlozzMediaEdgeModifier: ViewModifier {
+    private let cornerRadius: CGFloat
+    @Environment(\.themePalette) private var palette
+
+    public init(cornerRadius: CGFloat) {
+        self.cornerRadius = cornerRadius
+    }
+
+    public func body(content: Content) -> some View {
+        content.overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .inset(by: -0.5)
+                .stroke(palette.mediaEdgeColor, lineWidth: 1.5)
+        }
+    }
+}
+
 /// tvOS button style for focusable browsing **cards** (Home's library
 /// shortcuts, Music tiles, genre/category cards). Replaces the platform's
 /// default `.card` style — whose focus state paints a stark **white** plate —
@@ -115,6 +136,15 @@ public extension View {
     /// Wraps the view in the shared Plozz liquid-glass browsing-card surface.
     func plozzGlassCard(cornerRadius: CGFloat, isFocused: Bool) -> some View {
         modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, isFocused: isFocused))
+    }
+
+    /// Draws Twozz's hairline "inner glass" rim around a clipped media thumbnail:
+    /// a 1.5pt frosted-glass stroke (the theme's `mediaEdgeColor`) inset half a
+    /// point outside the artwork's rounded rect. Apply it **after** the artwork's
+    /// `.clipShape`, passing the same corner radius, so every card shares the same
+    /// clean edge and the stroke covers any sub-pixel bleed past the corners.
+    func plozzMediaEdge(cornerRadius: CGFloat) -> some View {
+        modifier(PlozzMediaEdgeModifier(cornerRadius: cornerRadius))
     }
 
     /// Styles a `Button` as a Plozz browsing card: the Twozz-ported liquid-glass

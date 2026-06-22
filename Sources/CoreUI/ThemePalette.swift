@@ -1,6 +1,9 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The concrete colours a resolved `AppTheme` paints with.
 ///
@@ -95,6 +98,27 @@ public extension ThemePalette {
     /// top glow in every theme, mirroring how Twozz tints its backdrop with its
     /// own brand colour (Plozz's is BLUE, never Twozz's purple).
     static let brandBlue = Color(red: 0.0, green: 0.643, blue: 0.863) // #00A4DC
+
+    /// Frosted-glass tone for the hairline rim around media thumbnails — the
+    /// theme's lower background stop nudged 9% toward white, ported from Twozz's
+    /// `mediaEdgeColor`. It blends with the surrounding card while quietly
+    /// covering the ~1–2px a clipped image/video plane can bleed past the rounded
+    /// corners, giving every thumbnail the same clean inner glass edge.
+    var mediaEdgeColor: Color {
+        #if canImport(UIKit)
+        let base = UIColor(backgroundSecondary)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        base.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let lift: CGFloat = 0.09
+        return Color(
+            red: Double(r + (1 - r) * lift),
+            green: Double(g + (1 - g) * lift),
+            blue: Double(b + (1 - b) * lift)
+        )
+        #else
+        return backgroundSecondary
+        #endif
+    }
 
     /// Soft dark theme. Uses the exact two-stop background gradient from my
     /// Twozz `ThemePalette.dark`, with the top glow recoloured to Plozz's brand

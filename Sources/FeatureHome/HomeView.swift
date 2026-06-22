@@ -87,6 +87,7 @@ public struct HomeView: View {
                             }
                             .frame(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
                             .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
+                            .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.cornerRadius)
                         }
                         .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
                     }

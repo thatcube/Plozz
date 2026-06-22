@@ -21,6 +21,7 @@ public struct PosterCardView: View {
 
     @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.themePalette) private var palette
 
     public init(
         item: MediaItem,
@@ -84,8 +85,9 @@ public struct PosterCardView: View {
                 .frame(maxWidth: .infinity)
                 .overlay { artwork }
                 .overlay(alignment: .topTrailing) { watchedBadge }
-                .overlay(alignment: .bottom) { progressBar(height: 8) }
+                .overlay(alignment: .bottom) { progressBar(height: 12) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
+                .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(primaryText)
@@ -118,8 +120,9 @@ public struct PosterCardView: View {
             artwork
                 .frame(width: size.width, height: size.height)
                 .overlay(alignment: .topTrailing) { watchedBadge }
-                .overlay(alignment: .bottom) { progressBar(height: 8) }
+                .overlay(alignment: .bottom) { progressBar(height: 12) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
+                .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(primaryText)
@@ -283,7 +286,7 @@ public struct PosterCardView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 30))
                 .symbolRenderingMode(.palette)
-                .foregroundStyle(.white, Color.accentColor)
+                .foregroundStyle(.white, palette.accent)
                 .padding(8)
                 .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
         }
@@ -294,13 +297,46 @@ public struct PosterCardView: View {
         if let percentage = item.playedPercentage, percentage > 0.01, percentage < 0.99 {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Rectangle().fill(.black.opacity(0.4))
-                    Rectangle()
-                        .fill(.tint)
-                        .frame(width: geo.size.width * percentage)
+                    // Track: a dark translucent capsule so the bar reads clearly
+                    // over both bright and dark artwork, with a hairline rim.
+                    Capsule(style: .continuous)
+                        .fill(.black.opacity(0.55))
+                        .overlay {
+                            Capsule(style: .continuous)
+                                .strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
+                        }
+
+                    // Fill: glossy "liquid glass" blue — Plozz's brand blue lit by
+                    // a vertical sheen and a bright rim, with a subtle glow so it
+                    // pops off the poster without blooming.
+                    Capsule(style: .continuous)
+                        .fill(ThemePalette.brandBlue)
+                        .overlay {
+                            Capsule(style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            .white.opacity(0.55),
+                                            .white.opacity(0.06),
+                                            .black.opacity(0.22)
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .blendMode(.plusLighter)
+                        }
+                        .overlay {
+                            Capsule(style: .continuous)
+                                .strokeBorder(.white.opacity(0.55), lineWidth: 0.5)
+                        }
+                        .frame(width: max(height, geo.size.width * percentage))
+                        .shadow(color: ThemePalette.brandBlue.opacity(0.5), radius: 3)
                 }
             }
             .frame(height: height)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
     }
 }

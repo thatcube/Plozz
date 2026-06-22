@@ -11,10 +11,16 @@ public enum PlozzTheme {
         public static let landscapeWidth: CGFloat = 480
         public static let landscapeHeight: CGFloat = 270
         public static let rowSpacing: CGFloat = 40
-        public static let cardSpacing: CGFloat = 40
-        /// Tighter spacing for dense multi-column library grids.
-        public static let gridSpacing: CGFloat = 28
+        public static let cardSpacing: CGFloat = 32
+        /// Tighter spacing for dense multi-column library grids — small,
+        /// consistent gutters so posters read as a dense wall, not islands.
+        public static let gridSpacing: CGFloat = 24
         public static let cornerRadius: CGFloat = 12
+        /// Poster (glass tile) surface + artwork corner radii. The shared
+        /// browsing card used across Home rows, the library grid and Search,
+        /// styled to match the Twozz "Browse" tile.
+        public static let posterCardCornerRadius: CGFloat = 26
+        public static let posterArtCornerRadius: CGFloat = 16
         /// Medium (landscape) card surface + media corner radii, matching the
         /// Twozz medium content card.
         public static let mediumCardCornerRadius: CGFloat = 22
@@ -28,7 +34,7 @@ public enum PlozzTheme {
         public static let railVerticalPadding: CGFloat = 48
         /// Scale applied to a focused browsing tile (matches Twozz Browse).
         public static let focusedCardScale: CGFloat = 1.08
-        public static let screenPadding: CGFloat = 36
+        public static let screenPadding: CGFloat = 32
     }
 }
 

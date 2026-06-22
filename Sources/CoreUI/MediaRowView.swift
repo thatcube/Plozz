@@ -62,7 +62,11 @@ public struct MediaRowView: View {
 
     @ViewBuilder
     private func card(for item: MediaItem) -> some View {
+        // Poster cards are flexible-width (they stretch to fill a grid column);
+        // in a horizontal rail we pin them to the standard poster width so the
+        // row lays out consistently. Landscape cards keep their intrinsic size.
         let card = PosterCardView(item: item, style: style, spoilerSettings: spoilerSettings) { onSelect(item) }
+            .frame(width: style == .poster ? PlozzTheme.Metrics.posterWidth : nil)
             .id(item.id)
         if initialFocusID != nil {
             card.focused($focusedID, equals: item.id)

@@ -1,14 +1,15 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreUI
 
 /// Layout tokens local to the Home feature's full-screen sub-pages (library
-/// browse, item detail). These intentionally use a tighter horizontal inset than
-/// the shared `PlozzTheme.Metrics.screenPadding` so browse/detail content reaches
-/// closer to the screen edges.
+/// browse, item detail). Kept in lock-step with the shared
+/// `PlozzTheme.Metrics.screenPadding` so every page — Home rows, library grid,
+/// and detail heroes — shares one consistent, tight horizontal inset.
 enum HomeLayout {
-    /// Horizontal inset for Home sub-pages — smaller than the global screen
-    /// padding so dense grids and detail heroes use more of the screen width.
-    static let horizontalPadding: CGFloat = 36
+    /// Horizontal inset for Home sub-pages. Mirrors the global screen padding so
+    /// content lines up edge-to-edge with the rest of the app.
+    static let horizontalPadding: CGFloat = PlozzTheme.Metrics.screenPadding
 }
 
 #endif

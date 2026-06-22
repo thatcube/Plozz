@@ -87,6 +87,9 @@ public struct SettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 40) {
+                    Text("Settings")
+                        .font(.largeTitle.bold())
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     profilePanel
                     accountsPanel
                     homeLibrariesPanel
@@ -100,7 +103,6 @@ public struct SettingsView: View {
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 40)
             }
-            .navigationTitle("Settings")
             .task { await reloadLibraries() }
         }
     }

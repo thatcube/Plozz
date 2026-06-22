@@ -31,50 +31,46 @@ public struct LibraryBrowseView: View {
         self.onSelect = onSelect
     }
 
-    // Fixed-width columns sized to the shared poster card so Library uses the
-    // exact same card as Home's "Recently Added" row, flowing as many columns as
-    // fit the available width.
-    private let columns = [
-        GridItem(
-            .adaptive(
-                minimum: PlozzTheme.Metrics.posterWidth,
-                maximum: PlozzTheme.Metrics.posterWidth
-            ),
-            spacing: PlozzTheme.Metrics.gridSpacing,
-            alignment: .top
-        )
-    ]
+    // Dense, fixed 7-column grid (Twozz "Browse" density). Flexible columns let
+    // each glass tile stretch to fill its column, so gutters stay small and
+    // consistent and the wall of posters reaches edge-to-edge — no big adaptive
+    // gaps.
+    private static let columnCount = 7
+    private let columns = Array(
+        repeating: GridItem(.flexible(), spacing: PlozzTheme.Metrics.gridSpacing, alignment: .top),
+        count: LibraryBrowseView.columnCount
+    )
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            ContentStateView(
-                state: viewModel.state,
-                emptyMessage: "This library is empty.",
-                onRetry: { Task { await viewModel.loadFirstPage() } }
-            ) { total in
-                ScrollView(.vertical, showsIndicators: false) {
+        ContentStateView(
+            state: viewModel.state,
+            emptyMessage: "This library is empty.",
+            onRetry: { Task { await viewModel.loadFirstPage() } }
+        ) { total in
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    header
                     LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.gridSpacing) {
                         ForEach(0..<total, id: \.self) { index in
                             cell(at: index)
                         }
                     }
                     .padding(.horizontal, HomeLayout.horizontalPadding)
-                    .padding(.top, 16)
                     .padding(.bottom, 40)
                     .focusSection()
                 }
+                .padding(.top, 24)
             }
         }
         // Browse is a full-screen sub-page: hide the top tab bar so it reads as a
-        // dedicated destination and the Sort control becomes the natural up-target.
+        // dedicated destination with no navigation chrome pinned at the top.
         .toolbar(.hidden, for: .tabBar)
         .task { if viewModel.state.value == nil { await viewModel.loadFirstPage() } }
     }
 
-    /// A pinned header (title + Sort) that never scrolls away. It lives in its own
-    /// focus section above the grid, so the Sort menu is always reachable by
-    /// pressing up from the top grid row — no scroll-to-top required.
+    /// The library title and Sort control. It scrolls *with* the grid (it is the
+    /// first row of the scroll content), so nothing is pinned to the top of the
+    /// sub-page.
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
@@ -83,12 +79,10 @@ public struct LibraryBrowseView: View {
             sortControl
         }
         .padding(.horizontal, HomeLayout.horizontalPadding)
-        .padding(.top, 24)
-        .padding(.bottom, 12)
         .focusSection()
     }
 
-    /// A focusable sort menu shown in the pinned header.
+    /// A focusable native sort menu.
     private var sortControl: some View {
         Menu {
             Picker("Sort By", selection: sortFieldBinding) {
@@ -144,17 +138,19 @@ public struct LibraryBrowseView: View {
 /// is in flight. Inert (non-focusable) so focus skips over it.
 private struct PosterPlaceholderView: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius)
+        VStack(alignment: .leading, spacing: 10) {
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous)
                 .fill(Color.primary.opacity(0.08))
-                .frame(width: PlozzTheme.Metrics.posterWidth, height: PlozzTheme.Metrics.posterHeight)
+                .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Loading").font(.headline)
                 Text(" ").font(.subheadline)
             }
-            .frame(width: PlozzTheme.Metrics.posterWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .redacted(reason: .placeholder)
         }
+        .padding(10)
     }
 }
 

@@ -26,15 +26,15 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
 /// handles well; use the VLCKit hybrid engine **only** for what AVPlayer can't
 /// direct-play without a server transcode:
 ///
-///   * **Dolby Vision** → ``PlaybackEngineKind/native``. AVPlayer is the *only*
-///     engine that renders Dolby Vision correctly on tvOS, so DoVi always goes
-///     native. The capability layer keeps DoVi out of non-Apple (e.g. MKV)
-///     direct-play, so a DoVi file only ever reaches the router as either an
-///     Apple-container direct-play (native) or a transcoded HLS stream (native).
-///   * **Matroska, plain HDR10/HLG in an MKV, AV1, DTS/DTS-HD/TrueHD audio, or an
-///     AVPlayer-incompatible video codec** → ``PlaybackEngineKind/hybrid`` (decode
-///     on-device, no transcode). Plain HDR10/HLG in an *Apple* container stays
-///     native — AVPlayer renders it on the efficient hardware path.
+///   * **Dolby Vision in an Apple container** → ``PlaybackEngineKind/native``.
+///     AVPlayer renders DoVi with full dynamic metadata on tvOS. But AVPlayer
+///     cannot demux Matroska and a server transcode of DoVi is unreliable, so
+///     **DoVi in an MKV** goes to the on-device engine (which decodes the HEVC
+///     base layer), matching Infuse.
+///   * **Matroska (incl. HDR10/HLG and DoVi in an MKV), AV1, DTS/DTS-HD/TrueHD
+///     audio, or an AVPlayer-incompatible video codec** → ``PlaybackEngineKind/hybrid``
+///     (decode on-device, no transcode). Plain HDR10/HLG in an *Apple* container
+///     stays native — AVPlayer renders it on the efficient hardware path.
 ///   * **Ambiguous/unknown, already transcoding, or no hybrid engine available**
 ///     → ``PlaybackEngineKind/native`` (it carries the server-transcode safety net).
 ///
@@ -42,9 +42,10 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
 /// The router and the provider capability profiles must advertise the *same* set
 /// of formats as direct-play: never advertise something the router can't route to
 /// a working engine. The capability expansion (gated by the same hybrid flag that
-/// sets `hybridAvailable` here) advertises raw MKV for SDR **and display-supported
-/// HDR10/HLG** (never DoVi, which transcodes → native), plus DTS/TrueHD and AV1,
-/// which is exactly what the rules below send to the hybrid engine.
+/// sets `hybridAvailable` here) advertises raw MKV for every display-supported
+/// range — SDR, HDR10/HLG, **and Dolby Vision** (decoded on-device) — plus
+/// DTS/TrueHD and AV1, which is exactly what the rules below send to the hybrid
+/// engine.
 public enum EngineRouter {
 
     /// Picks the engine for a resolved stream.
@@ -74,13 +75,14 @@ public enum EngineRouter {
         // No source facts → ambiguous → native (safety net handles surprises).
         guard let source else { return .native }
 
-        // Dolby Vision must ALWAYS render on AVPlayer — it is the only engine that
-        // renders DoVi correctly on tvOS. (Plain HDR10/HLG are NOT forced native:
-        // AVPlayer plays them in an Apple container, and the on-device engine plays
-        // them in an MKV — see the container rule below. The capability layer keeps
-        // *DoVi* out of MKV direct-play, so DoVi only ever reaches here as an
-        // Apple-container direct-play or a transcoded HLS stream.)
-        if isDolbyVision(source.video) { return .native }
+        // Dolby Vision is best on AVPlayer (the only engine that renders DoVi with
+        // full dynamic metadata on tvOS) — but ONLY when it can actually reach
+        // AVPlayer. AVPlayer cannot demux Matroska, and a server transcode of DoVi
+        // is unreliable (and outright fails on many servers), so DoVi *in an MKV*
+        // is decoded on-device instead: the engine decodes the HEVC base layer
+        // (HDR10/HLG/SDR for Profile 8, tone-mapped for Profile 5), exactly as
+        // Infuse does. DoVi in an Apple container still goes native.
+        if isDolbyVision(source.video), !isMatroska(source.container) { return .native }
 
         // AVPlayer cannot demux Matroska/WebM; the hybrid engine can.
         if isMatroska(source.container) { return .hybrid }

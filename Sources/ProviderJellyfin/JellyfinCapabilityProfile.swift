@@ -49,8 +49,8 @@ extension JellyfinCapabilityProfile {
     /// - Parameter hybridEngineEnabled: when `true`, the dual-engine (VLCKit)
     ///   build is active, so the profile additionally advertises the **extra**
     ///   direct-play formats the on-device hybrid engine can handle — the MKV /
-    ///   WebM container (SDR and display-supported HDR10/HLG; only Dolby Vision
-    ///   still transcodes so it reaches `AVPlayer`), AV1, and DTS / DTS-HD / TrueHD
+    ///   WebM container (every display-supported range, including Dolby Vision,
+    ///   decoded on-device), AV1, and DTS / DTS-HD / TrueHD
     ///   audio (decoded on-device, no
     ///   passthrough required). Defaults to `false`, which emits **byte-for-byte**
     ///   the current native-only profile (non-regression). This must stay in
@@ -235,33 +235,16 @@ extension JellyfinCapabilityProfile {
             )
         }
 
-        // Hybrid engine: a raw MKV is decoded on-device by VLCKit/mpv, but Dolby
-        // Vision must still render on AVPlayer. Constrain MKV/WebM HEVC and AV1 to
-        // SDR + display-supported HDR10/HLG (everything EXCEPT Dolby Vision) so a
-        // DoVi-in-MKV fails direct play and transcodes to an HLS stream AVPlayer
-        // plays — these container-scoped profiles AND with the global codec
-        // profiles above. HDR10/HLG MKV now direct-plays on the on-device engine
-        // (matching Infuse) instead of forcing a server transcode.
-        if hybrid {
-            let mkvContainer = "mkv,webm"
-            // The on-device engine handles HEVC/AV1 regardless of VideoToolbox AV1
-            // support, but DoVi is excluded so it routes to AVPlayer via transcode.
-            let mkvRanges = caps.allowedHDRRanges
-                .filter { !$0.rawValue.uppercased().hasPrefix("DOVI") }
-                .map(\.rawValue)
-                .joined(separator: "|")
-            profiles.append(
-                CodecProfile(type: "Video", codec: "hevc", container: mkvContainer, conditions: [
-                    ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: mkvRanges, isRequired: false)
-                ])
-            )
-            profiles.append(
-                CodecProfile(type: "Video", codec: "av1", container: mkvContainer, conditions: [
-                    ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: mkvRanges, isRequired: false)
-                ])
-            )
-        }
-
+        // Hybrid engine: a raw MKV is fully decoded on-device by VLCKit/mpv —
+        // including Dolby Vision (the engine decodes the HEVC base layer: HDR10/
+        // HLG/SDR for Profile 8, tone-mapped for Profile 5). We therefore add NO
+        // container-scoped range restriction for MKV: the global HEVC/AV1 codec
+        // profiles above already gate on the display's supported ranges (which on
+        // an Apple TV 4K include Dolby Vision, since DoVi support tracks HEVC
+        // hardware decode). The hybrid flag still gates MKV entirely via the
+        // `mkv,webm` DirectPlayProfile, so flag-off advertises no MKV at all. This
+        // makes HDR10/HLG and DoVi MKV direct-play on the on-device engine (no
+        // server transcode), matching Infuse.
         return profiles
     }
 

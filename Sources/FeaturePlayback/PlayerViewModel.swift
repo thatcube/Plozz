@@ -144,7 +144,11 @@ public final class PlayerViewModel {
     /// Swaps the active engine when the routed kind differs from the current one,
     /// tearing the old engine down and re-pointing the UI at the new surface.
     private func switchEngine(to kind: PlaybackEngineKind) {
-        guard kind != currentEngineKind else { return }
+        guard kind != currentEngineKind else {
+            plozzTrace("switchEngine: no-op, already \(kind)")
+            return
+        }
+        plozzTrace("switchEngine: \(currentEngineKind) -> \(kind); bumping engineToken (forces host rebuild)")
         engine.stop()
         engine = makeEngine(kind)
         currentEngineKind = kind
@@ -208,12 +212,12 @@ public final class PlayerViewModel {
                     preferredLanguage: captionSettings.resolvedPreferredLanguage)?.id
             }
 
+            plozzTrace("startPlayback: routed initial engineKind=\(kind) (transcoding=\(request.isTranscoding))")
             await playResolved(request, engineKind: kind, startPosition: startPosition)
 
             // Best-effort, never blocking play(): (if enabled) fetch a missing
             // subtitle in the preferred language.
-            startAutoSubtitleDownloadIfNeeded(request: request)
-        } catch let error as AppError {
+            startAutoSubtitleDownloadIfNeeded(request: request)        } catch let error as AppError {
             phase = .failed(error)
         } catch {
             phase = .failed(.unknown(""))
@@ -229,6 +233,7 @@ public final class PlayerViewModel {
         engineKind: PlaybackEngineKind,
         startPosition: TimeInterval
     ) async {
+        plozzTrace("playResolved: engineKind=\(engineKind) start=\(startPosition) (current=\(currentEngineKind))")
         switchEngine(to: engineKind)
         // Make diagnostics available immediately — the overlay can now show the
         // engine + source facts during loading and even if load() never reaches
@@ -237,9 +242,13 @@ public final class PlayerViewModel {
         // Arm the stall watchdog around load() so a hang that never reports an
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)
+        plozzTrace("playResolved: calling engine.load()")
         await engine.load(request: request, startPosition: startPosition)
+        plozzTrace("playResolved: engine.load() RETURNED; setting phase=.ready")
         phase = .ready
+        plozzTrace("playResolved: phase=.ready set; about to report(.start)")
         await report(event: .start, isPaused: false)
+        plozzTrace("playResolved: report(.start) done")
 
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
@@ -294,6 +303,7 @@ public final class PlayerViewModel {
     /// a server transcode (once); if even that fails, surface the error. Each step
     /// fires at most once so the chain can never loop.
     private func handleEngineFailure(_ error: AppError) async {
+        plozzTrace("handleEngineFailure: \(error) (current=\(currentEngineKind), triedAlternate=\(hasTriedAlternateEngine))")
         guard let request else {
             phase = .failed(error)
             return

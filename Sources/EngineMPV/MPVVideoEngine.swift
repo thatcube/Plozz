@@ -129,6 +129,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     // MARK: - Lifecycle
 
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {
+        plozzTrace("MPV.load: start (startPosition=\(startPosition))")
         status = .loading
         teardownClient()
 
@@ -144,6 +145,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             fail(.unknown("mpv: failed to create player context"))
             return
         }
+        plozzTrace("MPV.load: client.create OK")
 
         client.requestLogMessages("no")
 
@@ -165,7 +167,9 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         // correct SDR (the DoVi/HDR RPU is still parsed + tonemapped by
         // libplacebo) instead of failing or going black.
         let hdrMode = MPVHDR.mode(from: request.sourceMetadata?.video)
+        plozzTrace("MPV.load: hdrMode=\(hdrMode); configuring metalLayer")
         metalLayer.configure(for: hdrMode)
+        plozzTrace("MPV.load: metalLayer.configure done")
         client.setOptionString("target-colorspace-hint", "yes")
         if let trc = MPVHDR.mpvTargetTRC(for: hdrMode) {
             // For HDR content also state the target transfer / primaries
@@ -198,17 +202,21 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         client.observeDouble(MPVProperty.duration)
         client.observeFlag(MPVProperty.pause)
         client.observeFlag(MPVProperty.eofReached)
+        plozzTrace("MPV.load: observers set; calling client.initialize() NOW")
 
         guard client.initialize() >= 0 else {
             teardownClient()
             fail(.unknown("mpv: failed to initialize player"))
             return
         }
+        plozzTrace("MPV.load: client.initialize OK; applying display criteria")
 
         // Apply the HDR display switch now (the view is usually already in a
         // window during playback); otherwise it lands via `onWindowChange`.
         applyDisplayCriteriaIfPossible()
+        plozzTrace("MPV.load: applyDisplayCriteriaIfPossible done; updateHDRStatus")
         updateHDRStatus(mode: hdrMode)
+        plozzTrace("MPV.load: updateHDRStatus done; issuing loadfile")
 
         // Resume via a per-file `start=` option so playback opens at the right
         // spot without a separate post-load seek.
@@ -218,6 +226,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             args.append("start=\(Int(startPosition))")
         }
         client.command(args)
+        plozzTrace("MPV.load: loadfile command issued; load() returning")
     }
 
     public func play() {
@@ -263,7 +272,9 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     /// `pendingDisplayCriteria` nil), so SDR playback never switches the display.
     private func applyDisplayCriteriaIfPossible() {
         guard let criteria = pendingDisplayCriteria,
-              let manager = outputView?.window?.avDisplayManager else { return }
+              let window = outputView?.window,
+              Self.windowHasDisplayManager(window) else { return }
+        let manager = window.avDisplayManager
         manager.preferredDisplayCriteria = criteria
         appliedDisplayManager = manager
         didApplyDisplayCriteria = true
@@ -277,7 +288,15 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     /// mode would leak and strand the TV.
     private func clearDisplayCriteria() {
         guard didApplyDisplayCriteria else { return }
-        guard let manager = appliedDisplayManager ?? outputView?.window?.avDisplayManager else {
+        let resolvedManager: AVDisplayManager?
+        if let applied = appliedDisplayManager {
+            resolvedManager = applied
+        } else if let window = outputView?.window, Self.windowHasDisplayManager(window) {
+            resolvedManager = window.avDisplayManager
+        } else {
+            resolvedManager = nil
+        }
+        guard let manager = resolvedManager else {
             // No handle to the manager (window torn down before we captured it).
             // Nothing reachable to clear; drop our state so we don't loop.
             log.error("HDR: could not clear display criteria — manager unreachable")
@@ -290,10 +309,22 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         didApplyDisplayCriteria = false
     }
 
+    /// Safety net: the `avDisplayManager` accessor comes from AVKit's
+    /// `UIWindow (AVAdditions)` category. If AVKit somehow isn't loaded the
+    /// selector is unrecognized and accessing it would crash with
+    /// `-[UIWindow avDisplayManager]: unrecognized selector` — so verify it's
+    /// present first and degrade to a no-op (no HDR display switch) instead.
+    private static func windowHasDisplayManager(_ window: UIWindow) -> Bool {
+        window.responds(to: Selector(("avDisplayManager")))
+    }
+
     /// Snapshots the realized HDR state for diagnostics and logs it.
     private func updateHDRStatus(mode: MPVHDRMode) {
         let info = metalLayer.realizedColorInfo
-        let matchingEnabled = outputView?.window?.avDisplayManager.isDisplayCriteriaMatchingEnabled ?? false
+        let matchingEnabled: Bool = {
+            guard let window = outputView?.window, Self.windowHasDisplayManager(window) else { return false }
+            return window.avDisplayManager.isDisplayCriteriaMatchingEnabled
+        }()
         hdrStatus = MPVHDRStatus(
             requestedMode: mode.rawValue,
             layerPixelFormat: info.pixelFormat,
@@ -353,7 +384,11 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     // MARK: - View
 
     public func makeVideoOutputView() -> UIView {
-        if let outputView { return outputView }
+        if let outputView {
+            plozzTrace("MPV.makeVideoOutputView: returning CACHED view")
+            return outputView
+        }
+        plozzTrace("MPV.makeVideoOutputView: creating NEW MPVRenderView")
         let view = MPVRenderView(metalLayer: metalLayer)
         view.onWindowChange = { [weak self] window in
             guard let self else { return }

@@ -75,6 +75,63 @@ public extension View {
     func plozzGlassCard(cornerRadius: CGFloat, isFocused: Bool) -> some View {
         modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, isFocused: isFocused))
     }
+
+    /// Wraps the view in a non-interactive Liquid Glass *panel* surface (HUDs,
+    /// overlays). Uses native Liquid Glass on tvOS 26+ and a translucent material
+    /// fallback on older versions, with a faint theme-aware scrim behind it for
+    /// legibility over bright video. Respects Reduce Transparency.
+    func plozzGlassPanel(cornerRadius: CGFloat, scrimOpacity: Double = 0.1) -> some View {
+        modifier(PlozzGlassPanelModifier(cornerRadius: cornerRadius, scrimOpacity: scrimOpacity))
+    }
+}
+
+/// Liquid Glass surface for read-only overlay panels (e.g. the playback
+/// diagnostics HUD). Distinct from `PlozzGlassCardModifier`, which is tuned for
+/// focusable browsing tiles.
+public struct PlozzGlassPanelModifier: ViewModifier {
+    private let cornerRadius: CGFloat
+    private let scrimOpacity: Double
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.themePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
+
+    public init(cornerRadius: CGFloat, scrimOpacity: Double = 0.1) {
+        self.cornerRadius = cornerRadius
+        self.scrimOpacity = scrimOpacity
+    }
+
+    public func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        // Theme-aware scrim: black behind dark/OLED, white behind light, so the
+        // panel keeps text legible over any frame while still tracking the theme.
+        let scrim = (colorScheme == .dark ? Color.black : Color.white).opacity(scrimOpacity)
+
+        content
+            .background { shape.fill(scrim) }
+            .modifier(GlassSurface(shape: shape, reduceTransparency: reduceTransparency, palette: palette))
+            .overlay { shape.strokeBorder(palette.cardBorder.opacity(0.6), lineWidth: 1) }
+            .clipShape(shape)
+    }
+}
+
+/// Picks the best available translucent backing for a panel: native Liquid
+/// Glass on tvOS 26+, `.ultraThinMaterial` below that, and a solid theme fill
+/// when Reduce Transparency is on.
+private struct GlassSurface: ViewModifier {
+    let shape: RoundedRectangle
+    let reduceTransparency: Bool
+    let palette: ThemePalette
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background { shape.fill(palette.cardSurface) }
+        } else if #available(tvOS 26.0, *) {
+            content.glassEffect(.regular, in: shape)
+        } else {
+            content.background(.ultraThinMaterial, in: shape)
+        }
+    }
 }
 
 #endif

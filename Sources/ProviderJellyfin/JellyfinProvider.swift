@@ -127,8 +127,60 @@ public struct JellyfinProvider: MediaProvider {
             audioTracks: audio,
             subtitleTracks: subs,
             startPosition: mappedItem.resumePosition ?? 0,
-            isTranscoding: source.TranscodingUrl != nil
+            isTranscoding: source.TranscodingUrl != nil,
+            sourceMetadata: Self.sourceMetadata(container: source.Container, streams: streams)
         )
+    }
+
+    /// Builds provider-agnostic source facts (codec/HDR/resolution/channels/…)
+    /// from the original file's media streams, so the diagnostics overlay stays
+    /// accurate even when the server transcodes to a metadata-poor HLS stream.
+    static func sourceMetadata(container: String?, streams: [MediaStreamDto]) -> MediaSourceMetadata? {
+        let video = streams.first { $0.`Type` == "Video" }
+        let audio = streams.first { ($0.`Type` == "Audio") && ($0.IsDefault ?? false) }
+            ?? streams.first { $0.`Type` == "Audio" }
+        let subtitle = streams.first { ($0.`Type` == "Subtitle") && ($0.IsDefault ?? false) }
+            ?? streams.first { $0.`Type` == "Subtitle" }
+
+        let videoStream = video.map { v in
+            MediaSourceMetadata.VideoStream(
+                codec: v.Codec,
+                profile: v.Profile,
+                width: v.Width,
+                height: v.Height,
+                bitrate: v.BitRate,
+                frameRate: v.RealFrameRate ?? v.AverageFrameRate,
+                videoRange: v.VideoRange,
+                videoRangeType: v.VideoRangeType,
+                colorTransfer: v.ColorTransfer
+            )
+        }
+        let audioStream = audio.map { a in
+            MediaSourceMetadata.AudioStream(
+                codec: a.Codec,
+                profile: a.Profile,
+                channels: a.Channels,
+                channelLayout: a.ChannelLayout,
+                sampleRate: a.SampleRate,
+                bitrate: a.BitRate,
+                language: a.Language
+            )
+        }
+        let subtitleStream = subtitle.map { s in
+            MediaSourceMetadata.SubtitleStream(
+                codec: s.Codec,
+                language: s.Language,
+                title: s.DisplayTitle
+            )
+        }
+
+        let metadata = MediaSourceMetadata(
+            container: container,
+            video: videoStream,
+            audio: audioStream,
+            subtitle: subtitleStream
+        )
+        return metadata.isEmpty ? nil : metadata
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {

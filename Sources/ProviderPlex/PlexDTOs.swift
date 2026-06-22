@@ -81,6 +81,7 @@ struct PlexStream: Decodable {
     let streamType: Int?       // 1 video, 2 audio, 3 subtitle
     let index: Int?
     let codec: String?
+    let profile: String?
     let language: String?
     let languageTag: String?
     let displayTitle: String?
@@ -88,6 +89,18 @@ struct PlexStream: Decodable {
     let selected: Bool?
     let `default`: Bool?
     let forced: Bool?
+    // Video facts
+    let width: Int?
+    let height: Int?
+    let frameRate: Double?
+    let colorTrc: String?
+    let DOVIPresent: Bool?
+    // Audio facts
+    let channels: Int?
+    let samplingRate: Int?
+    let audioChannelLayout: String?
+    /// Per-stream bitrate, in **kbps** (Plex convention).
+    let bitrate: Int?
 }
 
 // MARK: Plex.tv: PIN flow

@@ -117,8 +117,68 @@ public struct PlexProvider: MediaProvider {
             audioTracks: audio,
             subtitleTracks: subs,
             startPosition: mappedItem.resumePosition ?? 0,
-            isTranscoding: resolved.isTranscoding
+            isTranscoding: resolved.isTranscoding,
+            sourceMetadata: Self.sourceMetadata(
+                container: media.container ?? part.container,
+                streams: streams
+            )
         )
+    }
+
+    /// Plex reports bitrates in kbps; the diagnostics model wants bits/sec.
+    private static func bps(fromKbps kbps: Int?) -> Int? {
+        guard let kbps, kbps > 0 else { return nil }
+        return kbps * 1000
+    }
+
+    /// Builds provider-agnostic source facts from a Plex part's streams so the
+    /// diagnostics overlay matches what a direct-play client (e.g. Infuse) shows.
+    static func sourceMetadata(container: String?, streams: [PlexStream]) -> MediaSourceMetadata? {
+        let video = streams.first { $0.streamType == 1 }
+        let audio = streams.first { ($0.streamType == 2) && ($0.selected ?? $0.default ?? false) }
+            ?? streams.first { $0.streamType == 2 }
+        let subtitle = streams.first { ($0.streamType == 3) && ($0.selected ?? false) }
+            ?? streams.first { $0.streamType == 3 }
+
+        let videoStream = video.map { v in
+            MediaSourceMetadata.VideoStream(
+                codec: v.codec,
+                profile: v.profile,
+                width: v.width,
+                height: v.height,
+                bitrate: bps(fromKbps: v.bitrate),
+                frameRate: v.frameRate,
+                videoRange: (v.DOVIPresent ?? false) ? "DOVI" : nil,
+                videoRangeType: (v.DOVIPresent ?? false) ? "DOVI" : nil,
+                colorTransfer: v.colorTrc
+            )
+        }
+        let audioStream = audio.map { a in
+            MediaSourceMetadata.AudioStream(
+                codec: a.codec,
+                profile: a.profile,
+                channels: a.channels,
+                channelLayout: a.audioChannelLayout,
+                sampleRate: a.samplingRate,
+                bitrate: bps(fromKbps: a.bitrate),
+                language: a.languageTag ?? a.language
+            )
+        }
+        let subtitleStream = subtitle.map { s in
+            MediaSourceMetadata.SubtitleStream(
+                codec: s.codec,
+                language: s.languageTag ?? s.language,
+                title: s.extendedDisplayTitle ?? s.displayTitle
+            )
+        }
+
+        let metadata = MediaSourceMetadata(
+            container: container,
+            video: videoStream,
+            audio: audioStream,
+            subtitle: subtitleStream
+        )
+        return metadata.isEmpty ? nil : metadata
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {

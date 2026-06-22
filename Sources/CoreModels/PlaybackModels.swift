@@ -33,6 +33,124 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// Source-of-truth media facts a provider knows about the *original* file,
+/// independent of how it ends up being streamed (direct vs transcode).
+///
+/// This is what powers the rich playback-diagnostics overlay: when the server
+/// transcodes, the `AVPlayer` stream exposes almost no track metadata, so we
+/// rely on these provider-reported facts (codec, HDR, resolution, bitrate,
+/// channels, …) instead — the same source a client like Infuse reads.
+public struct MediaSourceMetadata: Hashable, Sendable {
+    public struct VideoStream: Hashable, Sendable {
+        /// Raw codec token from the provider, e.g. `hevc`, `h264`, `av1`.
+        public var codec: String?
+        /// Codec profile, e.g. `Main 10`, `High`.
+        public var profile: String?
+        public var width: Int?
+        public var height: Int?
+        /// Declared video bitrate in bits/sec.
+        public var bitrate: Int?
+        public var frameRate: Double?
+        /// Coarse range token, e.g. `HDR`, `SDR` (Jellyfin `VideoRange`).
+        public var videoRange: String?
+        /// Specific range token, e.g. `DOVI`, `HDR10`, `HLG` (Jellyfin
+        /// `VideoRangeType`).
+        public var videoRangeType: String?
+        /// Color transfer characteristics, e.g. `smpte2084`, `arib-std-b67`.
+        public var colorTransfer: String?
+
+        public init(
+            codec: String? = nil,
+            profile: String? = nil,
+            width: Int? = nil,
+            height: Int? = nil,
+            bitrate: Int? = nil,
+            frameRate: Double? = nil,
+            videoRange: String? = nil,
+            videoRangeType: String? = nil,
+            colorTransfer: String? = nil
+        ) {
+            self.codec = codec
+            self.profile = profile
+            self.width = width
+            self.height = height
+            self.bitrate = bitrate
+            self.frameRate = frameRate
+            self.videoRange = videoRange
+            self.videoRangeType = videoRangeType
+            self.colorTransfer = colorTransfer
+        }
+    }
+
+    public struct AudioStream: Hashable, Sendable {
+        /// Raw codec token, e.g. `eac3`, `aac`, `dts`.
+        public var codec: String?
+        /// Codec profile, e.g. `Dolby Atmos`, `DTS-HD MA`.
+        public var profile: String?
+        public var channels: Int?
+        /// Channel layout label, e.g. `5.1`, `7.1`, `stereo`.
+        public var channelLayout: String?
+        /// Sample rate in Hz.
+        public var sampleRate: Int?
+        /// Declared audio bitrate in bits/sec.
+        public var bitrate: Int?
+        public var language: String?
+
+        public init(
+            codec: String? = nil,
+            profile: String? = nil,
+            channels: Int? = nil,
+            channelLayout: String? = nil,
+            sampleRate: Int? = nil,
+            bitrate: Int? = nil,
+            language: String? = nil
+        ) {
+            self.codec = codec
+            self.profile = profile
+            self.channels = channels
+            self.channelLayout = channelLayout
+            self.sampleRate = sampleRate
+            self.bitrate = bitrate
+            self.language = language
+        }
+    }
+
+    public struct SubtitleStream: Hashable, Sendable {
+        public var codec: String?
+        public var language: String?
+        public var title: String?
+
+        public init(codec: String? = nil, language: String? = nil, title: String? = nil) {
+            self.codec = codec
+            self.language = language
+            self.title = title
+        }
+    }
+
+    /// Original container, e.g. `mkv`, `mp4`.
+    public var container: String?
+    public var video: VideoStream?
+    public var audio: AudioStream?
+    public var subtitle: SubtitleStream?
+
+    public init(
+        container: String? = nil,
+        video: VideoStream? = nil,
+        audio: AudioStream? = nil,
+        subtitle: SubtitleStream? = nil
+    ) {
+        self.container = container
+        self.video = video
+        self.audio = audio
+        self.subtitle = subtitle
+    }
+
+    /// True when no useful field was populated (lets callers skip wiring it up).
+    public var isEmpty: Bool {
+        container == nil && video == nil && audio == nil && subtitle == nil
+    }
+}
+
 /// Everything `FeaturePlayback` needs to start playing an item.
 ///
 /// Built by a provider's `playbackInfo(for:)`. The provider decides whether to
@@ -51,6 +169,10 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// used) rather than direct-playing the original file. Surfaced by the
     /// playback diagnostics overlay.
     public var isTranscoding: Bool
+    /// Source-of-truth media facts (codec, HDR, resolution, channels, …) read
+    /// from the provider, used to populate the playback-diagnostics overlay even
+    /// when the streamed (transcoded) asset exposes no track metadata.
+    public var sourceMetadata: MediaSourceMetadata?
 
     public init(
         item: MediaItem,
@@ -59,7 +181,8 @@ public struct PlaybackRequest: Hashable, Sendable {
         audioTracks: [MediaTrack] = [],
         subtitleTracks: [MediaTrack] = [],
         startPosition: TimeInterval = 0,
-        isTranscoding: Bool = false
+        isTranscoding: Bool = false,
+        sourceMetadata: MediaSourceMetadata? = nil
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -68,6 +191,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.subtitleTracks = subtitleTracks
         self.startPosition = startPosition
         self.isTranscoding = isTranscoding
+        self.sourceMetadata = sourceMetadata
     }
 }
 

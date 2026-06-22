@@ -20,14 +20,17 @@ public struct YouTubeTrailerProvider: MediaProvider {
     private let trailerItem: MediaItem
     /// The YouTube video id to extract a stream for.
     private let videoID: String
-    /// Extraction methods in priority order; defaults to YouTubeKit's platform
-    /// default (local JavaScriptCore extraction on tvOS).
+    /// Extraction methods in priority order. Defaults to local JavaScriptCore
+    /// extraction first, then YouTubeKit's hosted remote fallback — so trailers
+    /// keep resolving even if YouTube changes its internals before the app can be
+    /// updated. The remote service makes its requests *through* this device, so
+    /// resolved stream URLs stay valid for playback here.
     private let methods: [YouTube.ExtractionMethod]
 
     public init(
         item: MediaItem,
         videoID: String,
-        methods: [YouTube.ExtractionMethod] = .default
+        methods: [YouTube.ExtractionMethod] = [.local, .remote]
     ) {
         self.trailerItem = item
         self.videoID = videoID

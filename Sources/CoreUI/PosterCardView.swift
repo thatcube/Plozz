@@ -62,36 +62,32 @@ public struct PosterCardView: View {
     // MARK: Poster
 
     private var posterCard: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                Color.clear
-                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .overlay { artwork }
-                    .overlay(alignment: .topTrailing) { watchedBadge }
-                    .overlay(alignment: .bottom) { progressBar(height: 8) }
-                    .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
+        VStack(alignment: .leading, spacing: 10) {
+            Color.clear
+                .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .overlay { artwork }
+                .overlay(alignment: .topTrailing) { watchedBadge }
+                .overlay(alignment: .bottom) { progressBar(height: 8) }
+                .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(primaryText)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Text(subtitleText ?? " ")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .opacity(subtitleText == nil ? 0 : 1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
-                .padding(.bottom, 4)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(primaryText)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(subtitleText ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .opacity(subtitleText == nil ? 0 : 1)
             }
-            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+            .padding(.bottom, 4)
         }
-        .buttonStyle(.plain)
-        .focused($isFocused)
-        .focusEffectDisabled()
+        .padding(10)
         .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, action: action)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.focusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
@@ -101,33 +97,29 @@ public struct PosterCardView: View {
     // MARK: Landscape (medium) card
 
     private var landscapeCard: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                artwork
-                    .frame(width: size.width, height: size.height)
-                    .overlay(alignment: .topTrailing) { watchedBadge }
-                    .overlay(alignment: .bottom) { progressBar(height: 8) }
-                    .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
+        VStack(alignment: .leading, spacing: 8) {
+            artwork
+                .frame(width: size.width, height: size.height)
+                .overlay(alignment: .topTrailing) { watchedBadge }
+                .overlay(alignment: .bottom) { progressBar(height: 8) }
+                .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(primaryText)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    Text(subtitleText ?? " ")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .opacity(subtitleText == nil ? 0 : 1)
-                }
-                .frame(width: size.width, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(primaryText)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(subtitleText ?? " ")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .opacity(subtitleText == nil ? 0 : 1)
             }
-            .padding(PlozzTheme.Metrics.mediumCardInset)
+            .frame(width: size.width, alignment: .leading)
         }
-        .buttonStyle(.plain)
-        .focused($isFocused)
-        .focusEffectDisabled()
+        .padding(PlozzTheme.Metrics.mediumCardInset)
         .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, action: action)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
@@ -292,6 +284,29 @@ public struct PosterCardView: View {
             }
             .frame(height: height)
         }
+    }
+}
+
+private extension View {
+    /// Makes a card a focusable, tappable surface **without** wrapping it in a
+    /// `Button`. On tvOS a `Button` (even `.buttonStyle(.plain)`) paints the
+    /// system focus *platter* — a stark white plate behind the focused card that
+    /// `.focusEffectDisabled()` can't fully remove and that buries our own glass
+    /// focus treatment (most visible on dark / OLED themes). Following Twozz's
+    /// card pattern, we instead drive focus with `.focusable` + `.onTapGesture`
+    /// (the select-press fires the tap) and disable the system focus effect, so
+    /// the only focus visuals are the ones we draw via `plozzGlassCard`.
+    func focusableCard(
+        isFocused: FocusState<Bool>.Binding,
+        cornerRadius: CGFloat,
+        action: @escaping () -> Void
+    ) -> some View {
+        contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .focusable(true)
+            .focused(isFocused)
+            .focusEffectDisabled()
+            .onTapGesture(perform: action)
+            .accessibilityAddTraits(.isButton)
     }
 }
 

@@ -457,29 +457,44 @@ private struct TraktConnectionView: View {
 
     private func connectingView(userCode: String, verificationURL: String) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("On your phone or computer, go to **\(displayURL(verificationURL))** and enter this code:")
+            Text("Scan the QR code with your phone to approve, or go to **\(displayURL(verificationURL))** and enter this code:")
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text(userCode)
-                .font(.system(size: 64, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .tracking(10)
-                .padding(.horizontal, 36)
-                .padding(.vertical, 18)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+            HStack(alignment: .center, spacing: 36) {
+                QRCodeView(activationURL(userCode: userCode, verificationURL: verificationURL))
+                    .frame(width: 220, height: 220)
+                    .padding(16)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 20))
 
-            HStack(spacing: 16) {
-                ProgressView()
-                Text("Waiting for you to approve…")
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 20) {
+                    Text(userCode)
+                        .font(.plozzCode(size: 64))
+                        .tracking(10)
+                        .padding(.horizontal, 36)
+                        .padding(.vertical, 18)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+
+                    HStack(spacing: 16) {
+                        ProgressView()
+                        Text("Waiting for you to approve…")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Button(role: .cancel, action: { trakt.cancelConnect() }) {
                 Text("Cancel")
             }
         }
+    }
+
+    /// Builds the activation URL with the user code pre-filled, so scanning the
+    /// QR opens Trakt's approval page with the code already entered.
+    private func activationURL(userCode: String, verificationURL: String) -> String {
+        let encoded = userCode.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userCode
+        return "\(verificationURL)?code=\(encoded)"
     }
 
     private func connectedView(username: String) -> some View {

@@ -75,7 +75,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureAuth",
-            dependencies: ["CoreModels", "CoreNetworking", "ProviderJellyfin", "ProviderPlex"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex"]
         ),
         .target(
             name: "FeatureHome",

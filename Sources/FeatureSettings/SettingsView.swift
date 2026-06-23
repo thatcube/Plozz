@@ -458,7 +458,7 @@ public struct SettingsView: View {
     private var traktPanel: some View {
         SettingsPanel(
             title: "Trakt",
-            footer: "Connect Trakt to automatically scrobble what \(activeProfile.name) watches to their Trakt.tv history. Each profile connects its own Trakt account."
+            footer: "Connect Trakt to automatically scrobble what you watch to your Trakt.tv history."
         ) {
             TraktConnectionView(trakt: trakt)
         }
@@ -545,6 +545,21 @@ private struct SettingsPanel<Content: View>: View {
 private struct TraktConnectionView: View {
     let trakt: TraktService
 
+    private enum Field: Hashable { case connect, cancel, disconnect, retry }
+    @FocusState private var focus: Field?
+
+    private enum PhaseTag: Equatable { case unknown, unavailable, disconnected, connecting, connected, error }
+    private var phaseTag: PhaseTag {
+        switch trakt.phase {
+        case .unknown: return .unknown
+        case .unavailable: return .unavailable
+        case .disconnected: return .disconnected
+        case .connecting: return .connecting
+        case .connected: return .connected
+        case .error: return .error
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             switch trakt.phase {
@@ -563,6 +578,7 @@ private struct TraktConnectionView: View {
                 Button(action: { trakt.connect() }) {
                     Label("Connect to Trakt", systemImage: "link")
                 }
+                .focused($focus, equals: .connect)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             case let .connecting(userCode, verificationURL, _):
@@ -578,44 +594,57 @@ private struct TraktConnectionView: View {
                     Button(action: { trakt.connect() }) {
                         Label("Try Again", systemImage: "arrow.clockwise")
                     }
+                    .focused($focus, equals: .retry)
                 }
             }
         }
         .task { await trakt.refreshStatus() }
+        // Keep focus inside the Trakt card across phase swaps so tvOS doesn't
+        // bounce it to the top of Settings when the focused control is replaced.
+        .onChange(of: phaseTag) { _, tag in
+            switch tag {
+            case .connecting: focus = .cancel
+            case .disconnected: focus = .connect
+            case .connected: focus = .disconnect
+            case .error: focus = .retry
+            default: break
+            }
+        }
     }
 
     private func connectingView(userCode: String, verificationURL: String) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Scan the QR code with your phone to approve, or go to **\(displayURL(verificationURL))** and enter this code:")
-                .font(.title3)
+        HStack(alignment: .center, spacing: 32) {
+            QRCodeView(activationURL(userCode: userCode, verificationURL: verificationURL))
+                .frame(width: 180, height: 180)
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 16))
+
+            Text("OR")
+                .font(.title3.weight(.bold))
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
-            HStack(alignment: .center, spacing: 36) {
-                QRCodeView(activationURL(userCode: userCode, verificationURL: verificationURL))
-                    .frame(width: 220, height: 220)
-                    .padding(16)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 20))
-
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(userCode)
-                        .font(.plozzCode(size: 64))
-                        .tracking(10)
-                        .padding(.horizontal, 36)
-                        .padding(.vertical, 18)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-
-                    HStack(spacing: 16) {
-                        ProgressView()
-                        Text("Waiting for you to approve…")
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 12) {
+                Text(displayURL(verificationURL))
+                    .font(.title2.weight(.semibold))
+                Text(userCode)
+                    .font(.plozzCode(size: 52))
+                    .tracking(8)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Waiting for approval…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
+                Button(role: .cancel, action: { trakt.cancelConnect() }) {
+                    Text("Cancel")
+                }
+                .focused($focus, equals: .cancel)
             }
 
-            Button(role: .cancel, action: { trakt.cancelConnect() }) {
-                Text("Cancel")
-            }
+            Spacer(minLength: 0)
         }
     }
 
@@ -643,6 +672,7 @@ private struct TraktConnectionView: View {
             } label: {
                 Label("Disconnect", systemImage: "xmark.circle")
             }
+            .focused($focus, equals: .disconnect)
         }
     }
 

@@ -384,11 +384,18 @@ public struct SettingsView: View {
                         Button {
                             theme.theme = option
                         } label: {
-                            Label(option.displayName, systemImage: option.symbolName)
-                                .font(.headline)
-                                .padding(.horizontal, 4)
+                            HStack(spacing: 10) {
+                                Image(systemName: option.symbolName)
+                                Text(option.displayName)
+                                if theme.theme == option {
+                                    Image(systemName: "checkmark.circle.fill")
+                                }
+                            }
+                            .font(.headline)
+                            .padding(.horizontal, 4)
                         }
                         .plozzGlassPillButton(isSelected: theme.theme == option)
+                        .accessibilityValue(theme.theme == option ? "Selected" : "")
                     }
                 }
                 .padding(.horizontal, 4)

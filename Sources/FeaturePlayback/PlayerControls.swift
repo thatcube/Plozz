@@ -150,7 +150,7 @@ struct PlayerControls: View {
                 leadingInset: 60,
                 trailingInset: 60 + 24 + 130
             )
-                .frame(height: 52)
+                .frame(height: 44)
                 .frame(maxWidth: .infinity)
             // Remaining time pinned to the end of the bar. Fixed width so the
             // track never resizes as the digits change.
@@ -562,17 +562,17 @@ private struct ScrubBar: View {
             let knobX = width * CGFloat(model.progressFraction)
 
             ZStack(alignment: .leading) {
-                glassTrack(height: 24)
+                glassTrack(height: 20)
                 Capsule()
                     .fill(.white.opacity(0.14))
-                    .frame(width: width * CGFloat(model.bufferedFraction), height: 24)
+                    .frame(width: width * CGFloat(model.bufferedFraction), height: 20)
                 Capsule()
                     .fill(palette.accent)
-                    .frame(width: knobX, height: 24)
+                    .frame(width: knobX, height: 20)
                 Circle()
                     .fill(.white)
-                    .frame(width: model.isScrubbing ? 48 : 40, height: model.isScrubbing ? 48 : 40)
-                    .offset(x: knobX - (model.isScrubbing ? 24 : 20))
+                    .frame(width: model.isScrubbing ? 40 : 34, height: model.isScrubbing ? 40 : 34)
+                    .offset(x: knobX - (model.isScrubbing ? 20 : 17))
                     .shadow(radius: 4)
 
                 if model.isScrubbing {

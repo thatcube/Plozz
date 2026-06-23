@@ -56,6 +56,13 @@ targets:
         # from the TMDB_BEARER_TOKEN build setting (gitignored Config/Secrets.local.xcconfig).
         # Empty by default, which disables the TMDb fallback.
         TMDBBearerToken: "$(TMDB_BEARER_TOKEN)"
+        # Optional base URL of a self-hostable TMDb caching proxy that holds ONE
+        # TMDb key server-side (TMDb terms forbid shipping a key in an open-source
+        # client). When set, TMDb-grade movie/western-TV backdrops, logos and
+        # episode stills are served compliantly and scalably for any number of
+        # users. Empty by default: the app then relies on the keyless providers
+        # (AniList/Kitsu/TVmaze/Deezer/MusicBrainz) and the user's own server art.
+        TMDBProxyBaseURL: "$(TMDB_PROXY_BASE_URL)"
         # Local network access is required for LAN server discovery on tvOS.
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:
@@ -82,6 +89,9 @@ targets:
         # enrichment disabled. A real key is supplied via the gitignored
         # Config/Secrets.local.xcconfig (see Config/Secrets.xcconfig).
         OMDB_API_KEY: ""
+        # Default (empty) TMDb proxy base URL. A maintainer-run/self-hosted proxy
+        # URL can be supplied via the gitignored Config/Secrets.local.xcconfig.
+        TMDB_PROXY_BASE_URL: ""
         # tvOS "Brand Assets" providing the layered app icon and Top Shelf
         # images (required by App Store Connect for any upload, incl. TestFlight).
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"

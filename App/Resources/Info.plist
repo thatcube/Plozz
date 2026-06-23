@@ -46,6 +46,8 @@
 	<string>$(OMDB_API_KEY)</string>
 	<key>TMDBBearerToken</key>
 	<string>$(TMDB_BEARER_TOKEN)</string>
+	<key>TMDBProxyBaseURL</key>
+	<string>$(TMDB_PROXY_BASE_URL)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

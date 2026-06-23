@@ -14,6 +14,9 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
     /// Letterboxd average rating (0–5). No public API yet — reserved so the UI
     /// already supports it if a provider is added later.
     case letterboxd
+    /// AniList weighted community score (0–100), shown as a percentage. The rating
+    /// that actually matters for anime — sourced keyless from the AniList API.
+    case anilist
     /// The Movie Database user rating (0–10).
     case tmdb
     /// A backend's generic "community"/audience rating (e.g. Jellyfin
@@ -31,6 +34,7 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         case .rottenTomatoesAudience: return "RT Audience"
         case .metacritic: return "Metacritic"
         case .letterboxd: return "Letterboxd"
+        case .anilist: return "AniList"
         case .tmdb: return "TMDB"
         case .community: return "Community"
         case .critic: return "Critics"
@@ -41,13 +45,14 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
     public var sortRank: Int {
         switch self {
         case .imdb: return 0
-        case .rottenTomatoes: return 1
-        case .rottenTomatoesAudience: return 2
-        case .metacritic: return 3
-        case .letterboxd: return 4
-        case .tmdb: return 5
-        case .community: return 6
-        case .critic: return 7
+        case .anilist: return 1
+        case .rottenTomatoes: return 2
+        case .rottenTomatoesAudience: return 3
+        case .metacritic: return 4
+        case .letterboxd: return 5
+        case .tmdb: return 6
+        case .community: return 7
+        case .critic: return 8
         }
     }
 
@@ -62,7 +67,7 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         // A backend "community" score is TMDB-sourced in practice, so it shares
         // TMDB's branding rather than a generic star.
         case .tmdb, .community: return .tmdb
-        case .imdb, .letterboxd: return .star
+        case .imdb, .letterboxd, .anilist: return .star
         case .metacritic: return .metacritic
         }
     }

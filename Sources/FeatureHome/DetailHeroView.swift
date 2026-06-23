@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import MetadataKit
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -292,36 +293,14 @@ struct DetailHeroView: View {
     /// episode/season backdrop it queries by series title. Inert without a token.
     private var tmdbBackdropFallback: (@Sendable () async -> URL?)? {
         let source = backdrop
-        let isTV: Bool
-        let queryTitle: String
-        let tmdbID: String?
         switch source.kind {
-        case .movie, .video:
-            isTV = false
-            queryTitle = source.title
-            tmdbID = source.providerIDs["Tmdb"]
-        case .series:
-            isTV = true
-            queryTitle = source.title
-            tmdbID = source.providerIDs["Tmdb"]
-        case .season, .episode:
-            isTV = true
-            queryTitle = source.parentTitle ?? source.title
-            // The item's own TMDb id is the episode/season, not the series.
-            tmdbID = nil
         case .folder, .collection, .unknown:
             return nil
+        default:
+            break
         }
-        guard !queryTitle.isEmpty || (tmdbID?.isEmpty == false) else { return nil }
-        let year = isTV ? nil : source.productionYear
         return {
-            await TMDbArtworkResolver.shared.backdropURL(
-                title: queryTitle,
-                year: year,
-                isTV: isTV,
-                tmdbID: tmdbID,
-                large: true
-            )
+            await ArtworkRouter.shared.artworkURL(.hero, for: source)
         }
     }
 
@@ -329,35 +308,15 @@ struct DetailHeroView: View {
     /// its logo. TV uses the *series* title (never an episode name); inert when no
     /// TMDb token is configured.
     private var tmdbLogoFallback: (@Sendable () async -> URL?)? {
-        let isTV: Bool
-        let queryTitle: String
-        let tmdbID: String?
-        switch item.kind {
-        case .movie, .video:
-            isTV = false
-            queryTitle = item.title
-            tmdbID = item.providerIDs["Tmdb"]
-        case .series:
-            isTV = true
-            queryTitle = item.title
-            tmdbID = item.providerIDs["Tmdb"]
-        case .season, .episode:
-            isTV = true
-            queryTitle = item.parentTitle ?? item.title
-            // The item's own TMDb id is the episode/season, not the series, so
-            // fall back to a title search for the show logo.
-            tmdbID = nil
+        let source = item
+        switch source.kind {
         case .folder, .collection, .unknown:
             return nil
+        default:
+            break
         }
-        let year = isTV ? nil : item.productionYear
         return {
-            await TMDbArtworkResolver.shared.logoURL(
-                title: queryTitle,
-                year: year,
-                isTV: isTV,
-                tmdbID: tmdbID
-            )
+            await ArtworkRouter.shared.artworkURL(.logo, for: source)
         }
     }
 }

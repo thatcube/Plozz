@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import MetadataKit
 
 /// A single, self-contained page for an entire series. The hero at the top is
 /// dynamic: it reflects whatever the user is currently *focused* on (not what
@@ -296,22 +297,24 @@ struct SeriesDetailView: View {
         "\(selectedSeasonID ?? "loose")#\(currentEpisodes.count)"
     }
 
-    /// Prefetches every loaded episode's TMDb still for the current season so the
-    /// rail's thumbnails are already cached before each card scrolls into view.
+    /// Prefetches every loaded episode's still (TMDb, falling back to TVmaze for
+    /// western TV) via the content-type-routed ``ArtworkRouter`` so the rail's
+    /// thumbnails are already resolved + decoded before each card scrolls in.
     private func prefetchSeasonStills() async {
-        let requests = currentEpisodes.compactMap { episode -> TMDbArtworkResolver.EpisodeStillRequest? in
-            guard episode.kind == .episode,
-                  let season = episode.seasonNumber,
-                  let number = episode.episodeNumber else { return nil }
-            return TMDbArtworkResolver.EpisodeStillRequest(
-                seriesTitle: episode.parentTitle ?? episode.title,
-                seriesTmdbID: episode.providerIDs["SeriesTmdb"],
-                season: season,
-                episode: number
-            )
+        let episodes = currentEpisodes.filter {
+            $0.kind == .episode && $0.seasonNumber != nil && $0.episodeNumber != nil
         }
-        guard !requests.isEmpty else { return }
-        await TMDbArtworkResolver.shared.prefetchEpisodeStills(requests)
+        guard !episodes.isEmpty else { return }
+        await withTaskGroup(of: Void.self) { group in
+            for episode in episodes {
+                group.addTask {
+                    guard let url = await ArtworkRouter.shared.artworkURL(.thumbnail, for: episode) else { return }
+                    #if canImport(UIKit)
+                    ArtworkImageCache.shared.prefetch(url)
+                    #endif
+                }
+            }
+        }
     }
 
     /// Episodes the rail should show: the selected season's loaded episodes, or

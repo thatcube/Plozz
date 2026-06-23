@@ -581,8 +581,8 @@ private struct TraktConnectionView: View {
                 .focused($focus, equals: .connect)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            case let .connecting(userCode, verificationURL, _):
-                connectingView(userCode: userCode, verificationURL: verificationURL)
+            case let .connecting(userCode, verificationURL, expiresAt):
+                connectingView(userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt)
 
             case let .connected(username):
                 connectedView(username: username)
@@ -612,7 +612,7 @@ private struct TraktConnectionView: View {
         }
     }
 
-    private func connectingView(userCode: String, verificationURL: String) -> some View {
+    private func connectingView(userCode: String, verificationURL: String, expiresAt: Date) -> some View {
         HStack(alignment: .center, spacing: 32) {
             QRCodeView(activationURL(userCode: userCode, verificationURL: verificationURL))
                 .frame(width: 180, height: 180)
@@ -633,7 +633,8 @@ private struct TraktConnectionView: View {
                     .padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
                 HStack(spacing: 12) {
-                    ProgressView()
+                    TraktExpiryCountdown(expiresAt: expiresAt, lifetime: trakt.codeLifetime)
+                        .frame(width: 40, height: 40)
                     Text("Waiting for approval…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -683,6 +684,38 @@ private struct TraktConnectionView: View {
             trimmed.removeFirst(prefix.count)
         }
         return trimmed
+    }
+}
+
+/// Compact ring that depletes over the life of the current Trakt device code,
+/// with the seconds remaining at its centre, shifting to a warning tint as the
+/// deadline nears. The code auto-refreshes on expiry, so this just resets.
+private struct TraktExpiryCountdown: View {
+    let expiresAt: Date
+    let lifetime: TimeInterval
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+            let fraction = lifetime > 0 ? remaining / lifetime : 0
+            let tint: Color = remaining <= 30 ? .orange : .accentColor
+
+            ZStack {
+                Circle()
+                    .stroke(tint.opacity(0.18), lineWidth: 4)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text("\(Int(remaining.rounded(.up)))")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(tint)
+                    .contentTransition(.numericText())
+            }
+            .animation(.easeOut(duration: 0.3), value: tint)
+            .accessibilityLabel("Code expires in \(Int(remaining.rounded(.up))) seconds")
+        }
     }
 }
 

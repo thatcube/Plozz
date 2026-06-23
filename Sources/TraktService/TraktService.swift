@@ -30,6 +30,10 @@ public enum TraktConnectionPhase: Equatable, Sendable {
 public final class TraktService {
     public private(set) var phase: TraktConnectionPhase
 
+    /// Lifetime (seconds) of the most recently issued device code, so the UI can
+    /// render a countdown ring against the current `connecting` `expiresAt`.
+    public private(set) var codeLifetime: TimeInterval = 600
+
     /// The scrobbler injected into playback. A no-op when Trakt is unconfigured.
     @ObservationIgnored public let scrobbler: any TraktScrobbling
 
@@ -85,25 +89,36 @@ public final class TraktService {
     }
 
     /// Starts (or restarts) the device-code flow: shows a code, then polls until
-    /// the user approves it at `trakt.tv/activate`.
+    /// the user approves it at `trakt.tv/activate`. Keeps a live code on screen
+    /// indefinitely — as soon as one lapses unapproved it transparently issues a
+    /// fresh one (like Jellyfin Quick Connect), so the user never hits "retry".
     public func connect() {
         guard config.isConfigured else { phase = .unavailable; return }
         connectTask?.cancel()
         connectTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let code = try await self.auth.beginDeviceCode()
-                try Task.checkCancellation()
-                self.phase = .connecting(
-                    userCode: code.userCode,
-                    verificationURL: code.verificationURL,
-                    expiresAt: Date().addingTimeInterval(code.expiresIn)
-                )
-                let tokens = try await self.auth.awaitToken(for: code)
-                try Task.checkCancellation()
-                try? self.tokenStore.save(tokens)
-                let settings = try? await self.auth.userSettings(accessToken: tokens.accessToken)
-                self.phase = .connected(username: settings?.displayName ?? "Trakt")
+                while true {
+                    try Task.checkCancellation()
+                    let code = try await self.auth.beginDeviceCode()
+                    try Task.checkCancellation()
+                    self.codeLifetime = code.expiresIn
+                    self.phase = .connecting(
+                        userCode: code.userCode,
+                        verificationURL: code.verificationURL,
+                        expiresAt: Date().addingTimeInterval(code.expiresIn)
+                    )
+                    do {
+                        let tokens = try await self.auth.awaitToken(for: code)
+                        try Task.checkCancellation()
+                        try? self.tokenStore.save(tokens)
+                        let settings = try? await self.auth.userSettings(accessToken: tokens.accessToken)
+                        self.phase = .connected(username: settings?.displayName ?? "Trakt")
+                        return
+                    } catch let error as AppError where error == .quickConnectExpired {
+                        continue // Code lapsed unapproved — issue a fresh one.
+                    }
+                }
             } catch is CancellationError {
                 // Cancelled by the user; `cancelConnect()` set the phase.
             } catch let error as AppError {

@@ -142,13 +142,13 @@ struct PlayerControls: View {
     }
 
     private var scrubberRow: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 12) {
             ScrubBar(
                 model: model,
                 palette: palette,
                 showThumbOverlay: openPanel == nil,
                 leadingInset: 60,
-                trailingInset: 60 + 24 + 130
+                trailingInset: 60 + 12 + 120
             )
                 .frame(height: 44)
                 .frame(maxWidth: .infinity)
@@ -158,7 +158,7 @@ struct PlayerControls: View {
                 .monospacedDigit()
                 .font(.callout)
                 .foregroundStyle(.white.opacity(0.85))
-                .frame(width: 130, alignment: .trailing)
+                .frame(width: 120, alignment: .trailing)
         }
     }
 
@@ -583,7 +583,7 @@ private struct ScrubBar: View {
                     topTrailingRadius: 0,
                     style: .continuous
                 )
-                    .fill(.white.opacity(focused ? 0.62 : 0.22))
+                    .fill(.white.opacity(focused ? 0.62 : 0.32))
                     .frame(width: knobX, height: barHeight)
                 RoundedRectangle(cornerRadius: focused ? knobWidth / 2 : 0, style: .continuous)
                     .fill(.white)

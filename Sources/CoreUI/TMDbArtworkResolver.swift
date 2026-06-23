@@ -470,23 +470,50 @@ public actor TMDbArtworkResolver {
     ///   - year: Release year (movies only; pass `nil` for TV).
     ///   - isTV: Use the `tv` namespace instead of `movie`.
     ///   - tmdbID: A known TMDb numeric id (from `providerIDs["Tmdb"]`), if any.
-    public func trailerVideoIDs(title: String, year: Int?, isTV: Bool, tmdbID: String?) async -> [String] {
+    ///   - imdbID: A known IMDb id (`tt…`, from `providerIDs["Imdb"]`), if any.
+    ///   - tvdbID: A known TheTVDB id (series only, from `providerIDs["Tvdb"]`).
+    public func trailerVideoIDs(
+        title: String,
+        year: Int?,
+        isTV: Bool,
+        tmdbID: String?,
+        imdbID: String? = nil,
+        tvdbID: String? = nil
+    ) async -> [String] {
         guard let token else { return [] }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let knownID = tmdbID?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || (knownID?.isEmpty == false) else { return [] }
 
+        // Resolve a TMDb id, best source first: an explicit Tmdb id, then a
+        // reliable IMDb/TVDB external-id lookup (`/find`), then a fuzzy title
+        // search as a last resort. The external-id path rescues titles a name
+        // search would miss or mismatch (foreign titles, ambiguous names).
         let id: String?
         if let knownID, !knownID.isEmpty {
             id = knownID
-        } else {
+        } else if let external = await fetchIDFromExternal(imdbID: imdbID, tvdbID: tvdbID, isTV: isTV, token: token) {
+            id = external
+        } else if !trimmed.isEmpty {
             id = await fetchID(title: trimmed, year: year, isTV: isTV, token: token)
+        } else {
+            id = nil
         }
         guard let id else { return [] }
 
-        guard let url = URL(string: "https://api.themoviedb.org/3/\(isTV ? "tv" : "movie")/\(id)/videos") else {
+        // Pull videos across *all* languages plus the title's original language.
+        // The bare `/videos` endpoint defaults to `en-US`, hiding trailers for
+        // foreign films/anime whose only trailer is tagged under another language
+        // (or `null`); `append_to_response=videos&include_video_language=all`
+        // surfaces those, and `original_language` lets us rank them sensibly.
+        guard var components = URLComponents(string: "https://api.themoviedb.org/3/\(isTV ? "tv" : "movie")/\(id)") else {
             return []
         }
+        components.queryItems = [
+            URLQueryItem(name: "append_to_response", value: "videos"),
+            URLQueryItem(name: "include_video_language", value: "all")
+        ]
+        guard let url = components.url else { return [] }
+
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "accept")
@@ -494,33 +521,89 @@ public actor TMDbArtworkResolver {
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
-              let decoded = try? JSONDecoder().decode(VideosResponse.self, from: data)
+              let decoded = try? JSONDecoder().decode(DetailsWithVideos.self, from: data)
         else {
             return []
         }
-        return Self.rankedYouTubeTrailerKeys(decoded.results)
+        return Self.rankedYouTubeTrailerKeys(decoded.videos?.results ?? [], originalLanguage: decoded.original_language)
+    }
+
+    /// Resolves a TMDb id from an IMDb (`tt…`) or TheTVDB id via TMDb's `/find`
+    /// endpoint — far more reliable than a fuzzy title search. Returns the first
+    /// matching movie (or series) id, or `nil` when no usable external id is
+    /// known or nothing matches.
+    private func fetchIDFromExternal(imdbID: String?, tvdbID: String?, isTV: Bool, token: String) async -> String? {
+        let imdb = imdbID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tvdb = tvdbID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lookup: (externalID: String, source: String)?
+        if let imdb, !imdb.isEmpty {
+            lookup = (imdb, "imdb_id")
+        } else if let tvdb, !tvdb.isEmpty, isTV {
+            lookup = (tvdb, "tvdb_id")
+        } else {
+            lookup = nil
+        }
+        guard let lookup,
+              var components = URLComponents(string: "https://api.themoviedb.org/3/find/\(lookup.externalID)") else {
+            return nil
+        }
+        components.queryItems = [URLQueryItem(name: "external_source", value: lookup.source)]
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(FindResponse.self, from: data)
+        else {
+            return nil
+        }
+        let results = isTV ? decoded.tv_results : decoded.movie_results
+        guard let first = results.first?.id else { return nil }
+        return String(first)
     }
 
     /// Pure selection of the best YouTube trailer keys from a TMDb `videos`
-    /// payload: keep YouTube `Trailer`/`Teaser` clips, prefer trailers over
-    /// teasers, then official clips, then larger sizes. Exposed for testing.
-    public static func rankedYouTubeTrailerKeys(_ videos: [Video]) -> [String] {
-        let usable = videos.filter { video in
+    /// payload. Keeps YouTube clips and ranks them by: language (the app's
+    /// English first, then language-neutral, then the title's original language,
+    /// then anything), type (trailer over teaser), official over fan-made, then
+    /// larger sizes. Falls back to clips/featurettes only when a title has no
+    /// real trailer/teaser, so titles shipping only B-roll still surface
+    /// something playable. Exposed for testing.
+    public static func rankedYouTubeTrailerKeys(_ videos: [Video], originalLanguage: String? = nil) -> [String] {
+        func isYouTube(_ video: Video) -> Bool {
             guard let key = video.key, !key.isEmpty else { return false }
-            guard (video.site ?? "").caseInsensitiveCompare("YouTube") == .orderedSame else { return false }
+            return (video.site ?? "").caseInsensitiveCompare("YouTube") == .orderedSame
+        }
+        func typeRank(_ video: Video) -> Int {
             switch (video.type ?? "").lowercased() {
-            case "trailer", "teaser": return true
-            default: return false
+            case "trailer": return 0
+            case "teaser": return 1
+            case "clip": return 2
+            case "featurette": return 3
+            default: return .max
             }
         }
-        func rank(_ video: Video) -> (Int, Int, Int) {
-            let isTrailer = (video.type ?? "").caseInsensitiveCompare("Trailer") == .orderedSame
-            return (isTrailer ? 0 : 1, (video.official ?? false) ? 0 : 1, -(video.size ?? 0))
+        let primary = videos.filter { isYouTube($0) && typeRank($0) <= 1 }
+        let pool = primary.isEmpty
+            ? videos.filter { isYouTube($0) && typeRank($0) <= 3 }
+            : primary
+
+        let original = originalLanguage?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        func langRank(_ video: Video) -> Int {
+            let lang = (video.iso_639_1 ?? "").lowercased()
+            if lang == "en" { return 0 }
+            if lang.isEmpty { return 1 }
+            if let original, !original.isEmpty, lang == original { return 2 }
+            return 3
         }
-        return usable.sorted {
-            let (l, r) = (rank($0), rank($1))
-            return l < r
-        }.compactMap { $0.key }
+        func rank(_ video: Video) -> (Int, Int, Int, Int) {
+            (langRank(video), typeRank(video), (video.official ?? false) ? 0 : 1, -(video.size ?? 0))
+        }
+        return pool.sorted { rank($0) < rank($1) }.compactMap { $0.key }
     }
     /// Reads and validates the bundled token, treating an empty value or an
     /// unsubstituted `$(TMDB_BEARER_TOKEN)` placeholder as "not configured".
@@ -577,6 +660,21 @@ public actor TMDbArtworkResolver {
         let results: [Video]
     }
 
+    /// Movie/TV details with `videos` appended (`append_to_response=videos`),
+    /// carrying `original_language` so a localized trailer can be ranked.
+    private struct DetailsWithVideos: Decodable {
+        let original_language: String?
+        let videos: VideosResponse?
+    }
+
+    /// TMDb `/find` response: a known external id (IMDb/TVDB) maps to at most one
+    /// movie or TV result.
+    private struct FindResponse: Decodable {
+        let movie_results: [Result]
+        let tv_results: [Result]
+        struct Result: Decodable { let id: Int }
+    }
+
     /// One clip from TMDb's `videos` endpoint (trailer, teaser, clip, …).
     public struct Video: Decodable, Equatable, Sendable {
         public let key: String?
@@ -584,13 +682,17 @@ public actor TMDbArtworkResolver {
         public let type: String?
         public let official: Bool?
         public let size: Int?
+        /// ISO-639-1 language tag of the clip (e.g. `en`, `ja`); `nil`/empty when
+        /// language-neutral. Used to prefer the viewer's language when ranking.
+        public let iso_639_1: String?
 
-        public init(key: String?, site: String?, type: String?, official: Bool?, size: Int?) {
+        public init(key: String?, site: String?, type: String?, official: Bool?, size: Int?, iso_639_1: String? = nil) {
             self.key = key
             self.site = site
             self.type = type
             self.official = official
             self.size = size
+            self.iso_639_1 = iso_639_1
         }
     }
 }

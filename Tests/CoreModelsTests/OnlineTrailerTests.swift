@@ -24,8 +24,8 @@ final class OnlineTrailerTests: XCTestCase {
 
     // MARK: - TMDb trailer ranking
 
-    private func video(_ key: String?, site: String = "YouTube", type: String = "Trailer", official: Bool = true, size: Int = 1080) -> TMDbArtworkResolver.Video {
-        TMDbArtworkResolver.Video(key: key, site: site, type: type, official: official, size: size)
+    private func video(_ key: String?, site: String = "YouTube", type: String = "Trailer", official: Bool = true, size: Int = 1080, lang: String? = nil) -> TMDbArtworkResolver.Video {
+        TMDbArtworkResolver.Video(key: key, site: site, type: type, official: official, size: size, iso_639_1: lang)
     }
 
     func testRankingKeepsOnlyYouTubeTrailersAndTeasers() {
@@ -64,5 +64,62 @@ final class OnlineTrailerTests: XCTestCase {
 
     func testRankingEmptyForNoVideos() {
         XCTAssertTrue(TMDbArtworkResolver.rankedYouTubeTrailerKeys([]).isEmpty)
+    }
+
+    func testFallsBackToClipsAndFeaturettesWhenNoTrailer() {
+        // A title with no Trailer/Teaser should still surface a playable clip
+        // rather than nothing, preferring clips over featurettes.
+        let videos = [
+            video("featurette", type: "Featurette"),
+            video("clip", type: "Clip"),
+            video("vimeo-clip", site: "Vimeo", type: "Clip")
+        ]
+        XCTAssertEqual(TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos), ["clip", "featurette"])
+    }
+
+    func testClipsIgnoredWhenARealTrailerExists() {
+        let videos = [
+            video("clip", type: "Clip"),
+            video("trailer", type: "Trailer")
+        ]
+        XCTAssertEqual(TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos), ["trailer"])
+    }
+
+    func testRankingPrefersEnglishOverOtherLanguages() {
+        let videos = [
+            video("japanese", type: "Trailer", lang: "ja"),
+            video("english", type: "Trailer", lang: "en"),
+            video("neutral", type: "Trailer", lang: nil)
+        ]
+        // English first, then language-neutral, then anything else.
+        XCTAssertEqual(
+            TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos),
+            ["english", "neutral", "japanese"]
+        )
+    }
+
+    func testRankingPrefersOriginalLanguageWhenNoEnglish() {
+        let videos = [
+            video("french", type: "Trailer", lang: "fr"),
+            video("japanese", type: "Trailer", lang: "ja")
+        ]
+        // No English/neutral: the title's original language wins over others.
+        XCTAssertEqual(
+            TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos, originalLanguage: "ja").first,
+            "japanese"
+        )
+    }
+
+    func testLanguagePreferenceOutranksTrailerOverTeaser() {
+        let videos = [
+            video("english-teaser", type: "Teaser", lang: "en"),
+            video("foreign-trailer", type: "Trailer", lang: "de")
+        ]
+        // An English teaser beats a foreign-language full trailer for an
+        // English-language UI.
+        XCTAssertEqual(
+            TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos).first,
+            "english-teaser"
+        )
     }
 }

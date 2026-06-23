@@ -77,9 +77,17 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         /// e.g. `1920×1080`.
         public var displayString: String { "\(width)×\(height)" }
 
-        /// Friendly quality label based on the vertical resolution.
+        /// Friendly quality label based on the resolution tier.
+        ///
+        /// Uses `effectiveResolutionLines` (the larger of the true height and the
+        /// height a 16:9 frame of this width implies) so cinematic letterboxed
+        /// content such as `1920×804` classifies by its real capture width
+        /// (→ `1080p`) rather than its cropped height (which would read `720p`).
         public var qualityLabel: String? {
-            switch height {
+            guard let lines = PlaybackDiagnostics.effectiveResolutionLines(width: width, height: height) else {
+                return nil
+            }
+            switch lines {
             case 4320...: return "8K"
             case 2160..<4320: return "4K"
             case 1440..<2160: return "1440p"
@@ -191,6 +199,22 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
 // MARK: - Classification (pure, unit-tested)
 
 public extension PlaybackDiagnostics {
+    /// The effective vertical resolution (in scan lines) used to classify a video
+    /// into a quality tier: the larger of the true pixel height and the height a
+    /// 16:9 frame of this width would have.
+    ///
+    /// Cinematic content is letterboxed — a 2.40:1 movie mastered at full HD width
+    /// is `1920×804`, so keying off the raw height (804) misclassifies it as
+    /// `720p`. Deriving lines from the (stable) width instead yields `1080p`,
+    /// matching how Plex/Jellyfin label the same file. Returns `nil` when neither
+    /// dimension is known.
+    static func effectiveResolutionLines(width: Int?, height: Int?) -> Int? {
+        let heightLines = (height ?? 0) > 0 ? (height ?? 0) : 0
+        let widthLines = (width ?? 0) > 0 ? ((width ?? 0) * 9) / 16 : 0
+        let lines = max(heightLines, widthLines)
+        return lines > 0 ? lines : nil
+    }
+
     /// Classifies the HDR format from the raw video codec FourCC string and the
     /// CoreMedia transfer-function extension string.
     ///

@@ -26,6 +26,12 @@ struct DetailHeroView: View {
     /// the season tabs and episode row peek above the fold, signalling there's
     /// more to scroll to.
     var heroHeightFraction: CGFloat = 1.0
+    /// Extends *only the backdrop image* (and its dissolve-to-background) below
+    /// the hero content by this fraction of the screen height, without moving the
+    /// title/Play (which stay pinned within `heroHeightFraction`). Used by the
+    /// series page so the seamless fade lands closer to the top of the episode
+    /// rail instead of completing high up the page.
+    var backdropBottomExtensionFraction: CGFloat = 0
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
@@ -58,19 +64,23 @@ struct DetailHeroView: View {
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
-    /// The capability badges shown above the ratings: the content-rating
-    /// certificate (e.g. `TV-14`) leading, then resolution/HDR/audio badges.
-    /// When the focused item is an episode without its own certificate, the
-    /// rating falls back to the backdrop item (the series), so a show's TV
-    /// rating still shows while scrubbing episodes — matching Apple TV.
+    /// The capability badges shown above the ratings: resolution/HDR/audio. The
+    /// content-rating certificate is rendered separately, inline with the
+    /// year/runtime/genre metadata line.
     private var featureBadges: [MediaBadge] {
-        let rating = item.ratingBadge ?? backdrop.ratingBadge
         // Prefer the focused item's own tech badges; fall back to the derived
         // series-level set for a series/season hero (or an episode whose stream
         // info hasn't loaded), so tech badges are present on every kind.
         let ownTech = item.technicalBadges
-        let tech = ownTech.isEmpty ? fallbackTechnicalBadges : ownTech
-        return (rating.map { [$0] } ?? []) + tech
+        return ownTech.isEmpty ? fallbackTechnicalBadges : ownTech
+    }
+
+    /// The content-rating certificate badge (e.g. `TV-14`). When the focused
+    /// item is an episode without its own certificate, it falls back to the
+    /// backdrop item (the series), so a show's TV rating still shows while
+    /// scrubbing episodes — matching Apple TV.
+    private var heroRatingBadge: MediaBadge? {
+        item.ratingBadge ?? backdrop.ratingBadge
     }
 
     /// External ratings to show. Falls back to the backdrop item (the series)
@@ -112,11 +122,18 @@ struct DetailHeroView: View {
                     .lineLimit(1)
             }
             let metadata = item.metadataComponents()
-            if !metadata.isEmpty {
-                Text(metadata.joined(separator: "  ·  "))
-                    .font(.system(size: 23, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            if heroRatingBadge != nil || !metadata.isEmpty {
+                HStack(alignment: .center, spacing: 16) {
+                    if let badge = heroRatingBadge {
+                        MediaBadgeChip(badge: badge)
+                    }
+                    if !metadata.isEmpty {
+                        Text(metadata.joined(separator: "  ·  "))
+                            .font(.system(size: 23, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
             if !hideText, let tagline = item.tagline {
                 Text(tagline)
@@ -188,7 +205,7 @@ struct DetailHeroView: View {
         // leading-aligned title/Play off the left edge while the centred image
         // still looked correct. As a background, the image bleeds edge-to-edge
         // purely visually and the content column stays at the safe width.
-        .background(alignment: .bottom) {
+        .background(alignment: backdropBottomExtensionFraction > 0 ? .top : .bottom) {
             heroBackdrop(hideThumbnail: hideThumbnail)
         }
         // Cross-fade the hero text as the focused context changes, while the
@@ -209,7 +226,7 @@ struct DetailHeroView: View {
         ) {
             heroPlaceholder
         }
-        .frame(height: Self.screenHeight * heroHeightFraction)
+        .frame(height: Self.screenHeight * (heroHeightFraction + backdropBottomExtensionFraction))
         .frame(maxWidth: .infinity)
         .clipped()
         .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
@@ -217,14 +234,30 @@ struct DetailHeroView: View {
             // Legibility scrim: darken the lower image so the title/overview
             // read clearly. It lives *under* the mask below, so it dissolves
             // away with the image and never tints the revealed background.
+            //
+            // The vertical ramp starts a little higher so it covers a bit more
+            // of the text, and a horizontal falloff concentrates the darkening
+            // on the leading side (where the content sits) while leaving the
+            // right side of the image clearer.
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0.0),
-                    .init(color: .clear, location: 0.5),
-                    .init(color: .black.opacity(0.7), location: 1.0)
+                    .init(color: .clear, location: 0.40),
+                    .init(color: .black.opacity(0.72), location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
+            )
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .white, location: 0.0),
+                        .init(color: .white, location: 0.40),
+                        .init(color: .clear, location: 0.85)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
             )
         )
         // Dissolve the backdrop's own alpha to transparent over the lower

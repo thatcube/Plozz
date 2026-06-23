@@ -35,12 +35,59 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertNil(meta.resolutionBadge)
     }
 
+    func testLetterboxedCinemaWidthClassifiesByWidth() {
+        // A 2.40:1 movie mastered at full-HD width is 1920×804; keying off the
+        // cropped height alone would misread it as 720p.
+        let meta = MediaSourceMetadata(video: .init(width: 1920, height: 804))
+        XCTAssertEqual(meta.resolutionBadge?.label, "1080p")
+    }
+
+    func testUltrawide4KClassifiesByWidth() {
+        // 3840×1600 (2.40:1 UHD) is 4K despite its 1600-line height.
+        let meta = MediaSourceMetadata(video: .init(width: 3840, height: 1600))
+        XCTAssertEqual(meta.resolutionBadge?.label, "4K")
+    }
+
+    // MARK: Video codec badge
+
+    func testVideoCodecBadgeHEVC() {
+        let meta = MediaSourceMetadata(video: .init(codec: "hevc"))
+        XCTAssertEqual(meta.videoCodecBadge?.label, "HEVC")
+        XCTAssertEqual(meta.videoCodecBadge?.style, .spec)
+    }
+
+    func testVideoCodecBadgeH264() {
+        let meta = MediaSourceMetadata(video: .init(codec: "h264"))
+        XCTAssertEqual(meta.videoCodecBadge?.label, "H.264")
+    }
+
+    func testVideoCodecBadgeNilWithoutCodec() {
+        let meta = MediaSourceMetadata(video: .init(width: 1920, height: 1080))
+        XCTAssertNil(meta.videoCodecBadge)
+    }
+
+    func testTechnicalBadgesIncludeCodecAfterDynamicRange() {
+        let meta = MediaSourceMetadata(
+            video: .init(codec: "hevc", width: 1920, height: 1080, videoRange: "HDR", videoRangeType: "HDR10"),
+            audio: .init(codec: "eac3", profile: "Dolby Atmos")
+        )
+        XCTAssertEqual(meta.technicalBadges.map(\.label), ["1080p", "HDR10", "HEVC", "Dolby Atmos"])
+    }
+
     // MARK: Dynamic range
 
     func testDolbyVisionFromRangeType() {
         let meta = MediaSourceMetadata(video: .init(videoRangeType: "DOVIWithHDR10"))
-        XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["Dolby Vision"])
+        // DoVi with an HDR10 base layer advertises both badges (Plex "DoVi/HDR10").
+        XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["Dolby Vision", "HDR10"])
         XCTAssertEqual(meta.dynamicRangeBadges.first?.style, .dolby)
+        XCTAssertEqual(meta.dynamicRangeBadges.last?.style, .hdr)
+    }
+
+    func testPureDolbyVisionHasNoHDR10Badge() {
+        // Profile 5 DoVi has no HDR10 fallback, so it shows Dolby Vision alone.
+        let meta = MediaSourceMetadata(video: .init(videoRangeType: "DOVI"))
+        XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["Dolby Vision"])
     }
 
     func testHDR10Plus() {
@@ -63,8 +110,23 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["HDR"])
     }
 
-    func testSDRHasNoDynamicRangeBadge() {
+    func testSDRBadgeFromExplicitToken() {
+        // Jellyfin reports an explicit SDR range token.
         let meta = MediaSourceMetadata(video: .init(videoRange: "SDR"))
+        XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["SDR"])
+        XCTAssertEqual(meta.dynamicRangeBadges.first?.style, .spec)
+    }
+
+    func testSDRBadgeInferredWhenNoRangeButDimensionsKnown() {
+        // Plex omits range info for SDR; a sized stream is still classified SDR.
+        let meta = MediaSourceMetadata(video: .init(width: 1920, height: 1080))
+        XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["SDR"])
+    }
+
+    func testNoDynamicRangeBadgeWhenStreamHasNothingToClassify() {
+        // A bare codec with no dimensions or range token stays unbadged rather
+        // than asserting SDR on no evidence.
+        let meta = MediaSourceMetadata(video: .init(codec: "h264"))
         XCTAssertTrue(meta.dynamicRangeBadges.isEmpty)
     }
 
@@ -83,7 +145,8 @@ final class MediaBadgesTests: XCTestCase {
 
     func testDolbyDigitalPlusWithSurroundChannel() {
         let meta = MediaSourceMetadata(audio: .init(codec: "eac3", profile: nil, channels: 6, channelLayout: "5.1"))
-        XCTAssertEqual(meta.audioBadges.map(\.label), ["Dolby Digital+", "5.1"])
+        XCTAssertEqual(meta.audioBadges.map(\.label), ["Dolby Digital+"])
+        XCTAssertEqual(meta.audioBadges.first?.detail, "5.1")
     }
 
     func testStereoProducesNoChannelBadge() {
@@ -109,7 +172,7 @@ final class MediaBadgesTests: XCTestCase {
     func testTechnicalBadgesGatedToPlayableKinds() {
         let meta = MediaSourceMetadata(video: .init(width: 3840, height: 2160))
         let movie = MediaItem(id: "1", title: "M", kind: .movie, mediaInfo: meta)
-        XCTAssertEqual(movie.technicalBadges.map(\.label), ["4K"])
+        XCTAssertEqual(movie.technicalBadges.map(\.label), ["4K", "SDR"])
 
         let series = MediaItem(id: "2", title: "S", kind: .series, mediaInfo: meta)
         XCTAssertTrue(series.technicalBadges.isEmpty)
@@ -147,9 +210,11 @@ final class MediaBadgesTests: XCTestCase {
                       mediaInfo: .init(audio: .init(codec: "eac3", channels: 8, channelLayout: "7.1"))),
         ]
         // Dolby Digital+ doesn't imply surround, so the best channel layout (7.1)
-        // is added alongside it.
-        XCTAssertEqual(episodes.representativeTechnicalBadges.map(\.label),
-                       ["1080p", "Dolby Digital+", "7.1"])
+        // is attached to it as a trailing detail. E1 is SDR, so the range summary
+        // reads SDR.
+        let badges = episodes.representativeTechnicalBadges
+        XCTAssertEqual(badges.map(\.label), ["1080p", "SDR", "Dolby Digital+"])
+        XCTAssertEqual(badges.last?.detail, "7.1")
     }
 
     func testRepresentativeBadgesEmptyWhenNoMediaInfo() {

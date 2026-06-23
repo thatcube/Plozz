@@ -167,7 +167,7 @@ public final class NativeVideoEngine: VideoEngine {
         installTimeObserver(on: player)
         status = .ready
         isPaused = false
-        player.play()
+        player.playImmediately(atRate: Float(currentPlaybackRate))
 
         // Best-effort: pick the default subtitle for the user's mode/language.
         await applyDefaultSubtitleSelection(for: item)
@@ -256,7 +256,7 @@ public final class NativeVideoEngine: VideoEngine {
 
     public func play() {
         guard let player else { return }
-        player.play()
+        player.playImmediately(atRate: Float(currentPlaybackRate))
         isPaused = false
     }
 
@@ -264,6 +264,28 @@ public final class NativeVideoEngine: VideoEngine {
         guard let player else { return }
         player.pause()
         isPaused = true
+    }
+
+    // MARK: - Tunables
+
+    /// AVPlayer can change `rate` live with no reload, so we advertise speed.
+    /// Audio/subtitle delay are not exposed by AVPlayer in a useful way (it
+    /// owns the audio mix in the asset graph), so we honestly opt out instead
+    /// of pretending — the menu hides those rows for this engine.
+    public var capabilities: PlayerEngineCapabilities { [.playbackSpeed] }
+
+    /// Last requested speed, so a subsequent play() doesn't snap back to 1.0
+    /// (AVPlayer resets rate to 1.0 on pause and on some item transitions).
+    @ObservationIgnored private var currentPlaybackRate: Double = 1.0
+
+    public func setPlaybackSpeed(_ rate: Double) {
+        let clamped = max(0.25, min(4.0, rate))
+        currentPlaybackRate = clamped
+        // Only push to AVPlayer when playing — pausing then re-setting `rate`
+        // would silently un-pause the player.
+        if let player, !isPaused {
+            player.rate = Float(clamped)
+        }
     }
 
     public func stop() {
@@ -521,7 +543,12 @@ public final class NativeVideoEngine: VideoEngine {
 
     public func seek(to seconds: TimeInterval) async {
         guard let player else { return }
-        await seek(player: player, to: seconds)
+        await seek(player: player, to: seconds, kind: .exact)
+    }
+
+    public func seek(to seconds: TimeInterval, kind: VideoSeekKind) async {
+        guard let player else { return }
+        await seek(player: player, to: seconds, kind: kind)
     }
 
     /// Waits (briefly) for the player item to become ready before seeking. A
@@ -538,11 +565,19 @@ public final class NativeVideoEngine: VideoEngine {
     }
 
     private func seek(player: AVPlayer, to seconds: TimeInterval) async {
+        await seek(player: player, to: seconds, kind: .exact)
+    }
+
+    private func seek(player: AVPlayer, to seconds: TimeInterval, kind: VideoSeekKind) async {
         let target = clampToSeekableRange(seconds, item: player.currentItem)
         let time = CMTime(seconds: target, preferredTimescale: 600)
-        // Allow a small tolerance: exact (.zero) seeks can stall or fail on
-        // transcoded HLS, which is exactly the far-seek failure we're fixing.
-        let tolerance = CMTime(seconds: 1, preferredTimescale: 600)
+        // `.fast` widens the tolerance so AVPlayer can snap to the nearest
+        // available keyframe and return immediately — the right behaviour for
+        // intermediate seeks in a rapid-skip burst that will be superseded by a
+        // later, exact seek. `.exact` keeps a tight 1s tolerance: exact (.zero)
+        // seeks can stall or fail on transcoded HLS, so 1s is the sweet spot.
+        let toleranceSeconds: Double = kind == .fast ? 5 : 1
+        let tolerance = CMTime(seconds: toleranceSeconds, preferredTimescale: 600)
         await player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
     }
 

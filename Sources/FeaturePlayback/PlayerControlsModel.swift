@@ -38,6 +38,16 @@ public final class PlayerControlsModel {
     /// True while a committed seek is resolving, so the overlay can show a spinner.
     public var isSeeking: Bool = false
 
+    /// The latest *committed* seek destination that hasn't yet been reached by
+    /// the engine. While non-nil, the engine-poll refresh loop must NOT
+    /// overwrite `currentSeconds` with the live engine time — that's what
+    /// caused the "press right → snaps back" feel: a 300ms poll arrived
+    /// between the optimistic position update and the engine actually arriving,
+    /// and snapped the bar back to the *old* position. With this in place, the
+    /// scrub head holds at the optimistic target until the engine catches up
+    /// (within a small tolerance), then we release.
+    public var pendingSeekTarget: TimeInterval?
+
     // MARK: Presentation
     public var title: String = ""
     public var subtitle: String = ""
@@ -47,12 +57,28 @@ public final class PlayerControlsModel {
     public var audioOptions: [PlayerTrackOption] = []
     public var subtitleOptions: [PlayerTrackOption] = []
 
+    // MARK: Live tunables (mirrors of engine state)
+    /// What the active engine supports — drives which rows the options menu
+    /// renders so AVPlayer doesn't show fake delay sliders, etc.
+    public var engineCapabilities: PlayerEngineCapabilities = []
+    /// Current playback speed (1.0 == normal).
+    public var playbackSpeed: Double = 1.0
+    /// Audio offset in seconds (positive = audio later than video).
+    public var audioDelaySeconds: TimeInterval = 0
+    /// Subtitle offset in seconds (positive = subs later than video).
+    public var subtitleDelaySeconds: TimeInterval = 0
+    /// Whether the dialog-enhance audio filter is engaged (when supported).
+    public var dialogEnhanceEnabled: Bool = false
+
     // MARK: Transport UI state (written by the input controller)
     public var controlsVisible: Bool = false
     public var isScrubbing: Bool = false
     public var scrubSeconds: TimeInterval = 0
     /// The trickplay frame for `scrubSeconds`, shown above the scrub head.
     public var previewImage: CGImage?
+    /// True while the in-player options menu is on screen. The input controller
+    /// reads this to suppress scrub gestures and hand focus to the menu.
+    public var optionsMenuVisible: Bool = false
 
     public init() {}
 

@@ -31,6 +31,7 @@ targets:
     sources:
       - path: App/Plozz
       - path: App/Resources/Assets.xcassets
+      - path: App/Resources/Fonts
     info:
       path: App/Resources/Info.plist
       properties:
@@ -43,6 +44,8 @@ targets:
         # background/Now-Playing behaviour (AVAudioSession .playback).
         UIBackgroundModes:
           - audio
+        UIAppFonts:
+          - "Bungee-Regular.ttf"
         # OMDb API key for external ratings enrichment (IMDb/RT/Metacritic).
         # Substituted from the OMDB_API_KEY build setting (see Config/Secrets.xcconfig
         # → optional, gitignored Config/Secrets.local.xcconfig). Empty by default,

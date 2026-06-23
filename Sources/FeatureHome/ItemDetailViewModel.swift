@@ -25,6 +25,10 @@ public final class ItemDetailViewModel {
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
     public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
     private var loadingSeasons: Set<String> = []
+    /// When this detail is a series, its TMDb id. Stamped into loaded episodes
+    /// under `SeriesTmdb` once at fetch time so episode rails don't re-map every
+    /// episode on every focus movement.
+    private var seriesTMDbID: String?
 
     private let provider: any MediaProvider
     private let itemID: String
@@ -61,6 +65,7 @@ public final class ItemDetailViewModel {
         state = .loading
         do {
             let item = try await provider.item(id: itemID)
+            seriesTMDbID = item.kind == .series ? item.providerIDs["Tmdb"] : nil
             // Series/seasons have children to list; leaf items don't.
             let children: [MediaItem]
             switch item.kind {
@@ -131,6 +136,7 @@ public final class ItemDetailViewModel {
     public func reload() async {
         guard case .loaded = state else { await load(); return }
         guard let item = try? await provider.item(id: itemID) else { return }
+        seriesTMDbID = item.kind == .series ? item.providerIDs["Tmdb"] : nil
         let children: [MediaItem]
         switch item.kind {
         case .series, .season, .folder, .collection:
@@ -158,7 +164,7 @@ public final class ItemDetailViewModel {
         loadingSeasons.insert(seasonID)
         defer { loadingSeasons.remove(seasonID) }
         let episodes = (try? await provider.children(of: seasonID)) ?? []
-        seasonEpisodes[seasonID] = episodes.map(tagged)
+        seasonEpisodes[seasonID] = stampSeriesTMDb(into: episodes.map(tagged))
     }
 
     /// Stamps an item with this detail's owning account (if any) so navigation
@@ -166,6 +172,20 @@ public final class ItemDetailViewModel {
     private func tagged(_ item: MediaItem) -> MediaItem {
         guard let sourceAccountID else { return item }
         return item.taggingSource(sourceAccountID)
+    }
+
+    /// Ensures every episode carries the parent series' TMDb id under
+    /// `SeriesTmdb`. This is required for robust anime thumbnail/logo fallback and
+    /// is done here once per fetch to avoid per-focus remapping in the view layer.
+    private func stampSeriesTMDb(into episodes: [MediaItem]) -> [MediaItem] {
+        guard let seriesTMDbID, !seriesTMDbID.isEmpty else { return episodes }
+        return episodes.map { episode in
+            var copy = episode
+            if copy.providerIDs["SeriesTmdb"] == nil {
+                copy.providerIDs["SeriesTmdb"] = seriesTMDbID
+            }
+            return copy
+        }
     }
 
     /// Fetches external ratings off the critical path and merges them into the

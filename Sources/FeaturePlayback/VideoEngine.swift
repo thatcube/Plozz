@@ -14,6 +14,38 @@ public enum VideoEngineStatus: Equatable, Sendable {
     case failed(AppError)
 }
 
+/// Hint about how *precise* a seek needs to be. Engines use this to choose
+/// between snappy keyframe seeks (great for rapid skip-coalescing where only
+/// the *final* destination matters) and exact frame seeks (the committed
+/// scrub-bar release that has to land precisely where the user dropped it).
+public enum VideoSeekKind: Sendable {
+    /// Snap to the nearest keyframe / use a generous tolerance. Intended for
+    /// rapid intermediate skips that will be superseded by a later seek; the
+    /// goal is to start moving frames *now* without waiting for an exact decode.
+    case fast
+    /// Land precisely at the requested time. Intended for committed seeks
+    /// (scrub-bar release, the *last* press in a coalesced skip burst).
+    case exact
+}
+
+/// What an engine can do beyond the baseline transport. Used by the player
+/// options menu to hide or disable controls the active engine cannot honour
+/// (e.g. AVPlayer can't shift audio/subtitle delay independently), so the UI
+/// degrades gracefully per engine without lying to the viewer.
+public struct PlayerEngineCapabilities: OptionSet, Sendable {
+    public let rawValue: Int
+    public init(rawValue: Int) { self.rawValue = rawValue }
+
+    /// Engine can change `playbackSpeed` live without a reload.
+    public static let playbackSpeed = PlayerEngineCapabilities(rawValue: 1 << 0)
+    /// Engine can shift audio relative to video (A/V sync offset, seconds).
+    public static let audioDelay = PlayerEngineCapabilities(rawValue: 1 << 1)
+    /// Engine can shift subtitles relative to video (seconds).
+    public static let subtitleDelay = PlayerEngineCapabilities(rawValue: 1 << 2)
+    /// Engine can boost dialog intelligibility via an audio filter.
+    public static let dialogEnhance = PlayerEngineCapabilities(rawValue: 1 << 3)
+}
+
 /// Engine-agnostic abstraction over a single playback session.
 ///
 /// `VideoEngine` captures everything `PlayerViewModel` needs from a player while
@@ -55,9 +87,40 @@ public protocol VideoEngine: AnyObject {
     /// Seeks to `seconds`, clamped into the playable range.
     func seek(to seconds: TimeInterval) async
 
+    /// Seeks to `seconds` with a hint about precision. Engines that don't
+    /// distinguish kinds simply forward to `seek(to:)` (see the default impl).
+    /// This is what the seek-coordinator uses: rapid intermediate presses go
+    /// through `.fast` (keyframe / loose tolerance) so they don't block the
+    /// next press, and the final settled target goes through `.exact`.
+    func seek(to seconds: TimeInterval, kind: VideoSeekKind) async
+
     /// Stops playback and releases all engine resources. After `stop()` the
     /// engine is inert until `load` is called again.
     func stop()
+
+    // MARK: Live tunables
+
+    /// What this engine supports beyond baseline transport. The options menu
+    /// reads this to hide controls the active engine can't honour.
+    var capabilities: PlayerEngineCapabilities { get }
+
+    /// Sets the playback speed multiplier (`1.0` == normal). No-op when the
+    /// engine doesn't advertise `.playbackSpeed`.
+    func setPlaybackSpeed(_ rate: Double)
+
+    /// Shifts audio relative to video by `seconds` (positive = audio later,
+    /// negative = audio earlier). No-op when the engine doesn't advertise
+    /// `.audioDelay`.
+    func setAudioDelay(_ seconds: TimeInterval)
+
+    /// Shifts subtitles relative to video by `seconds` (positive = subs later,
+    /// negative = subs earlier). No-op when the engine doesn't advertise
+    /// `.subtitleDelay`.
+    func setSubtitleDelay(_ seconds: TimeInterval)
+
+    /// Enables or disables an engine-side dialog-enhancement audio filter.
+    /// No-op when the engine doesn't advertise `.dialogEnhance`.
+    func setDialogEnhanceEnabled(_ enabled: Bool)
 
     // MARK: Observable state
 
@@ -137,5 +200,18 @@ public extension VideoEngine {
 
     /// Default: a generic label for engines that don't name themselves.
     var displayName: String { "Player" }
+
+    /// Default kinded-seek forwards to the unkinded variant, so existing
+    /// engines that only know one seek mode keep working unchanged.
+    func seek(to seconds: TimeInterval, kind: VideoSeekKind) async {
+        await seek(to: seconds)
+    }
+
+    /// Default: no extra tunables. Concrete engines override.
+    var capabilities: PlayerEngineCapabilities { [] }
+    func setPlaybackSpeed(_ rate: Double) {}
+    func setAudioDelay(_ seconds: TimeInterval) {}
+    func setSubtitleDelay(_ seconds: TimeInterval) {}
+    func setDialogEnhanceEnabled(_ enabled: Bool) {}
 }
 #endif

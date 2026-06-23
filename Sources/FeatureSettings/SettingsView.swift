@@ -428,6 +428,14 @@ public struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+
+                Divider()
+
+                Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
+
+                Text("Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
     }

@@ -204,6 +204,20 @@ private struct HomeTab: View {
                     initialSeasonID: item.seasonID
                 )
             }
+            .navigationDestination(for: EpisodeContextRoute.self) { route in
+                ItemDetailView(
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(route.sourceAccountID, in: accounts),
+                        itemID: route.seriesID,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: route.sourceAccountID
+                    ),
+                    spoilerSettings: spoilerSettings,
+                    onPlay: { requestPlay($0) },
+                    onSelectChild: { navigate($0) },
+                    initialEpisode: route.episode
+                )
+            }
         }
         .fullScreenCover(item: $playRequest) { request in
             PlayerView(
@@ -238,12 +252,17 @@ private struct HomeTab: View {
         }
     }
 
-    /// Pushes a detail page for any item — movies and episodes get a Movie/Episode
-    /// Details page (with a Play button) before playback; series/seasons get their
-    /// children list. Immediate playback is reserved for Continue Watching and
-    /// the detail page's own Play action.
+    /// Pushes a detail page for any item — movies get a Movie Details page (with a
+    /// Play button); series/seasons get their children list. A tapped episode is
+    /// redirected to its *series* page (fronting that episode) so the user never
+    /// lands on a dead-end single-episode page. Immediate playback is reserved for
+    /// Continue Watching and the detail page's own Play action.
     private func navigate(_ item: MediaItem) {
-        path.append(item)
+        if item.kind == .episode, item.seriesID != nil {
+            path.append(EpisodeContextRoute(episode: item))
+        } else {
+            path.append(item)
+        }
     }
 
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
@@ -263,6 +282,20 @@ private struct PlayRequest: Identifiable, Equatable {
     let item: MediaItem
     let startPosition: TimeInterval
     var id: String { item.id }
+}
+
+/// A navigation value for opening a *series* page focused on one of its
+/// episodes. Tapping a lone episode (e.g. from "Recently Added") routes through
+/// this instead of pushing the episode itself, so the user always lands on the
+/// rich series/season page — with the tapped episode fronted in the hero, its
+/// season selected, the episode row pre-scrolled to it, and Play focused at the
+/// top — rather than a dead-end single-episode page.
+private struct EpisodeContextRoute: Hashable {
+    let episode: MediaItem
+    /// The owning series' id (falls back to the episode id only if unset, which
+    /// shouldn't happen for an episode that carries a `seriesID`).
+    var seriesID: String { episode.seriesID ?? episode.id }
+    var sourceAccountID: String? { episode.sourceAccountID }
 }
 
 private extension View {
@@ -330,8 +363,28 @@ private struct SearchTab: View {
                     initialSeasonID: item.seasonID
                 )
             }
+            .navigationDestination(for: EpisodeContextRoute.self) { route in
+                ItemDetailView(
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(route.sourceAccountID, in: accounts),
+                        itemID: route.seriesID,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: route.sourceAccountID
+                    ),
+                    spoilerSettings: spoilerSettings,
+                    onPlay: { requestPlay($0) },
+                    onSelectChild: { open($0) },
+                    initialEpisode: route.episode
+                )
+            }
         }
-        .mediaItemNavigator { path.append($0) }
+        .mediaItemNavigator { item in
+            if item.kind == .episode, item.seriesID != nil {
+                path.append(EpisodeContextRoute(episode: item))
+            } else {
+                path.append(item)
+            }
+        }
         .fullScreenCover(item: $playRequest) { request in
             PlayerView(
                 viewModel: makePlayerViewModel(

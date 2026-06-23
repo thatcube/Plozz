@@ -20,18 +20,39 @@ struct DetailHeroView: View {
     /// drives the logo, title, overview and Play button. Swapping the backdrop
     /// per focused episode reads as distracting flicker, so we don't.
     var backdropItem: MediaItem?
+    /// Fraction of the screen height the hero backdrop occupies. Defaults to a
+    /// full-screen cinematic hero (`1.0`); a TV show shrinks this (e.g. `0.8`) so
+    /// the season tabs and episode row peek above the fold, signalling there's
+    /// more to scroll to.
+    var heroHeightFraction: CGFloat = 1.0
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
     let playTitle: String?
     let onPlay: (() -> Void)?
-    /// When non-`nil`, a secondary "Trailer" button is shown next to Play.
+    /// When provided (`0..<1`), a thin watched-progress bar is shown inside the
+    /// Play button, between the play icon and the remaining-time line.
+    var playProgress: Double? = nil
+    /// When provided, a "… left" remaining-time line is shown inside the Play
+    /// button, after the progress bar.
+    var playRemainingText: String? = nil
+    /// When provided, a secondary "Trailer" button is shown next to Play.
     var onPlayTrailer: (() -> Void)? = nil
     /// Technical badges to show when the focused item carries none of its own —
     /// a series or season hero has no media file, so the parent derives a
     /// representative set from the loaded episodes (best resolution/HDR/audio)
     /// and passes it here so a show still advertises 4K/Dolby Vision/Atmos.
     var fallbackTechnicalBadges: [MediaBadge] = []
+    /// When provided, the hero's Play button binds to this focus state (as
+    /// `true`), letting a parent give Play initial focus — used when a page is
+    /// opened targeting a specific episode so focus lands on Play at the top
+    /// rather than down in the episode row.
+    var playButtonFocus: FocusState<Bool>.Binding? = nil
+
+    /// Local focus state of the Play button, so the inline resume progress bar
+    /// can flip its colours to stay visible against the button's focused (white)
+    /// vs unfocused (dark) background.
+    @FocusState private var playButtonHasFocus: Bool
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
@@ -71,11 +92,12 @@ struct DetailHeroView: View {
         ZStack(alignment: .bottomLeading) {
             FallbackAsyncImage(
                 urls: [backdrop.heroBackdropURL, backdrop.backdropURL, backdrop.posterURL].compactMap { $0 },
-                maxAspectRatio: 3.0
+                maxAspectRatio: 3.0,
+                asyncFallbackURL: tmdbBackdropFallback
             ) {
                 Rectangle().fill(.tertiary)
             }
-            .frame(height: Self.heroHeight)
+            .frame(height: Self.screenHeight * heroHeightFraction)
             .frame(maxWidth: .infinity)
             .clipped()
             .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
@@ -147,7 +169,7 @@ struct DetailHeroView: View {
                 if !featureBadges.isEmpty {
                     MediaBadgeRow(badges: featureBadges)
                 }
-                if !heroRatings.isEmpty {
+                if !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item) {
                     RatingsBadgeRow(ratings: heroRatings)
                 }
                 if hideText {
@@ -169,20 +191,22 @@ struct DetailHeroView: View {
                 if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
                     HStack(spacing: 24) {
                         if let playTitle, let onPlay {
-                            Button(action: onPlay) {
-                                Label(playTitle, systemImage: "play.fill")
-                                    .frame(minWidth: 260)
-                            }
-                            .buttonStyle(.borderedProminent)
+                            playButton(title: playTitle, action: onPlay)
                         }
                         if let onPlayTrailer {
                             Button(action: onPlayTrailer) {
                                 Label("Trailer", systemImage: "film.fill")
                             }
-                            .buttonStyle(.bordered)
+                            .modifier(HeroButtonStyle(prominent: false))
                         }
                     }
                     .padding(.top, 8)
+                    // Span the full width and make the action row one focus section.
+                    // Full width is what lets "up" from a season parked far to the
+                    // right reliably land here — a narrow section only aligns with
+                    // the left-most seasons. Keeps working as more buttons are added.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .focusSection()
                 }
             }
             .padding(.vertical, PlozzTheme.Metrics.screenPadding)
@@ -194,6 +218,55 @@ struct DetailHeroView: View {
         .animation(.easeInOut(duration: 0.2), value: item.id)
     }
 
+    /// The hero Play button. Extracted so the optional initial-focus binding can
+    /// be applied to it conditionally (a `nil` binding leaves default focus
+    /// behaviour untouched). When the resume target is partially watched the
+    /// label becomes `▶  [progress bar]  … left`, keeping the button's normal
+    /// height; otherwise it's the plain `▶  Play/Resume`.
+    @ViewBuilder
+    private func playButton(title: String, action: @escaping () -> Void) -> some View {
+        let button = Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: "play.fill")
+                if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1 {
+                    resumeProgressCapsule(progress: playProgress)
+                    Text(playRemainingText)
+                } else {
+                    Text(title)
+                }
+            }
+            .frame(minWidth: 260)
+        }
+        .modifier(HeroButtonStyle(prominent: true))
+        .focused($playButtonHasFocus)
+
+        if let playButtonFocus {
+            button.focused(playButtonFocus, equals: true)
+        } else {
+            button
+        }
+    }
+
+    /// The thin watched-progress bar shown inside the Play button between the
+    /// play icon and the "… left" line. Its colours flip with the button's focus
+    /// state — light fill on the dark unfocused button, dark fill on the white
+    /// focused button — so it stays clearly visible either way.
+    private func resumeProgressCapsule(progress: Double) -> some View {
+        let onLight = playButtonHasFocus
+        let track = onLight ? Color.black.opacity(0.22) : Color.white.opacity(0.32)
+        let fill = onLight ? Color.black.opacity(0.85) : Color.white
+        let width: CGFloat = 150
+        return Capsule()
+            .fill(track)
+            .frame(width: width, height: 6)
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(fill)
+                    .frame(width: max(8, width * progress), height: 6)
+            }
+            .animation(.easeInOut(duration: 0.2), value: onLight)
+    }
+
     /// The plain text title, used both under spoilers and as the fallback when no
     /// logo art can be resolved.
     private func titleText(hideText: Bool) -> some View {
@@ -201,15 +274,55 @@ struct DetailHeroView: View {
             .font(.system(size: 64, weight: .bold))
     }
 
-    /// Full-screen height for the backdrop so the hero reads as a cinematic,
-    /// edge-to-edge image rather than a fixed-height banner. Falls back to a
-    /// 1080p constant where UIKit isn't available (non-Apple toolchains/tests).
-    private static var heroHeight: CGFloat {
+    /// Full screen height, the basis for the backdrop's height (scaled by
+    /// `heroHeightFraction`). Falls back to a 1080p constant where UIKit isn't
+    /// available (non-Apple toolchains/tests).
+    private static var screenHeight: CGFloat {
         #if canImport(UIKit)
         return UIScreen.main.bounds.height
         #else
         return 1080
         #endif
+    }
+
+    /// Last-resort backdrop art for the hero: look the show/movie up on TMDb and
+    /// use a wide fanart image. Many anime (via Shoko/AniDB) ship no backdrop, so
+    /// this fills the otherwise-empty hero. Uses the *backdrop* item (the series,
+    /// when pinned) and its TMDb id when that id refers to the show itself; for an
+    /// episode/season backdrop it queries by series title. Inert without a token.
+    private var tmdbBackdropFallback: (@Sendable () async -> URL?)? {
+        let source = backdrop
+        let isTV: Bool
+        let queryTitle: String
+        let tmdbID: String?
+        switch source.kind {
+        case .movie, .video:
+            isTV = false
+            queryTitle = source.title
+            tmdbID = source.providerIDs["Tmdb"]
+        case .series:
+            isTV = true
+            queryTitle = source.title
+            tmdbID = source.providerIDs["Tmdb"]
+        case .season, .episode:
+            isTV = true
+            queryTitle = source.parentTitle ?? source.title
+            // The item's own TMDb id is the episode/season, not the series.
+            tmdbID = nil
+        case .folder, .collection, .unknown:
+            return nil
+        }
+        guard !queryTitle.isEmpty || (tmdbID?.isEmpty == false) else { return nil }
+        let year = isTV ? nil : source.productionYear
+        return {
+            await TMDbArtworkResolver.shared.backdropURL(
+                title: queryTitle,
+                year: year,
+                isTV: isTV,
+                tmdbID: tmdbID,
+                large: true
+            )
+        }
     }
 
     /// Last-resort title art for the hero: look the show/movie up on TMDb and use
@@ -245,6 +358,31 @@ struct DetailHeroView: View {
                 isTV: isTV,
                 tmdbID: tmdbID
             )
+        }
+    }
+}
+
+/// Applies the native Liquid Glass button style to the hero's action buttons on
+/// OS versions that ship it (tvOS 26+), falling back to the classic bordered
+/// styles below that. `prominent` picks the tinted primary glass (Play) versus
+/// the lighter clear glass (secondary actions like Trailer).
+private struct HeroButtonStyle: ViewModifier {
+    let prominent: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(tvOS 26.0, *) {
+            if prominent {
+                content.buttonStyle(.glassProminent)
+            } else {
+                content.buttonStyle(.glass)
+            }
+        } else {
+            if prominent {
+                content.buttonStyle(.borderedProminent)
+            } else {
+                content.buttonStyle(.bordered)
+            }
         }
     }
 }

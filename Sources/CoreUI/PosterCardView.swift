@@ -177,23 +177,7 @@ public struct PosterCardView: View {
 
     /// Ordered list of real-image candidates to try before showing a placeholder.
     private var artworkCandidates: [URL] {
-        switch style {
-        case .poster:
-            // A poster grid always wants the vertical show/movie poster. For an
-            // episode that means the *series* poster, never the episode's own
-            // 16:9 still (which would render as a wide card).
-            if item.kind == .episode {
-                return [item.seriesPosterURL, item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
-            }
-            return [item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
-        case .landscape:
-            if item.kind == .episode {
-                // An episode's thumbnail is its Primary image; fall back to the
-                // series backdrop, then to a neutral placeholder.
-                return [item.posterURL, item.backdropURL, item.fallbackArtworkURL].compactMap { $0 }
-            }
-            return [item.backdropURL, item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
-        }
+        item.artworkCandidates(for: style)
     }
 
     @ViewBuilder
@@ -214,10 +198,38 @@ public struct PosterCardView: View {
         FallbackAsyncImage(
             urls: artworkCandidates,
             maxAspectRatio: posterAspectGuard,
-            asyncFallbackURL: tmdbPosterFallback
+            asyncFallbackURL: asyncArtworkFallback
         ) {
             neutralPlaceholder
         }
+    }
+
+    /// The async (TMDb) last-resort source for whichever card shape this is: a
+    /// vertical poster for poster cards, a wide backdrop for landscape cards. For
+    /// a landscape *episode* card it first tries the real per-episode still (a
+    /// genuine thumbnail), then falls back to the show's backdrop — anime via
+    /// Shoko/AniDB usually ship no per-episode image, so TMDb supplies it.
+    private var asyncArtworkFallback: (@Sendable () async -> URL?)? {
+        if style == .poster { return tmdbPosterFallback }
+        if item.kind == .episode,
+           let season = item.seasonNumber,
+           let episode = item.episodeNumber {
+            let seriesTitle = item.parentTitle ?? item.title
+            let seriesID = item.providerIDs["SeriesTmdb"]
+            let backdropFallback = tmdbBackdropFallback
+            return {
+                if let still = await TMDbArtworkResolver.shared.episodeStillURL(
+                    seriesTitle: seriesTitle,
+                    seriesTmdbID: seriesID,
+                    season: season,
+                    episode: episode
+                ) {
+                    return still
+                }
+                return await backdropFallback?()
+            }
+        }
+        return tmdbBackdropFallback
     }
 
     /// Poster cards reject any source image wider than ~0.9:1 (a real poster is
@@ -254,6 +266,47 @@ public struct PosterCardView: View {
                 title: queryTitle,
                 year: isTV ? nil : year,
                 isTV: isTV
+            )
+        }
+    }
+
+    /// Last-resort backdrop source for landscape cards whose provider thumbnail is
+    /// missing (common for anime episodes via Shoko/AniDB): look the show up on
+    /// TMDb and use a wide fanart image. Episodes/seasons query by the *series*
+    /// title; movies/series by their own. Inert without a TMDb token.
+    private var tmdbBackdropFallback: (@Sendable () async -> URL?)? {
+        guard style == .landscape else { return nil }
+        let isTV: Bool
+        let queryTitle: String
+        let tmdbID: String?
+        switch item.kind {
+        case .movie, .video:
+            isTV = false
+            queryTitle = item.title
+            tmdbID = item.providerIDs["Tmdb"]
+        case .series:
+            isTV = true
+            queryTitle = item.title
+            tmdbID = item.providerIDs["Tmdb"]
+        case .season, .episode:
+            isTV = true
+            queryTitle = item.parentTitle ?? item.title
+            // An episode/season carries its *own* TMDb id (not the show's), which
+            // is useless for a series backdrop. The series page stamps the show's
+            // id under "SeriesTmdb" so we can resolve the same backdrop the hero
+            // uses by id (a plain title search often misses anime titles).
+            tmdbID = item.providerIDs["SeriesTmdb"]
+        case .folder, .collection, .unknown:
+            return nil
+        }
+        guard !queryTitle.isEmpty || (tmdbID?.isEmpty == false) else { return nil }
+        let year = isTV ? nil : item.productionYear
+        return {
+            await TMDbArtworkResolver.shared.backdropURL(
+                title: queryTitle,
+                year: year,
+                isTV: isTV,
+                tmdbID: tmdbID
             )
         }
     }
@@ -385,6 +438,34 @@ private extension View {
             .focusEffectDisabled()
             .onTapGesture(perform: action)
             .accessibilityAddTraits(.isButton)
+    }
+}
+
+public extension MediaItem {
+    /// Ordered real-image candidates a `PosterCardView` of `style` will try before
+    /// any async (TMDb) fallback. Rails use this to prefetch each card's artwork
+    /// into `ArtworkImageCache` ahead of scroll, so a card already has its decoded
+    /// thumbnail the moment it appears. Mirrors `PosterCardView.artworkCandidates`.
+    func artworkCandidates(for style: PosterCardView.Style) -> [URL] {
+        switch style {
+        case .poster:
+            // A poster grid always wants the vertical show/movie poster. For an
+            // episode that means the *series* poster, never the episode's own
+            // 16:9 still (which would render as a wide card).
+            if kind == .episode {
+                return [seriesPosterURL, posterURL, fallbackArtworkURL].compactMap { $0 }
+            }
+            return [posterURL, fallbackArtworkURL].compactMap { $0 }
+        case .landscape:
+            if kind == .episode {
+                // An episode's thumbnail is its own Primary (then Backdrop) image.
+                // The series backdrop is deliberately *not* a direct fallback (it
+                // would paint the same image on every episode); the async TMDb
+                // fallback supplies a real per-episode still instead.
+                return [posterURL, backdropURL].compactMap { $0 }
+            }
+            return [backdropURL, posterURL, fallbackArtworkURL].compactMap { $0 }
+        }
     }
 }
 

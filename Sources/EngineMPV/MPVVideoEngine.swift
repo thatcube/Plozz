@@ -363,9 +363,19 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     // MARK: - Seeking
 
     public func seek(to seconds: TimeInterval) async {
+        await seek(to: seconds, kind: .exact)
+    }
+
+    public func seek(to seconds: TimeInterval, kind: VideoSeekKind) async {
         guard client.isAlive else { return }
         let clamped = max(0, seconds)
-        client.command(["seek", "\(clamped)", "absolute", "exact"])
+        // mpv's `keyframes` mode is dramatically faster than `exact` (a
+        // refdec-then-decode walk) and is exactly what we want for the
+        // intermediate frames of a rapid-skip burst: snap to the nearest
+        // keyframe NOW so the on-screen position obviously moves, and let
+        // the *final* (.exact) seek land precisely on release.
+        let mode = kind == .fast ? "keyframes" : "exact"
+        client.command(["seek", "\(clamped)", "absolute", mode])
         furthestObservedPosition = max(furthestObservedPosition, clamped)
     }
 
@@ -405,6 +415,50 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             }
         }
         return nil
+    }
+
+    // MARK: - Live tunables
+
+    /// mpv changes all four tunables live, with no reload, via single property
+    /// writes — exactly what the options menu needs for frame-accurate feedback.
+    public var capabilities: PlayerEngineCapabilities {
+        [.playbackSpeed, .audioDelay, .subtitleDelay, .dialogEnhance]
+    }
+
+    public func setPlaybackSpeed(_ rate: Double) {
+        guard client.isAlive else { return }
+        let clamped = max(0.25, min(4.0, rate))
+        client.setPropertyString("speed", String(format: "%.3f", clamped))
+    }
+
+    public func setAudioDelay(_ seconds: TimeInterval) {
+        guard client.isAlive else { return }
+        client.setPropertyString("audio-delay", String(format: "%.3f", seconds))
+    }
+
+    public func setSubtitleDelay(_ seconds: TimeInterval) {
+        guard client.isAlive else { return }
+        client.setPropertyString("sub-delay", String(format: "%.3f", seconds))
+    }
+
+    /// Toggles a labelled `dialoguenhance` audio filter — FFmpeg's purpose-built
+    /// dialogue enhancer that lifts the centre/voice channel out of a stereo or
+    /// surround mix so speech stays intelligible without raising music/effects.
+    /// We use the `@plozz-dialog` label so we can add/remove this exact filter
+    /// without trampling any user `af` chain, and it is attached/detached rather
+    /// than tweaked so disabling it has zero CPU cost. If the FFmpeg build
+    /// lacks `dialoguenhance`, mpv simply logs and no-ops (graceful degrade).
+    public func setDialogEnhanceEnabled(_ enabled: Bool) {
+        guard client.isAlive else { return }
+        if enabled {
+            // `dialoguenhance` operates on a stereo downmix and boosts the
+            // phase-correlated centre content (dialogue). original=1 keeps the
+            // base mix, enhance=1 adds a full-strength enhanced centre, voice=2
+            // widens the band treated as voice so more speech is captured.
+            client.command(["af", "add", "@plozz-dialog:lavfi=[dialoguenhance=original=1:enhance=1:voice=2]"])
+        } else {
+            client.command(["af", "remove", "@plozz-dialog"])
+        }
     }
 
     // MARK: - View

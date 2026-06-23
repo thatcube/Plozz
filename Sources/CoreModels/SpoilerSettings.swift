@@ -28,16 +28,41 @@ public struct SpoilerSettings: Codable, Equatable, Sendable {
     public var isEnabled: Bool
     /// How hidden thumbnails are presented.
     public var mode: Mode
+    /// When enabled, external ratings (IMDb, Rotten Tomatoes, …) are hidden for
+    /// a movie or episode until it has been fully watched, so the score can't
+    /// bias the viewer beforehand. Independent of `isEnabled` — it's its own
+    /// opt-in switch. Off by default.
+    public var hideRatingsUntilWatched: Bool
 
     public init(
         isEnabled: Bool = false,
-        mode: Mode = .blur
+        mode: Mode = .blur,
+        hideRatingsUntilWatched: Bool = false
     ) {
         self.isEnabled = isEnabled
         self.mode = mode
+        self.hideRatingsUntilWatched = hideRatingsUntilWatched
     }
 
     public static let `default` = SpoilerSettings()
+}
+
+// MARK: - Codable (tolerant of older persisted payloads)
+
+public extension SpoilerSettings {
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled, mode, hideRatingsUntilWatched
+    }
+
+    /// Decodes leniently so settings saved before a field existed still load
+    /// instead of resetting the whole struct to its defaults.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = SpoilerSettings.default
+        self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? defaults.isEnabled
+        self.mode = try container.decodeIfPresent(Mode.self, forKey: .mode) ?? defaults.mode
+        self.hideRatingsUntilWatched = try container.decodeIfPresent(Bool.self, forKey: .hideRatingsUntilWatched) ?? defaults.hideRatingsUntilWatched
+    }
 }
 
 // MARK: - Decision logic (pure, unit-tested)
@@ -79,5 +104,19 @@ public extension SpoilerSettings {
     func maskedTitle(for item: MediaItem) -> String {
         if let number = item.episodeNumber { return "Episode \(number)" }
         return "Episode"
+    }
+
+    /// Hide external ratings for a movie or episode until it has been fully
+    /// watched, so the score doesn't bias the viewer before they see it. Series
+    /// and seasons carry aggregate ratings and are never hidden. In-progress
+    /// items still hide their ratings — they're only revealed once finished.
+    func shouldHideRatings(for item: MediaItem) -> Bool {
+        guard hideRatingsUntilWatched else { return false }
+        switch item.kind {
+        case .movie, .episode:
+            return !item.isPlayed
+        default:
+            return false
+        }
     }
 }

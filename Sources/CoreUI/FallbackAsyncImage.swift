@@ -89,6 +89,10 @@ private struct SequentialAsyncImage<Placeholder: View>: View {
 /// Loads candidates in order, decoding each to inspect its true pixel aspect
 /// ratio, and shows the first one that is poster-shaped enough (≤ `maxAspectRatio`).
 /// Anything wider is skipped. Falls back to the placeholder when none qualify.
+///
+/// Decoded results live in `ArtworkImageCache`, so a card scrolled back into view
+/// (or one whose art was prefetched ahead of scroll) seeds its image
+/// synchronously and renders with no gray placeholder frame.
 private struct FilteredArtworkImage<Placeholder: View>: View {
     let urls: [URL]
     let maxAspectRatio: CGFloat?
@@ -96,7 +100,24 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
     let placeholder: () -> Placeholder
 
     @State private var image: UIImage?
-    @State private var resolved = false
+    @State private var resolved: Bool
+
+    init(
+        urls: [URL],
+        maxAspectRatio: CGFloat?,
+        asyncFallbackURL: (@Sendable () async -> URL?)?,
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.urls = urls
+        self.maxAspectRatio = maxAspectRatio
+        self.asyncFallbackURL = asyncFallbackURL
+        self.placeholder = placeholder
+        // Seed synchronously from the decoded-image cache so an already-warmed card
+        // renders its art on the very first frame — no async hop, no gray flash.
+        let seeded = Self.cachedUsableImage(urls: urls, maxAspectRatio: maxAspectRatio)
+        _image = State(initialValue: seeded)
+        _resolved = State(initialValue: seeded != nil)
+    }
 
     var body: some View {
         Group {
@@ -114,24 +135,35 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
     }
 
     private func resolve() async {
+        // A synchronously-seeded image (cache hit) is already correct — keep it
+        // rather than wiping it back to gray and re-resolving.
+        if image != nil { return }
         resolved = false
-        image = nil
         // 1) Try provider candidates in order, skipping any that are too wide.
         for url in urls {
-            guard let loaded = await Self.load(url) else { continue }
-            guard let size = Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) else { continue }
-            _ = size
+            guard let loaded = await ArtworkImageCache.shared.image(for: url) else { continue }
+            guard Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil else { continue }
             image = loaded
             resolved = true
             return
         }
         // 2) Nothing usable from the provider — try the async fallback (TMDb).
-        if let asyncFallbackURL, let url = await asyncFallbackURL(), let loaded = await Self.load(url) {
+        if let asyncFallbackURL, let url = await asyncFallbackURL(), let loaded = await ArtworkImageCache.shared.image(for: url) {
             image = loaded
             resolved = true
             return
         }
         resolved = true
+    }
+
+    /// First already-decoded candidate (in priority order) that is acceptable for
+    /// this context, read synchronously from `ArtworkImageCache`.
+    private static func cachedUsableImage(urls: [URL], maxAspectRatio: CGFloat?) -> UIImage? {
+        for url in urls {
+            guard let cached = ArtworkImageCache.shared.cachedImage(for: url) else { continue }
+            if usableSize(cached, maxAspectRatio: maxAspectRatio) != nil { return cached }
+        }
+        return nil
     }
 
     /// Returns the image's size when it is acceptable for this context, or `nil`
@@ -141,16 +173,6 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
         guard size.height > 0 else { return nil }
         if let maxAspectRatio, size.width / size.height > maxAspectRatio { return nil }
         return size
-    }
-
-    private static func load(_ url: URL) async -> UIImage? {
-        guard let (data, response) = try? await URLSession.shared.data(from: url) else {
-            return nil
-        }
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            return nil
-        }
-        return UIImage(data: data)
     }
 }
 #endif

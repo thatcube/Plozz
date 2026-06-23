@@ -521,12 +521,13 @@ public struct JellyfinProvider: MediaProvider {
 
     /// Maps Jellyfin's native rating fields onto provider-agnostic ratings.
     ///
-    /// `CommunityRating` is a 0–10 audience score; `CriticRating` is a 0–100
-    /// Rotten Tomatoes Tomatometer percentage.
+    /// `CommunityRating` is a 0–10 audience score sourced from TMDB, so we brand
+    /// it as TMDB for every item type (movies, series, episodes, …). `CriticRating`
+    /// is a 0–100 Rotten Tomatoes Tomatometer percentage.
     private static func ratings(from dto: BaseItemDto) -> [ExternalRating] {
         var ratings: [ExternalRating] = []
         if let community = dto.CommunityRating {
-            ratings.append(ExternalRating(source: .community, value: community, scale: .outOfTen))
+            ratings.append(ExternalRating(source: .tmdb, value: community, scale: .outOfTen))
         }
         if let critic = dto.CriticRating {
             ratings.append(ExternalRating(source: .rottenTomatoes, value: critic, scale: .percent))

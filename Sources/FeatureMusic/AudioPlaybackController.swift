@@ -73,11 +73,11 @@ public final class AudioPlaybackController {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var sessionConfigured = false
+    private var remoteCommandsActive = false
     private var artworkLoadTask: Task<Void, Never>?
 
     public init() {
         player.actionAtItemEnd = .none
-        configureRemoteCommands()
         installTimeObserver()
     }
 
@@ -192,6 +192,9 @@ public final class AudioPlaybackController {
         currentTime = 0
         duration = 0
         clearNowPlaying()
+        // Relinquish the system Play/Pause button so the video player can
+        // receive it again once music is no longer playing.
+        disableRemoteCommands()
     }
 
     // MARK: Shuffle
@@ -254,6 +257,12 @@ public final class AudioPlaybackController {
     private func startCurrent() async {
         guard let track = currentTrack, let resolver else { return }
         guard let url = await resolver(track) else { return }
+        // Claim the system remote/Now Playing controls only once music is
+        // actually playing. Registering them eagerly (e.g. at app launch) makes
+        // tvOS route the Siri Remote's Play/Pause button to the command center
+        // instead of delivering it to the foreground view, which silently breaks
+        // the video player's own Play/Pause handling.
+        enableRemoteCommands()
         let item = AVPlayerItem(url: url)
         player.removeAllItems()
         player.insert(item, after: nil)
@@ -332,8 +341,10 @@ public final class AudioPlaybackController {
 
     // MARK: Now Playing + remote commands
 
-    private func configureRemoteCommands() {
+    private func enableRemoteCommands() {
         #if canImport(MediaPlayer)
+        guard !remoteCommandsActive else { return }
+        remoteCommandsActive = true
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
@@ -362,6 +373,22 @@ public final class AudioPlaybackController {
             Task { await self.seek(to: event.positionTime) }
             return .success
         }
+        #endif
+    }
+
+    /// Removes our handlers so the system no longer routes the Siri Remote's
+    /// Play/Pause button to music — letting the video player receive it again.
+    private func disableRemoteCommands() {
+        #if canImport(MediaPlayer)
+        guard remoteCommandsActive else { return }
+        remoteCommandsActive = false
+        let center = MPRemoteCommandCenter.shared()
+        center.playCommand.removeTarget(nil)
+        center.pauseCommand.removeTarget(nil)
+        center.togglePlayPauseCommand.removeTarget(nil)
+        center.nextTrackCommand.removeTarget(nil)
+        center.previousTrackCommand.removeTarget(nil)
+        center.changePlaybackPositionCommand.removeTarget(nil)
         #endif
     }
 

@@ -51,6 +51,19 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
     public private(set) var status: VideoEngineStatus = .idle
     public private(set) var isPaused: Bool = false
+
+    /// Mirrors mpv's `eof-reached`: `true` once the stream hits a clean end and
+    /// playback is no longer advancing. Used to release the wake lock at the end
+    /// of a file even though `isPaused` may still read `false`.
+    private var hasReachedEnd: Bool = false
+
+    /// Keep the display awake only while mpv is actually advancing frames: not
+    /// paused and not sitting at end-of-stream. Matches the native engine's
+    /// `timeControlStatus == .playing` policy so the screensaver behaviour is
+    /// identical regardless of which decoder is active.
+    public var preventsDisplaySleep: Bool {
+        !isPaused && !hasReachedEnd
+    }
     public private(set) var currentTime: TimeInterval = 0
     public private(set) var duration: TimeInterval = 0
     public private(set) var furthestObservedPosition: TimeInterval = 0
@@ -162,6 +175,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         self.request = request
         hasFailed = false
         isPaused = false
+        hasReachedEnd = false
         currentTime = 0
         duration = 0
         lastReportedSecond = -1
@@ -520,7 +534,9 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         case MPVProperty.eofReached:
             // `eof-reached` flips true at a clean end-of-stream; treated as a
             // benign stop (the owner reads `currentTime`/`duration`), not a fail.
-            break
+            // Tracked so the display wake lock is released at end-of-file even
+            // while `pause` still reads false.
+            hasReachedEnd = client.getFlag(MPVProperty.eofReached)
         default:
             break
         }

@@ -114,6 +114,12 @@ final class PlayerInputViewController: UIViewController {
     private var scrubBaseSeconds: TimeInterval = 0
     private var resumeAfterScrub = false
 
+    /// Suppresses the tvOS screensaver / Apple TV sleep while video is actively
+    /// playing, and releases it the instant playback pauses, ends, or this host
+    /// goes away. Driven every refresh tick off `engine.preventsDisplaySleep`, so
+    /// it behaves identically for every engine/decoder (AVPlayer *and* mpv).
+    private let idleSleepGuard = IdleSleepGuard()
+
     /// Whether the Siri Remote currently drives the scrub surface or the bottom
     /// control bar. In `.controlBar` the surface gesture recognizers are disabled
     /// so the SwiftUI focus engine owns navigation.
@@ -165,6 +171,8 @@ final class PlayerInputViewController: UIViewController {
         super.viewDidDisappear(animated)
         refreshTask?.cancel()
         refreshTask = nil
+        // Leaving playback: let the screensaver / Apple TV sleep resume.
+        idleSleepGuard.allowSleep()
     }
 
     override var canBecomeFirstResponder: Bool { true }
@@ -236,6 +244,10 @@ final class PlayerInputViewController: UIViewController {
     }
 
     private func refreshFromEngine() {
+        // Keep the display awake only while frames are actually advancing.
+        // Evaluated every tick, before any early-return, so a pause, end-of-
+        // stream, or stall promptly releases the wake lock for every engine.
+        idleSleepGuard.keepAwake(engine.preventsDisplaySleep)
         let duration = engine.duration
         if duration > 0 { model.duration = duration }
         // Don't fight the scrub head or an in-flight committed seek.

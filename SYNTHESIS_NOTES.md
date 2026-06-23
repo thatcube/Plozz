@@ -276,3 +276,63 @@ metadata lines were not.
 
 No artwork/provider behaviour changed; this is layout-only. Build BUILD
 SUCCEEDED; installed + launched on the Apple TV.
+
+---
+
+## Phase 5 — Hero overflow (hard containment) + anime episode thumbnails
+
+Two issues persisted on-device after Phase 4:
+
+### A. Hero page still shifted right (focus off-screen left)
+The Phase-4 per-text caps were not enough: on tvOS, *any* focusable element (the
+Play button) inside content wider than the scroll viewport makes the page pan
+horizontally, and the hero content column had no hard width cap of its own — a
+wide badge/ratings strip, an oversized logo, or any future row could still push
+it past the screen. (A vertical `ScrollView` clips vertical overflow but the
+focus engine will still pan horizontally to "frame" a focused element in
+over-wide content.)
+
+**Fix** (`Sources/FeatureHome/DetailHeroView.swift`):
+- Added a hard `.frame(maxWidth: Self.screenWidth, alignment: .leading)` on the
+  hero content `VStack` *after* its paddings, so the column can never report a
+  width greater than the viewport regardless of which inner row is wide. Added a
+  `screenWidth` helper (UIScreen width, 1920 fallback off-device).
+- This is the definitive containment: even if an inner row overflows it now draws
+  past the right edge (clipped) instead of widening the page and panning focus
+  off-screen.
+
+### B. Many anime episodes showed no thumbnail (and no placeholder)
+The Phase-2 episode fallback synthesizes a *series* item from the episode and asks
+`ArtworkRouter` for a `.hero` (TMDb backdrop, else the keyless AniList banner).
+But Jellyfin/Plex **episodes rarely carry the show's anime ids or "Anime"
+genre**, so the synthesized series item classified as `tvShow` → hero chain
+`[tmdb]` only → no AniList → blank for anime when TMDb has no match.
+
+**Fix** (propagate series anime context onto episodes, mirroring the existing
+`SeriesTmdb` stamp):
+- `Sources/MetadataKit/ContentClassification.swift`: new public
+  `ContentClassifier.isAnimeProviderIDKey(_:)` so callers can copy just a series'
+  anime ids (AniList/AniDB/MAL/Shoko/Kitsu).
+- `Sources/FeatureHome/ItemDetailViewModel.swift`: capture the series' anime ids +
+  `isAnime` at load (`captureSeriesContext`) and, in `stampSeriesTMDb`, stamp each
+  episode with the series' anime ids and an "Anime" genre when the show is anime.
+- `Sources/FeatureHome/SeriesDetailView.swift`: same stamp for the flat
+  `looseEpisodes` path (now takes the full `series`).
+
+Because `AniListArtworkProvider` falls back to a **title search** when no id is
+present, the only requirement for the keyless banner is that the synthesized
+series item classifies as anime — which this stamping guarantees. Result: an
+anime episode with no still now shows the show's AniList banner (keyless, no TMDb
+needed); the same banner on every episode of a show is acceptable vs. a blank
+card.
+
+Build BUILD SUCCEEDED; installed + launched on the Apple TV from the verified
+`CODESIGNING_FOLDER_PATH` of the fresh build (to rule out a stale install).
+
+**Still needs on-device verification by the maintainer:**
+- Open an anime series detail page: the hero/Play button should be on-screen at
+  the left immediately (no rightward page shift), for shows with long titles.
+- Anime episodes with no server still should now show the show's banner instead
+  of a blank card. Western-TV episodes are unaffected (still → TMDb/TVmaze).
+- Confirm heroes still look sharp (TMDb `/original` when configured) and that
+  removing TMDb would degrade gracefully to the keyless AniList banner.

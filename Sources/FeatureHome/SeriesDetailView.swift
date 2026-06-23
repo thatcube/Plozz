@@ -70,7 +70,7 @@ struct SeriesDetailView: View {
         self.series = series
         self.seasons = seasons
         self.looseEpisodes = looseEpisodes
-        self.stampedLooseEpisodes = Self.stampSeriesTMDb(into: looseEpisodes, seriesTMDbID: series.providerIDs["Tmdb"])
+        self.stampedLooseEpisodes = Self.stampSeriesTMDb(into: looseEpisodes, series: series)
         self.viewModel = viewModel
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
@@ -394,15 +394,26 @@ struct SeriesDetailView: View {
         }
     }
 
-    /// Adds the owning series' TMDb id to each episode under `SeriesTmdb` once,
-    /// keeping per-episode artwork fallback fully functional without body-time
-    /// remapping.
-    private static func stampSeriesTMDb(into episodes: [MediaItem], seriesTMDbID: String?) -> [MediaItem] {
-        guard let seriesTMDbID, !seriesTMDbID.isEmpty else { return episodes }
+    /// Adds the owning series' TMDb id to each episode under `SeriesTmdb`, plus the
+    /// series' anime ids and an "Anime" genre when the show is anime, once — keeping
+    /// per-episode artwork fallback (including the keyless AniList banner for anime)
+    /// fully functional without body-time remapping.
+    private static func stampSeriesTMDb(into episodes: [MediaItem], series: MediaItem) -> [MediaItem] {
+        let seriesTMDbID = series.providerIDs["Tmdb"]
+        let animeIDs = series.providerIDs.filter { ContentClassifier.isAnimeProviderIDKey($0.key) }
+        let isAnime = ContentClassifier.isAnime(series)
+        let hasTMDb = (seriesTMDbID?.isEmpty == false)
+        guard hasTMDb || isAnime || !animeIDs.isEmpty else { return episodes }
         return episodes.map { episode in
             var copy = episode
-            if copy.providerIDs["SeriesTmdb"] == nil {
+            if let seriesTMDbID, !seriesTMDbID.isEmpty, copy.providerIDs["SeriesTmdb"] == nil {
                 copy.providerIDs["SeriesTmdb"] = seriesTMDbID
+            }
+            for (key, value) in animeIDs where copy.providerIDs[key] == nil {
+                copy.providerIDs[key] = value
+            }
+            if isAnime, !copy.genres.contains(where: { $0.lowercased().contains("anime") }) {
+                copy.genres.append("Anime")
             }
             return copy
         }

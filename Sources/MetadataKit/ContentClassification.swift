@@ -45,6 +45,16 @@ public enum ContentClassifier {
         }
     }
 
+    /// `true` when the provider-id key names an anime database (AniList / AniDB /
+    /// MyAnimeList / Shoko / Kitsu), tolerant of the casing/punctuation each
+    /// backend uses. Lets callers copy just a series' anime ids onto its episodes.
+    public static func isAnimeProviderIDKey(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        if animeIDKeys.contains(where: { normalized.contains($0) }) { return true }
+        // Common short aliases the substring list above doesn't cover.
+        return ["mal", "anilistid", "anidbid"].contains(normalized)
+    }
+
     /// `true` when the item carries any anime-database id or an "Anime" genre/tag.
     public static func isAnime(_ item: MediaItem) -> Bool {
         // Prefer the normalized namespace lookups (tolerant of provider key

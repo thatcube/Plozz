@@ -210,7 +210,12 @@ struct ArtistDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
                 HStack(spacing: 32) {
-                    MusicArtworkImage(url: viewModel.artist.artworkURL, systemPlaceholder: "music.mic", cornerRadius: 130)
+                    MusicArtworkImage(
+                        url: viewModel.artist.artworkURL,
+                        systemPlaceholder: "music.mic",
+                        cornerRadius: 130,
+                        asyncFallbackURL: MusicArtworkFallback.artistImage(name: viewModel.artist.name)
+                    )
                         .clipShape(Circle())
                         .frame(width: 260, height: 260)
                     VStack(alignment: .leading, spacing: 12) {
@@ -268,7 +273,14 @@ struct AlbumDetailView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 32) {
-            MusicArtworkImage(url: viewModel.album.artworkURL, systemPlaceholder: "opticaldisc")
+            MusicArtworkImage(
+                url: viewModel.album.artworkURL,
+                systemPlaceholder: "opticaldisc",
+                asyncFallbackURL: MusicArtworkFallback.albumCover(
+                    title: viewModel.album.title,
+                    artist: viewModel.album.artistName
+                )
+            )
                 .frame(width: 320, height: 320)
             VStack(alignment: .leading, spacing: 14) {
                 Text(viewModel.album.title).font(.system(size: 52, weight: .bold)).lineLimit(2)

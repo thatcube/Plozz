@@ -34,10 +34,11 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private var background: some View {
-        if let track = controller.currentTrack, let url = track.artworkURL {
-            AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
+        if let track = controller.currentTrack {
+            FallbackAsyncImage(
+                urls: [track.artworkURL].compactMap { $0 },
+                asyncFallbackURL: MusicArtworkFallback.artistImage(name: track.artistName ?? "")
+            ) {
                 Color.black
             }
             .ignoresSafeArea()
@@ -50,7 +51,11 @@ struct NowPlayingView: View {
 
     private var nowPlayingColumn: some View {
         VStack(alignment: .leading, spacing: 32) {
-            MusicArtworkImage(url: controller.currentTrack?.artworkURL, systemPlaceholder: "music.note")
+            MusicArtworkImage(
+                url: controller.currentTrack?.artworkURL,
+                systemPlaceholder: "music.note",
+                asyncFallbackURL: trackFallback(controller.currentTrack)
+            )
                 .frame(width: 420, height: 420)
                 .shadow(radius: 30)
 
@@ -127,6 +132,17 @@ struct NowPlayingView: View {
         }
     }
 
+    /// Best-effort album-cover fallback for `track`, used only when the server
+    /// ships no artwork. `nil` track / blank fields yield no fallback.
+    private func trackFallback(_ track: MusicTrack?) -> (@Sendable () async -> URL?)? {
+        guard let track else { return nil }
+        return MusicArtworkFallback.trackCover(
+            title: track.title,
+            album: track.albumTitle,
+            artist: track.artistName
+        )
+    }
+
     @ViewBuilder
     private var upNextColumn: some View {
         if controller.upNext.isEmpty {
@@ -142,7 +158,12 @@ struct NowPlayingView: View {
                                 controller.play(at: controller.index + 1 + offset)
                             } label: {
                                 HStack(spacing: 16) {
-                                    MusicArtworkImage(url: track.artworkURL, systemPlaceholder: "music.note", cornerRadius: 6)
+                                    MusicArtworkImage(
+                                        url: track.artworkURL,
+                                        systemPlaceholder: "music.note",
+                                        cornerRadius: 6,
+                                        asyncFallbackURL: trackFallback(track)
+                                    )
                                         .frame(width: 56, height: 56)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(track.title).font(.headline).lineLimit(1)

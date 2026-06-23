@@ -21,6 +21,7 @@ let package = Package(
         .library(name: "CoreModels", targets: ["CoreModels"]),
         .library(name: "CoreNetworking", targets: ["CoreNetworking"]),
         .library(name: "CoreUI", targets: ["CoreUI"]),
+        .library(name: "MetadataKit", targets: ["MetadataKit"]),
         .library(name: "EngineMPV", targets: ["EngineMPV"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
@@ -56,7 +57,20 @@ let package = Package(
         // MARK: Shared UI (design system + reusable tvOS components)
         .target(
             name: "CoreUI",
-            dependencies: ["CoreModels"]
+            dependencies: ["CoreModels", "MetadataKit"]
+        ),
+
+        // MARK: Scalable external metadata/artwork (content-type-routed providers)
+        //
+        // Foundation-only so it stays unit-testable off-device. Houses the keyless,
+        // per-IP artwork providers (AniList, Kitsu, TVmaze, Deezer, MusicBrainz),
+        // the optional proxy/token-gated TMDb provider, the content-type classifier
+        // + ArtworkRouter that picks the right provider chain, and a persistent
+        // resolved-URL disk cache. This is the engine behind goals 1–5 scaling to
+        // a large user base without a "bring your own API key" design.
+        .target(
+            name: "MetadataKit",
+            dependencies: ["CoreModels", "CoreNetworking"]
         ),
 
         // MARK: libmpv-backed engine (the on-device decoding path)
@@ -150,7 +164,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TopShelfKit", "RatingsService"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService"]
         ),
         .target(
             name: "FeaturePlayback",
@@ -186,7 +200,7 @@ let package = Package(
         // it stays decoupled from the video feature modules.
         .target(
             name: "FeatureMusic",
-            dependencies: ["CoreModels", "CoreUI"]
+            dependencies: ["CoreModels", "CoreUI", "MetadataKit"]
         ),
 
         // MARK: Top Shelf (shared with the tvOS Top Shelf extension)
@@ -232,6 +246,10 @@ let package = Package(
         .testTarget(
             name: "CoreNetworkingTests",
             dependencies: ["CoreNetworking", "CoreModels"]
+        ),
+        .testTarget(
+            name: "MetadataKitTests",
+            dependencies: ["MetadataKit", "CoreModels"]
         ),
         .testTarget(
             name: "FeatureDiscoveryTests",

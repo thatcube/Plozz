@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import MetadataKit
 
 /// A single, self-contained page for an entire series. The hero at the top is
 /// dynamic: it reflects whatever the user is currently *focused* on (not what
@@ -71,7 +72,7 @@ struct SeriesDetailView: View {
         self.series = series
         self.seasons = seasons
         self.looseEpisodes = looseEpisodes
-        self.stampedLooseEpisodes = Self.stampSeriesTMDb(into: looseEpisodes, seriesTMDbID: series.providerIDs["Tmdb"])
+        self.stampedLooseEpisodes = Self.stampSeriesTMDb(into: looseEpisodes, series: series)
         self.viewModel = viewModel
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
@@ -102,10 +103,14 @@ struct SeriesDetailView: View {
             // ScrollView reserving it as a blank bar above the backdrop.
             .ignoresSafeArea(.container, edges: .top)
             .task { await prepareInitialSeason() }
-            // Warm the whole season's episode stills as soon as they load, so
+            // Warm the current season's episode thumbnails as soon as they load, so
             // cards already have their thumbnail when scrolled to rather than
             // visibly fetching it on appear.
             .task(id: stillPrefetchKey) { await prefetchSeasonStills() }
+            // Background-warm *every* season's thumbnails the moment the page opens,
+            // so switching seasons later is instant (no gray-placeholder flash)
+            // rather than fetching that season's stills only once it is selected.
+            .task { await prewarmAllSeasons() }
     }
 
     @ViewBuilder
@@ -148,6 +153,13 @@ struct SeriesDetailView: View {
                     DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenPadding)
+                // Cap the whole scroll column to the proposed (safe viewport)
+                // width. The hero backdrop still bleeds edge-to-edge via its own
+                // `.ignoresSafeArea`, but its layout footprint — and any over-wide
+                // row below (e.g. a long tags strip) — can no longer inflate the
+                // column past the viewport, which is what let tvOS pan the page
+                // sideways and shove focus off the left edge.
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Keep the page pinned to the top on first load. The Play button is
             // bottom-anchored in the full-screen hero, so when initial focus
@@ -299,22 +311,97 @@ struct SeriesDetailView: View {
         "\(selectedSeasonID ?? "loose")#\(currentEpisodes.count)"
     }
 
-    /// Prefetches every loaded episode's TMDb still for the current season so the
-    /// rail's thumbnails are already cached before each card scrolls into view.
+    /// Warms the **currently selected** season so its episode thumbnails are
+    /// synchronously seedable on first render (no gray placeholder flash). Runs
+    /// whenever the selected season's episodes arrive or change.
     private func prefetchSeasonStills() async {
-        let requests = currentEpisodes.compactMap { episode -> TMDbArtworkResolver.EpisodeStillRequest? in
-            guard episode.kind == .episode,
-                  let season = episode.seasonNumber,
-                  let number = episode.episodeNumber else { return nil }
-            return TMDbArtworkResolver.EpisodeStillRequest(
-                seriesTitle: episode.parentTitle ?? episode.title,
-                seriesTmdbID: episode.providerIDs["SeriesTmdb"],
-                season: season,
-                episode: number
-            )
+        if let id = selectedSeasonID {
+            await warmSeason(id)
+        } else {
+            warmPrimaryThumbnails(for: currentEpisodes)
         }
-        guard !requests.isEmpty else { return }
-        await TMDbArtworkResolver.shared.prefetchEpisodeStills(requests)
+    }
+
+    /// Background-warms *every other* season the moment the page opens, which is
+    /// what eliminates the gray-placeholder flash when the user later switches
+    /// seasons. For each season we first ensure its episodes are fetched and cached
+    /// (so the rail never momentarily shows an empty list on switch) and then warm
+    /// + inject each episode's thumbnail ahead of time. Seasons are warmed one at a
+    /// time, yielding between them, so a long show never floods the loader or
+    /// competes with the on-screen season's art. The currently selected season is
+    /// skipped here because `prefetchSeasonStills` already owns it.
+    private func prewarmAllSeasons() async {
+        for season in seasons where season.id != selectedSeasonID {
+            if Task.isCancelled { return }
+            await viewModel.loadEpisodes(for: season.id)
+            await warmSeason(season.id)
+            await Task.yield()
+        }
+    }
+
+    /// Makes a season's episode thumbnails render with **no gray flash** when its
+    /// rail appears, by guaranteeing each card can seed its image *synchronously*
+    /// from the decoded cache on first frame.
+    ///
+    /// Two episode shapes exist:
+    ///   • Episodes the server has an image for already expose a seedable candidate
+    ///     URL (`posterURL`/`backdropURL`); we just decode it into the cache.
+    ///   • Anime (and other) episodes the server has *no* image for would otherwise
+    ///     get their still from the asynchronous ``ArtworkRouter`` fallback — a URL
+    ///     that is resolved lazily and therefore can **never** be seeded
+    ///     synchronously, which is the root of the persistent one-frame gray flash.
+    ///     For those we resolve the still here (the real per-episode still, else the
+    ///     series hero), decode it, and **inject it as the episode's `posterURL`**
+    ///     so it becomes a seedable candidate. The enriched episodes are handed back
+    ///     to the view model so the rail re-renders seeding the now-decoded image.
+    private func warmSeason(_ seasonID: String) async {
+        guard let episodes = viewModel.episodes(for: seasonID) else { return }
+        var resolved = episodes
+        var changed = false
+        var heroResolved = false
+        var heroURL: URL?
+        for index in resolved.indices {
+            if Task.isCancelled { return }
+            let episode = resolved[index]
+            if let url = episode.artworkCandidates(for: .landscape).first {
+                #if canImport(UIKit)
+                await ArtworkImageCache.shared.image(for: url)
+                #endif
+                continue
+            }
+            guard episode.kind == .episode else { continue }
+            // No server image: resolve a real still, falling back to the series
+            // hero (resolved once and reused) so every episode is at least covered.
+            var still = await ArtworkRouter.shared.artworkURL(.thumbnail, for: episode)
+            if still == nil {
+                if !heroResolved {
+                    heroURL = await ArtworkRouter.shared.artworkURL(.hero, for: series)
+                    heroResolved = true
+                }
+                still = heroURL ?? series.fallbackArtworkURL
+            }
+            guard let still else { continue }
+            #if canImport(UIKit)
+            await ArtworkImageCache.shared.image(for: still)
+            #endif
+            resolved[index].posterURL = still
+            changed = true
+        }
+        if changed {
+            viewModel.setEpisodes(resolved, for: seasonID)
+        }
+    }
+
+    /// Decodes each episode's first displayed landscape candidate (its server
+    /// image) into the shared synchronous image cache. Used for the loose-episode
+    /// case where there is no season id to enrich.
+    private func warmPrimaryThumbnails(for episodes: [MediaItem]) {
+        #if canImport(UIKit)
+        for episode in episodes {
+            guard let url = episode.artworkCandidates(for: .landscape).first else { continue }
+            ArtworkImageCache.shared.prefetch(url)
+        }
+        #endif
     }
 
     /// Episodes the rail should show: the selected season's loaded episodes, or
@@ -400,15 +487,26 @@ struct SeriesDetailView: View {
         }
     }
 
-    /// Adds the owning series' TMDb id to each episode under `SeriesTmdb` once,
-    /// keeping per-episode artwork fallback fully functional without body-time
-    /// remapping.
-    private static func stampSeriesTMDb(into episodes: [MediaItem], seriesTMDbID: String?) -> [MediaItem] {
-        guard let seriesTMDbID, !seriesTMDbID.isEmpty else { return episodes }
+    /// Adds the owning series' TMDb id to each episode under `SeriesTmdb`, plus the
+    /// series' anime ids and an "Anime" genre when the show is anime, once — keeping
+    /// per-episode artwork fallback (including the keyless AniList banner for anime)
+    /// fully functional without body-time remapping.
+    private static func stampSeriesTMDb(into episodes: [MediaItem], series: MediaItem) -> [MediaItem] {
+        let seriesTMDbID = series.providerIDs["Tmdb"]
+        let animeIDs = series.providerIDs.filter { ContentClassifier.isAnimeProviderIDKey($0.key) }
+        let isAnime = ContentClassifier.isAnime(series)
+        let hasTMDb = (seriesTMDbID?.isEmpty == false)
+        guard hasTMDb || isAnime || !animeIDs.isEmpty else { return episodes }
         return episodes.map { episode in
             var copy = episode
-            if copy.providerIDs["SeriesTmdb"] == nil {
+            if let seriesTMDbID, !seriesTMDbID.isEmpty, copy.providerIDs["SeriesTmdb"] == nil {
                 copy.providerIDs["SeriesTmdb"] = seriesTMDbID
+            }
+            for (key, value) in animeIDs where copy.providerIDs[key] == nil {
+                copy.providerIDs[key] = value
+            }
+            if isAnime, !copy.genres.contains(where: { $0.lowercased().contains("anime") }) {
+                copy.genres.append("Anime")
             }
             return copy
         }

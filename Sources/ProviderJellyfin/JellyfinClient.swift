@@ -539,6 +539,24 @@ public struct JellyfinClient: Sendable {
         return components.url
     }
 
+    /// Builds an absolute profile-image URL for a Jellyfin user
+    /// (`/Users/{id}/Images/Primary`). We attach `api_key` when available so the
+    /// image loads even on servers that require auth for user avatars.
+    public func userAvatarURL(userID: String, maxWidth: Int?, token: String?) -> URL? {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/Users/\(userID)/Images/Primary"
+        var queryItems: [URLQueryItem] = []
+        if let maxWidth {
+            queryItems.append(URLQueryItem(name: "maxWidth", value: String(maxWidth)))
+        }
+        if let token, !token.isEmpty {
+            queryItems.append(URLQueryItem(name: "api_key", value: token))
+        }
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        return components.url
+    }
+
     /// Absolute URL for one trickplay tile image
     /// (`GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`). The endpoint
     /// requires auth, so we embed the token as `api_key` because image loaders

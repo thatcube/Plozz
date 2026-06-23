@@ -31,7 +31,7 @@ struct DetailExtrasView: View {
                     StudiosRow(studios: item.studios)
                 }
                 if !item.tags.isEmpty {
-                    InfoChipsRow(title: "Tags", values: item.tags, leadingInset: leadingInset)
+                    InfoChipsRow(title: "Tags", values: Array(item.tags.prefix(40)), leadingInset: leadingInset)
                 }
             }
         }
@@ -352,8 +352,21 @@ private struct FlowLayout: Layout {
     var spacing: CGFloat = 12
     var lineSpacing: CGFloat = 12
 
+    /// Finite width to wrap at when the layout is proposed an unbounded width
+    /// (which can otherwise make `sizeThatFits` return the summed width of *every*
+    /// chip on a single row — hundreds of tags then blow the page far past the
+    /// viewport and shove the whole detail page sideways).
+    private static var fallbackWidth: CGFloat {
+        #if canImport(UIKit)
+        return UIScreen.main.bounds.width
+        #else
+        return 1920
+        #endif
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
-        let maxWidth = proposal.width ?? .infinity
+        let proposed = proposal.width
+        let maxWidth: CGFloat = (proposed != nil && proposed!.isFinite && proposed! > 0) ? proposed! : Self.fallbackWidth
         var rows: [[CGSize]] = [[]]
         var x: CGFloat = 0
         for subview in subviews {
@@ -369,7 +382,7 @@ private struct FlowLayout: Layout {
             let rowHeight = row.map(\.height).max() ?? 0
             return acc + rowHeight + lineSpacing
         } - (rows.isEmpty ? 0 : lineSpacing)
-        return CGSize(width: maxWidth == .infinity ? x : maxWidth, height: max(0, height))
+        return CGSize(width: maxWidth, height: max(0, height))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {

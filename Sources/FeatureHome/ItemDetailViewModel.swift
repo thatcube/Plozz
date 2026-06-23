@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import CoreModels
+import MetadataKit
 import RatingsService
 
 /// Loads full detail for an item plus its children (episodes/seasons), and
@@ -29,6 +30,14 @@ public final class ItemDetailViewModel {
     /// under `SeriesTmdb` once at fetch time so episode rails don't re-map every
     /// episode on every focus movement.
     private var seriesTMDbID: String?
+    /// When this detail is a series, the anime provider-ids (AniList/AniDB/MAL/…)
+    /// and an "Anime" marker propagated onto its episodes so each episode — and
+    /// the series-level fallback synthesized from it — classifies as anime and can
+    /// resolve the keyless AniList banner. Episodes themselves rarely carry the
+    /// show's anime ids/genre, so without this an anime episode with no still gets
+    /// no thumbnail at all.
+    private var seriesAnimeIDs: [String: String] = [:]
+    private var seriesIsAnime = false
 
     private let provider: any MediaProvider
     private let itemID: String
@@ -65,7 +74,7 @@ public final class ItemDetailViewModel {
         state = .loading
         do {
             let item = try await provider.item(id: itemID)
-            seriesTMDbID = item.kind == .series ? item.providerIDs["Tmdb"] : nil
+            captureSeriesContext(from: item)
             // Series/seasons have children to list; leaf items don't.
             let children: [MediaItem]
             switch item.kind {
@@ -136,7 +145,7 @@ public final class ItemDetailViewModel {
     public func reload() async {
         guard case .loaded = state else { await load(); return }
         guard let item = try? await provider.item(id: itemID) else { return }
-        seriesTMDbID = item.kind == .series ? item.providerIDs["Tmdb"] : nil
+        captureSeriesContext(from: item)
         let children: [MediaItem]
         switch item.kind {
         case .series, .season, .folder, .collection:
@@ -167,6 +176,16 @@ public final class ItemDetailViewModel {
         seasonEpisodes[seasonID] = stampSeriesTMDb(into: episodes.map(tagged))
     }
 
+    /// Replaces the cached episodes for a season after the view has enriched them
+    /// — specifically, after injecting a resolved still URL into episodes the
+    /// server has no image for, so the rail re-renders seeding a synchronously
+    /// available thumbnail (no gray-placeholder flash). The ids and order are
+    /// unchanged, so SwiftUI updates artwork in place without disturbing focus.
+    public func setEpisodes(_ episodes: [MediaItem], for seasonID: String) {
+        guard seasonEpisodes[seasonID] != nil else { return }
+        seasonEpisodes[seasonID] = episodes
+    }
+
     /// Stamps an item with this detail's owning account (if any) so navigation
     /// keeps routing to the right provider.
     private func tagged(_ item: MediaItem) -> MediaItem {
@@ -174,15 +193,39 @@ public final class ItemDetailViewModel {
         return item.taggingSource(sourceAccountID)
     }
 
-    /// Ensures every episode carries the parent series' TMDb id under
-    /// `SeriesTmdb`. This is required for robust anime thumbnail/logo fallback and
-    /// is done here once per fetch to avoid per-focus remapping in the view layer.
+    /// Captures the series-level context (TMDb id + anime ids/genre) used to stamp
+    /// episodes as they load. Cleared for non-series details.
+    private func captureSeriesContext(from item: MediaItem) {
+        guard item.kind == .series else {
+            seriesTMDbID = nil
+            seriesAnimeIDs = [:]
+            seriesIsAnime = false
+            return
+        }
+        seriesTMDbID = item.providerIDs["Tmdb"]
+        seriesAnimeIDs = item.providerIDs.filter { ContentClassifier.isAnimeProviderIDKey($0.key) }
+        seriesIsAnime = ContentClassifier.isAnime(item)
+    }
+
+    /// Ensures every episode carries the parent series' TMDb id under `SeriesTmdb`,
+    /// plus the series' anime ids and an "Anime" genre when the show is anime. This
+    /// is required for robust anime thumbnail/logo fallback (episodes rarely carry
+    /// the show's anime ids/genre, so the series-banner fallback would otherwise
+    /// misclassify them as non-anime and show nothing). Done here once per fetch to
+    /// avoid per-focus remapping in the view layer.
     private func stampSeriesTMDb(into episodes: [MediaItem]) -> [MediaItem] {
-        guard let seriesTMDbID, !seriesTMDbID.isEmpty else { return episodes }
+        let hasTMDb = (seriesTMDbID?.isEmpty == false)
+        guard hasTMDb || seriesIsAnime || !seriesAnimeIDs.isEmpty else { return episodes }
         return episodes.map { episode in
             var copy = episode
-            if copy.providerIDs["SeriesTmdb"] == nil {
+            if let seriesTMDbID, !seriesTMDbID.isEmpty, copy.providerIDs["SeriesTmdb"] == nil {
                 copy.providerIDs["SeriesTmdb"] = seriesTMDbID
+            }
+            for (key, value) in seriesAnimeIDs where copy.providerIDs[key] == nil {
+                copy.providerIDs[key] = value
+            }
+            if seriesIsAnime, !copy.genres.contains(where: { $0.lowercased().contains("anime") }) {
+                copy.genres.append("Anime")
             }
             return copy
         }

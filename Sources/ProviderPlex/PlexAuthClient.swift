@@ -27,15 +27,18 @@ public struct PlexAuthClient: Sendable {
 
     private let deviceProfile: PlexDeviceProfile
     private let http: HTTPClient
+    private let probeHTTP: HTTPClient
     private let baseURL: URL
 
     public init(
         deviceProfile: PlexDeviceProfile,
         http: HTTPClient = URLSessionHTTPClient(),
+        probeHTTP: HTTPClient = URLSessionHTTPClient(session: .plozzDiscovery),
         baseURL: URL = PlexAuthClient.plexTVBaseURL
     ) {
         self.deviceProfile = deviceProfile
         self.http = http
+        self.probeHTTP = probeHTTP
         self.baseURL = baseURL
     }
 
@@ -68,12 +71,15 @@ public struct PlexAuthClient: Sendable {
     // MARK: Account + servers
 
     /// `GET /api/v2/user` — the signed-in account identity.
-    public func user(authToken: String) async throws -> (id: String, userName: String) {
+    public func user(authToken: String) async throws -> (id: String, userName: String, avatarURL: URL?) {
         let endpoint = Endpoint(path: "/api/v2/user", headers: deviceProfile.headers(token: authToken))
         let dto = try await http.decode(PlexUserDTO.self, from: endpoint, baseURL: baseURL)
         let id = dto.uuid ?? dto.id.map(String.init) ?? "plex-user"
         let name = dto.title ?? dto.username ?? "Plex"
-        return (id, name)
+        let avatarURL = dto.thumb.flatMap { thumb in
+            URL(string: thumb, relativeTo: baseURL)?.absoluteURL
+        }
+        return (id, name, avatarURL)
     }
 
     /// `GET /api/v2/resources?includeHttps=1` — the servers this account can
@@ -88,19 +94,85 @@ public struct PlexAuthClient: Sendable {
             headers: deviceProfile.headers(token: authToken)
         )
         let resources = try await http.decode([PlexResourceDTO].self, from: endpoint, baseURL: baseURL)
-        return resources.compactMap { resource in
-            guard resource.provides?.contains("server") == true,
-                  let id = resource.clientIdentifier,
-                  let baseURL = PlexConnectionSelector.best(from: resource.connections ?? []) else {
-                return nil
+        let servers = resources.filter { $0.provides?.contains("server") == true }
+
+        return await withTaskGroup(of: PlexServerCandidate?.self) { group in
+            for resource in servers {
+                group.addTask {
+                    await self.resolveServer(resource, authToken: authToken)
+                }
             }
-            return PlexServerCandidate(
-                id: id,
-                name: resource.name ?? baseURL.host ?? "Plex Server",
-                baseURL: baseURL,
-                accessToken: resource.accessToken ?? authToken,
-                isOwned: resource.owned ?? false
-            )
+            var candidates: [PlexServerCandidate] = []
+            for await candidate in group {
+                if let candidate { candidates.append(candidate) }
+            }
+            return candidates
+        }
+    }
+
+    /// The reachable-ordered connection URLs for one specific server the account
+    /// can reach, identified by its stable `clientIdentifier`. Used to refresh a
+    /// saved server's connection list when its previously-good URL has gone
+    /// unreachable (e.g. the server changed networks). Returns `[]` if the server
+    /// is no longer listed for the account.
+    public func connectionURLs(forServerID serverID: String, authToken: String) async throws -> [URL] {
+        try await servers(authToken: authToken)
+            .first { $0.id == serverID }?
+            .connectionURLs ?? []
+    }
+
+    /// Resolves a single server resource to its best *reachable* connection.
+    ///
+    /// Plex lists every address the server is bound to — including ones a TV on a
+    /// different network can't reach (e.g. a Docker bridge gateway advertised as
+    /// "local"). We probe the ranked connections and keep the first that answers,
+    /// falling back to the top-ranked URL if none respond so the server still
+    /// appears (the UI can then surface "unreachable" instead of silently
+    /// dropping it).
+    private func resolveServer(_ resource: PlexResourceDTO, authToken: String) async -> PlexServerCandidate? {
+        guard let id = resource.clientIdentifier else { return nil }
+        let ranked = PlexConnectionSelector.ranked(from: resource.connections ?? [])
+        guard !ranked.isEmpty else { return nil }
+        let token = resource.accessToken ?? authToken
+        let reachable = await firstReachable(among: ranked, token: token)
+        // Order the persisted candidate list so the connection that answered the
+        // probe is first (becomes `baseURL`), with the rest kept as fallbacks the
+        // client can self-heal onto later.
+        let ordered: [URL]
+        if let reachable {
+            ordered = [reachable] + ranked.filter { $0 != reachable }
+        } else {
+            ordered = ranked
+        }
+        return PlexServerCandidate(
+            id: id,
+            name: resource.name ?? ordered.first?.host ?? "Plex Server",
+            connectionURLs: ordered,
+            accessToken: token,
+            isOwned: resource.owned ?? false
+        )
+    }
+
+    /// Returns the most-preferred connection that answers a lightweight
+    /// `/identity` probe, or `nil` if none respond within the probe window.
+    private func firstReachable(among urls: [URL], token: String) async -> URL? {
+        await withTaskGroup(of: (Int, Bool).self) { group in
+            for (index, url) in urls.enumerated() {
+                group.addTask {
+                    let endpoint = Endpoint(path: "/identity", headers: self.deviceProfile.headers(token: token))
+                    do {
+                        _ = try await self.probeHTTP.send(endpoint, baseURL: url)
+                        return (index, true)
+                    } catch {
+                        return (index, false)
+                    }
+                }
+            }
+            var bestReachable: Int?
+            for await (index, reachable) in group where reachable {
+                bestReachable = min(bestReachable ?? index, index)
+            }
+            return bestReachable.map { urls[$0] }
         }
     }
 

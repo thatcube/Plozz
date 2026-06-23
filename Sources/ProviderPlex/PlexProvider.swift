@@ -15,16 +15,48 @@ public struct PlexProvider: MediaProvider {
     public init(
         session: UserSession,
         http: HTTPClient = URLSessionHTTPClient(),
-        hybridEngineEnabled: Bool = false
+        hybridEngineEnabled: Bool = false,
+        connectionRefresh: PlexConnectionResolver.Refresh? = nil,
+        probe: HTTPClient = URLSessionHTTPClient(session: .plozzDiscovery)
     ) {
         self.session = session
+        let deviceProfile = PlexDeviceProfile(clientIdentifier: session.deviceID)
+        // Probe the persisted connection list (or the single saved URL) and stay
+        // on whichever is reachable. With only one candidate and no refresh this
+        // is a no-op — behaviour matches a fixed URL.
+        let candidates = session.server.connectionURLs?.isEmpty == false
+            ? session.server.connectionURLs!
+            : [session.server.baseURL]
+        let resolver = PlexConnectionResolver(
+            candidates: candidates,
+            deviceProfile: deviceProfile,
+            token: session.accessToken,
+            probe: probe,
+            refresh: connectionRefresh
+        )
         self.client = PlexClient(
-            baseURL: session.server.baseURL,
-            deviceProfile: PlexDeviceProfile(clientIdentifier: session.deviceID),
+            resolver: resolver,
+            deviceProfile: deviceProfile,
             token: session.accessToken,
             http: http,
             hybridEngineEnabled: hybridEngineEnabled
         )
+    }
+
+    /// Builds the plex.tv connection-refresh closure for a session: when every
+    /// connection Plozz knows about for this server is unreachable, re-fetch the
+    /// account's current (reachable-ordered) connection list from plex.tv. Lets a
+    /// server that has changed networks since the account was added heal itself
+    /// without the user re-adding it. Returns `[]` on any failure so the resolver
+    /// falls back gracefully.
+    public static func connectionRefresh(for session: UserSession) -> PlexConnectionResolver.Refresh {
+        let serverID = session.server.id
+        let token = session.accessToken
+        let deviceID = session.deviceID
+        return {
+            let client = PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID))
+            return (try? await client.connectionURLs(forServerID: serverID, authToken: token)) ?? []
+        }
     }
 
     // MARK: Browsing
@@ -290,9 +322,47 @@ public struct PlexProvider: MediaProvider {
             backdropURL: client.imageURL(path: dto.art, maxWidth: 1280),
             heroBackdropURL: client.imageURL(path: dto.art, maxWidth: 3840),
             ratings: Self.ratings(from: dto),
-            providerIDs: [:],
+            providerIDs: Self.providerIDs(from: dto),
             mediaInfo: Self.sourceMetadata(from: dto)
         )
+    }
+
+    /// Maps Plex `Guid` values (`imdb://...`, `tmdb://...`, …) into the shared
+    /// `MediaItem.providerIDs` shape used by artwork and ratings enrichment. The
+    /// keys mirror Jellyfin's casing (`Imdb`, `Tmdb`, `AniList`, …) so the
+    /// content classifier and `ArtworkRouter` resolve Plex and Jellyfin items the
+    /// same way.
+    static func providerIDs(from dto: PlexMetadata) -> [String: String] {
+        var ids: [String: String] = [:]
+        for guid in dto.Guid ?? [] {
+            guard let raw = guid.id?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let schemeRange = raw.range(of: "://")
+            else { continue }
+            let scheme = raw[..<schemeRange.lowerBound].lowercased()
+            let value = String(raw[schemeRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            switch scheme {
+            case "imdb":
+                if ids["Imdb"] == nil { ids["Imdb"] = value }
+            case "tmdb", "themoviedb":
+                if ids["Tmdb"] == nil { ids["Tmdb"] = value }
+            case "tvdb", "thetvdb":
+                if ids["Tvdb"] == nil { ids["Tvdb"] = value }
+            case "tvmaze":
+                if ids["Tvmaze"] == nil { ids["Tvmaze"] = value }
+            case "anidb":
+                if ids["AniDB"] == nil { ids["AniDB"] = value }
+            case "anilist":
+                if ids["AniList"] == nil { ids["AniList"] = value }
+            case "myanimelist", "mal":
+                if ids["Mal"] == nil { ids["Mal"] = value }
+            case "mbid":
+                if ids["MusicBrainzRelease"] == nil { ids["MusicBrainzRelease"] = value }
+            default:
+                continue
+            }
+        }
+        return ids
     }
 
     /// Builds the playable source's technical metadata from an item's first

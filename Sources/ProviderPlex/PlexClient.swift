@@ -8,7 +8,10 @@ import CoreNetworking
 /// in DTOs; mapping to `CoreModels` happens in `PlexProvider`. Mirrors the role
 /// of `JellyfinClient` for the Plex backend.
 public struct PlexClient: Sendable {
-    public let baseURL: URL
+    /// Resolves (and self-heals) the working server base URL. Browsing requests
+    /// go through it so a saved-but-now-unreachable connection transparently
+    /// fails over to a reachable one.
+    private let resolver: PlexConnectionResolver
     private let deviceProfile: PlexDeviceProfile
     private let token: String
     private let http: HTTPClient
@@ -28,6 +31,13 @@ public struct PlexClient: Sendable {
     /// router sends to the hybrid engine.
     private let hybridEngineEnabled: Bool
 
+    /// The server base URL currently in use (best-known reachable connection).
+    /// Resolved lazily on the first request; this is the synchronous best guess
+    /// used by URL builders after a request has settled it.
+    public var baseURL: URL { resolver.current }
+
+    /// Fixed-URL initializer: the client always talks to `baseURL` (no probing).
+    /// Used for manually-entered hosts and unit tests.
     public init(
         baseURL: URL,
         deviceProfile: PlexDeviceProfile,
@@ -36,7 +46,27 @@ public struct PlexClient: Sendable {
         capabilities: MediaCapabilities = .detected(),
         hybridEngineEnabled: Bool = false
     ) {
-        self.baseURL = baseURL
+        self.init(
+            resolver: PlexConnectionResolver(candidates: [baseURL], deviceProfile: deviceProfile, token: token),
+            deviceProfile: deviceProfile,
+            token: token,
+            http: http,
+            capabilities: capabilities,
+            hybridEngineEnabled: hybridEngineEnabled
+        )
+    }
+
+    /// Self-healing initializer: `resolver` probes its candidate connections and
+    /// keeps the client on whichever one is reachable.
+    public init(
+        resolver: PlexConnectionResolver,
+        deviceProfile: PlexDeviceProfile,
+        token: String,
+        http: HTTPClient = URLSessionHTTPClient(),
+        capabilities: MediaCapabilities = .detected(),
+        hybridEngineEnabled: Bool = false
+    ) {
+        self.resolver = resolver
         self.deviceProfile = deviceProfile
         self.token = token
         self.http = http
@@ -46,12 +76,39 @@ public struct PlexClient: Sendable {
 
     private var headers: [String: String] { deviceProfile.headers(token: token) }
 
+    // MARK: Request plumbing
+
+    /// Sends `endpoint` against the resolved base URL, transparently re-resolving
+    /// and retrying once if the chosen connection is unreachable (self-heal).
+    private func send(_ endpoint: Endpoint) async throws -> (Data, HTTPURLResponse) {
+        let base = await resolver.resolved()
+        do {
+            return try await http.send(endpoint, baseURL: base)
+        } catch AppError.serverUnreachable {
+            resolver.reportFailure(base)
+            let retry = await resolver.resolved()
+            guard retry != base else { throw AppError.serverUnreachable }
+            return try await http.send(endpoint, baseURL: retry)
+        }
+    }
+
+    /// Sends and decodes JSON, with the same self-healing retry as `send`.
+    private func decode<T: Decodable>(_ type: T.Type, _ endpoint: Endpoint) async throws -> T {
+        let (data, _) = try await send(endpoint)
+        do {
+            return try JSONDecoder.plozz.decode(T.self, from: data)
+        } catch {
+            PlozzLog.networking.error("Decoding \(String(describing: T.self)) failed")
+            throw AppError.decoding
+        }
+    }
+
     // MARK: Browsing
 
     /// `GET /library/sections` — top-level libraries.
     func sections() async throws -> [PlexDirectory] {
         let endpoint = Endpoint(path: "/library/sections", headers: headers)
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Directory ?? []
     }
 
@@ -62,7 +119,7 @@ public struct PlexClient: Sendable {
             queryItems: containerQuery(start: 0, size: limit),
             headers: headers
         )
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
 
@@ -73,14 +130,18 @@ public struct PlexClient: Sendable {
             queryItems: containerQuery(start: 0, size: limit),
             headers: headers
         )
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
 
     /// `GET /library/metadata/{ratingKey}` — full detail for one item.
     func metadata(ratingKey: String) async throws -> PlexMetadata {
-        let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)", headers: headers)
-        let container = try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL).MediaContainer
+        let endpoint = Endpoint(
+            path: "/library/metadata/\(ratingKey)",
+            queryItems: [URLQueryItem(name: "includeGuids", value: "1")],
+            headers: headers
+        )
+        let container = try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
         guard let item = container.Metadata?.first else { throw AppError.notFound }
         return item
     }
@@ -89,7 +150,7 @@ public struct PlexClient: Sendable {
     /// episodes of a season, …
     func children(ratingKey: String) async throws -> [PlexMetadata] {
         let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)/children", headers: headers)
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
 
@@ -99,7 +160,7 @@ public struct PlexClient: Sendable {
     /// path. Callers filter by `subtype` to keep only trailers.
     func extras(ratingKey: String) async throws -> [PlexMetadata] {
         let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)/extras", headers: headers)
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
 
@@ -117,7 +178,7 @@ public struct PlexClient: Sendable {
         }
         query.append(URLQueryItem(name: "sort", value: "titleSort"))
         let endpoint = Endpoint(path: "/library/sections/\(sectionID)/all", queryItems: query, headers: headers)
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL).MediaContainer
+        return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
     }
 
     /// `GET /search?query=…` — global server search across libraries. Returns a
@@ -126,7 +187,7 @@ public struct PlexClient: Sendable {
         var items = containerQuery(start: 0, size: limit)
         items.append(URLQueryItem(name: "query", value: query))
         let endpoint = Endpoint(path: "/search", queryItems: items, headers: headers)
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
 
@@ -145,7 +206,7 @@ public struct PlexClient: Sendable {
             query.append(URLQueryItem(name: "duration", value: String(durationMs)))
         }
         let endpoint = Endpoint(path: "/:/timeline", queryItems: query, headers: headers)
-        _ = try await http.send(endpoint, baseURL: baseURL)
+        _ = try await send(endpoint)
     }
 
     /// `GET /:/scrobble` (watched) or `GET /:/unscrobble` (unwatched) — toggles
@@ -161,7 +222,7 @@ public struct PlexClient: Sendable {
             ],
             headers: headers
         )
-        _ = try await http.send(endpoint, baseURL: baseURL)
+        _ = try await send(endpoint)
     }
 
     // MARK: URLs
@@ -449,7 +510,12 @@ public struct PlexClient: Sendable {
     private func containerQuery(start: Int, size: Int) -> [URLQueryItem] {
         [
             URLQueryItem(name: "X-Plex-Container-Start", value: String(start)),
-            URLQueryItem(name: "X-Plex-Container-Size", value: String(size))
+            URLQueryItem(name: "X-Plex-Container-Size", value: String(size)),
+            // Ask Plex to inline each item's external `Guid` array (imdb://,
+            // tmdb://, anidb://, …) on list responses too — without this flag
+            // list endpoints omit it, so rail/grid items would reach the
+            // metadata router with no external ids to match (or detect anime) by.
+            URLQueryItem(name: "includeGuids", value: "1")
         ]
     }
 

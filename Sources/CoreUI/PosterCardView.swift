@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import MetadataKit
 
 /// A focusable poster/landscape card for a `MediaItem`, with artwork, a watched
 /// progress bar, and title/subtitle. The standard building block of Home rows
@@ -212,24 +213,48 @@ public struct PosterCardView: View {
     private var asyncArtworkFallback: (@Sendable () async -> URL?)? {
         if style == .poster { return tmdbPosterFallback }
         if item.kind == .episode,
-           let season = item.seasonNumber,
-           let episode = item.episodeNumber {
-            let seriesTitle = item.parentTitle ?? item.title
-            let seriesID = item.providerIDs["SeriesTmdb"]
-            let backdropFallback = tmdbBackdropFallback
+           item.seasonNumber != nil,
+           item.episodeNumber != nil {
+            let snapshot = item
+            let seriesItem = Self.seriesArtworkItem(for: item)
+            let serverSeriesBackdrop = item.fallbackArtworkURL
             return {
-                if let still = await TMDbArtworkResolver.shared.episodeStillURL(
-                    seriesTitle: seriesTitle,
-                    seriesTmdbID: seriesID,
-                    season: season,
-                    episode: episode
-                ) {
+                // 1) Real per-episode still first (TMDb stills, then TVmaze for
+                //    western TV). Anime via Shoko/AniDB usually ship none.
+                if let still = await ArtworkRouter.shared.artworkURL(.thumbnail, for: snapshot) {
                     return still
                 }
-                return await backdropFallback?()
+                // 2) Series-level wide hero so an episode card is never blank: a
+                //    high-res TMDb backdrop when configured, otherwise the keyless
+                //    AniList banner for anime. The same banner on every episode of
+                //    a show is acceptable; a blank card is not.
+                if let seriesHero = await ArtworkRouter.shared.artworkURL(.hero, for: seriesItem) {
+                    return seriesHero
+                }
+                // 3) Last resort: the server's own series backdrop, if present.
+                return serverSeriesBackdrop
             }
         }
         return tmdbBackdropFallback
+    }
+
+    /// A lightweight *series-level* item synthesized from an episode, used only to
+    /// resolve a wide series hero (TMDb backdrop or the keyless AniList banner) as
+    /// a guaranteed non-blank fallback for episode cards. Carries the episode's
+    /// normalized provider IDs, title, genres and tags so anime detection and
+    /// cross-provider lookups stay accurate at the series level.
+    private static func seriesArtworkItem(for episode: MediaItem) -> MediaItem {
+        MediaItem(
+            id: episode.seriesID ?? episode.id,
+            title: episode.parentTitle ?? episode.title,
+            kind: .series,
+            productionYear: episode.productionYear,
+            genres: episode.genres,
+            tags: episode.tags,
+            seriesID: episode.seriesID,
+            fallbackArtworkURL: episode.fallbackArtworkURL,
+            providerIDs: episode.providerIDs
+        )
     }
 
     /// Poster cards reject any source image wider than ~0.9:1 (a real poster is
@@ -244,29 +269,15 @@ public struct PosterCardView: View {
     /// by the *series* title). Inert when no TMDb token is configured.
     private var tmdbPosterFallback: (@Sendable () async -> URL?)? {
         guard style == .poster else { return nil }
-        let isTV: Bool
-        let queryTitle: String
         switch item.kind {
-        case .movie, .video:
-            isTV = false
-            queryTitle = item.title
-        case .series, .season:
-            isTV = true
-            queryTitle = item.parentTitle ?? item.title
-        case .episode:
-            isTV = true
-            // Use the series title (never the episode name) for the show poster.
-            queryTitle = item.parentTitle ?? item.title
         case .folder, .collection, .unknown:
             return nil
+        default:
+            break
         }
-        let year = item.productionYear
+        let snapshot = item
         return {
-            await TMDbArtworkResolver.shared.posterURL(
-                title: queryTitle,
-                year: isTV ? nil : year,
-                isTV: isTV
-            )
+            await ArtworkRouter.shared.artworkURL(.poster, for: snapshot)
         }
     }
 
@@ -276,38 +287,15 @@ public struct PosterCardView: View {
     /// title; movies/series by their own. Inert without a TMDb token.
     private var tmdbBackdropFallback: (@Sendable () async -> URL?)? {
         guard style == .landscape else { return nil }
-        let isTV: Bool
-        let queryTitle: String
-        let tmdbID: String?
         switch item.kind {
-        case .movie, .video:
-            isTV = false
-            queryTitle = item.title
-            tmdbID = item.providerIDs["Tmdb"]
-        case .series:
-            isTV = true
-            queryTitle = item.title
-            tmdbID = item.providerIDs["Tmdb"]
-        case .season, .episode:
-            isTV = true
-            queryTitle = item.parentTitle ?? item.title
-            // An episode/season carries its *own* TMDb id (not the show's), which
-            // is useless for a series backdrop. The series page stamps the show's
-            // id under "SeriesTmdb" so we can resolve the same backdrop the hero
-            // uses by id (a plain title search often misses anime titles).
-            tmdbID = item.providerIDs["SeriesTmdb"]
         case .folder, .collection, .unknown:
             return nil
+        default:
+            break
         }
-        guard !queryTitle.isEmpty || (tmdbID?.isEmpty == false) else { return nil }
-        let year = isTV ? nil : item.productionYear
+        let snapshot = item
         return {
-            await TMDbArtworkResolver.shared.backdropURL(
-                title: queryTitle,
-                year: year,
-                isTV: isTV,
-                tmdbID: tmdbID
-            )
+            await ArtworkRouter.shared.artworkURL(.hero, for: snapshot)
         }
     }
 

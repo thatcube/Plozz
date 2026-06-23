@@ -101,6 +101,11 @@ public struct ItemDetailView: View {
                     DetailExtrasView(item: detail.item, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenPadding)
+                // Cap the whole scroll column to the proposed (safe viewport)
+                // width so an over-wide row can't inflate the column past the
+                // viewport and pan the page sideways. The hero still bleeds
+                // edge-to-edge via its own `.ignoresSafeArea`.
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Pin to the top on first load: the Play button is bottom-anchored in
             // the full-screen hero, so initial focus on it makes tvOS auto-scroll

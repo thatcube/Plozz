@@ -76,6 +76,8 @@ public struct ItemDetailView: View {
                     spoilerSettings: spoilerSettings,
                     playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
                     onPlay: isPlayable(detail.item) ? { onPlay(detail.item) } : nil,
+                    playProgress: isPlayable(detail.item) ? detail.item.resumeProgressFraction : nil,
+                    playRemainingText: isPlayable(detail.item) ? detail.item.resumeRemainingText : nil,
                     onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
                     fallbackTechnicalBadges: detail.children.representativeTechnicalBadges
                 )

@@ -25,7 +25,13 @@ struct DetailHeroView: View {
     /// (e.g. a season with no resolved episodes yet).
     let playTitle: String?
     let onPlay: (() -> Void)?
-    /// When non-`nil`, a secondary "Trailer" button is shown next to Play.
+    /// When provided (`0..<1`), the Play button shows a small progress bar of how
+    /// far the resume target has been watched.
+    var playProgress: Double? = nil
+    /// When provided, a small "… left" remaining-time line is shown inside the
+    /// Play button beneath its title.
+    var playRemainingText: String? = nil
+    /// When provided, a secondary "Trailer" button is shown next to Play.
     var onPlayTrailer: (() -> Void)? = nil
     /// Technical badges to show when the focused item carries none of its own —
     /// a series or season hero has no media file, so the parent derives a
@@ -185,11 +191,11 @@ struct DetailHeroView: View {
                         }
                     }
                     .padding(.top, 8)
-                    // Treat the action buttons as one focus section so pressing
-                    // "up" from anywhere in the season bar — even a season parked
-                    // far to the right — reliably lands here instead of being lost
-                    // because no button sits directly above. Keeps working as more
-                    // buttons (e.g. watchlist) are added beside Play.
+                    // Span the full width and make the action row one focus section.
+                    // Full width is what lets "up" from a season parked far to the
+                    // right reliably land here — a narrow section only aligns with
+                    // the left-most seasons. Keeps working as more buttons are added.
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .focusSection()
                 }
             }
@@ -204,18 +210,52 @@ struct DetailHeroView: View {
 
     /// The hero Play button. Extracted so the optional initial-focus binding can
     /// be applied to it conditionally (a `nil` binding leaves default focus
-    /// behaviour untouched).
+    /// behaviour untouched). Shows a "… left" remaining line and a thin progress
+    /// bar when the resume target has been partially watched.
     @ViewBuilder
     private func playButton(title: String, action: @escaping () -> Void) -> some View {
         let button = Button(action: action) {
-            Label(title, systemImage: "play.fill")
-                .frame(minWidth: 260)
+            HStack(spacing: 14) {
+                Image(systemName: "play.fill")
+                if let playRemainingText, playProgress != nil {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title)
+                        Text(playRemainingText)
+                            .font(.system(size: 18, weight: .medium))
+                            .opacity(0.75)
+                    }
+                } else {
+                    Text(title)
+                }
+            }
+            .frame(minWidth: 260)
+            .overlay(alignment: .bottom) { playProgressBar }
         }
         .buttonStyle(.borderedProminent)
         if let playButtonFocus {
             button.focused(playButtonFocus, equals: true)
         } else {
             button
+        }
+    }
+
+    /// A thin watched-progress bar pinned to the bottom of the Play button,
+    /// mirroring the Apple TV resume affordance. Hidden unless partially watched.
+    @ViewBuilder
+    private var playProgressBar: some View {
+        if let playProgress, playProgress > 0, playProgress < 1 {
+            GeometryReader { geo in
+                Capsule()
+                    .fill(.white.opacity(0.3))
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(.white)
+                            .frame(width: geo.size.width * playProgress)
+                    }
+            }
+            .frame(height: 5)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 10)
         }
     }
 

@@ -110,6 +110,8 @@ struct SeriesDetailView: View {
                     spoilerSettings: spoilerSettings,
                     playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                     onPlay: playTarget.map { target in { onPlay(target) } },
+                    playProgress: playTarget?.resumeProgressFraction,
+                    playRemainingText: playTarget?.resumeRemainingText,
                     onPlayTrailer: trailerButtonAction,
                     fallbackTechnicalBadges: representativeTechnicalBadges,
                     playButtonFocus: isTargetingEpisode ? $playFocused : nil

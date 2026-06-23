@@ -195,6 +195,18 @@ public extension MediaItem {
         return runtime.runtimeBadgeText
     }
 
+    /// In-progress fraction (`0..<1`) for a resumable item, or `nil` when it has
+    /// not been started or is already finished. Drives the detail Play button's
+    /// small progress bar.
+    var resumeProgressFraction: Double? { cardProgressFraction }
+
+    /// "… left"-style remaining-time text for an in-progress item, or `nil` when
+    /// it is not resumable. Shown beside the detail Play button.
+    var resumeRemainingText: String? {
+        guard let runtime, runtime > 0 else { return nil }
+        return remainingCardRuntimeText(for: runtime)
+    }
+
     /// The dotted metadata line components for the detail hero, in order:
     /// production year, formatted runtime, then up to `maxGenres` genres. The UI
     /// joins these with a `·` separator. Empty entries are omitted.

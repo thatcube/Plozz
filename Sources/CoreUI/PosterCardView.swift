@@ -177,26 +177,7 @@ public struct PosterCardView: View {
 
     /// Ordered list of real-image candidates to try before showing a placeholder.
     private var artworkCandidates: [URL] {
-        switch style {
-        case .poster:
-            // A poster grid always wants the vertical show/movie poster. For an
-            // episode that means the *series* poster, never the episode's own
-            // 16:9 still (which would render as a wide card).
-            if item.kind == .episode {
-                return [item.seriesPosterURL, item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
-            }
-            return [item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
-        case .landscape:
-            if item.kind == .episode {
-                // An episode's thumbnail is its own Primary (then Backdrop) image.
-                // We deliberately do NOT fall back to the series backdrop here —
-                // that paints the same image on every episode. Instead the async
-                // TMDb fallback supplies a real per-episode still (then the show
-                // backdrop) for sources like Shoko/AniDB that ship no episode art.
-                return [item.posterURL, item.backdropURL].compactMap { $0 }
-            }
-            return [item.backdropURL, item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
-        }
+        item.artworkCandidates(for: style)
     }
 
     @ViewBuilder
@@ -457,6 +438,34 @@ private extension View {
             .focusEffectDisabled()
             .onTapGesture(perform: action)
             .accessibilityAddTraits(.isButton)
+    }
+}
+
+public extension MediaItem {
+    /// Ordered real-image candidates a `PosterCardView` of `style` will try before
+    /// any async (TMDb) fallback. Rails use this to prefetch each card's artwork
+    /// into `ArtworkImageCache` ahead of scroll, so a card already has its decoded
+    /// thumbnail the moment it appears. Mirrors `PosterCardView.artworkCandidates`.
+    func artworkCandidates(for style: PosterCardView.Style) -> [URL] {
+        switch style {
+        case .poster:
+            // A poster grid always wants the vertical show/movie poster. For an
+            // episode that means the *series* poster, never the episode's own
+            // 16:9 still (which would render as a wide card).
+            if kind == .episode {
+                return [seriesPosterURL, posterURL, fallbackArtworkURL].compactMap { $0 }
+            }
+            return [posterURL, fallbackArtworkURL].compactMap { $0 }
+        case .landscape:
+            if kind == .episode {
+                // An episode's thumbnail is its own Primary (then Backdrop) image.
+                // The series backdrop is deliberately *not* a direct fallback (it
+                // would paint the same image on every episode); the async TMDb
+                // fallback supplies a real per-episode still instead.
+                return [posterURL, backdropURL].compactMap { $0 }
+            }
+            return [backdropURL, posterURL, fallbackArtworkURL].compactMap { $0 }
+        }
     }
 }
 

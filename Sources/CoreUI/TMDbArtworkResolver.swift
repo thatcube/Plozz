@@ -192,7 +192,14 @@ public actor TMDbArtworkResolver {
                         season: request.season,
                         episode: request.episode
                     ) {
+                        // Download *and decode* into the shared image cache so the
+                        // card seeds its still synchronously on appear (no gray
+                        // flash) rather than re-decoding from URLCache bytes.
+                        #if canImport(UIKit)
+                        await ArtworkImageCache.shared.image(for: url)
+                        #else
                         _ = try? await URLSession.shared.data(from: url)
+                        #endif
                     }
                 }
             }

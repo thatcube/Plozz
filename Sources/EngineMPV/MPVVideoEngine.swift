@@ -363,9 +363,19 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     // MARK: - Seeking
 
     public func seek(to seconds: TimeInterval) async {
+        await seek(to: seconds, kind: .exact)
+    }
+
+    public func seek(to seconds: TimeInterval, kind: VideoSeekKind) async {
         guard client.isAlive else { return }
         let clamped = max(0, seconds)
-        client.command(["seek", "\(clamped)", "absolute", "exact"])
+        // mpv's `keyframes` mode is dramatically faster than `exact` (a
+        // refdec-then-decode walk) and is exactly what we want for the
+        // intermediate frames of a rapid-skip burst: snap to the nearest
+        // keyframe NOW so the on-screen position obviously moves, and let
+        // the *final* (.exact) seek land precisely on release.
+        let mode = kind == .fast ? "keyframes" : "exact"
+        client.command(["seek", "\(clamped)", "absolute", mode])
         furthestObservedPosition = max(furthestObservedPosition, clamped)
     }
 
@@ -405,6 +415,48 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             }
         }
         return nil
+    }
+
+    // MARK: - Live tunables
+
+    /// mpv changes all four tunables live, with no reload, via single property
+    /// writes — exactly what the options menu needs for frame-accurate feedback.
+    public var capabilities: PlayerEngineCapabilities {
+        [.playbackSpeed, .audioDelay, .subtitleDelay, .dialogEnhance]
+    }
+
+    public func setPlaybackSpeed(_ rate: Double) {
+        guard client.isAlive else { return }
+        let clamped = max(0.25, min(4.0, rate))
+        client.setPropertyString("speed", String(format: "%.3f", clamped))
+    }
+
+    public func setAudioDelay(_ seconds: TimeInterval) {
+        guard client.isAlive else { return }
+        client.setPropertyString("audio-delay", String(format: "%.3f", seconds))
+    }
+
+    public func setSubtitleDelay(_ seconds: TimeInterval) {
+        guard client.isAlive else { return }
+        client.setPropertyString("sub-delay", String(format: "%.3f", seconds))
+    }
+
+    /// Toggles a labelled `dynaudnorm` audio filter that smooths the loudness
+    /// curve so dialog stays audible without the surround mix peaking. We use
+    /// the `@plozz-dialog` label so we can add/remove this exact filter without
+    /// trampling any user `af` chain. The filter is attached and detached
+    /// rather than tweaked so disabling it has zero CPU cost.
+    public func setDialogEnhanceEnabled(_ enabled: Bool) {
+        guard client.isAlive else { return }
+        if enabled {
+            // `dynaudnorm` is a built-in libavfilter filter shipped with our
+            // FFmpeg build. The parameters favour dialog: a longer window
+            // (g=31), moderate target peak (p=0.9), and gentle max gain (m=4)
+            // so explosions don't pump.
+            client.command(["af", "add", "@plozz-dialog:lavfi=[dynaudnorm=g=31:m=4:p=0.9]"])
+        } else {
+            client.command(["af", "remove", "@plozz-dialog"])
+        }
     }
 
     // MARK: - View

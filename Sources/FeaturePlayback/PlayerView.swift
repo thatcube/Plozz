@@ -44,16 +44,30 @@ public struct PlayerView: View {
                     engine: viewModel.videoEngine,
                     model: viewModel.controls,
                     actions: PlayerActions(
-                        seek: { target in Task { await viewModel.seek(to: target) } },
+                        seek: { target in viewModel.requestSeek(to: target) },
                         togglePlayPause: { viewModel.togglePlayPause() },
                         selectAudio: { viewModel.selectAudioOption(id: $0) },
                         selectSubtitle: { viewModel.selectSubtitleOption(id: $0) },
+                        setPlaybackSpeed: { viewModel.setPlaybackSpeed($0) },
+                        setAudioDelay: { viewModel.setAudioDelay($0) },
+                        setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
+                        setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
                         dismiss: { dismiss() }
                     ),
                     trickplay: viewModel.trickplay,
-                    themePalette: ThemePaletteBox(makeOverlay: { model in
-                        AnyView(PlayerControlsOverlay(model: model, palette: themePalette))
-                    })
+                    themePalette: ThemePaletteBox(
+                        makeOverlay: { model in
+                            AnyView(PlayerControlsOverlay(model: model, palette: themePalette))
+                        },
+                        makeOptionsMenu: { model, actions, onDismiss in
+                            AnyView(PlayerOptionsMenu(
+                                model: model,
+                                palette: themePalette,
+                                actions: actions,
+                                onDismiss: onDismiss
+                            ))
+                        }
+                    )
                 )
                 // Rebuild the host when the engine is swapped (cross-engine
                 // fallback) so it re-hosts the new engine's bare video surface.

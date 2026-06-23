@@ -98,13 +98,24 @@ public final class PlayerViewModel {
     private var selectedAudioTrackID: Int?
     private var selectedSubtitleTrackID: Int?
 
+    /// Seek-coordinator state. `latestSeekTarget` is the most-recently-requested
+    /// committed seek time; `seekTask` is the single in-flight loop that drains
+    /// it. Together they guarantee rapid presses ACCUMULATE and resolve to the
+    /// final target without overlapping engine seeks racing each other.
+    private var latestSeekTarget: TimeInterval?
+    private var seekTask: Task<Void, Never>?
+
+    /// Persisted player preferences (e.g. last-used playback speed).
+    private let preferencesStore: PlaybackPreferencesStoring
+
     public init(
         provider: any MediaProvider,
         itemID: String,
         captionSettings: CaptionSettings = .default,
         startPosition: TimeInterval? = nil,
         engineFactory: EngineFactory = .native,
-        capabilities: MediaCapabilities = .detected()
+        capabilities: MediaCapabilities = .detected(),
+        preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore()
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -112,8 +123,11 @@ public final class PlayerViewModel {
         self.startPositionOverride = startPosition
         self.engineFactory = engineFactory
         self.capabilities = capabilities
+        self.preferencesStore = preferencesStore
         self.engine = engineFactory.makeNative(captionSettings)
         self.currentEngineKind = .native
+        // Seed last-used speed so a user who set 1.25× on the last show keeps it.
+        self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
         configureEngineCallbacks()
     }
 
@@ -284,6 +298,24 @@ public final class PlayerViewModel {
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
         loadTrackOptions()
+
+        // Reflect what the new engine supports + apply persisted/initial tunable
+        // state through it, so the options menu opens with accurate rows and the
+        // user's last playback speed is honoured from frame 1.
+        controls.engineCapabilities = engine.capabilities
+        if engine.capabilities.contains(.playbackSpeed) {
+            engine.setPlaybackSpeed(controls.playbackSpeed)
+        } else {
+            controls.playbackSpeed = 1.0
+        }
+        // Delays + dialog enhance reset on every load: they're per-stream and
+        // carrying a previous file's −500ms offset onto a fresh one is awful.
+        controls.audioDelaySeconds = 0
+        controls.subtitleDelaySeconds = 0
+        controls.dialogEnhanceEnabled = false
+        engine.setAudioDelay(0)
+        engine.setSubtitleDelay(0)
+        engine.setDialogEnhanceEnabled(false)
     }
 
     // MARK: - Stall watchdog
@@ -385,13 +417,83 @@ public final class PlayerViewModel {
 
     // MARK: - Transport
 
+    /// Requests a committed seek. Coalesces rapid presses: while one seek is
+    /// in flight, additional calls just update the *latest target*; the
+    /// scheduler loop then jumps directly to that latest target (skipping the
+    /// intermediate values entirely) using `.fast` for any intermediate hop
+    /// and `.exact` for the final settle. The `pendingSeekTarget` flag pins
+    /// the on-screen position so the refresh loop can't snap the bar backward
+    /// to a stale `engine.currentTime` while the seek resolves.
+    public func requestSeek(to seconds: TimeInterval) {
+        let target = max(0, seconds)
+        controls.currentSeconds = target
+        controls.pendingSeekTarget = target
+        controls.isSeeking = true
+        latestSeekTarget = target
+        if seekTask == nil {
+            startSeekLoop()
+        }
+    }
+
+    private func startSeekLoop() {
+        seekTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Drain: process the latest pending target until none remains.
+            while let next = self.takeLatestSeekTarget() {
+                // If a newer target arrives while this one is in flight, we
+                // can be cheap here — only the LAST one needs to be precise.
+                let isFinal = (self.latestSeekTarget == nil)
+                let kind: VideoSeekKind = isFinal ? .exact : .fast
+                await self.engine.seek(to: next, kind: kind)
+            }
+            self.seekTask = nil
+            self.controls.isSeeking = false
+            // `pendingSeekTarget` is cleared by the refresh poll once the
+            // engine's `currentTime` arrives within tolerance of the target —
+            // that's the moment it's safe to resume mirroring engine time.
+        }
+    }
+
+    private func takeLatestSeekTarget() -> TimeInterval? {
+        guard let target = latestSeekTarget else { return nil }
+        latestSeekTarget = nil
+        return target
+    }
+
+    /// Legacy direct-seek path retained for callers (e.g. resume on load) that
+    /// want a one-shot await. New transport input goes through `requestSeek`.
     public func seek(to seconds: TimeInterval) async {
         controls.isSeeking = true
-        // Reflect the target immediately so the bar doesn't snap backwards while
-        // a (possibly slow) seek resolves.
         controls.currentSeconds = max(0, seconds)
-        await engine.seek(to: seconds)
+        controls.pendingSeekTarget = max(0, seconds)
+        await engine.seek(to: seconds, kind: .exact)
         controls.isSeeking = false
+    }
+
+    // MARK: Live tunables (engine fan-out)
+
+    public func setPlaybackSpeed(_ rate: Double) {
+        let clamped = max(0.25, min(4.0, rate))
+        controls.playbackSpeed = clamped
+        engine.setPlaybackSpeed(clamped)
+        preferencesStore.savePlaybackSpeed(clamped)
+    }
+
+    public func setAudioDelay(_ seconds: TimeInterval) {
+        let clamped = max(-10, min(10, seconds))
+        controls.audioDelaySeconds = clamped
+        engine.setAudioDelay(clamped)
+    }
+
+    public func setSubtitleDelay(_ seconds: TimeInterval) {
+        let clamped = max(-10, min(10, seconds))
+        controls.subtitleDelaySeconds = clamped
+        engine.setSubtitleDelay(clamped)
+    }
+
+    public func setDialogEnhanceEnabled(_ enabled: Bool) {
+        controls.dialogEnhanceEnabled = enabled
+        engine.setDialogEnhanceEnabled(enabled)
     }
 
     /// Toggles play/pause from the custom transport, keeping `controls` and the

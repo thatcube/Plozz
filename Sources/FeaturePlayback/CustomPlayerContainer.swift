@@ -7,10 +7,17 @@ import CoreModels
 /// plain value of closures so the UIKit layer never imports the view model.
 @MainActor
 struct PlayerActions {
+    /// Request a *committed* seek to `target`. The view model coalesces rapid
+    /// calls into a single in-flight seek that always targets the latest
+    /// requested time, so rapid left/right skips can NEVER race or snap back.
     var seek: (TimeInterval) -> Void = { _ in }
     var togglePlayPause: () -> Void = {}
     var selectAudio: (Int) -> Void = { _ in }
     var selectSubtitle: (Int) -> Void = { _ in }
+    var setPlaybackSpeed: (Double) -> Void = { _ in }
+    var setAudioDelay: (TimeInterval) -> Void = { _ in }
+    var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
+    var setDialogEnhance: (Bool) -> Void = { _ in }
     var dismiss: () -> Void = {}
 }
 
@@ -76,6 +83,7 @@ struct VideoSurfaceContainer: UIViewRepresentable {
 /// structurally; the overlay uses it directly.
 struct ThemePaletteBox {
     let makeOverlay: (PlayerControlsModel) -> AnyView
+    let makeOptionsMenu: (PlayerControlsModel, PlayerOptionsActions, @escaping () -> Void) -> AnyView
 }
 
 /// The focusable root view that receives Siri Remote presses and indirect-touch
@@ -103,6 +111,10 @@ final class PlayerInputViewController: UIViewController {
     private var refreshTask: Task<Void, Never>?
     private var scrubBaseSeconds: TimeInterval = 0
     private var resumeAfterScrub = false
+    /// The presented options menu, when visible. While set, menu input takes
+    /// focus and scrub/skip gestures are ignored.
+    private var optionsHost: UIHostingController<AnyView>?
+    private var optionsThemePalette: ThemePaletteBox?
 
     init(engine: any VideoEngine, model: PlayerControlsModel, actions: PlayerActions) {
         self.engine = engine
@@ -165,6 +177,7 @@ final class PlayerInputViewController: UIViewController {
 
     func attachOverlay(themePalette: ThemePaletteBox) {
         plozzTrace("attachOverlay: building UIHostingController(overlay)")
+        optionsThemePalette = themePalette
         let host = UIHostingController(rootView: themePalette.makeOverlay(model))
         host.view.backgroundColor = .clear
         // Presentational only — never let the overlay steal remote focus from
@@ -198,8 +211,22 @@ final class PlayerInputViewController: UIViewController {
         let duration = engine.duration
         if duration > 0 { model.duration = duration }
         // Don't fight the scrub head or an in-flight committed seek.
-        if !model.isScrubbing && !model.isSeeking {
-            model.currentSeconds = engine.currentTime
+        if model.isScrubbing { return }
+        let engineTime = engine.currentTime
+        if let pending = model.pendingSeekTarget {
+            // A committed seek is in flight (or just finished). Holding the bar
+            // at the optimistic target until the engine actually arrives is the
+            // entire fix for the "press right → snap back" feel: a poll arriving
+            // between the optimistic update and the engine catching up would
+            // otherwise overwrite `currentSeconds` with the stale pre-seek time.
+            // Once the engine's position is within tolerance, release.
+            if abs(engineTime - pending) < 0.75 {
+                model.pendingSeekTarget = nil
+                model.currentSeconds = engineTime
+            }
+            // else: keep `currentSeconds` pinned to the optimistic value.
+        } else {
+            model.currentSeconds = engineTime
         }
         model.bufferedSeconds = engine.bufferedPosition
         model.isPaused = engine.isPaused
@@ -207,7 +234,13 @@ final class PlayerInputViewController: UIViewController {
 
     // MARK: Focus
 
-    override var preferredFocusEnvironments: [UIFocusEnvironment] { [view] }
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        // While the options menu is visible, hand focus to it so the Siri
+        // Remote drives its rows; otherwise the input surface owns focus so
+        // pans/presses reach our gesture recognizers.
+        if let optionsHost { return [optionsHost.view] }
+        return [view]
+    }
 
     // MARK: Gestures
 
@@ -236,6 +269,17 @@ final class PlayerInputViewController: UIViewController {
 
     // MARK: Scrubbing
 
+    /// Axis decision for the current pan. Decided once on the first sample that
+    /// crosses the dead zone; locked for the rest of the gesture so a small
+    /// vertical drift inside a horizontal scrub never bleeds into the bar (and
+    /// — more importantly — a vertical swipe NEVER moves the scrub head).
+    private enum PanAxis { case undecided, horizontal, verticalIgnored }
+    private var panAxis: PanAxis = .undecided
+    /// Distance (points) a touch must travel before we lock to an axis. Smaller
+    /// than the swipe-down recognizer's threshold so deliberate horizontal
+    /// scrubs feel immediate but a stray vertical drift can still ignore.
+    private let panAxisDeadZone: CGFloat = 18
+
     private var scrubSensitivitySeconds: TimeInterval {
         // A full touch-surface swipe covers ~15% of the runtime, clamped so it's
         // neither uselessly fine on long films nor jumpy on short clips. Edge
@@ -245,15 +289,48 @@ final class PlayerInputViewController: UIViewController {
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         guard model.duration > 0 else { return }
+        guard optionsHost == nil else { return }
         switch gesture.state {
         case .began:
-            if !model.isScrubbing { beginScrub() }
-            scrubBaseSeconds = model.scrubSeconds
+            panAxis = .undecided
         case .changed:
+            let translation = gesture.translation(in: view)
+            if panAxis == .undecided {
+                // Wait for a clear directional signal before committing. While
+                // undecided, NOTHING happens — the scrub head doesn't move and
+                // we don't begin a scrub, so vertical swipes that the system
+                // turns into a swipe-down recognizer don't briefly nudge the
+                // bar before being suppressed.
+                let absX = abs(translation.x)
+                let absY = abs(translation.y)
+                guard max(absX, absY) >= panAxisDeadZone else { return }
+                if absX >= absY {
+                    panAxis = .horizontal
+                    beginScrub()
+                    // Re-anchor: the axis-decision travel doesn't count as scrub
+                    // distance, so the first frame of motion lands exactly at
+                    // the current position, not at the cumulative pan offset.
+                    gesture.setTranslation(.zero, in: view)
+                    scrubBaseSeconds = model.scrubSeconds
+                } else {
+                    panAxis = .verticalIgnored
+                    return
+                }
+            }
+            guard panAxis == .horizontal else { return }
             let width = max(1, view.bounds.width)
-            let delta = (gesture.translation(in: view).x / width) * scrubSensitivitySeconds
+            let delta = (translation.x / width) * scrubSensitivitySeconds
             model.scrubSeconds = min(max(0, scrubBaseSeconds + delta), model.duration)
             updatePreviewThumbnail()
+        case .ended, .cancelled, .failed:
+            // Auto-commit a horizontal scrub on lift, like Apple's own
+            // AVPlayerViewController: the user expects the bar's final position
+            // to take effect without a separate Select press. A vertical-only
+            // gesture never started a scrub, so nothing to commit.
+            if panAxis == .horizontal, model.isScrubbing {
+                commitScrub()
+            }
+            panAxis = .undecided
         default:
             break
         }
@@ -311,6 +388,7 @@ final class PlayerInputViewController: UIViewController {
     // MARK: Button handlers
 
     @objc private func handleSelect() {
+        guard optionsHost == nil else { return }
         if model.isScrubbing {
             commitScrub()
         } else {
@@ -320,12 +398,17 @@ final class PlayerInputViewController: UIViewController {
     }
 
     @objc private func handlePlayPause() {
+        guard optionsHost == nil else { return }
         if model.isScrubbing { commitScrub() }
         actions.togglePlayPause()
         flashControls()
     }
 
     @objc private func handleMenu() {
+        if optionsHost != nil {
+            dismissOptionsMenu()
+            return
+        }
         if model.isScrubbing {
             cancelScrub()
         } else if model.controlsVisible {
@@ -335,8 +418,14 @@ final class PlayerInputViewController: UIViewController {
         }
     }
 
-    @objc private func handleLeft() { skip(by: -10) }
-    @objc private func handleRight() { skip(by: 10) }
+    @objc private func handleLeft() {
+        guard optionsHost == nil else { return }
+        skip(by: -10)
+    }
+    @objc private func handleRight() {
+        guard optionsHost == nil else { return }
+        skip(by: 10)
+    }
 
     private func skip(by seconds: TimeInterval) {
         guard model.duration > 0 else { return }
@@ -344,7 +433,14 @@ final class PlayerInputViewController: UIViewController {
             model.scrubSeconds = min(max(0, model.scrubSeconds + seconds), model.duration)
             updatePreviewThumbnail()
         } else {
-            let target = min(max(0, model.currentSeconds + seconds), model.duration)
+            // The crucial bit: stack on the LAST requested target, not on the
+            // engine's possibly-stale `currentTime`. Without this, two fast
+            // right presses both compute `engine.currentTime + 10` from the
+            // same pre-seek position and produce a single +10 skip — exactly
+            // the "I pressed twice but nothing extra happened" bug. The view
+            // model coalesces all of them into one final seek.
+            let base = model.pendingSeekTarget ?? model.currentSeconds
+            let target = min(max(0, base + seconds), model.duration)
             actions.seek(target)
             flashControls()
         }
@@ -352,6 +448,7 @@ final class PlayerInputViewController: UIViewController {
 
     @objc private func handleSwipeDown() {
         guard !model.isScrubbing else { return }
+        guard optionsHost == nil else { return }
         presentOptionsMenu()
     }
 
@@ -372,7 +469,7 @@ final class PlayerInputViewController: UIViewController {
         autoHideTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            if !self.model.isScrubbing && !self.model.isPaused {
+            if !self.model.isScrubbing && !self.model.isPaused && self.optionsHost == nil {
                 self.model.controlsVisible = false
             }
         }
@@ -383,38 +480,55 @@ final class PlayerInputViewController: UIViewController {
         autoHideTask = nil
     }
 
-    // MARK: Track menu
+    // MARK: Options menu
 
+    /// Presents the full in-player options menu (Audio · Subtitles · Speed ·
+    /// A/V Sync) as a focusable SwiftUI surface that takes Siri Remote focus
+    /// without pausing playback. Replaces the legacy `UIAlertController`
+    /// audio/subtitle picker so we can expose speed, dialog enhance, and the
+    /// audio/subtitle delay tunables — and so changes apply *live* with no
+    /// reload (Infuse-style).
     private func presentOptionsMenu() {
-        let hasAudio = model.hasSelectableAudio
-        let hasSubs = model.hasSelectableSubtitles
-        guard hasAudio || hasSubs else { return }
+        guard let palette = optionsThemePalette else { return }
+        cancelAutoHide()
+        model.optionsMenuVisible = true
+        model.controlsVisible = true
 
-        if hasAudio && hasSubs {
-            let sheet = UIAlertController(title: "Options", message: nil, preferredStyle: .actionSheet)
-            sheet.addAction(UIAlertAction(title: "Audio", style: .default) { [weak self] _ in
-                self?.presentTrackMenu(title: "Audio", options: self?.model.audioOptions ?? [], select: { self?.actions.selectAudio($0) })
-            })
-            sheet.addAction(UIAlertAction(title: "Subtitles", style: .default) { [weak self] _ in
-                self?.presentTrackMenu(title: "Subtitles", options: self?.model.subtitleOptions ?? [], select: { self?.actions.selectSubtitle($0) })
-            })
-            sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            present(sheet, animated: true)
-        } else if hasAudio {
-            presentTrackMenu(title: "Audio", options: model.audioOptions, select: { [weak self] in self?.actions.selectAudio($0) })
-        } else {
-            presentTrackMenu(title: "Subtitles", options: model.subtitleOptions, select: { [weak self] in self?.actions.selectSubtitle($0) })
-        }
+        let actions = PlayerOptionsActions(
+            selectAudio: { [weak self] in self?.actions.selectAudio($0) },
+            selectSubtitle: { [weak self] in self?.actions.selectSubtitle($0) },
+            setPlaybackSpeed: { [weak self] in self?.actions.setPlaybackSpeed($0) },
+            setAudioDelay: { [weak self] in self?.actions.setAudioDelay($0) },
+            setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
+            setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) }
+        )
+        let host = UIHostingController(
+            rootView: palette.makeOptionsMenu(model, actions) { [weak self] in
+                self?.dismissOptionsMenu()
+            }
+        )
+        host.view.backgroundColor = .clear
+        host.view.isUserInteractionEnabled = true
+        addChild(host)
+        host.view.frame = view.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(host.view)
+        host.didMove(toParent: self)
+        optionsHost = host
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
     }
 
-    private func presentTrackMenu(title: String, options: [PlayerTrackOption], select: @escaping (Int) -> Void) {
-        let sheet = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
-        for option in options {
-            let label = option.isSelected ? "✓  \(option.title)" : option.title
-            sheet.addAction(UIAlertAction(title: label, style: .default) { _ in select(option.id) })
-        }
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        present(sheet, animated: true)
+    private func dismissOptionsMenu() {
+        guard let host = optionsHost else { return }
+        host.willMove(toParent: nil)
+        host.view.removeFromSuperview()
+        host.removeFromParent()
+        optionsHost = nil
+        model.optionsMenuVisible = false
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+        scheduleAutoHide()
     }
 
     deinit {

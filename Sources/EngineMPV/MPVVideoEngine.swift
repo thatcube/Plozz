@@ -441,19 +441,21 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         client.setPropertyString("sub-delay", String(format: "%.3f", seconds))
     }
 
-    /// Toggles a labelled `dynaudnorm` audio filter that smooths the loudness
-    /// curve so dialog stays audible without the surround mix peaking. We use
-    /// the `@plozz-dialog` label so we can add/remove this exact filter without
-    /// trampling any user `af` chain. The filter is attached and detached
-    /// rather than tweaked so disabling it has zero CPU cost.
+    /// Toggles a labelled `dialoguenhance` audio filter — FFmpeg's purpose-built
+    /// dialogue enhancer that lifts the centre/voice channel out of a stereo or
+    /// surround mix so speech stays intelligible without raising music/effects.
+    /// We use the `@plozz-dialog` label so we can add/remove this exact filter
+    /// without trampling any user `af` chain, and it is attached/detached rather
+    /// than tweaked so disabling it has zero CPU cost. If the FFmpeg build
+    /// lacks `dialoguenhance`, mpv simply logs and no-ops (graceful degrade).
     public func setDialogEnhanceEnabled(_ enabled: Bool) {
         guard client.isAlive else { return }
         if enabled {
-            // `dynaudnorm` is a built-in libavfilter filter shipped with our
-            // FFmpeg build. The parameters favour dialog: a longer window
-            // (g=31), moderate target peak (p=0.9), and gentle max gain (m=4)
-            // so explosions don't pump.
-            client.command(["af", "add", "@plozz-dialog:lavfi=[dynaudnorm=g=31:m=4:p=0.9]"])
+            // `dialoguenhance` operates on a stereo downmix and boosts the
+            // phase-correlated centre content (dialogue). original=1 keeps the
+            // base mix, enhance=1 adds a full-strength enhanced centre, voice=2
+            // widens the band treated as voice so more speech is captured.
+            client.command(["af", "add", "@plozz-dialog:lavfi=[dialoguenhance=original=1:enhance=1:voice=2]"])
         } else {
             client.command(["af", "remove", "@plozz-dialog"])
         }

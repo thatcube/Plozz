@@ -36,6 +36,12 @@ public struct MediaBadgeChip: View {
     /// hardcoded white that vanishes against a light-mode background.
     @Environment(\.themePalette) private var palette
 
+    /// The active appearance. The HDR wordmark's gradient is intentionally bright
+    /// (it evokes HDR's luminance range), but those light gold/cyan stops wash out
+    /// against a light-mode background — so in light mode we swap in darker, still
+    /// fully-saturated versions of the same hues.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Shared type scale so every treatment lines up to the same cap height.
     private static let textFont = Font.system(size: 21, weight: .semibold)
     private static let dolbyWordFont = Font.system(size: 16, weight: .semibold)
@@ -183,7 +189,7 @@ public struct MediaBadgeChip: View {
                     .baselineOffset(1)
             }
         }
-        .foregroundStyle(Self.hdrGradient)
+        .foregroundStyle(hdrGradient)
         .tracking(0.5)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
@@ -272,16 +278,24 @@ public struct MediaBadgeChip: View {
     }
 
     /// HDR accent gradient (warm highlight → cool shadow) used to fill the HDR
-    /// wordmark, evoking the wide luminance range HDR represents.
-    private static let hdrGradient = LinearGradient(
-        colors: [
-            Color(red: 1.00, green: 0.80, blue: 0.25),
-            Color(red: 0.95, green: 0.35, blue: 0.45),
-            Color(red: 0.25, green: 0.75, blue: 0.95)
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    /// wordmark, evoking the wide luminance range HDR represents. In dark/OLED the
+    /// stops are bright (gold → pink → cyan); in light mode they're replaced with
+    /// darker, deeply-saturated versions of the *same* hues so the logo keeps its
+    /// vibrant identity while staying legible against a light background.
+    private var hdrGradient: LinearGradient {
+        let colors: [Color] = colorScheme == .light
+            ? [
+                Color(red: 0.82, green: 0.55, blue: 0.00),
+                Color(red: 0.80, green: 0.12, blue: 0.28),
+                Color(red: 0.05, green: 0.42, blue: 0.72)
+            ]
+            : [
+                Color(red: 1.00, green: 0.80, blue: 0.25),
+                Color(red: 0.95, green: 0.35, blue: 0.45),
+                Color(red: 0.25, green: 0.75, blue: 0.95)
+            ]
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
 }
 
 /// The iconic Dolby "double-D" mark: two back-to-back D shapes with their

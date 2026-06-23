@@ -21,15 +21,33 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
     }
 
     func actions(for item: MediaItem, context: MediaItemActionContext) -> [MediaItemAction] {
-        let supportsWatchState = (provider(for: item) as? WatchStateProviding) != nil
+        let provider = provider(for: item)
         return MediaItemActionCatalog.actions(
             for: item,
-            supportsWatchState: supportsWatchState,
+            supportsWatchState: provider is WatchStateProviding,
+            supportsWatchlist: provider is WatchlistProviding,
+            supportsMetadataRefresh: provider is MetadataRefreshing,
             context: context
         )
     }
 
     func perform(_ action: MediaItemAction, on item: MediaItem, context: MediaItemActionContext) {
+        switch action {
+        case .markWatched, .markUnwatched, .markWatchedUpToHere:
+            performWatchState(action, on: item, context: context)
+        case .addToWatchlist, .removeFromWatchlist:
+            performWatchlist(adding: action == .addToWatchlist, on: item)
+        case .refreshMetadata:
+            performRefresh(on: item)
+        case .goToSeason, .goToMovie:
+            // Navigation is handled in the view layer, never here.
+            break
+        }
+    }
+
+    // MARK: - Watched state
+
+    private func performWatchState(_ action: MediaItemAction, on item: MediaItem, context: MediaItemActionContext) {
         guard let watch = provider(for: item) as? WatchStateProviding else { return }
         guard let plan = mutationPlan(for: action, item: item, context: context) else { return }
 
@@ -70,8 +88,7 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
             ids.formUnion(MediaItemActionCatalog.siblingsToMarkUpToHere(item, in: context.orderedSiblings).map(\.id))
             ids.insert(item.id)
             return MutationPlan(action: action, targetID: item.id, affectedIDs: ids, played: true, revertOnFailure: false)
-        case .goToSeason, .goToMovie:
-            // Navigation is handled in the view layer, never here.
+        default:
             return nil
         }
     }
@@ -90,13 +107,69 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
                 for id in plan.affectedIDs {
                     try? await watch.setPlayed(true, itemID: id)
                 }
-            case .goToSeason, .goToMovie:
+            default:
                 break
             }
         } catch {
             PlozzLog.app.error("Media item action \(plan.action.rawValue) failed")
             if plan.revertOnFailure {
                 MediaItemMutation(itemIDs: plan.affectedIDs, played: !plan.played).post()
+            }
+        }
+    }
+
+    // MARK: - Watchlist
+
+    /// Adds or removes the item from the watchlist. The optimistic `favorite`
+    /// mutation flips the badge / Home row immediately; the write then fans out
+    /// across **every** account that holds this (possibly merged) title and can
+    /// express a watchlist, so a save lands on both the user's Jellyfin Favorites
+    /// and their Plex Watchlist when a title exists on both servers.
+    private func performWatchlist(adding: Bool, on item: MediaItem) {
+        let providers = watchlistProviders(for: item)
+        guard !providers.isEmpty else { return }
+
+        MediaItemMutation(itemIDs: [item.id], favorite: adding).post()
+        Task {
+            var anySucceeded = false
+            for provider in providers {
+                do {
+                    try await provider.setWatchlisted(adding, item: item)
+                    anySucceeded = true
+                } catch {
+                    PlozzLog.app.error("Watchlist \(adding ? "add" : "remove") failed on a provider")
+                }
+            }
+            // If every provider failed, revert the optimistic change.
+            if !anySucceeded {
+                MediaItemMutation(itemIDs: [item.id], favorite: !adding).post()
+            }
+        }
+    }
+
+    /// Every `WatchlistProviding` provider that holds this title: the primary
+    /// owner plus any de-duplicated cross-server alternates.
+    private func watchlistProviders(for item: MediaItem) -> [any WatchlistProviding] {
+        let accountIDs = item.allSourceAccountIDs
+        if accountIDs.isEmpty {
+            return [appState.primaryProvider as? WatchlistProviding].compactMap { $0 }
+        }
+        return accountIDs.compactMap { appState.provider(forAccountID: $0) as? WatchlistProviding }
+    }
+
+    // MARK: - Refresh metadata
+
+    /// Fire-and-forget server-side metadata refresh. Never blocks the UI and
+    /// posts no optimistic mutation (nothing changes client-side until the next
+    /// fetch); a failure is logged only.
+    private func performRefresh(on item: MediaItem) {
+        guard let refresher = provider(for: item) as? MetadataRefreshing else { return }
+        let itemID = item.id
+        Task {
+            do {
+                try await refresher.refreshMetadata(itemID: itemID)
+            } catch {
+                PlozzLog.app.error("Refresh metadata failed for item \(itemID)")
             }
         }
     }

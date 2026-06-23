@@ -39,6 +39,18 @@ struct DetailHeroView: View {
     var playRemainingText: String? = nil
     /// When provided, a secondary "Trailer" button is shown next to Play.
     var onPlayTrailer: (() -> Void)? = nil
+    /// The selectable versions for this title. When more than one exists and
+    /// `onSelectVersion` is set, a "Version" picker button is shown next to Play
+    /// so the user can choose which source `Play` targets.
+    var versions: [MediaVersion] = []
+    /// The currently-effective selected version id (drives the picker's label and
+    /// the menu checkmark). `nil` falls back to the first/recommended version.
+    var selectedVersionID: String? = nil
+    /// This device's capabilities, used to predict Direct Play vs Transcode for
+    /// each version in the picker (the creative compatibility badge).
+    var capabilities: MediaCapabilities = .detected()
+    /// Invoked with the chosen `MediaVersion.id` when the user picks a version.
+    var onSelectVersion: ((String) -> Void)? = nil
     /// Technical badges to show when the focused item carries none of its own —
     /// a series or season hero has no media file, so the parent derives a
     /// representative set from the loaded episodes (best resolution/HDR/audio)
@@ -148,10 +160,13 @@ struct DetailHeroView: View {
                     .lineLimit(3, reservesSpace: true)
                     .frame(maxWidth: 960, alignment: .topLeading)
             }
-            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
+            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || (versions.count > 1 && onSelectVersion != nil) {
                 HStack(spacing: 24) {
                     if let playTitle, let onPlay {
                         playButton(title: playTitle, action: onPlay)
+                    }
+                    if versions.count > 1, let onSelectVersion {
+                        versionButton(onSelect: onSelectVersion)
                     }
                     if let onPlayTrailer {
                         Button(action: onPlayTrailer) {
@@ -276,6 +291,35 @@ struct DetailHeroView: View {
         } else {
             button
         }
+    }
+
+    /// The version-picker button shown next to Play when a title has more than
+    /// one source. Its label reflects the currently-selected version's quality
+    /// ("4K · Dolby Vision"); the menu lists every version with a visual quality
+    /// diff and a predicted Direct Play / Transcode badge for *this* device, with
+    /// a checkmark on the active one.
+    @ViewBuilder
+    private func versionButton(onSelect: @escaping (String) -> Void) -> some View {
+        let current = versions.first { $0.id == selectedVersionID } ?? versions.first
+        Menu {
+            ForEach(versions) { version in
+                Button {
+                    onSelect(version.id)
+                } label: {
+                    let badge = version.compatibility(with: capabilities).badge
+                    let suffix = badge.isEmpty ? "" : "  •  \(badge)"
+                    if version.id == current?.id {
+                        Label(version.displayLabel + suffix, systemImage: "checkmark")
+                    } else {
+                        Text(version.displayLabel + suffix)
+                    }
+                }
+            }
+        } label: {
+            Label(current?.resolutionLabel ?? "Version", systemImage: "rectangle.stack.fill")
+                .frame(minWidth: 160)
+        }
+        .modifier(HeroButtonStyle(prominent: false))
     }
 
     /// The thin watched-progress bar shown inside the Play button between the

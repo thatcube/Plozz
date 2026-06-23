@@ -128,7 +128,8 @@ public struct MediaItemContextMenu: ViewModifier {
             navigator?(target)
         case .goToMovie:
             navigator?(item)
-        case .markWatched, .markUnwatched, .markWatchedUpToHere:
+        case .markWatched, .markUnwatched, .markWatchedUpToHere,
+             .addToWatchlist, .removeFromWatchlist, .refreshMetadata:
             break
         }
     }

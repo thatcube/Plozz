@@ -225,6 +225,19 @@ public struct PlexClient: Sendable {
         _ = try await send(endpoint)
     }
 
+    /// `PUT /library/metadata/{ratingKey}/refresh` — asks the PMS to re-scan the
+    /// item's files and re-fetch metadata/artwork from its configured agents.
+    /// The server queues the work and returns immediately.
+    func refreshMetadata(ratingKey: String) async throws {
+        let endpoint = Endpoint(
+            method: .put,
+            path: "/library/metadata/\(ratingKey)/refresh",
+            queryItems: [URLQueryItem(name: "X-Plex-Token", value: token)],
+            headers: headers
+        )
+        _ = try await send(endpoint)
+    }
+
     // MARK: URLs
 
     /// Builds an absolute, token-bearing stream URL for a part `key` (which is

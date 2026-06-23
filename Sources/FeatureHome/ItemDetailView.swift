@@ -18,13 +18,25 @@ public struct ItemDetailView: View {
     /// episode row pre-scrolled to it, and focus on the hero Play button.
     private let initialEpisode: MediaItem?
 
+    /// This device's capabilities, used to drive the smart default version and
+    /// the per-version Direct Play / Transcode prediction in the picker.
+    private let capabilities: MediaCapabilities
+    /// Persists the user's per-title preferred version (creative addition), so a
+    /// title reopens on the version they last chose rather than the default.
+    private let versionPreferences: VersionPreferenceStoring
+    /// The user's explicit version override for this visit. `nil` means "use the
+    /// remembered preference, else the smart recommended default".
+    @State private var versionOverride: String?
+
     public init(
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings = .default,
         onPlay: @escaping (MediaItem) -> Void,
         onSelectChild: @escaping (MediaItem) -> Void,
         initialSeasonID: String? = nil,
-        initialEpisode: MediaItem? = nil
+        initialEpisode: MediaItem? = nil,
+        capabilities: MediaCapabilities = .detected(),
+        versionPreferences: VersionPreferenceStoring = VersionPreferenceStore()
     ) {
         _viewModel = State(initialValue: viewModel)
         self.spoilerSettings = spoilerSettings
@@ -32,6 +44,8 @@ public struct ItemDetailView: View {
         self.onSelectChild = onSelectChild
         self.initialSeasonID = initialSeasonID
         self.initialEpisode = initialEpisode
+        self.capabilities = capabilities
+        self.versionPreferences = versionPreferences
     }
 
     public var body: some View {
@@ -75,7 +89,8 @@ public struct ItemDetailView: View {
     private static let topAnchorID = "item-hero-top"
 
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {
-        ScrollViewReader { proxy in
+        let effectiveVersionID = effectiveVersionID(for: detail.item)
+        return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 32) {
                     DetailHeroView(
@@ -83,10 +98,14 @@ public struct ItemDetailView: View {
                         heroHeightFraction: detail.children.isEmpty ? 1.0 : 0.8,
                         spoilerSettings: spoilerSettings,
                         playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
-                        onPlay: isPlayable(detail.item) ? { onPlay(detail.item) } : nil,
+                        onPlay: isPlayable(detail.item) ? { onPlay(detail.item.selectingVersion(effectiveVersionID)) } : nil,
                         playProgress: isPlayable(detail.item) ? detail.item.resumeProgressFraction : nil,
                         playRemainingText: isPlayable(detail.item) ? detail.item.resumeRemainingText : nil,
                         onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
+                        versions: detail.item.versions,
+                        selectedVersionID: effectiveVersionID,
+                        capabilities: capabilities,
+                        onSelectVersion: { id in selectVersion(id, for: detail.item) },
                         fallbackTechnicalBadges: detail.children.representativeTechnicalBadges
                     )
                     .id(Self.topAnchorID)
@@ -133,6 +152,35 @@ public struct ItemDetailView: View {
 
     private func childrenTitle(for item: MediaItem) -> String {
         "Contents"
+    }
+
+    /// The version id `Play` should target right now: the user's in-session
+    /// override, else their remembered per-title preference (if still offered),
+    /// else the smart capability-aware recommended default. `nil` when the title
+    /// has no selectable versions (server picks).
+    private func effectiveVersionID(for item: MediaItem) -> String? {
+        guard item.hasMultipleVersions else { return nil }
+        if let versionOverride, item.versions.contains(where: { $0.id == versionOverride }) {
+            return versionOverride
+        }
+        let remembered = versionPreferences.preferredVersionID(forTitle: versionPreferenceKey(for: item))
+        if let remembered, item.versions.contains(where: { $0.id == remembered }) {
+            return remembered
+        }
+        return item.versions.recommendedSelection(for: capabilities)?.id
+    }
+
+    /// Records the user's version choice for this visit and remembers it for next
+    /// time, keyed per title (per series for an episode).
+    private func selectVersion(_ id: String, for item: MediaItem) {
+        versionOverride = id
+        versionPreferences.setPreferredVersionID(id, forTitle: versionPreferenceKey(for: item))
+    }
+
+    /// Stable key for the per-title version preference. Episodes share their
+    /// series' key so a whole show remembers one preferred version.
+    private func versionPreferenceKey(for item: MediaItem) -> String {
+        item.seriesID ?? item.id
     }
 }
 

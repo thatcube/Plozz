@@ -134,8 +134,16 @@ public struct PlexProvider: MediaProvider {
     }
 
     public func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
+        try await playbackInfo(for: itemID, mediaSourceID: nil, forceTranscode: forceTranscode)
+    }
+
+    public func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
         let detail = try await client.metadata(ratingKey: itemID)
-        guard let media = detail.Media?.first,
+        // Pick the chosen Media element (version) by id, else Plex's first.
+        let chosenMedia = mediaSourceID.flatMap { id in
+            detail.Media?.first { $0.id.map(String.init) == id }
+        } ?? detail.Media?.first
+        guard let media = chosenMedia,
               let part = media.Part?.first else {
             throw AppError.notFound
         }
@@ -337,8 +345,34 @@ public struct PlexProvider: MediaProvider {
             heroBackdropURL: client.imageURL(path: dto.art, maxWidth: 3840),
             ratings: Self.ratings(from: dto),
             providerIDs: Self.providerIDs(from: dto),
-            mediaInfo: Self.sourceMetadata(from: dto)
+            mediaInfo: Self.sourceMetadata(from: dto),
+            versions: Self.versions(from: dto.Media)
         )
+    }
+
+    /// Maps Plex's multiple `Media` elements (the same title in several
+    /// qualities) into provider-agnostic `MediaVersion`s. Returns `[]` unless
+    /// there's a genuine choice (>1), so the picker only appears when useful. The
+    /// first element is flagged `isDefault` to mirror Plex's own ordering.
+    static func versions(from media: [PlexMedia]?) -> [MediaVersion] {
+        guard let media, media.count > 1 else { return [] }
+        return media.enumerated().map { index, m in
+            MediaVersion(
+                id: m.id.map(String.init) ?? "\(index)",
+                name: nil,
+                width: m.width,
+                height: m.height,
+                bitrate: nil,
+                sizeBytes: nil,
+                isDefault: index == 0,
+                videoCodec: m.videoCodec,
+                videoRange: nil,
+                audioCodec: m.audioCodec,
+                audioChannels: m.audioChannels,
+                audioProfile: nil,
+                container: m.container
+            )
+        }
     }
 
     /// Maps Plex `Guid` values (`imdb://...`, `tmdb://...`, …) into the shared
@@ -523,5 +557,16 @@ extension PlexProvider: WatchStateProviding {
     /// season or series ratingKey marks the contained episodes too.
     public func setPlayed(_ played: Bool, itemID: String) async throws {
         try await client.setWatched(played, ratingKey: itemID)
+    }
+}
+
+// MARK: - Metadata refresh
+
+extension PlexProvider: MetadataRefreshing {
+    /// Triggers a server-side metadata + artwork refresh for the item via the
+    /// PMS `/refresh` endpoint. Fire and forget: the server processes it
+    /// asynchronously.
+    public func refreshMetadata(itemID: String) async throws {
+        try await client.refreshMetadata(ratingKey: itemID)
     }
 }

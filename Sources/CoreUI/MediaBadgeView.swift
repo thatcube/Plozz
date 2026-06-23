@@ -153,7 +153,7 @@ public struct MediaBadgeChip: View {
     private func dtsLabel(_ text: String) -> some View {
         let parts = Self.splitDTS(text)
         let isX = parts.suffix?.uppercased() == "X"
-        return HStack(alignment: .firstTextBaseline, spacing: isX ? 1 : 0) {
+        return HStack(alignment: isX ? .center : .firstTextBaseline, spacing: isX ? 1 : 0) {
             Text(parts.head)
                 .font(Self.dtsHeadFont)
                 .tracking(-0.5)

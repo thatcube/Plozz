@@ -39,6 +39,11 @@ public struct MediaBadgeChip: View {
     /// name (`HDR`/`HLG`) and its numeric variant (`10`, `10+`).
     private static let hdrHeadFont = Font.system(size: 21, weight: .black)
     private static let hdrSuffixFont = Font.system(size: 16, weight: .heavy)
+    /// DTS wordmark weights: a heavy lowercase `dts` head with a slightly
+    /// smaller, emphasized format suffix (`X`, `HD`) and a light separator.
+    private static let dtsHeadFont = Font.system(size: 22, weight: .black)
+    private static let dtsSepFont = Font.system(size: 18, weight: .light)
+    private static let dtsSuffixFont = Font.system(size: 19, weight: .heavy)
     private static let cornerRadius: CGFloat = 6
     private static let hPadding: CGFloat = 11
     /// Tighter horizontal padding for the borderless HDR wordmark, which has no
@@ -78,6 +83,9 @@ public struct MediaBadgeChip: View {
                 .accessibilityLabel(badge.label)
         case .hdr:
             hdrLabel(badge.label)
+                .accessibilityLabel(badge.label)
+        case .dts:
+            dtsLabel(badge.label)
                 .accessibilityLabel(badge.label)
         case .dolby:
             VStack(alignment: .center, spacing: -1) {
@@ -135,8 +143,44 @@ public struct MediaBadgeChip: View {
         .frame(height: Self.pillHeight)
     }
 
-    /// Splits an HDR label into a wordmark head (`HDR`/`HLG`) and an optional
-    /// numeric variant suffix (`10`, `10+`).
+    /// A custom DTS wordmark logo (no pill): lowercase heavy `dts` with the
+    /// format suffix (`X`, `HD`) emphasized and the separator (`:`/`-`) set
+    /// lighter, so `DTS:X`/`DTS-HD` read as a brand mark beside the Dolby logos
+    /// without bundling the trademarked artwork.
+    private func dtsLabel(_ text: String) -> some View {
+        let parts = Self.splitDTS(text)
+        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(parts.head)
+                .font(Self.dtsHeadFont)
+                .tracking(-0.5)
+            if let separator = parts.separator {
+                Text(separator)
+                    .font(Self.dtsSepFont)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            if let suffix = parts.suffix {
+                Text(suffix)
+                    .font(Self.dtsSuffixFont)
+            }
+        }
+        .foregroundStyle(.white)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .padding(.horizontal, Self.hdrHPadding)
+        .frame(height: Self.pillHeight)
+    }
+
+    /// Splits a DTS label into a lowercase wordmark head (`dts`), an optional
+    /// separator (`:`/`-`), and an optional format suffix (`X`/`HD`).
+    private static func splitDTS(_ text: String) -> (head: String, separator: String?, suffix: String?) {
+        let upper = text.uppercased()
+        guard upper.hasPrefix("DTS") else { return (text.lowercased(), nil, nil) }
+        let rest = String(upper.dropFirst(3))
+        guard let first = rest.first else { return ("dts", nil, nil) }
+        let separator = String(first)
+        let suffix = String(rest.dropFirst())
+        return ("dts", separator, suffix.isEmpty ? nil : suffix)
+    }
     private static func splitHDR(_ text: String) -> (head: String, suffix: String?) {
         let upper = text.uppercased()
         if upper.hasPrefix("HDR") {

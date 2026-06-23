@@ -27,6 +27,9 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
         /// (`Dolby` over the format, e.g. Dolby Vision / Atmos / Digital+). No
         /// pill.
         case dolby
+        /// A DTS badge rendered as a custom `dts:X` / `dts-HD` wordmark logo
+        /// (lowercase `dts` with an emphasized format suffix). No pill.
+        case dts
     }
 
     public var label: String
@@ -162,13 +165,13 @@ public extension MediaSourceMetadata {
             badges.append(MediaBadge("Dolby Atmos", style: .dolby))
             formatImpliesSurround = true
         } else if profile.contains("dts:x") || profile.contains("dtsx") || profile.contains("dts x") {
-            badges.append(MediaBadge("DTS:X", style: .spec))
+            badges.append(MediaBadge("DTS:X", style: .dts))
             formatImpliesSurround = true
         } else if codec == "truehd" {
             badges.append(MediaBadge("Dolby TrueHD", style: .dolby))
             formatImpliesSurround = true
         } else if codec == "dts" && (profile.contains("hd") || profile.contains("ma")) {
-            badges.append(MediaBadge("DTS-HD", style: .spec))
+            badges.append(MediaBadge("DTS-HD", style: .dts))
         } else if codec == "eac3" {
             badges.append(MediaBadge("Dolby Digital+", style: .dolby))
         } else if codec == "ac3" {

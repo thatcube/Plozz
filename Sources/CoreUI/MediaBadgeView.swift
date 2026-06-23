@@ -33,8 +33,8 @@ public struct MediaBadgeChip: View {
 
     /// Shared type scale so every treatment lines up to the same cap height.
     private static let textFont = Font.system(size: 21, weight: .semibold)
-    private static let dolbyWordFont = Font.system(size: 17, weight: .semibold)
-    private static let dolbyFormatFont = Font.system(size: 18, weight: .heavy)
+    private static let dolbyWordFont = Font.system(size: 16, weight: .semibold)
+    private static let dolbyFormatFont = Font.system(size: 13, weight: .medium)
     private static let cornerRadius: CGFloat = 6
     private static let hPadding: CGFloat = 11
     private static let vPadding: CGFloat = 5
@@ -61,10 +61,10 @@ public struct MediaBadgeChip: View {
                 .accessibilityLabel(badge.label)
         case .dolby:
             VStack(alignment: .center, spacing: -2) {
-                HStack(alignment: .center, spacing: 6) {
+                HStack(alignment: .center, spacing: 5) {
                     DolbyDoubleD()
                         .fill(Color.white)
-                        .frame(width: 26, height: 18)
+                        .frame(width: 21, height: 14)
                     Text("Dolby")
                         .font(Self.dolbyWordFont)
                         .foregroundStyle(.white)
@@ -72,7 +72,7 @@ public struct MediaBadgeChip: View {
                 Text(badge.dolbyFormatWord.uppercased())
                     .font(Self.dolbyFormatFont)
                     .foregroundStyle(.white)
-                    .tracking(0.9)
+                    .tracking(1.0)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }

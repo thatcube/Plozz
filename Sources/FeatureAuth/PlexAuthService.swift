@@ -81,7 +81,8 @@ public struct PlexAuthService: Sendable {
                 id: candidate.id,
                 name: candidate.name,
                 baseURL: candidate.baseURL,
-                provider: .plex
+                provider: .plex,
+                connectionURLs: candidate.connectionURLs
             ),
             userID: user.id,
             userName: user.userName,

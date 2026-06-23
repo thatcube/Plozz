@@ -216,3 +216,38 @@ fix degrades gracefully to keyless sources (AniList banner / server art).
    a clean gradient rather than a stretched vertical poster.
 5. **Western TV unaffected:** episodes/series with real server art still render
    that art (tag-guarding only nils out genuinely-absent images).
+
+---
+
+## Phase 3 — Merge of Plex self-heal branch (`thatcube-literate-train`)
+
+Merged `origin/thatcube-literate-train` (HEAD `b4c49b1`) into this branch with
+`--no-ff` to bring in a sibling session's Plex connection self-heal (a Docker
+Plex server advertising an unroutable `172.18.0.1` "local" address yielded an
+empty Home). Their files overlapped our Plex GUID-ingestion graft. Both sides
+were preserved.
+
+**Conflict (1 file):**
+- `Sources/ProviderPlex/PlexClient.swift` — `metadata(ratingKey:)`. Their refactor
+  routes detail fetches through the new `decode()` wrapper (send() + retry-once on
+  `serverUnreachable` via `reportFailure`); our graft added `includeGuids=1` and
+  used `http.decode(..., baseURL:)` directly. **Resolved** by keeping their
+  `decode()` wrapper (self-heal) AND re-adding our `includeGuids=1` query, so the
+  detail path is both self-healing and GUID-enriched.
+
+**Auto-merged, verified both sides intact:**
+- `CoreModels/MediaServer.swift` — `connectionURLs: [URL]?` (their back-compat field).
+- `ProviderPlex/PlexConnectionResolver.swift` — new file (theirs), kept as-is.
+- `PlexConnectionSelector.swift` — `ranked(from:)`, `connectionURLs`, both inits.
+- `PlexAuthClient.swift` — `resolveServer()` + `connectionURLs(forServerID:authToken:)`.
+- `PlexProvider.swift` — their `init(connectionRefresh:probe:)` + resolver wiring
+  AND our `providerIDs(from:)` GUID parsing (`Self.providerIDs(from: dto)` in map).
+- `FeatureAuth/PlexAuthService.swift` — persists `connectionURLs`.
+- `AppShell/AppState.swift` — `.plex` factory wires `connectionRefresh`.
+- `PlexClient.swift` — both inits (`baseURL:` compat + `resolver:`), `baseURL` ==
+  `resolver.current`; our `includeGuids=1` present in `containerQuery` (list) and
+  the detail path.
+- `PlexDTOs.swift` — our `Guid`/`PlexGuid` DTO intact.
+
+**Verification:** `ProviderPlexTests` 61/61 passed (tvOS Simulator); full device
+build `BUILD SUCCEEDED`. No Apple TV install/launch (forbidden for the merge).

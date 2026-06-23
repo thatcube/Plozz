@@ -234,16 +234,21 @@ struct SeriesDetailView: View {
 
     private var episodeRail: some View {
         let episodes = currentEpisodes
+        // The episode the hero's Play button acts on — what focus should land on
+        // when moving down into the rail, and where the rail is pre-scrolled.
+        let target = isTargetingEpisode ? initialEpisode?.id : SeriesResume.nextUp(in: episodes)?.id
         return MediaRowView(
             title: railTitle,
             items: episodes,
             style: .landscape,
             spoilerSettings: spoilerSettings,
-            // Keep focus on the hero Play button; only pre-scroll the rail so the
-            // resume/target episode sits in the correct position below, ready for
-            // when focus moves down into the episodes.
+            // Keep focus on the hero Play button initially; pre-scroll the rail to
+            // the resume/target episode and make it the row's default focus so
+            // pressing down from Play lands on *that* episode — wherever it is in
+            // the season — rather than the geometrically-nearest card.
             initialFocusID: nil,
-            initialScrollID: isTargetingEpisode ? initialEpisode?.id : SeriesResume.nextUp(in: episodes)?.id,
+            initialScrollID: target,
+            defaultFocusID: target,
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusChange: { focused in
                 if let focused { heroItem = focused }

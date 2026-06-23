@@ -18,6 +18,12 @@ public struct MediaRowView: View {
     /// stay elsewhere (e.g. the hero's Play button) while the row is still
     /// pre-positioned at a chosen episode. Ignored when `initialFocusID` is set.
     private let initialScrollID: String?
+    /// When set, the matching item becomes the row's *default focus* — the card
+    /// focus lands on when focus first moves **into** the row from outside (e.g.
+    /// pressing down from the hero Play button), regardless of which card is
+    /// geometrically nearest. Used so the episode the Play button resumes is the
+    /// one focused on entry, even when it's far down a long season.
+    private let defaultFocusID: String?
     /// Leading inset for the row's title and first card. Defaults to the standard
     /// screen padding (Home rows); detail pages pass the larger hero leading
     /// padding so the row aligns with the hero text above it.
@@ -38,6 +44,7 @@ public struct MediaRowView: View {
         spoilerSettings: SpoilerSettings = .default,
         initialFocusID: String? = nil,
         initialScrollID: String? = nil,
+        defaultFocusID: String? = nil,
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         onSelect: @escaping (MediaItem) -> Void
@@ -48,14 +55,17 @@ public struct MediaRowView: View {
         self.spoilerSettings = spoilerSettings
         self.initialFocusID = initialFocusID
         self.initialScrollID = initialScrollID
+        self.defaultFocusID = defaultFocusID
         self.leadingInset = leadingInset
         self.onFocusChange = onFocusChange
         self.onSelect = onSelect
     }
 
     /// Whether each card needs an individual focus binding installed — required
-    /// both to drive initial focus and to report focus changes to the hero.
-    private var tracksFocus: Bool { initialFocusID != nil || onFocusChange != nil }
+    /// to drive initial/default focus and to report focus changes to the hero.
+    private var tracksFocus: Bool {
+        initialFocusID != nil || onFocusChange != nil || defaultFocusID != nil
+    }
 
     public var body: some View {
         if !items.isEmpty {
@@ -79,6 +89,10 @@ public struct MediaRowView: View {
                         // never clipped by the scroll view's bounds.
                         .padding(.top, 16)
                         .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
+                        // Direct focus to the resume-target card when focus first
+                        // enters the row (e.g. pressing down from Play), instead of
+                        // the geometrically-nearest one.
+                        .modifier(DefaultFocusModifier(focusedID: $focusedID, targetID: defaultFocusID))
                     }
                     // Let a focused card's lift, drop shadow and border render
                     // outside the rail's bounds instead of being clipped.
@@ -134,6 +148,22 @@ public struct MediaRowView: View {
             // the target's offset before we scroll; focus is deliberately left
             // wherever it currently is (typically the hero Play button).
             DispatchQueue.main.async { proxy.scrollTo(target, anchor: .leading) }
+        }
+    }
+}
+
+/// Applies `.defaultFocus` to a row only when a target id is provided, so the
+/// row can direct entry focus to a specific card (e.g. the resume episode)
+/// without affecting rows that don't set one.
+private struct DefaultFocusModifier: ViewModifier {
+    let focusedID: FocusState<String?>.Binding
+    let targetID: String?
+
+    func body(content: Content) -> some View {
+        if let targetID {
+            content.defaultFocus(focusedID, targetID)
+        } else {
+            content
         }
     }
 }

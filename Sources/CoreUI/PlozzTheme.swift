@@ -37,9 +37,9 @@ public enum PlozzTheme {
         public static let screenPadding: CGFloat = 32
         /// Leading inset for the detail hero's title/metadata block, shared by the
         /// rows beneath it (seasons, episodes, cast, chips) so the whole page lines
-        /// up on one edge. Wider than `screenPadding` so content sits in from the
-        /// screen border the way the Apple TV detail page does, without hugging it.
-        public static let heroLeadingPadding: CGFloat = 64
+        /// up on one edge. Matches the standard `screenPadding` used by the Home
+        /// rows so detail and Home content sit on the same left edge.
+        public static let heroLeadingPadding: CGFloat = screenPadding
     }
 }
 

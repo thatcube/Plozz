@@ -61,6 +61,10 @@ public enum MediaItemActionCatalog {
             actions.append(.goToSeason)
         }
 
+        if canGoToMovie(item, in: context) {
+            actions.append(.goToMovie)
+        }
+
         return actions
     }
 
@@ -70,6 +74,14 @@ public enum MediaItemActionCatalog {
     /// Watching, Recently Added, Search and Top Shelf deep links all qualify.
     private static func canGoToSeason(_ item: MediaItem, in context: MediaItemActionContext) -> Bool {
         item.kind == .episode && item.seasonID != nil && context.orderedSiblings.isEmpty
+    }
+
+    /// Whether "Go to Movie" applies: a movie shown *outside* its own detail page
+    /// (Continue Watching, Recently Added, Search), where tapping may play it
+    /// immediately. As with `canGoToSeason`, an empty `orderedSiblings` marks
+    /// "not already inside a list that the action would be redundant for".
+    private static func canGoToMovie(_ item: MediaItem, in context: MediaItemActionContext) -> Bool {
+        item.kind == .movie && context.orderedSiblings.isEmpty
     }
 
     /// The siblings "mark watched up to here" should mark watched: every sibling

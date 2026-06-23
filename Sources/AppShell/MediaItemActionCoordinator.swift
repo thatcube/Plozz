@@ -70,7 +70,7 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
             ids.formUnion(MediaItemActionCatalog.siblingsToMarkUpToHere(item, in: context.orderedSiblings).map(\.id))
             ids.insert(item.id)
             return MutationPlan(action: action, targetID: item.id, affectedIDs: ids, played: true, revertOnFailure: false)
-        case .goToSeason:
+        case .goToSeason, .goToMovie:
             // Navigation is handled in the view layer, never here.
             return nil
         }
@@ -90,7 +90,7 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
                 for id in plan.affectedIDs {
                     try? await watch.setPlayed(true, itemID: id)
                 }
-            case .goToSeason:
+            case .goToSeason, .goToMovie:
                 break
             }
         } catch {

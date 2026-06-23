@@ -31,6 +31,10 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     /// Navigate from this episode to its owning season's page. A pure navigation
     /// action (no provider mutation) handled by the view layer's router.
     case goToSeason
+    /// Navigate from a movie card (Continue Watching, Recently Added, Search) to
+    /// the movie's own detail page instead of playing it. A pure navigation
+    /// action (no provider mutation) handled by the view layer's router.
+    case goToMovie
 
     public var id: String { rawValue }
 
@@ -41,6 +45,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .markUnwatched: return "Mark as Unwatched"
         case .markWatchedUpToHere: return "Mark Watched Up to Here"
         case .goToSeason: return "Go to Season"
+        case .goToMovie: return "Go to Movie"
         }
     }
 
@@ -51,6 +56,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .markUnwatched: return "arrow.uturn.backward.circle"
         case .markWatchedUpToHere: return "checkmark.circle.fill"
         case .goToSeason: return "rectangle.stack"
+        case .goToMovie: return "film"
         }
     }
 
@@ -59,7 +65,7 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     /// locally by the context menu, not the app-level action handler.
     public var isNavigation: Bool {
         switch self {
-        case .goToSeason: return true
+        case .goToSeason, .goToMovie: return true
         case .markWatched, .markUnwatched, .markWatchedUpToHere: return false
         }
     }

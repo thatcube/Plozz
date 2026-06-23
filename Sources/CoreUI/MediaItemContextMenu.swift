@@ -126,6 +126,8 @@ public struct MediaItemContextMenu: ViewModifier {
         case .goToSeason:
             guard let target = item.seasonNavigationTarget else { return }
             navigator?(target)
+        case .goToMovie:
+            navigator?(item)
         case .markWatched, .markUnwatched, .markWatchedUpToHere:
             break
         }

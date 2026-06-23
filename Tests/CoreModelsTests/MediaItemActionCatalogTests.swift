@@ -22,9 +22,10 @@ final class MediaItemActionCatalogTests: XCTestCase {
 
     // MARK: - Capability gating
 
-    func testNoActionsWhenWatchStateUnsupported() {
+    func testNoWatchActionsWhenWatchStateUnsupported() {
+        // Navigation actions remain (Go to Movie); only watched-state actions are gated.
         let movie = item(id: "m", kind: .movie)
-        XCTAssertTrue(MediaItemActionCatalog.actions(for: movie, supportsWatchState: false).isEmpty)
+        XCTAssertEqual(MediaItemActionCatalog.actions(for: movie, supportsWatchState: false), [.goToMovie])
     }
 
     func testNoActionsForIneligibleKinds() {
@@ -41,12 +42,12 @@ final class MediaItemActionCatalogTests: XCTestCase {
 
     func testUnwatchedMovieOffersMarkWatched() {
         let movie = item(id: "m", kind: .movie, isPlayed: false)
-        XCTAssertEqual(MediaItemActionCatalog.actions(for: movie, supportsWatchState: true), [.markWatched])
+        XCTAssertEqual(MediaItemActionCatalog.actions(for: movie, supportsWatchState: true), [.markWatched, .goToMovie])
     }
 
     func testWatchedMovieOffersMarkUnwatched() {
         let movie = item(id: "m", kind: .movie, isPlayed: true)
-        XCTAssertEqual(MediaItemActionCatalog.actions(for: movie, supportsWatchState: true), [.markUnwatched])
+        XCTAssertEqual(MediaItemActionCatalog.actions(for: movie, supportsWatchState: true), [.markUnwatched, .goToMovie])
     }
 
     func testSeasonAndSeriesAreEligible() {
@@ -145,5 +146,38 @@ final class MediaItemActionCatalogTests: XCTestCase {
         let movie = item(id: "m", kind: .movie, seasonID: "s1")
         let actions = MediaItemActionCatalog.actions(for: movie, supportsWatchState: true)
         XCTAssertFalse(actions.contains(.goToSeason))
+    }
+
+    // MARK: - Go to Movie
+
+    func testGoToMovieOfferedForMovieOutsideList() {
+        let movie = item(id: "m", kind: .movie)
+        // No orderedSiblings == not inside a list (e.g. Continue Watching).
+        let actions = MediaItemActionCatalog.actions(for: movie, supportsWatchState: true)
+        XCTAssertTrue(actions.contains(.goToMovie))
+    }
+
+    func testGoToMovieHiddenWhenInsideList() {
+        let m1 = item(id: "m1", kind: .movie)
+        let m2 = item(id: "m2", kind: .movie)
+        let context = MediaItemActionContext(orderedSiblings: [m1, m2])
+        let actions = MediaItemActionCatalog.actions(for: m2, supportsWatchState: true, context: context)
+        XCTAssertFalse(actions.contains(.goToMovie))
+    }
+
+    func testGoToMovieOfferedEvenWithoutWatchStateSupport() {
+        let movie = item(id: "m", kind: .movie)
+        let actions = MediaItemActionCatalog.actions(for: movie, supportsWatchState: false)
+        XCTAssertEqual(actions, [.goToMovie])
+    }
+
+    func testGoToMovieNotOfferedForNonMovies() {
+        for kind in [MediaItemKind.episode, .series, .season, .video] {
+            let it = item(id: "x", kind: kind, seasonID: "s1")
+            XCTAssertFalse(
+                MediaItemActionCatalog.actions(for: it, supportsWatchState: true).contains(.goToMovie),
+                "expected no Go to Movie for \(kind)"
+            )
+        }
     }
 }

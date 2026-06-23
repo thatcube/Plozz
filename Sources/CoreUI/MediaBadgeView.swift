@@ -46,7 +46,7 @@ public struct MediaBadgeChip: View {
     public var body: some View {
         switch badge.style {
         case .rating:
-            label(badge.label, font: Font.custom("Bungee-Regular", size: 19))
+            label(badge.label, font: Font.custom("RussoOne-Regular", size: 19))
                 .overlay(
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.55), lineWidth: 2)

@@ -56,6 +56,8 @@ public struct MediaBadgeChip: View {
     private static let dtsHDColor = Color(white: 0.62)
     /// Plain trailing channel-layout number appended to a format logo.
     private static let channelFont = Font.system(size: 18, weight: .semibold)
+    /// A bolder channel number for the dts-HD mark specifically.
+    private static let dtsChannelFont = Font.system(size: 18, weight: .heavy)
     /// The oversized `X` of the dts:X mark, larger than the `dts` head and
     /// filled with the orange dts:X gradient.
     private static let dtsXFont = Font.system(size: 32, weight: .black)
@@ -104,8 +106,9 @@ public struct MediaBadgeChip: View {
                 dtsLabel(badge.label)
                 if let detail = badge.detail {
                     // DTS-HD: nudge the channel number down/left to sit better
-                    // against the shorter, baseline-aligned dts-HD wordmark.
-                    channelText(detail)
+                    // against the shorter, baseline-aligned dts-HD wordmark, and
+                    // render it a little bolder.
+                    channelText(detail, font: Self.dtsChannelFont)
                         .offset(x: -2, y: 2)
                 }
             }
@@ -138,9 +141,9 @@ public struct MediaBadgeChip: View {
 
     /// A trailing channel-layout number (`5.1`/`7.1`) rendered as plain white
     /// text with no pill, so it reads as part of the preceding format logo.
-    private func channelText(_ text: String) -> some View {
+    private func channelText(_ text: String, font: Font = Self.channelFont) -> some View {
         Text(text)
-            .font(Self.channelFont)
+            .font(font)
             .foregroundStyle(.white)
             .lineLimit(1)
             .minimumScaleFactor(0.75)

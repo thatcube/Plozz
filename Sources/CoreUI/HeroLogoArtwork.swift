@@ -4,6 +4,25 @@ import SwiftUI
 import UIKit
 #endif
 
+/// A colour sample of the hero artwork behind the logo: the mean colour of the
+/// sampled region plus its luminance. Used to decide whether a logo needs a
+/// legibility halo — the decision weighs both brightness *and* colour, so a
+/// vibrant logo (e.g. a saturated red wordmark) isn't haloed just because its
+/// luminance happens to sit near the backdrop's.
+public struct HeroBackgroundSample: Sendable {
+    public let red: Double
+    public let green: Double
+    public let blue: Double
+    public let luminance: Double
+
+    public init(red: Double, green: Double, blue: Double, luminance: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.luminance = luminance
+    }
+}
+
 /// Renders a show's stylized title/logo art for the detail hero, falling back to
 /// a plain text title when no logo can be found.
 ///
@@ -20,7 +39,7 @@ import UIKit
 public struct HeroLogoArtwork<TextFallback: View>: View {
     private let primaryURL: URL?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
-    private let backgroundLuminance: (@Sendable () async -> Double?)?
+    private let backgroundSample: (@Sendable () async -> HeroBackgroundSample?)?
     private let maxWidth: CGFloat
     private let maxHeight: CGFloat
     private let textFallback: () -> TextFallback
@@ -28,14 +47,14 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
     public init(
         primaryURL: URL?,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
-        backgroundLuminance: (@Sendable () async -> Double?)? = nil,
+        backgroundSample: (@Sendable () async -> HeroBackgroundSample?)? = nil,
         maxWidth: CGFloat = 620,
         maxHeight: CGFloat = 200,
         @ViewBuilder textFallback: @escaping () -> TextFallback
     ) {
         self.primaryURL = primaryURL
         self.asyncFallbackURL = asyncFallbackURL
-        self.backgroundLuminance = backgroundLuminance
+        self.backgroundSample = backgroundSample
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
         self.textFallback = textFallback
@@ -46,7 +65,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         LoadedLogo(
             primaryURL: primaryURL,
             asyncFallbackURL: asyncFallbackURL,
-            backgroundLuminance: backgroundLuminance,
+            backgroundSample: backgroundSample,
             maxWidth: maxWidth,
             maxHeight: maxHeight,
             textFallback: textFallback
@@ -61,7 +80,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
 private struct LoadedLogo<TextFallback: View>: View {
     let primaryURL: URL?
     let asyncFallbackURL: (@Sendable () async -> URL?)?
-    let backgroundLuminance: (@Sendable () async -> Double?)?
+    let backgroundSample: (@Sendable () async -> HeroBackgroundSample?)?
     let maxWidth: CGFloat
     let maxHeight: CGFloat
     let textFallback: () -> TextFallback
@@ -119,25 +138,53 @@ private struct LoadedLogo<TextFallback: View>: View {
         resolved = true
     }
 
-    /// Combines the prepared logo with the background luminance to decide whether
-    /// the legibility halo is needed. With no background sample available we keep
-    /// the halo on, since we can't prove the logo is safe without it.
+    /// Combines the prepared logo with a colour sample of the background to decide
+    /// whether the legibility halo is needed. With no sample available we keep the
+    /// halo on, since we can't prove the logo is safe without it.
+    ///
+    /// A logo is legible when it separates from the artwork behind it by *either*
+    /// brightness or colour, so the halo is reserved for the cases where it does
+    /// neither: the luminance gap is small **and** the colours are close. That
+    /// keeps vibrant wordmarks (e.g. a saturated red logo on near-black) clean,
+    /// even though their luminance sits close to the dark backdrop's.
     private func finalize(_ prepared: PreparedLogo) async -> ProcessedLogo {
         let isDark = prepared.luminance < 0.5
         var needsHalo = true
-        if let bg = await backgroundLuminance?() {
-            // Symmetric tone gap between the logo and the artwork behind it. Below
-            // the threshold the two read as the same value and the logo would
-            // smear into the hero, so the halo earns its place; above it the logo
-            // already separates and we leave it clean.
-            needsHalo = abs(prepared.luminance - bg) < Self.haloContrastThreshold
+        if let bg = await backgroundSample?() {
+            let lumaGap = abs(prepared.luminance - bg.luminance)
+            let colorGap = Self.perceptualDistance(
+                r1: prepared.red, g1: prepared.green, b1: prepared.blue,
+                r2: bg.red, g2: bg.green, b2: bg.blue
+            )
+            needsHalo = lumaGap < Self.haloLuminanceThreshold
+                && colorGap < Self.haloColorThreshold
         }
         return ProcessedLogo(image: prepared.image, isDark: isDark, needsHalo: needsHalo)
     }
 
-    /// Logo/background luminance gap (0…1) below which the halo switches on. Tuned
-    /// for a "clean" lean: only clearly low-contrast pairs get a halo.
-    private static var haloContrastThreshold: Double { 0.26 }
+    /// Logo/background luminance gap (0…1) below which the logo no longer
+    /// separates by brightness alone. Tuned for a "clean" lean.
+    private static var haloLuminanceThreshold: Double { 0.26 }
+
+    /// Perceptual logo/background colour distance (0…~3, see `perceptualDistance`)
+    /// below which the logo no longer separates by colour either. Above it a
+    /// vibrant logo reads clearly against the backdrop and needs no halo.
+    private static var haloColorThreshold: Double { 0.40 }
+
+    /// Weighted ("redmean") RGB distance — a cheap approximation of perceived
+    /// colour difference that tracks the eye far better than raw Euclidean RGB.
+    /// Inputs are 0…1 per channel; the result ranges 0 (identical) to ~3
+    /// (black↔white).
+    private static func perceptualDistance(
+        r1: Double, g1: Double, b1: Double,
+        r2: Double, g2: Double, b2: Double
+    ) -> Double {
+        let rMean = (r1 + r2) / 2
+        let dr = r1 - r2
+        let dg = g1 - g2
+        let db = b1 - b2
+        return ((2 + rMean) * dr * dr + 4 * dg * dg + (3 - rMean) * db * db).squareRoot()
+    }
 
     private static func load(_ url: URL) async -> PreparedLogo? {
         guard let (data, response) = try? await URLSession.shared.data(from: url) else {
@@ -151,11 +198,23 @@ private struct LoadedLogo<TextFallback: View>: View {
     }
 }
 
-/// A logo after background removal/trim, carrying the mean luminance of its
-/// visible pixels so the caller can decide whether a contrast halo is needed.
+/// A logo after background removal/trim, carrying the mean luminance *and* mean
+/// colour of its visible pixels so the caller can decide whether a contrast halo
+/// is needed (weighing both brightness and colour against the backdrop).
 struct PreparedLogo {
     let image: UIImage
     let luminance: Double
+    let red: Double
+    let green: Double
+    let blue: Double
+
+    init(image: UIImage, luminance: Double, red: Double = 0, green: Double = 0, blue: Double = 0) {
+        self.image = image
+        self.luminance = luminance
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
 }
 
 /// A fully-resolved hero logo ready to render: the processed image, whether it
@@ -233,6 +292,7 @@ private extension UIImage {
         var minX = width, minY = height, maxX = -1, maxY = -1
         var lumaSum = 0.0
         var lumaWeight = 0.0
+        var rSum = 0.0, gSum = 0.0, bSum = 0.0
         for y in 0..<height {
             let rowStart = y * bytesPerRow
             for x in 0..<width {
@@ -251,12 +311,18 @@ private extension UIImage {
                     let b = Double(data[i + 2]) / 255.0 / af
                     let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
                     lumaSum += luma * af
+                    rSum += r * af
+                    gSum += g * af
+                    bSum += b * af
                     lumaWeight += af
                 }
             }
         }
 
         let luminance = lumaWeight > 0 ? (lumaSum / lumaWeight) : 0.0
+        let meanR = lumaWeight > 0 ? (rSum / lumaWeight) : 0.0
+        let meanG = lumaWeight > 0 ? (gSum / lumaWeight) : 0.0
+        let meanB = lumaWeight > 0 ? (bSum / lumaWeight) : 0.0
 
         // If background removal (or a fully transparent source) left essentially
         // nothing visible — e.g. a logo whose colour matched its own plate — the
@@ -268,11 +334,12 @@ private extension UIImage {
         }
         let cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
         guard let cropped = processedFull.cropping(to: cropRect) else {
-            return PreparedLogo(image: UIImage(cgImage: processedFull, scale: scale, orientation: imageOrientation), luminance: luminance)
+            return PreparedLogo(image: UIImage(cgImage: processedFull, scale: scale, orientation: imageOrientation), luminance: luminance, red: meanR, green: meanG, blue: meanB)
         }
         return PreparedLogo(
             image: UIImage(cgImage: cropped, scale: scale, orientation: imageOrientation),
-            luminance: luminance
+            luminance: luminance,
+            red: meanR, green: meanG, blue: meanB
         )
     }
 
@@ -401,26 +468,26 @@ private extension UIImage {
     }
 }
 
-/// Samples the effective luminance of the hero artwork behind the logo, so the
+/// Samples the effective colour of the hero artwork behind the logo, so the
 /// caller can decide whether the logo needs a contrast halo. Fully keyless and
 /// on-device: it just downsamples the same backdrop image and averages the
 /// left-of-centre band where the logo sits. Returns `nil` when no candidate URL
 /// yields a decodable image (the caller then keeps the halo on, to be safe).
-public enum HeroBackgroundLuminance {
-    /// Average luminance (0…1) of `region` (normalized, origin top-left) across
+public enum HeroBackgroundSampler {
+    /// Mean colour + luminance of `region` (normalized, origin top-left) across
     /// the first decodable URL in `urls`. `region` defaults to the left-of-centre
     /// vertical mid-band, which is where the hero's leading-aligned logo renders.
     public static func sample(
         urls: [URL],
         region: CGRect = CGRect(x: 0.0, y: 0.28, width: 0.5, height: 0.40)
-    ) async -> Double? {
+    ) async -> HeroBackgroundSample? {
         for url in urls {
-            if let luma = await sampleOne(url, region: region) { return luma }
+            if let sample = await sampleOne(url, region: region) { return sample }
         }
         return nil
     }
 
-    private static func sampleOne(_ url: URL, region: CGRect) async -> Double? {
+    private static func sampleOne(_ url: URL, region: CGRect) async -> HeroBackgroundSample? {
         guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return nil }
         guard let image = UIImage(data: data), let cg = image.cgImage, cg.width > 0, cg.height > 0 else {
@@ -456,7 +523,7 @@ public enum HeroBackgroundLuminance {
         let y0 = max(0, Int(region.minY * Double(targetH)))
         let y1 = min(targetH, max(y0 + 1, Int(region.maxY * Double(targetH))))
 
-        var lumaSum = 0.0
+        var rSum = 0.0, gSum = 0.0, bSum = 0.0
         var count = 0
         for y in y0..<y1 {
             let rowStart = y * bytesPerRow
@@ -464,14 +531,19 @@ public enum HeroBackgroundLuminance {
                 let i = rowStart + x * 4
                 let a = Double(buf[i + 3]) / 255.0
                 guard a > 0 else { continue }
-                let r = Double(buf[i]) / 255.0 / a
-                let g = Double(buf[i + 1]) / 255.0 / a
-                let b = Double(buf[i + 2]) / 255.0 / a
-                lumaSum += 0.2126 * r + 0.7152 * g + 0.0722 * b
+                rSum += Double(buf[i]) / 255.0 / a
+                gSum += Double(buf[i + 1]) / 255.0 / a
+                bSum += Double(buf[i + 2]) / 255.0 / a
                 count += 1
             }
         }
-        return count > 0 ? lumaSum / Double(count) : nil
+        guard count > 0 else { return nil }
+        let n = Double(count)
+        let r = rSum / n, g = gSum / n, b = bSum / n
+        return HeroBackgroundSample(
+            red: r, green: g, blue: b,
+            luminance: 0.2126 * r + 0.7152 * g + 0.0722 * b
+        )
     }
 }
 #endif

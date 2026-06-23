@@ -60,21 +60,21 @@ public struct MediaBadgeChip: View {
                 )
                 .accessibilityLabel(badge.label)
         case .dolby:
-            HStack(alignment: .center, spacing: 8) {
-                DolbyDoubleD()
-                    .fill(Color.white)
-                    .frame(width: 30, height: 21)
-                VStack(alignment: .leading, spacing: -2) {
+            VStack(alignment: .center, spacing: -2) {
+                HStack(alignment: .center, spacing: 6) {
+                    DolbyDoubleD()
+                        .fill(Color.white)
+                        .frame(width: 26, height: 18)
                     Text("Dolby")
                         .font(Self.dolbyWordFont)
                         .foregroundStyle(.white)
-                    Text(badge.dolbyFormatWord.uppercased())
-                        .font(Self.dolbyFormatFont)
-                        .foregroundStyle(.white)
-                        .tracking(0.9)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
                 }
+                Text(badge.dolbyFormatWord.uppercased())
+                    .font(Self.dolbyFormatFont)
+                    .foregroundStyle(.white)
+                    .tracking(0.9)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .accessibilityLabel(badge.label)
         }

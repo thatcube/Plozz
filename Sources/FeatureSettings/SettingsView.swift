@@ -387,14 +387,13 @@ public struct SettingsView: View {
                             HStack(spacing: 10) {
                                 Image(systemName: option.symbolName)
                                 Text(option.displayName)
-                                if theme.theme == option {
-                                    Image(systemName: "checkmark.circle.fill")
-                                }
+                                Image(systemName: "checkmark.circle.fill")
+                                    .opacity(theme.theme == option ? 1 : 0)
                             }
                             .font(.headline)
                             .padding(.horizontal, 4)
                         }
-                        .plozzGlassPillButton(isSelected: theme.theme == option)
+                        .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
                         .accessibilityValue(theme.theme == option ? "Selected" : "")
                     }
                 }

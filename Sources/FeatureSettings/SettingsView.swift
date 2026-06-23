@@ -458,9 +458,20 @@ public struct SettingsView: View {
     private var traktPanel: some View {
         SettingsPanel(
             title: "Trakt",
-            footer: "Connect Trakt to automatically scrobble what you watch to your Trakt.tv history."
+            footer: traktFooter
         ) {
             TraktConnectionView(trakt: trakt)
+        }
+    }
+
+    /// Only show the explanatory footer before the user connects. Once a code is
+    /// showing or the account is linked, the prompt is redundant.
+    private var traktFooter: String? {
+        switch trakt.phase {
+        case .connecting, .connected:
+            return nil
+        default:
+            return "Connect Trakt to automatically scrobble what you watch to your Trakt.tv history."
         }
     }
 
@@ -601,7 +612,10 @@ private struct TraktConnectionView: View {
         .task { await trakt.refreshStatus() }
         // Keep focus inside the Trakt card across phase swaps so tvOS doesn't
         // bounce it to the top of Settings when the focused control is replaced.
+        // Only redirect when the card already holds focus, otherwise resolving
+        // the initial status would steal focus down to Trakt on page load.
         .onChange(of: phaseTag) { _, tag in
+            guard focus != nil else { return }
             switch tag {
             case .connecting: focus = .cancel
             case .disconnected: focus = .connect

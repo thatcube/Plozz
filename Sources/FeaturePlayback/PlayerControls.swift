@@ -568,6 +568,7 @@ private struct ScrubBar: View {
 
                 if model.isScrubbing {
                     thumbnailPreview(width: width, knobX: knobX)
+                        .transition(.thumbnailDismiss)
                 }
                 if showThumbOverlay || model.isScrubbing {
                     thumbOverlay(width: width, knobX: knobX)
@@ -676,7 +677,7 @@ private struct ScrubBar: View {
         let thumbHeight = thumbWidth / aspect
         let clampedX = min(max(thumbWidth / 2, knobX), width - thumbWidth / 2)
         let corner: CGFloat = 18
-        let border: CGFloat = 2.5
+        let border: CGFloat = 6.5
 
         let content = Group {
             if let image = model.previewImage {
@@ -704,12 +705,40 @@ private struct ScrubBar: View {
                     )
             }
         }
-        .position(x: clampedX, y: Self.timeRowY - 22 - thumbHeight / 2)
+        .position(x: clampedX, y: Self.timeRowY - 30 - thumbHeight / 2)
     }
 
     private var previewAspect: CGFloat {
         guard let image = model.previewImage, image.height > 0 else { return 16.0 / 9.0 }
         return CGFloat(image.width) / CGFloat(image.height)
+    }
+}
+
+/// Drives the trickplay thumbnail's dismissal: it appears instantly (identity
+/// insertion) and, on removal, quickly fades while blurring, scaling down a
+/// touch, and drifting slightly downward.
+private struct ThumbnailTransitionModifier: ViewModifier {
+    /// 0 = fully visible, 1 = fully dismissed.
+    var progress: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(1 - 0.12 * progress, anchor: .center)
+            .blur(radius: 10 * progress)
+            .offset(y: 16 * progress)
+            .opacity(Double(1 - progress))
+    }
+}
+
+private extension AnyTransition {
+    static var thumbnailDismiss: AnyTransition {
+        .asymmetric(
+            insertion: .identity,
+            removal: .modifier(
+                active: ThumbnailTransitionModifier(progress: 1),
+                identity: ThumbnailTransitionModifier(progress: 0)
+            )
+        )
     }
 }
 

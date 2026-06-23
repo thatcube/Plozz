@@ -703,7 +703,7 @@ private struct ScrubBar: View {
 
     @ViewBuilder
     private func thumbnailPreview(width: CGFloat, knobX: CGFloat) -> some View {
-        let thumbWidth: CGFloat = 375
+        let thumbWidth: CGFloat = 420
         let aspect = previewAspect
         let thumbHeight = thumbWidth / aspect
         let edgeMargin: CGFloat = 16

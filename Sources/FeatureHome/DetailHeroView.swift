@@ -61,6 +61,12 @@ struct DetailHeroView: View {
     /// vs unfocused (dark) background.
     @FocusState private var playButtonHasFocus: Bool
 
+    /// The active light/dark appearance. The unfocused prominent button is dark
+    /// in dark mode but light in light mode, so the inline progress bar must take
+    /// the colour scheme into account — otherwise its white fill vanishes against
+    /// the light unfocused button in light mode.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
@@ -312,11 +318,12 @@ struct DetailHeroView: View {
     }
 
     /// The thin watched-progress bar shown inside the Play button between the
-    /// play icon and the "… left" line. Its colours flip with the button's focus
-    /// state — light fill on the dark unfocused button, dark fill on the white
-    /// focused button — so it stays clearly visible either way.
+    /// play icon and the "… left" line. Its colours flip to stay visible against
+    /// the button's background: the focused button is white in either appearance,
+    /// and the unfocused button is dark in dark mode but light in light mode — so
+    /// a light fill is only safe on an unfocused button in dark mode.
     private func resumeProgressCapsule(progress: Double) -> some View {
-        let onLight = playButtonHasFocus
+        let onLight = playButtonHasFocus || colorScheme == .light
         let track = onLight ? Color.black.opacity(0.22) : Color.white.opacity(0.32)
         let fill = onLight ? Color.black.opacity(0.85) : Color.white
         let width: CGFloat = 150

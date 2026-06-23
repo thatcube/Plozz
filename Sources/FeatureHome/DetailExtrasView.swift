@@ -2,6 +2,9 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The lower-detail metadata block: cast row, plus a studios/tags information
 /// strip. Shown beneath the hero on movie and series detail pages so the rich
@@ -121,32 +124,142 @@ private struct StudiosRow: View {
     }
 }
 
-/// A studio rendered as its TMDb logo on a light pill, sized to align with the
-/// text chips. Falls back to a text chip if the logo image fails to load.
+/// A studio rendered as its TMDb logo on a large, squared tile whose background
+/// (light or dark) is chosen to contrast the logo's own brightness, so logos of
+/// any colour stay legible. Falls back to a text tile if the image can't load.
+#if canImport(UIKit)
 private struct StudioLogoChip: View {
     let url: URL
     let name: String
 
+    /// Side of the square tile and its inner padding / corner radius.
+    private let side: CGFloat = 180
+    private let corner: CGFloat = 20
+    private let inset: CGFloat = 26
+
+    @State private var image: UIImage?
+    @State private var tileIsDark = false
+    @State private var failed = false
+    @State private var resolved = false
+
     var body: some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case let .success(image):
-                image
+        Group {
+            if let image {
+                Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(height: 28)
-                    .frame(maxWidth: 220)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 18)
-                    .background(Capsule().fill(Color.white))
-            case .failure:
-                StudioTextChip(name: name)
-            default:
-                Capsule()
-                    .fill(Color.primary.opacity(0.10))
-                    .frame(width: 120, height: 44)
+                    .padding(inset)
+                    .frame(width: side, height: side)
+                    .background(
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
+                            .fill(tileIsDark ? Color(white: 0.10) : Color(white: 0.96))
+                    )
+            } else if failed {
+                StudioTextTile(name: name, side: side, corner: corner)
+            } else {
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: side, height: side)
             }
         }
+        .task(id: url) { await load() }
+    }
+
+    private func load() async {
+        guard !resolved else { return }
+        guard
+            let (data, response) = try? await URLSession.shared.data(from: url),
+            (response as? HTTPURLResponse).map({ (200...299).contains($0.statusCode) }) ?? true,
+            let loaded = UIImage(data: data)
+        else {
+            failed = true
+            resolved = true
+            return
+        }
+        // A predominantly light logo wants a dark tile, and vice-versa.
+        tileIsDark = Self.averageLuminance(of: loaded) > 0.5
+        image = loaded
+        resolved = true
+    }
+
+    /// Alpha-weighted average luminance of the logo's opaque pixels (0 = black,
+    /// 1 = white), computed from a tiny downsample. Transparent areas are
+    /// ignored so the result reflects the "ink", not the background.
+    private static func averageLuminance(of image: UIImage) -> Double {
+        guard let cg = image.cgImage else { return 0 }
+        let width = 24, height = 24
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return 0 }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var luminanceSum = 0.0
+        var alphaSum = 0.0
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            let alpha = Double(pixels[index + 3]) / 255.0
+            guard alpha > 0.05 else { continue }
+            // Premultiplied: un-multiply by alpha to recover the true colour.
+            let r = Double(pixels[index]) / 255.0 / alpha
+            let g = Double(pixels[index + 1]) / 255.0 / alpha
+            let b = Double(pixels[index + 2]) / 255.0 / alpha
+            let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            luminanceSum += luminance * alpha
+            alphaSum += alpha
+        }
+        return alphaSum > 0 ? luminanceSum / alphaSum : 0
+    }
+}
+#else
+private struct StudioLogoChip: View {
+    let url: URL
+    let name: String
+
+    private let side: CGFloat = 180
+    private let corner: CGFloat = 20
+
+    var body: some View {
+        AsyncImage(url: url) { phase in
+            if case let .success(image) = phase {
+                image.resizable().scaledToFit().padding(26)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: side, height: side)
+        .background(
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .fill(Color(white: 0.96))
+        )
+    }
+}
+#endif
+
+/// A studio with no usable logo, shown as a squared tile with its name — keeps
+/// the row visually consistent with the logo tiles.
+private struct StudioTextTile: View {
+    let name: String
+    let side: CGFloat
+    let corner: CGFloat
+
+    var body: some View {
+        Text(name)
+            .font(.system(size: 24, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .minimumScaleFactor(0.7)
+            .padding(18)
+            .frame(width: side, height: side)
+            .background(
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(Color.primary.opacity(0.10))
+            )
     }
 }
 

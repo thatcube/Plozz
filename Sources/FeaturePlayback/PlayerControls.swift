@@ -564,7 +564,7 @@ private struct ScrubBar: View {
             ZStack(alignment: .leading) {
                 glassTrack(height: 24)
                 Capsule()
-                    .fill(.white.opacity(0.35))
+                    .fill(.white.opacity(0.14))
                     .frame(width: width * CGFloat(model.bufferedFraction), height: 24)
                 Capsule()
                     .fill(palette.accent)

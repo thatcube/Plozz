@@ -215,15 +215,16 @@ private struct StudioLogoChip: View {
     /// Decides whether the tile behind a logo should be dark or light.
     ///
     /// Distinguishes two cases by how much of the image is transparent:
-    /// - **Transparent logo** (a meaningful share of pixels are see-through —
-    ///   the common case): pick the tile that *contrasts* the logo's own "ink"
-    ///   so a white logo gets a dark tile and a black logo a light one. This
-    ///   correctly handles logos whose ink reaches the image edges (e.g. Fox),
-    ///   which an edge-only test would misread.
-    /// - **Opaque/baked-in background** (almost no transparency — e.g. dark text
-    ///   on a white card): sample the corners (reliably the background) and
-    ///   match the tile to them so the logo blends in instead of showing as a
-    ///   "box within a box".
+    /// - **Opaque/baked-in background** (essentially *no* transparency — a solid
+    ///   card, e.g. dark text on a white rectangle): sample the corners (the
+    ///   background) and match the tile to them so the logo blends in instead of
+    ///   showing as a "box within a box".
+    /// - **Transparent logo** (any meaningful transparency — the common case,
+    ///   including logos whose ink reaches the image edges like 20th Century
+    ///   Fox): pick the tile that *contrasts* the logo's own "ink" so a white
+    ///   logo gets a dark tile and a black logo a light one. Corner sampling is
+    ///   deliberately *not* used here, because a transparent logo's corners are
+    ///   often its own ink, not a background.
     private static func prefersDarkTile(for image: UIImage) -> Bool {
         guard let cg = image.cgImage else { return false }
         let size = 28
@@ -268,8 +269,9 @@ private struct StudioLogoChip: View {
         }
 
         let transparentFraction = transparentCount / Double(size * size)
-        // Mostly opaque ⇒ the logo carries its own background; blend with it.
-        if transparentFraction < 0.12, cornerWeight > 0 {
+        // Essentially fully opaque ⇒ the logo is a solid card carrying its own
+        // background; blend the tile with that background's corner shade.
+        if transparentFraction < 0.02, cornerWeight > 0 {
             return (cornerLumSum / cornerWeight) < 0.5
         }
         // Transparent logo ⇒ contrast against the ink.

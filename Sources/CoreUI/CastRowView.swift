@@ -9,10 +9,18 @@ import CoreModels
 public struct CastRowView: View {
     private let title: String
     private let people: [MediaPerson]
+    /// Leading inset for the title and first headshot. Detail pages pass the
+    /// hero leading padding so the cast row aligns with the hero text above.
+    private let leadingInset: CGFloat
 
-    public init(title: String = "Cast", people: [MediaPerson]) {
+    public init(
+        title: String = "Cast",
+        people: [MediaPerson],
+        leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding
+    ) {
         self.title = title
         self.people = people
+        self.leadingInset = leadingInset
     }
 
     public var body: some View {
@@ -21,7 +29,7 @@ public struct CastRowView: View {
                 if !title.isEmpty {
                     Text(title)
                         .font(.system(size: 32, weight: .bold))
-                        .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                        .padding(.leading, leadingInset)
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -30,7 +38,8 @@ public struct CastRowView: View {
                             CastMemberCard(person: person)
                         }
                     }
-                    .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                    .padding(.leading, leadingInset)
+                    .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                     .padding(.top, 12)
                     .padding(.bottom, 28)
                 }

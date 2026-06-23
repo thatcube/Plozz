@@ -111,7 +111,7 @@ struct SeriesDetailView: View {
 
                 episodeRail
 
-                DetailExtrasView(item: series)
+                DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
             }
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }
@@ -126,7 +126,8 @@ struct SeriesDetailView: View {
                     seasonChip(season)
                 }
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
             // Headroom for the focused chip's lift so it is never clipped.
             .padding(.vertical, 12)
         }
@@ -134,16 +135,20 @@ struct SeriesDetailView: View {
         .scrollClipDisabled()
         // Treat the whole tab bar as one focus section so pressing "up" from any
         // episode — even when the rail is scrolled far to the right and no tab
-        // sits directly above — reliably enters the bar and lands on the season
-        // it last had focused (the one currently on screen).
+        // sits directly above — reliably enters the bar instead of being trapped.
         .focusSection()
-        // Entering the bar (down from Play, or up from the episode row) should
-        // land on the *active* season's tab, not the first/nearest one. Once
-        // inside, left/right moves between seasons normally (which updates the
-        // selection, so re-entry keeps landing on whatever is active).
-        .defaultFocus($focusedSeasonID, selectedSeasonID)
-        .onChange(of: focusedSeasonID) { _, newValue in
-            guard let id = newValue, let season = seasons.first(where: { $0.id == id }) else { return }
+        .onChange(of: focusedSeasonID) { oldValue, newValue in
+            guard let id = newValue else { return }
+            // Entering the bar from outside (Play above / episodes below) lands on
+            // whichever chip is geometrically nearest — often the wrong season. If
+            // that isn't the active season, redirect focus to it. Only do this on
+            // *entry* (oldValue == nil); once inside, left/right moves freely
+            // between seasons (which updates the active season as it goes).
+            if oldValue == nil, let active = selectedSeasonID, id != active {
+                focusedSeasonID = active
+                return
+            }
+            guard let season = seasons.first(where: { $0.id == id }) else { return }
             select(season)
             heroItem = season
         }
@@ -189,6 +194,7 @@ struct SeriesDetailView: View {
             // focus on the hero Play button; otherwise surface "next up" focused.
             initialFocusID: isTargetingEpisode ? nil : SeriesResume.nextUp(in: episodes)?.id,
             initialScrollID: isTargetingEpisode ? initialEpisode?.id : nil,
+            leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusChange: { focused in
                 if let focused { heroItem = focused }
             },

@@ -18,6 +18,10 @@ public struct MediaRowView: View {
     /// stay elsewhere (e.g. the hero's Play button) while the row is still
     /// pre-positioned at a chosen episode. Ignored when `initialFocusID` is set.
     private let initialScrollID: String?
+    /// Leading inset for the row's title and first card. Defaults to the standard
+    /// screen padding (Home rows); detail pages pass the larger hero leading
+    /// padding so the row aligns with the hero text above it.
+    private let leadingInset: CGFloat
     private let onSelect: (MediaItem) -> Void
     /// Called whenever focus moves onto a card (with that item) or off the row
     /// entirely (`nil`). Used by series detail to mirror the focused episode into
@@ -34,6 +38,7 @@ public struct MediaRowView: View {
         spoilerSettings: SpoilerSettings = .default,
         initialFocusID: String? = nil,
         initialScrollID: String? = nil,
+        leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         onSelect: @escaping (MediaItem) -> Void
     ) {
@@ -43,6 +48,7 @@ public struct MediaRowView: View {
         self.spoilerSettings = spoilerSettings
         self.initialFocusID = initialFocusID
         self.initialScrollID = initialScrollID
+        self.leadingInset = leadingInset
         self.onFocusChange = onFocusChange
         self.onSelect = onSelect
     }
@@ -57,7 +63,7 @@ public struct MediaRowView: View {
                 if !title.isEmpty {
                     Text(title)
                         .font(.system(size: 32, weight: .bold))
-                        .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                        .padding(.leading, leadingInset)
                 }
 
                 ScrollViewReader { proxy in
@@ -67,7 +73,8 @@ public struct MediaRowView: View {
                                 card(for: item)
                             }
                         }
-                        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                        .padding(.leading, leadingInset)
+                        .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                         // Give the focused card's lift + drop shadow room so it is
                         // never clipped by the scroll view's bounds.
                         .padding(.top, 16)

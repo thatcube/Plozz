@@ -86,11 +86,12 @@ public struct ItemDetailView: View {
                         style: detail.item.kind == .series ? .poster : .landscape,
                         spoilerSettings: spoilerSettings,
                         initialFocusID: nextUpFocusID(for: detail),
+                        leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
                         onSelect: onSelectChild
                     )
                     .mediaItemActionContext(childrenActionContext(for: detail))
                 }
-                DetailExtrasView(item: detail.item)
+                DetailExtrasView(item: detail.item, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
             }
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
         }

@@ -10,6 +10,9 @@ import CoreUI
 /// tags are the defining metadata.
 struct DetailExtrasView: View {
     let item: MediaItem
+    /// Leading inset so the cast row and chip strips align with the hero text
+    /// above. Defaults to the standard screen padding.
+    var leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding
 
     private var hasContent: Bool {
         !item.cast.isEmpty || !item.studios.isEmpty || !item.tags.isEmpty
@@ -19,13 +22,13 @@ struct DetailExtrasView: View {
         if hasContent {
             VStack(alignment: .leading, spacing: 28) {
                 if !item.cast.isEmpty {
-                    CastRowView(people: item.cast)
+                    CastRowView(people: item.cast, leadingInset: leadingInset)
                 }
                 if !item.studios.isEmpty {
-                    InfoChipsRow(title: "Studios", values: item.studios)
+                    InfoChipsRow(title: "Studios", values: item.studios, leadingInset: leadingInset)
                 }
                 if !item.tags.isEmpty {
-                    InfoChipsRow(title: "Tags", values: item.tags)
+                    InfoChipsRow(title: "Tags", values: item.tags, leadingInset: leadingInset)
                 }
             }
         }
@@ -36,6 +39,7 @@ struct DetailExtrasView: View {
 private struct InfoChipsRow: View {
     let title: String
     let values: [String]
+    var leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -54,7 +58,8 @@ private struct InfoChipsRow: View {
                 }
             }
         }
-        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+        .padding(.leading, leadingInset)
+        .padding(.trailing, PlozzTheme.Metrics.screenPadding)
     }
 }
 

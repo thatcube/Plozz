@@ -135,22 +135,29 @@ private struct StudiosRow: View {
     }
 }
 
-/// A studio rendered as its TMDb logo on a large, squared tile whose background
-/// (light or dark) is chosen to contrast the logo's own brightness, so logos of
-/// any colour stay legible. Falls back to a text tile if the image can't load.
+/// A studio rendered as its TMDb logo on a tile. The tile keeps a fixed height
+/// and adapts its width to the logo's aspect ratio (square logos get a near-
+/// square tile, wide wordmarks get a wide tile) so every tile reads as the same
+/// "size". The background (light or dark) is chosen so the logo stays legible:
+/// transparent logos get a tile that contrasts their ink, while logos that ship
+/// their own opaque background get a tile that blends with it. Falls back to a
+/// text tile if the image can't load.
 #if canImport(UIKit)
 private struct StudioLogoChip: View {
     let url: URL
     let name: String
 
-    /// Tile dimensions, corner radius and inner padding.
-    private let tileWidth: CGFloat = 260
-    private let tileHeight: CGFloat = 190
+    /// Fixed tile height; width is derived from the logo's aspect ratio and
+    /// clamped to this range so nothing gets too narrow or runs off the row.
+    private let tileHeight: CGFloat = 180
+    private let minWidth: CGFloat = 150
+    private let maxWidth: CGFloat = 460
     private let corner: CGFloat = 22
-    private let inset: CGFloat = 28
+    private let inset: CGFloat = 26
 
     @State private var image: UIImage?
     @State private var tileIsDark = false
+    @State private var tileWidth: CGFloat = 240
     @State private var failed = false
     @State private var resolved = false
 
@@ -189,20 +196,34 @@ private struct StudioLogoChip: View {
             return
         }
         tileIsDark = Self.prefersDarkTile(for: loaded)
+        tileWidth = tileWidthForAspect(of: loaded)
         image = loaded
         resolved = true
     }
 
+    /// Derives the tile width from the logo's aspect ratio, keeping the inner
+    /// content area at the fixed tile height so all tiles share one height and
+    /// only differ in width.
+    private func tileWidthForAspect(of image: UIImage) -> CGFloat {
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return 240 }
+        let contentHeight = tileHeight - inset * 2
+        let contentWidth = contentHeight * (size.width / size.height)
+        return min(maxWidth, max(minWidth, contentWidth + inset * 2))
+    }
+
     /// Decides whether the tile behind a logo should be dark or light.
     ///
-    /// Two cases, both reduced to a light/dark choice so the row keeps a
-    /// consistent two-shade palette:
-    /// - **Baked-in background** (the logo image has opaque edges, i.e. no
-    ///   transparency — e.g. dark text scanned on a white card): match the tile
-    ///   to that background's brightness so the image blends in instead of
-    ///   showing as a "box within a box".
-    /// - **Transparent logo**: pick the tile that *contrasts* the logo's own
-    ///   "ink" so a white logo gets a dark tile and a black logo a light one.
+    /// Distinguishes two cases by how much of the image is transparent:
+    /// - **Transparent logo** (a meaningful share of pixels are see-through —
+    ///   the common case): pick the tile that *contrasts* the logo's own "ink"
+    ///   so a white logo gets a dark tile and a black logo a light one. This
+    ///   correctly handles logos whose ink reaches the image edges (e.g. Fox),
+    ///   which an edge-only test would misread.
+    /// - **Opaque/baked-in background** (almost no transparency — e.g. dark text
+    ///   on a white card): sample the corners (reliably the background) and
+    ///   match the tile to them so the logo blends in instead of showing as a
+    ///   "box within a box".
     private static func prefersDarkTile(for image: UIImage) -> Bool {
         guard let cg = image.cgImage else { return false }
         let size = 28
@@ -225,33 +246,31 @@ private struct StudioLogoChip: View {
             return 0.2126 * r + 0.7152 * g + 0.0722 * b
         }
 
-        var edgeAlphaSum = 0.0, edgeCount = 0.0
-        var edgeLumSum = 0.0, edgeLumWeight = 0.0
+        let lastIndex = size - 1
+        var transparentCount = 0.0
         var inkLumSum = 0.0, inkAlphaSum = 0.0
+        var cornerLumSum = 0.0, cornerWeight = 0.0
         for y in 0..<size {
             for x in 0..<size {
                 let i = (y * size + x) * 4
                 let alpha = Double(pixels[i + 3]) / 255.0
-                let isEdge = x == 0 || y == 0 || x == size - 1 || y == size - 1
-                if isEdge {
-                    edgeAlphaSum += alpha
-                    edgeCount += 1
-                    if alpha > 0.05 {
-                        edgeLumSum += luminance(at: i, alpha: alpha) * alpha
-                        edgeLumWeight += alpha
-                    }
-                }
+                if alpha < 0.05 { transparentCount += 1 }
                 if alpha > 0.05 {
                     inkLumSum += luminance(at: i, alpha: alpha) * alpha
                     inkAlphaSum += alpha
                 }
+                let isCorner = (x == 0 || x == lastIndex) && (y == 0 || y == lastIndex)
+                if isCorner, alpha > 0.05 {
+                    cornerLumSum += luminance(at: i, alpha: alpha) * alpha
+                    cornerWeight += alpha
+                }
             }
         }
 
-        let averageEdgeAlpha = edgeCount > 0 ? edgeAlphaSum / edgeCount : 0
-        // Opaque edges ⇒ the logo carries its own background; blend with it.
-        if averageEdgeAlpha > 0.6, edgeLumWeight > 0 {
-            return (edgeLumSum / edgeLumWeight) < 0.5
+        let transparentFraction = transparentCount / Double(size * size)
+        // Mostly opaque ⇒ the logo carries its own background; blend with it.
+        if transparentFraction < 0.12, cornerWeight > 0 {
+            return (cornerLumSum / cornerWeight) < 0.5
         }
         // Transparent logo ⇒ contrast against the ink.
         let inkLuminance = inkAlphaSum > 0 ? inkLumSum / inkAlphaSum : 0
@@ -263,19 +282,18 @@ private struct StudioLogoChip: View {
     let url: URL
     let name: String
 
-    private let tileWidth: CGFloat = 260
-    private let tileHeight: CGFloat = 190
+    private let tileHeight: CGFloat = 180
     private let corner: CGFloat = 22
 
     var body: some View {
         AsyncImage(url: url) { phase in
             if case let .success(image) = phase {
-                image.resizable().scaledToFit().padding(28)
+                image.resizable().scaledToFit().padding(26)
             } else {
                 Color.clear
             }
         }
-        .frame(width: tileWidth, height: tileHeight)
+        .frame(width: 240, height: tileHeight)
         .background(
             RoundedRectangle(cornerRadius: corner, style: .continuous)
                 .fill(Color(white: 0.96))

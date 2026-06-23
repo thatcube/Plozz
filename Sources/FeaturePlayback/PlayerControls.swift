@@ -574,29 +574,29 @@ private struct ScrubBar: View {
     }
 
     /// Floated just above the scrub head (the focus indicator) and tracking it,
-    /// Apple-TV style: the current time you're at, centered on the thumb, with a
-    /// fixed-width slot on each side. A backward skip's −10 glyph (and, if the
-    /// seek is still resolving, the loading spinner) sits in the left slot; a
-    /// forward skip's +10, the spinner for a forward skip / plain scrub, and the
-    /// circular pause glyph all sit in the right slot. Equal slot widths keep the
-    /// time centered on the thumb; the whole cluster is centered at the knob and
-    /// clamped so it never runs off either edge.
+    /// Apple-TV style. The current time is pinned dead-centre on the thumb and
+    /// never moves; the flanking glyphs hang off its left/right edges as overlays
+    /// so they can't shift it. A backward skip's −10 (and, if the seek is still
+    /// resolving, the loading spinner) sits to the left; a forward skip's +10, the
+    /// spinner for a forward seek / plain scrub, and the circular pause glyph sit
+    /// to the right. Clamped so the time never runs off either edge.
     @ViewBuilder
     private func thumbOverlay(width: CGFloat, knobX: CGFloat) -> some View {
-        let clusterWidth: CGFloat = 240
-        let cx = min(max(clusterWidth / 2, knobX), width - clusterWidth / 2)
-        HStack(spacing: 8) {
-            leftSlot.frame(width: 44, height: 44)
-            Text(PlayerControls.timeLabel(model.displaySeconds))
-                .monospacedDigit()
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(.white)
-                .fixedSize()
-                .shadow(radius: 3)
-            rightSlot.frame(width: 44, height: 44)
-        }
-        .frame(width: clusterWidth)
-        .position(x: cx, y: -36)
+        let margin: CGFloat = 120
+        let cx = min(max(margin, knobX), max(margin, width - margin))
+        Text(PlayerControls.timeLabel(model.displaySeconds))
+            .monospacedDigit()
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(.white)
+            .fixedSize()
+            .shadow(radius: 3)
+            .overlay(alignment: .leading) {
+                leftSlot.frame(width: 44, height: 44).offset(x: -50)
+            }
+            .overlay(alignment: .trailing) {
+                rightSlot.frame(width: 44, height: 44).offset(x: 50)
+            }
+            .position(x: cx, y: -36)
     }
 
     /// Left of the current time: the −10 glyph after a backward skip, replaced by

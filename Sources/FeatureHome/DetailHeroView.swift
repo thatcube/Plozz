@@ -58,19 +58,23 @@ struct DetailHeroView: View {
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
-    /// The capability badges shown above the ratings: the content-rating
-    /// certificate (e.g. `TV-14`) leading, then resolution/HDR/audio badges.
-    /// When the focused item is an episode without its own certificate, the
-    /// rating falls back to the backdrop item (the series), so a show's TV
-    /// rating still shows while scrubbing episodes — matching Apple TV.
+    /// The capability badges shown above the ratings: resolution/HDR/audio. The
+    /// content-rating certificate is rendered separately, inline with the
+    /// year/runtime/genre metadata line.
     private var featureBadges: [MediaBadge] {
-        let rating = item.ratingBadge ?? backdrop.ratingBadge
         // Prefer the focused item's own tech badges; fall back to the derived
         // series-level set for a series/season hero (or an episode whose stream
         // info hasn't loaded), so tech badges are present on every kind.
         let ownTech = item.technicalBadges
-        let tech = ownTech.isEmpty ? fallbackTechnicalBadges : ownTech
-        return (rating.map { [$0] } ?? []) + tech
+        return ownTech.isEmpty ? fallbackTechnicalBadges : ownTech
+    }
+
+    /// The content-rating certificate badge (e.g. `TV-14`). When the focused
+    /// item is an episode without its own certificate, it falls back to the
+    /// backdrop item (the series), so a show's TV rating still shows while
+    /// scrubbing episodes — matching Apple TV.
+    private var heroRatingBadge: MediaBadge? {
+        item.ratingBadge ?? backdrop.ratingBadge
     }
 
     /// External ratings to show. Falls back to the backdrop item (the series)
@@ -112,11 +116,18 @@ struct DetailHeroView: View {
                     .lineLimit(1)
             }
             let metadata = item.metadataComponents()
-            if !metadata.isEmpty {
-                Text(metadata.joined(separator: "  ·  "))
-                    .font(.system(size: 23, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            if heroRatingBadge != nil || !metadata.isEmpty {
+                HStack(alignment: .center, spacing: 16) {
+                    if let badge = heroRatingBadge {
+                        MediaBadgeChip(badge: badge)
+                    }
+                    if !metadata.isEmpty {
+                        Text(metadata.joined(separator: "  ·  "))
+                            .font(.system(size: 23, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
             if !hideText, let tagline = item.tagline {
                 Text(tagline)

@@ -103,7 +103,10 @@ public struct MediaBadgeChip: View {
             HStack(alignment: .center, spacing: 6) {
                 dtsLabel(badge.label)
                 if let detail = badge.detail {
+                    // DTS-HD: nudge the channel number down/left to sit better
+                    // against the shorter, baseline-aligned dts-HD wordmark.
                     channelText(detail)
+                        .offset(x: -2, y: 2)
                 }
             }
             .accessibilityLabel(badge.accessibilityText)

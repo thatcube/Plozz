@@ -295,6 +295,15 @@ let package = Package(
             name: "FeaturePlaybackTests",
             dependencies: ["FeaturePlayback", "CoreModels"]
         ),
+        // EngineMPV tests require the Libmpv xcframeworks (staged by
+        // tools/setup-mpv.sh) and compile only on tvOS. The test source is
+        // guarded by `#if canImport(Libmpv) && canImport(UIKit)` so the target
+        // builds to an empty test bundle in environments that lack those
+        // frameworks (e.g. plain `swift build` on macOS).
+        .testTarget(
+            name: "EngineMPVTests",
+            dependencies: ["EngineMPV", "CoreModels"]
+        ),
 
         // MARK: - EngineMPV binary dependencies
         //

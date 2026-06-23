@@ -26,6 +26,8 @@ struct SeriesDetailView: View {
     let viewModel: ItemDetailViewModel
     let spoilerSettings: SpoilerSettings
     let onPlay: (MediaItem) -> Void
+    /// When the page was opened targeting a specific season, that season's id.
+    let initialSeasonID: String?
     /// When the page was opened by tapping a specific episode, that episode. The
     /// page then fronts it in the hero, selects its season, pre-scrolls the
     /// episode row to it, and parks focus on the hero Play button.
@@ -73,6 +75,7 @@ struct SeriesDetailView: View {
         self.viewModel = viewModel
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
+        self.initialSeasonID = initialSeasonID
         self.initialEpisode = initialEpisode
         // When opened via "Go to Season", pre-select that season (and front it in
         // the hero) so the page lands on the requested season rather than the
@@ -384,10 +387,16 @@ struct SeriesDetailView: View {
     /// "next up"), so nothing swaps under the user after load.
     @MainActor
     private func frontTargetEpisodeIfNeeded(in seasonID: String?) async {
-        guard let target = initialEpisode else { return }
         let pool = seasonID.flatMap { viewModel.episodes(for: $0) } ?? (seasons.isEmpty ? stampedLooseEpisodes : [])
-        if let loaded = pool.first(where: { $0.id == target.id }) {
-            heroItem = loaded
+        
+        if let target = initialEpisode {
+            if let loaded = pool.first(where: { $0.id == target.id }) {
+                heroItem = loaded
+            }
+        } else if initialSeasonID != nil {
+            if let target = SeriesResume.nextUp(in: pool) {
+                heroItem = target
+            }
         }
     }
 

@@ -218,6 +218,20 @@ private struct HomeTab: View {
                     initialEpisode: route.episode
                 )
             }
+            .navigationDestination(for: SeasonContextRoute.self) { route in
+                ItemDetailView(
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(route.sourceAccountID, in: accounts),
+                        itemID: route.seriesID,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: route.sourceAccountID
+                    ),
+                    spoilerSettings: spoilerSettings,
+                    onPlay: { requestPlay($0) },
+                    onSelectChild: { navigate($0) },
+                    initialSeasonID: route.season.id
+                )
+            }
         }
         .fullScreenCover(item: $playRequest) { request in
             PlayerView(
@@ -260,6 +274,8 @@ private struct HomeTab: View {
     private func navigate(_ item: MediaItem) {
         if item.kind == .episode, item.seriesID != nil {
             path.append(EpisodeContextRoute(episode: item))
+        } else if item.kind == .season, item.seriesID != nil {
+            path.append(SeasonContextRoute(season: item))
         } else {
             path.append(item)
         }
@@ -296,6 +312,18 @@ private struct EpisodeContextRoute: Hashable {
     /// shouldn't happen for an episode that carries a `seriesID`).
     var seriesID: String { episode.seriesID ?? episode.id }
     var sourceAccountID: String? { episode.sourceAccountID }
+}
+
+/// A navigation value for opening a *series* page focused on a specific season.
+/// Tapping a season item (e.g. from "Recently Added") routes through this instead
+/// of pushing the season itself, so the user always lands on the rich series page —
+/// with the tapped season selected, and the "next up" episode for that season
+/// fronted in the hero.
+private struct SeasonContextRoute: Hashable {
+    let season: MediaItem
+    /// The owning series' id.
+    var seriesID: String { season.seriesID ?? season.id }
+    var sourceAccountID: String? { season.sourceAccountID }
 }
 
 private extension View {
@@ -377,10 +405,26 @@ private struct SearchTab: View {
                     initialEpisode: route.episode
                 )
             }
+            .navigationDestination(for: SeasonContextRoute.self) { route in
+                ItemDetailView(
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(route.sourceAccountID, in: accounts),
+                        itemID: route.seriesID,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: route.sourceAccountID
+                    ),
+                    spoilerSettings: spoilerSettings,
+                    onPlay: { requestPlay($0) },
+                    onSelectChild: { open($0) },
+                    initialSeasonID: route.season.id
+                )
+            }
         }
         .mediaItemNavigator { item in
             if item.kind == .episode, item.seriesID != nil {
                 path.append(EpisodeContextRoute(episode: item))
+            } else if item.kind == .season, item.seriesID != nil {
+                path.append(SeasonContextRoute(season: item))
             } else {
                 path.append(item)
             }
@@ -407,6 +451,8 @@ private struct SearchTab: View {
         switch item.kind {
         case .movie, .episode, .video:
             requestPlay(item)
+        case .season where item.seriesID != nil:
+            path.append(SeasonContextRoute(season: item))
         default:
             path.append(item)
         }

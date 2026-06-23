@@ -560,6 +560,13 @@ private struct ScrubBar: View {
         GeometryReader { geo in
             let width = geo.size.width
             let knobX = width * CGFloat(model.progressFraction)
+            // The bar reads as "focused" once it owns Siri-Remote focus (the
+            // bottom control bar is engaged) or while the user is actively
+            // scrubbing. Unfocused, the played fill fades back and the playhead
+            // shrinks flush into the track so the focus cue is unmistakable.
+            let focused = model.controlBarVisible || model.isScrubbing
+            let knobWidth: CGFloat = focused ? 8 : 4
+            let knobHeight: CGFloat = focused ? (model.isScrubbing ? 40 : 32) : 20
 
             ZStack(alignment: .leading) {
                 glassTrack(height: 20)
@@ -573,12 +580,12 @@ private struct ScrubBar: View {
                     topTrailingRadius: 0,
                     style: .continuous
                 )
-                    .fill(palette.accent.opacity(0.62))
+                    .fill(.white.opacity(focused ? 0.62 : 0.22))
                     .frame(width: knobX, height: 20)
                 Capsule(style: .continuous)
                     .fill(.white)
-                    .frame(width: 8, height: model.isScrubbing ? 40 : 32)
-                    .offset(x: knobX - 4)
+                    .frame(width: knobWidth, height: knobHeight)
+                    .offset(x: knobX - knobWidth / 2)
                     .shadow(radius: 4)
 
                 if model.isScrubbing {
@@ -591,6 +598,7 @@ private struct ScrubBar: View {
             }
             .frame(maxHeight: .infinity, alignment: .center)
             .animation(.easeOut(duration: 0.12), value: model.isScrubbing)
+            .animation(.easeOut(duration: 0.2), value: model.controlBarVisible)
             .onChange(of: model.skipHintToken) { _, _ in pulseSkipPress() }
             .onChange(of: model.skipHintVisible) { _, visible in
                 if !visible { skipPressed = false }

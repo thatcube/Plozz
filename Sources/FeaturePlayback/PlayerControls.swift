@@ -575,10 +575,10 @@ private struct ScrubBar: View {
                 )
                     .fill(palette.accent.opacity(0.62))
                     .frame(width: knobX, height: 20)
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                Capsule(style: .continuous)
                     .fill(.white)
-                    .frame(width: 6, height: model.isScrubbing ? 40 : 32)
-                    .offset(x: knobX - 3)
+                    .frame(width: 8, height: model.isScrubbing ? 40 : 32)
+                    .offset(x: knobX - 4)
                     .shadow(radius: 4)
 
                 if model.isScrubbing {

@@ -52,6 +52,13 @@ public struct MediaBadgeChip: View {
                         .strokeBorder(Color.white.opacity(0.55), lineWidth: 2)
                 )
                 .accessibilityLabel(badge.label)
+        case .prominent:
+            label(badge.label, textColor: .black)
+                .background(
+                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                        .fill(Color.white)
+                )
+                .accessibilityLabel(badge.label)
         case .spec:
             label(badge.label)
                 .background(
@@ -80,10 +87,10 @@ public struct MediaBadgeChip: View {
         }
     }
 
-    private func label(_ text: String) -> some View {
+    private func label(_ text: String, textColor: Color = .white) -> some View {
         Text(text)
             .font(Self.textFont)
-            .foregroundStyle(.white)
+            .foregroundStyle(textColor)
             .textCase(.uppercase)
             .tracking(0.5)
             .padding(.horizontal, Self.hPadding)

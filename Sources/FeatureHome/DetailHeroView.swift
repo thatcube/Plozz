@@ -217,14 +217,13 @@ struct DetailHeroView: View {
             .padding(.vertical, PlozzTheme.Metrics.screenPadding)
             .padding(.trailing, PlozzTheme.Metrics.screenPadding)
             .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
-            // Hard-pin the content column to the viewport width *after* its
-            // paddings, so no inner row (a long title, a wide badge/ratings strip,
-            // an oversized logo) can ever report a width greater than the screen.
-            // On tvOS a focusable element (the Play button) inside content wider
-            // than the scroll viewport makes the page pan horizontally — which is
-            // what pushed the hero/focus off the left edge. Capping the reported
-            // width here removes that overflow entirely.
-            .frame(maxWidth: Self.screenWidth, alignment: .leading)
+            // Pin the content column to the *proposed* width (the safe viewport),
+            // never a hard-coded panel width, so no inner row (a long title, a wide
+            // badge/ratings strip, an oversized logo) can report a width greater
+            // than the viewport. Using `.infinity` reports the proposed width and
+            // caps over-wide children to it; a fixed 1920 would exceed the tvOS
+            // safe area (~1740) and itself cause the page to pan.
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         // Cross-fade the hero text as the focused context changes, while the
         // backdrop swaps underneath it.
@@ -302,18 +301,6 @@ struct DetailHeroView: View {
         return UIScreen.main.bounds.height
         #else
         return 1080
-        #endif
-    }
-
-    /// Full screen width, used to hard-cap the hero content column so it can never
-    /// report a width wider than the viewport (which would let tvOS pan the page
-    /// horizontally and push focus off-screen). Falls back to a 1080p-width
-    /// constant where UIKit isn't available.
-    private static var screenWidth: CGFloat {
-        #if canImport(UIKit)
-        return UIScreen.main.bounds.width
-        #else
-        return 1920
         #endif
     }
 

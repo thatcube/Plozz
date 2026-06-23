@@ -146,6 +146,13 @@ struct SeriesDetailView: View {
                     DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
                 }
                 .padding(.bottom, PlozzTheme.Metrics.screenPadding)
+                // Cap the whole scroll column to the proposed (safe viewport)
+                // width. The hero backdrop still bleeds edge-to-edge via its own
+                // `.ignoresSafeArea`, but its layout footprint — and any over-wide
+                // row below (e.g. a long tags strip) — can no longer inflate the
+                // column past the viewport, which is what let tvOS pan the page
+                // sideways and shove focus off the left edge.
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Keep the page pinned to the top on first load. The Play button is
             // bottom-anchored in the full-screen hero, so when initial focus

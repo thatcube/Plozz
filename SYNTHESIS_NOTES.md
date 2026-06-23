@@ -336,3 +336,48 @@ Build BUILD SUCCEEDED; installed + launched on the Apple TV from the verified
   of a blank card. Western-TV episodes are unaffected (still → TMDb/TVmaze).
 - Confirm heroes still look sharp (TMDb `/original` when configured) and that
   removing TMDb would degrade gracefully to the keyless AniList banner.
+
+## Phase 6 — Root-cause fix for the hero/page horizontal shift (4th pass)
+
+Earlier passes (title caps, hero-column `screenWidth` cap) did NOT fix the
+reported shift. Decisive on-device clue from the maintainer: the **hero image is
+dead-centre in the viewport while the rest of the UI is pushed right** (focus
+off the left edge), and there were "hundreds of tags." Root cause, verified in
+code (and confirmed *not* caused by the graft — `git diff 6ff5a0a` shows the
+graft only populated `providerIDs`, never `tags`; this is a base-level layout
+bug the maintainer was comparing against competitor branches):
+
+1. The hero backdrop uses `.ignoresSafeArea([.top, .horizontal])` to bleed
+   edge-to-edge, which inflates the hero's **layout** width to the full panel
+   (~1920) while the ScrollView's *safe* viewport is only ~1740 (tvOS overscan).
+   The scroll-content `VStack` had **no width cap**, so it reported ~1920 and the
+   page panned sideways.
+2. `FlowLayout.sizeThatFits` returned the **summed width of every chip** when
+   proposed an unbounded width — so a show with hundreds of server tags could
+   balloon the column to many thousands of px, which SwiftUI then centres
+   (hero appears centred, leading content thrown far off-screen left).
+3. The prior `screenWidth` (=1920) hero cap was ≥ the safe viewport, so it could
+   never actually constrain anything.
+
+Fixes (all additive, keyless-safe, no provider/data changes):
+- **DetailHeroView.swift**: hero content column cap `Self.screenWidth` →
+  `.frame(maxWidth: .infinity)` (reports the *proposed* safe-viewport width and
+  caps over-wide inner rows to it); removed the now-unused `screenWidth` helper.
+- **SeriesDetailView.swift / ItemDetailView.swift**: cap the whole scroll-content
+  `VStack` with `.frame(maxWidth: .infinity, alignment: .leading)`. The hero
+  still bleeds full-width via its own `.ignoresSafeArea`, but its footprint — and
+  any over-wide row below — can no longer inflate the column past the viewport.
+- **DetailExtrasView.swift FlowLayout**: when proposed an unbounded width, wrap
+  at a finite fallback (`UIScreen.main.bounds.width`) instead of summing all
+  chips, so tags can never balloon the page.
+- **DetailExtrasView.swift**: cap the displayed Tags strip to the first 40
+  (anime can carry hundreds of AniDB keyword tags) — directly addresses the
+  maintainer's "do they have a limit?" question.
+
+### Needs on-device verification (maintainer)
+- Anime **series** detail page: the page no longer shifts right; focus (Play
+  button) is visible on the left on entry, with NO horizontal pan, even for
+  shows with very long titles and/or hundreds of tags.
+- The hero backdrop still bleeds edge-to-edge (full-width) and is centred.
+- Tags strip now wraps to multiple lines and is capped at 40 chips.
+- Movie detail pages (ItemDetailView) likewise no longer pan sideways.

@@ -26,15 +26,21 @@ public struct MediaBadgeRow: View {
 /// treatments:
 /// - `.rating` — an outlined pill with a transparent fill (`TV-14`, `PG-13`).
 /// - `.spec` — a solid, faintly-filled gray pill (`4K`, `HDR`, `5.1`, `DTS:X`).
-/// - `.dolby` — the Dolby double-D logo followed by the format word, no pill.
+/// - `.dolby` — the Dolby double-D logo with a stacked wordmark (`Dolby` over
+///   the format name), no pill.
 public struct MediaBadgeChip: View {
     private let badge: MediaBadge
 
     /// Shared type scale so every treatment lines up to the same cap height.
     private static let textFont = Font.system(size: 21, weight: .semibold)
+    private static let dolbyWordFont = Font.system(size: 16, weight: .semibold)
+    private static let dolbyFormatFont = Font.system(size: 13, weight: .medium)
     private static let cornerRadius: CGFloat = 6
     private static let hPadding: CGFloat = 11
     private static let vPadding: CGFloat = 5
+    /// Shared pill height so every pill badge (rating, resolution, spec) lines
+    /// up to the exact same height regardless of the font it uses.
+    private static let pillHeight: CGFloat = 36
 
     public init(badge: MediaBadge) {
         self.badge = badge
@@ -43,10 +49,17 @@ public struct MediaBadgeChip: View {
     public var body: some View {
         switch badge.style {
         case .rating:
-            label(badge.label)
+            label(badge.label, font: Font.custom("Bungee-Regular", size: 18))
                 .overlay(
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.55), lineWidth: 2)
+                        .strokeBorder(Color.white.opacity(0.65), lineWidth: 3)
+                )
+                .accessibilityLabel(badge.label)
+        case .prominent:
+            label(badge.label, textColor: .black)
+                .background(
+                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                        .fill(Color.white)
                 )
                 .accessibilityLabel(badge.label)
         case .spec:
@@ -57,26 +70,36 @@ public struct MediaBadgeChip: View {
                 )
                 .accessibilityLabel(badge.label)
         case .dolby:
-            HStack(spacing: 7) {
-                DolbyDoubleD()
-                    .fill(Color.white)
-                    .frame(width: 30, height: 22)
-                Text(badge.dolbyFormatWord)
-                    .font(Self.textFont)
+            VStack(alignment: .center, spacing: -1) {
+                HStack(alignment: .center, spacing: 5) {
+                    DolbyDoubleD()
+                        .fill(Color.white)
+                        .frame(width: 21, height: 14)
+                    Text("Dolby")
+                        .font(Self.dolbyWordFont)
+                        .foregroundStyle(.white)
+                }
+                Text(badge.dolbyFormatWord.uppercased())
+                    .font(Self.dolbyFormatFont)
                     .foregroundStyle(.white)
+                    .tracking(1.0)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .accessibilityLabel(badge.label)
         }
     }
 
-    private func label(_ text: String) -> some View {
+    private func label(_ text: String, textColor: Color = .white, font: Font? = nil) -> some View {
         Text(text)
-            .font(Self.textFont)
-            .foregroundStyle(.white)
+            .font(font ?? Self.textFont)
+            .foregroundStyle(textColor)
             .textCase(.uppercase)
             .tracking(0.5)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .padding(.horizontal, Self.hPadding)
-            .padding(.vertical, Self.vPadding)
+            .frame(height: Self.pillHeight)
     }
 }
 

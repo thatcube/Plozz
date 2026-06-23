@@ -16,8 +16,12 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
         /// A solid, faintly-filled gray pill — technical specs such as `4K`,
         /// `HDR`, `HDR10`, `5.1`, `DTS:X`.
         case spec
-        /// A Dolby badge rendered as the double-D logo followed by the format
-        /// word (Dolby Vision, Dolby Atmos, Dolby Digital+, …). No pill.
+        /// A highly visible solid pill (e.g. solid white with dark text) for
+        /// the primary resolution badge.
+        case prominent
+        /// A Dolby badge rendered as the double-D logo with a stacked wordmark
+        /// (`Dolby` over the format, e.g. Dolby Vision / Atmos / Digital+). No
+        /// pill.
         case dolby
     }
 
@@ -70,7 +74,7 @@ public extension MediaSourceMetadata {
         case 700..<1000: label = "720p"
         default: label = "SD"
         }
-        return MediaBadge(label, style: .spec)
+        return MediaBadge(label, style: .prominent)
     }
 
     /// At most one dynamic-range badge describing the HDR/Dolby Vision signal:

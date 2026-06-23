@@ -711,7 +711,7 @@ private struct ScrubBar: View {
         let maxX = width + trailingInset - thumbWidth / 2 - edgeMargin
         let clampedX = min(max(minX, knobX), max(minX, maxX))
         let corner: CGFloat = 18
-        let border: CGFloat = 6.5
+        let border: CGFloat = 10.5
 
         let content = Group {
             if let image = model.previewImage {

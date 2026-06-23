@@ -178,9 +178,9 @@ public struct JellyfinClient: Sendable {
     /// `GET /Users/{userId}/Items/{itemId}/LocalTrailers` — the local trailer
     /// files Jellyfin detected alongside an item. Each is a fully playable
     /// `BaseItemDto` (its own item id), so it streams through the normal
-    /// playback path. Returns a bare array, not an `Items` envelope. Remote
-    /// (e.g. YouTube) trailers are intentionally not included — they aren't
-    /// directly playable in the tvOS player.
+    /// playback path. Returns a bare array, not an `Items` envelope. Online
+    /// (e.g. YouTube) trailers come from a separate field — see
+    /// ``remoteTrailers(userID:id:)``.
     func localTrailers(userID: String, id: String) async throws -> [BaseItemDto] {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/\(id)/LocalTrailers",
@@ -188,6 +188,20 @@ public struct JellyfinClient: Sendable {
             headers: authHeaders
         )
         return try await http.decode([BaseItemDto].self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// The item's online trailer links (`BaseItemDto.RemoteTrailers`) — YouTube
+    /// watch URLs the server resolved from its own metadata provider. Unlike
+    /// local trailers these have no server item id; the caller extracts the
+    /// YouTube video id and plays it through the keyless trailer path. Returns an
+    /// empty array when the server has none.
+    func remoteTrailers(userID: String, id: String) async throws -> [MediaUrlDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items/\(id)",
+            queryItems: [URLQueryItem(name: "Fields", value: "RemoteTrailers")],
+            headers: authHeaders
+        )
+        return try await http.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL).RemoteTrailers ?? []
     }
 
     /// One page of a container's items for library browsing.

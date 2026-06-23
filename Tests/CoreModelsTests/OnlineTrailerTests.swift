@@ -1,6 +1,5 @@
 import XCTest
 import CoreModels
-import CoreUI
 
 final class OnlineTrailerTests: XCTestCase {
 
@@ -22,104 +21,64 @@ final class OnlineTrailerTests: XCTestCase {
         XCTAssertNil(movie.youTubeTrailerVideoID)
     }
 
-    // MARK: - TMDb trailer ranking
+    // MARK: - YouTube URL parsing (server RemoteTrailers / Plex remote extras)
 
-    private func video(_ key: String?, site: String = "YouTube", type: String = "Trailer", official: Bool = true, size: Int = 1080, lang: String? = nil) -> TMDbArtworkResolver.Video {
-        TMDbArtworkResolver.Video(key: key, site: site, type: type, official: official, size: size, iso_639_1: lang)
-    }
-
-    func testRankingKeepsOnlyYouTubeTrailersAndTeasers() {
-        let videos = [
-            video("vimeo", site: "Vimeo"),
-            video("clip", type: "Clip"),
-            video("featurette", type: "Featurette"),
-            video("trailer"),
-            video("teaser", type: "Teaser"),
-            video(nil)
-        ]
-        XCTAssertEqual(TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos), ["trailer", "teaser"])
-    }
-
-    func testRankingPrefersOfficialTrailerOverTeaser() {
-        let videos = [
-            video("teaser-official", type: "Teaser", official: true, size: 2160),
-            video("trailer-unofficial", type: "Trailer", official: false, size: 720),
-            video("trailer-official", type: "Trailer", official: true, size: 1080)
-        ]
-        // Trailers rank above teasers; official above unofficial.
+    func testParsesWatchURL() {
         XCTAssertEqual(
-            TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos),
-            ["trailer-official", "trailer-unofficial", "teaser-official"]
+            MediaItem.youTubeVideoID(fromURL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            "dQw4w9WgXcQ"
         )
     }
 
-    func testRankingBreaksTiesByLargerSize() {
-        let videos = [
-            video("small", size: 480),
-            video("large", size: 2160),
-            video("medium", size: 1080)
-        ]
-        XCTAssertEqual(TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos), ["large", "medium", "small"])
-    }
-
-    func testRankingEmptyForNoVideos() {
-        XCTAssertTrue(TMDbArtworkResolver.rankedYouTubeTrailerKeys([]).isEmpty)
-    }
-
-    func testFallsBackToClipsAndFeaturettesWhenNoTrailer() {
-        // A title with no Trailer/Teaser should still surface a playable clip
-        // rather than nothing, preferring clips over featurettes.
-        let videos = [
-            video("featurette", type: "Featurette"),
-            video("clip", type: "Clip"),
-            video("vimeo-clip", site: "Vimeo", type: "Clip")
-        ]
-        XCTAssertEqual(TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos), ["clip", "featurette"])
-    }
-
-    func testClipsIgnoredWhenARealTrailerExists() {
-        let videos = [
-            video("clip", type: "Clip"),
-            video("trailer", type: "Trailer")
-        ]
-        XCTAssertEqual(TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos), ["trailer"])
-    }
-
-    func testRankingPrefersEnglishOverOtherLanguages() {
-        let videos = [
-            video("japanese", type: "Trailer", lang: "ja"),
-            video("english", type: "Trailer", lang: "en"),
-            video("neutral", type: "Trailer", lang: nil)
-        ]
-        // English first, then language-neutral, then anything else.
+    func testParsesWatchURLWithExtraParams() {
         XCTAssertEqual(
-            TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos),
-            ["english", "neutral", "japanese"]
+            MediaItem.youTubeVideoID(fromURL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=ABC&t=42s"),
+            "dQw4w9WgXcQ"
         )
     }
 
-    func testRankingPrefersOriginalLanguageWhenNoEnglish() {
-        let videos = [
-            video("french", type: "Trailer", lang: "fr"),
-            video("japanese", type: "Trailer", lang: "ja")
-        ]
-        // No English/neutral: the title's original language wins over others.
+    func testParsesShortYoutuBeURL() {
         XCTAssertEqual(
-            TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos, originalLanguage: "ja").first,
-            "japanese"
+            MediaItem.youTubeVideoID(fromURL: "https://youtu.be/dQw4w9WgXcQ?t=10"),
+            "dQw4w9WgXcQ"
         )
     }
 
-    func testLanguagePreferenceOutranksTrailerOverTeaser() {
-        let videos = [
-            video("english-teaser", type: "Teaser", lang: "en"),
-            video("foreign-trailer", type: "Trailer", lang: "de")
-        ]
-        // An English teaser beats a foreign-language full trailer for an
-        // English-language UI.
+    func testParsesEmbedShortsAndVPaths() {
+        XCTAssertEqual(MediaItem.youTubeVideoID(fromURL: "https://www.youtube.com/embed/dQw4w9WgXcQ"), "dQw4w9WgXcQ")
+        XCTAssertEqual(MediaItem.youTubeVideoID(fromURL: "https://www.youtube.com/shorts/dQw4w9WgXcQ"), "dQw4w9WgXcQ")
+        XCTAssertEqual(MediaItem.youTubeVideoID(fromURL: "https://www.youtube.com/v/dQw4w9WgXcQ"), "dQw4w9WgXcQ")
+    }
+
+    func testParsesNoCookieHost() {
         XCTAssertEqual(
-            TMDbArtworkResolver.rankedYouTubeTrailerKeys(videos).first,
-            "english-teaser"
+            MediaItem.youTubeVideoID(fromURL: "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"),
+            "dQw4w9WgXcQ"
         )
+    }
+
+    func testParsesBareID() {
+        XCTAssertEqual(MediaItem.youTubeVideoID(fromURL: "dQw4w9WgXcQ"), "dQw4w9WgXcQ")
+    }
+
+    func testRejectsNonYouTubeAndMalformed() {
+        XCTAssertNil(MediaItem.youTubeVideoID(fromURL: "https://vimeo.com/123456"))
+        XCTAssertNil(MediaItem.youTubeVideoID(fromURL: "https://www.youtube.com/watch?v=tooLong12345"))
+        XCTAssertNil(MediaItem.youTubeVideoID(fromURL: ""))
+        XCTAssertNil(MediaItem.youTubeVideoID(fromURL: "not a url"))
+    }
+
+    func testYouTubeTrailerFromURLBuildsMarkedItem() {
+        let trailer = MediaItem.youTubeTrailer(
+            fromURL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            title: "Dune — Trailer",
+            parentTitle: "Dune"
+        )
+        XCTAssertEqual(trailer?.youTubeTrailerVideoID, "dQw4w9WgXcQ")
+        XCTAssertEqual(trailer?.parentTitle, "Dune")
+    }
+
+    func testYouTubeTrailerFromURLNilForUnsupported() {
+        XCTAssertNil(MediaItem.youTubeTrailer(fromURL: "https://vimeo.com/123456", title: "x"))
     }
 }

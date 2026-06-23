@@ -40,9 +40,14 @@ public struct MediaBadgeChip: View {
     private static let hdrHeadFont = Font.system(size: 21, weight: .black)
     private static let hdrSuffixFont = Font.system(size: 16, weight: .heavy)
     /// DTS wordmark weights: a heavy lowercase `dts` head with the `-HD` suffix
-    /// rendered as one connected gray unit (dash fused to the `HD`).
+    /// rendered as one connected gray unit — a short `HD` (about as tall as the
+    /// `s`) with the dash drawn as a solid bar fused to the `H`.
     private static let dtsHeadFont = Font.system(size: 22, weight: .black)
-    private static let dtsSuffixFont = Font.system(size: 21, weight: .black)
+    private static let dtsSuffixFont = Font.system(size: 15, weight: .black)
+    /// The fused dash bar of the dts-HD mark, sized to the shorter `HD`.
+    private static let dtsDashWidth: CGFloat = 6
+    private static let dtsDashThickness: CGFloat = 3
+    private static let dtsDashYOffset: CGFloat = -1
     /// Gray fill for the `-HD` portion of the dts-HD mark.
     private static let dtsHDColor = Color(white: 0.62)
     /// Plain trailing channel-layout number appended to a format logo.
@@ -176,7 +181,7 @@ public struct MediaBadgeChip: View {
     private func dtsLabel(_ text: String) -> some View {
         let parts = Self.splitDTS(text)
         let isX = parts.suffix?.uppercased() == "X"
-        return HStack(alignment: isX ? .center : .firstTextBaseline, spacing: isX ? 1 : 0) {
+        return HStack(alignment: .center, spacing: isX ? 1 : 0) {
             Text(parts.head)
                 .font(Self.dtsHeadFont)
                 .tracking(-0.5)
@@ -185,6 +190,17 @@ public struct MediaBadgeChip: View {
                 Text("X")
                     .font(Self.dtsXFont)
                     .foregroundStyle(Self.dtsXGradient)
+            } else if parts.separator == "-", let suffix = parts.suffix {
+                // dts-HD: a short, much smaller `HD` with the dash drawn as a
+                // solid bar fused to the `H`, the whole unit gray.
+                HStack(alignment: .center, spacing: -0.5) {
+                    Rectangle()
+                        .frame(width: Self.dtsDashWidth, height: Self.dtsDashThickness)
+                        .offset(y: Self.dtsDashYOffset)
+                    Text(suffix)
+                        .font(Self.dtsSuffixFont)
+                }
+                .foregroundStyle(Self.dtsHDColor)
             } else {
                 Text((parts.separator ?? "") + (parts.suffix ?? ""))
                     .font(Self.dtsSuffixFont)

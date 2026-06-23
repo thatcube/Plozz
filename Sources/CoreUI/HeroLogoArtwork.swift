@@ -20,6 +20,7 @@ import UIKit
 public struct HeroLogoArtwork<TextFallback: View>: View {
     private let primaryURL: URL?
     private let asyncFallbackURL: (@Sendable () async -> URL?)?
+    private let backgroundLuminance: (@Sendable () async -> Double?)?
     private let maxWidth: CGFloat
     private let maxHeight: CGFloat
     private let textFallback: () -> TextFallback
@@ -27,12 +28,14 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
     public init(
         primaryURL: URL?,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        backgroundLuminance: (@Sendable () async -> Double?)? = nil,
         maxWidth: CGFloat = 620,
         maxHeight: CGFloat = 200,
         @ViewBuilder textFallback: @escaping () -> TextFallback
     ) {
         self.primaryURL = primaryURL
         self.asyncFallbackURL = asyncFallbackURL
+        self.backgroundLuminance = backgroundLuminance
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
         self.textFallback = textFallback
@@ -43,6 +46,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
         LoadedLogo(
             primaryURL: primaryURL,
             asyncFallbackURL: asyncFallbackURL,
+            backgroundLuminance: backgroundLuminance,
             maxWidth: maxWidth,
             maxHeight: maxHeight,
             textFallback: textFallback
@@ -57,6 +61,7 @@ public struct HeroLogoArtwork<TextFallback: View>: View {
 private struct LoadedLogo<TextFallback: View>: View {
     let primaryURL: URL?
     let asyncFallbackURL: (@Sendable () async -> URL?)?
+    let backgroundLuminance: (@Sendable () async -> Double?)?
     let maxWidth: CGFloat
     let maxHeight: CGFloat
     let textFallback: () -> TextFallback
@@ -73,13 +78,13 @@ private struct LoadedLogo<TextFallback: View>: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: .leading)
-                    // Adaptive contrast halo so the logo stays legible against any
-                    // hero: a soft light glow behind dark logos, a soft dark
-                    // shadow behind light ones. The illegible cases are precisely
-                    // when the logo's tone matches the background's, so keying the
-                    // halo off the logo's own luminance fixes dark-on-dark and
-                    // light-on-light without sampling the background.
-                    .modifier(LogoLegibilityHalo(isDark: processed.isDark))
+                    // Adaptive contrast halo, applied *only* to logos that need it
+                    // (`needsHalo`): a soft light glow behind dark logos, a soft
+                    // dark shadow behind light ones. The illegible cases are
+                    // precisely when the logo's tone matches the background's, so
+                    // we only add the halo when the measured logo/background
+                    // contrast is low — logos that already stand out stay clean.
+                    .modifier(LogoLegibilityHalo(isDark: processed.isDark, active: processed.needsHalo))
                     .transition(.opacity)
             } else if resolved {
                 textFallback()
@@ -101,20 +106,40 @@ private struct LoadedLogo<TextFallback: View>: View {
     private func resolve() async {
         resolved = false
         image = nil
-        if let primaryURL, let loaded = await Self.load(primaryURL) {
-            image = loaded
+        if let primaryURL, let prepared = await Self.load(primaryURL) {
+            image = await finalize(prepared)
             resolved = true
             return
         }
-        if let asyncFallbackURL, let url = await asyncFallbackURL(), let loaded = await Self.load(url) {
-            image = loaded
+        if let asyncFallbackURL, let url = await asyncFallbackURL(), let prepared = await Self.load(url) {
+            image = await finalize(prepared)
             resolved = true
             return
         }
         resolved = true
     }
 
-    private static func load(_ url: URL) async -> ProcessedLogo? {
+    /// Combines the prepared logo with the background luminance to decide whether
+    /// the legibility halo is needed. With no background sample available we keep
+    /// the halo on, since we can't prove the logo is safe without it.
+    private func finalize(_ prepared: PreparedLogo) async -> ProcessedLogo {
+        let isDark = prepared.luminance < 0.5
+        var needsHalo = true
+        if let bg = await backgroundLuminance?() {
+            // Symmetric tone gap between the logo and the artwork behind it. Below
+            // the threshold the two read as the same value and the logo would
+            // smear into the hero, so the halo earns its place; above it the logo
+            // already separates and we leave it clean.
+            needsHalo = abs(prepared.luminance - bg) < Self.haloContrastThreshold
+        }
+        return ProcessedLogo(image: prepared.image, isDark: isDark, needsHalo: needsHalo)
+    }
+
+    /// Logo/background luminance gap (0…1) below which the halo switches on. Tuned
+    /// for a "clean" lean: only clearly low-contrast pairs get a halo.
+    private static var haloContrastThreshold: Double { 0.26 }
+
+    private static func load(_ url: URL) async -> PreparedLogo? {
         guard let (data, response) = try? await URLSession.shared.data(from: url) else {
             return nil
         }
@@ -126,22 +151,33 @@ private struct LoadedLogo<TextFallback: View>: View {
     }
 }
 
-/// A decoded hero logo plus the legibility metadata derived from its pixels:
-/// `isDark` drives the adaptive contrast halo (light glow vs. dark shadow).
+/// A logo after background removal/trim, carrying the mean luminance of its
+/// visible pixels so the caller can decide whether a contrast halo is needed.
+struct PreparedLogo {
+    let image: UIImage
+    let luminance: Double
+}
+
+/// A fully-resolved hero logo ready to render: the processed image, whether it
+/// reads as dark (halo colour), and whether the halo should be shown at all.
 struct ProcessedLogo {
     let image: UIImage
     let isDark: Bool
+    let needsHalo: Bool
 }
 
 /// Wraps the logo in a soft, single-tone halo so it separates from the hero
 /// regardless of the artwork behind it. Two stacked shadows build a stronger,
-/// evenly-spread glow than one. Harmless in the already-legible cases (a white
-/// glow behind a dark logo on a light hero is barely visible).
+/// evenly-spread glow than one. `active == false` is a clean pass-through, so a
+/// logo that already contrasts with its background renders with no halo at all.
 private struct LogoLegibilityHalo: ViewModifier {
     let isDark: Bool
+    let active: Bool
 
     func body(content: Content) -> some View {
-        if isDark {
+        if !active {
+            content
+        } else if isDark {
             content
                 .shadow(color: .white.opacity(0.6), radius: 5)
                 .shadow(color: .white.opacity(0.35), radius: 14)
@@ -156,18 +192,19 @@ private struct LogoLegibilityHalo: ViewModifier {
 private extension UIImage {
     /// Prepares a raw logo image for the hero: strips a baked-in solid-colour
     /// background when present, trims transparent margins so logos align by their
-    /// visible content, and measures the logo's luminance to pick a contrast halo.
-    /// Returns `nil` only when there is no decodable backing image.
-    func preparedAsHeroLogo() -> ProcessedLogo? {
+    /// visible content, and measures the logo's luminance (used to pick and gate
+    /// the contrast halo). Returns `nil` when nothing usable remains (no decodable
+    /// image, or removal erased essentially everything).
+    func preparedAsHeroLogo() -> PreparedLogo? {
         guard let cg = cgImage, cg.width > 0, cg.height > 0 else {
-            return ProcessedLogo(image: self, isDark: true)
+            return PreparedLogo(image: self, luminance: 0.0)
         }
         let width = cg.width
         let height = cg.height
         // Guard against pathologically large logos — the per-pixel passes below
         // are O(width*height); skip the heavy work and use the image as-is.
         if width * height > 8_000_000 {
-            return ProcessedLogo(image: self, isDark: true)
+            return PreparedLogo(image: self, luminance: 0.0)
         }
 
         let bytesPerPixel = 4
@@ -186,7 +223,7 @@ private extension UIImage {
             ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
-        guard success else { return ProcessedLogo(image: self, isDark: true) }
+        guard success else { return PreparedLogo(image: self, luminance: 0.0) }
 
         Self.removeSolidBackground(&data, width: width, height: height, bytesPerRow: bytesPerRow)
 
@@ -219,7 +256,7 @@ private extension UIImage {
             }
         }
 
-        let isDark = lumaWeight > 0 ? (lumaSum / lumaWeight) < 0.5 : true
+        let luminance = lumaWeight > 0 ? (lumaSum / lumaWeight) : 0.0
 
         // If background removal (or a fully transparent source) left essentially
         // nothing visible — e.g. a logo whose colour matched its own plate — the
@@ -231,11 +268,11 @@ private extension UIImage {
         }
         let cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
         guard let cropped = processedFull.cropping(to: cropRect) else {
-            return ProcessedLogo(image: UIImage(cgImage: processedFull, scale: scale, orientation: imageOrientation), isDark: isDark)
+            return PreparedLogo(image: UIImage(cgImage: processedFull, scale: scale, orientation: imageOrientation), luminance: luminance)
         }
-        return ProcessedLogo(
+        return PreparedLogo(
             image: UIImage(cgImage: cropped, scale: scale, orientation: imageOrientation),
-            isDark: isDark
+            luminance: luminance
         )
     }
 
@@ -361,6 +398,80 @@ private extension UIImage {
                 // else: logo body, leave untouched.
             }
         }
+    }
+}
+
+/// Samples the effective luminance of the hero artwork behind the logo, so the
+/// caller can decide whether the logo needs a contrast halo. Fully keyless and
+/// on-device: it just downsamples the same backdrop image and averages the
+/// left-of-centre band where the logo sits. Returns `nil` when no candidate URL
+/// yields a decodable image (the caller then keeps the halo on, to be safe).
+public enum HeroBackgroundLuminance {
+    /// Average luminance (0…1) of `region` (normalized, origin top-left) across
+    /// the first decodable URL in `urls`. `region` defaults to the left-of-centre
+    /// vertical mid-band, which is where the hero's leading-aligned logo renders.
+    public static func sample(
+        urls: [URL],
+        region: CGRect = CGRect(x: 0.0, y: 0.28, width: 0.5, height: 0.40)
+    ) async -> Double? {
+        for url in urls {
+            if let luma = await sampleOne(url, region: region) { return luma }
+        }
+        return nil
+    }
+
+    private static func sampleOne(_ url: URL, region: CGRect) async -> Double? {
+        guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return nil }
+        guard let image = UIImage(data: data), let cg = image.cgImage, cg.width > 0, cg.height > 0 else {
+            return nil
+        }
+
+        // Downsample to a tiny thumbnail; we only need an average, so low-quality
+        // scaling is plenty and keeps this cheap even for a 4K backdrop.
+        let targetW = 100
+        let targetH = max(1, Int((Double(cg.height) / Double(cg.width)) * Double(targetW)))
+        let bytesPerRow = targetW * 4
+        var buf = [UInt8](repeating: 0, count: targetW * targetH * 4)
+        let drawn = buf.withUnsafeMutableBytes { raw -> Bool in
+            guard let ctx = CGContext(
+                data: raw.baseAddress,
+                width: targetW,
+                height: targetH,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            ctx.interpolationQuality = .low
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: targetW, height: targetH))
+            return true
+        }
+        guard drawn else { return nil }
+
+        // Buffer row 0 is the top of the image, matching the normalized top-left
+        // region origin used elsewhere in this file.
+        let x0 = max(0, Int(region.minX * Double(targetW)))
+        let x1 = min(targetW, max(x0 + 1, Int(region.maxX * Double(targetW))))
+        let y0 = max(0, Int(region.minY * Double(targetH)))
+        let y1 = min(targetH, max(y0 + 1, Int(region.maxY * Double(targetH))))
+
+        var lumaSum = 0.0
+        var count = 0
+        for y in y0..<y1 {
+            let rowStart = y * bytesPerRow
+            for x in x0..<x1 {
+                let i = rowStart + x * 4
+                let a = Double(buf[i + 3]) / 255.0
+                guard a > 0 else { continue }
+                let r = Double(buf[i]) / 255.0 / a
+                let g = Double(buf[i + 1]) / 255.0 / a
+                let b = Double(buf[i + 2]) / 255.0 / a
+                lumaSum += 0.2126 * r + 0.7152 * g + 0.0722 * b
+                count += 1
+            }
+        }
+        return count > 0 ? lumaSum / Double(count) : nil
     }
 }
 #endif

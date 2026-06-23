@@ -116,7 +116,8 @@ struct DetailHeroView: View {
             } else {
                 HeroLogoArtwork(
                     primaryURL: item.logoURL,
-                    asyncFallbackURL: tmdbLogoFallback
+                    asyncFallbackURL: tmdbLogoFallback,
+                    backgroundLuminance: heroBackgroundLuminance
                 ) {
                     titleText(hideText: hideText)
                 }
@@ -422,6 +423,28 @@ struct DetailHeroView: View {
         return {
             await ArtworkRouter.shared.artworkURL(.logo, for: source)
         }
+    }
+
+    /// Effective luminance of the hero artwork behind the logo, used to decide
+    /// whether the logo needs a legibility halo. Mirrors the backdrop resolution
+    /// order (`heroBackdropURL`/`backdropURL` → TMDb hero → poster placeholder) so
+    /// it measures the same image the user actually sees. Keyless/on-device; nil
+    /// when no image can be sampled, in which case the halo stays on to be safe.
+    private var heroBackgroundLuminance: (@Sendable () async -> Double?)? {
+        #if canImport(UIKit)
+        let urls = [backdrop.heroBackdropURL, backdrop.backdropURL].compactMap { $0 }
+        let source = backdrop
+        return {
+            if let luma = await HeroBackgroundLuminance.sample(urls: urls) { return luma }
+            if let tmdb = await ArtworkRouter.shared.artworkURL(.hero, for: source),
+               let luma = await HeroBackgroundLuminance.sample(urls: [tmdb]) { return luma }
+            if let poster = source.posterURL,
+               let luma = await HeroBackgroundLuminance.sample(urls: [poster]) { return luma }
+            return nil
+        }
+        #else
+        return nil
+        #endif
     }
 }
 

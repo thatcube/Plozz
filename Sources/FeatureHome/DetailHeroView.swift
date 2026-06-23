@@ -67,8 +67,60 @@ struct DetailHeroView: View {
     /// vs unfocused (dark) background.
     @FocusState private var playButtonHasFocus: Bool
 
+    /// The app-installed action handler (the SAME one the press-and-hold context
+    /// menu reads). Drives the visible Watchlist / Watched / Refresh hero buttons
+    /// so they are byte-for-byte consistent with the long-press menu — optimistic
+    /// update, cross-provider fan-out and mutation broadcast all go through it.
+    /// `nil` in previews/tests, which simply hides the buttons.
+    @Environment(\.mediaItemActionHandler) private var actionHandler
+    /// Surrounding-list context, so a hero acting on a focused episode behaves
+    /// exactly like that episode's context-menu would.
+    @Environment(\.mediaItemActionContext) private var actionContext
+    /// Brief "Refreshing…" confirmation shown in place of the Refresh button's
+    /// label for a couple of seconds after it's pressed. The refresh itself is a
+    /// fire-and-forget server task, so this is the only feedback the user gets.
+    @State private var refreshConfirmed = false
+
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
+
+    // MARK: - Visible item actions (discoverability)
+
+    /// The capability-gated actions the installed handler offers for the focused
+    /// `item`. Identical to what the context menu shows, so the visible buttons
+    /// and the long-press menu can never drift apart.
+    private var heroActions: [MediaItemAction] {
+        actionHandler?.actions(for: item, context: actionContext) ?? []
+    }
+
+    /// The watchlist toggle for `item`, if its resolving provider conforms to
+    /// `WatchlistProviding` (offered only for whole titles — movies/series).
+    private var heroWatchlistAction: MediaItemAction? {
+        heroActions.first { $0 == .addToWatchlist || $0 == .removeFromWatchlist }
+    }
+
+    /// The watched-state toggle for `item`, if its provider can mutate it. On a
+    /// series page this lights up for the focused *episode* (the hero mirrors it),
+    /// giving episodes a visible watched toggle without touching the rail.
+    private var heroWatchedAction: MediaItemAction? {
+        heroActions.first { $0 == .markWatched || $0 == .markUnwatched }
+    }
+
+    /// Whether to show the Refresh Metadata button (provider conforms to
+    /// `MetadataRefreshing`).
+    private var heroOffersRefresh: Bool { heroActions.contains(.refreshMetadata) }
+
+    /// Whether any visible item-action button should render — used to decide
+    /// whether the action row appears even when there's no Play/Trailer/Version.
+    private var hasHeroActionButtons: Bool {
+        heroWatchlistAction != nil || heroWatchedAction != nil || heroOffersRefresh
+    }
+
+    /// Routes a hero button through the shared action handler with this hero's
+    /// item + context — the exact same path the context menu uses.
+    private func performHeroAction(_ action: MediaItemAction) {
+        actionHandler?.perform(action, on: item, context: actionContext)
+    }
 
     /// The capability badges shown above the ratings: the content-rating
     /// certificate (e.g. `TV-14`) leading, then resolution/HDR/audio badges.
@@ -160,7 +212,7 @@ struct DetailHeroView: View {
                     .lineLimit(3, reservesSpace: true)
                     .frame(maxWidth: 960, alignment: .topLeading)
             }
-            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || (versions.count > 1 && onSelectVersion != nil) {
+            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || (versions.count > 1 && onSelectVersion != nil) || hasHeroActionButtons {
                 HStack(spacing: 24) {
                     if let playTitle, let onPlay {
                         playButton(title: playTitle, action: onPlay)
@@ -173,6 +225,15 @@ struct DetailHeroView: View {
                             Label("Trailer", systemImage: "film.fill")
                         }
                         .modifier(HeroButtonStyle(prominent: false))
+                    }
+                    if let heroWatchlistAction {
+                        watchlistButton(action: heroWatchlistAction)
+                    }
+                    if let heroWatchedAction {
+                        watchedButton(action: heroWatchedAction)
+                    }
+                    if heroOffersRefresh {
+                        refreshButton()
                     }
                 }
                 .padding(.top, 8)
@@ -322,7 +383,52 @@ struct DetailHeroView: View {
         .modifier(HeroButtonStyle(prominent: false))
     }
 
-    /// The thin watched-progress bar shown inside the Play button between the
+    /// Visible Watchlist toggle, shown when the resolving provider conforms to
+    /// `WatchlistProviding`. A filled bookmark + "Watchlisted" reflects current
+    /// membership; an outline bookmark + "Watchlist" prompts adding. Tapping
+    /// routes through the shared handler (optimistic update + cross-provider
+    /// fan-out), so the icon flips the instant the mutation broadcasts back.
+    @ViewBuilder
+    private func watchlistButton(action: MediaItemAction) -> some View {
+        Button { performHeroAction(action) } label: {
+            Label(item.isFavorite ? "Watchlisted" : "Watchlist",
+                  systemImage: item.isFavorite ? "bookmark.fill" : "bookmark")
+        }
+        .modifier(HeroButtonStyle(prominent: false))
+        .accessibilityLabel(action.title)
+    }
+
+    /// Visible watched-state toggle, shown when the provider can mutate it. On a
+    /// series page the hero mirrors the focused episode, so this doubles as the
+    /// episode's visible watched toggle.
+    @ViewBuilder
+    private func watchedButton(action: MediaItemAction) -> some View {
+        Button { performHeroAction(action) } label: {
+            Label(item.isPlayed ? "Watched" : "Mark Watched",
+                  systemImage: item.isPlayed ? "checkmark.circle.fill" : "checkmark.circle")
+        }
+        .modifier(HeroButtonStyle(prominent: false))
+        .accessibilityLabel(action.title)
+    }
+
+    /// Visible Refresh Metadata button, shown when the provider conforms to
+    /// `MetadataRefreshing`. The server task is fire-and-forget, so the label
+    /// briefly flips to a "Refreshing…" checkmark for visible confirmation.
+    @ViewBuilder
+    private func refreshButton() -> some View {
+        Button {
+            performHeroAction(.refreshMetadata)
+            withAnimation(.easeInOut(duration: 0.2)) { refreshConfirmed = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+                withAnimation(.easeInOut(duration: 0.2)) { refreshConfirmed = false }
+            }
+        } label: {
+            Label(refreshConfirmed ? "Refreshing…" : "Refresh",
+                  systemImage: refreshConfirmed ? "checkmark" : "arrow.clockwise")
+        }
+        .modifier(HeroButtonStyle(prominent: false))
+        .accessibilityLabel(MediaItemAction.refreshMetadata.title)
+    }
     /// play icon and the "… left" line. Its colours flip with the button's focus
     /// state — light fill on the dark unfocused button, dark fill on the white
     /// focused button — so it stays clearly visible either way.

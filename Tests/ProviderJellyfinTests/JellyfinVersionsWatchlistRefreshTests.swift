@@ -23,12 +23,12 @@ final class JellyfinVersionsWatchlistRefreshTests: XCTestCase {
          "MediaSources":[
            {"Id":"src4k","Name":"4K Remux","Size":42000000000,"Bitrate":80000000,
             "MediaStreams":[
-              {"Type":"Video","Codec":"hevc","Width":3840,"Height":2160,"VideoRangeType":"DOVI"},
-              {"Type":"Audio","Codec":"truehd","Channels":8,"Profile":"Dolby Atmos"}]},
+              {"Index":0,"Type":"Video","Codec":"hevc","Width":3840,"Height":2160,"VideoRangeType":"DOVI"},
+              {"Index":1,"Type":"Audio","Codec":"truehd","Channels":8,"Profile":"Dolby Atmos"}]},
            {"Id":"src1080","Name":"1080p","Size":9000000000,
             "MediaStreams":[
-              {"Type":"Video","Codec":"h264","Width":1920,"Height":1080,"VideoRangeType":"SDR"},
-              {"Type":"Audio","Codec":"aac","Channels":2}]}
+              {"Index":0,"Type":"Video","Codec":"h264","Width":1920,"Height":1080,"VideoRangeType":"SDR"},
+              {"Index":1,"Type":"Audio","Codec":"aac","Channels":2}]}
          ]}
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
@@ -56,7 +56,7 @@ final class JellyfinVersionsWatchlistRefreshTests: XCTestCase {
         stub.stub(pathSuffix: "/Users/u1/Items/i2", json: """
         {"Id":"i2","Name":"Solo","Type":"Movie",
          "MediaSources":[{"Id":"only","MediaStreams":[
-           {"Type":"Video","Codec":"h264","Height":1080}]}]}
+           {"Index":0,"Type":"Video","Codec":"h264","Height":1080}]}]}
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 

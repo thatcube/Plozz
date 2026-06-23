@@ -410,6 +410,12 @@ public struct PlexProvider: MediaProvider {
                 continue
             }
         }
+        // Stash the canonical Plex global guid (e.g. plex://movie/5d77...) so the
+        // account-level Watchlist (Discover) writer can address the item even
+        // though it's keyed globally rather than by the per-server ratingKey.
+        if let guid = dto.guid?.trimmingCharacters(in: .whitespacesAndNewlines), !guid.isEmpty {
+            ids["PlexGuid"] = guid
+        }
         return ids
     }
 
@@ -557,6 +563,33 @@ extension PlexProvider: WatchStateProviding {
     /// season or series ratingKey marks the contained episodes too.
     public func setPlayed(_ played: Bool, itemID: String) async throws {
         try await client.setWatched(played, ratingKey: itemID)
+    }
+}
+
+// MARK: - Watchlist
+
+extension PlexProvider: WatchlistProviding {
+    /// Adds/removes the title from the account Watchlist via the plex.tv Discover
+    /// service. Keyed by the item's global `plex://` guid (stashed in
+    /// `providerIDs["PlexGuid"]` during mapping), since the Watchlist is an
+    /// account-level list addressed globally — not by the per-server ratingKey.
+    /// Throws `AppError.notFound` when the item carries no usable guid so the
+    /// optimistic UI reverts cleanly rather than silently no-op'ing.
+    public func setWatchlisted(_ on: Bool, item: MediaItem) async throws {
+        guard let metadataID = PlexClient.watchlistMetadataID(fromGuid: item.providerIDs["PlexGuid"]) else {
+            throw AppError.notFound
+        }
+        try await client.setWatchlisted(on, metadataID: metadataID)
+    }
+
+    /// The account's Plex Watchlist, mapped to items flagged `isFavorite` so the
+    /// unified Watchlist row renders them as saved. Discover items carry global
+    /// ids that won't resolve for playback against a specific server (documented
+    /// limitation); they appear in the row but may not direct-play.
+    public func watchlist() async throws -> [MediaItem] {
+        try await client.watchlist()
+            .map(map(metadata:))
+            .map { var copy = $0; copy.isFavorite = true; return copy }
     }
 }
 

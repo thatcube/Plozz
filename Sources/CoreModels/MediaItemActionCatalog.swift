@@ -136,6 +136,12 @@ public enum MediaItemActionCatalog {
 
     private static func hasUnwatchedUpToHere(_ item: MediaItem, in context: MediaItemActionContext) -> Bool {
         if !context.precedingContainerIDs.isEmpty { return true }
-        return !siblingsToMarkUpToHere(item, in: context.orderedSiblings).isEmpty
+        // Only meaningful when something *strictly before* the target is still
+        // unwatched. If the only unwatched item up to here is the target itself,
+        // "up to here" is redundant with plain "mark watched", so we hide it.
+        guard let index = context.orderedSiblings.firstIndex(where: { $0.id == item.id }) else {
+            return false
+        }
+        return context.orderedSiblings[..<index].contains { !$0.isPlayed }
     }
 }

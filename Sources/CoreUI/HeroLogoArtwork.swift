@@ -221,9 +221,13 @@ private extension UIImage {
 
         let isDark = lumaWeight > 0 ? (lumaSum / lumaWeight) < 0.5 : true
 
-        guard maxX >= minX, maxY >= minY,
-              let processedFull = Self.makeImage(from: data, width: width, height: height, bytesPerRow: bytesPerRow) else {
-            return ProcessedLogo(image: self, isDark: isDark)
+        // If background removal (or a fully transparent source) left essentially
+        // nothing visible — e.g. a logo whose colour matched its own plate — the
+        // logo is unusable. Return nil so the caller falls through to the next
+        // source and ultimately the clean styled title, never a blank or boxed logo.
+        guard maxX >= minX, maxY >= minY else { return nil }
+        guard let processedFull = Self.makeImage(from: data, width: width, height: height, bytesPerRow: bytesPerRow) else {
+            return nil
         }
         let cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
         guard let cropped = processedFull.cropping(to: cropRect) else {
@@ -252,14 +256,21 @@ private extension UIImage {
         }
     }
 
-    /// Detects a logo shipped on a solid opaque plate (e.g. a black box behind
-    /// the title) and erases it to transparency. The background is identified
-    /// from the border ring; if that ring is opaque and near-uniform, the
-    /// connected region of that colour is flood-filled from the edges to alpha 0,
-    /// with a graded edge so anti-aliased logo borders feather cleanly instead of
-    /// leaving a hard fringe. A genuinely transparent logo has a transparent
-    /// border, so this is a no-op for it. Operates in place on a premultiplied
-    /// RGBA buffer.
+    /// Detects a logo shipped on a solid opaque plate (e.g. a black "title card"
+    /// box behind the title) and erases that colour to transparency everywhere.
+    ///
+    /// The background colour is identified from the border ring; the removal only
+    /// runs when that ring is opaque and near-uniform, which is the signature of a
+    /// deliberate plate rather than real artwork — a genuinely transparent logo
+    /// has a transparent border, so this is a no-op for it. When it does run it is
+    /// a *global* soft chroma-key, not a border flood-fill: every pixel near the
+    /// background colour is removed, with a graded edge so anti-aliased borders
+    /// feather cleanly. Going global is what clears the colour trapped *inside*
+    /// enclosed letter shapes (the counters of B, O, D, P, R…), which a
+    /// border-connected flood-fill leaves behind as ugly solid blobs. It is safe
+    /// because the plate colour and the logo's bright/coloured letters are far
+    /// apart in colour space, so the letters survive intact. Operates in place on
+    /// a premultiplied RGBA buffer.
     private static func removeSolidBackground(_ data: inout [UInt8], width: Int, height: Int, bytesPerRow: Int) {
         let bpp = 4
         guard width > 2, height > 2 else { return }
@@ -314,67 +325,41 @@ private extension UIImage {
         // JPEG noise, tight enough to spare gradient/photographic backgrounds.
         guard maxDev <= 26 else { return }
 
-        // Flood fill the connected background from every border pixel. `innerTol`
-        // is the squared colour distance treated as pure background (alpha 0 and
-        // keep spreading); between inner and `outerTol` the pixel is an
-        // anti-aliased edge — feather its alpha and stop spreading there.
-        let innerTol = 34.0 * 34.0
-        let outerTol = 70.0 * 70.0
-        var visited = [Bool](repeating: false, count: width * height)
-        var stack = [Int]()
-        stack.reserveCapacity(1024)
-
-        func colorDistanceSq(_ i: Int) -> (Double, Double) {
-            // returns (distanceSq, alphaFraction)
-            let a = Double(data[i + 3]) / 255.0
-            guard a > 0 else { return (0, 0) }
-            let r = Double(data[i]) / 255.0 / a * 255.0
-            let g = Double(data[i + 1]) / 255.0 / a * 255.0
-            let b = Double(data[i + 2]) / 255.0 / a * 255.0
-            let dr = r - bgR, dg = g - bgG, db = b - bgB
-            return (dr * dr + dg * dg + db * db, a)
-        }
-
-        func enqueueBorder(_ x: Int, _ y: Int) {
-            let p = y * width + x
-            if !visited[p] { visited[p] = true; stack.append(p) }
-        }
-        for x in 0..<width { enqueueBorder(x, 0); enqueueBorder(x, height - 1) }
-        for y in 0..<height { enqueueBorder(0, y); enqueueBorder(width - 1, y) }
-
-        while let p = stack.popLast() {
-            let x = p % width
-            let y = p / width
-            let i = y * bytesPerRow + x * bpp
-            let (distSq, _) = colorDistanceSq(i)
-            if distSq <= innerTol {
-                // Pure background: fully transparent, keep flooding neighbours.
-                data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0
-            } else if distSq <= outerTol {
-                // Anti-aliased edge: feather alpha toward 0, but stop here so we
-                // don't eat into the logo body.
-                let t = (distSq - innerTol) / (outerTol - innerTol)
-                let newAf = max(0.0, min(1.0, t))
+        // Global soft chroma-key. `innerTol` is the squared colour distance from
+        // the plate colour treated as pure background (fully transparent);
+        // `outerTol` is where a pixel becomes fully opaque logo. Between them the
+        // alpha is graded so anti-aliased edges feather instead of leaving a hard
+        // fringe. Applied to every pixel (not just border-connected ones) so the
+        // background trapped inside enclosed letters is removed too.
+        let innerTol = 45.0 * 45.0
+        let outerTol = 120.0 * 120.0
+        for y in 0..<height {
+            let rowStart = y * bytesPerRow
+            for x in 0..<width {
+                let i = rowStart + x * bpp
                 let oldA = Double(data[i + 3]) / 255.0
                 guard oldA > 0 else { continue }
-                // Convert to straight RGB, reapply the feathered alpha premultiplied.
-                let r = Double(data[i]) / 255.0 / oldA
-                let g = Double(data[i + 1]) / 255.0 / oldA
-                let b = Double(data[i + 2]) / 255.0 / oldA
-                let outA = newAf * oldA
-                data[i] = UInt8(max(0, min(255, r * outA * 255)))
-                data[i + 1] = UInt8(max(0, min(255, g * outA * 255)))
-                data[i + 2] = UInt8(max(0, min(255, b * outA * 255)))
-                data[i + 3] = UInt8(max(0, min(255, outA * 255)))
-                continue
-            } else {
-                // Logo body: leave untouched and stop.
-                continue
+                // Un-premultiply to straight RGB to compare against the plate colour.
+                let r = Double(data[i]) / 255.0 / oldA * 255.0
+                let g = Double(data[i + 1]) / 255.0 / oldA * 255.0
+                let b = Double(data[i + 2]) / 255.0 / oldA * 255.0
+                let dr = r - bgR, dg = g - bgG, db = b - bgB
+                let distSq = dr * dr + dg * dg + db * db
+                if distSq <= innerTol {
+                    // Pure background: fully transparent.
+                    data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0
+                } else if distSq <= outerTol {
+                    // Anti-aliased edge: feather alpha toward 0.
+                    let t = (distSq - innerTol) / (outerTol - innerTol)
+                    let outA = max(0.0, min(1.0, t)) * oldA
+                    // Re-premultiply the original straight RGB by the new alpha.
+                    data[i] = UInt8(max(0, min(255, r / 255.0 * outA * 255.0)))
+                    data[i + 1] = UInt8(max(0, min(255, g / 255.0 * outA * 255.0)))
+                    data[i + 2] = UInt8(max(0, min(255, b / 255.0 * outA * 255.0)))
+                    data[i + 3] = UInt8(max(0, min(255, outA * 255.0)))
+                }
+                // else: logo body, leave untouched.
             }
-            if x > 0 { let n = p - 1; if !visited[n] { visited[n] = true; stack.append(n) } }
-            if x < width - 1 { let n = p + 1; if !visited[n] { visited[n] = true; stack.append(n) } }
-            if y > 0 { let n = p - width; if !visited[n] { visited[n] = true; stack.append(n) } }
-            if y < height - 1 { let n = p + width; if !visited[n] { visited[n] = true; stack.append(n) } }
         }
     }
 }

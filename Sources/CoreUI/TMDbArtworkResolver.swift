@@ -26,6 +26,8 @@ public actor TMDbArtworkResolver {
     private var cache: [String: URL?] = [:]
     /// Separate cache for logo lookups, same negative-result semantics.
     private var logoCache: [String: URL?] = [:]
+    /// Separate cache for production-company (studio) logo lookups.
+    private var companyLogoCache: [String: URL?] = [:]
 
     public init(token: String? = TMDbArtworkResolver.tokenFromBundle()) {
         self.token = token
@@ -80,8 +82,65 @@ public actor TMDbArtworkResolver {
         return resolved
     }
 
-    private func fetchLogoURL(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> URL? {
-        let id: String?
+    /// Returns a TMDb production-company (studio) logo URL for the given studio
+    /// name, or `nil` if disabled, not found, or the network call fails.
+    ///
+    /// Used by the detail page's studios strip to credit studios with their
+    /// official logo. Keys off the studio *name* string, so it works identically
+    /// for Jellyfin and Plex (neither of which serves studio logos uniformly).
+    /// The logo image bytes come from TMDb's CDN — nothing is bundled locally.
+    public func companyLogoURL(name: String) async -> URL? {
+        guard let token else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let key = trimmed.lowercased()
+        if let cached = companyLogoCache[key] { return cached }
+
+        let resolved = await fetchCompanyLogoURL(name: trimmed, token: token)
+        companyLogoCache[key] = resolved
+        return resolved
+    }
+
+    private func fetchCompanyLogoURL(name: String, token: String) async -> URL? {
+        guard var components = URLComponents(string: "https://api.themoviedb.org/3/search/company") else {
+            return nil
+        }
+        components.queryItems = [URLQueryItem(name: "query", value: name)]
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(CompanySearchResponse.self, from: data)
+        else {
+            return nil
+        }
+        guard let path = Self.bestCompanyLogoPath(decoded.results, query: name) else { return nil }
+        return URL(string: logoImageBase + path)
+    }
+
+    /// Picks the best company logo: skip unrenderable `.svg`, prefer an exact
+    /// (case-insensitive) name match, otherwise take TMDb's first ranked result
+    /// that actually carries a logo. Exposed for testing.
+    public static func bestCompanyLogoPath(_ results: [CompanySearchResponse.Company], query: String) -> String? {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let usable = results.filter {
+            guard let path = $0.logo_path, !path.isEmpty else { return false }
+            return !path.lowercased().hasSuffix(".svg")
+        }
+        guard !usable.isEmpty else { return nil }
+        if let exact = usable.first(where: { ($0.name ?? "").lowercased() == normalizedQuery }) {
+            return exact.logo_path
+        }
+        return usable.first?.logo_path
+    }
+
+    private func fetchLogoURL(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> URL? {        let id: String?
         if let tmdbID, !tmdbID.isEmpty {
             id = tmdbID
         } else {
@@ -282,6 +341,21 @@ public actor TMDbArtworkResolver {
             let file_path: String?
             let iso_639_1: String?
             let vote_average: Double?
+        }
+    }
+
+    /// TMDb `/search/company` payload. Public so the logo-ranking helper can be
+    /// unit-tested with synthesized results.
+    public struct CompanySearchResponse: Decodable {
+        public let results: [Company]
+        public struct Company: Decodable {
+            public let logo_path: String?
+            public let name: String?
+
+            public init(logo_path: String?, name: String?) {
+                self.logo_path = logo_path
+                self.name = name
+            }
         }
     }
 

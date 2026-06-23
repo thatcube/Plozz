@@ -22,7 +22,7 @@ struct DetailExtrasView: View {
                     CastRowView(people: item.cast)
                 }
                 if !item.studios.isEmpty {
-                    InfoChipsRow(title: "Studios", values: item.studios)
+                    StudiosRow(studios: item.studios)
                 }
                 if !item.tags.isEmpty {
                     InfoChipsRow(title: "Tags", values: item.tags)
@@ -55,6 +55,112 @@ private struct InfoChipsRow: View {
             }
         }
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+    }
+}
+
+/// The studios strip. Resolves a TMDb company logo per studio name (works for
+/// both Jellyfin and Plex, neither of which serves studio logos reliably), and
+/// renders studios that have a logo first — as logo chips — followed by the
+/// remaining studios as plain text chips. Falls back to text for every studio
+/// when the TMDb token is absent or no logo is found.
+private struct StudiosRow: View {
+    private let studios: [String]
+
+    @State private var ordered: [Studio]
+    @State private var didResolve = false
+
+    init(studios: [String]) {
+        self.studios = studios
+        _ordered = State(initialValue: studios.map { Studio(name: $0, logoURL: nil) })
+    }
+
+    private struct Studio: Identifiable {
+        let id = UUID()
+        let name: String
+        let logoURL: URL?
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Studios")
+                .font(.system(size: 32, weight: .bold))
+            FlowLayout(spacing: 12, lineSpacing: 12) {
+                ForEach(ordered) { studio in
+                    if let url = studio.logoURL {
+                        StudioLogoChip(url: url, name: studio.name)
+                    } else {
+                        StudioTextChip(name: studio.name)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+        .task(id: studios) { await resolve() }
+    }
+
+    private func resolve() async {
+        guard !didResolve else { return }
+        let names = studios
+        let logos = await withTaskGroup(of: (Int, URL?).self) { group -> [Int: URL?] in
+            for (index, name) in names.enumerated() {
+                group.addTask {
+                    (index, await TMDbArtworkResolver.shared.companyLogoURL(name: name))
+                }
+            }
+            var result: [Int: URL?] = [:]
+            for await (index, url) in group { result[index] = url }
+            return result
+        }
+
+        let resolved = names.enumerated().map { index, name in
+            Studio(name: name, logoURL: logos[index] ?? nil)
+        }
+        // Studios with a logo come first (in original order), then text-only.
+        ordered = resolved.filter { $0.logoURL != nil } + resolved.filter { $0.logoURL == nil }
+        didResolve = true
+    }
+}
+
+/// A studio rendered as its TMDb logo on a light pill, sized to align with the
+/// text chips. Falls back to a text chip if the logo image fails to load.
+private struct StudioLogoChip: View {
+    let url: URL
+    let name: String
+
+    var body: some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case let .success(image):
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 28)
+                    .frame(maxWidth: 220)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 18)
+                    .background(Capsule().fill(Color.white))
+            case .failure:
+                StudioTextChip(name: name)
+            default:
+                Capsule()
+                    .fill(Color.primary.opacity(0.10))
+                    .frame(width: 120, height: 44)
+            }
+        }
+    }
+}
+
+/// A studio rendered as a plain text pill (used when no logo is available).
+private struct StudioTextChip: View {
+    let name: String
+
+    var body: some View {
+        Text(name)
+            .font(.system(size: 22, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 18)
+            .background(Capsule().fill(Color.primary.opacity(0.10)))
     }
 }
 

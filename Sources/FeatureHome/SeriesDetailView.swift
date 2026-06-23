@@ -36,6 +36,12 @@ struct SeriesDetailView: View {
     /// hero's own Play button) keeps the last meaningful context.
     @State private var heroItem: MediaItem
     @FocusState private var focusedSeasonID: String?
+    /// True once focus is *inside* the season bar. While false, only the active
+    /// season chip is focusable, so entering the bar (from Play above or the
+    /// episodes below) lands directly on the active season with no visible
+    /// snap from a geometrically-nearer chip. Once true, every chip is focusable
+    /// so left/right moves freely between seasons; it resets when focus leaves.
+    @State private var seasonBarEngaged = false
     /// Drives initial focus onto the hero Play button when the page is opened
     /// targeting a specific episode, so focus lands at the top rather than down
     /// in the episode row.
@@ -137,17 +143,16 @@ struct SeriesDetailView: View {
         // episode — even when the rail is scrolled far to the right and no tab
         // sits directly above — reliably enters the bar instead of being trapped.
         .focusSection()
-        .onChange(of: focusedSeasonID) { oldValue, newValue in
-            guard let id = newValue else { return }
-            // Entering the bar from outside (Play above / episodes below) lands on
-            // whichever chip is geometrically nearest — often the wrong season. If
-            // that isn't the active season, redirect focus to it. Only do this on
-            // *entry* (oldValue == nil); once inside, left/right moves freely
-            // between seasons (which updates the active season as it goes).
-            if oldValue == nil, let active = selectedSeasonID, id != active {
-                focusedSeasonID = active
+        .onChange(of: focusedSeasonID) { _, newValue in
+            guard let id = newValue else {
+                // Focus left the bar (up to Play, or down to the episodes); re-arm
+                // the gate so the next entry again lands only on the active season.
+                seasonBarEngaged = false
                 return
             }
+            // We're now inside the bar — open every chip to focus so left/right
+            // navigation between seasons works.
+            seasonBarEngaged = true
             guard let season = seasons.first(where: { $0.id == id }) else { return }
             select(season)
             heroItem = season
@@ -160,6 +165,11 @@ struct SeriesDetailView: View {
     /// identity — that is what keeps left/right focus moving between tabs.
     private func seasonChip(_ season: MediaItem) -> some View {
         let isSelected = selectedSeasonID == season.id
+        // The chip focus can land on while *entering* the bar: the active season,
+        // falling back to the first one before a selection settles, so the bar is
+        // never momentarily unfocusable during initial load.
+        let activeID = selectedSeasonID ?? seasons.first?.id
+        let isFocusable = seasonBarEngaged || season.id == activeID
         return Button {
             select(season)
             heroItem = season
@@ -172,6 +182,9 @@ struct SeriesDetailView: View {
         // No system focus ring — the pill + scale is the focus treatment.
         .focusEffectDisabled()
         .focused($focusedSeasonID, equals: season.id)
+        // Remove non-active seasons from the focus system until the bar is engaged,
+        // so directional entry can only ever land on the active season (no snap).
+        .disabled(!isFocusable)
     }
 
     /// Selects `season`: marks it active and kicks off (cached) episode loading

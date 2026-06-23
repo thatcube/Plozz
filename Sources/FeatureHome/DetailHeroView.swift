@@ -185,6 +185,12 @@ struct DetailHeroView: View {
                         }
                     }
                     .padding(.top, 8)
+                    // Treat the action buttons as one focus section so pressing
+                    // "up" from anywhere in the season bar — even a season parked
+                    // far to the right — reliably lands here instead of being lost
+                    // because no button sits directly above. Keeps working as more
+                    // buttons (e.g. watchlist) are added beside Play.
+                    .focusSection()
                 }
             }
             .padding(.vertical, PlozzTheme.Metrics.screenPadding)

@@ -188,9 +188,12 @@ public struct PosterCardView: View {
             return [item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
         case .landscape:
             if item.kind == .episode {
-                // An episode's thumbnail is its Primary image; fall back to the
-                // series backdrop, then to a neutral placeholder.
-                return [item.posterURL, item.backdropURL, item.fallbackArtworkURL].compactMap { $0 }
+                // An episode's thumbnail is its own Primary (then Backdrop) image.
+                // We deliberately do NOT fall back to the series backdrop here —
+                // that paints the same image on every episode. Instead the async
+                // TMDb fallback supplies a real per-episode still (then the show
+                // backdrop) for sources like Shoko/AniDB that ship no episode art.
+                return [item.posterURL, item.backdropURL].compactMap { $0 }
             }
             return [item.backdropURL, item.posterURL, item.fallbackArtworkURL].compactMap { $0 }
         }
@@ -221,9 +224,31 @@ public struct PosterCardView: View {
     }
 
     /// The async (TMDb) last-resort source for whichever card shape this is: a
-    /// vertical poster for poster cards, a wide backdrop for landscape cards.
+    /// vertical poster for poster cards, a wide backdrop for landscape cards. For
+    /// a landscape *episode* card it first tries the real per-episode still (a
+    /// genuine thumbnail), then falls back to the show's backdrop — anime via
+    /// Shoko/AniDB usually ship no per-episode image, so TMDb supplies it.
     private var asyncArtworkFallback: (@Sendable () async -> URL?)? {
-        style == .poster ? tmdbPosterFallback : tmdbBackdropFallback
+        if style == .poster { return tmdbPosterFallback }
+        if item.kind == .episode,
+           let season = item.seasonNumber,
+           let episode = item.episodeNumber {
+            let seriesTitle = item.parentTitle ?? item.title
+            let seriesID = item.providerIDs["SeriesTmdb"]
+            let backdropFallback = tmdbBackdropFallback
+            return {
+                if let still = await TMDbArtworkResolver.shared.episodeStillURL(
+                    seriesTitle: seriesTitle,
+                    seriesTmdbID: seriesID,
+                    season: season,
+                    episode: episode
+                ) {
+                    return still
+                }
+                return await backdropFallback?()
+            }
+        }
+        return tmdbBackdropFallback
     }
 
     /// Poster cards reject any source image wider than ~0.9:1 (a real poster is

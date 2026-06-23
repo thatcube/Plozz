@@ -26,6 +26,9 @@ public actor TMDbArtworkResolver {
     /// Backdrop path cache, keyed independent of size. A present value of `nil`
     /// is a negative result, so we never re-query a title TMDb couldn't resolve.
     private var backdropCache: [String: String?] = [:]
+    /// Per-episode still URL cache (keyed by series + season/episode). A present
+    /// value of `nil` is a negative result.
+    private var stillCache: [String: URL?] = [:]
     /// Logos are transparent PNGs; `w500` keeps them crisp at hero size without
     /// pulling multi-megabyte originals.
     private let logoImageBase = "https://image.tmdb.org/t/p/w500"
@@ -118,6 +121,57 @@ public actor TMDbArtworkResolver {
         }
         guard let path else { return nil }
         return URL(string: (large ? backdropOriginalBase : backdropImageBase) + path)
+    }
+
+    /// Returns a TMDb per-episode still URL (a `w1280` frame for the given
+    /// season/episode), or `nil` if disabled, not found, or the call fails. This
+    /// is the real "episode thumbnail" for anime whose Jellyfin source (Shoko via
+    /// AniDB) ships no per-episode stills. Resolves the series TMDb id from
+    /// `seriesTmdbID` when known, otherwise by title search.
+    /// - Parameters:
+    ///   - seriesTitle: The *series* title (used only when `seriesTmdbID` is nil).
+    ///   - seriesTmdbID: A known series TMDb numeric id, if any.
+    ///   - season: The season number.
+    ///   - episode: The episode number within the season.
+    public func episodeStillURL(seriesTitle: String, seriesTmdbID: String?, season: Int, episode: Int) async -> URL? {
+        guard let token else { return nil }
+        let trimmed = seriesTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id0 = seriesTmdbID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || (id0?.isEmpty == false) else { return nil }
+
+        let key = "\(id0 ?? "")|\(trimmed.lowercased())|s\(season)e\(episode)"
+        if let cached = stillCache[key] { return cached }
+
+        let seriesID: String?
+        if let id0, !id0.isEmpty {
+            seriesID = id0
+        } else {
+            seriesID = await fetchID(title: trimmed, year: nil, isTV: true, token: token)
+        }
+        guard let seriesID else { stillCache[key] = .some(nil); return nil }
+
+        let path = await fetchStillPath(seriesID: seriesID, season: season, episode: episode, token: token)
+        let url = path.flatMap { URL(string: backdropImageBase + $0) }
+        stillCache[key] = url
+        return url
+    }
+
+    private func fetchStillPath(seriesID: String, season: Int, episode: Int, token: String) async -> String? {
+        guard let url = URL(string: "https://api.themoviedb.org/3/tv/\(seriesID)/season/\(season)/episode/\(episode)/images") else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(StillsResponse.self, from: data)
+        else {
+            return nil
+        }
+        return Self.bestBackdropPath(decoded.stills)
     }
 
     private func fetchBackdropPath(title: String, year: Int?, isTV: Bool, tmdbID: String?, token: String) async -> String? {
@@ -370,6 +424,12 @@ public actor TMDbArtworkResolver {
             let iso_639_1: String?
             let vote_average: Double?
         }
+    }
+
+    /// The `/tv/{id}/season/{n}/episode/{m}/images` payload, whose frames live
+    /// under `stills` (reusing `ImagesResponse.Image` for ranking).
+    private struct StillsResponse: Decodable {
+        let stills: [ImagesResponse.Image]?
     }
 
     private struct VideosResponse: Decodable {

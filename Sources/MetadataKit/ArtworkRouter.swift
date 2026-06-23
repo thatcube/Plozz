@@ -21,6 +21,8 @@ public actor ArtworkRouter {
     private let anilist = AniListArtworkProvider()
     private let kitsu = KitsuArtworkProvider()
     private let tvmaze = TVmazeArtworkProvider()
+    private let wikidata = WikidataArtworkProvider()
+    private let wikipedia = WikipediaArtworkProvider()
     private let deezer = DeezerMusicProvider()
     private let musicBrainz = MusicBrainzArtworkProvider()
     private var tmdb: TMDbMetadataProvider
@@ -80,15 +82,25 @@ public actor ArtworkRouter {
             }
         case .tvShow:
             switch kind {
-            case .hero: return [tmdb]
-            case .poster: return [tmdb, tvmaze]
+            case .hero: return [tmdb, wikidata, wikipedia]
+            case .poster: return [tmdb, tvmaze, wikidata, wikipedia]
             case .thumbnail: return [tmdb, tvmaze]
-            case .logo: return [tmdb]
+            case .logo: return [tmdb, wikidata]
             }
         case .movie:
-            return [tmdb]
+            switch kind {
+            case .hero: return [tmdb, wikidata, wikipedia]
+            case .poster: return [tmdb, wikidata, wikipedia]
+            case .thumbnail: return [tmdb]
+            case .logo: return [tmdb, wikidata]
+            }
         case .unknown:
-            return [tmdb]
+            switch kind {
+            case .hero: return [tmdb, wikidata, wikipedia]
+            case .poster: return [tmdb, wikidata, wikipedia]
+            case .thumbnail: return [tmdb]
+            case .logo: return [tmdb, wikidata]
+            }
         case .music:
             return []
         }

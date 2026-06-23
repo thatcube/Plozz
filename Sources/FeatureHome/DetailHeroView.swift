@@ -207,7 +207,7 @@ struct DetailHeroView: View {
             maxAspectRatio: 3.0,
             asyncFallbackURL: tmdbBackdropFallback
         ) {
-            Rectangle().fill(.tertiary)
+            heroPlaceholder
         }
         .frame(height: Self.screenHeight * heroHeightFraction)
         .frame(maxWidth: .infinity)
@@ -321,6 +321,33 @@ struct DetailHeroView: View {
         #else
         return 1080
         #endif
+    }
+
+    /// The hero's final, always-keyless background when no real landscape art is
+    /// available from the server or any external provider. Rather than a flat grey
+    /// panel, it blows up the item's own poster, scaled to fill and heavily blurred
+    /// into a soft cinematic wash, so a movie/show with only a poster still gets a
+    /// rich coloured hero instead of an empty one. Falls back to the neutral fill
+    /// only when there is no poster at all.
+    @ViewBuilder
+    private var heroPlaceholder: some View {
+        if let poster = backdrop.posterURL {
+            AsyncImage(url: poster) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .blur(radius: 60)
+                        .scaleEffect(1.2)
+                        .overlay(Color.black.opacity(0.35))
+                default:
+                    Rectangle().fill(.tertiary)
+                }
+            }
+        } else {
+            Rectangle().fill(.tertiary)
+        }
     }
 
     /// Last-resort backdrop art for the hero: look the show/movie up on TMDb and

@@ -43,13 +43,13 @@ public struct MediaBadgeChip: View {
     /// rendered as one connected gray unit — a short `HD` (about as tall as the
     /// `s`) with the dash drawn as a solid bar fused to the `H`.
     private static let dtsHeadFont = Font.system(size: 22, weight: .black)
-    private static let dtsSuffixFont = Font.system(size: 15, weight: .black)
+    private static let dtsSuffixFont = Font.system(size: 17, weight: .black)
     /// The fused dash bar of the dts-HD mark: sized to the shorter `HD`, raised
     /// to the `H`'s mid-height, gapped from the `dts` on its left and overlapped
     /// into the `H` on its right so the two connect.
     private static let dtsDashWidth: CGFloat = 7
     private static let dtsDashThickness: CGFloat = 3
-    private static let dtsDashRaise: CGFloat = 5
+    private static let dtsDashRaise: CGFloat = 6
     private static let dtsDashLeading: CGFloat = 2
     private static let dtsDashOverlap: CGFloat = 2
     /// Gray fill for the `-HD` portion of the dts-HD mark.

@@ -707,21 +707,23 @@ private struct TraktExpiryCountdown: View {
                     .trim(from: 0, to: fraction)
                     .stroke(tint, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                Text(Self.format(remaining))
+                Text(Self.format(remaining, lifetime: lifetime))
                     .font(.system(size: 20, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(tint)
                     .contentTransition(.numericText())
             }
             .animation(.easeOut(duration: 0.3), value: tint)
-            .accessibilityLabel("Code expires in \(Self.format(remaining))")
+            .accessibilityLabel("Code expires in \(Self.format(remaining, lifetime: lifetime))")
         }
     }
 
-    /// Formats the remaining time as `m:ss` so a 600-second code reads as
-    /// `10:00` rather than a raw second count.
-    private static func format(_ remaining: TimeInterval) -> String {
-        let total = Int(remaining.rounded(.up))
+    /// Formats the remaining time as `m:ss`. The display is capped one second
+    /// below the full lifetime so a 600-second code starts at `9:59` rather
+    /// than `10:00`, which is wider than the ring and clips at first.
+    private static func format(_ remaining: TimeInterval, lifetime: TimeInterval) -> String {
+        let cap = lifetime > 0 ? Int(lifetime.rounded(.up)) - 1 : Int.max
+        let total = min(Int(remaining.rounded(.up)), cap)
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

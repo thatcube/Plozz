@@ -148,3 +148,71 @@ These compile and are logically wired, but were **not** run on the Apple TV
    GUIDs resolve TMDb/TVmaze art the same way Jellyfin items do.
 6. **No music regression:** playback, queue, Up Next and focus behaviour on the
    Music tab are unchanged.
+
+---
+
+## Phase 2 — On-device artwork fixes (maintainer feedback)
+
+After the first synthesis was tested on the Apple TV, the maintainer reported
+two artwork problems. Both were root-caused in code and fixed additively. Build
+verified `BUILD SUCCEEDED`, installed + launched on the Apple TV.
+
+### Problem 1 — anime episodes showed no thumbnail
+
+**FIX 1 — Guard Jellyfin image URLs on real image tags**
+(`Sources/ProviderJellyfin/JellyfinProvider.swift`)
+- Added a private `imageURL(for:kind:maxWidth:client:)` helper that returns `nil`
+  when the DTO doesn't advertise the image (`ImageTags["Primary"/"Thumb"/"Logo"]`,
+  or a non-empty `BackdropImageTags`). Previously item image URLs were built
+  unconditionally, so an episode with no server Primary still got a URL that
+  404'd into a blank card. Returning `nil` now lets the artwork fallback chain run.
+- Applied to `posterURL`, `backdropURL`, `heroBackdropURL` in `map(item:)` and to
+  the library `imageURL` mapping. `seriesPosterURL`/`fallbackArtworkURL` (series
+  -level, keyed by `SeriesId`) and the existing `logoURL` helper are left as-is.
+- Note: `ImageTags`/`BackdropImageTags` are returned by Jellyfin by default (the
+  existing People/logo guards already read them), and are **not** valid
+  `ItemFields` enum values — adding them to `Fields` risks a 400 on strict
+  servers — so the `Fields` query params were intentionally left untouched.
+
+**FIX 2 — Episode cards never render blank**
+(`Sources/CoreUI/PosterCardView.swift`)
+- The episode async fallback chain is now: real per-episode still
+  (`ArtworkRouter .thumbnail`) → **series-level wide hero** → server series
+  backdrop (`item.fallbackArtworkURL`).
+- Added `seriesArtworkItem(for:)` which synthesizes a lightweight `.series`
+  `MediaItem` from the episode (series id/title + normalized provider IDs +
+  genres/tags) and calls `ArtworkRouter.shared.artworkURL(.hero, for:)`. For
+  anime this yields the keyless AniList banner, so every anime episode card now
+  shows the show banner instead of nothing. Same banner on every episode is
+  acceptable; a blank card is not.
+
+### Problem 2 — anime hero/background images were blurry
+
+**FIX 3 — Sharper anime hero** (`Sources/MetadataKit/ArtworkRouter.swift`)
+- Anime `.hero` chain changed `[anilist, tmdb, kitsu]` → `[tmdb, anilist, kitsu]`
+  so the high-res TMDb `/original` backdrop is preferred when configured, with
+  the keyless AniList banner (~1900×400) as fallback. Anime `.poster` left as
+  `[anilist, kitsu, tmdb]`.
+
+**FIX 4 — Stop stretching posters into the hero**
+(`Sources/FeatureHome/DetailHeroView.swift`)
+- Removed `backdrop.posterURL` (a vertical poster) from the hero backdrop
+  `FallbackAsyncImage` `urls` list, keeping `heroBackdropURL` + `backdropURL`
+  and the async `tmdbBackdropFallback`. A vertical poster is no longer stretched
+  across the cinematic hero; an empty gradient hero is preferred over a distorted
+  poster. Poster-style cards are untouched.
+
+**No-BYOK preserved:** TMDb remains the optional tier. With no TMDb token every
+fix degrades gracefully to keyless sources (AniList banner / server art).
+
+### Phase 2 — needs on-device verification
+1. **Anime episode cards:** episodes with no server still now show the show's
+   AniList banner (keyless) — confirm no blank cards in anime episode rails.
+2. **Anime episode stills (TMDb path):** with the maintainer's TMDb token, real
+   per-episode stills still appear where TMDb numbering matches.
+3. **Anime heroes sharp:** detail hero/background for anime is now the sharp TMDb
+   `/original` backdrop (token configured), falling back to AniList banner.
+4. **No stretched posters:** anime/movie detail heroes with no wide backdrop show
+   a clean gradient rather than a stretched vertical poster.
+5. **Western TV unaffected:** episodes/series with real server art still render
+   that art (tag-guarding only nils out genuinely-absent images).

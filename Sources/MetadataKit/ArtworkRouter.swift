@@ -73,7 +73,7 @@ public actor ArtworkRouter {
         switch type {
         case .anime:
             switch kind {
-            case .hero: return [anilist, tmdb, kitsu]
+            case .hero: return [tmdb, anilist, kitsu]
             case .poster: return [anilist, kitsu, tmdb]
             case .thumbnail: return [tmdb] // real anime stills; series-backdrop fallback handled by callers
             case .logo: return [tmdb]

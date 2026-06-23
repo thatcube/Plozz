@@ -92,7 +92,7 @@ struct DetailHeroView: View {
         let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
         ZStack(alignment: .bottomLeading) {
             FallbackAsyncImage(
-                urls: [backdrop.heroBackdropURL, backdrop.backdropURL, backdrop.posterURL].compactMap { $0 },
+                urls: [backdrop.heroBackdropURL, backdrop.backdropURL].compactMap { $0 },
                 maxAspectRatio: 3.0,
                 asyncFallbackURL: tmdbBackdropFallback
             ) {

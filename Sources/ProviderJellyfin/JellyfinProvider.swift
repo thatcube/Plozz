@@ -35,7 +35,7 @@ public struct JellyfinProvider: MediaProvider {
                 id: dto.Id,
                 title: dto.Name ?? "Library",
                 kind: Self.kind(forCollectionType: dto.CollectionType),
-                imageURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 400)
+                imageURL: Self.imageURL(for: dto, kind: .primary, maxWidth: 400, client: client)
             )
         }
     }
@@ -459,12 +459,12 @@ public struct JellyfinProvider: MediaProvider {
             resumePosition: JellyfinTicks.seconds(fromTicks: dto.UserData?.PlaybackPositionTicks),
             playedPercentage: dto.UserData?.PlayedPercentage.map { $0 / 100.0 },
             isPlayed: dto.UserData?.Played ?? false,
-            posterURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 500),
+            posterURL: Self.imageURL(for: dto, kind: .primary, maxWidth: 500, client: client),
             seriesPosterURL: dto.SeriesId.flatMap {
                 client.imageURL(itemID: $0, kind: .primary, maxWidth: 500)
             },
-            backdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 1280),
-            heroBackdropURL: client.imageURL(itemID: dto.Id, kind: .backdrop, maxWidth: 3840),
+            backdropURL: Self.imageURL(for: dto, kind: .backdrop, maxWidth: 1280, client: client),
+            heroBackdropURL: Self.imageURL(for: dto, kind: .backdrop, maxWidth: 3840, client: client),
             fallbackArtworkURL: dto.SeriesId.flatMap {
                 client.imageURL(itemID: $0, kind: .backdrop, maxWidth: 1280)
             },
@@ -497,6 +497,24 @@ public struct JellyfinProvider: MediaProvider {
                 imageURL: imageURL
             )
         }
+    }
+
+    /// Builds an *item-owned* image URL only when the DTO actually advertises
+    /// that image, so a missing server image yields `nil` (letting the artwork
+    /// fallback chain run) instead of a URL that 404s into a blank card. The
+    /// item's own `Primary`/`Thumb`/`Logo` live in `ImageTags`; backdrops live in
+    /// `BackdropImageTags`. Series-level art (seriesPoster/fallback) is resolved
+    /// separately against `SeriesId` and intentionally not gated here.
+    private static func imageURL(for dto: BaseItemDto, kind: ImageKind, maxWidth: Int, client: JellyfinClient) -> URL? {
+        let advertised: Bool
+        switch kind {
+        case .primary: advertised = dto.ImageTags?["Primary"] != nil
+        case .thumb: advertised = dto.ImageTags?["Thumb"] != nil
+        case .logo: advertised = dto.ImageTags?["Logo"] != nil
+        case .backdrop: advertised = (dto.BackdropImageTags?.isEmpty == false)
+        }
+        guard advertised else { return nil }
+        return client.imageURL(itemID: dto.Id, kind: kind, maxWidth: maxWidth)
     }
 
     /// Resolves the stylized title/logo art URL for the detail hero.

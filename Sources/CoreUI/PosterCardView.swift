@@ -216,17 +216,45 @@ public struct PosterCardView: View {
            item.seasonNumber != nil,
            item.episodeNumber != nil {
             let snapshot = item
-            let backdropFallback = tmdbBackdropFallback
+            let seriesItem = Self.seriesArtworkItem(for: item)
+            let serverSeriesBackdrop = item.fallbackArtworkURL
             return {
-                // Real per-episode still first (TMDb stills, then TVmaze for
-                // western TV); otherwise the show's wide backdrop.
+                // 1) Real per-episode still first (TMDb stills, then TVmaze for
+                //    western TV). Anime via Shoko/AniDB usually ship none.
                 if let still = await ArtworkRouter.shared.artworkURL(.thumbnail, for: snapshot) {
                     return still
                 }
-                return await backdropFallback?()
+                // 2) Series-level wide hero so an episode card is never blank: a
+                //    high-res TMDb backdrop when configured, otherwise the keyless
+                //    AniList banner for anime. The same banner on every episode of
+                //    a show is acceptable; a blank card is not.
+                if let seriesHero = await ArtworkRouter.shared.artworkURL(.hero, for: seriesItem) {
+                    return seriesHero
+                }
+                // 3) Last resort: the server's own series backdrop, if present.
+                return serverSeriesBackdrop
             }
         }
         return tmdbBackdropFallback
+    }
+
+    /// A lightweight *series-level* item synthesized from an episode, used only to
+    /// resolve a wide series hero (TMDb backdrop or the keyless AniList banner) as
+    /// a guaranteed non-blank fallback for episode cards. Carries the episode's
+    /// normalized provider IDs, title, genres and tags so anime detection and
+    /// cross-provider lookups stay accurate at the series level.
+    private static func seriesArtworkItem(for episode: MediaItem) -> MediaItem {
+        MediaItem(
+            id: episode.seriesID ?? episode.id,
+            title: episode.parentTitle ?? episode.title,
+            kind: .series,
+            productionYear: episode.productionYear,
+            genres: episode.genres,
+            tags: episode.tags,
+            seriesID: episode.seriesID,
+            fallbackArtworkURL: episode.fallbackArtworkURL,
+            providerIDs: episode.providerIDs
+        )
     }
 
     /// Poster cards reject any source image wider than ~0.9:1 (a real poster is

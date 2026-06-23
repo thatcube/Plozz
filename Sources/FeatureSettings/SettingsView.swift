@@ -377,23 +377,25 @@ public struct SettingsView: View {
     // MARK: - Appearance
 
     private var appearancePanel: some View {
-        SettingsPanel(
-            title: "Appearance",
-            footer: "Choose how Plozz looks. System follows your Apple TV's appearance; OLED uses a pure-black background."
-        ) {
-            OptionCardRow(options: AppTheme.allCases, selection: themeBinding) { option in
-                VStack(spacing: 12) {
-                    Image(systemName: option.symbolName)
-                        .font(.largeTitle)
-                    Text(option.displayName)
-                        .font(.headline)
+        SettingsPanel(title: "Appearance") {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(AppTheme.allCases) { option in
+                        Button {
+                            theme.theme = option
+                        } label: {
+                            Label(option.displayName, systemImage: option.symbolName)
+                                .font(.headline)
+                                .padding(.horizontal, 4)
+                        }
+                        .plozzGlassPillButton(isSelected: theme.theme == option)
+                    }
                 }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
             }
+            .scrollClipDisabled()
         }
-    }
-
-    private var themeBinding: Binding<AppTheme> {
-        Binding(get: { theme.theme }, set: { theme.theme = $0 })
     }
 
     // MARK: - Captions

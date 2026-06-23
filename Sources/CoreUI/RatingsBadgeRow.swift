@@ -23,14 +23,16 @@ public struct RatingsBadgeRow: View {
 }
 
 /// A single source's rating: a compact branded icon (a filled star for
-/// user/community scores, a tomato/popcorn for Rotten Tomatoes, or a coloured
-/// Metacritic chip) beside the formatted score. Rotten Tomatoes scores tint red
-/// when fresh and green when rotten, mirroring the real badges.
+/// user/community scores, a TMDB logo chip for TMDB, a tomato/popcorn for
+/// Rotten Tomatoes, or a coloured Metacritic chip) beside the formatted score.
+/// Rotten Tomatoes scores tint red when fresh and green when rotten, mirroring
+/// the real badges.
 public struct RatingBadge: View {
     private let rating: ExternalRating
 
     /// Shared type scale so the icon and score line up to a compact cap height.
     private static let valueFont = Font.system(size: 22, weight: .semibold)
+    private static let emphasizedValueFont = Font.system(size: 22, weight: .bold)
     private static let iconSize: CGFloat = 24
 
     public init(rating: ExternalRating) {
@@ -41,7 +43,7 @@ public struct RatingBadge: View {
         HStack(spacing: 7) {
             icon
             Text(rating.displayValue)
-                .font(Self.valueFont)
+                .font(valueFont)
                 .monospacedDigit()
                 .foregroundStyle(valueColor)
         }
@@ -56,6 +58,8 @@ public struct RatingBadge: View {
             Image(systemName: "star.fill")
                 .font(.system(size: Self.iconSize * 0.8, weight: .semibold))
                 .foregroundStyle(Self.starGold)
+        case .tmdb:
+            tmdbBadge
         case .tomato:
             emoji("🍅")
         case .popcorn:
@@ -81,6 +85,24 @@ public struct RatingBadge: View {
             .foregroundStyle(.white)
             .frame(width: 34, height: 34)
             .background(metacriticColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    private var tmdbBadge: some View {
+        Image("TMDBPrimaryShortBlue")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 42, height: 18)
+    }
+
+    /// Tint for the score text — fresh/rotten for Rotten Tomatoes-style sources,
+    /// primary otherwise.
+    private var valueFont: Font {
+        switch rating.source {
+        case .tmdb, .rottenTomatoes, .critic:
+            return Self.emphasizedValueFont
+        default:
+            return Self.valueFont
+        }
     }
 
     /// Tint for the score text — fresh/rotten for Rotten Tomatoes-style sources,

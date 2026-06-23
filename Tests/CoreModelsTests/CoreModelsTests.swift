@@ -148,4 +148,57 @@ final class SpoilerSettingsTests: XCTestCase {
         XCTAssertEqual(enabled.maskedTitle(for: episode(number: 7)), "Episode 7")
         XCTAssertEqual(enabled.maskedTitle(for: episode(number: nil)), "Episode")
     }
+
+    // MARK: - Hide ratings until watched
+
+    private let ratingsHidden = SpoilerSettings(hideRatingsUntilWatched: true)
+    private func movie(played: Bool = false) -> MediaItem {
+        MediaItem(id: "m", title: "Film", kind: .movie, isPlayed: played)
+    }
+
+    func testHideRatingsDefaultsOff() {
+        XCTAssertFalse(SpoilerSettings.default.hideRatingsUntilWatched)
+        XCTAssertFalse(SpoilerSettings.default.shouldHideRatings(for: movie()))
+        XCTAssertFalse(SpoilerSettings.default.shouldHideRatings(for: episode()))
+    }
+
+    func testHideRatingsIsIndependentOfSpoilerSwitch() {
+        XCTAssertTrue(ratingsHidden.shouldHideRatings(for: episode()))
+        XCTAssertFalse(ratingsHidden.shouldHideThumbnail(for: episode()))
+        XCTAssertFalse(ratingsHidden.shouldHideText(for: episode()))
+    }
+
+    func testHideRatingsForUnwatchedMovieAndEpisode() {
+        XCTAssertTrue(ratingsHidden.shouldHideRatings(for: movie()))
+        XCTAssertTrue(ratingsHidden.shouldHideRatings(for: episode()))
+    }
+
+    func testHideRatingsRevealsAfterFullyWatched() {
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(for: movie(played: true)))
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(for: episode(played: true)))
+    }
+
+    func testHideRatingsStillHiddenWhileInProgress() {
+        XCTAssertTrue(ratingsHidden.shouldHideRatings(for: episode(percentage: 0.5)))
+        XCTAssertTrue(ratingsHidden.shouldHideRatings(for: episode(resume: 120)))
+    }
+
+    func testHideRatingsNeverAppliesToSeriesOrSeason() {
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(for: MediaItem(id: "s", title: "Show", kind: .series)))
+        XCTAssertFalse(ratingsHidden.shouldHideRatings(for: MediaItem(id: "se", title: "Season 1", kind: .season)))
+    }
+
+    func testDecodesLegacyPayloadWithoutHideRatingsKey() throws {
+        let legacy = #"{"isEnabled":true,"mode":"placeholder"}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(SpoilerSettings.self, from: legacy)
+        XCTAssertTrue(decoded.isEnabled)
+        XCTAssertEqual(decoded.mode, .placeholder)
+        XCTAssertFalse(decoded.hideRatingsUntilWatched)
+    }
+
+    func testHideRatingsCodableRoundTrip() throws {
+        let settings = SpoilerSettings(isEnabled: true, mode: .blur, hideRatingsUntilWatched: true)
+        let data = try JSONEncoder().encode(settings)
+        XCTAssertEqual(try JSONDecoder().decode(SpoilerSettings.self, from: data), settings)
+    }
 }

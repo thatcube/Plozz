@@ -44,10 +44,14 @@ public struct MediaBadgeChip: View {
     /// `s`) with the dash drawn as a solid bar fused to the `H`.
     private static let dtsHeadFont = Font.system(size: 22, weight: .black)
     private static let dtsSuffixFont = Font.system(size: 15, weight: .black)
-    /// The fused dash bar of the dts-HD mark, sized to the shorter `HD`.
-    private static let dtsDashWidth: CGFloat = 6
+    /// The fused dash bar of the dts-HD mark: sized to the shorter `HD`, raised
+    /// to the `H`'s mid-height, gapped from the `dts` on its left and overlapped
+    /// into the `H` on its right so the two connect.
+    private static let dtsDashWidth: CGFloat = 7
     private static let dtsDashThickness: CGFloat = 3
-    private static let dtsDashYOffset: CGFloat = -1
+    private static let dtsDashRaise: CGFloat = 5
+    private static let dtsDashLeading: CGFloat = 2
+    private static let dtsDashOverlap: CGFloat = 2
     /// Gray fill for the `-HD` portion of the dts-HD mark.
     private static let dtsHDColor = Color(white: 0.62)
     /// Plain trailing channel-layout number appended to a format logo.
@@ -181,7 +185,7 @@ public struct MediaBadgeChip: View {
     private func dtsLabel(_ text: String) -> some View {
         let parts = Self.splitDTS(text)
         let isX = parts.suffix?.uppercased() == "X"
-        return HStack(alignment: .center, spacing: isX ? 1 : 0) {
+        return HStack(alignment: isX ? .center : .firstTextBaseline, spacing: isX ? 1 : 0) {
             Text(parts.head)
                 .font(Self.dtsHeadFont)
                 .tracking(-0.5)
@@ -191,16 +195,20 @@ public struct MediaBadgeChip: View {
                     .font(Self.dtsXFont)
                     .foregroundStyle(Self.dtsXGradient)
             } else if parts.separator == "-", let suffix = parts.suffix {
-                // dts-HD: a short, much smaller `HD` with the dash drawn as a
-                // solid bar fused to the `H`, the whole unit gray.
-                HStack(alignment: .center, spacing: -0.5) {
-                    Rectangle()
-                        .frame(width: Self.dtsDashWidth, height: Self.dtsDashThickness)
-                        .offset(y: Self.dtsDashYOffset)
-                    Text(suffix)
-                        .font(Self.dtsSuffixFont)
-                }
-                .foregroundStyle(Self.dtsHDColor)
+                // dts-HD: a short, much smaller `HD` sitting on the dts baseline,
+                // with the dash drawn as a solid bar at the `H`'s mid-height and
+                // overlapped into it so the two fuse. The whole unit is gray.
+                Rectangle()
+                    .fill(Self.dtsHDColor)
+                    .frame(width: Self.dtsDashWidth, height: Self.dtsDashThickness)
+                    .padding(.leading, Self.dtsDashLeading)
+                    .padding(.trailing, -Self.dtsDashOverlap)
+                    .alignmentGuide(.firstTextBaseline) { _ in
+                        Self.dtsDashThickness / 2 + Self.dtsDashRaise
+                    }
+                Text(suffix)
+                    .font(Self.dtsSuffixFont)
+                    .foregroundStyle(Self.dtsHDColor)
             } else {
                 Text((parts.separator ?? "") + (parts.suffix ?? ""))
                     .font(Self.dtsSuffixFont)

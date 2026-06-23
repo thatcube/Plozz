@@ -200,7 +200,7 @@ let package = Package(
         // it stays decoupled from the video feature modules.
         .target(
             name: "FeatureMusic",
-            dependencies: ["CoreModels", "CoreUI"]
+            dependencies: ["CoreModels", "CoreUI", "MetadataKit"]
         ),
 
         // MARK: Top Shelf (shared with the tvOS Top Shelf extension)

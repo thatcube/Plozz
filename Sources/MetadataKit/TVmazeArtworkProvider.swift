@@ -32,7 +32,7 @@ public struct TVmazeArtworkProvider: ArtworkProvider {
     }
 
     private func fetchShow(for query: MetadataQuery) async -> Show? {
-        if let imdb = query.providerIDs["Imdb"]?.trimmingCharacters(in: .whitespaces), !imdb.isEmpty,
+        if let imdb = query.providerIDs.providerID(.imdb), !imdb.isEmpty,
            let url = URL(string: "https://api.tvmaze.com/lookup/shows?imdb=\(imdb)"),
            let show = await MetadataHTTP.get(Show.self, url: url) {
             return show

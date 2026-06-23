@@ -79,7 +79,11 @@ public struct PlexClient: Sendable {
 
     /// `GET /library/metadata/{ratingKey}` — full detail for one item.
     func metadata(ratingKey: String) async throws -> PlexMetadata {
-        let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)", headers: headers)
+        let endpoint = Endpoint(
+            path: "/library/metadata/\(ratingKey)",
+            queryItems: [URLQueryItem(name: "includeGuids", value: "1")],
+            headers: headers
+        )
         let container = try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL).MediaContainer
         guard let item = container.Metadata?.first else { throw AppError.notFound }
         return item
@@ -449,7 +453,12 @@ public struct PlexClient: Sendable {
     private func containerQuery(start: Int, size: Int) -> [URLQueryItem] {
         [
             URLQueryItem(name: "X-Plex-Container-Start", value: String(start)),
-            URLQueryItem(name: "X-Plex-Container-Size", value: String(size))
+            URLQueryItem(name: "X-Plex-Container-Size", value: String(size)),
+            // Ask Plex to inline each item's external `Guid` array (imdb://,
+            // tmdb://, anidb://, …) on list responses too — without this flag
+            // list endpoints omit it, so rail/grid items would reach the
+            // metadata router with no external ids to match (or detect anime) by.
+            URLQueryItem(name: "includeGuids", value: "1")
         ]
     }
 

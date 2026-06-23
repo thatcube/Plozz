@@ -99,8 +99,8 @@ public struct MetadataQuery: Sendable, Hashable {
         var parts: [String] = [contentType.rawValue, kind.rawValue]
         if let anilist = animeIDs.anilist { parts.append("anilist:\(anilist)") }
         else if let mal = animeIDs.mal { parts.append("mal:\(mal)") }
-        else if let tmdb = providerIDs["Tmdb"] ?? providerIDs["SeriesTmdb"] { parts.append("tmdb:\(tmdb)") }
-        else if let imdb = providerIDs["Imdb"] { parts.append("imdb:\(imdb)") }
+        else if let tmdb = providerIDs.providerID(.tmdb) ?? providerIDs.providerID(.seriesTmdb) { parts.append("tmdb:\(tmdb)") }
+        else if let imdb = providerIDs.providerID(.imdb) { parts.append("imdb:\(imdb)") }
         else { parts.append("t:\(title.lowercased())|y:\(year.map(String.init) ?? "")") }
         if kind == .thumbnail, let s = seasonNumber, let e = episodeNumber {
             parts.append("s\(s)e\(e)")

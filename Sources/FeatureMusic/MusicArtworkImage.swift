@@ -6,27 +6,38 @@ import CoreUI
 /// Square async artwork for a music node, with a symbol placeholder while
 /// loading or when no image exists. Mirrors CoreUI's fallback-image behaviour but
 /// is square (album/artist art) rather than poster-shaped.
+///
+/// The server's own art (`url`) is always tried first. `asyncFallbackURL` is an
+/// optional best-effort closure (Deezer artist hero / Cover Art Archive album
+/// cover via `ArtworkRouter`) used only when the server ships no art, so the
+/// keyless MetadataKit music providers fill gaps without ever overriding the
+/// user's library art. Resolved bytes are cached by CoreUI's `ArtworkImageCache`.
 struct MusicArtworkImage: View {
     let url: URL?
     var systemPlaceholder: String = "music.note"
     var cornerRadius: CGFloat = 12
+    var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
+
+    init(
+        url: URL?,
+        systemPlaceholder: String = "music.note",
+        cornerRadius: CGFloat = 12,
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil
+    ) {
+        self.url = url
+        self.systemPlaceholder = systemPlaceholder
+        self.cornerRadius = cornerRadius
+        self.asyncFallbackURL = asyncFallbackURL
+    }
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(Color.primary.opacity(0.08))
-            if let url {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    case .empty:
-                        ProgressView()
-                    default:
-                        placeholder
-                    }
-                }
-            } else {
+            FallbackAsyncImage(
+                urls: [url].compactMap { $0 },
+                asyncFallbackURL: asyncFallbackURL
+            ) {
                 placeholder
             }
         }
@@ -49,8 +60,27 @@ struct MusicCard<Caption: View>: View {
     var systemPlaceholder: String = "music.note"
     var isCircular: Bool = false
     let width: CGFloat
+    var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
     let action: () -> Void
     @ViewBuilder var caption: () -> Caption
+
+    init(
+        artworkURL: URL?,
+        systemPlaceholder: String = "music.note",
+        isCircular: Bool = false,
+        width: CGFloat,
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        action: @escaping () -> Void,
+        @ViewBuilder caption: @escaping () -> Caption
+    ) {
+        self.artworkURL = artworkURL
+        self.systemPlaceholder = systemPlaceholder
+        self.isCircular = isCircular
+        self.width = width
+        self.asyncFallbackURL = asyncFallbackURL
+        self.action = action
+        self.caption = caption
+    }
 
     var body: some View {
         Button(action: action) {
@@ -67,10 +97,19 @@ struct MusicCard<Caption: View>: View {
     @ViewBuilder
     private var artwork: some View {
         if isCircular {
-            MusicArtworkImage(url: artworkURL, systemPlaceholder: systemPlaceholder, cornerRadius: width / 2)
-                .clipShape(Circle())
+            MusicArtworkImage(
+                url: artworkURL,
+                systemPlaceholder: systemPlaceholder,
+                cornerRadius: width / 2,
+                asyncFallbackURL: asyncFallbackURL
+            )
+            .clipShape(Circle())
         } else {
-            MusicArtworkImage(url: artworkURL, systemPlaceholder: systemPlaceholder)
+            MusicArtworkImage(
+                url: artworkURL,
+                systemPlaceholder: systemPlaceholder,
+                asyncFallbackURL: asyncFallbackURL
+            )
         }
     }
 }
@@ -81,7 +120,13 @@ struct AlbumCard: View {
     let action: () -> Void
 
     var body: some View {
-        MusicCard(artworkURL: album.artworkURL, systemPlaceholder: "opticaldisc", width: width, action: action) {
+        MusicCard(
+            artworkURL: album.artworkURL,
+            systemPlaceholder: "opticaldisc",
+            width: width,
+            asyncFallbackURL: MusicArtworkFallback.albumCover(title: album.title, artist: album.artistName),
+            action: action
+        ) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(album.title)
                     .font(.headline)
@@ -101,7 +146,14 @@ struct ArtistCard: View {
     let action: () -> Void
 
     var body: some View {
-        MusicCard(artworkURL: artist.artworkURL, systemPlaceholder: "music.mic", isCircular: true, width: width, action: action) {
+        MusicCard(
+            artworkURL: artist.artworkURL,
+            systemPlaceholder: "music.mic",
+            isCircular: true,
+            width: width,
+            asyncFallbackURL: MusicArtworkFallback.artistImage(name: artist.name),
+            action: action
+        ) {
             Text(artist.name)
                 .font(.headline)
                 .lineLimit(1)

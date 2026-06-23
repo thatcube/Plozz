@@ -47,13 +47,18 @@ public enum ContentClassifier {
 
     /// `true` when the item carries any anime-database id or an "Anime" genre/tag.
     public static func isAnime(_ item: MediaItem) -> Bool {
-        for key in item.providerIDs.keys {
-            let lowered = key.lowercased()
-            if animeIDKeys.contains(where: { lowered.contains($0) }) {
-                // "MyAnimeList" sometimes appears as "Mal"; cover that explicitly.
-                return true
-            }
-            if lowered == "mal" { return true }
+        // Prefer the normalized namespace lookups (tolerant of provider key
+        // casing/punctuation across Jellyfin and Plex) for the common anime dbs.
+        if item.providerID(.aniList) != nil
+            || item.providerID(.myAnimeList) != nil
+            || item.providerID(.aniDB) != nil {
+            return true
+        }
+        // Kitsu/Shoko have no `ProviderIDNamespace` case; match them (and any
+        // other anime-db id) by normalized-key substring as a fallback.
+        let normalizedKeys = item.providerIDs.normalizedProviderIDs.keys
+        for key in normalizedKeys {
+            if animeIDKeys.contains(where: { key.contains($0) }) { return true }
         }
         let labels = (item.genres + item.tags).map { $0.lowercased() }
         return labels.contains { label in animeLabels.contains { label.contains($0) } }
@@ -80,19 +85,16 @@ public struct AnimeIDs: Sendable, Equatable, Hashable {
 
     public init(from item: MediaItem) {
         var ids = AnimeIDs()
-        for (key, value) in item.providerIDs {
-            let lowered = key.lowercased()
-            let trimmed = value.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { continue }
-            if lowered.contains("anilist") {
-                ids.anilist = Int(trimmed)
-            } else if lowered.contains("myanimelist") || lowered == "mal" {
-                ids.mal = Int(trimmed)
-            } else if lowered.contains("anidb") {
-                ids.anidb = Int(trimmed)
-            } else if lowered.contains("kitsu") {
-                ids.kitsu = trimmed
-            }
+        // Resolve the major anime databases through the normalized namespace so
+        // differing provider key casing (`AniList`, `anilistid`, `MAL`, …) and
+        // Plex/Jellyfin both map to the same id.
+        if let value = item.providerID(.aniList) { ids.anilist = Int(value) }
+        if let value = item.providerID(.myAnimeList) { ids.mal = Int(value) }
+        if let value = item.providerID(.aniDB) { ids.anidb = Int(value) }
+        // Kitsu has no `ProviderIDNamespace` case; pull it by normalized key.
+        for (key, value) in item.providerIDs.normalizedProviderIDs where key.contains("kitsu") {
+            ids.kitsu = value
+            break
         }
         self = ids
     }

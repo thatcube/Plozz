@@ -89,14 +89,14 @@ public struct TMDbMetadataProvider: ArtworkProvider {
     /// episodes/seasons) over a title search.
     private func resolveID(for query: MetadataQuery, forceTV: Bool = false) async -> String? {
         let isTV = forceTV || query.isTV
-        if isTV, let series = query.providerIDs["SeriesTmdb"]?.trimmingCharacters(in: .whitespaces), !series.isEmpty {
+        if isTV, let series = query.providerIDs.providerID(.seriesTmdb), !series.isEmpty {
             return series
         }
         // An episode/season's own `Tmdb` id is the episode, not the show, so only
         // trust a stamped `Tmdb` for series/movies.
         switch query.kind {
         case .movie, .video, .series:
-            if let own = query.providerIDs["Tmdb"]?.trimmingCharacters(in: .whitespaces), !own.isEmpty {
+            if let own = query.providerIDs.providerID(.tmdb), !own.isEmpty {
                 return own
             }
         default:

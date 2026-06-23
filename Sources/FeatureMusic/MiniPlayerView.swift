@@ -16,7 +16,16 @@ struct MiniPlayerBar: View {
             HStack(spacing: 20) {
                 Button(action: onOpen) {
                     HStack(spacing: 16) {
-                        MusicArtworkImage(url: track.artworkURL, systemPlaceholder: "music.note", cornerRadius: 8)
+                        MusicArtworkImage(
+                            url: track.artworkURL,
+                            systemPlaceholder: "music.note",
+                            cornerRadius: 8,
+                            asyncFallbackURL: MusicArtworkFallback.trackCover(
+                                title: track.title,
+                                album: track.albumTitle,
+                                artist: track.artistName
+                            )
+                        )
                             .frame(width: 64, height: 64)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(track.title).font(.headline).lineLimit(1)

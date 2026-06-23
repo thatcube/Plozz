@@ -290,9 +290,47 @@ public struct PlexProvider: MediaProvider {
             backdropURL: client.imageURL(path: dto.art, maxWidth: 1280),
             heroBackdropURL: client.imageURL(path: dto.art, maxWidth: 3840),
             ratings: Self.ratings(from: dto),
-            providerIDs: [:],
+            providerIDs: Self.providerIDs(from: dto),
             mediaInfo: Self.sourceMetadata(from: dto)
         )
+    }
+
+    /// Maps Plex `Guid` values (`imdb://...`, `tmdb://...`, …) into the shared
+    /// `MediaItem.providerIDs` shape used by artwork and ratings enrichment. The
+    /// keys mirror Jellyfin's casing (`Imdb`, `Tmdb`, `AniList`, …) so the
+    /// content classifier and `ArtworkRouter` resolve Plex and Jellyfin items the
+    /// same way.
+    static func providerIDs(from dto: PlexMetadata) -> [String: String] {
+        var ids: [String: String] = [:]
+        for guid in dto.Guid ?? [] {
+            guard let raw = guid.id?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let schemeRange = raw.range(of: "://")
+            else { continue }
+            let scheme = raw[..<schemeRange.lowerBound].lowercased()
+            let value = String(raw[schemeRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            switch scheme {
+            case "imdb":
+                if ids["Imdb"] == nil { ids["Imdb"] = value }
+            case "tmdb", "themoviedb":
+                if ids["Tmdb"] == nil { ids["Tmdb"] = value }
+            case "tvdb", "thetvdb":
+                if ids["Tvdb"] == nil { ids["Tvdb"] = value }
+            case "tvmaze":
+                if ids["Tvmaze"] == nil { ids["Tvmaze"] = value }
+            case "anidb":
+                if ids["AniDB"] == nil { ids["AniDB"] = value }
+            case "anilist":
+                if ids["AniList"] == nil { ids["AniList"] = value }
+            case "myanimelist", "mal":
+                if ids["Mal"] == nil { ids["Mal"] = value }
+            case "mbid":
+                if ids["MusicBrainzRelease"] == nil { ids["MusicBrainzRelease"] = value }
+            default:
+                continue
+            }
+        }
+        return ids
     }
 
     /// Builds the playable source's technical metadata from an item's first

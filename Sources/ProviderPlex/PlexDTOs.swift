@@ -71,8 +71,18 @@ struct PlexMetadata: Decodable {
     /// Audience score (0–10); `audienceRatingImage` names the source.
     let audienceRating: Double?
     let audienceRatingImage: String?
+    /// External ids (`imdb://...`, `tmdb://...`, `tvdb://...`, `anidb://...`)
+    /// exported by Plex agents/scanners. Ingested into `MediaItem.providerIDs`
+    /// so the metadata router can match items by a stable external id (which
+    /// also sharpens anime detection) instead of a fuzzy title search.
+    let Guid: [PlexGuid]?
     let Genre: [PlexTag]?
     let Media: [PlexMedia]?
+}
+
+/// One Plex external-id GUID, e.g. `{ "id": "imdb://tt0111161" }`.
+struct PlexGuid: Decodable {
+    let id: String?
 }
 
 /// A simple Plex tag element (genres, directors, …): only the display `tag` is

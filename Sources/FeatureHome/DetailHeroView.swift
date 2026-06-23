@@ -147,7 +147,7 @@ struct DetailHeroView: View {
                 if !featureBadges.isEmpty {
                     MediaBadgeRow(badges: featureBadges)
                 }
-                if !heroRatings.isEmpty {
+                if !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item) {
                     RatingsBadgeRow(ratings: heroRatings)
                 }
                 if hideText {

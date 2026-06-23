@@ -85,8 +85,9 @@ public extension MediaSourceMetadata {
     /// also carries an HDR10 base layer (Jellyfin's `DOVIWithHDR10`, Plex's
     /// "DoVi/HDR10") reads `Dolby Vision` **and** `HDR10` so the badge row
     /// advertises both. Otherwise a single `HDR10+`, `HDR10`, `HLG`, or generic
-    /// `HDR` badge. Empty for SDR content. HDR badges use the `.hdr` logo style;
-    /// Dolby Vision uses the `.dolby` mark.
+    /// `HDR` badge, or `SDR` for standard-range content. Empty only when there's
+    /// nothing to classify. HDR badges use the `.hdr` logo style; Dolby Vision
+    /// uses the `.dolby` mark; `SDR` is a plain `.spec` pill.
     var dynamicRangeBadges: [MediaBadge] {
         guard let video else { return [] }
         let rangeType = (video.videoRangeType ?? "").uppercased()
@@ -115,6 +116,16 @@ public extension MediaSourceMetadata {
         }
         if rangeType.hasPrefix("HDR") || range == "HDR" {
             return [MediaBadge("HDR", style: .hdr)]
+        }
+        // No HDR signal → standard dynamic range. Providers either emit an
+        // explicit `SDR` token (Jellyfin) or omit range info entirely (Plex), so
+        // label SDR whenever we have something concrete to classify — real
+        // dimensions or an explicit range token — and stay silent on an empty
+        // stream so we never assert SDR with nothing to back it.
+        let hasDimensions = (video.width ?? 0) > 0 || (video.height ?? 0) > 0
+        let hasRangeToken = !range.isEmpty || !rangeType.isEmpty
+        if hasDimensions || hasRangeToken {
+            return [MediaBadge("SDR", style: .spec)]
         }
         return []
     }

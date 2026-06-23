@@ -110,8 +110,23 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["HDR"])
     }
 
-    func testSDRHasNoDynamicRangeBadge() {
+    func testSDRBadgeFromExplicitToken() {
+        // Jellyfin reports an explicit SDR range token.
         let meta = MediaSourceMetadata(video: .init(videoRange: "SDR"))
+        XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["SDR"])
+        XCTAssertEqual(meta.dynamicRangeBadges.first?.style, .spec)
+    }
+
+    func testSDRBadgeInferredWhenNoRangeButDimensionsKnown() {
+        // Plex omits range info for SDR; a sized stream is still classified SDR.
+        let meta = MediaSourceMetadata(video: .init(width: 1920, height: 1080))
+        XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["SDR"])
+    }
+
+    func testNoDynamicRangeBadgeWhenStreamHasNothingToClassify() {
+        // A bare codec with no dimensions or range token stays unbadged rather
+        // than asserting SDR on no evidence.
+        let meta = MediaSourceMetadata(video: .init(codec: "h264"))
         XCTAssertTrue(meta.dynamicRangeBadges.isEmpty)
     }
 
@@ -156,7 +171,7 @@ final class MediaBadgesTests: XCTestCase {
     func testTechnicalBadgesGatedToPlayableKinds() {
         let meta = MediaSourceMetadata(video: .init(width: 3840, height: 2160))
         let movie = MediaItem(id: "1", title: "M", kind: .movie, mediaInfo: meta)
-        XCTAssertEqual(movie.technicalBadges.map(\.label), ["4K"])
+        XCTAssertEqual(movie.technicalBadges.map(\.label), ["4K", "SDR"])
 
         let series = MediaItem(id: "2", title: "S", kind: .series, mediaInfo: meta)
         XCTAssertTrue(series.technicalBadges.isEmpty)
@@ -194,9 +209,9 @@ final class MediaBadgesTests: XCTestCase {
                       mediaInfo: .init(audio: .init(codec: "eac3", channels: 8, channelLayout: "7.1"))),
         ]
         // Dolby Digital+ doesn't imply surround, so the best channel layout (7.1)
-        // is added alongside it.
+        // is added alongside it. E1 is SDR, so the range summary reads SDR.
         XCTAssertEqual(episodes.representativeTechnicalBadges.map(\.label),
-                       ["1080p", "Dolby Digital+", "7.1"])
+                       ["1080p", "SDR", "Dolby Digital+", "7.1"])
     }
 
     func testRepresentativeBadgesEmptyWhenNoMediaInfo() {

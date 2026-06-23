@@ -385,8 +385,9 @@ final class PlexProviderMappingTests: XCTestCase {
         let provider = PlexProvider(session: makeSession(), http: stub)
 
         let item = try await provider.item(id: "88")
-        // No Stream array: resolution + codec + surround come from Media-level facts.
-        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "H.264", "Dolby Digital+", "5.1"])
+        // No Stream array: resolution + codec + surround come from Media-level
+        // facts; no HDR signal, so the range reads SDR.
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "SDR", "H.264", "Dolby Digital+", "5.1"])
     }
 
     func testItemsPagePassesContainerParamsAndType() async throws {

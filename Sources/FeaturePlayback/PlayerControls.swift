@@ -562,19 +562,17 @@ private struct ScrubBar: View {
             let knobX = width * CGFloat(model.progressFraction)
 
             ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(.white.opacity(0.22))
-                    .frame(height: 6)
+                glassTrack(height: 14)
                 Capsule()
                     .fill(.white.opacity(0.35))
-                    .frame(width: width * CGFloat(model.bufferedFraction), height: 6)
+                    .frame(width: width * CGFloat(model.bufferedFraction), height: 14)
                 Capsule()
                     .fill(palette.accent)
-                    .frame(width: knobX, height: 6)
+                    .frame(width: knobX, height: 14)
                 Circle()
                     .fill(.white)
-                    .frame(width: model.isScrubbing ? 22 : 16, height: model.isScrubbing ? 22 : 16)
-                    .offset(x: knobX - (model.isScrubbing ? 11 : 8))
+                    .frame(width: model.isScrubbing ? 24 : 18, height: model.isScrubbing ? 24 : 18)
+                    .offset(x: knobX - (model.isScrubbing ? 12 : 9))
                     .shadow(radius: 4)
 
                 if model.isScrubbing {
@@ -591,6 +589,22 @@ private struct ScrubBar: View {
             .onChange(of: model.skipHintVisible) { _, visible in
                 if !visible { skipPressed = false }
             }
+        }
+    }
+
+    /// The base scrub track rendered as Liquid Glass on tvOS 26+, with a
+    /// translucent-fill fallback on older systems.
+    @ViewBuilder
+    private func glassTrack(height: CGFloat) -> some View {
+        if #available(tvOS 26.0, *) {
+            Capsule()
+                .fill(.clear)
+                .frame(height: height)
+                .glassEffect(.regular, in: Capsule())
+        } else {
+            Capsule()
+                .fill(.white.opacity(0.22))
+                .frame(height: height)
         }
     }
 

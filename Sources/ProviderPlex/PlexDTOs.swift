@@ -115,6 +115,10 @@ struct PlexPart: Decodable {
     let key: String?           // e.g. "/library/parts/123/16000/file.mkv"
     let duration: Int?
     let container: String?
+    /// Which trickplay (BIF) index resolutions the server has generated for this
+    /// part, e.g. `"sd"` or `"sd,hd"`. Present only when the server has built
+    /// "video preview thumbnails"; drives Plozz's scrubbing previews.
+    let indexes: String?
     let Stream: [PlexStream]?
 }
 

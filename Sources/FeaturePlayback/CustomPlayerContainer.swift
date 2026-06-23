@@ -32,13 +32,13 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
     let engine: any VideoEngine
     let model: PlayerControlsModel
     let actions: PlayerActions
-    let trickplay: TrickplayManifest?
+    let scrubPreview: ScrubPreviewSource?
     let themePalette: ThemePaletteBox
 
     func makeUIViewController(context: Context) -> PlayerInputViewController {
         plozzTrace("CustomPlayerContainer.makeUIViewController: ENTER (engine=\(type(of: engine)))")
         let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
-        controller.configureTrickplay(trickplay)
+        controller.configureScrubPreview(scrubPreview)
         controller.attachVideoSurface()
         controller.attachControls(themePalette: themePalette)
         plozzTrace("CustomPlayerContainer.makeUIViewController: EXIT")
@@ -105,7 +105,7 @@ final class PlayerInputViewController: UIViewController {
     var actions: PlayerActions
     private let engine: any VideoEngine
     private let model: PlayerControlsModel
-    private var thumbnailLoader: TrickplayThumbnailLoader?
+    private var thumbnailLoader: (any ScrubThumbnailProviding)?
 
     private var autoHideTask: Task<Void, Never>?
     private var thumbnailTask: Task<Void, Never>?
@@ -169,9 +169,13 @@ final class PlayerInputViewController: UIViewController {
 
     override var canBecomeFirstResponder: Bool { true }
 
-    func configureTrickplay(_ manifest: TrickplayManifest?) {
-        if let manifest, manifest.isUsable {
+    func configureScrubPreview(_ source: ScrubPreviewSource?) {
+        guard let source, source.isUsable else { return }
+        switch source {
+        case .tiled(let manifest):
             thumbnailLoader = TrickplayThumbnailLoader(manifest: manifest)
+        case .plexBIF(let url):
+            thumbnailLoader = PlexBIFThumbnailLoader(url: url)
         }
     }
 

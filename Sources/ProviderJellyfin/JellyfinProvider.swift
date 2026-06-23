@@ -198,7 +198,7 @@ public struct JellyfinProvider: MediaProvider {
             isTranscoding: source.TranscodingUrl != nil,
             deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
             sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
-            trickplay: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay)
+            scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled)
         )
     }
 

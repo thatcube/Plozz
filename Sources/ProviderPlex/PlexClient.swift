@@ -234,6 +234,18 @@ public struct PlexClient: Sendable {
         absoluteURL(serverPath: key, extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)])
     }
 
+    /// Absolute, token-bearing URL of a part's **BIF** trickplay index file
+    /// (`GET /library/parts/{partID}/indexes/{quality}`). The whole BIF blob is
+    /// downloaded and parsed client-side for scrubbing previews; the token rides
+    /// as a query param because the image/data loader doesn't send our X-Plex
+    /// headers.
+    func bifIndexURL(partID: Int, quality: String = "sd") -> URL? {
+        absoluteURL(
+            serverPath: "/library/parts/\(partID)/indexes/\(quality)",
+            extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)]
+        )
+    }
+
     /// Resolves the playable URL for a media item, choosing **direct play** when
     /// tvOS/AVFoundation can demux the original container/codecs, and otherwise a
     /// server-side **HLS transcode** (Plex's universal transcoder).

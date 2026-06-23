@@ -492,7 +492,44 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertTrue(url.contains("X-Plex-Token=TOKEN"), url)
     }
 
-    func testReportPlaybackSendsTimelineState() async throws {
+    func testPlaybackInfoBuildsPlexBIFScrubPreviewWhenIndexed() async throws {
+        // A part the server has generated BIF preview thumbnails for advertises
+        // `indexes:"sd"`, so the provider should expose a Plex BIF scrub source
+        // pointing at /library/parts/{id}/indexes/sd with the auth token.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/99", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"99","type":"movie","title":"Movie","duration":3600000,
+           "Media":[{"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac","Part":[{"id":42,"key":"/library/parts/42/16000/file.mp4","container":"mp4","indexes":"sd","Stream":[
+             {"id":10,"streamType":1,"index":0,"codec":"h264"},
+             {"id":11,"streamType":2,"index":1,"codec":"aac","selected":true}
+           ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "99")
+        let bifURL = try XCTUnwrap(request.scrubPreview?.plexBIFURL?.absoluteString)
+        XCTAssertTrue(bifURL.hasPrefix("https://plex.host:32400/library/parts/42/indexes/sd"), bifURL)
+        XCTAssertTrue(bifURL.contains("X-Plex-Token=TOKEN"), bifURL)
+    }
+
+    func testPlaybackInfoHasNoScrubPreviewWhenPartNotIndexed() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/100", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"100","type":"movie","title":"Movie","duration":3600000,
+           "Media":[{"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac","Part":[{"id":42,"key":"/library/parts/42/16000/file.mp4","container":"mp4","Stream":[
+             {"id":10,"streamType":1,"index":0,"codec":"h264"},
+             {"id":11,"streamType":2,"index":1,"codec":"aac","selected":true}
+           ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "100")
+        XCTAssertNil(request.scrubPreview)
+    }
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/:/timeline", json: "")
         let provider = PlexProvider(session: makeSession(), http: stub)

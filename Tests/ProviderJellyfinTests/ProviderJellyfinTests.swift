@@ -414,7 +414,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
         let request = try await provider.playbackInfo(for: "i1")
-        let manifest = try XCTUnwrap(request.trickplay)
+        let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
         XCTAssertEqual(manifest.thumbnailWidth, 320)
         XCTAssertEqual(manifest.thumbnailHeight, 180)
         XCTAssertEqual(manifest.tileColumns, 10)
@@ -441,7 +441,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
         let request = try await provider.playbackInfo(for: "i1")
-        XCTAssertNil(request.trickplay)
+        XCTAssertNil(request.scrubPreview)
     }
 
     func testPlaybackInfoSendsDeviceProfile() async throws {

@@ -283,13 +283,31 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.providerIDs["Imdb"], "tt0111161")
         XCTAssertEqual(item.providerIDs["Tmdb"], "278")
 
-        let community = item.ratings.first { $0.source == .community }
+        let community = item.ratings.first { $0.source == .tmdb }
         XCTAssertEqual(community?.value, 7.2)
         XCTAssertEqual(community?.scale, .outOfTen)
 
         let critic = item.ratings.first { $0.source == .rottenTomatoes }
         XCTAssertEqual(critic?.value, 74)
         XCTAssertEqual(critic?.scale, .percent)
+    }
+
+    func testItemCommunityRatingFallsBackToGenericSourceWithoutTMDBProviderID() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i3", json: """
+        {"Id":"i3","Name":"Movie","Type":"Movie","RunTimeTicks":0,
+        "CommunityRating":7.9,
+        "ProviderIds":{"Imdb":"tt1234567"},
+        "UserData":{"PlaybackPositionTicks":0}}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "i3")
+
+        let community = item.ratings.first { $0.source == .community }
+        XCTAssertEqual(community?.value, 7.9)
+        XCTAssertEqual(community?.scale, .outOfTen)
+        XCTAssertFalse(item.ratings.contains { $0.source == .tmdb })
     }
 
     func testItemWithoutRatingFieldsHasEmptyRatings() async throws {

@@ -45,6 +45,8 @@ public struct MediaBadgeChip: View {
     private static let dtsSuffixFont = Font.system(size: 21, weight: .black)
     /// Gray fill for the `-HD` portion of the dts-HD mark.
     private static let dtsHDColor = Color(white: 0.62)
+    /// Plain trailing channel-layout number appended to a format logo.
+    private static let channelFont = Font.system(size: 18, weight: .semibold)
     /// The oversized `X` of the dts:X mark, larger than the `dts` head and
     /// filled with the orange dts:X gradient.
     private static let dtsXFont = Font.system(size: 32, weight: .black)
@@ -89,27 +91,47 @@ public struct MediaBadgeChip: View {
             hdrLabel(badge.label)
                 .accessibilityLabel(badge.label)
         case .dts:
-            dtsLabel(badge.label)
-                .accessibilityLabel(badge.label)
-        case .dolby:
-            VStack(alignment: .center, spacing: -1) {
-                HStack(alignment: .center, spacing: 5) {
-                    DolbyDoubleD()
-                        .fill(Color.white)
-                        .frame(width: 21, height: 14)
-                    Text("Dolby")
-                        .font(Self.dolbyWordFont)
-                        .foregroundStyle(.white)
+            HStack(alignment: .center, spacing: 6) {
+                dtsLabel(badge.label)
+                if let detail = badge.detail {
+                    channelText(detail)
                 }
-                Text(badge.dolbyFormatWord.uppercased())
-                    .font(Self.dolbyFormatFont)
-                    .foregroundStyle(.white)
-                    .tracking(1.0)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
             }
-            .accessibilityLabel(badge.label)
+            .accessibilityLabel(badge.accessibilityText)
+        case .dolby:
+            HStack(alignment: .center, spacing: 7) {
+                VStack(alignment: .center, spacing: -1) {
+                    HStack(alignment: .center, spacing: 5) {
+                        DolbyDoubleD()
+                            .fill(Color.white)
+                            .frame(width: 21, height: 14)
+                        Text("Dolby")
+                            .font(Self.dolbyWordFont)
+                            .foregroundStyle(.white)
+                    }
+                    Text(badge.dolbyFormatWord.uppercased())
+                        .font(Self.dolbyFormatFont)
+                        .foregroundStyle(.white)
+                        .tracking(1.0)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                if let detail = badge.detail {
+                    channelText(detail)
+                }
+            }
+            .accessibilityLabel(badge.accessibilityText)
         }
+    }
+
+    /// A trailing channel-layout number (`5.1`/`7.1`) rendered as plain white
+    /// text with no pill, so it reads as part of the preceding format logo.
+    private func channelText(_ text: String) -> some View {
+        Text(text)
+            .font(Self.channelFont)
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
     }
 
     private func label(_ text: String, textColor: Color = .white, font: Font? = nil) -> some View {

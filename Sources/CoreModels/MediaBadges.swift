@@ -34,12 +34,24 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
 
     public var label: String
     public var style: Style
+    /// Optional trailing detail rendered as plain text after a logo-style badge
+    /// (`.dolby`/`.dts`) — e.g. the channel layout `5.1`/`7.1`, so the format
+    /// logo and its channel count read as one unit with no separate pill.
+    public var detail: String?
 
-    public var id: String { "\(style.rawValue):\(label)" }
+    public var id: String { "\(style.rawValue):\(label):\(detail ?? "")" }
 
-    public init(_ label: String, style: Style = .spec) {
+    public init(_ label: String, style: Style = .spec, detail: String? = nil) {
         self.label = label
         self.style = style
+        self.detail = detail
+    }
+
+    /// A spoken/described form combining the label with any trailing detail
+    /// (e.g. `Dolby Digital+ 5.1`).
+    public var accessibilityText: String {
+        guard let detail, !detail.isEmpty else { return label }
+        return "\(label) \(detail)"
     }
 
     /// For `.dolby` badges, the format word(s) after the leading "Dolby " (e.g.
@@ -149,42 +161,49 @@ public extension MediaSourceMetadata {
         return MediaBadge(name, style: .spec)
     }
 
-    /// Audio capability badges: a headline format badge (Dolby Atmos, DTS:X,
-    /// Dolby TrueHD, DTS-HD, Dolby Digital+/Dolby Digital) and, when the format
-    /// isn't already object-based surround, a channel-layout badge (`5.1`/`7.1`).
+    /// Audio capability badges: a single headline format badge (Dolby Atmos,
+    /// DTS:X, Dolby TrueHD, DTS-HD, Dolby Digital+/Dolby Digital) carrying the
+    /// channel layout (`5.1`/`7.1`) as a trailing `detail` when the format isn't
+    /// already object-based surround. When no headline format is present, a bare
+    /// channel badge is emitted instead.
     var audioBadges: [MediaBadge] {
         guard let audio else { return [] }
-        var badges: [MediaBadge] = []
         let profile = (audio.profile ?? "").lowercased()
         let codec = (audio.codec ?? "").lowercased()
 
         // Object-based / lossless headline formats imply surround on their own,
-        // so they suppress the separate channel badge below.
+        // so they suppress the trailing channel detail below.
+        var format: MediaBadge?
         var formatImpliesSurround = false
         if profile.contains("atmos") {
-            badges.append(MediaBadge("Dolby Atmos", style: .dolby))
+            format = MediaBadge("Dolby Atmos", style: .dolby)
             formatImpliesSurround = true
         } else if profile.contains("dts:x") || profile.contains("dtsx") || profile.contains("dts x") {
-            badges.append(MediaBadge("DTS:X", style: .dts))
+            format = MediaBadge("DTS:X", style: .dts)
             formatImpliesSurround = true
         } else if codec == "truehd" {
-            badges.append(MediaBadge("Dolby TrueHD", style: .dolby))
+            format = MediaBadge("Dolby TrueHD", style: .dolby)
             formatImpliesSurround = true
         } else if codec == "dts" && (profile.contains("hd") || profile.contains("ma")) {
-            badges.append(MediaBadge("DTS-HD", style: .dts))
+            format = MediaBadge("DTS-HD", style: .dts)
         } else if codec == "eac3" {
-            badges.append(MediaBadge("Dolby Digital+", style: .dolby))
+            format = MediaBadge("Dolby Digital+", style: .dolby)
         } else if codec == "ac3" {
-            badges.append(MediaBadge("Dolby Digital", style: .dolby))
+            format = MediaBadge("Dolby Digital", style: .dolby)
         }
 
-        if !formatImpliesSurround, let channels = Self.surroundLabel(
+        let channels = formatImpliesSurround ? nil : Self.surroundLabel(
             channelLayout: audio.channelLayout,
             channels: audio.channels
-        ) {
-            badges.append(MediaBadge(channels, style: .spec))
+        )
+
+        if var format {
+            format.detail = channels
+            return [format]
+        } else if let channels {
+            return [MediaBadge(channels, style: .spec)]
         }
-        return badges
+        return []
     }
 
     /// The full ordered technical badge set: resolution, dynamic range, codec,
@@ -349,22 +368,26 @@ public extension MediaSourceMetadata {
         }
 
         // Maximise the headline audio format and the surround layout separately,
-        // then suppress the channel badge when the winning format already implies
-        // surround (Atmos/DTS:X/TrueHD), matching the single-item rule.
+        // then attach the best channel layout to the winning format as a trailing
+        // detail — unless that format already implies surround (Atmos/DTS:X/
+        // TrueHD). Channel info may live on a format badge's `detail` or as a
+        // standalone channel badge's label.
         let audioBadges = sources.flatMap(\.audioBadges)
         let bestFormat = audioBadges
             .filter { audioFormatRank($0.label) > 0 }
             .max(by: { audioFormatRank($0.label) < audioFormatRank($1.label) })
-        let bestChannels = audioBadges
-            .filter { channelRank($0.label) > 0 }
-            .max(by: { channelRank($0.label) < channelRank($1.label) })
-        if let bestFormat {
+        let channelCandidates = audioBadges.flatMap { badge -> [String] in
+            var candidates: [String] = []
+            if let detail = badge.detail { candidates.append(detail) }
+            if channelRank(badge.label) > 0 { candidates.append(badge.label) }
+            return candidates
+        }
+        let bestChannels = channelCandidates.max(by: { channelRank($0) < channelRank($1) })
+        if var bestFormat {
+            bestFormat.detail = formatImpliesSurround(bestFormat.label) ? nil : bestChannels
             badges.append(bestFormat)
-            if !formatImpliesSurround(bestFormat.label), let bestChannels {
-                badges.append(bestChannels)
-            }
         } else if let bestChannels {
-            badges.append(bestChannels)
+            badges.append(MediaBadge(bestChannels, style: .spec))
         }
 
         return badges

@@ -145,7 +145,8 @@ final class MediaBadgesTests: XCTestCase {
 
     func testDolbyDigitalPlusWithSurroundChannel() {
         let meta = MediaSourceMetadata(audio: .init(codec: "eac3", profile: nil, channels: 6, channelLayout: "5.1"))
-        XCTAssertEqual(meta.audioBadges.map(\.label), ["Dolby Digital+", "5.1"])
+        XCTAssertEqual(meta.audioBadges.map(\.label), ["Dolby Digital+"])
+        XCTAssertEqual(meta.audioBadges.first?.detail, "5.1")
     }
 
     func testStereoProducesNoChannelBadge() {
@@ -209,9 +210,11 @@ final class MediaBadgesTests: XCTestCase {
                       mediaInfo: .init(audio: .init(codec: "eac3", channels: 8, channelLayout: "7.1"))),
         ]
         // Dolby Digital+ doesn't imply surround, so the best channel layout (7.1)
-        // is added alongside it. E1 is SDR, so the range summary reads SDR.
-        XCTAssertEqual(episodes.representativeTechnicalBadges.map(\.label),
-                       ["1080p", "SDR", "Dolby Digital+", "7.1"])
+        // is attached to it as a trailing detail. E1 is SDR, so the range summary
+        // reads SDR.
+        let badges = episodes.representativeTechnicalBadges
+        XCTAssertEqual(badges.map(\.label), ["1080p", "SDR", "Dolby Digital+"])
+        XCTAssertEqual(badges.last?.detail, "7.1")
     }
 
     func testRepresentativeBadgesEmptyWhenNoMediaInfo() {

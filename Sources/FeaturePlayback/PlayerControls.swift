@@ -143,7 +143,13 @@ struct PlayerControls: View {
 
     private var scrubberRow: some View {
         HStack(spacing: 24) {
-            ScrubBar(model: model, palette: palette, showThumbOverlay: openPanel == nil)
+            ScrubBar(
+                model: model,
+                palette: palette,
+                showThumbOverlay: openPanel == nil,
+                leadingInset: 60,
+                trailingInset: 60 + 24 + 130
+            )
                 .frame(height: 26)
                 .frame(maxWidth: .infinity)
             // Remaining time pinned to the end of the bar. Fixed width so the
@@ -539,6 +545,11 @@ private struct ScrubBar: View {
     /// above the scrub head. Suppressed while a category panel is open so it
     /// can't collide with the panel.
     var showThumbOverlay: Bool = true
+    /// Horizontal distance from the scrub track's leading/trailing edge out to the
+    /// screen edge, so the trickplay thumbnail can extend past the track (but not
+    /// off-screen).
+    var leadingInset: CGFloat = 0
+    var trailingInset: CGFloat = 0
 
     /// Subtle "pressed-down" scale applied to the ±10s glyph on each skip press,
     /// so rapid spamming reads as a held button rather than a flashing re-pop.
@@ -675,7 +686,10 @@ private struct ScrubBar: View {
         let thumbWidth: CGFloat = 375
         let aspect = previewAspect
         let thumbHeight = thumbWidth / aspect
-        let clampedX = min(max(thumbWidth / 2, knobX), width - thumbWidth / 2)
+        let edgeMargin: CGFloat = 16
+        let minX = -leadingInset + thumbWidth / 2 + edgeMargin
+        let maxX = width + trailingInset - thumbWidth / 2 - edgeMargin
+        let clampedX = min(max(minX, knobX), max(minX, maxX))
         let corner: CGFloat = 18
         let border: CGFloat = 6.5
 

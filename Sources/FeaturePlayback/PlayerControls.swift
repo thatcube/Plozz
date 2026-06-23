@@ -650,12 +650,10 @@ private struct ScrubBar: View {
     /// teardown), and a subtle scale dip gives "pressed" feedback on each press.
     private func skipGlyph(forward: Bool) -> some View {
         Image(systemName: forward ? "goforward.10" : "gobackward.10")
-            .font(.system(size: 20, weight: .semibold))
+            .font(.system(size: 24, weight: .semibold))
             .foregroundStyle(.white)
-            .padding(7)
-            .background(.ultraThinMaterial, in: Circle())
-            .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
-            .scaleEffect(skipPressed ? 0.86 : 1.0)
+            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+            .scaleEffect(skipPressed ? 0.9 : 1.0)
             .transition(.scale(scale: 0.5).combined(with: .opacity))
     }
 

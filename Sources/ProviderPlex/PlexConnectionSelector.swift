@@ -12,6 +12,10 @@ public struct PlexServerCandidate: Hashable, Identifiable, Sendable {
     /// Base URL of the best connection (no trailing slash), e.g.
     /// `https://10-0-0-2.<hash>.plex.direct:32400`.
     public var baseURL: URL
+    /// All usable connections for this server, most-preferred first
+    /// (`baseURL` is `connectionURLs.first`). Persisted on the session so the
+    /// client can probe and self-heal onto a reachable one later.
+    public var connectionURLs: [URL]
     /// Server-scoped access token (`X-Plex-Token`) for browsing/playback.
     public var accessToken: String
     public var isOwned: Bool
@@ -20,6 +24,16 @@ public struct PlexServerCandidate: Hashable, Identifiable, Sendable {
         self.id = id
         self.name = name
         self.baseURL = baseURL
+        self.connectionURLs = [baseURL]
+        self.accessToken = accessToken
+        self.isOwned = isOwned
+    }
+
+    public init(id: String, name: String, connectionURLs: [URL], accessToken: String, isOwned: Bool) {
+        self.id = id
+        self.name = name
+        self.baseURL = connectionURLs.first ?? URL(string: "https://localhost")!
+        self.connectionURLs = connectionURLs
         self.accessToken = accessToken
         self.isOwned = isOwned
     }

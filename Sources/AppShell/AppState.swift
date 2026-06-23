@@ -191,7 +191,11 @@ public final class AppState {
             JellyfinProvider(session: session, hybridEngineEnabled: HybridPlayback.enabled)
         }
         registry.register(.plex) { session in
-            PlexProvider(session: session, hybridEngineEnabled: HybridPlayback.enabled)
+            PlexProvider(
+                session: session,
+                hybridEngineEnabled: HybridPlayback.enabled,
+                connectionRefresh: PlexProvider.connectionRefresh(for: session)
+            )
         }
         return registry
     }

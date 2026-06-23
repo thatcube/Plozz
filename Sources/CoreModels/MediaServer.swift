@@ -12,18 +12,27 @@ public struct MediaServer: Codable, Hashable, Identifiable, Sendable {
     public var baseURL: URL
     public var provider: ProviderKind
     public var version: String?
+    /// All known reachable base URLs for this server, most-preferred first
+    /// (`baseURL` is `connectionURLs.first`). Plex servers advertise several
+    /// connections (LAN, remote, relay); persisting the full set lets the client
+    /// probe and self-heal onto whichever path is reachable at launch, instead of
+    /// being pinned to one address that may have gone unreachable. `nil` for
+    /// servers reached through a single fixed URL (e.g. a manually-entered host).
+    public var connectionURLs: [URL]?
 
     public init(
         id: String,
         name: String,
         baseURL: URL,
         provider: ProviderKind,
-        version: String? = nil
+        version: String? = nil,
+        connectionURLs: [URL]? = nil
     ) {
         self.id = id
         self.name = name
         self.baseURL = baseURL
         self.provider = provider
         self.version = version
+        self.connectionURLs = connectionURLs
     }
 }

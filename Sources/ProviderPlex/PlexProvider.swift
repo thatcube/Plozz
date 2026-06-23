@@ -15,16 +15,48 @@ public struct PlexProvider: MediaProvider {
     public init(
         session: UserSession,
         http: HTTPClient = URLSessionHTTPClient(),
-        hybridEngineEnabled: Bool = false
+        hybridEngineEnabled: Bool = false,
+        connectionRefresh: PlexConnectionResolver.Refresh? = nil,
+        probe: HTTPClient = URLSessionHTTPClient(session: .plozzDiscovery)
     ) {
         self.session = session
+        let deviceProfile = PlexDeviceProfile(clientIdentifier: session.deviceID)
+        // Probe the persisted connection list (or the single saved URL) and stay
+        // on whichever is reachable. With only one candidate and no refresh this
+        // is a no-op — behaviour matches a fixed URL.
+        let candidates = session.server.connectionURLs?.isEmpty == false
+            ? session.server.connectionURLs!
+            : [session.server.baseURL]
+        let resolver = PlexConnectionResolver(
+            candidates: candidates,
+            deviceProfile: deviceProfile,
+            token: session.accessToken,
+            probe: probe,
+            refresh: connectionRefresh
+        )
         self.client = PlexClient(
-            baseURL: session.server.baseURL,
-            deviceProfile: PlexDeviceProfile(clientIdentifier: session.deviceID),
+            resolver: resolver,
+            deviceProfile: deviceProfile,
             token: session.accessToken,
             http: http,
             hybridEngineEnabled: hybridEngineEnabled
         )
+    }
+
+    /// Builds the plex.tv connection-refresh closure for a session: when every
+    /// connection Plozz knows about for this server is unreachable, re-fetch the
+    /// account's current (reachable-ordered) connection list from plex.tv. Lets a
+    /// server that has changed networks since the account was added heal itself
+    /// without the user re-adding it. Returns `[]` on any failure so the resolver
+    /// falls back gracefully.
+    public static func connectionRefresh(for session: UserSession) -> PlexConnectionResolver.Refresh {
+        let serverID = session.server.id
+        let token = session.accessToken
+        let deviceID = session.deviceID
+        return {
+            let client = PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID))
+            return (try? await client.connectionURLs(forServerID: serverID, authToken: token)) ?? []
+        }
     }
 
     // MARK: Browsing

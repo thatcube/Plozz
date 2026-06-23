@@ -107,6 +107,17 @@ public struct PlexAuthClient: Sendable {
         }
     }
 
+    /// The reachable-ordered connection URLs for one specific server the account
+    /// can reach, identified by its stable `clientIdentifier`. Used to refresh a
+    /// saved server's connection list when its previously-good URL has gone
+    /// unreachable (e.g. the server changed networks). Returns `[]` if the server
+    /// is no longer listed for the account.
+    public func connectionURLs(forServerID serverID: String, authToken: String) async throws -> [URL] {
+        try await servers(authToken: authToken)
+            .first { $0.id == serverID }?
+            .connectionURLs ?? []
+    }
+
     /// Resolves a single server resource to its best *reachable* connection.
     ///
     /// Plex lists every address the server is bound to — including ones a TV on a
@@ -120,11 +131,20 @@ public struct PlexAuthClient: Sendable {
         let ranked = PlexConnectionSelector.ranked(from: resource.connections ?? [])
         guard !ranked.isEmpty else { return nil }
         let token = resource.accessToken ?? authToken
-        let baseURL = await firstReachable(among: ranked, token: token) ?? ranked[0]
+        let reachable = await firstReachable(among: ranked, token: token)
+        // Order the persisted candidate list so the connection that answered the
+        // probe is first (becomes `baseURL`), with the rest kept as fallbacks the
+        // client can self-heal onto later.
+        let ordered: [URL]
+        if let reachable {
+            ordered = [reachable] + ranked.filter { $0 != reachable }
+        } else {
+            ordered = ranked
+        }
         return PlexServerCandidate(
             id: id,
-            name: resource.name ?? baseURL.host ?? "Plex Server",
-            baseURL: baseURL,
+            name: resource.name ?? ordered.first?.host ?? "Plex Server",
+            connectionURLs: ordered,
             accessToken: token,
             isOwned: resource.owned ?? false
         )

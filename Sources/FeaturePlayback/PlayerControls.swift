@@ -738,7 +738,7 @@ private struct ThumbnailTransitionModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .blur(radius: 9 * progress)
-            .offset(y: 34 * progress)
+            .offset(y: 13 * progress)
             .opacity(Double(max(0, 1 - progress * 4.5)))
     }
 }

@@ -32,6 +32,7 @@ public struct RatingBadge: View {
 
     /// Shared type scale so the icon and score line up to a compact cap height.
     private static let valueFont = Font.system(size: 22, weight: .semibold)
+    private static let emphasizedValueFont = Font.system(size: 22, weight: .bold)
     private static let iconSize: CGFloat = 24
 
     public init(rating: ExternalRating) {
@@ -42,7 +43,7 @@ public struct RatingBadge: View {
         HStack(spacing: 7) {
             icon
             Text(rating.displayValue)
-                .font(Self.valueFont)
+                .font(valueFont)
                 .monospacedDigit()
                 .foregroundStyle(valueColor)
         }
@@ -91,6 +92,17 @@ public struct RatingBadge: View {
             .resizable()
             .scaledToFit()
             .frame(width: 42, height: 18)
+    }
+
+    /// Tint for the score text — fresh/rotten for Rotten Tomatoes-style sources,
+    /// primary otherwise.
+    private var valueFont: Font {
+        switch rating.source {
+        case .tmdb, .rottenTomatoes, .critic:
+            return Self.emphasizedValueFont
+        default:
+            return Self.valueFont
+        }
     }
 
     /// Tint for the score text — fresh/rotten for Rotten Tomatoes-style sources,

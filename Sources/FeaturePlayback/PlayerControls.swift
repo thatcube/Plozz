@@ -80,10 +80,9 @@ struct PlayerControls: View {
             }
             .animation(.easeInOut(duration: 0.25), value: model.controlsVisible)
         }
-        .overlay(alignment: .center) { skipHint }
+        .ignoresSafeArea()
         .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
         .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintToken)
-        .ignoresSafeArea()
         .onChange(of: model.controlBarVisible) { _, focused in
             openPanel = nil
             focus = focused ? initialFocus : nil
@@ -145,21 +144,23 @@ struct PlayerControls: View {
 
     private var scrubberRow: some View {
         HStack(spacing: 22) {
-            ScrubBar(model: model, palette: palette)
+            ScrubBar(model: model, palette: palette, showTimeBubble: openPanel == nil)
                 .frame(height: 26)
                 .frame(maxWidth: .infinity)
-            // Apple-TV-style status cluster pinned to the right of the bar: the
-            // current time, then a small spinner (while seeking) or pause glyph.
-            // Fixed width so the scrub track never resizes as the time text or
-            // indicator changes.
-            HStack(spacing: 10) {
-                Text(Self.timeLabel(model.displaySeconds))
+            // Apple-TV-style status cluster pinned to the right of the bar:
+            // the transient ±10s skip hint, then the remaining time, then a
+            // small spinner (while seeking) or pause glyph. Fixed width so the
+            // scrub track never resizes as the contents change.
+            HStack(spacing: 12) {
+                skipHintInline
+                    .frame(width: 46)
+                Text("-" + Self.timeLabel(max(0, model.duration - model.displaySeconds)))
                     .monospacedDigit()
                     .font(.callout)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.white.opacity(0.85))
                 transportStatus
             }
-            .frame(width: 150, alignment: .leading)
+            .frame(width: 250, alignment: .leading)
         }
     }
 
@@ -215,15 +216,19 @@ struct PlayerControls: View {
 
     // MARK: Skip hint
 
-    @ViewBuilder private var skipHint: some View {
+    /// A compact, transient ±10s indicator that lives in the status cluster to
+    /// the right of the scrub bar (Apple-TV style). The fixed-width slot keeps
+    /// the bar from shifting whether or not it's showing. `.id(token)` replays
+    /// the snappy spring pop-in on every skip, even rapid repeats.
+    @ViewBuilder private var skipHintInline: some View {
         if model.skipHintVisible {
             Image(systemName: model.skipHintForward ? "goforward.10" : "gobackward.10")
-                .font(.system(size: 56, weight: .semibold))
+                .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
-                .padding(30)
+                .padding(8)
                 .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
-                .shadow(radius: 12)
+                .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
+                .shadow(radius: 6)
                 .id(model.skipHintToken)
                 .transition(.scale(scale: 0.5).combined(with: .opacity))
         }
@@ -570,6 +575,9 @@ struct PlayerControls: View {
 private struct ScrubBar: View {
     let model: PlayerControlsModel
     let palette: ThemePalette
+    /// Whether to float the current-time bubble above the scrub head. Suppressed
+    /// while a category panel is open so it can't collide with the panel.
+    var showTimeBubble: Bool = true
 
     var body: some View {
         GeometryReader { geo in
@@ -594,11 +602,29 @@ private struct ScrubBar: View {
 
                 if model.isScrubbing {
                     thumbnailPreview(width: width, knobX: knobX)
+                } else if showTimeBubble {
+                    timeBubble(width: width, knobX: knobX)
                 }
             }
             .frame(maxHeight: .infinity, alignment: .center)
             .animation(.easeOut(duration: 0.12), value: model.isScrubbing)
         }
+    }
+
+    /// The current playback time, floated just above the scrub head (the focus
+    /// indicator), tracking its position. Mirrors the Apple TV transport, where
+    /// the playhead carries the time you're currently at.
+    @ViewBuilder
+    private func timeBubble(width: CGFloat, knobX: CGFloat) -> some View {
+        let bubbleWidth: CGFloat = 120
+        let clampedX = min(max(bubbleWidth / 2, knobX), width - bubbleWidth / 2)
+        Text(PlayerControls.timeLabel(model.displaySeconds))
+            .monospacedDigit()
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .shadow(radius: 3)
+            .frame(width: bubbleWidth)
+            .position(x: clampedX, y: -22)
     }
 
     @ViewBuilder

@@ -56,11 +56,8 @@ public struct PlayerView: View {
                     ),
                     trickplay: viewModel.trickplay,
                     themePalette: ThemePaletteBox(
-                        makeOverlay: { model in
-                            AnyView(PlayerControlsOverlay(model: model, palette: themePalette))
-                        },
-                        makeControlBar: { model, actions, onExitToSurface in
-                            AnyView(PlayerControlBar(
+                        makeControls: { model, actions, onExitToSurface in
+                            AnyView(PlayerControls(
                                 model: model,
                                 palette: themePalette,
                                 actions: actions,
@@ -81,7 +78,7 @@ public struct PlayerView: View {
         .overlay(alignment: .topLeading) {
             // Keep diagnostics off during load/failure while mpv is initializing;
             // this avoids extra SwiftUI preference/layout churn on the crash path.
-            if showDiagnostics, viewModel.phase == .ready {
+            if viewModel.controls.diagnosticsEnabled, viewModel.phase == .ready {
                 PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
                     .environment(\.themePalette, themePalette)
                     .allowsHitTesting(false)
@@ -89,10 +86,11 @@ public struct PlayerView: View {
             }
         }
         .task {
+            viewModel.controls.diagnosticsEnabled = showDiagnostics
             await viewModel.load()
-            if showDiagnostics { startSampling() }
+            if viewModel.controls.diagnosticsEnabled { startSampling() }
         }
-        .onChange(of: showDiagnostics) { _, enabled in
+        .onChange(of: viewModel.controls.diagnosticsEnabled) { _, enabled in
             if enabled {
                 startSampling()
             } else {
@@ -103,13 +101,13 @@ public struct PlayerView: View {
             // A request resolved (initial load, cross-engine swap, or transcode
             // retry) and the engine is committed — seed the overlay with the
             // engine + source facts now, even before/if load() reaches ready.
-            if showDiagnostics { startSampling() }
+            if viewModel.controls.diagnosticsEnabled { startSampling() }
         }
         .onChange(of: viewModel.playerInstanceID) { _, _ in
             // The native engine created its live AVPlayer (initial load or
             // transcode fallback); restart sampling to pick up live per-tick
             // metrics now that there's a player to read.
-            if showDiagnostics { startSampling() }
+            if viewModel.controls.diagnosticsEnabled { startSampling() }
         }
         .onDisappear {
             diagnosticsSampler.stop()

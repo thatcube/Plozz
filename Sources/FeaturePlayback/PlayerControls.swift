@@ -4,7 +4,7 @@ import UIKit
 import CoreUI
 
 /// Lightweight value-type bag of options callbacks. Mirrors the tunable subset
-/// of `PlayerActions` so the control bar stays presentation-only.
+/// of `PlayerActions` so the controls stay presentation-only.
 @MainActor
 struct PlayerOptionsActions {
     var selectAudio: (Int) -> Void = { _ in }
@@ -15,24 +15,24 @@ struct PlayerOptionsActions {
     var setDialogEnhance: (Bool) -> Void = { _ in }
 }
 
-/// Netflix-style bottom control bar for the custom player: a **focusable row of
-/// native tvOS buttons** (Audio & Subtitles · Speed · A/V Sync) with category
-/// panels that open *above* the row. Modelled on the best TV players:
+/// The complete custom-player transport: a title bar, the scrub bar (with
+/// buffered/played fill + floating trickplay thumbnail), and — directly beneath
+/// the scrubber — a **focusable row of native tvOS buttons** (Audio & Subtitles ·
+/// Speed · A/V Sync · Diagnostics), modelled on Netflix / the Apple TV app.
 ///
-///  * **Everything lives at the bottom** (Netflix / YouTube / Disney+) — the row
-///    a viewer reaches for during a session is one focus-move down from the
-///    scrubber, never buried in a tree.
-///  * **Native focus throughout** — standard tvOS Buttons, so the parallax
-///    highlight, focus navigation, and Select activation are the system's, not a
-///    hand-rolled imitation.
-///  * **Playback keeps going** while the bar is open (Infuse) so delay/track
-///    tweaks have instant feedback.
-///  * **Capability-driven** — rows the active engine can't honour are hidden,
-///    not faked (AVPlayer has no A/V-sync row).
+///  * The button row is **visible whenever the transport is** so viewers can see
+///    what's available; focus only drops into it on swipe-down / Down, and
+///    returns to the scrub surface on Up / Menu.
+///  * Selecting a category expands its options as a panel that floats just above
+///    the scrubber, so the row stays put.
+///  * Playback keeps running while adjusting (Infuse-style) so track/speed/sync
+///    changes have instant feedback.
+///  * Capability-driven — rows the active engine can't honour are hidden.
 ///
-/// Focus enters this surface from the UIKit scrub layer on swipe-down/down and
-/// returns to it on up / Menu via `onExitToSurface`.
-struct PlayerControlBar: View {
+/// All Siri-Remote *scrubbing* input is handled in UIKit
+/// (`PlayerInputViewController`); this view never takes focus while the player is
+/// in its scrub state because the host disables its interaction then.
+struct PlayerControls: View {
     let model: PlayerControlsModel
     let palette: ThemePalette
     let actions: PlayerOptionsActions
@@ -62,6 +62,7 @@ struct PlayerControlBar: View {
 
     private enum FocusSlot: Hashable {
         case button(Category)
+        case diagnostics
         case row(Int)
     }
 
@@ -69,27 +70,23 @@ struct PlayerControlBar: View {
     @FocusState private var focus: FocusSlot?
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Color.clear
-            if model.controlBarVisible {
-                VStack(alignment: .leading, spacing: 22) {
-                    if let openPanel {
-                        panelContainer(for: openPanel)
-                    }
-                    buttonRow
-                }
-                .padding(.horizontal, 60)
-                .padding(.bottom, 48)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        ZStack {
+            VStack(spacing: 0) {
+                topBar
+                    .opacity(model.controlsVisible ? 1 : 0)
+                Spacer(minLength: 0)
+                bottomCluster
+                    .opacity(model.controlsVisible ? 1 : 0)
             }
+            .animation(.easeInOut(duration: 0.25), value: model.controlsVisible)
         }
+        .overlay(alignment: .center) { skipHint }
+        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
+        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintToken)
         .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.2), value: model.controlBarVisible)
-        .animation(.easeInOut(duration: 0.2), value: openPanel)
-        .onChange(of: model.controlBarVisible) { _, visible in
+        .onChange(of: model.controlBarVisible) { _, focused in
             openPanel = nil
-            focus = visible ? .button(firstCategory ?? .audioSubtitles) : nil
+            focus = focused ? initialFocus : nil
         }
         .onChange(of: openPanel) { _, panel in
             if let panel { focus = .row(selectedRowIndex(for: panel)) }
@@ -100,10 +97,76 @@ struct PlayerControlBar: View {
         }
     }
 
+    // MARK: Title
+
+    private var topBar: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(model.title)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white)
+                if !model.subtitle.isEmpty {
+                    Text(model.subtitle)
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 60)
+        .padding(.top, 50)
+        .padding(.bottom, 80)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom)
+        )
+    }
+
+    // MARK: Bottom cluster (scrubber + buttons)
+
+    private var bottomCluster: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if let openPanel {
+                panelContainer(for: openPanel)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            scrubberRow
+            buttonRow
+        }
+        .animation(.easeInOut(duration: 0.2), value: openPanel)
+        .padding(.horizontal, 60)
+        .padding(.top, 90)
+        .padding(.bottom, 48)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
+        )
+    }
+
+    private var scrubberRow: some View {
+        HStack(spacing: 16) {
+            Text(Self.timeLabel(model.displaySeconds))
+                .monospacedDigit()
+                .font(.callout)
+                .foregroundStyle(.white)
+            ScrubBar(model: model, palette: palette)
+                .frame(height: 26)
+            Text("-" + Self.timeLabel(max(0, model.duration - model.displaySeconds)))
+                .monospacedDigit()
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.8))
+            if model.isSeeking {
+                ProgressView()
+                    .tint(.white)
+                    .frame(width: 28)
+            }
+        }
+    }
+
     // MARK: Button row
 
     private var buttonRow: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 20) {
             ForEach(availableCategories, id: \.self) { category in
                 Button {
                     toggle(category)
@@ -114,6 +177,18 @@ struct PlayerControlBar: View {
                 }
                 .focused($focus, equals: .button(category))
             }
+
+            Button {
+                model.diagnosticsEnabled.toggle()
+            } label: {
+                Label(
+                    "Diagnostics",
+                    systemImage: model.diagnosticsEnabled ? "waveform.circle.fill" : "waveform.circle"
+                )
+                .font(.headline)
+                .padding(.horizontal, 6)
+            }
+            .focused($focus, equals: .diagnostics)
         }
     }
 
@@ -123,6 +198,22 @@ struct PlayerControlBar: View {
             focus = .button(category)
         } else {
             openPanel = category
+        }
+    }
+
+    // MARK: Skip hint
+
+    @ViewBuilder private var skipHint: some View {
+        if model.skipHintVisible {
+            Image(systemName: model.skipHintForward ? "goforward.10" : "gobackward.10")
+                .font(.system(size: 56, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(30)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
+                .shadow(radius: 12)
+                .id(model.skipHintToken)
+                .transition(.scale(scale: 0.5).combined(with: .opacity))
         }
     }
 
@@ -148,7 +239,7 @@ struct PlayerControlBar: View {
                 }
                 .padding(.vertical, 10)
             }
-            .frame(maxHeight: 520)
+            .frame(maxHeight: 440)
         }
         .frame(width: 760, alignment: .leading)
         .background(.ultraThinMaterial)
@@ -348,10 +439,13 @@ struct PlayerControlBar: View {
         return result
     }
 
-    private var firstCategory: Category? { availableCategories.first }
+    /// Focus target when the bar first takes focus: the first category, or the
+    /// always-present Diagnostics button when no categories apply.
+    private var initialFocus: FocusSlot {
+        if let first = availableCategories.first { return .button(first) }
+        return .diagnostics
+    }
 
-    /// Flat, indexed rows for the combined Audio & Subtitles pane. The `id` is the
-    /// focus-slot index so we can land initial focus on the active selection.
     private struct TrackRow: Identifiable {
         let id: Int
         let header: String?
@@ -444,6 +538,95 @@ struct PlayerControlBar: View {
         let ms = Int((seconds * 1000).rounded())
         if ms == 0 { return "0 ms" }
         return ms > 0 ? "+\(ms) ms" : "\(ms) ms"
+    }
+
+    static func timeLabel(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds.rounded())
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%d:%02d", m, s)
+    }
+}
+
+/// The scrub track: buffered + played fill, a knob, and a floating trickplay
+/// thumbnail positioned over the scrub head while scrubbing.
+private struct ScrubBar: View {
+    let model: PlayerControlsModel
+    let palette: ThemePalette
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let knobX = width * CGFloat(model.progressFraction)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.22))
+                    .frame(height: 6)
+                Capsule()
+                    .fill(.white.opacity(0.35))
+                    .frame(width: width * CGFloat(model.bufferedFraction), height: 6)
+                Capsule()
+                    .fill(palette.accent)
+                    .frame(width: knobX, height: 6)
+                Circle()
+                    .fill(.white)
+                    .frame(width: model.isScrubbing ? 22 : 16, height: model.isScrubbing ? 22 : 16)
+                    .offset(x: knobX - (model.isScrubbing ? 11 : 8))
+                    .shadow(radius: 4)
+
+                if model.isScrubbing {
+                    thumbnailPreview(width: width, knobX: knobX)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+            .animation(.easeOut(duration: 0.12), value: model.isScrubbing)
+        }
+    }
+
+    @ViewBuilder
+    private func thumbnailPreview(width: CGFloat, knobX: CGFloat) -> some View {
+        let thumbWidth: CGFloat = 240
+        let aspect = previewAspect
+        let thumbHeight = thumbWidth / aspect
+        let clampedX = min(max(thumbWidth / 2, knobX), width - thumbWidth / 2)
+
+        VStack(spacing: 8) {
+            Group {
+                if let image = model.previewImage {
+                    Image(decorative: image, scale: 1, orientation: .up)
+                        .resizable()
+                        .interpolation(.medium)
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    Rectangle().fill(.black.opacity(0.6))
+                }
+            }
+            .frame(width: thumbWidth, height: thumbHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(.white.opacity(0.85), lineWidth: 2)
+            )
+
+            Text(PlayerControls.timeLabel(model.scrubSeconds))
+                .monospacedDigit()
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white)
+                .shadow(radius: 3)
+        }
+        .frame(width: thumbWidth)
+        .position(x: clampedX, y: -thumbHeight / 2 - 30)
+    }
+
+    private var previewAspect: CGFloat {
+        guard let image = model.previewImage, image.height > 0 else { return 16.0 / 9.0 }
+        return CGFloat(image.width) / CGFloat(image.height)
     }
 }
 #endif

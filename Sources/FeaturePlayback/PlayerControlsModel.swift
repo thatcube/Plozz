@@ -90,6 +90,10 @@ public final class PlayerControlsModel {
     /// when it's already visible (rapid repeated skips).
     public var skipHintToken: Int = 0
 
+    /// Whether the live playback-diagnostics overlay is shown. Toggleable from
+    /// the in-player control bar; seeded from the caller's initial preference.
+    public var diagnosticsEnabled: Bool = false
+
     public init() {}
 
     /// Where the transport playhead should render: the scrub target while

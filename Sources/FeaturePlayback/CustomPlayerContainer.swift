@@ -40,8 +40,7 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
         let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
         controller.configureTrickplay(trickplay)
         controller.attachVideoSurface()
-        controller.attachOverlay(themePalette: themePalette)
-        controller.attachControlBar(themePalette: themePalette)
+        controller.attachControls(themePalette: themePalette)
         plozzTrace("CustomPlayerContainer.makeUIViewController: EXIT")
         return controller
     }
@@ -83,8 +82,7 @@ struct VideoSurfaceContainer: UIViewRepresentable {
 /// representable boundary without FeaturePlayback's UIKit layer depending on it
 /// structurally; the overlay uses it directly.
 struct ThemePaletteBox {
-    let makeOverlay: (PlayerControlsModel) -> AnyView
-    let makeControlBar: (PlayerControlsModel, PlayerOptionsActions, @escaping () -> Void) -> AnyView
+    let makeControls: (PlayerControlsModel, PlayerOptionsActions, @escaping () -> Void) -> AnyView
 }
 
 /// The focusable root view that receives Siri Remote presses and indirect-touch
@@ -108,7 +106,6 @@ final class PlayerInputViewController: UIViewController {
     private let engine: any VideoEngine
     private let model: PlayerControlsModel
     private var thumbnailLoader: TrickplayThumbnailLoader?
-    private var overlayHost: UIHostingController<AnyView>?
 
     private var autoHideTask: Task<Void, Never>?
     private var thumbnailTask: Task<Void, Never>?
@@ -191,27 +188,13 @@ final class PlayerInputViewController: UIViewController {
         plozzTrace("attachVideoSurface: done")
     }
 
-    func attachOverlay(themePalette: ThemePaletteBox) {
-        plozzTrace("attachOverlay: building UIHostingController(overlay)")
-        let host = UIHostingController(rootView: themePalette.makeOverlay(model))
-        host.view.backgroundColor = .clear
-        // Presentational only — never let the overlay steal remote focus from
-        // the input surface that drives scrubbing.
-        host.view.isUserInteractionEnabled = false
-        addChild(host)
-        host.view.frame = view.bounds
-        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(host.view)
-        host.didMove(toParent: self)
-        overlayHost = host
-        plozzTrace("attachOverlay: done")
-    }
-
-    /// Hosts the focusable bottom control bar. It stays attached for the player's
-    /// lifetime but only takes Siri-Remote focus while `focusContext` is
-    /// `.controlBar`; otherwise its interaction is disabled so indirect-touch
-    /// scrub pans flow to the surface and it can't steal focus.
-    func attachControlBar(themePalette: ThemePaletteBox) {
+    /// Hosts the combined transport + focusable control bar. It stays attached
+    /// for the player's lifetime; the scrubber/title render whenever the controls
+    /// are visible, while focus only drops into the button row (and the host
+    /// becomes interactive) when `focusContext == .controlBar`. Otherwise its
+    /// interaction is off so indirect-touch scrub pans flow to the surface and it
+    /// can't steal focus.
+    func attachControls(themePalette: ThemePaletteBox) {
         let exitToSurface: () -> Void = { [weak self] in self?.exitToSurface() }
         let actions = PlayerOptionsActions(
             selectAudio: { [weak self] in self?.actions.selectAudio($0) },
@@ -221,7 +204,7 @@ final class PlayerInputViewController: UIViewController {
             setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
             setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) }
         )
-        let host = UIHostingController(rootView: themePalette.makeControlBar(model, actions, exitToSurface))
+        let host = UIHostingController(rootView: themePalette.makeControls(model, actions, exitToSurface))
         host.view.backgroundColor = .clear
         // Off until the viewer drops focus into the bar (swipe-down / Down).
         host.view.isUserInteractionEnabled = false
@@ -299,12 +282,6 @@ final class PlayerInputViewController: UIViewController {
         surfaceRecognizers.append(addPress(.leftArrow, #selector(handleLeft)))
         surfaceRecognizers.append(addPress(.rightArrow, #selector(handleRight)))
         surfaceRecognizers.append(addPress(.downArrow, #selector(handleDown)))
-
-        let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDown))
-        swipeDown.direction = .down
-        swipeDown.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
-        view.addGestureRecognizer(swipeDown)
-        surfaceRecognizers.append(swipeDown)
     }
 
     @discardableResult
@@ -362,6 +339,13 @@ final class PlayerInputViewController: UIViewController {
                     scrubBaseSeconds = model.scrubSeconds
                 } else {
                     panAxis = .verticalIgnored
+                    // A deliberate downward swipe reveals the controls and drops
+                    // focus into the bottom button row — handled here off the pan
+                    // (rather than a separate swipe recognizer, which competes
+                    // with this pan and was unreliable).
+                    if translation.y > 0 {
+                        enterControlBar()
+                    }
                     return
                 }
             }
@@ -498,11 +482,6 @@ final class PlayerInputViewController: UIViewController {
         }
     }
 
-    @objc private func handleSwipeDown() {
-        guard focusContext == .surface, !model.isScrubbing else { return }
-        enterControlBar()
-    }
-
     // MARK: Skip hint
 
     /// Pops the transient ±10s indicator and schedules its quick fade. Re-arming
@@ -591,16 +570,9 @@ final class PlayerInputViewController: UIViewController {
         for recognizer in surfaceRecognizers { recognizer.isEnabled = enabled }
     }
 
-    /// Whether the bottom control bar has any rows to show for the active engine
-    /// and source. Mirrors `PlayerControlBar.availableCategories`.
-    private var hasControlBarContent: Bool {
-        model.hasSelectableAudio
-            || model.hasSelectableSubtitles
-            || model.engineCapabilities.contains(.dialogEnhance)
-            || model.engineCapabilities.contains(.playbackSpeed)
-            || model.engineCapabilities.contains(.audioDelay)
-            || model.engineCapabilities.contains(.subtitleDelay)
-    }
+    /// The bottom control bar always has at least the Diagnostics toggle, so
+    /// entering it is always meaningful.
+    private var hasControlBarContent: Bool { true }
 
     deinit {
         autoHideTask?.cancel()

@@ -144,22 +144,34 @@ struct PlayerControls: View {
     }
 
     private var scrubberRow: some View {
-        HStack(spacing: 16) {
-            Text(Self.timeLabel(model.displaySeconds))
-                .monospacedDigit()
-                .font(.callout)
-                .foregroundStyle(.white)
+        HStack(spacing: 22) {
             ScrubBar(model: model, palette: palette)
                 .frame(height: 26)
-            Text("-" + Self.timeLabel(max(0, model.duration - model.displaySeconds)))
-                .monospacedDigit()
-                .font(.callout)
-                .foregroundStyle(.white.opacity(0.8))
-            if model.isSeeking {
-                ProgressView()
-                    .tint(.white)
-                    .frame(width: 28)
+                .frame(maxWidth: .infinity)
+            // Apple-TV-style status cluster pinned to the right of the bar: the
+            // current time, then a small spinner (while seeking) or pause glyph.
+            // Fixed width so the scrub track never resizes as the time text or
+            // indicator changes.
+            HStack(spacing: 10) {
+                Text(Self.timeLabel(model.displaySeconds))
+                    .monospacedDigit()
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                transportStatus
             }
+            .frame(width: 150, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder private var transportStatus: some View {
+        if model.isSeeking {
+            ProgressView()
+                .tint(.white)
+                .controlSize(.small)
+        } else if model.isPaused {
+            Image(systemName: "pause.fill")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.85))
         }
     }
 
@@ -173,8 +185,8 @@ struct PlayerControls: View {
                 } label: {
                     Label(category.title, systemImage: category.icon)
                         .font(.headline)
-                        .padding(.horizontal, 6)
                 }
+                .playerGlassButton(prominent: openPanel == category)
                 .focused($focus, equals: .button(category))
             }
 
@@ -186,8 +198,8 @@ struct PlayerControls: View {
                     systemImage: model.diagnosticsEnabled ? "waveform.circle.fill" : "waveform.circle"
                 )
                 .font(.headline)
-                .padding(.horizontal, 6)
             }
+            .playerGlassButton(prominent: model.diagnosticsEnabled)
             .focused($focus, equals: .diagnostics)
         }
     }
@@ -627,6 +639,28 @@ private struct ScrubBar: View {
     private var previewAspect: CGFloat {
         guard let image = model.previewImage, image.height > 0 else { return 16.0 / 9.0 }
         return CGFloat(image.width) / CGFloat(image.height)
+    }
+}
+
+private extension View {
+    /// Applies the system Liquid Glass button style (tvOS 26+), falling back to
+    /// the bordered styles on older systems. `prominent` highlights the active
+    /// category / enabled toggle.
+    @ViewBuilder
+    func playerGlassButton(prominent: Bool) -> some View {
+        if #available(tvOS 26.0, *) {
+            if prominent {
+                buttonStyle(.glassProminent)
+            } else {
+                buttonStyle(.glass)
+            }
+        } else {
+            if prominent {
+                buttonStyle(.borderedProminent)
+            } else {
+                buttonStyle(.bordered)
+            }
+        }
     }
 }
 #endif

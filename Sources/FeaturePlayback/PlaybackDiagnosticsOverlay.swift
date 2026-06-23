@@ -19,7 +19,7 @@ struct PlaybackDiagnosticsOverlay: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Playback Diagnostics")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(palette.primaryText)
                 .padding(.bottom, 1)
 
@@ -27,7 +27,7 @@ struct PlaybackDiagnosticsOverlay: View {
                 grid(for: diagnostics)
             } else {
                 Text("Gathering metrics…")
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 15, design: .monospaced))
                     .foregroundStyle(palette.secondaryText)
             }
         }
@@ -71,11 +71,11 @@ struct PlaybackDiagnosticsOverlay: View {
     private func row(_ label: String, _ value: String) -> some View {
         GridRow {
             Text(label)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: 15, design: .monospaced))
                 .foregroundStyle(palette.secondaryText)
                 .gridColumnAlignment(.leading)
             Text(value)
-                .font(.system(size: 13, design: .monospaced).weight(.semibold))
+                .font(.system(size: 15, design: .monospaced).weight(.semibold))
                 .foregroundStyle(palette.primaryText)
                 .gridColumnAlignment(.leading)
         }

@@ -455,73 +455,6 @@ public actor TMDbArtworkResolver {
         return URL(string: imageBase + path)
     }
 
-    // MARK: - Trailers
-
-    /// Returns YouTube trailer video ids for the given title, best first, or an
-    /// empty array if disabled, not found, or the network call fails.
-    ///
-    /// This is how the app gets trailers for libraries that ship no local trailer
-    /// files (the common case): TMDb's `videos` endpoint lists official YouTube
-    /// trailers/teasers, whose ids are then played by extracting their stream
-    /// (`ProviderTrailers`). Resolves the TMDb id from `tmdbID` when known
-    /// (skipping a search), otherwise looks it up by title.
-    /// - Parameters:
-    ///   - title: Movie title, or — for TV — the *series* title.
-    ///   - year: Release year (movies only; pass `nil` for TV).
-    ///   - isTV: Use the `tv` namespace instead of `movie`.
-    ///   - tmdbID: A known TMDb numeric id (from `providerIDs["Tmdb"]`), if any.
-    public func trailerVideoIDs(title: String, year: Int?, isTV: Bool, tmdbID: String?) async -> [String] {
-        guard let token else { return [] }
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let knownID = tmdbID?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || (knownID?.isEmpty == false) else { return [] }
-
-        let id: String?
-        if let knownID, !knownID.isEmpty {
-            id = knownID
-        } else {
-            id = await fetchID(title: trimmed, year: year, isTV: isTV, token: token)
-        }
-        guard let id else { return [] }
-
-        guard let url = URL(string: "https://api.themoviedb.org/3/\(isTV ? "tv" : "movie")/\(id)/videos") else {
-            return []
-        }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "accept")
-
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode),
-              let decoded = try? JSONDecoder().decode(VideosResponse.self, from: data)
-        else {
-            return []
-        }
-        return Self.rankedYouTubeTrailerKeys(decoded.results)
-    }
-
-    /// Pure selection of the best YouTube trailer keys from a TMDb `videos`
-    /// payload: keep YouTube `Trailer`/`Teaser` clips, prefer trailers over
-    /// teasers, then official clips, then larger sizes. Exposed for testing.
-    public static func rankedYouTubeTrailerKeys(_ videos: [Video]) -> [String] {
-        let usable = videos.filter { video in
-            guard let key = video.key, !key.isEmpty else { return false }
-            guard (video.site ?? "").caseInsensitiveCompare("YouTube") == .orderedSame else { return false }
-            switch (video.type ?? "").lowercased() {
-            case "trailer", "teaser": return true
-            default: return false
-            }
-        }
-        func rank(_ video: Video) -> (Int, Int, Int) {
-            let isTrailer = (video.type ?? "").caseInsensitiveCompare("Trailer") == .orderedSame
-            return (isTrailer ? 0 : 1, (video.official ?? false) ? 0 : 1, -(video.size ?? 0))
-        }
-        return usable.sorted {
-            let (l, r) = (rank($0), rank($1))
-            return l < r
-        }.compactMap { $0.key }
-    }
     /// Reads and validates the bundled token, treating an empty value or an
     /// unsubstituted `$(TMDB_BEARER_TOKEN)` placeholder as "not configured".
     public static func tokenFromBundle(_ bundle: Bundle = .main) -> String? {
@@ -573,25 +506,5 @@ public actor TMDbArtworkResolver {
         }
     }
 
-    private struct VideosResponse: Decodable {
-        let results: [Video]
-    }
-
-    /// One clip from TMDb's `videos` endpoint (trailer, teaser, clip, …).
-    public struct Video: Decodable, Equatable, Sendable {
-        public let key: String?
-        public let site: String?
-        public let type: String?
-        public let official: Bool?
-        public let size: Int?
-
-        public init(key: String?, site: String?, type: String?, official: Bool?, size: Int?) {
-            self.key = key
-            self.site = site
-            self.type = type
-            self.official = official
-            self.size = size
-        }
-    }
 }
 #endif

@@ -30,6 +30,14 @@ public final class NativeVideoEngine: VideoEngine {
     public private(set) var status: VideoEngineStatus = .idle
     public private(set) var isPaused: Bool = false
 
+    /// Keep the display awake only while the player is genuinely advancing
+    /// frames. `timeControlStatus == .playing` is `false` when paused, ended, or
+    /// stalled waiting to buffer, so the screensaver/sleep is allowed in exactly
+    /// those cases — matching the cross-engine policy.
+    public var preventsDisplaySleep: Bool {
+        player?.timeControlStatus == .playing
+    }
+
     public var currentTime: TimeInterval {
         guard let seconds = player?.currentTime().seconds, seconds.isFinite else { return 0 }
         return max(0, seconds)

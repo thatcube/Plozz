@@ -27,14 +27,41 @@ public actor MetadataDiskCache {
     private var loaded = false
     private var dirty = false
 
+    /// The on-disk cache filename carries a schema version. **Bump this whenever
+    /// the provider set or chain order changes**: resolved URLs (including
+    /// remembered *negatives*, which have only a 3-day TTL) are keyed without any
+    /// provider fingerprint, so a device that cached `nil` for a hero/logo before a
+    /// new provider existed would otherwise keep showing nothing until the entry
+    /// expired. A version bump starts a fresh file, giving the new providers a
+    /// clean shot immediately on every device. (v2: added keyless Wikidata +
+    /// Wikipedia artwork providers.)
+    private static let cacheFileName = "plozz-metadata-cache-v2.json"
+    /// Matches every versioned cache file (current and superseded) so a bump can
+    /// delete its predecessors instead of orphaning them on disk.
+    private static let cacheFilePrefix = "plozz-metadata-cache"
+
     public init(
         directory: URL? = MetadataDiskCache.defaultDirectory(),
         positiveTTL: TimeInterval = 60 * 60 * 24 * 30,
         negativeTTL: TimeInterval = 60 * 60 * 24 * 3
     ) {
-        self.fileURL = directory?.appendingPathComponent("plozz-metadata-cache.json")
+        self.fileURL = directory?.appendingPathComponent(Self.cacheFileName)
         self.positiveTTL = positiveTTL
         self.negativeTTL = negativeTTL
+        if let directory { Self.removeSupersededCaches(in: directory) }
+    }
+
+    /// Deletes any older-versioned cache files so each schema bump self-cleans its
+    /// predecessor rather than leaving small orphans for the OS to reclaim.
+    private static func removeSupersededCaches(in directory: URL) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        ) else { return }
+        for file in files where file.lastPathComponent != cacheFileName
+            && file.lastPathComponent.hasPrefix(cacheFilePrefix)
+            && file.pathExtension == "json" {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     /// Looks up a cached result for `key`.

@@ -51,6 +51,19 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
     public private(set) var status: VideoEngineStatus = .idle
     public private(set) var isPaused: Bool = false
+
+    /// Mirrors mpv's `eof-reached`: `true` once the stream hits a clean end and
+    /// playback is no longer advancing. Used to release the wake lock at the end
+    /// of a file even though `isPaused` may still read `false`.
+    private var hasReachedEnd: Bool = false
+
+    /// Keep the display awake only while mpv is actually advancing frames: not
+    /// paused and not sitting at end-of-stream. Matches the native engine's
+    /// `timeControlStatus == .playing` policy so the screensaver behaviour is
+    /// identical regardless of which decoder is active.
+    public var preventsDisplaySleep: Bool {
+        !isPaused && !hasReachedEnd
+    }
     public private(set) var currentTime: TimeInterval = 0
     public private(set) var duration: TimeInterval = 0
     public private(set) var furthestObservedPosition: TimeInterval = 0
@@ -98,6 +111,10 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     /// A pending HDR display-mode switch awaiting a live `UIWindow`. Applied as
     /// soon as the output view is in a window; `nil` for SDR content.
     private var pendingDisplayCriteria: AVDisplayCriteria?
+    /// Whether the pending/applied criteria carries the `'dvh1'` Dolby Vision
+    /// codec tag (i.e. we're asking tvOS for a true DoVi HDMI signal). Cleared
+    /// on the HDR10 fallback path.
+    private var requestedDolbyVisionSwitch = false
     /// Whether we currently hold an applied `preferredDisplayCriteria` that must
     /// be cleared on teardown so the TV isn't left stuck in a forced mode.
     private var didApplyDisplayCriteria = false
@@ -162,6 +179,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         self.request = request
         hasFailed = false
         isPaused = false
+        hasReachedEnd = false
         currentTime = 0
         duration = 0
         lastReportedSecond = -1
@@ -199,8 +217,26 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         // Prepare (but don't yet apply) the tvOS display-mode switch for HDR; it
         // needs a live UIWindow and is gated to HDR content so SDR never yanks the
         // TV into HDR. Applied after init / once the view is in a window.
-        pendingDisplayCriteria = MPVHDR.formatDescription(for: hdrMode, video: request.sourceMetadata?.video).map {
-            AVDisplayCriteria(refreshRate: Float(request.sourceMetadata?.video?.frameRate ?? 0), formatDescription: $0)
+        //
+        // For Dolby Vision we build the criteria with the 'dvh1' codec FourCC so
+        // tvOS negotiates a true DoVi HDMI signal (and the TV lights its "Dolby
+        // Vision" banner) instead of plain HDR10. libplacebo still reshapes the
+        // P5/P8 RPU to PQ HDR10 on the render surface — only the display-criteria
+        // codec tag changes. If the 'dvh1' description can't be built for any
+        // reason, fall back to the HDR10 ('hvc1'+PQ) switch rather than failing,
+        // so we never drop to SDR for a DoVi source.
+        let frameRate = Float(request.sourceMetadata?.video?.frameRate ?? 0)
+        if let desc = MPVHDR.formatDescription(for: hdrMode, video: request.sourceMetadata?.video) {
+            pendingDisplayCriteria = AVDisplayCriteria(refreshRate: frameRate, formatDescription: desc)
+            requestedDolbyVisionSwitch = (hdrMode == .dolbyVision)
+        } else if hdrMode == .dolbyVision,
+                  let fallback = MPVHDR.hdr10FallbackFormatDescription(video: request.sourceMetadata?.video) {
+            log.error("HDR: dvh1 Dolby Vision criteria unavailable; falling back to HDR10 (hvc1+PQ) display switch")
+            pendingDisplayCriteria = AVDisplayCriteria(refreshRate: frameRate, formatDescription: fallback)
+            requestedDolbyVisionSwitch = false
+        } else {
+            pendingDisplayCriteria = nil
+            requestedDolbyVisionSwitch = false
         }
 
         // Match-OS-language subtitle/audio defaults, harmless when tracks are
@@ -287,6 +323,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         // forced mode after playback stops.
         clearDisplayCriteria()
         pendingDisplayCriteria = nil
+        requestedDolbyVisionSwitch = false
         hdrStatus = MPVHDRStatus()
         lastReportedSecond = -1
     }
@@ -304,7 +341,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         manager.preferredDisplayCriteria = criteria
         appliedDisplayManager = manager
         didApplyDisplayCriteria = true
-        log.info("HDR: requested display-mode switch (matchingEnabled=\(manager.isDisplayCriteriaMatchingEnabled, privacy: .public))")
+        log.info("HDR: requested display-mode switch (dolbyVision=\(self.requestedDolbyVisionSwitch, privacy: .public) matchingEnabled=\(manager.isDisplayCriteriaMatchingEnabled, privacy: .public))")
     }
 
     /// Clears our `preferredDisplayCriteria` (passing `nil` returns the display to
@@ -356,8 +393,9 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             layerPixelFormat: info.pixelFormat,
             layerColorspace: info.colorspace,
             displaySwitchRequested: didApplyDisplayCriteria,
+            dolbyVisionRequested: requestedDolbyVisionSwitch && didApplyDisplayCriteria,
             displayMatchingEnabled: matchingEnabled)
-        log.info("HDR status mode=\(mode.rawValue, privacy: .public) surface=\(info.pixelFormat, privacy: .public) colorspace=\(info.colorspace ?? "nil", privacy: .public) switchRequested=\(self.didApplyDisplayCriteria, privacy: .public) matchingEnabled=\(matchingEnabled, privacy: .public)")
+        log.info("HDR status mode=\(mode.rawValue, privacy: .public) surface=\(info.pixelFormat, privacy: .public) colorspace=\(info.colorspace ?? "nil", privacy: .public) switchRequested=\(self.didApplyDisplayCriteria, privacy: .public) dolbyVision=\(self.requestedDolbyVisionSwitch && self.didApplyDisplayCriteria, privacy: .public) matchingEnabled=\(matchingEnabled, privacy: .public)")
     }
 
     // MARK: - Seeking
@@ -520,7 +558,9 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         case MPVProperty.eofReached:
             // `eof-reached` flips true at a clean end-of-stream; treated as a
             // benign stop (the owner reads `currentTime`/`duration`), not a fail.
-            break
+            // Tracked so the display wake lock is released at end-of-file even
+            // while `pause` still reads false.
+            hasReachedEnd = client.getFlag(MPVProperty.eofReached)
         default:
             break
         }

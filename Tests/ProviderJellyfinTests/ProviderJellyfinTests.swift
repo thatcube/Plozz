@@ -682,3 +682,59 @@ final class JellyfinHvc1RemuxTests: XCTestCase {
         XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
     }
 }
+
+final class JellyfinRemoteTrailersTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testTrailersMergeLocalAndRemoteYouTube() async throws {
+        let stub = StubHTTPClient()
+        // Local trailer file (own server item).
+        stub.stub(pathSuffix: "/Users/u1/Items/i1/LocalTrailers", json: """
+        [{"Id":"local1","Name":"Local Trailer","Type":"Trailer"}]
+        """)
+        // Server-resolved remote trailer (YouTube watch URL).
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Dune","Type":"Movie",
+         "RemoteTrailers":[{"Url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","Name":"Dune Trailer"}]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "i1")
+        XCTAssertEqual(trailers.count, 2)
+
+        let local = trailers.first { !$0.isYouTubeTrailer }
+        let remote = trailers.first { $0.isYouTubeTrailer }
+        XCTAssertEqual(local?.id, "local1")
+        XCTAssertEqual(remote?.youTubeTrailerVideoID, "dQw4w9WgXcQ")
+    }
+
+    func testTrailersSurviveLocalFailure() async throws {
+        let stub = StubHTTPClient()
+        // No LocalTrailers stub -> notFound thrown for that path, but remote still works.
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Dune","Type":"Movie",
+         "RemoteTrailers":[{"Url":"https://youtu.be/dQw4w9WgXcQ","Name":"Trailer"}]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "i1")
+        XCTAssertEqual(trailers.count, 1)
+        XCTAssertEqual(trailers.first?.youTubeTrailerVideoID, "dQw4w9WgXcQ")
+    }
+
+    func testTrailersEmptyWhenNoneAvailable() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Dune","Type":"Movie"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "i1")
+        XCTAssertTrue(trailers.isEmpty)
+    }
+}

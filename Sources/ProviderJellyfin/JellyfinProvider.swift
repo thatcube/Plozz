@@ -53,7 +53,19 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     public func trailers(for itemID: String) async throws -> [MediaItem] {
-        try await client.localTrailers(userID: session.userID, id: itemID).map(map(item:))
+        async let localTask = client.localTrailers(userID: session.userID, id: itemID)
+        async let remoteTask = client.remoteTrailers(userID: session.userID, id: itemID)
+
+        // Local trailer files play through the normal provider path; server
+        // remote trailers are YouTube URLs that route to the keyless YouTube
+        // trailer provider. Both are best-effort so one failing doesn't hide the
+        // other.
+        let local = ((try? await localTask) ?? []).map(map(item:))
+        let remote = ((try? await remoteTask) ?? []).compactMap { link -> MediaItem? in
+            guard let url = link.Url else { return nil }
+            return MediaItem.youTubeTrailer(fromURL: url, title: link.Name ?? "Trailer")
+        }
+        return local + remote
     }
 
     public func children(of itemID: String) async throws -> [MediaItem] {

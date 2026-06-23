@@ -136,6 +136,16 @@ public protocol VideoEngine: AnyObject {
     /// Whether playback is currently paused.
     var isPaused: Bool { get }
 
+    /// Whether the engine is **actively presenting moving video right now** and
+    /// therefore the display must be kept awake (screensaver / Apple TV sleep
+    /// suppressed). This is stricter than `!isPaused`: it is `true` only while
+    /// frames are genuinely advancing, so a paused, ended, or stalled stream
+    /// returns `false` and lets the screensaver/sleep resume. Driving the idle
+    /// timer off this (rather than user intent) keeps the behaviour identical
+    /// across every engine/decoder. Defaulted to `!isPaused` (see the protocol
+    /// extension) for engines that can't report a finer-grained state.
+    var preventsDisplaySleep: Bool { get }
+
     /// Current playback position in seconds (`0` when unknown).
     var currentTime: TimeInterval { get }
 
@@ -200,6 +210,12 @@ public extension VideoEngine {
 
     /// Default: a generic label for engines that don't name themselves.
     var displayName: String { "Player" }
+
+    /// Default: keep the display awake whenever the engine isn't paused. Engines
+    /// that can report a finer-grained "frames are advancing" signal (native
+    /// `timeControlStatus`, mpv `eof-reached`) override this so the screensaver
+    /// is also allowed at end-of-stream / during a stall, not just on pause.
+    var preventsDisplaySleep: Bool { !isPaused }
 
     /// Default kinded-seek forwards to the unkinded variant, so existing
     /// engines that only know one seek mode keep working unchanged.

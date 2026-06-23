@@ -48,8 +48,9 @@ public final class ItemDetailViewModel {
     private let provider: any MediaProvider
     private let itemID: String
     private let ratingsProvider: any ExternalRatingsProviding
-    /// Resolves online (TMDb → YouTube) trailers, used only when the provider
-    /// surfaces no local trailer. Injectable so tests can avoid the network.
+    /// Resolves a keyless online trailer (public YouTube front-ends), used only
+    /// when the provider surfaces no local or server trailer. Injectable so tests
+    /// can avoid the network.
     private let onlineTrailerResolver: OnlineTrailerResolving
     /// The account this item belongs to, propagated so the detail item and its
     /// children stay tagged with their owning provider as the user drills down
@@ -70,8 +71,8 @@ public final class ItemDetailViewModel {
         self.onlineTrailerResolver = onlineTrailerResolver
     }
 
-    /// Production online-trailer resolver: looks the title up on TMDb and surfaces
-    /// the best YouTube trailer as a playable online trailer item.
+    /// Production online-trailer resolver: a keyless YouTube search (no API key,
+    /// no TMDb) that surfaces the best official trailer for the title.
     public static let defaultOnlineTrailerResolver: OnlineTrailerResolving = { item in
         await OnlineTrailerSource.trailers(for: item)
     }
@@ -123,17 +124,20 @@ public final class ItemDetailViewModel {
         seasonEpisodes[seasonID]
     }
 
-    /// Fetches the item's trailers off the critical path and tags them with the
-    /// owning account so playback routes to the right provider. Local trailers
-    /// (Jellyfin local files, Plex local extras) are preferred; when the backend
-    /// has none, falls back to an online (TMDb → YouTube) trailer so libraries
-    /// without local trailer files still get one. Best-effort: any failure leaves
-    /// `trailers` empty and the detail page hides its Trailer button.
+    /// Fetches the item's trailers off the critical path. Provider trailers come
+    /// first — local trailer files (Jellyfin `/LocalTrailers`, Plex local extras)
+    /// and server-resolved online trailers (Jellyfin `RemoteTrailers`, Plex
+    /// remote extras), the latter already YouTube-marked. Local items are tagged
+    /// with the owning account so playback routes to the right provider; online
+    /// (YouTube) items keep their marker and route to the keyless YouTube trailer
+    /// provider instead. When the server surfaces nothing, falls back to a keyless
+    /// online lookup. Best-effort: any failure leaves `trailers` empty and the
+    /// detail page hides its Trailer button.
     private func loadTrailers(for item: MediaItem) async {
-        let local = (try? await provider.trailers(for: item.id)) ?? []
-        // Online trailers are intentionally left untagged: they route to the
-        // YouTube trailer provider via their marker, not to an account provider.
-        let resolved = local.isEmpty ? await onlineTrailerResolver(item) : local.map(tagged)
+        let provided = (try? await provider.trailers(for: item.id)) ?? []
+        let resolved = provided.isEmpty
+            ? await onlineTrailerResolver(item)
+            : provided.map { $0.isYouTubeTrailer ? $0 : tagged($0) }
         guard case let .loaded(detail) = state, detail.item.id == item.id else { return }
         trailers = resolved
     }

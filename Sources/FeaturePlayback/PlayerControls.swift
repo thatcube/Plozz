@@ -143,9 +143,18 @@ struct PlayerControls: View {
     }
 
     private var scrubberRow: some View {
-        ScrubBar(model: model, palette: palette, showThumbOverlay: openPanel == nil)
-            .frame(height: 26)
-            .frame(maxWidth: .infinity)
+        HStack(spacing: 24) {
+            ScrubBar(model: model, palette: palette, showThumbOverlay: openPanel == nil)
+                .frame(height: 26)
+                .frame(maxWidth: .infinity)
+            // Remaining time pinned to the end of the bar. Fixed width so the
+            // track never resizes as the digits change.
+            Text("-" + Self.timeLabel(max(0, model.duration - model.displaySeconds)))
+                .monospacedDigit()
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 130, alignment: .trailing)
+        }
     }
 
     // MARK: Button row
@@ -564,56 +573,75 @@ private struct ScrubBar: View {
         }
     }
 
-    /// Floated just above the scrub head (the focus indicator) and tracking its
-    /// position, Apple-TV style: the current time you're at, then — to its right
-    /// — the transient ±10s skip hint, the remaining time, and a spinner/pause
-    /// glyph. Anchored at the knob and clamped so it never runs off either edge.
+    /// Floated just above the scrub head (the focus indicator) and tracking it,
+    /// Apple-TV style: the current time you're at, centered on the thumb, with a
+    /// fixed-width slot on each side. A backward skip's −10 glyph (and, if the
+    /// seek is still resolving, the loading spinner) sits in the left slot; a
+    /// forward skip's +10, the spinner for a forward skip / plain scrub, and the
+    /// circular pause glyph all sit in the right slot. Equal slot widths keep the
+    /// time centered on the thumb; the whole cluster is centered at the knob and
+    /// clamped so it never runs off either edge.
     @ViewBuilder
     private func thumbOverlay(width: CGFloat, knobX: CGFloat) -> some View {
-        let estimatedWidth: CGFloat = 280
-        let x = min(max(0, knobX - 24), max(0, width - estimatedWidth))
-        HStack(spacing: 10) {
+        let clusterWidth: CGFloat = 240
+        let cx = min(max(clusterWidth / 2, knobX), width - clusterWidth / 2)
+        HStack(spacing: 8) {
+            leftSlot.frame(width: 44, height: 44)
             Text(PlayerControls.timeLabel(model.displaySeconds))
                 .monospacedDigit()
-                .font(.caption.weight(.semibold))
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(.white)
-            skipPill
-            Text("-" + PlayerControls.timeLabel(max(0, model.duration - model.displaySeconds)))
-                .monospacedDigit()
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.75))
-            transportStatus
+                .fixedSize()
+                .shadow(radius: 3)
+            rightSlot.frame(width: 44, height: 44)
         }
-        .fixedSize()
-        .shadow(radius: 3)
-        .offset(x: x, y: -34)
+        .frame(width: clusterWidth)
+        .position(x: cx, y: -36)
     }
 
-    /// Compact, transient ±10s indicator. `.id(token)` replays the snappy spring
-    /// pop-in on every skip, even rapid repeats.
-    @ViewBuilder private var skipPill: some View {
-        if model.skipHintVisible {
-            Image(systemName: model.skipHintForward ? "goforward.10" : "gobackward.10")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(7)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
-                .id(model.skipHintToken)
-                .transition(.scale(scale: 0.5).combined(with: .opacity))
+    /// Left of the current time: the −10 glyph after a backward skip, replaced by
+    /// the loading spinner if a backward seek is still resolving.
+    @ViewBuilder private var leftSlot: some View {
+        if model.skipHintVisible && !model.skipHintForward {
+            skipGlyph(forward: false)
+        } else if model.isSeeking && model.seekIndicatorOnLeft {
+            spinner
         }
     }
 
-    @ViewBuilder private var transportStatus: some View {
-        if model.isSeeking {
-            ProgressView()
-                .tint(.white)
-                .controlSize(.small)
+    /// Right of the current time: the +10 glyph after a forward skip; otherwise
+    /// the spinner for a forward seek / plain scrub; otherwise the circular pause
+    /// glyph while paused. All share this one slot.
+    @ViewBuilder private var rightSlot: some View {
+        if model.skipHintVisible && model.skipHintForward {
+            skipGlyph(forward: true)
+        } else if model.isSeeking && !model.seekIndicatorOnLeft {
+            spinner
         } else if model.isPaused {
-            Image(systemName: "pause.fill")
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.85))
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(.white)
+                .shadow(radius: 3)
         }
+    }
+
+    /// Compact, transient ±10s glyph. `.id(token)` replays the snappy spring
+    /// pop-in on every skip, even rapid repeats.
+    private func skipGlyph(forward: Bool) -> some View {
+        Image(systemName: forward ? "goforward.10" : "gobackward.10")
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(7)
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
+            .id(model.skipHintToken)
+            .transition(.scale(scale: 0.5).combined(with: .opacity))
+    }
+
+    private var spinner: some View {
+        ProgressView()
+            .tint(.white)
+            .controlSize(.small)
     }
 
     @ViewBuilder

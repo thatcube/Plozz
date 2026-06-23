@@ -89,6 +89,10 @@ public final class PlayerControlsModel {
     /// Bumped on every skip so the indicator's pop-in transition replays even
     /// when it's already visible (rapid repeated skips).
     public var skipHintToken: Int = 0
+    /// Which side of the thumb the loading spinner sits on while a seek resolves:
+    /// the left of the current time after a backward skip, otherwise the right
+    /// (forward skip or a plain scrub). Mirrors where the ±10s glyph appeared.
+    public var seekIndicatorOnLeft: Bool = false
 
     /// Whether the live playback-diagnostics overlay is shown. Toggleable from
     /// the in-player control bar; seeded from the caller's initial preference.

@@ -384,6 +384,7 @@ final class PlayerInputViewController: UIViewController {
         let target = model.scrubSeconds
         model.isScrubbing = false
         model.previewImage = nil
+        model.seekIndicatorOnLeft = false
         actions.seek(target)
         if resumeAfterScrub { actions.togglePlayPause() }
         scheduleAutoHide()
@@ -489,6 +490,7 @@ final class PlayerInputViewController: UIViewController {
     /// rather than sit static, matching Apple's player feel.
     private func flashSkipHint(forward: Bool) {
         model.skipHintForward = forward
+        model.seekIndicatorOnLeft = !forward
         model.skipHintToken &+= 1
         model.skipHintVisible = true
         skipHintTask?.cancel()

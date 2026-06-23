@@ -70,6 +70,12 @@ struct DetailHeroView: View {
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
+    /// Tone of the hero legibility scrim: a dark wash in dark mode (so light
+    /// content reads against the artwork) and a light wash in light mode (so dark
+    /// content does). The scrim geometry is identical across modes — only this
+    /// tone flips — so legibility stays consistent between appearances.
+    private var scrimTone: Color { colorScheme == .dark ? .black : .white }
+
     /// The capability badges shown above the ratings: resolution/HDR/audio. The
     /// content-rating certificate is rendered separately, inline with the
     /// year/runtime/genre metadata line.
@@ -240,19 +246,23 @@ struct DetailHeroView: View {
         .clipped()
         .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
         .overlay(
-            // Legibility scrim: darken the lower image so the title/overview
-            // read clearly. It lives *under* the mask below, so it dissolves
-            // away with the image and never tints the revealed background.
+            // Legibility scrim: fade a mode-appropriate tone in over the leading
+            // side so the title/logo/overview read clearly against the artwork —
+            // a dark tone in dark mode (for light content), a light tone in light
+            // mode (for dark content). The *geometry is identical in both modes*;
+            // only the tone flips, so legibility is consistent across appearances.
+            // It lives *under* the dissolve mask below, so it fades away with the
+            // image and never tints the revealed background.
             //
-            // The vertical ramp starts a little higher so it covers a bit more
-            // of the text, and a horizontal falloff concentrates the darkening
-            // on the leading side (where the content sits) while leaving the
-            // right side of the image clearer.
+            // The vertical ramp starts high enough to reach the logo (which sits
+            // above the title), and a horizontal falloff concentrates the wash on
+            // the leading side (where the content sits) while leaving the right
+            // side of the image — the hero subject — clear.
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0.0),
-                    .init(color: .clear, location: 0.40),
-                    .init(color: .black.opacity(0.72), location: 1.0)
+                    .init(color: .clear, location: 0.20),
+                    .init(color: scrimTone.opacity(0.72), location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom

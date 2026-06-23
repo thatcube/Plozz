@@ -86,6 +86,7 @@ private struct LoadedLogo<TextFallback: View>: View {
     let textFallback: () -> TextFallback
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var image: ProcessedLogo?
     @State private var resolved = false
@@ -93,17 +94,7 @@ private struct LoadedLogo<TextFallback: View>: View {
     var body: some View {
         Group {
             if let processed = image {
-                Image(uiImage: processed.image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: .leading)
-                    // Adaptive contrast halo, applied *only* to logos that need it
-                    // (`needsHalo`): a soft light glow behind dark logos, a soft
-                    // dark shadow behind light ones. The illegible cases are
-                    // precisely when the logo's tone matches the background's, so
-                    // we only add the halo when the measured logo/background
-                    // contrast is low — logos that already stand out stay clean.
-                    .modifier(LogoLegibilityHalo(isDark: processed.isDark, active: processed.needsHalo))
+                logo(processed)
                     .transition(.opacity)
             } else if resolved {
                 textFallback()
@@ -115,6 +106,44 @@ private struct LoadedLogo<TextFallback: View>: View {
         }
         .animation(reduceMotion ? nil : .easeIn(duration: 0.25), value: image != nil)
         .task(id: taskKey) { await resolve() }
+    }
+
+    /// Renders the resolved logo. Most logos draw as-is with an adaptive contrast
+    /// halo, applied *only* to logos that need it (`needsHalo`): a soft light glow
+    /// behind dark logos, a soft dark shadow behind light ones — used only when the
+    /// measured logo/background contrast is low, so logos that already stand out
+    /// stay clean.
+    ///
+    /// A *monochrome* logo (a single near-grayscale tone, e.g. an all-black or
+    /// all-white wordmark) is instead recoloured to the foreground tone of the
+    /// current colour scheme — white in dark mode, black in light mode — so a
+    /// black wordmark on a dark hero flips to white and stays legible, matching how
+    /// the rest of the UI adapts. Its alpha (the letter shapes) is preserved as a
+    /// template mask, so only single-tone logos qualify (guarded in `finalize`),
+    /// never multi-colour brand art.
+    @ViewBuilder
+    private func logo(_ processed: ProcessedLogo) -> some View {
+        if processed.isMonochrome {
+            let tintLight = colorScheme == .dark   // dark mode → light (white) logo
+            let tintLuminance = tintLight ? 1.0 : 0.0
+            let needsHalo: Bool = {
+                guard let bg = processed.backgroundLuminance else { return true }
+                return abs(tintLuminance - bg) < Self.haloLuminanceThreshold
+            }()
+            Image(uiImage: processed.image)
+                .renderingMode(.template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: .leading)
+                .foregroundStyle(tintLight ? Color.white : Color.black)
+                .modifier(LogoLegibilityHalo(isDark: !tintLight, active: needsHalo))
+        } else {
+            Image(uiImage: processed.image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: .leading)
+                .modifier(LogoLegibilityHalo(isDark: processed.isDark, active: processed.needsHalo))
+        }
     }
 
     /// Re-run resolution whenever the candidate sources change.
@@ -149,8 +178,22 @@ private struct LoadedLogo<TextFallback: View>: View {
     /// even though their luminance sits close to the dark backdrop's.
     private func finalize(_ prepared: PreparedLogo) async -> ProcessedLogo {
         let isDark = prepared.luminance < 0.5
+        // A logo is "monochrome" when its visible pixels are a single near-grayscale
+        // tone at one luminance extreme — an all-black or all-white wordmark. Such a
+        // logo can be safely recoloured to the current scheme's foreground tone via
+        // its alpha mask. The coverage guard excludes images that never had their
+        // background removed (a near-solid rectangle), whose alpha mask would tint
+        // the whole box rather than just letter shapes.
+        let chroma = max(prepared.red, prepared.green, prepared.blue)
+            - min(prepared.red, prepared.green, prepared.blue)
+        let isMonochrome = prepared.coverage < 0.85
+            && chroma < 0.10
+            && (prepared.luminance < 0.22 || prepared.luminance > 0.85)
+
         var needsHalo = true
+        var backgroundLuminance: Double?
         if let bg = await backgroundSample?() {
+            backgroundLuminance = bg.luminance
             let lumaGap = abs(prepared.luminance - bg.luminance)
             let colorGap = Self.perceptualDistance(
                 r1: prepared.red, g1: prepared.green, b1: prepared.blue,
@@ -159,7 +202,13 @@ private struct LoadedLogo<TextFallback: View>: View {
             needsHalo = lumaGap < Self.haloLuminanceThreshold
                 && colorGap < Self.haloColorThreshold
         }
-        return ProcessedLogo(image: prepared.image, isDark: isDark, needsHalo: needsHalo)
+        return ProcessedLogo(
+            image: prepared.image,
+            isDark: isDark,
+            needsHalo: needsHalo,
+            isMonochrome: isMonochrome,
+            backgroundLuminance: backgroundLuminance
+        )
     }
 
     /// Logo/background luminance gap (0…1) below which the logo no longer
@@ -199,30 +248,47 @@ private struct LoadedLogo<TextFallback: View>: View {
 }
 
 /// A logo after background removal/trim, carrying the mean luminance *and* mean
-/// colour of its visible pixels so the caller can decide whether a contrast halo
-/// is needed (weighing both brightness and colour against the backdrop).
+/// colour of its visible pixels (plus how much of the frame it covers) so the
+/// caller can decide whether a contrast halo is needed and whether the logo is a
+/// single-tone wordmark safe to recolour.
 struct PreparedLogo {
     let image: UIImage
     let luminance: Double
     let red: Double
     let green: Double
     let blue: Double
+    /// Alpha-weighted fraction of the whole frame that is opaque (0…1). Low for a
+    /// normal wordmark surrounded by transparency; ~1 for a logo whose background
+    /// was never removed (a near-solid rectangle), which must not be recoloured.
+    let coverage: Double
 
-    init(image: UIImage, luminance: Double, red: Double = 0, green: Double = 0, blue: Double = 0) {
+    init(
+        image: UIImage,
+        luminance: Double,
+        red: Double = 0,
+        green: Double = 0,
+        blue: Double = 0,
+        coverage: Double = 1.0
+    ) {
         self.image = image
         self.luminance = luminance
         self.red = red
         self.green = green
         self.blue = blue
+        self.coverage = coverage
     }
 }
 
 /// A fully-resolved hero logo ready to render: the processed image, whether it
-/// reads as dark (halo colour), and whether the halo should be shown at all.
+/// reads as dark (halo colour), whether the halo should be shown at all, whether
+/// it is a single-tone wordmark (recoloured to the scheme's foreground), and the
+/// sampled background luminance (for the recoloured logo's own halo decision).
 struct ProcessedLogo {
     let image: UIImage
     let isDark: Bool
     let needsHalo: Bool
+    let isMonochrome: Bool
+    let backgroundLuminance: Double?
 }
 
 /// Wraps the logo in a soft, single-tone halo so it separates from the hero
@@ -329,17 +395,23 @@ private extension UIImage {
         // logo is unusable. Return nil so the caller falls through to the next
         // source and ultimately the clean styled title, never a blank or boxed logo.
         guard maxX >= minX, maxY >= minY else { return nil }
+        // Alpha-weighted opaque fraction of the trimmed bounding box. ~1 when the
+        // logo fills its box (a solid plate that was never removed), low for a
+        // wordmark surrounded by — and pierced by — transparency.
+        let cropArea = Double((maxX - minX + 1) * (maxY - minY + 1))
+        let coverage = cropArea > 0 ? min(1.0, lumaWeight / cropArea) : 1.0
         guard let processedFull = Self.makeImage(from: data, width: width, height: height, bytesPerRow: bytesPerRow) else {
             return nil
         }
         let cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
         guard let cropped = processedFull.cropping(to: cropRect) else {
-            return PreparedLogo(image: UIImage(cgImage: processedFull, scale: scale, orientation: imageOrientation), luminance: luminance, red: meanR, green: meanG, blue: meanB)
+            return PreparedLogo(image: UIImage(cgImage: processedFull, scale: scale, orientation: imageOrientation), luminance: luminance, red: meanR, green: meanG, blue: meanB, coverage: coverage)
         }
         return PreparedLogo(
             image: UIImage(cgImage: cropped, scale: scale, orientation: imageOrientation),
             luminance: luminance,
-            red: meanR, green: meanG, blue: meanB
+            red: meanR, green: meanG, blue: meanB,
+            coverage: coverage
         )
     }
 

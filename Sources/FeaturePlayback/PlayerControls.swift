@@ -566,8 +566,14 @@ private struct ScrubBar: View {
                 Capsule()
                     .fill(.white.opacity(0.14))
                     .frame(width: width * CGFloat(model.bufferedFraction), height: 20)
-                Capsule()
-                    .fill(palette.accent)
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 10,
+                    bottomLeadingRadius: 10,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: 0,
+                    style: .continuous
+                )
+                    .fill(palette.accent.opacity(0.62))
                     .frame(width: knobX, height: 20)
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .fill(.white)

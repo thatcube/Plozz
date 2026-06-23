@@ -39,6 +39,10 @@ public struct ItemDetailView: View {
             state: viewModel.state,
             onRetry: { Task { await viewModel.load() } }
         ) { detail in
+            // A season never has its own page: ItemDetailViewModel transparently
+            // redirects a season load to its parent series, so by the time we
+            // render here a season has become a `.series`. `container` only ever
+            // serves movies, episodes, folders and collections.
             if detail.item.kind == .series {
                 SeriesDetailView(
                     series: detail.item,
@@ -47,7 +51,7 @@ public struct ItemDetailView: View {
                     viewModel: viewModel,
                     spoilerSettings: spoilerSettings,
                     onPlay: onPlay,
-                    initialSeasonID: initialSeasonID ?? initialEpisode?.seasonID,
+                    initialSeasonID: initialSeasonID ?? viewModel.preselectedSeasonID ?? initialEpisode?.seasonID,
                     initialEpisode: initialEpisode
                 )
             } else {
@@ -90,13 +94,11 @@ public struct ItemDetailView: View {
                         MediaRowView(
                             title: childrenTitle(for: detail.item),
                             items: detail.children,
-                            style: detail.item.kind == .series ? .poster : .landscape,
+                            style: .landscape,
                             spoilerSettings: spoilerSettings,
-                            initialFocusID: nextUpFocusID(for: detail),
                             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
                             onSelect: onSelectChild
                         )
-                        .mediaItemActionContext(childrenActionContext(for: detail))
                     }
                     DetailExtrasView(item: detail.item, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
                 }
@@ -122,14 +124,6 @@ public struct ItemDetailView: View {
         }
     }
 
-    /// For a season opened directly, the episode rail is an ordered list, so we
-    /// supply it as context to enable "mark watched up to here". Other container
-    /// kinds (series shows seasons, folders, collections) carry no ordering.
-    private func childrenActionContext(for detail: ItemDetailViewModel.Detail) -> MediaItemActionContext {
-        guard detail.item.kind == .season else { return .none }
-        return MediaItemActionContext(orderedSiblings: detail.children)
-    }
-
     private func isPlayable(_ item: MediaItem) -> Bool {
         switch item.kind {
         case .movie, .episode, .video: return true
@@ -138,23 +132,7 @@ public struct ItemDetailView: View {
     }
 
     private func childrenTitle(for item: MediaItem) -> String {
-        switch item.kind {
-        case .series: return "Seasons"
-        case .season: return "Episodes"
-        default: return "Contents"
-        }
-    }
-
-    /// For a series/season, the child the episodes/seasons rail should open
-    /// focused on (the "next up" episode). Other container kinds keep default
-    /// focus.
-    private func nextUpFocusID(for detail: ItemDetailViewModel.Detail) -> String? {
-        switch detail.item.kind {
-        case .series, .season:
-            return SeriesResume.nextUp(in: detail.children)?.id
-        default:
-            return nil
-        }
+        "Contents"
     }
 }
 

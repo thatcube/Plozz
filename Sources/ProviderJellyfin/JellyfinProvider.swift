@@ -453,7 +453,7 @@ public struct JellyfinProvider: MediaProvider {
             studios: dto.Studios?.compactMap(\.Name).filter { !$0.isEmpty } ?? [],
             tags: dto.Tags ?? [],
             taglines: dto.Taglines ?? [],
-            seriesID: dto.SeriesId,
+            seriesID: dto.SeriesId ?? (Self.kind(forItemType: dto.`Type`) == .season ? dto.ParentId : nil),
             seasonID: dto.SeasonId,
             runtime: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
             resumePosition: JellyfinTicks.seconds(fromTicks: dto.UserData?.PlaybackPositionTicks),

@@ -41,6 +41,7 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
         controller.configureTrickplay(trickplay)
         controller.attachVideoSurface()
         controller.attachOverlay(themePalette: themePalette)
+        controller.attachControlBar(themePalette: themePalette)
         plozzTrace("CustomPlayerContainer.makeUIViewController: EXIT")
         return controller
     }
@@ -83,14 +84,17 @@ struct VideoSurfaceContainer: UIViewRepresentable {
 /// structurally; the overlay uses it directly.
 struct ThemePaletteBox {
     let makeOverlay: (PlayerControlsModel) -> AnyView
-    let makeOptionsMenu: (PlayerControlsModel, PlayerOptionsActions, @escaping () -> Void) -> AnyView
+    let makeControlBar: (PlayerControlsModel, PlayerOptionsActions, @escaping () -> Void) -> AnyView
 }
 
 /// The focusable root view that receives Siri Remote presses and indirect-touch
 /// pans. The engine's video surface and the controls overlay are added as
-/// non-interactive subviews, so focus always stays here.
+/// non-interactive subviews, so focus stays here while scrubbing. While the
+/// bottom control bar owns focus, `allowsFocus` is flipped off so the focus
+/// engine can't bounce back here (Up exits via the control bar instead).
 final class PlayerInputView: UIView {
-    override var canBecomeFocused: Bool { true }
+    var allowsFocus = true
+    override var canBecomeFocused: Bool { allowsFocus }
 }
 
 /// Owns the focusable input surface, hosts the engine's bare video output view,
@@ -109,12 +113,24 @@ final class PlayerInputViewController: UIViewController {
     private var autoHideTask: Task<Void, Never>?
     private var thumbnailTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    private var skipHintTask: Task<Void, Never>?
     private var scrubBaseSeconds: TimeInterval = 0
     private var resumeAfterScrub = false
-    /// The presented options menu, when visible. While set, menu input takes
-    /// focus and scrub/skip gestures are ignored.
-    private var optionsHost: UIHostingController<AnyView>?
-    private var optionsThemePalette: ThemePaletteBox?
+
+    /// Whether the Siri Remote currently drives the scrub surface or the bottom
+    /// control bar. In `.controlBar` the surface gesture recognizers are disabled
+    /// so the SwiftUI focus engine owns navigation.
+    private enum FocusContext { case surface, controlBar }
+    private var focusContext: FocusContext = .surface
+
+    /// The always-attached, focusable bottom control bar. It only takes focus
+    /// while `focusContext == .controlBar`.
+    private var controlBarHost: UIHostingController<AnyView>?
+
+    /// Surface gesture recognizers we toggle off while the control bar owns focus.
+    private var surfaceRecognizers: [UIGestureRecognizer] = []
+
+    private var playerInputView: PlayerInputView? { view as? PlayerInputView }
 
     init(engine: any VideoEngine, model: PlayerControlsModel, actions: PlayerActions) {
         self.engine = engine
@@ -177,7 +193,6 @@ final class PlayerInputViewController: UIViewController {
 
     func attachOverlay(themePalette: ThemePaletteBox) {
         plozzTrace("attachOverlay: building UIHostingController(overlay)")
-        optionsThemePalette = themePalette
         let host = UIHostingController(rootView: themePalette.makeOverlay(model))
         host.view.backgroundColor = .clear
         // Presentational only — never let the overlay steal remote focus from
@@ -190,6 +205,32 @@ final class PlayerInputViewController: UIViewController {
         host.didMove(toParent: self)
         overlayHost = host
         plozzTrace("attachOverlay: done")
+    }
+
+    /// Hosts the focusable bottom control bar. It stays attached for the player's
+    /// lifetime but only takes Siri-Remote focus while `focusContext` is
+    /// `.controlBar`; otherwise its interaction is disabled so indirect-touch
+    /// scrub pans flow to the surface and it can't steal focus.
+    func attachControlBar(themePalette: ThemePaletteBox) {
+        let exitToSurface: () -> Void = { [weak self] in self?.exitToSurface() }
+        let actions = PlayerOptionsActions(
+            selectAudio: { [weak self] in self?.actions.selectAudio($0) },
+            selectSubtitle: { [weak self] in self?.actions.selectSubtitle($0) },
+            setPlaybackSpeed: { [weak self] in self?.actions.setPlaybackSpeed($0) },
+            setAudioDelay: { [weak self] in self?.actions.setAudioDelay($0) },
+            setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
+            setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) }
+        )
+        let host = UIHostingController(rootView: themePalette.makeControlBar(model, actions, exitToSurface))
+        host.view.backgroundColor = .clear
+        // Off until the viewer drops focus into the bar (swipe-down / Down).
+        host.view.isUserInteractionEnabled = false
+        addChild(host)
+        host.view.frame = view.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(host.view)
+        host.didMove(toParent: self)
+        controlBarHost = host
     }
 
     // MARK: Engine state refresh
@@ -235,10 +276,12 @@ final class PlayerInputViewController: UIViewController {
     // MARK: Focus
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        // While the options menu is visible, hand focus to it so the Siri
-        // Remote drives its rows; otherwise the input surface owns focus so
-        // pans/presses reach our gesture recognizers.
-        if let optionsHost { return [optionsHost.view] }
+        // While the bottom control bar is active, hand focus to it so the Siri
+        // Remote drives its native buttons; otherwise the input surface owns
+        // focus so pans/presses reach our gesture recognizers.
+        if focusContext == .controlBar, let controlBarHost {
+            return [controlBarHost.view]
+        }
         return [view]
     }
 
@@ -248,23 +291,28 @@ final class PlayerInputViewController: UIViewController {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
         view.addGestureRecognizer(pan)
+        surfaceRecognizers.append(pan)
 
-        addPress(.select, #selector(handleSelect))
-        addPress(.playPause, #selector(handlePlayPause))
-        addPress(.menu, #selector(handleMenu))
-        addPress(.leftArrow, #selector(handleLeft))
-        addPress(.rightArrow, #selector(handleRight))
+        surfaceRecognizers.append(addPress(.select, #selector(handleSelect)))
+        surfaceRecognizers.append(addPress(.playPause, #selector(handlePlayPause)))
+        surfaceRecognizers.append(addPress(.menu, #selector(handleMenu)))
+        surfaceRecognizers.append(addPress(.leftArrow, #selector(handleLeft)))
+        surfaceRecognizers.append(addPress(.rightArrow, #selector(handleRight)))
+        surfaceRecognizers.append(addPress(.downArrow, #selector(handleDown)))
 
         let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDown))
         swipeDown.direction = .down
         swipeDown.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
         view.addGestureRecognizer(swipeDown)
+        surfaceRecognizers.append(swipeDown)
     }
 
-    private func addPress(_ type: UIPress.PressType, _ action: Selector) {
+    @discardableResult
+    private func addPress(_ type: UIPress.PressType, _ action: Selector) -> UIGestureRecognizer {
         let recognizer = UITapGestureRecognizer(target: self, action: action)
         recognizer.allowedPressTypes = [NSNumber(value: type.rawValue)]
         view.addGestureRecognizer(recognizer)
+        return recognizer
     }
 
     // MARK: Scrubbing
@@ -289,7 +337,7 @@ final class PlayerInputViewController: UIViewController {
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         guard model.duration > 0 else { return }
-        guard optionsHost == nil else { return }
+        guard focusContext == .surface else { return }
         switch gesture.state {
         case .began:
             panAxis = .undecided
@@ -388,7 +436,7 @@ final class PlayerInputViewController: UIViewController {
     // MARK: Button handlers
 
     @objc private func handleSelect() {
-        guard optionsHost == nil else { return }
+        guard focusContext == .surface else { return }
         if model.isScrubbing {
             commitScrub()
         } else {
@@ -398,17 +446,13 @@ final class PlayerInputViewController: UIViewController {
     }
 
     @objc private func handlePlayPause() {
-        guard optionsHost == nil else { return }
+        guard focusContext == .surface else { return }
         if model.isScrubbing { commitScrub() }
         actions.togglePlayPause()
         flashControls()
     }
 
     @objc private func handleMenu() {
-        if optionsHost != nil {
-            dismissOptionsMenu()
-            return
-        }
         if model.isScrubbing {
             cancelScrub()
         } else if model.controlsVisible {
@@ -419,12 +463,19 @@ final class PlayerInputViewController: UIViewController {
     }
 
     @objc private func handleLeft() {
-        guard optionsHost == nil else { return }
+        guard focusContext == .surface else { return }
         skip(by: -10)
     }
     @objc private func handleRight() {
-        guard optionsHost == nil else { return }
+        guard focusContext == .surface else { return }
         skip(by: 10)
+    }
+
+    /// A Down press from the scrub surface reveals the controls and drops focus
+    /// straight into the bottom control bar — the same destination as swipe-down.
+    @objc private func handleDown() {
+        guard focusContext == .surface, !model.isScrubbing else { return }
+        enterControlBar()
     }
 
     private func skip(by seconds: TimeInterval) {
@@ -443,13 +494,30 @@ final class PlayerInputViewController: UIViewController {
             let target = min(max(0, base + seconds), model.duration)
             actions.seek(target)
             flashControls()
+            flashSkipHint(forward: seconds > 0)
         }
     }
 
     @objc private func handleSwipeDown() {
-        guard !model.isScrubbing else { return }
-        guard optionsHost == nil else { return }
-        presentOptionsMenu()
+        guard focusContext == .surface, !model.isScrubbing else { return }
+        enterControlBar()
+    }
+
+    // MARK: Skip hint
+
+    /// Pops the transient ±10s indicator and schedules its quick fade. Re-arming
+    /// the timer + bumping the token on each press makes rapid skips re-pop
+    /// rather than sit static, matching Apple's player feel.
+    private func flashSkipHint(forward: Bool) {
+        model.skipHintForward = forward
+        model.skipHintToken &+= 1
+        model.skipHintVisible = true
+        skipHintTask?.cancel()
+        skipHintTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 550_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.model.skipHintVisible = false
+        }
     }
 
     // MARK: Controls visibility
@@ -469,7 +537,7 @@ final class PlayerInputViewController: UIViewController {
         autoHideTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            if !self.model.isScrubbing && !self.model.isPaused && self.optionsHost == nil {
+            if !self.model.isScrubbing && !self.model.isPaused && self.focusContext == .surface {
                 self.model.controlsVisible = false
             }
         }
@@ -480,61 +548,65 @@ final class PlayerInputViewController: UIViewController {
         autoHideTask = nil
     }
 
-    // MARK: Options menu
+    // MARK: Control bar focus
 
-    /// Presents the full in-player options menu (Audio · Subtitles · Speed ·
-    /// A/V Sync) as a focusable SwiftUI surface that takes Siri Remote focus
-    /// without pausing playback. Replaces the legacy `UIAlertController`
-    /// audio/subtitle picker so we can expose speed, dialog enhance, and the
-    /// audio/subtitle delay tunables — and so changes apply *live* with no
-    /// reload (Infuse-style).
-    private func presentOptionsMenu() {
-        guard let palette = optionsThemePalette else { return }
+    /// Reveals the transport and drops Siri-Remote focus into the bottom control
+    /// bar (Audio & Subtitles · Speed · A/V Sync). Surface scrub/skip recognizers
+    /// are disabled so the SwiftUI focus engine owns navigation. Playback keeps
+    /// running so track/speed/sync tweaks apply live (Infuse-style).
+    private func enterControlBar() {
+        guard focusContext == .surface else { return }
+        guard hasControlBarContent else {
+            // Nothing to configure for this engine/source — just flash the
+            // transport instead of dropping focus into an empty bar.
+            flashControls()
+            return
+        }
         cancelAutoHide()
-        model.optionsMenuVisible = true
+        focusContext = .controlBar
         model.controlsVisible = true
-
-        let actions = PlayerOptionsActions(
-            selectAudio: { [weak self] in self?.actions.selectAudio($0) },
-            selectSubtitle: { [weak self] in self?.actions.selectSubtitle($0) },
-            setPlaybackSpeed: { [weak self] in self?.actions.setPlaybackSpeed($0) },
-            setAudioDelay: { [weak self] in self?.actions.setAudioDelay($0) },
-            setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
-            setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) }
-        )
-        let host = UIHostingController(
-            rootView: palette.makeOptionsMenu(model, actions) { [weak self] in
-                self?.dismissOptionsMenu()
-            }
-        )
-        host.view.backgroundColor = .clear
-        host.view.isUserInteractionEnabled = true
-        addChild(host)
-        host.view.frame = view.bounds
-        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(host.view)
-        host.didMove(toParent: self)
-        optionsHost = host
+        model.controlBarVisible = true
+        setSurfaceRecognizers(enabled: false)
+        controlBarHost?.view.isUserInteractionEnabled = true
+        playerInputView?.allowsFocus = false
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
     }
 
-    private func dismissOptionsMenu() {
-        guard let host = optionsHost else { return }
-        host.willMove(toParent: nil)
-        host.view.removeFromSuperview()
-        host.removeFromParent()
-        optionsHost = nil
-        model.optionsMenuVisible = false
+    /// Returns focus to the scrub surface (Up / Menu from the control-bar root),
+    /// re-enabling scrub gestures and letting the transport auto-hide.
+    private func exitToSurface() {
+        guard focusContext == .controlBar else { return }
+        focusContext = .surface
+        model.controlBarVisible = false
+        controlBarHost?.view.isUserInteractionEnabled = false
+        playerInputView?.allowsFocus = true
+        setSurfaceRecognizers(enabled: true)
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
         scheduleAutoHide()
+    }
+
+    private func setSurfaceRecognizers(enabled: Bool) {
+        for recognizer in surfaceRecognizers { recognizer.isEnabled = enabled }
+    }
+
+    /// Whether the bottom control bar has any rows to show for the active engine
+    /// and source. Mirrors `PlayerControlBar.availableCategories`.
+    private var hasControlBarContent: Bool {
+        model.hasSelectableAudio
+            || model.hasSelectableSubtitles
+            || model.engineCapabilities.contains(.dialogEnhance)
+            || model.engineCapabilities.contains(.playbackSpeed)
+            || model.engineCapabilities.contains(.audioDelay)
+            || model.engineCapabilities.contains(.subtitleDelay)
     }
 
     deinit {
         autoHideTask?.cancel()
         thumbnailTask?.cancel()
         refreshTask?.cancel()
+        skipHintTask?.cancel()
     }
 }
 #endif

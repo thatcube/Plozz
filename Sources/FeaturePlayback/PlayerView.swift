@@ -59,12 +59,12 @@ public struct PlayerView: View {
                         makeOverlay: { model in
                             AnyView(PlayerControlsOverlay(model: model, palette: themePalette))
                         },
-                        makeOptionsMenu: { model, actions, onDismiss in
-                            AnyView(PlayerOptionsMenu(
+                        makeControlBar: { model, actions, onExitToSurface in
+                            AnyView(PlayerControlBar(
                                 model: model,
                                 palette: themePalette,
                                 actions: actions,
-                                onDismiss: onDismiss
+                                onExitToSurface: onExitToSurface
                             ))
                         }
                     )

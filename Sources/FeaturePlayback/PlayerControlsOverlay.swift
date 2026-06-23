@@ -19,8 +19,31 @@ struct PlayerControlsOverlay: View {
         }
         .opacity(model.controlsVisible ? 1 : 0)
         .animation(.easeInOut(duration: 0.25), value: model.controlsVisible)
+        .overlay(alignment: .center) { skipHint }
+        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
+        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintToken)
         .allowsHitTesting(false)
         .ignoresSafeArea()
+    }
+
+    // MARK: Skip hint
+
+    /// Apple-TV-style transient ±10s indicator. A blurred capsule with the
+    /// `goforward.10` / `gobackward.10` glyph that pops in and out fast; re-keyed
+    /// on `skipHintToken` so rapid repeated skips replay the pop instead of
+    /// sitting static.
+    @ViewBuilder private var skipHint: some View {
+        if model.skipHintVisible {
+            Image(systemName: model.skipHintForward ? "goforward.10" : "gobackward.10")
+                .font(.system(size: 56, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(30)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
+                .shadow(radius: 12)
+                .id(model.skipHintToken)
+                .transition(.scale(scale: 0.5).combined(with: .opacity))
+        }
     }
 
     // MARK: Top
@@ -39,7 +62,7 @@ struct PlayerControlsOverlay: View {
             }
             Spacer()
             if model.hasSelectableAudio || model.hasSelectableSubtitles {
-                Label("Swipe down for audio & subtitles", systemImage: "chevron.down")
+                Label("Swipe down for options", systemImage: "chevron.down")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.6))
             }
@@ -62,10 +85,6 @@ struct PlayerControlsOverlay: View {
     private var bottomBar: some View {
         VStack(spacing: 14) {
             HStack(spacing: 16) {
-                Image(systemName: model.isPaused ? "pause.fill" : "play.fill")
-                    .font(.title3)
-                    .foregroundStyle(.white)
-                    .frame(width: 28)
                 Text(Self.timeLabel(model.displaySeconds))
                     .monospacedDigit()
                     .font(.callout)

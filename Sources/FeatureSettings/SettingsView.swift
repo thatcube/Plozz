@@ -632,9 +632,9 @@ private struct TraktConnectionView: View {
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                HStack(spacing: 12) {
+                HStack(spacing: 14) {
                     TraktExpiryCountdown(expiresAt: expiresAt, lifetime: trakt.codeLifetime)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 64, height: 64)
                     Text("Waiting for approval…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -702,20 +702,27 @@ private struct TraktExpiryCountdown: View {
 
             ZStack {
                 Circle()
-                    .stroke(tint.opacity(0.18), lineWidth: 4)
+                    .stroke(tint.opacity(0.18), lineWidth: 6)
                 Circle()
                     .trim(from: 0, to: fraction)
-                    .stroke(tint, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(tint, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                Text("\(Int(remaining.rounded(.up)))")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                Text(Self.format(remaining))
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(tint)
                     .contentTransition(.numericText())
             }
             .animation(.easeOut(duration: 0.3), value: tint)
-            .accessibilityLabel("Code expires in \(Int(remaining.rounded(.up))) seconds")
+            .accessibilityLabel("Code expires in \(Self.format(remaining))")
         }
+    }
+
+    /// Formats the remaining time as `m:ss` so a 600-second code reads as
+    /// `10:00` rather than a raw second count.
+    private static func format(_ remaining: TimeInterval) -> String {
+        let total = Int(remaining.rounded(.up))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
 

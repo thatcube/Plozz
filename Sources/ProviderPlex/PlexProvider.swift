@@ -311,7 +311,7 @@ public struct PlexProvider: MediaProvider {
             productionYear: dto.year,
             officialRating: dto.contentRating,
             genres: dto.Genre?.compactMap(\.tag) ?? [],
-            seriesID: isEpisode ? dto.grandparentRatingKey : nil,
+            seriesID: isEpisode ? dto.grandparentRatingKey : (kind == .season ? dto.parentRatingKey : nil),
             seasonID: isEpisode ? dto.parentRatingKey : nil,
             runtime: runtime,
             resumePosition: resume,

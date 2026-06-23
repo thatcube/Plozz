@@ -16,8 +16,9 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
         /// A solid, faintly-filled gray pill — technical specs such as `4K`,
         /// `HDR`, `HDR10`, `5.1`, `DTS:X`.
         case spec
-        /// A Dolby badge rendered as the double-D logo followed by the format
-        /// word (Dolby Vision, Dolby Atmos, Dolby Digital+, …). No pill.
+        /// A Dolby badge rendered as the double-D logo with a stacked wordmark
+        /// (`Dolby` over the format, e.g. Dolby Vision / Atmos / Digital+). No
+        /// pill.
         case dolby
     }
 

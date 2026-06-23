@@ -26,12 +26,15 @@ public struct MediaBadgeRow: View {
 /// treatments:
 /// - `.rating` — an outlined pill with a transparent fill (`TV-14`, `PG-13`).
 /// - `.spec` — a solid, faintly-filled gray pill (`4K`, `HDR`, `5.1`, `DTS:X`).
-/// - `.dolby` — the Dolby double-D logo followed by the format word, no pill.
+/// - `.dolby` — the Dolby double-D logo with a stacked wordmark (`Dolby` over
+///   the format name), no pill.
 public struct MediaBadgeChip: View {
     private let badge: MediaBadge
 
     /// Shared type scale so every treatment lines up to the same cap height.
     private static let textFont = Font.system(size: 21, weight: .semibold)
+    private static let dolbyWordFont = Font.system(size: 17, weight: .semibold)
+    private static let dolbyFormatFont = Font.system(size: 18, weight: .heavy)
     private static let cornerRadius: CGFloat = 6
     private static let hPadding: CGFloat = 11
     private static let vPadding: CGFloat = 5
@@ -57,13 +60,21 @@ public struct MediaBadgeChip: View {
                 )
                 .accessibilityLabel(badge.label)
         case .dolby:
-            HStack(spacing: 7) {
+            HStack(alignment: .center, spacing: 8) {
                 DolbyDoubleD()
                     .fill(Color.white)
-                    .frame(width: 30, height: 22)
-                Text(badge.dolbyFormatWord)
-                    .font(Self.textFont)
-                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 21)
+                VStack(alignment: .leading, spacing: -2) {
+                    Text("Dolby")
+                        .font(Self.dolbyWordFont)
+                        .foregroundStyle(.white)
+                    Text(badge.dolbyFormatWord.uppercased())
+                        .font(Self.dolbyFormatFont)
+                        .foregroundStyle(.white)
+                        .tracking(0.9)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
             }
             .accessibilityLabel(badge.label)
         }

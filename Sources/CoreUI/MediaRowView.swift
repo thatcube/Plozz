@@ -36,6 +36,13 @@ public struct MediaRowView: View {
 
     @FocusState private var focusedID: String?
     @State private var didApplyInitialFocus = false
+    /// Tracks whether focus has settled inside this row. While `false` and a
+    /// `defaultFocusID` is set, every *other* card is non-focusable, so focus
+    /// entering the row (from Play or the season tabs above) can only land on the
+    /// target card — no geometric guessing, no visible snap. Once focus lands it
+    /// flips `true`, re-enabling the whole row for free left/right browsing, and
+    /// resets to `false` when focus leaves so the next entry re-targets.
+    @State private var focusEngaged = false
 
     public init(
         title: String,
@@ -67,6 +74,20 @@ public struct MediaRowView: View {
         initialFocusID != nil || onFocusChange != nil || defaultFocusID != nil
     }
 
+    /// Whether the row restricts entry focus to a single target card. Only when a
+    /// `defaultFocusID` is set *and* it actually exists in the row.
+    private var gatesFocus: Bool {
+        guard let defaultFocusID else { return false }
+        return items.contains { $0.id == defaultFocusID }
+    }
+
+    /// Whether `item` may receive focus right now: always once focus has engaged
+    /// the row, otherwise only the target card (so entry lands deterministically
+    /// on it). Rows without gating leave every card focusable as before.
+    private func isFocusable(_ item: MediaItem) -> Bool {
+        !gatesFocus || focusEngaged || item.id == defaultFocusID
+    }
+
     public var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
@@ -89,18 +110,16 @@ public struct MediaRowView: View {
                         // never clipped by the scroll view's bounds.
                         .padding(.top, 16)
                         .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
-                        // Direct focus to the resume-target card when focus first
-                        // enters the row (e.g. pressing down from Play), instead of
-                        // the geometrically-nearest one.
-                        .modifier(DefaultFocusModifier(focusedID: $focusedID, targetID: defaultFocusID))
                     }
                     // Let a focused card's lift, drop shadow and border render
                     // outside the rail's bounds instead of being clipped.
                     .scrollClipDisabled()
                     .onAppear { applyInitialFocus(using: proxy) }
                     .onChange(of: focusedID) { _, newValue in
-                        guard let onFocusChange else { return }
-                        onFocusChange(items.first { $0.id == newValue })
+                        // Engage the row the moment focus lands inside it; release
+                        // when focus leaves so re-entry re-targets the default card.
+                        if gatesFocus { focusEngaged = newValue != nil }
+                        onFocusChange?(items.first { $0.id == newValue })
                     }
                 }
             }
@@ -120,7 +139,12 @@ public struct MediaRowView: View {
             .frame(width: style == .poster ? PlozzTheme.Metrics.posterWidth : PlozzTheme.Metrics.landscapeWidth)
             .id(item.id)
         if tracksFocus {
-            card.focused($focusedID, equals: item.id)
+            card
+                .focused($focusedID, equals: item.id)
+                // Gate non-target cards out of the focus system until the row is
+                // engaged. These cards aren't `Button`s and draw no enabled/
+                // disabled styling, so this only affects focusability — no dimming.
+                .disabled(!isFocusable(item))
         } else {
             card
         }
@@ -148,22 +172,6 @@ public struct MediaRowView: View {
             // the target's offset before we scroll; focus is deliberately left
             // wherever it currently is (typically the hero Play button).
             DispatchQueue.main.async { proxy.scrollTo(target, anchor: .leading) }
-        }
-    }
-}
-
-/// Applies `.defaultFocus` to a row only when a target id is provided, so the
-/// row can direct entry focus to a specific card (e.g. the resume episode)
-/// without affecting rows that don't set one.
-private struct DefaultFocusModifier: ViewModifier {
-    let focusedID: FocusState<String?>.Binding
-    let targetID: String?
-
-    func body(content: Content) -> some View {
-        if let targetID {
-            content.defaultFocus(focusedID, targetID)
-        } else {
-            content
         }
     }
 }

@@ -27,12 +27,22 @@ public actor MetadataDiskCache {
     private var loaded = false
     private var dirty = false
 
+    /// The on-disk cache filename carries a schema version. **Bump this whenever
+    /// the provider set or chain order changes**: resolved URLs (including
+    /// remembered *negatives*, which have only a 3-day TTL) are keyed without any
+    /// provider fingerprint, so a device that cached `nil` for a hero/logo before a
+    /// new provider existed would otherwise keep showing nothing until the entry
+    /// expired. A version bump starts a fresh file, giving the new providers a
+    /// clean shot immediately on every device. (v2: added keyless Wikidata +
+    /// Wikipedia artwork providers.)
+    private static let cacheFileName = "plozz-metadata-cache-v2.json"
+
     public init(
         directory: URL? = MetadataDiskCache.defaultDirectory(),
         positiveTTL: TimeInterval = 60 * 60 * 24 * 30,
         negativeTTL: TimeInterval = 60 * 60 * 24 * 3
     ) {
-        self.fileURL = directory?.appendingPathComponent("plozz-metadata-cache.json")
+        self.fileURL = directory?.appendingPathComponent(Self.cacheFileName)
         self.positiveTTL = positiveTTL
         self.negativeTTL = negativeTTL
     }

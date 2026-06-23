@@ -59,8 +59,10 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         switch self {
         case .rottenTomatoes, .critic: return .tomato
         case .rottenTomatoesAudience: return .popcorn
-        case .tmdb: return .tmdb
-        case .imdb, .community, .letterboxd: return .star
+        // A backend "community" score is TMDB-sourced in practice, so it shares
+        // TMDB's branding rather than a generic star.
+        case .tmdb, .community: return .tmdb
+        case .imdb, .letterboxd: return .star
         case .metacritic: return .metacritic
         }
     }

@@ -521,28 +521,18 @@ public struct JellyfinProvider: MediaProvider {
 
     /// Maps Jellyfin's native rating fields onto provider-agnostic ratings.
     ///
-    /// `CommunityRating` is a 0–10 audience score. Jellyfin commonly sources it
-    /// from TMDB when a TMDB provider id is present, so we brand it as TMDB in
-    /// that case; otherwise it remains a generic community score. `CriticRating`
+    /// `CommunityRating` is a 0–10 audience score sourced from TMDB, so we brand
+    /// it as TMDB for every item type (movies, series, episodes, …). `CriticRating`
     /// is a 0–100 Rotten Tomatoes Tomatometer percentage.
     private static func ratings(from dto: BaseItemDto) -> [ExternalRating] {
         var ratings: [ExternalRating] = []
         if let community = dto.CommunityRating {
-            let source: RatingSource = hasTMDbProviderID(dto.ProviderIds) ? .tmdb : .community
-            ratings.append(ExternalRating(source: source, value: community, scale: .outOfTen))
+            ratings.append(ExternalRating(source: .tmdb, value: community, scale: .outOfTen))
         }
         if let critic = dto.CriticRating {
             ratings.append(ExternalRating(source: .rottenTomatoes, value: critic, scale: .percent))
         }
         return ratings
-    }
-
-    private static func hasTMDbProviderID(_ providerIDs: [String: String]?) -> Bool {
-        guard let providerIDs else { return false }
-        return providerIDs.contains { key, value in
-            key.caseInsensitiveCompare("tmdb") == .orderedSame &&
-            !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
     }
 
     private func map(stream dto: MediaStreamDto) -> MediaTrack {

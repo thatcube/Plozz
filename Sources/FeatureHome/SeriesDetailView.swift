@@ -85,6 +85,10 @@ struct SeriesDetailView: View {
             // ScrollView reserving it as a blank bar above the backdrop.
             .ignoresSafeArea(.container, edges: .top)
             .task { await prepareInitialSeason() }
+            // Warm the whole season's episode stills as soon as they load, so
+            // cards already have their thumbnail when scrolled to rather than
+            // visibly fetching it on appear.
+            .task(id: stillPrefetchKey) { await prefetchSeasonStills() }
     }
 
     @ViewBuilder
@@ -230,6 +234,31 @@ struct SeriesDetailView: View {
         return seasons
             .filter { ($0.seasonNumber ?? .max) < currentNumber }
             .map(\.id)
+    }
+
+    /// Identifies the currently-loaded episode set for the still prefetch task, so
+    /// it fires once the selected season's episodes arrive and again when the
+    /// season changes — but not on every unrelated re-render.
+    private var stillPrefetchKey: String {
+        "\(selectedSeasonID ?? "loose")#\(currentEpisodes.count)"
+    }
+
+    /// Prefetches every loaded episode's TMDb still for the current season so the
+    /// rail's thumbnails are already cached before each card scrolls into view.
+    private func prefetchSeasonStills() async {
+        let requests = currentEpisodes.compactMap { episode -> TMDbArtworkResolver.EpisodeStillRequest? in
+            guard episode.kind == .episode,
+                  let season = episode.seasonNumber,
+                  let number = episode.episodeNumber else { return nil }
+            return TMDbArtworkResolver.EpisodeStillRequest(
+                seriesTitle: episode.parentTitle ?? episode.title,
+                seriesTmdbID: episode.providerIDs["SeriesTmdb"],
+                season: season,
+                episode: number
+            )
+        }
+        guard !requests.isEmpty else { return }
+        await TMDbArtworkResolver.shared.prefetchEpisodeStills(requests)
     }
 
     /// Episodes the rail should show: the selected season's loaded episodes, or

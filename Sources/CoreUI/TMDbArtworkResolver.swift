@@ -16,6 +16,21 @@ import Foundation
 public actor TMDbArtworkResolver {
     public static let shared = TMDbArtworkResolver()
 
+    /// One episode's identity for a batched still prefetch.
+    public struct EpisodeStillRequest: Sendable {
+        public let seriesTitle: String
+        public let seriesTmdbID: String?
+        public let season: Int
+        public let episode: Int
+
+        public init(seriesTitle: String, seriesTmdbID: String?, season: Int, episode: Int) {
+            self.seriesTitle = seriesTitle
+            self.seriesTmdbID = seriesTmdbID
+            self.season = season
+            self.episode = episode
+        }
+    }
+
     private let token: String?
     private let imageBase = "https://image.tmdb.org/t/p/w500"
     /// Backdrops feed the full-bleed detail hero, so pull a large width.
@@ -29,6 +44,9 @@ public actor TMDbArtworkResolver {
     /// Per-episode still URL cache (keyed by series + season/episode). A present
     /// value of `nil` is a negative result.
     private var stillCache: [String: URL?] = [:]
+    /// Series-id-by-title cache, so prefetching a whole season's per-episode
+    /// stills resolves the show's TMDb id once instead of re-searching per episode.
+    private var seriesIDCache: [String: String?] = [:]
     /// Logos are transparent PNGs; `w500` keeps them crisp at hero size without
     /// pulling multi-megabyte originals.
     private let logoImageBase = "https://image.tmdb.org/t/p/w500"
@@ -146,7 +164,7 @@ public actor TMDbArtworkResolver {
         if let id0, !id0.isEmpty {
             seriesID = id0
         } else {
-            seriesID = await fetchID(title: trimmed, year: nil, isTV: true, token: token)
+            seriesID = await resolveSeriesID(title: trimmed, token: token)
         }
         guard let seriesID else { stillCache[key] = .some(nil); return nil }
 
@@ -154,6 +172,47 @@ public actor TMDbArtworkResolver {
         let url = path.flatMap { URL(string: backdropImageBase + $0) }
         stillCache[key] = url
         return url
+    }
+
+    /// Warms the cache for a whole season's per-episode stills ahead of time, so a
+    /// card already has its art the moment it scrolls into view instead of
+    /// visibly loading in. Resolves+caches each still URL and downloads its bytes
+    /// into `URLCache.shared` (which the card's loader reads through). Bounded
+    /// concurrency keeps it polite to TMDb while staying well under its rate limit.
+    public func prefetchEpisodeStills(_ requests: [EpisodeStillRequest]) async {
+        guard token != nil, !requests.isEmpty else { return }
+        let maxConcurrent = 6
+        await withTaskGroup(of: Void.self) { group in
+            var next = 0
+            func schedule(_ request: EpisodeStillRequest) {
+                group.addTask {
+                    if let url = await self.episodeStillURL(
+                        seriesTitle: request.seriesTitle,
+                        seriesTmdbID: request.seriesTmdbID,
+                        season: request.season,
+                        episode: request.episode
+                    ) {
+                        _ = try? await URLSession.shared.data(from: url)
+                    }
+                }
+            }
+            while next < min(maxConcurrent, requests.count) {
+                schedule(requests[next]); next += 1
+            }
+            while await group.next() != nil {
+                if next < requests.count { schedule(requests[next]); next += 1 }
+            }
+        }
+    }
+
+    /// Resolves (and caches) a TV series' TMDb id by title, shared across every
+    /// per-episode still lookup for that show.
+    private func resolveSeriesID(title: String, token: String) async -> String? {
+        let key = title.lowercased()
+        if let cached = seriesIDCache[key] { return cached }
+        let id = await fetchID(title: title, year: nil, isTV: true, token: token)
+        seriesIDCache[key] = id
+        return id
     }
 
     private func fetchStillPath(seriesID: String, season: Int, episode: Int, token: String) async -> String? {

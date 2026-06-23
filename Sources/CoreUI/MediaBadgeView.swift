@@ -75,10 +75,6 @@ public struct MediaBadgeChip: View {
                 .accessibilityLabel(badge.label)
         case .hdr:
             hdrLabel(badge.label)
-                .background(
-                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .fill(Color.white.opacity(0.16))
-                )
                 .accessibilityLabel(badge.label)
         case .dolby:
             VStack(alignment: .center, spacing: -1) {
@@ -113,9 +109,10 @@ public struct MediaBadgeChip: View {
             .frame(height: Self.pillHeight)
     }
 
-    /// A two-weight HDR wordmark: the format name (`HDR`/`HLG`) in a heavy cap
-    /// height with any numeric variant (`10`, `10+`) set slightly smaller and
-    /// raised, so `HDR10` reads as a bold logo rather than flat text.
+    /// A two-weight HDR wordmark filled with the HDR gradient (no pill behind
+    /// it): the format name (`HDR`/`HLG`) in a heavy cap height with any numeric
+    /// variant (`10`, `10+`) set slightly smaller and raised, so `HDR10` reads as
+    /// a bold gradient logo rather than flat text.
     private func hdrLabel(_ text: String) -> some View {
         let parts = Self.splitHDR(text)
         return HStack(alignment: .firstTextBaseline, spacing: 1) {
@@ -127,7 +124,7 @@ public struct MediaBadgeChip: View {
                     .baselineOffset(1)
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Self.hdrGradient)
         .tracking(0.5)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
@@ -145,6 +142,18 @@ public struct MediaBadgeChip: View {
         }
         return (upper, nil)
     }
+
+    /// HDR accent gradient (warm highlight → cool shadow) used to fill the HDR
+    /// wordmark, evoking the wide luminance range HDR represents.
+    private static let hdrGradient = LinearGradient(
+        colors: [
+            Color(red: 1.00, green: 0.80, blue: 0.25),
+            Color(red: 0.95, green: 0.35, blue: 0.45),
+            Color(red: 0.25, green: 0.75, blue: 0.95)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 }
 
 /// The iconic Dolby "double-D" mark: two back-to-back D shapes with their

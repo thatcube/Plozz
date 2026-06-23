@@ -191,6 +191,11 @@ public struct MediaBadgeChip: View {
         .frame(height: Self.pillHeight)
     }
 
+    /// Muted gray for the `-HD` portion of the dts-HD mark: the theme's secondary
+    /// text knocked back a bit further so the `HD` reads as a quieter gray than
+    /// the surrounding metadata in both light and dark.
+    private var dtsHDColor: Color { palette.secondaryText.opacity(0.72) }
+
     /// A custom DTS wordmark logo (no pill): lowercase heavy `dts` with the
     /// format suffix (`X`, `HD`) emphasized and the separator (`:`/`-`) set
     /// lighter, so `DTS:X`/`DTS-HD` read as a brand mark beside the Dolby logos
@@ -212,7 +217,7 @@ public struct MediaBadgeChip: View {
                 // with the dash drawn as a solid bar at the `H`'s mid-height and
                 // overlapped into it so the two fuse. The whole unit is gray.
                 Rectangle()
-                    .fill(palette.secondaryText)
+                    .fill(dtsHDColor)
                     .frame(width: Self.dtsDashWidth, height: Self.dtsDashThickness)
                     .padding(.leading, Self.dtsDashLeading)
                     .padding(.trailing, -Self.dtsDashOverlap)
@@ -221,11 +226,11 @@ public struct MediaBadgeChip: View {
                     }
                 Text(suffix)
                     .font(Self.dtsSuffixFont)
-                    .foregroundStyle(palette.secondaryText)
+                    .foregroundStyle(dtsHDColor)
             } else {
                 Text((parts.separator ?? "") + (parts.suffix ?? ""))
                     .font(Self.dtsSuffixFont)
-                    .foregroundStyle(palette.secondaryText)
+                    .foregroundStyle(dtsHDColor)
             }
         }
         .lineLimit(1)

@@ -70,6 +70,88 @@ final class PlexConnectionSelectorTests: XCTestCase {
     func testNilWhenNoUsableConnections() {
         XCTAssertNil(PlexConnectionSelector.best(from: connections("[]")))
     }
+
+    func testRankedReturnsAllInPreferenceOrderDeduped() {
+        let conns = connections("""
+        [
+          {"protocol":"https","uri":"https://relay.plex.direct:443","local":false,"relay":true},
+          {"protocol":"https","uri":"https://remote.plex.direct:32400","local":false,"relay":false},
+          {"protocol":"https","uri":"https://local.plex.direct:32400","local":true,"relay":false},
+          {"protocol":"https","uri":"https://local.plex.direct:32400","local":true,"relay":false}
+        ]
+        """)
+        XCTAssertEqual(PlexConnectionSelector.ranked(from: conns).map(\.absoluteString), [
+            "https://local.plex.direct:32400",
+            "https://remote.plex.direct:32400",
+            "https://relay.plex.direct:443"
+        ])
+    }
+}
+
+// MARK: - Reachability-aware server resolution
+
+final class PlexServerReachabilityTests: XCTestCase {
+    /// Probe double that answers only for hosts NOT containing `unreachableHostFragment`.
+    private final class HostAwareProbe: HTTPClient, @unchecked Sendable {
+        let unreachableHostFragment: String
+        private(set) var probedHosts: [String] = []
+        init(unreachableHostFragment: String) { self.unreachableHostFragment = unreachableHostFragment }
+
+        func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+            let host = baseURL.host ?? ""
+            probedHosts.append(host)
+            if host.contains(unreachableHostFragment) {
+                throw AppError.serverUnreachable
+            }
+            return (Data("{}".utf8), HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
+    private let resourcesJSON = """
+    [
+      {
+        "name":"Brandoland","clientIdentifier":"srv-1","provides":"server","owned":true,"accessToken":"SRVTOKEN",
+        "connections":[
+          {"protocol":"https","uri":"https://172-18-0-1.hash.plex.direct:32400","local":true,"relay":false},
+          {"protocol":"https","uri":"https://remote.hash.plex.direct:32400","local":false,"relay":false},
+          {"protocol":"https","uri":"https://relay.plex.direct:443","local":false,"relay":true}
+        ]
+      }
+    ]
+    """
+
+    func testSkipsUnreachableLocalDockerConnection() async throws {
+        let http = StubHTTPClient()
+        http.stub(pathSuffix: "/api/v2/resources", json: resourcesJSON)
+        let probe = HostAwareProbe(unreachableHostFragment: "172-18-0-1")
+        let client = PlexAuthClient(
+            deviceProfile: PlexDeviceProfile(clientIdentifier: "dev"),
+            http: http,
+            probeHTTP: probe
+        )
+
+        let servers = try await client.servers(authToken: "ACCT")
+        XCTAssertEqual(servers.count, 1)
+        XCTAssertEqual(servers.first?.baseURL.absoluteString, "https://remote.hash.plex.direct:32400")
+        XCTAssertEqual(servers.first?.accessToken, "SRVTOKEN")
+    }
+
+    func testFallsBackToTopRankedWhenNothingReachable() async throws {
+        let http = StubHTTPClient()
+        http.stub(pathSuffix: "/api/v2/resources", json: resourcesJSON)
+        // Nothing answers: every probe fails.
+        let probe = HostAwareProbe(unreachableHostFragment: ".plex.direct")
+        let client = PlexAuthClient(
+            deviceProfile: PlexDeviceProfile(clientIdentifier: "dev"),
+            http: http,
+            probeHTTP: probe
+        )
+
+        let servers = try await client.servers(authToken: "ACCT")
+        // Server still surfaces (so the UI can show "unreachable"), pinned to the
+        // most-preferred candidate.
+        XCTAssertEqual(servers.first?.baseURL.absoluteString, "https://172-18-0-1.hash.plex.direct:32400")
+    }
 }
 
 // MARK: - Provider mapping

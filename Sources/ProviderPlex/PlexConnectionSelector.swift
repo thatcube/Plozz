@@ -44,6 +44,17 @@ public enum PlexConnectionSelector {
     }
 
     static func best(from connections: [PlexConnectionDTO]) -> URL? {
+        ranked(from: connections).first
+    }
+
+    /// All usable connection URLs in preference order (most-preferred first).
+    ///
+    /// Callers that can probe reachability (e.g. `PlexAuthClient.servers`) walk
+    /// this list and pick the first connection that actually answers — important
+    /// because Plex advertises *every* address it's bound to as "local",
+    /// including container-bridge gateways like `172.18.0.1` that a TV on a
+    /// different subnet can never reach.
+    static func ranked(from connections: [PlexConnectionDTO]) -> [URL] {
         let candidates = connections.map {
             Candidate(
                 uri: $0.uri,
@@ -59,12 +70,15 @@ public enum PlexConnectionSelector {
                 // Prefer secure within the same tier.
                 return (lhs.isSecure ? 0 : 1) < (rhs.isSecure ? 0 : 1)
             }
+        var seen = Set<String>()
+        var urls: [URL] = []
         for candidate in ranked {
-            if let uri = candidate.uri, let url = URL(string: uri) {
-                return url
+            guard let uri = candidate.uri, let url = URL(string: uri), seen.insert(uri).inserted else {
+                continue
             }
+            urls.append(url)
         }
-        return nil
+        return urls
     }
 }
 

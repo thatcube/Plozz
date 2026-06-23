@@ -82,7 +82,6 @@ struct PlayerControls: View {
         }
         .ignoresSafeArea()
         .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
-        .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintToken)
         .onChange(of: model.controlBarVisible) { _, focused in
             openPanel = nil
             focus = focused ? initialFocus : nil
@@ -541,6 +540,11 @@ private struct ScrubBar: View {
     /// can't collide with the panel.
     var showThumbOverlay: Bool = true
 
+    /// Subtle "pressed-down" scale applied to the ±10s glyph on each skip press,
+    /// so rapid spamming reads as a held button rather than a flashing re-pop.
+    @State private var skipPressed = false
+    @State private var skipPressTask: Task<Void, Never>?
+
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
@@ -570,6 +574,23 @@ private struct ScrubBar: View {
             }
             .frame(maxHeight: .infinity, alignment: .center)
             .animation(.easeOut(duration: 0.12), value: model.isScrubbing)
+            .onChange(of: model.skipHintToken) { _, _ in pulseSkipPress() }
+            .onChange(of: model.skipHintVisible) { _, visible in
+                if !visible { skipPressed = false }
+            }
+        }
+    }
+
+    /// Dips the glyph on a press, then springs it back ~90 ms after the *last*
+    /// press — so while spamming it stays gently pressed and only releases once
+    /// the user stops.
+    private func pulseSkipPress() {
+        skipPressTask?.cancel()
+        withAnimation(.easeOut(duration: 0.06)) { skipPressed = true }
+        skipPressTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 90_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { skipPressed = false }
         }
     }
 
@@ -625,8 +646,8 @@ private struct ScrubBar: View {
         }
     }
 
-    /// Compact, transient ±10s glyph. `.id(token)` replays the snappy spring
-    /// pop-in on every skip, even rapid repeats.
+    /// Compact ±10s glyph. It persists for the whole skip burst (no per-press
+    /// teardown), and a subtle scale dip gives "pressed" feedback on each press.
     private func skipGlyph(forward: Bool) -> some View {
         Image(systemName: forward ? "goforward.10" : "gobackward.10")
             .font(.system(size: 20, weight: .semibold))
@@ -634,7 +655,7 @@ private struct ScrubBar: View {
             .padding(7)
             .background(.ultraThinMaterial, in: Circle())
             .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
-            .id(model.skipHintToken)
+            .scaleEffect(skipPressed ? 0.86 : 1.0)
             .transition(.scale(scale: 0.5).combined(with: .opacity))
     }
 

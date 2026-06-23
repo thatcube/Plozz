@@ -530,6 +530,8 @@ final class PlexProviderMappingTests: XCTestCase {
         let request = try await provider.playbackInfo(for: "100")
         XCTAssertNil(request.scrubPreview)
     }
+
+    func testReportPlaybackSendsTimelineState() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/:/timeline", json: "")
         let provider = PlexProvider(session: makeSession(), http: stub)

@@ -44,6 +44,9 @@ public struct MediaBadgeChip: View {
     private static let dtsHeadFont = Font.system(size: 22, weight: .black)
     private static let dtsSepFont = Font.system(size: 18, weight: .light)
     private static let dtsSuffixFont = Font.system(size: 19, weight: .heavy)
+    /// The oversized `X` of the dts:X mark, larger than the `dts` head and
+    /// filled with the orange dts:X gradient.
+    private static let dtsXFont = Font.system(size: 32, weight: .black)
     private static let cornerRadius: CGFloat = 6
     private static let hPadding: CGFloat = 11
     /// Tighter horizontal padding for the borderless HDR wordmark, which has no
@@ -149,26 +152,46 @@ public struct MediaBadgeChip: View {
     /// without bundling the trademarked artwork.
     private func dtsLabel(_ text: String) -> some View {
         let parts = Self.splitDTS(text)
-        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+        let isX = parts.suffix?.uppercased() == "X"
+        return HStack(alignment: .firstTextBaseline, spacing: isX ? 1 : 0) {
             Text(parts.head)
                 .font(Self.dtsHeadFont)
                 .tracking(-0.5)
-            if let separator = parts.separator {
-                Text(separator)
-                    .font(Self.dtsSepFont)
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-            if let suffix = parts.suffix {
-                Text(suffix)
-                    .font(Self.dtsSuffixFont)
+                .foregroundStyle(.white)
+            if isX {
+                Text("X")
+                    .font(Self.dtsXFont)
+                    .foregroundStyle(Self.dtsXGradient)
+            } else {
+                if let separator = parts.separator {
+                    Text(separator)
+                        .font(Self.dtsSepFont)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                if let suffix = parts.suffix {
+                    Text(suffix)
+                        .font(Self.dtsSuffixFont)
+                        .foregroundStyle(.white)
+                }
             }
         }
-        .foregroundStyle(.white)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
         .padding(.horizontal, Self.hdrHPadding)
         .frame(height: Self.pillHeight)
     }
+
+    /// The orange dts:X gradient (light orange highlight → deep orange) used to
+    /// fill the oversized `X`, evoking the official mark.
+    private static let dtsXGradient = LinearGradient(
+        colors: [
+            Color(red: 0.99, green: 0.72, blue: 0.36),
+            Color(red: 0.95, green: 0.52, blue: 0.16),
+            Color(red: 0.90, green: 0.40, blue: 0.08)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
 
     /// Splits a DTS label into a lowercase wordmark head (`dts`), an optional
     /// separator (`:`/`-`), and an optional format suffix (`X`/`HD`).

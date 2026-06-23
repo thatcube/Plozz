@@ -111,7 +111,21 @@ final class PlayerInputViewController: UIViewController {
     private var thumbnailTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var skipHintTask: Task<Void, Never>?
-    private var scrubBaseSeconds: TimeInterval = 0
+    /// The pan-gesture `translation.x` from the *previous* scrub sample. Each
+    /// pan event scrubs by the *increment* since this value (not the cumulative
+    /// translation against a base), which is what lets the velocity-accelerated
+    /// transfer function apply per-sample gain. Seeded with the translation at
+    /// the axis decision so the dead-zone travel spent deciding the axis never
+    /// counts as scrub distance, and never mutated on the recognizer itself
+    /// (no `setTranslation(.zero)`), so the head can't snap backward between
+    /// events.
+    private var scrubLastTranslationX: CGFloat = 0
+    /// Low-pass-filtered pan speed (points/sec) used to drive the acceleration
+    /// gain. The recognizer's raw `velocity` spikes sample-to-sample, and feeding
+    /// that straight into the gain made fast flicks feel *jumpy* (the multiplier
+    /// lurched between events). An exponential moving average smooths it so the
+    /// gain ramps fluidly. Reset to 0 at the start of each scrub.
+    private var scrubSmoothedSpeed: Double = 0
     private var resumeAfterScrub = false
 
     /// Suppresses the tvOS screensaver / Apple TV sleep while video is actively
@@ -321,11 +335,27 @@ final class PlayerInputViewController: UIViewController {
     /// scrubs feel immediate but a stray vertical drift can still ignore.
     private let panAxisDeadZone: CGFloat = 18
 
-    private var scrubSensitivitySeconds: TimeInterval {
-        // A full touch-surface swipe covers ~15% of the runtime, clamped so it's
-        // neither uselessly fine on long films nor jumpy on short clips. Edge
-        // clicks (left/right) handle big ±10s skips.
-        max(60, min(model.duration * 0.15, 300))
+    /// EMA weight for the per-sample pan-speed used to drive scrub acceleration.
+    /// Lower = smoother (more lag), higher = more responsive (more jitter). 0.25
+    /// removes the sample-to-sample velocity spikes that made flicks feel jumpy
+    /// while still tracking a real flick within a few events.
+    private let scrubSpeedSmoothing: Double = 0.25
+
+    private var scrubTuning: ScrubGeometry.Tuning {
+        // Base seconds-per-point scales with runtime so the *fraction* of the
+        // content a swipe covers stays roughly consistent. The reference is a 2h
+        // film (scale 1.0 → ~0.18 s/pt, the silky fine-scrub feel). The floor is
+        // low (0.3) so short TV episodes scale right down — otherwise the same
+        // s/pt crosses a much bigger fraction of a 25-min episode and feels way
+        // too fast. A fast flick accelerates up to maxAccelMultiplier via a
+        // smoothstep curve (see ScrubGeometry); the ceiling is modest so flicks
+        // stay controllable.
+        let durationScale = min(max(model.duration / 7200, 0.3), 1.6)
+        return ScrubGeometry.Tuning(
+            baseSecondsPerPoint: 0.18 * durationScale,
+            accelOnsetSpeed: 500,
+            accelSaturationSpeed: 3500,
+            maxAccelMultiplier: 5)
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -334,6 +364,7 @@ final class PlayerInputViewController: UIViewController {
         switch gesture.state {
         case .began:
             panAxis = .undecided
+            scrubLastTranslationX = 0
         case .changed:
             let translation = gesture.translation(in: view)
             if panAxis == .undecided {
@@ -348,11 +379,16 @@ final class PlayerInputViewController: UIViewController {
                 if absX >= absY {
                     panAxis = .horizontal
                     beginScrub()
-                    // Re-anchor: the axis-decision travel doesn't count as scrub
-                    // distance, so the first frame of motion lands exactly at
-                    // the current position, not at the cumulative pan offset.
-                    gesture.setTranslation(.zero, in: view)
-                    scrubBaseSeconds = model.scrubSeconds
+                    // Seed the incremental anchor at *this* translation so the
+                    // axis-decision dead-zone travel is excluded (the first
+                    // scrub sample moves by zero, not the cumulative pan
+                    // offset). We track our own previous-translation rather than
+                    // calling `gesture.setTranslation(.zero)`, which would leave
+                    // the pre-reset `translation` applied this event and a
+                    // reset-to-tiny translation next event — stepping the bar
+                    // backward by the gap.
+                    scrubLastTranslationX = translation.x
+                    scrubSmoothedSpeed = 0
                 } else {
                     panAxis = .verticalIgnored
                     // A deliberate downward swipe reveals the controls and drops
@@ -366,9 +402,20 @@ final class PlayerInputViewController: UIViewController {
                 }
             }
             guard panAxis == .horizontal else { return }
-            let width = max(1, view.bounds.width)
-            let delta = (translation.x / width) * scrubSensitivitySeconds
-            model.scrubSeconds = min(max(0, scrubBaseSeconds + delta), model.duration)
+            // Scrub by the increment since the last sample, with gain that ramps
+            // up with pan speed: slow drags stay precise, fast flicks fling far.
+            // The raw recognizer velocity is jittery, so smooth it (EMA) before
+            // it drives the gain — otherwise fast flicks feel jumpy.
+            let dx = Double(translation.x - scrubLastTranslationX)
+            scrubLastTranslationX = translation.x
+            let rawSpeed = abs(Double(gesture.velocity(in: view).x))
+            scrubSmoothedSpeed += (rawSpeed - scrubSmoothedSpeed) * scrubSpeedSmoothing
+            model.scrubSeconds = ScrubGeometry.advance(
+                scrubSeconds: model.scrubSeconds,
+                translationDeltaPoints: dx,
+                speedPointsPerSecond: scrubSmoothedSpeed,
+                tuning: scrubTuning,
+                duration: model.duration)
             updatePreviewThumbnail()
         case .ended, .cancelled, .failed:
             // Auto-commit a horizontal scrub on lift, like Apple's own
@@ -398,10 +445,16 @@ final class PlayerInputViewController: UIViewController {
     private func commitScrub() {
         guard model.isScrubbing else { return }
         let target = model.scrubSeconds
+        // Commit the optimistic target BEFORE leaving scrub mode. While
+        // scrubbing, `displaySeconds` reads `scrubSeconds` (== target); once
+        // `isScrubbing` clears it reads `currentSeconds`. Seeking first makes
+        // `requestSeek` set `currentSeconds = target` up front, so the handoff is
+        // scrubSeconds(target) → currentSeconds(target) with no one-frame dip
+        // back to the stale pre-scrub position.
+        actions.seek(target)
         model.isScrubbing = false
         model.previewImage = nil
         model.seekIndicatorOnLeft = false
-        actions.seek(target)
         if resumeAfterScrub { actions.togglePlayPause() }
         scheduleAutoHide()
     }

@@ -739,7 +739,7 @@ private struct ScrubBar: View {
                     )
             }
         }
-        .position(x: clampedX, y: Self.timeRowY - 30 - thumbHeight / 2)
+        .position(x: clampedX, y: Self.timeRowY - 46 - thumbHeight / 2)
     }
 
     private var previewAspect: CGFloat {

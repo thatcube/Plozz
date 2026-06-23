@@ -149,15 +149,15 @@ private struct StudioLogoChip: View {
 
     /// Fixed tile height; width is derived from the logo's aspect ratio and
     /// clamped to this range so nothing gets too narrow or runs off the row.
-    private let tileHeight: CGFloat = 180
-    private let minWidth: CGFloat = 150
-    private let maxWidth: CGFloat = 460
-    private let corner: CGFloat = 22
-    private let inset: CGFloat = 26
+    private let tileHeight: CGFloat = 135
+    private let minWidth: CGFloat = 113
+    private let maxWidth: CGFloat = 345
+    private let corner: CGFloat = 17
+    private let inset: CGFloat = 20
 
     @State private var image: UIImage?
     @State private var tileIsDark = false
-    @State private var tileWidth: CGFloat = 240
+    @State private var tileWidth: CGFloat = 180
     @State private var failed = false
     @State private var resolved = false
 
@@ -206,7 +206,7 @@ private struct StudioLogoChip: View {
     /// only differ in width.
     private func tileWidthForAspect(of image: UIImage) -> CGFloat {
         let size = image.size
-        guard size.width > 0, size.height > 0 else { return 240 }
+        guard size.width > 0, size.height > 0 else { return 180 }
         let contentHeight = tileHeight - inset * 2
         let contentWidth = contentHeight * (size.width / size.height)
         return min(maxWidth, max(minWidth, contentWidth + inset * 2))
@@ -284,18 +284,18 @@ private struct StudioLogoChip: View {
     let url: URL
     let name: String
 
-    private let tileHeight: CGFloat = 180
-    private let corner: CGFloat = 22
+    private let tileHeight: CGFloat = 135
+    private let corner: CGFloat = 17
 
     var body: some View {
         AsyncImage(url: url) { phase in
             if case let .success(image) = phase {
-                image.resizable().scaledToFit().padding(26)
+                image.resizable().scaledToFit().padding(20)
             } else {
                 Color.clear
             }
         }
-        .frame(width: 240, height: tileHeight)
+        .frame(width: 180, height: tileHeight)
         .background(
             RoundedRectangle(cornerRadius: corner, style: .continuous)
                 .fill(Color(white: 0.96))

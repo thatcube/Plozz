@@ -77,6 +77,10 @@ struct SeriesDetailView: View {
     /// Whether the page was opened targeting a specific episode.
     private var isTargetingEpisode: Bool { initialEpisode != nil }
 
+    /// Scroll anchor for the hero, used to keep the page pinned to the top while
+    /// initial focus lands on the bottom-anchored Play button.
+    private static let topAnchorID = "series-hero-top"
+
     var body: some View {
         scrollContent
             // Never clip a focused card's lift, shadow or border.
@@ -102,30 +106,46 @@ struct SeriesDetailView: View {
     }
 
     private var scroll: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
-                DetailHeroView(
-                    item: heroItem,
-                    backdropItem: series,
-                    spoilerSettings: spoilerSettings,
-                    playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
-                    onPlay: playTarget.map { target in { onPlay(target) } },
-                    playProgress: playTarget?.resumeProgressFraction,
-                    playRemainingText: playTarget?.resumeRemainingText,
-                    onPlayTrailer: trailerButtonAction,
-                    fallbackTechnicalBadges: representativeTechnicalBadges,
-                    playButtonFocus: isTargetingEpisode ? $playFocused : nil
-                )
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 32) {
+                    DetailHeroView(
+                        item: heroItem,
+                        backdropItem: series,
+                        spoilerSettings: spoilerSettings,
+                        playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
+                        onPlay: playTarget.map { target in { onPlay(target) } },
+                        playProgress: playTarget?.resumeProgressFraction,
+                        playRemainingText: playTarget?.resumeRemainingText,
+                        onPlayTrailer: trailerButtonAction,
+                        fallbackTechnicalBadges: representativeTechnicalBadges,
+                        playButtonFocus: isTargetingEpisode ? $playFocused : nil
+                    )
+                    .id(Self.topAnchorID)
 
-                if !seasons.isEmpty {
-                    seasonTabBar
+                    if !seasons.isEmpty {
+                        seasonTabBar
+                    }
+
+                    episodeRail
+
+                    DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
                 }
-
-                episodeRail
-
-                DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
+                .padding(.bottom, PlozzTheme.Metrics.screenPadding)
             }
-            .padding(.bottom, PlozzTheme.Metrics.screenPadding)
+            // Keep the page pinned to the top on first load. The Play button is
+            // bottom-anchored in the full-screen hero, so when initial focus
+            // lands on it tvOS auto-scrolls to frame it "comfortably", nudging
+            // the backdrop top off screen. Snap back to the hero top so focus
+            // stays on Play without the page appearing scrolled down; moving
+            // down to the seasons scrolls normally from there.
+            .onChange(of: playFocused) { _, focused in
+                if focused { proxy.scrollTo(Self.topAnchorID, anchor: .top) }
+            }
+            .task {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                proxy.scrollTo(Self.topAnchorID, anchor: .top)
+            }
         }
     }
 

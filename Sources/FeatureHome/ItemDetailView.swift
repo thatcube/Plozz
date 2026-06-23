@@ -68,40 +68,52 @@ public struct ItemDetailView: View {
 
     /// Layout for non-series detail: a hero plus, for seasons/folders/collections,
     /// a single rail of children. Movies and episodes show just the hero + Play.
+    private static let topAnchorID = "item-hero-top"
+
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
-                DetailHeroView(
-                    item: detail.item,
-                    spoilerSettings: spoilerSettings,
-                    playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
-                    onPlay: isPlayable(detail.item) ? { onPlay(detail.item) } : nil,
-                    playProgress: isPlayable(detail.item) ? detail.item.resumeProgressFraction : nil,
-                    playRemainingText: isPlayable(detail.item) ? detail.item.resumeRemainingText : nil,
-                    onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
-                    fallbackTechnicalBadges: detail.children.representativeTechnicalBadges
-                )
-                if !detail.children.isEmpty {
-                    MediaRowView(
-                        title: childrenTitle(for: detail.item),
-                        items: detail.children,
-                        style: detail.item.kind == .series ? .poster : .landscape,
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 32) {
+                    DetailHeroView(
+                        item: detail.item,
                         spoilerSettings: spoilerSettings,
-                        initialFocusID: nextUpFocusID(for: detail),
-                        leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
-                        onSelect: onSelectChild
+                        playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
+                        onPlay: isPlayable(detail.item) ? { onPlay(detail.item) } : nil,
+                        playProgress: isPlayable(detail.item) ? detail.item.resumeProgressFraction : nil,
+                        playRemainingText: isPlayable(detail.item) ? detail.item.resumeRemainingText : nil,
+                        onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
+                        fallbackTechnicalBadges: detail.children.representativeTechnicalBadges
                     )
-                    .mediaItemActionContext(childrenActionContext(for: detail))
+                    .id(Self.topAnchorID)
+                    if !detail.children.isEmpty {
+                        MediaRowView(
+                            title: childrenTitle(for: detail.item),
+                            items: detail.children,
+                            style: detail.item.kind == .series ? .poster : .landscape,
+                            spoilerSettings: spoilerSettings,
+                            initialFocusID: nextUpFocusID(for: detail),
+                            leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
+                            onSelect: onSelectChild
+                        )
+                        .mediaItemActionContext(childrenActionContext(for: detail))
+                    }
+                    DetailExtrasView(item: detail.item, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
                 }
-                DetailExtrasView(item: detail.item, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
+                .padding(.bottom, PlozzTheme.Metrics.screenPadding)
             }
-            .padding(.bottom, PlozzTheme.Metrics.screenPadding)
+            // Pin to the top on first load: the Play button is bottom-anchored in
+            // the full-screen hero, so initial focus on it makes tvOS auto-scroll
+            // the page down. Snap back to the hero top so focus stays on Play.
+            .task {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                proxy.scrollTo(Self.topAnchorID, anchor: .top)
+            }
+            // Never clip a focused card's lift, shadow or border.
+            .scrollClipDisabled()
+            // Let the hero bleed into the top overscan inset instead of the
+            // ScrollView reserving it as a blank bar above the backdrop.
+            .ignoresSafeArea(.container, edges: .top)
         }
-        // Never clip a focused card's lift, shadow or border.
-        .scrollClipDisabled()
-        // Let the hero bleed into the top overscan inset instead of the
-        // ScrollView reserving it as a blank bar above the backdrop.
-        .ignoresSafeArea(.container, edges: .top)
     }
 
     /// For a season opened directly, the episode rail is an ordered list, so we

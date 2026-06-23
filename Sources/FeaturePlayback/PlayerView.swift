@@ -54,7 +54,7 @@ public struct PlayerView: View {
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
                         dismiss: { dismiss() }
                     ),
-                    trickplay: viewModel.trickplay,
+                    scrubPreview: viewModel.scrubPreview,
                     themePalette: ThemePaletteBox(
                         makeControls: { model, actions, onExitToSurface in
                             AnyView(PlayerControls(

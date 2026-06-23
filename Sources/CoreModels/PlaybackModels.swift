@@ -199,9 +199,10 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// when the streamed (transcoded) asset exposes no track metadata.
     public var sourceMetadata: MediaSourceMetadata?
     /// Scrubbing-preview thumbnails for this item, when the server has generated
-    /// them. `nil` (or an unusable manifest) means the custom player simply shows
-    /// no scrub preview — it never blocks playback.
-    public var trickplay: TrickplayManifest?
+    /// them (Jellyfin trickplay tiles or a Plex BIF index). `nil` (or an unusable
+    /// source) means the custom player simply shows no scrub preview — it never
+    /// blocks playback.
+    public var scrubPreview: ScrubPreviewSource?
 
     public init(
         item: MediaItem,
@@ -213,7 +214,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         isTranscoding: Bool = false,
         deliveryMode: PlaybackDiagnostics.PlaybackMode? = nil,
         sourceMetadata: MediaSourceMetadata? = nil,
-        trickplay: TrickplayManifest? = nil
+        scrubPreview: ScrubPreviewSource? = nil
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -224,7 +225,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.isTranscoding = isTranscoding
         self.deliveryMode = deliveryMode ?? (isTranscoding ? .transcode : .directPlay)
         self.sourceMetadata = sourceMetadata
-        self.trickplay = trickplay
+        self.scrubPreview = scrubPreview
     }
 }
 

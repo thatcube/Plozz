@@ -11,7 +11,7 @@ import CoreModels
 /// every other frame is a cheap in-memory `CGImage` crop. Concurrent requests
 /// for the same tile coalesce onto one download.
 @MainActor
-final class TrickplayThumbnailLoader {
+final class TrickplayThumbnailLoader: ScrubThumbnailProviding {
     private let manifest: TrickplayManifest
     private let session: URLSession
     private var tileCache: [URL: CGImage] = [:]

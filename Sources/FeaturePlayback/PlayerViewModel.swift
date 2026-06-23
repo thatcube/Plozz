@@ -555,8 +555,8 @@ public final class PlayerViewModel {
     /// to populate the playback diagnostics overlay.
     public var sourceMetadata: MediaSourceMetadata? { request?.sourceMetadata }
 
-    /// Scrubbing-preview thumbnails for the playing item, if the server has them.
-    public var trickplay: TrickplayManifest? { request?.trickplay }
+    /// Scrubbing-preview source for the playing item, if the server has previews.
+    public var scrubPreview: ScrubPreviewSource? { request?.scrubPreview }
 
     /// The active engine, exposed so the shared transport overlay can drive
     /// playback (play/pause/seek/state/tracks) and host the engine's bare video
@@ -574,7 +574,7 @@ public final class PlayerViewModel {
     private func configureControls(for request: PlaybackRequest) {
         controls.title = request.item.title
         controls.subtitle = Self.subtitleText(for: request.item)
-        controls.hasTrickplay = request.trickplay?.isUsable ?? false
+        controls.hasTrickplay = request.scrubPreview?.isUsable ?? false
         controls.duration = request.item.runtime ?? 0
         controls.currentSeconds = 0
         controls.bufferedSeconds = 0

@@ -169,8 +169,22 @@ public struct PlexProvider: MediaProvider {
             sourceMetadata: Self.sourceMetadata(
                 container: media.container ?? part.container,
                 streams: streams
-            )
+            ),
+            scrubPreview: scrubPreview(for: part)
         )
+    }
+
+    /// Builds a Plex scrubbing-preview source from a part's BIF index, when the
+    /// server has generated "video preview thumbnails" (signalled by the part's
+    /// `indexes` listing `sd`). Returns `nil` otherwise so the player simply
+    /// shows no preview.
+    func scrubPreview(for part: PlexPart) -> ScrubPreviewSource? {
+        guard let partID = part.id,
+              let indexes = part.indexes,
+              indexes.lowercased().contains("sd"),
+              let url = client.bifIndexURL(partID: partID, quality: "sd")
+        else { return nil }
+        return .plexBIF(url: url)
     }
 
     /// Plex reports bitrates in kbps; the diagnostics model wants bits/sec.

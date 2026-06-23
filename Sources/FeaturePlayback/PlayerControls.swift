@@ -568,7 +568,8 @@ private struct ScrubBar: View {
 
                 if model.isScrubbing {
                     thumbnailPreview(width: width, knobX: knobX)
-                } else if showThumbOverlay {
+                }
+                if showThumbOverlay || model.isScrubbing {
                     thumbOverlay(width: width, knobX: knobX)
                 }
             }
@@ -594,6 +595,11 @@ private struct ScrubBar: View {
         }
     }
 
+    /// Vertical anchor (relative to the scrub track) for the time + glyph row.
+    /// Kept constant across scrubbing / non-scrubbing so the time never jumps;
+    /// the trickplay thumbnail floats above this line.
+    static let timeRowY: CGFloat = -28
+
     /// Floated just above the scrub head (the focus indicator) and tracking it,
     /// Apple-TV style. The current time is pinned dead-centre on the thumb and
     /// never moves; the flanking glyphs hang off its left/right edges as overlays
@@ -617,7 +623,7 @@ private struct ScrubBar: View {
             .overlay(alignment: .trailing) {
                 rightSlot.frame(width: 44, height: 44).offset(x: 50)
             }
-            .position(x: cx, y: -36)
+            .position(x: cx, y: Self.timeRowY)
     }
 
     /// Left of the current time: the −10 glyph after a backward skip, replaced by
@@ -665,37 +671,40 @@ private struct ScrubBar: View {
 
     @ViewBuilder
     private func thumbnailPreview(width: CGFloat, knobX: CGFloat) -> some View {
-        let thumbWidth: CGFloat = 300
+        let thumbWidth: CGFloat = 375
         let aspect = previewAspect
         let thumbHeight = thumbWidth / aspect
         let clampedX = min(max(thumbWidth / 2, knobX), width - thumbWidth / 2)
+        let corner: CGFloat = 18
+        let border: CGFloat = 2.5
 
-        VStack(spacing: 8) {
-            Group {
-                if let image = model.previewImage {
-                    Image(decorative: image, scale: 1, orientation: .up)
-                        .resizable()
-                        .interpolation(.medium)
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Rectangle().fill(.black.opacity(0.6))
-                }
+        let content = Group {
+            if let image = model.previewImage {
+                Image(decorative: image, scale: 1, orientation: .up)
+                    .resizable()
+                    .interpolation(.medium)
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Rectangle().fill(.black.opacity(0.6))
             }
-            .frame(width: thumbWidth, height: thumbHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(.white.opacity(0.85), lineWidth: 2)
-            )
-
-            Text(PlayerControls.timeLabel(model.scrubSeconds))
-                .monospacedDigit()
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(.white)
-                .shadow(radius: 3)
         }
-        .frame(width: thumbWidth)
-        .position(x: clampedX, y: -thumbHeight / 2 - 30)
+        .frame(width: thumbWidth, height: thumbHeight)
+        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+
+        Group {
+            if #available(tvOS 26.0, *) {
+                content
+                    .padding(border)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: corner + border, style: .continuous))
+            } else {
+                content
+                    .overlay(
+                        RoundedRectangle(cornerRadius: corner, style: .continuous)
+                            .stroke(.white.opacity(0.85), lineWidth: border)
+                    )
+            }
+        }
+        .position(x: clampedX, y: Self.timeRowY - 22 - thumbHeight / 2)
     }
 
     private var previewAspect: CGFloat {

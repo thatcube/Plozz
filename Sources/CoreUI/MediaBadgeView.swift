@@ -46,7 +46,7 @@ public struct MediaBadgeChip: View {
     public var body: some View {
         switch badge.style {
         case .rating:
-            label(badge.label)
+            label(badge.label, font: Font.custom("Graduate-Regular", size: 21))
                 .overlay(
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.55), lineWidth: 2)
@@ -87,9 +87,9 @@ public struct MediaBadgeChip: View {
         }
     }
 
-    private func label(_ text: String, textColor: Color = .white) -> some View {
+    private func label(_ text: String, textColor: Color = .white, font: Font? = nil) -> some View {
         Text(text)
-            .font(Self.textFont)
+            .font(font ?? Self.textFont)
             .foregroundStyle(textColor)
             .textCase(.uppercase)
             .tracking(0.5)

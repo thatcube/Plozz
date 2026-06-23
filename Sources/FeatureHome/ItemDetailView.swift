@@ -76,6 +76,7 @@ public struct ItemDetailView: View {
                 VStack(alignment: .leading, spacing: 32) {
                     DetailHeroView(
                         item: detail.item,
+                        heroHeightFraction: detail.children.isEmpty ? 1.0 : 0.8,
                         spoilerSettings: spoilerSettings,
                         playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
                         onPlay: isPlayable(detail.item) ? { onPlay(detail.item) } : nil,

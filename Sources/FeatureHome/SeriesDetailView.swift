@@ -110,6 +110,7 @@ struct SeriesDetailView: View {
                     DetailHeroView(
                         item: heroItem,
                         backdropItem: series,
+                        heroHeightFraction: 0.8,
                         spoilerSettings: spoilerSettings,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                         onPlay: playTarget.map { target in { onPlay(target) } },
@@ -121,11 +122,15 @@ struct SeriesDetailView: View {
                     )
                     .id(Self.topAnchorID)
 
-                    if !seasons.isEmpty {
-                        seasonTabBar
-                    }
+                    // Seasons and their episodes sit together as a tighter group,
+                    // with the show-level extras kept at the wider page spacing.
+                    VStack(alignment: .leading, spacing: 12) {
+                        if !seasons.isEmpty {
+                            seasonTabBar
+                        }
 
-                    episodeRail
+                        episodeRail
+                    }
 
                     DetailExtrasView(item: series, leadingInset: PlozzTheme.Metrics.heroLeadingPadding)
                 }
@@ -137,8 +142,15 @@ struct SeriesDetailView: View {
             // the backdrop top off screen. Snap back to the hero top so focus
             // stays on Play without the page appearing scrolled down; moving
             // down to the seasons scrolls normally from there.
+            // Snap back to the hero top whenever Play regains focus (e.g. moving
+            // "up" from the seasons), animated so the page glides up smoothly
+            // rather than jumping instantly.
             .onChange(of: playFocused) { _, focused in
-                if focused { proxy.scrollTo(Self.topAnchorID, anchor: .top) }
+                if focused {
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                    }
+                }
             }
             .task {
                 try? await Task.sleep(nanoseconds: 50_000_000)
@@ -358,25 +370,18 @@ struct SeriesDetailView: View {
         await frontTargetEpisodeIfNeeded(in: first.id)
     }
 
-    /// After episodes load, swap the hero to the fully-loaded copy of the episode
-    /// the page should present: the tapped episode when targeting one, otherwise
-    /// the season's "next up" (the Play button's resume target). This keeps the
-    /// hero reflecting that episode while focus stays on the Play button — the
-    /// rail below is only pre-scrolled, never focused.
+    /// After episodes load, replace the hero's tapped-episode placeholder with the
+    /// fully-loaded episode (richer overview/badges) so the hero and Play target
+    /// reflect complete metadata. No-op unless the page is targeting an episode —
+    /// a normal open keeps the stable series hero (the Play button still resumes
+    /// "next up"), so nothing swaps under the user after load.
     @MainActor
     private func frontTargetEpisodeIfNeeded(in seasonID: String?) async {
+        guard let target = initialEpisode else { return }
         let pool = seasonID.flatMap { viewModel.episodes(for: $0) } ?? (seasons.isEmpty ? looseEpisodes : [])
-        if let target = initialEpisode {
-            if let loaded = pool.first(where: { $0.id == target.id }) {
-                heroItem = loaded
-            }
-            return
+        if let loaded = pool.first(where: { $0.id == target.id }) {
+            heroItem = loaded
         }
-        // Normal open: surface "next up" in the hero without moving focus, but
-        // only while the hero is still presenting the show itself (i.e. the user
-        // hasn't already browsed to another episode/season).
-        guard heroItem.id == series.id, let nextUp = SeriesResume.nextUp(in: currentEpisodes) else { return }
-        heroItem = nextUp
     }
 }
 

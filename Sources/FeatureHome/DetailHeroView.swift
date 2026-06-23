@@ -20,16 +20,21 @@ struct DetailHeroView: View {
     /// drives the logo, title, overview and Play button. Swapping the backdrop
     /// per focused episode reads as distracting flicker, so we don't.
     var backdropItem: MediaItem?
+    /// Fraction of the screen height the hero backdrop occupies. Defaults to a
+    /// full-screen cinematic hero (`1.0`); a TV show shrinks this (e.g. `0.8`) so
+    /// the season tabs and episode row peek above the fold, signalling there's
+    /// more to scroll to.
+    var heroHeightFraction: CGFloat = 1.0
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
     let playTitle: String?
     let onPlay: (() -> Void)?
-    /// When provided (`0..<1`), a thin watched-progress bar is shown beneath the
-    /// Play button (between it and the remaining-time line).
+    /// When provided (`0..<1`), a thin watched-progress bar is shown inside the
+    /// Play button, between the play icon and the remaining-time line.
     var playProgress: Double? = nil
-    /// When provided, a "… left" remaining-time line is shown beneath the Play
-    /// button's progress bar.
+    /// When provided, a "… left" remaining-time line is shown inside the Play
+    /// button, after the progress bar.
     var playRemainingText: String? = nil
     /// When provided, a secondary "Trailer" button is shown next to Play.
     var onPlayTrailer: (() -> Void)? = nil
@@ -44,9 +49,10 @@ struct DetailHeroView: View {
     /// rather than down in the episode row.
     var playButtonFocus: FocusState<Bool>.Binding? = nil
 
-    /// Measured width of the Play button, so the resume progress bar and
-    /// remaining-time line beneath it can be sized to match.
-    @State private var playButtonWidth: CGFloat = 0
+    /// Local focus state of the Play button, so the inline resume progress bar
+    /// can flip its colours to stay visible against the button's focused (white)
+    /// vs unfocused (dark) background.
+    @FocusState private var playButtonHasFocus: Bool
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
@@ -91,7 +97,7 @@ struct DetailHeroView: View {
             ) {
                 Rectangle().fill(.tertiary)
             }
-            .frame(height: Self.heroHeight)
+            .frame(height: Self.screenHeight * heroHeightFraction)
             .frame(maxWidth: .infinity)
             .clipped()
             .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
@@ -183,22 +189,16 @@ struct DetailHeroView: View {
                         .frame(maxWidth: 960, alignment: .topLeading)
                 }
                 if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 24) {
-                            if let playTitle, let onPlay {
-                                playButton(title: playTitle, action: onPlay)
-                            }
-                            if let onPlayTrailer {
-                                Button(action: onPlayTrailer) {
-                                    Label("Trailer", systemImage: "film.fill")
-                                }
-                                .buttonStyle(.bordered)
-                            }
+                    HStack(spacing: 24) {
+                        if let playTitle, let onPlay {
+                            playButton(title: playTitle, action: onPlay)
                         }
-                        // Resume affordance lives *below* the Play button — a thin
-                        // progress bar then the "… left" line — so the button keeps
-                        // its normal height. Sized to the measured button width.
-                        resumeProgressDetail
+                        if let onPlayTrailer {
+                            Button(action: onPlayTrailer) {
+                                Label("Trailer", systemImage: "film.fill")
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
                     .padding(.top, 8)
                     // Span the full width and make the action row one focus section.
@@ -207,7 +207,6 @@ struct DetailHeroView: View {
                     // the left-most seasons. Keeps working as more buttons are added.
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .focusSection()
-                    .onPreferenceChange(PlayButtonWidthKey.self) { playButtonWidth = $0 }
                 }
             }
             .padding(.vertical, PlozzTheme.Metrics.screenPadding)
@@ -221,23 +220,26 @@ struct DetailHeroView: View {
 
     /// The hero Play button. Extracted so the optional initial-focus binding can
     /// be applied to it conditionally (a `nil` binding leaves default focus
-    /// behaviour untouched). Keeps its standard height; the resume progress bar
-    /// and "… left" line render beneath it (see `resumeProgressDetail`).
+    /// behaviour untouched). When the resume target is partially watched the
+    /// label becomes `▶  [progress bar]  … left`, keeping the button's normal
+    /// height; otherwise it's the plain `▶  Play/Resume`.
     @ViewBuilder
     private func playButton(title: String, action: @escaping () -> Void) -> some View {
         let button = Button(action: action) {
-            HStack(spacing: 14) {
+            HStack(spacing: 16) {
                 Image(systemName: "play.fill")
-                Text(title)
+                if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1 {
+                    resumeProgressCapsule(progress: playProgress)
+                    Text(playRemainingText)
+                } else {
+                    Text(title)
+                }
             }
             .frame(minWidth: 260)
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(key: PlayButtonWidthKey.self, value: geo.size.width)
-                }
-            )
         }
         .buttonStyle(.borderedProminent)
+        .focused($playButtonHasFocus)
+
         if let playButtonFocus {
             button.focused(playButtonFocus, equals: true)
         } else {
@@ -245,34 +247,24 @@ struct DetailHeroView: View {
         }
     }
 
-    /// The resume affordance shown beneath the Play button when the target has
-    /// been partially watched: a thin watched-progress bar followed by the
-    /// "… left" remaining-time line. Sized to the Play button's width so it reads
-    /// as belonging to it. Hidden unless partially watched.
-    @ViewBuilder
-    private var resumeProgressDetail: some View {
-        if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1 {
-            VStack(alignment: .leading, spacing: 8) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(.white.opacity(0.3))
-                        Capsule()
-                            .fill(.white)
-                            .frame(width: max(8, geo.size.width * playProgress))
-                    }
-                }
-                .frame(height: 6)
-                // A soft shadow keeps the bar legible over bright backdrops in
-                // both the focused and unfocused states.
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-
-                Text(playRemainingText)
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
+    /// The thin watched-progress bar shown inside the Play button between the
+    /// play icon and the "… left" line. Its colours flip with the button's focus
+    /// state — light fill on the dark unfocused button, dark fill on the white
+    /// focused button — so it stays clearly visible either way.
+    private func resumeProgressCapsule(progress: Double) -> some View {
+        let onLight = playButtonHasFocus
+        let track = onLight ? Color.black.opacity(0.22) : Color.white.opacity(0.32)
+        let fill = onLight ? Color.black.opacity(0.85) : Color.white
+        let width: CGFloat = 150
+        return Capsule()
+            .fill(track)
+            .frame(width: width, height: 6)
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(fill)
+                    .frame(width: max(8, width * progress), height: 6)
             }
-            .frame(width: playButtonWidth > 0 ? playButtonWidth : nil, alignment: .leading)
-            .padding(.leading, 4)
-        }
+            .animation(.easeInOut(duration: 0.2), value: onLight)
     }
 
     /// The plain text title, used both under spoilers and as the fallback when no
@@ -282,10 +274,10 @@ struct DetailHeroView: View {
             .font(.system(size: 64, weight: .bold))
     }
 
-    /// Full-screen height for the backdrop so the hero reads as a cinematic,
-    /// edge-to-edge image rather than a fixed-height banner. Falls back to a
-    /// 1080p constant where UIKit isn't available (non-Apple toolchains/tests).
-    private static var heroHeight: CGFloat {
+    /// Full screen height, the basis for the backdrop's height (scaled by
+    /// `heroHeightFraction`). Falls back to a 1080p constant where UIKit isn't
+    /// available (non-Apple toolchains/tests).
+    private static var screenHeight: CGFloat {
         #if canImport(UIKit)
         return UIScreen.main.bounds.height
         #else
@@ -367,15 +359,6 @@ struct DetailHeroView: View {
                 tmdbID: tmdbID
             )
         }
-    }
-}
-
-/// Carries the measured Play button width up so the resume progress bar and
-/// remaining-time line beneath it can match its width.
-private struct PlayButtonWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
 

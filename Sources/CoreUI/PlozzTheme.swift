@@ -39,7 +39,7 @@ public enum PlozzTheme {
         /// rows beneath it (seasons, episodes, cast, chips) so the whole page lines
         /// up on one edge. Wider than `screenPadding` so content sits in from the
         /// screen border the way the Apple TV detail page does, without hugging it.
-        public static let heroLeadingPadding: CGFloat = 48
+        public static let heroLeadingPadding: CGFloat = 64
     }
 }
 

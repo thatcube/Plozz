@@ -76,9 +76,27 @@ public final class PlayerControlsModel {
     public var scrubSeconds: TimeInterval = 0
     /// The trickplay frame for `scrubSeconds`, shown above the scrub head.
     public var previewImage: CGImage?
-    /// True while the in-player options menu is on screen. The input controller
-    /// reads this to suppress scrub gestures and hand focus to the menu.
-    public var optionsMenuVisible: Bool = false
+    /// True while the focusable bottom control bar owns Siri-Remote focus. The
+    /// input controller reads this to suppress scrub gestures and the control bar
+    /// reads it to take/relinquish focus.
+    public var controlBarVisible: Bool = false
+
+    // MARK: Skip hint (transient ±10s indicator)
+    /// Whether the last skip was forward; drives which glyph the hint shows.
+    public var skipHintForward: Bool = true
+    /// True while the transient skip indicator is on screen.
+    public var skipHintVisible: Bool = false
+    /// Bumped on every skip so the indicator's pop-in transition replays even
+    /// when it's already visible (rapid repeated skips).
+    public var skipHintToken: Int = 0
+    /// Which side of the thumb the loading spinner sits on while a seek resolves:
+    /// the left of the current time after a backward skip, otherwise the right
+    /// (forward skip or a plain scrub). Mirrors where the ±10s glyph appeared.
+    public var seekIndicatorOnLeft: Bool = false
+
+    /// Whether the live playback-diagnostics overlay is shown. Toggleable from
+    /// the in-player control bar; seeded from the caller's initial preference.
+    public var diagnosticsEnabled: Bool = false
 
     public init() {}
 

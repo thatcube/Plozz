@@ -400,12 +400,12 @@ public final class PlayerViewModel {
 
     /// Reports the current position. Best-effort: a failed report must never
     /// interrupt playback, so errors are swallowed (and never logged with data).
-    private func report(event: PlaybackEvent, isPaused: Bool) async {
+    private func report(event: PlaybackEvent, isPaused: Bool, positionOverride: TimeInterval? = nil) async {
         guard let request else { return }
         let progress = PlaybackProgress(
             itemID: itemID,
             playSessionID: request.playSessionID,
-            positionSeconds: engine.currentTime,
+            positionSeconds: positionOverride ?? engine.currentTime,
             isPaused: isPaused
         )
         do {
@@ -515,10 +515,15 @@ public final class PlayerViewModel {
     /// resume point, then tear the engine down.
     public func stop() async {
         cancelWatchdog()
-        await report(event: .stop, isPaused: true)
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = nil
+        // Silence the engine *before* the final server report. The report is a
+        // network round-trip that can take a second or two; stopping first means
+        // leaving the player never keeps playing audio while it completes. Grab
+        // the resume position up front since the engine is torn down here.
+        let finalPosition = max(engine.furthestObservedPosition, engine.currentTime)
         engine.stop()
+        await report(event: .stop, isPaused: true, positionOverride: finalPosition)
     }
 
     // MARK: - View / diagnostics access

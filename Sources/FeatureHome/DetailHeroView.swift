@@ -197,7 +197,7 @@ struct DetailHeroView: View {
                             Button(action: onPlayTrailer) {
                                 Label("Trailer", systemImage: "film.fill")
                             }
-                            .buttonStyle(.bordered)
+                            .modifier(HeroButtonStyle(prominent: false))
                         }
                     }
                     .padding(.top, 8)
@@ -237,7 +237,7 @@ struct DetailHeroView: View {
             }
             .frame(minWidth: 260)
         }
-        .buttonStyle(.borderedProminent)
+        .modifier(HeroButtonStyle(prominent: true))
         .focused($playButtonHasFocus)
 
         if let playButtonFocus {
@@ -358,6 +358,31 @@ struct DetailHeroView: View {
                 isTV: isTV,
                 tmdbID: tmdbID
             )
+        }
+    }
+}
+
+/// Applies the native Liquid Glass button style to the hero's action buttons on
+/// OS versions that ship it (tvOS 26+), falling back to the classic bordered
+/// styles below that. `prominent` picks the tinted primary glass (Play) versus
+/// the lighter clear glass (secondary actions like Trailer).
+private struct HeroButtonStyle: ViewModifier {
+    let prominent: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(tvOS 26.0, *) {
+            if prominent {
+                content.buttonStyle(.glassProminent)
+            } else {
+                content.buttonStyle(.glass)
+            }
+        } else {
+            if prominent {
+                content.buttonStyle(.borderedProminent)
+            } else {
+                content.buttonStyle(.bordered)
+            }
         }
     }
 }

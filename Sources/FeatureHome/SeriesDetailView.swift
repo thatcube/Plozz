@@ -97,12 +97,10 @@ struct SeriesDetailView: View {
 
     @ViewBuilder
     private var scrollContent: some View {
-        if isTargetingEpisode {
-            // Land focus on the hero Play button (top) rather than the episode row.
-            scroll.defaultFocus($playFocused, true)
-        } else {
-            scroll
-        }
+        // Always land initial focus on the hero Play button (top) rather than the
+        // episode row or a season chip, while the episode rail merely pre-scrolls
+        // to the resume/target episode below.
+        scroll.defaultFocus($playFocused, true)
     }
 
     private var scroll: some View {
@@ -119,7 +117,7 @@ struct SeriesDetailView: View {
                         playRemainingText: playTarget?.resumeRemainingText,
                         onPlayTrailer: trailerButtonAction,
                         fallbackTechnicalBadges: representativeTechnicalBadges,
-                        playButtonFocus: isTargetingEpisode ? $playFocused : nil
+                        playButtonFocus: $playFocused
                     )
                     .id(Self.topAnchorID)
 
@@ -229,10 +227,11 @@ struct SeriesDetailView: View {
             items: episodes,
             style: .landscape,
             spoilerSettings: spoilerSettings,
-            // When targeting a tapped episode, pre-scroll the row to it but keep
-            // focus on the hero Play button; otherwise surface "next up" focused.
-            initialFocusID: isTargetingEpisode ? nil : SeriesResume.nextUp(in: episodes)?.id,
-            initialScrollID: isTargetingEpisode ? initialEpisode?.id : nil,
+            // Keep focus on the hero Play button; only pre-scroll the rail so the
+            // resume/target episode sits in the correct position below, ready for
+            // when focus moves down into the episodes.
+            initialFocusID: nil,
+            initialScrollID: isTargetingEpisode ? initialEpisode?.id : SeriesResume.nextUp(in: episodes)?.id,
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusChange: { focused in
                 if let focused { heroItem = focused }
@@ -359,16 +358,25 @@ struct SeriesDetailView: View {
         await frontTargetEpisodeIfNeeded(in: first.id)
     }
 
-    /// After episodes load, replace the hero's tapped-episode placeholder with the
-    /// fully-loaded episode (richer overview/badges) so the hero and Play target
-    /// reflect complete metadata. No-op unless the page is targeting an episode.
+    /// After episodes load, swap the hero to the fully-loaded copy of the episode
+    /// the page should present: the tapped episode when targeting one, otherwise
+    /// the season's "next up" (the Play button's resume target). This keeps the
+    /// hero reflecting that episode while focus stays on the Play button — the
+    /// rail below is only pre-scrolled, never focused.
     @MainActor
     private func frontTargetEpisodeIfNeeded(in seasonID: String?) async {
-        guard let target = initialEpisode else { return }
         let pool = seasonID.flatMap { viewModel.episodes(for: $0) } ?? (seasons.isEmpty ? looseEpisodes : [])
-        if let loaded = pool.first(where: { $0.id == target.id }) {
-            heroItem = loaded
+        if let target = initialEpisode {
+            if let loaded = pool.first(where: { $0.id == target.id }) {
+                heroItem = loaded
+            }
+            return
         }
+        // Normal open: surface "next up" in the hero without moving focus, but
+        // only while the hero is still presenting the show itself (i.e. the user
+        // hasn't already browsed to another episode/season).
+        guard heroItem.id == series.id, let nextUp = SeriesResume.nextUp(in: currentEpisodes) else { return }
+        heroItem = nextUp
     }
 }
 

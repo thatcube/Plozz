@@ -25,11 +25,11 @@ struct DetailHeroView: View {
     /// (e.g. a season with no resolved episodes yet).
     let playTitle: String?
     let onPlay: (() -> Void)?
-    /// When provided (`0..<1`), the Play button shows a small progress bar of how
-    /// far the resume target has been watched.
+    /// When provided (`0..<1`), a thin watched-progress bar is shown beneath the
+    /// Play button (between it and the remaining-time line).
     var playProgress: Double? = nil
-    /// When provided, a small "… left" remaining-time line is shown inside the
-    /// Play button beneath its title.
+    /// When provided, a "… left" remaining-time line is shown beneath the Play
+    /// button's progress bar.
     var playRemainingText: String? = nil
     /// When provided, a secondary "Trailer" button is shown next to Play.
     var onPlayTrailer: (() -> Void)? = nil
@@ -43,6 +43,10 @@ struct DetailHeroView: View {
     /// opened targeting a specific episode so focus lands on Play at the top
     /// rather than down in the episode row.
     var playButtonFocus: FocusState<Bool>.Binding? = nil
+
+    /// Measured width of the Play button, so the resume progress bar and
+    /// remaining-time line beneath it can be sized to match.
+    @State private var playButtonWidth: CGFloat = 0
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
@@ -179,16 +183,22 @@ struct DetailHeroView: View {
                         .frame(maxWidth: 960, alignment: .topLeading)
                 }
                 if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
-                    HStack(spacing: 24) {
-                        if let playTitle, let onPlay {
-                            playButton(title: playTitle, action: onPlay)
-                        }
-                        if let onPlayTrailer {
-                            Button(action: onPlayTrailer) {
-                                Label("Trailer", systemImage: "film.fill")
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 24) {
+                            if let playTitle, let onPlay {
+                                playButton(title: playTitle, action: onPlay)
                             }
-                            .buttonStyle(.bordered)
+                            if let onPlayTrailer {
+                                Button(action: onPlayTrailer) {
+                                    Label("Trailer", systemImage: "film.fill")
+                                }
+                                .buttonStyle(.bordered)
+                            }
                         }
+                        // Resume affordance lives *below* the Play button — a thin
+                        // progress bar then the "… left" line — so the button keeps
+                        // its normal height. Sized to the measured button width.
+                        resumeProgressDetail
                     }
                     .padding(.top, 8)
                     // Span the full width and make the action row one focus section.
@@ -197,6 +207,7 @@ struct DetailHeroView: View {
                     // the left-most seasons. Keeps working as more buttons are added.
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .focusSection()
+                    .onPreferenceChange(PlayButtonWidthKey.self) { playButtonWidth = $0 }
                 }
             }
             .padding(.vertical, PlozzTheme.Metrics.screenPadding)
@@ -210,26 +221,21 @@ struct DetailHeroView: View {
 
     /// The hero Play button. Extracted so the optional initial-focus binding can
     /// be applied to it conditionally (a `nil` binding leaves default focus
-    /// behaviour untouched). Shows a "… left" remaining line and a thin progress
-    /// bar when the resume target has been partially watched.
+    /// behaviour untouched). Keeps its standard height; the resume progress bar
+    /// and "… left" line render beneath it (see `resumeProgressDetail`).
     @ViewBuilder
     private func playButton(title: String, action: @escaping () -> Void) -> some View {
         let button = Button(action: action) {
             HStack(spacing: 14) {
                 Image(systemName: "play.fill")
-                if let playRemainingText, playProgress != nil {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                        Text(playRemainingText)
-                            .font(.system(size: 18, weight: .medium))
-                            .opacity(0.75)
-                    }
-                } else {
-                    Text(title)
-                }
+                Text(title)
             }
             .frame(minWidth: 260)
-            .overlay(alignment: .bottom) { playProgressBar }
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: PlayButtonWidthKey.self, value: geo.size.width)
+                }
+            )
         }
         .buttonStyle(.borderedProminent)
         if let playButtonFocus {
@@ -239,23 +245,33 @@ struct DetailHeroView: View {
         }
     }
 
-    /// A thin watched-progress bar pinned to the bottom of the Play button,
-    /// mirroring the Apple TV resume affordance. Hidden unless partially watched.
+    /// The resume affordance shown beneath the Play button when the target has
+    /// been partially watched: a thin watched-progress bar followed by the
+    /// "… left" remaining-time line. Sized to the Play button's width so it reads
+    /// as belonging to it. Hidden unless partially watched.
     @ViewBuilder
-    private var playProgressBar: some View {
-        if let playProgress, playProgress > 0, playProgress < 1 {
-            GeometryReader { geo in
-                Capsule()
-                    .fill(.white.opacity(0.3))
-                    .overlay(alignment: .leading) {
+    private var resumeProgressDetail: some View {
+        if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1 {
+            VStack(alignment: .leading, spacing: 8) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.3))
                         Capsule()
                             .fill(.white)
-                            .frame(width: geo.size.width * playProgress)
+                            .frame(width: max(8, geo.size.width * playProgress))
                     }
+                }
+                .frame(height: 6)
+                // A soft shadow keeps the bar legible over bright backdrops in
+                // both the focused and unfocused states.
+                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+
+                Text(playRemainingText)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
             }
-            .frame(height: 5)
-            .padding(.horizontal, 18)
-            .padding(.bottom, 10)
+            .frame(width: playButtonWidth > 0 ? playButtonWidth : nil, alignment: .leading)
+            .padding(.leading, 4)
         }
     }
 
@@ -351,6 +367,15 @@ struct DetailHeroView: View {
                 tmdbID: tmdbID
             )
         }
+    }
+}
+
+/// Carries the measured Play button width up so the resume progress bar and
+/// remaining-time line beneath it can match its width.
+private struct PlayButtonWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

@@ -48,6 +48,10 @@
 	<string>$(TMDB_BEARER_TOKEN)</string>
 	<key>TMDBProxyBaseURL</key>
 	<string>$(TMDB_PROXY_BASE_URL)</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Bungee-Regular.ttf</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

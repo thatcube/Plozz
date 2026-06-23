@@ -172,6 +172,7 @@ struct PlexUserDTO: Decodable {
     let username: String?
     let title: String?
     let email: String?
+    let thumb: String?
 }
 
 // MARK: Plex.tv: Home users

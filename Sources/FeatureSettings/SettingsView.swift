@@ -15,6 +15,11 @@ import CoreUI
 /// is a `ScrollView` of focusable content, which also fixes the previously
 /// unreachable (and therefore unreadable) About section on tvOS.
 public struct SettingsView: View {
+    private enum FocusTarget: Hashable {
+        case switchProfile
+    }
+
+    @FocusState private var focusedControl: FocusTarget?
     @State private var captions: CaptionSettingsModel
     @State private var spoilers: SpoilerSettingsModel
     @State private var theme: ThemeSettingsModel
@@ -103,6 +108,7 @@ public struct SettingsView: View {
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 40)
             }
+            .defaultFocus($focusedControl, .switchProfile)
             // Never clip a focused control's lift, shadow or border.
             .scrollClipDisabled()
             .task { await reloadLibraries() }
@@ -131,6 +137,7 @@ public struct SettingsView: View {
                 Button(action: onSwitchProfile) {
                     Label("Switch Profile", systemImage: "person.2.circle")
                 }
+                .focused($focusedControl, equals: .switchProfile)
             }
         }
     }
@@ -142,44 +149,55 @@ public struct SettingsView: View {
             title: accounts.count == 1 ? "Account" : "Accounts",
             footer: "Add another Jellyfin or Plex server to combine their libraries on Home."
         ) {
-            VStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(accounts) { account in
                     accountRow(account)
                 }
                 Button(action: onAddAccount) {
-                    Label("Add Account", systemImage: "plus.circle")
+                    HStack(spacing: 8) {
+                        Spacer(minLength: 0)
+                        Label("Add Account", systemImage: "plus.circle")
+                        Spacer(minLength: 0)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .focusSection()
         }
     }
 
     private func accountRow(_ account: Account) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(account.userName).font(.headline)
+        HStack(spacing: 16) {
+            accountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 40)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(account.userName).font(.headline)
+                HStack(spacing: 6) {
                     Text(account.server.name)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text(account.server.baseURL.absoluteString)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("·")
+                    providerLabel(account.server.provider)
+                    Text("·")
+                    Text(account.server.baseURL.host ?? account.server.baseURL.absoluteString)
+                        .truncationMode(.middle)
                 }
-                Spacer()
-                if account.id == activeAccountID {
-                    Label("Active", systemImage: "checkmark.circle.fill")
-                        .labelStyle(.iconOnly)
-                        .foregroundStyle(.green)
-                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if account.id == activeAccountID {
+                Label("Active", systemImage: "checkmark.circle.fill")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(.green)
             }
             Button(role: .destructive) {
                 onRemoveAccount(account)
             } label: {
-                Label("Remove", systemImage: "trash")
+                Image(systemName: "trash")
             }
+            .accessibilityLabel("Remove \(account.userName)")
         }
-        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
     }
 
     // MARK: - Home libraries
@@ -223,14 +241,23 @@ public struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(groupedLibraries(libraries), id: \.id) { group in
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(group.header)
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: 10) {
+                                accountAvatar(name: group.accountName, imageURL: group.accountAvatarURL, size: 30)
+                                Text("\(group.accountName) · \(group.serverName)")
+                                    .font(.headline)
+                                    .foregroundStyle(.secondary)
+                                providerLabel(group.providerKind)
+                            }
                             ForEach(group.libraries) { aggregated in
-                                Toggle(aggregated.library.title, isOn: Binding(
+                                Toggle(isOn: Binding(
                                     get: { homeVisibility.isVisible(aggregated.key) },
                                     set: { homeVisibility.setVisible($0, for: aggregated.key) }
-                                ))
+                                )) {
+                                    HStack(spacing: 8) {
+                                        providerIcon(aggregated.providerKind, size: 16)
+                                        Text(aggregated.library.title)
+                                    }
+                                }
                             }
                         }
                     }
@@ -241,13 +268,17 @@ public struct SettingsView: View {
 
     private struct LibraryGroup: Identifiable {
         let id: String
-        let header: String
+        let accountName: String
+        let serverName: String
+        let providerKind: ProviderKind
+        let accountAvatarURL: URL?
         let libraries: [AggregatedLibrary]
     }
 
     /// Groups discovered libraries by their owning account, preserving discovery
     /// order, with a "user · server (provider)" header per group.
     private func groupedLibraries(_ libraries: [AggregatedLibrary]) -> [LibraryGroup] {
+        let accountByID = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
         var order: [String] = []
         var groups: [String: [AggregatedLibrary]] = [:]
         for library in libraries {
@@ -256,31 +287,121 @@ public struct SettingsView: View {
         }
         return order.compactMap { accountID in
             guard let libs = groups[accountID], let first = libs.first else { return nil }
-            let header = "\(first.accountName) · \(first.serverName) (\(first.providerKind.displayName))"
-            return LibraryGroup(id: accountID, header: header, libraries: libs)
+            return LibraryGroup(
+                id: accountID,
+                accountName: first.accountName,
+                serverName: first.serverName,
+                providerKind: first.providerKind,
+                accountAvatarURL: accountByID[accountID].flatMap(resolvedAvatarURL),
+                libraries: libs
+            )
+        }
+    }
+
+    private func resolvedAvatarURL(for account: Account) -> URL? {
+        if let avatarURL = account.avatarURL {
+            return avatarURL
+        }
+        guard account.server.provider == .jellyfin,
+              var components = URLComponents(url: account.server.baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/Users/\(account.userID)/Images/Primary"
+        return components.url
+    }
+
+    @ViewBuilder
+    private func providerLabel(_ provider: ProviderKind) -> some View {
+        HStack(spacing: 4) {
+            providerIcon(provider, size: 14)
+            Text(provider.displayName)
+        }
+        .fixedSize()
+    }
+
+    private func providerIcon(_ provider: ProviderKind, size: CGFloat) -> some View {
+        ZStack {
+            Circle().fill(providerTint(provider).opacity(0.18))
+            Image(systemName: provider == .jellyfin ? "drop.fill" : "chevron.forward")
+                .font(.system(size: provider == .jellyfin ? size * 0.58 : size * 0.52, weight: .bold))
+                .foregroundStyle(providerTint(provider))
+        }
+        .frame(width: size, height: size)
+    }
+
+    private func providerTint(_ provider: ProviderKind) -> Color {
+        switch provider {
+        case .jellyfin:
+            return Color(red: 0.53, green: 0.38, blue: 0.95)
+        case .plex:
+            return Color(red: 0xE5 / 255, green: 0xA0 / 255, blue: 0x0D / 255)
+        }
+    }
+
+    private func accountAvatar(name: String, imageURL: URL?, size: CGFloat) -> some View {
+        Group {
+            if let imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty, .failure:
+                        avatarPlaceholder(name: name)
+                    @unknown default:
+                        avatarPlaceholder(name: name)
+                    }
+                }
+            } else {
+                avatarPlaceholder(name: name)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(
+            Circle().strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private func avatarPlaceholder(name: String) -> some View {
+        ZStack {
+            Circle().fill(Color.primary.opacity(0.10))
+            Text(String(name.prefix(1)).uppercased())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
     }
 
     // MARK: - Appearance
 
     private var appearancePanel: some View {
-        SettingsPanel(
-            title: "Appearance",
-            footer: "Choose how Plozz looks. System follows your Apple TV's appearance; OLED uses a pure-black background."
-        ) {
-            OptionCardRow(options: AppTheme.allCases, selection: themeBinding) { option in
-                VStack(spacing: 12) {
-                    Image(systemName: option.symbolName)
-                        .font(.largeTitle)
-                    Text(option.displayName)
-                        .font(.headline)
+        SettingsPanel(title: "Appearance") {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(AppTheme.allCases) { option in
+                        Button {
+                            theme.theme = option
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: option.symbolName)
+                                Text(option.displayName)
+                                Image(systemName: "checkmark.circle.fill")
+                                    .opacity(theme.theme == option ? 1 : 0)
+                            }
+                            .font(.headline)
+                            .padding(.horizontal, 4)
+                        }
+                        .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
+                        .accessibilityValue(theme.theme == option ? "Selected" : "")
+                    }
                 }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
             }
+            .scrollClipDisabled()
         }
-    }
-
-    private var themeBinding: Binding<AppTheme> {
-        Binding(get: { theme.theme }, set: { theme.theme = $0 })
     }
 
     // MARK: - Captions
@@ -376,9 +497,9 @@ private struct SettingsPanel<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(title)
-                .font(.title2.weight(.bold))
+                .font(.headline.weight(.semibold))
             content
             if let footer {
                 Text(footer)
@@ -388,7 +509,7 @@ private struct SettingsPanel<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(36)
+        .padding(28)
         .background(
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)

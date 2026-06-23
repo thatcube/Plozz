@@ -86,6 +86,7 @@ public struct PlexAuthService: Sendable {
             ),
             userID: user.id,
             userName: user.userName,
+            avatarURL: user.avatarURL,
             deviceID: deviceID,
             accessToken: candidate.accessToken
         )

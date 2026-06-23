@@ -129,6 +129,7 @@ struct SeriesDetailView: View {
                         item: heroItem,
                         backdropItem: series,
                         heroHeightFraction: 0.8,
+                        backdropBottomExtensionFraction: 0.1,
                         spoilerSettings: spoilerSettings,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                         onPlay: playTarget.map { target in { onPlay(target) } },

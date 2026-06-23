@@ -17,6 +17,10 @@ public struct ItemDetailView: View {
     /// episode fronted in the hero (Play targets it), its season selected, the
     /// episode row pre-scrolled to it, and focus on the hero Play button.
     private let initialEpisode: MediaItem?
+    /// Lands initial focus on the hero Play button (top) rather than letting tvOS
+    /// pick a bottom-anchored control in the full-screen hero — which would make
+    /// it auto-scroll the page down on arrival. Mirrors `SeriesDetailView`.
+    @FocusState private var playFocused: Bool
 
     public init(
         viewModel: ItemDetailViewModel,
@@ -87,7 +91,8 @@ public struct ItemDetailView: View {
                         playProgress: isPlayable(detail.item) ? detail.item.resumeProgressFraction : nil,
                         playRemainingText: isPlayable(detail.item) ? detail.item.resumeRemainingText : nil,
                         onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
-                        fallbackTechnicalBadges: detail.children.representativeTechnicalBadges
+                        fallbackTechnicalBadges: detail.children.representativeTechnicalBadges,
+                        playButtonFocus: $playFocused
                     )
                     .id(Self.topAnchorID)
                     if !detail.children.isEmpty {
@@ -109,12 +114,24 @@ public struct ItemDetailView: View {
                 // edge-to-edge via its own `.ignoresSafeArea`.
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .defaultFocus($playFocused, true)
             // Pin to the top on first load: the Play button is bottom-anchored in
             // the full-screen hero, so initial focus on it makes tvOS auto-scroll
             // the page down. Snap back to the hero top so focus stays on Play.
             .task {
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 proxy.scrollTo(Self.topAnchorID, anchor: .top)
+            }
+            // Snap back to the hero top whenever Play regains focus (e.g. moving
+            // "up" from a children rail), animated so the page glides up smoothly.
+            // Without this the movie hero stays scrolled down after tvOS frames
+            // the bottom-anchored Play button on first focus.
+            .onChange(of: playFocused) { _, focused in
+                if focused {
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        proxy.scrollTo(Self.topAnchorID, anchor: .top)
+                    }
+                }
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()

@@ -19,20 +19,39 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
         /// A highly visible solid pill (e.g. solid white with dark text) for
         /// the primary resolution badge.
         case prominent
+        /// A stylized HDR wordmark badge (`HDR10`, `HDR10+`, `HLG`, `HDR`)
+        /// painted with a gradient border so it reads like the HDR logo rather
+        /// than a plain spec pill.
+        case hdr
         /// A Dolby badge rendered as the double-D logo with a stacked wordmark
         /// (`Dolby` over the format, e.g. Dolby Vision / Atmos / Digital+). No
         /// pill.
         case dolby
+        /// A DTS badge rendered as a custom `dts:X` / `dts-HD` wordmark logo
+        /// (lowercase `dts` with an emphasized format suffix). No pill.
+        case dts
     }
 
     public var label: String
     public var style: Style
+    /// Optional trailing detail rendered as plain text after a logo-style badge
+    /// (`.dolby`/`.dts`) — e.g. the channel layout `5.1`/`7.1`, so the format
+    /// logo and its channel count read as one unit with no separate pill.
+    public var detail: String?
 
-    public var id: String { "\(style.rawValue):\(label)" }
+    public var id: String { "\(style.rawValue):\(label):\(detail ?? "")" }
 
-    public init(_ label: String, style: Style = .spec) {
+    public init(_ label: String, style: Style = .spec, detail: String? = nil) {
         self.label = label
         self.style = style
+        self.detail = detail
+    }
+
+    /// A spoken/described form combining the label with any trailing detail
+    /// (e.g. `Dolby Digital+ 5.1`).
+    public var accessibilityText: String {
+        guard let detail, !detail.isEmpty else { return label }
+        return "\(label) \(detail)"
     }
 
     /// For `.dolby` badges, the format word(s) after the leading "Dolby " (e.g.
@@ -55,17 +74,16 @@ public extension MediaSourceMetadata {
     /// video stream's pixel dimensions, or `nil` when no dimensions are known.
     var resolutionBadge: MediaBadge? {
         guard let video else { return nil }
-        // Use the vertical resolution where known; otherwise infer it from width
-        // assuming roughly 16:9 so unusual aspect ratios still classify sensibly.
-        let lines: Int?
-        if let height = video.height, height > 0 {
-            lines = height
-        } else if let width = video.width, width > 0 {
-            lines = width * 9 / 16
-        } else {
-            lines = nil
+        // Classify by effective lines (max of true height and the height this
+        // width implies at 16:9) so letterboxed cinematic content — e.g. a
+        // 1920×804 movie — reads by its real width (1080p) rather than its
+        // cropped height (which would wrongly read 720p).
+        guard let lines = PlaybackDiagnostics.effectiveResolutionLines(
+            width: video.width,
+            height: video.height
+        ) else {
+            return nil
         }
-        guard let lines else { return nil }
         let label: String
         switch lines {
         case 2000...: label = "4K"
@@ -77,75 +95,124 @@ public extension MediaSourceMetadata {
         return MediaBadge(label, style: .prominent)
     }
 
-    /// At most one dynamic-range badge describing the HDR/Dolby Vision signal:
-    /// `Dolby Vision`, `HDR10+`, `HDR10`, `HLG`, or a generic `HDR`. Empty for
-    /// SDR content. Premium ranges read as `.prominent`.
+    /// Dynamic-range badge(s) describing the HDR/Dolby Vision signal. A pure
+    /// Dolby Vision stream reads `Dolby Vision` alone; a Dolby Vision stream that
+    /// also carries an HDR10 base layer (Jellyfin's `DOVIWithHDR10`, Plex's
+    /// "DoVi/HDR10") reads `Dolby Vision` **and** `HDR10` so the badge row
+    /// advertises both. Otherwise a single `HDR10+`, `HDR10`, `HLG`, or generic
+    /// `HDR` badge, or `SDR` for standard-range content. Empty only when there's
+    /// nothing to classify. HDR badges use the `.hdr` logo style; Dolby Vision
+    /// uses the `.dolby` mark; `SDR` is a plain `.spec` pill.
     var dynamicRangeBadges: [MediaBadge] {
         guard let video else { return [] }
         let rangeType = (video.videoRangeType ?? "").uppercased()
         let range = (video.videoRange ?? "").uppercased()
 
-        if rangeType.hasPrefix("DOVI") || range == "DOVI" {
-            return [MediaBadge("Dolby Vision", style: .dolby)]
+        if rangeType.hasPrefix("DOVI") || rangeType.contains("DOLBY") || range == "DOVI" {
+            var badges = [MediaBadge("Dolby Vision", style: .dolby)]
+            // DoVi profiles 7/8 ship an HDR10 base layer; surface it as a second
+            // badge so a "DoVi/HDR10" file shows both. Pure DoVi (profile 5)
+            // carries no HDR10 fallback and shows Dolby Vision alone.
+            if rangeType.contains("HDR10PLUS") || rangeType.contains("HDR10+") {
+                badges.append(MediaBadge("HDR10+", style: .hdr))
+            } else if rangeType.contains("HDR10") {
+                badges.append(MediaBadge("HDR10", style: .hdr))
+            }
+            return badges
         }
         if rangeType.contains("HDR10PLUS") || rangeType.contains("HDR10+") {
-            return [MediaBadge("HDR10+", style: .spec)]
+            return [MediaBadge("HDR10+", style: .hdr)]
         }
         if rangeType.hasPrefix("HDR10") {
-            return [MediaBadge("HDR10", style: .spec)]
+            return [MediaBadge("HDR10", style: .hdr)]
         }
         if rangeType == "HLG" || rangeType.hasPrefix("HLG") {
-            return [MediaBadge("HLG", style: .spec)]
+            return [MediaBadge("HLG", style: .hdr)]
         }
         if rangeType.hasPrefix("HDR") || range == "HDR" {
-            return [MediaBadge("HDR", style: .spec)]
+            return [MediaBadge("HDR", style: .hdr)]
+        }
+        // No HDR signal → standard dynamic range. Providers either emit an
+        // explicit `SDR` token (Jellyfin) or omit range info entirely (Plex), so
+        // label SDR whenever we have something concrete to classify — real
+        // dimensions or an explicit range token — and stay silent on an empty
+        // stream so we never assert SDR with nothing to back it.
+        let hasDimensions = (video.width ?? 0) > 0 || (video.height ?? 0) > 0
+        let hasRangeToken = !range.isEmpty || !rangeType.isEmpty
+        if hasDimensions || hasRangeToken {
+            return [MediaBadge("SDR", style: .spec)]
         }
         return []
     }
 
-    /// Audio capability badges: a headline format badge (Dolby Atmos, DTS:X,
-    /// Dolby TrueHD, DTS-HD, Dolby Digital+/Dolby Digital) and, when the format
-    /// isn't already object-based surround, a channel-layout badge (`5.1`/`7.1`).
+    /// A badge naming the video codec family (`HEVC`, `H.264`, `AV1`, `VP9`, …),
+    /// or `nil` when the source reports no codec. This is the "(HEVC)" / "(H.264)"
+    /// detail Plex shows alongside the resolution; the full codec profile lives in
+    /// the playback-diagnostics overlay.
+    var videoCodecBadge: MediaBadge? {
+        guard let video,
+              let name = PlaybackDiagnostics.friendlyCodecName(video.codec),
+              !name.isEmpty,
+              // The Dolby Vision case is already conveyed by the dynamic-range
+              // badge, so don't repeat it here if a codec *tag* folded to it.
+              name != "Dolby Vision" else {
+            return nil
+        }
+        return MediaBadge(name, style: .spec)
+    }
+
+    /// Audio capability badges: a single headline format badge (Dolby Atmos,
+    /// DTS:X, Dolby TrueHD, DTS-HD, Dolby Digital+/Dolby Digital) carrying the
+    /// channel layout (`5.1`/`7.1`) as a trailing `detail` when the format isn't
+    /// already object-based surround. When no headline format is present, a bare
+    /// channel badge is emitted instead.
     var audioBadges: [MediaBadge] {
         guard let audio else { return [] }
-        var badges: [MediaBadge] = []
         let profile = (audio.profile ?? "").lowercased()
         let codec = (audio.codec ?? "").lowercased()
 
         // Object-based / lossless headline formats imply surround on their own,
-        // so they suppress the separate channel badge below.
+        // so they suppress the trailing channel detail below.
+        var format: MediaBadge?
         var formatImpliesSurround = false
         if profile.contains("atmos") {
-            badges.append(MediaBadge("Dolby Atmos", style: .dolby))
+            format = MediaBadge("Dolby Atmos", style: .dolby)
             formatImpliesSurround = true
         } else if profile.contains("dts:x") || profile.contains("dtsx") || profile.contains("dts x") {
-            badges.append(MediaBadge("DTS:X", style: .spec))
+            format = MediaBadge("DTS:X", style: .dts)
             formatImpliesSurround = true
         } else if codec == "truehd" {
-            badges.append(MediaBadge("Dolby TrueHD", style: .dolby))
+            format = MediaBadge("Dolby TrueHD", style: .dolby)
             formatImpliesSurround = true
         } else if codec == "dts" && (profile.contains("hd") || profile.contains("ma")) {
-            badges.append(MediaBadge("DTS-HD", style: .spec))
+            format = MediaBadge("DTS-HD", style: .dts)
         } else if codec == "eac3" {
-            badges.append(MediaBadge("Dolby Digital+", style: .dolby))
+            format = MediaBadge("Dolby Digital+", style: .dolby)
         } else if codec == "ac3" {
-            badges.append(MediaBadge("Dolby Digital", style: .dolby))
+            format = MediaBadge("Dolby Digital", style: .dolby)
         }
 
-        if !formatImpliesSurround, let channels = Self.surroundLabel(
+        let channels = formatImpliesSurround ? nil : Self.surroundLabel(
             channelLayout: audio.channelLayout,
             channels: audio.channels
-        ) {
-            badges.append(MediaBadge(channels, style: .spec))
+        )
+
+        if var format {
+            format.detail = channels
+            return [format]
+        } else if let channels {
+            return [MediaBadge(channels, style: .spec)]
         }
-        return badges
+        return []
     }
 
-    /// The full ordered technical badge set: resolution, dynamic range, audio.
+    /// The full ordered technical badge set: resolution, dynamic range, codec,
+    /// audio — mirroring how Plex composes "1080p · DoVi/HDR10 · HEVC".
     var technicalBadges: [MediaBadge] {
         var badges: [MediaBadge] = []
         if let resolutionBadge { badges.append(resolutionBadge) }
         badges.append(contentsOf: dynamicRangeBadges)
+        if let videoCodecBadge { badges.append(videoCodecBadge) }
         badges.append(contentsOf: audioBadges)
         return badges
     }    /// A surround-channel label (`7.1`, `5.1`) from a layout string or channel
@@ -301,22 +368,26 @@ public extension MediaSourceMetadata {
         }
 
         // Maximise the headline audio format and the surround layout separately,
-        // then suppress the channel badge when the winning format already implies
-        // surround (Atmos/DTS:X/TrueHD), matching the single-item rule.
+        // then attach the best channel layout to the winning format as a trailing
+        // detail — unless that format already implies surround (Atmos/DTS:X/
+        // TrueHD). Channel info may live on a format badge's `detail` or as a
+        // standalone channel badge's label.
         let audioBadges = sources.flatMap(\.audioBadges)
         let bestFormat = audioBadges
             .filter { audioFormatRank($0.label) > 0 }
             .max(by: { audioFormatRank($0.label) < audioFormatRank($1.label) })
-        let bestChannels = audioBadges
-            .filter { channelRank($0.label) > 0 }
-            .max(by: { channelRank($0.label) < channelRank($1.label) })
-        if let bestFormat {
+        let channelCandidates = audioBadges.flatMap { badge -> [String] in
+            var candidates: [String] = []
+            if let detail = badge.detail { candidates.append(detail) }
+            if channelRank(badge.label) > 0 { candidates.append(badge.label) }
+            return candidates
+        }
+        let bestChannels = channelCandidates.max(by: { channelRank($0) < channelRank($1) })
+        if var bestFormat {
+            bestFormat.detail = formatImpliesSurround(bestFormat.label) ? nil : bestChannels
             badges.append(bestFormat)
-            if !formatImpliesSurround(bestFormat.label), let bestChannels {
-                badges.append(bestChannels)
-            }
         } else if let bestChannels {
-            badges.append(bestChannels)
+            badges.append(MediaBadge(bestChannels, style: .spec))
         }
 
         return badges

@@ -41,6 +41,9 @@ public struct MediaBadgeChip: View {
     private static let hdrSuffixFont = Font.system(size: 16, weight: .heavy)
     private static let cornerRadius: CGFloat = 6
     private static let hPadding: CGFloat = 11
+    /// Tighter horizontal padding for the borderless HDR wordmark, which has no
+    /// pill background and so doesn't need the inset the filled pills use.
+    private static let hdrHPadding: CGFloat = 2
     private static let vPadding: CGFloat = 5
     /// Shared pill height so every pill badge (rating, resolution, spec) lines
     /// up to the exact same height regardless of the font it uses.
@@ -128,7 +131,7 @@ public struct MediaBadgeChip: View {
         .tracking(0.5)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
-        .padding(.horizontal, Self.hPadding)
+        .padding(.horizontal, Self.hdrHPadding)
         .frame(height: Self.pillHeight)
     }
 

@@ -176,6 +176,16 @@ public final class ItemDetailViewModel {
         seasonEpisodes[seasonID] = stampSeriesTMDb(into: episodes.map(tagged))
     }
 
+    /// Replaces the cached episodes for a season after the view has enriched them
+    /// — specifically, after injecting a resolved still URL into episodes the
+    /// server has no image for, so the rail re-renders seeding a synchronously
+    /// available thumbnail (no gray-placeholder flash). The ids and order are
+    /// unchanged, so SwiftUI updates artwork in place without disturbing focus.
+    public func setEpisodes(_ episodes: [MediaItem], for seasonID: String) {
+        guard seasonEpisodes[seasonID] != nil else { return }
+        seasonEpisodes[seasonID] = episodes
+    }
+
     /// Stamps an item with this detail's owning account (if any) so navigation
     /// keeps routing to the right provider.
     private func tagged(_ item: MediaItem) -> MediaItem {

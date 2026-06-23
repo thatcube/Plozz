@@ -9,16 +9,25 @@ import Foundation
 /// `AVPlayerItem`/`AVPlayer` and hands plain strings/numbers to the pure
 /// helpers below.
 public struct PlaybackDiagnostics: Equatable, Sendable {
-    /// Whether the server is streaming the original file or transcoding it.
+    /// How the **server** is delivering the stream. The distinction matters for
+    /// quality and Dolby Vision: a `remux` repackages the original bitstream into
+    /// a new container with **no re-encode** (lossless, preserves the DoVi RPU),
+    /// while a `transcode` re-encodes the video (quality loss, heavy server CPU).
     public enum PlaybackMode: String, Sendable {
+        /// Server sends the original file untouched (no container change).
         case directPlay
+        /// Server repackages the original video/audio bitstream into a new
+        /// container (e.g. MKV → fMP4 HLS) with no re-encode. Lossless.
+        case remux
+        /// Server re-encodes the video and/or audio.
         case transcode
         case unknown
 
         public var displayName: String {
             switch self {
             case .directPlay: return "Direct Play"
-            case .transcode: return "Transcode"
+            case .remux: return "Remux (server, lossless)"
+            case .transcode: return "Transcode (server)"
             case .unknown: return "Unknown"
             }
         }
@@ -68,9 +77,17 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         /// e.g. `1920×1080`.
         public var displayString: String { "\(width)×\(height)" }
 
-        /// Friendly quality label based on the vertical resolution.
+        /// Friendly quality label based on the resolution tier.
+        ///
+        /// Uses `effectiveResolutionLines` (the larger of the true height and the
+        /// height a 16:9 frame of this width implies) so cinematic letterboxed
+        /// content such as `1920×804` classifies by its real capture width
+        /// (→ `1080p`) rather than its cropped height (which would read `720p`).
         public var qualityLabel: String? {
-            switch height {
+            guard let lines = PlaybackDiagnostics.effectiveResolutionLines(width: width, height: height) else {
+                return nil
+            }
+            switch lines {
             case 4320...: return "8K"
             case 2160..<4320: return "4K"
             case 1440..<2160: return "1440p"
@@ -108,6 +125,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var container: String?
     public var mode: PlaybackMode
     public var hdr: HDRFormat
+    /// Human-readable name of the engine decoding the stream (e.g. `AVPlayer`,
+    /// `VLCKit`, `mpv`). `nil` until the player wires it in.
+    public var engineName: String?
     /// Seconds of media buffered ahead of the current playback position.
     public var bufferedSecondsAhead: Double?
     /// Cumulative dropped video frames reported by the access log.
@@ -140,6 +160,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         container: String? = nil,
         mode: PlaybackMode = .unknown,
         hdr: HDRFormat = .unknown,
+        engineName: String? = nil,
         bufferedSecondsAhead: Double? = nil,
         droppedVideoFrames: Int? = nil,
         frameRate: Double? = nil,
@@ -164,6 +185,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.container = container
         self.mode = mode
         self.hdr = hdr
+        self.engineName = engineName
         self.bufferedSecondsAhead = bufferedSecondsAhead
         self.droppedVideoFrames = droppedVideoFrames
         self.frameRate = frameRate
@@ -177,6 +199,22 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
 // MARK: - Classification (pure, unit-tested)
 
 public extension PlaybackDiagnostics {
+    /// The effective vertical resolution (in scan lines) used to classify a video
+    /// into a quality tier: the larger of the true pixel height and the height a
+    /// 16:9 frame of this width would have.
+    ///
+    /// Cinematic content is letterboxed — a 2.40:1 movie mastered at full HD width
+    /// is `1920×804`, so keying off the raw height (804) misclassifies it as
+    /// `720p`. Deriving lines from the (stable) width instead yields `1080p`,
+    /// matching how Plex/Jellyfin label the same file. Returns `nil` when neither
+    /// dimension is known.
+    static func effectiveResolutionLines(width: Int?, height: Int?) -> Int? {
+        let heightLines = (height ?? 0) > 0 ? (height ?? 0) : 0
+        let widthLines = (width ?? 0) > 0 ? ((width ?? 0) * 9) / 16 : 0
+        let lines = max(heightLines, widthLines)
+        return lines > 0 ? lines : nil
+    }
+
     /// Classifies the HDR format from the raw video codec FourCC string and the
     /// CoreMedia transfer-function extension string.
     ///

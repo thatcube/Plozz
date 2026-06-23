@@ -105,6 +105,29 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Movie")
     }
 
+    func testTrailersMapLocalTrailers() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/m1/LocalTrailers", json: """
+        [{"Id":"t1","Name":"Official Trailer","Type":"Trailer","Container":"mp4"}]
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "m1")
+
+        XCTAssertEqual(trailers.map(\.id), ["t1"])
+        XCTAssertEqual(trailers.first?.title, "Official Trailer")
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Users/u1/Items/m1/LocalTrailers") })
+    }
+
+    func testTrailersEmptyWhenNoneReported() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Items/m1/LocalTrailers", json: "[]")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "m1")
+        XCTAssertTrue(trailers.isEmpty)
+    }
+
     func testItemsPageUsesSeriesTypeForTVLibrary() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items", json: #"{"Items":[],"TotalRecordCount":0}"#)
@@ -260,13 +283,33 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.providerIDs["Imdb"], "tt0111161")
         XCTAssertEqual(item.providerIDs["Tmdb"], "278")
 
-        let community = item.ratings.first { $0.source == .community }
+        let community = item.ratings.first { $0.source == .tmdb }
         XCTAssertEqual(community?.value, 7.2)
         XCTAssertEqual(community?.scale, .outOfTen)
 
         let critic = item.ratings.first { $0.source == .rottenTomatoes }
         XCTAssertEqual(critic?.value, 74)
         XCTAssertEqual(critic?.scale, .percent)
+    }
+
+    func testItemCommunityRatingMapsToTMDBEvenWithoutTMDBProviderID() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i3", json: """
+        {"Id":"i3","Name":"Show","Type":"Series","RunTimeTicks":0,
+        "CommunityRating":7.9,
+        "ProviderIds":{"Imdb":"tt1234567"},
+        "UserData":{"PlaybackPositionTicks":0}}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "i3")
+
+        // The native community score is TMDB-sourced regardless of item type or
+        // which provider ids happen to be present, so it always brands as TMDB.
+        let tmdb = item.ratings.first { $0.source == .tmdb }
+        XCTAssertEqual(tmdb?.value, 7.9)
+        XCTAssertEqual(tmdb?.scale, .outOfTen)
+        XCTAssertFalse(item.ratings.contains { $0.source == .community })
     }
 
     func testItemWithoutRatingFieldsHasEmptyRatings() async throws {
@@ -355,6 +398,50 @@ final class JellyfinProviderMappingTests: XCTestCase {
         )
 
         XCTAssertFalse(stub.sentPaths.contains { $0.hasSuffix("/Videos/ActiveEncodings") })
+    }
+
+    func testPlaybackInfoParsesTrickplayManifest() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0,
+        "Trickplay":{"src1":{"320":{"Width":320,"Height":180,"TileWidth":10,"TileHeight":10,
+        "ThumbnailCount":250,"Interval":10000,"Bandwidth":1000}}}}
+        """)
+        stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "i1")
+        let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
+        XCTAssertEqual(manifest.thumbnailWidth, 320)
+        XCTAssertEqual(manifest.thumbnailHeight, 180)
+        XCTAssertEqual(manifest.tileColumns, 10)
+        XCTAssertEqual(manifest.tileRows, 10)
+        XCTAssertEqual(manifest.thumbnailCount, 250)
+        XCTAssertEqual(manifest.intervalMs, 10000)
+        // 250 thumbs / 100 per tile -> 3 tiles.
+        XCTAssertEqual(manifest.tileURLs.count, 3)
+        let first = manifest.tileURLs[0].absoluteString
+        XCTAssertTrue(first.contains("/Videos/i1/Trickplay/320/0.jpg"), first)
+        XCTAssertTrue(first.contains("api_key=TOKEN"), first)
+        XCTAssertTrue(first.contains("mediaSourceId=src1"), first)
+    }
+
+    func testPlaybackInfoHasNoTrickplayWhenServerOmitsIt() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":0}
+        """)
+        stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "i1")
+        XCTAssertNil(request.scrubPreview)
     }
 
     func testPlaybackInfoSendsDeviceProfile() async throws {
@@ -489,5 +576,165 @@ final class JellyfinRemoteSubtitleTests: XCTestCase {
 
         try await provider.downloadRemoteSubtitle(itemID: "i1", subtitleID: "sub-1")
         XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Items/i1/RemoteSearch/Subtitles/sub-1") })
+    }
+}
+
+final class JellyfinWatchStateTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testSetPlayedTruePostsToPlayedItems() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/PlayedItems/i1", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(true, itemID: "i1")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Users/u1/PlayedItems/i1") })
+        XCTAssertEqual(stub.method(forPathSuffix: "/Users/u1/PlayedItems/i1"), .post)
+    }
+
+    func testSetPlayedFalseDeletesPlayedItems() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/PlayedItems/i1", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(false, itemID: "i1")
+
+        XCTAssertEqual(stub.method(forPathSuffix: "/Users/u1/PlayedItems/i1"), .delete)
+    }
+}
+
+final class JellyfinDeliveryModeTests: XCTestCase {
+    func testDirectPlayWhenNoTranscodingUrl() {
+        XCTAssertEqual(
+            JellyfinProvider.deliveryMode(transcoding: false, didRemux: false),
+            .directPlay
+        )
+    }
+
+    func testRemuxWhenWeRequestedDirectStream() {
+        XCTAssertEqual(
+            JellyfinProvider.deliveryMode(transcoding: true, didRemux: true),
+            .remux
+        )
+    }
+
+    func testTranscodeWhenServerChoseItWithoutOurRemux() {
+        XCTAssertEqual(
+            JellyfinProvider.deliveryMode(transcoding: true, didRemux: false),
+            .transcode
+        )
+    }
+}
+
+final class JellyfinHvc1RemuxTests: XCTestCase {
+    private func source(_ json: String) throws -> MediaSourceInfo {
+        try JSONDecoder().decode(MediaSourceInfo.self, from: Data(json.utf8))
+    }
+
+    func testHev1HevcInMP4WithAppleAudioRequestsRemux() throws {
+        let s = try source(#"""
+        {"Container":"mp4","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"},
+          {"Index":1,"Type":"Audio","Codec":"aac","IsDefault":true}]}
+        """#)
+        XCTAssertTrue(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testHvc1HevcIsNotRemuxed() throws {
+        let s = try source(#"""
+        {"Container":"mp4","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hvc1"}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testHev1InMatroskaIsNotRemuxed() throws {
+        // hev1 in MKV routes to the on-device hybrid engine instead.
+        let s = try source(#"""
+        {"Container":"mkv","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testAlreadyTranscodingIsNotRemuxed() throws {
+        let s = try source(#"""
+        {"Container":"mp4","TranscodingUrl":"/v.m3u8","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+
+    func testHev1WithIncompatibleAudioIsNotRemuxed() throws {
+        // DTS can't be stream-copied into fMP4 → forcing the remux would transcode
+        // audio, so we leave it for the on-device engine net instead.
+        let s = try source(#"""
+        {"Container":"mp4","MediaStreams":[
+          {"Index":0,"Type":"Video","Codec":"hevc","CodecTag":"hev1"},
+          {"Index":1,"Type":"Audio","Codec":"dts","IsDefault":true}]}
+        """#)
+        XCTAssertFalse(JellyfinProvider.shouldRequestHvc1Remux(s))
+    }
+}
+
+final class JellyfinRemoteTrailersTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testTrailersMergeLocalAndRemoteYouTube() async throws {
+        let stub = StubHTTPClient()
+        // Local trailer file (own server item).
+        stub.stub(pathSuffix: "/Users/u1/Items/i1/LocalTrailers", json: """
+        [{"Id":"local1","Name":"Local Trailer","Type":"Trailer"}]
+        """)
+        // Server-resolved remote trailer (YouTube watch URL).
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Dune","Type":"Movie",
+         "RemoteTrailers":[{"Url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","Name":"Dune Trailer"}]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "i1")
+        XCTAssertEqual(trailers.count, 2)
+
+        let local = trailers.first { !$0.isYouTubeTrailer }
+        let remote = trailers.first { $0.isYouTubeTrailer }
+        XCTAssertEqual(local?.id, "local1")
+        XCTAssertEqual(remote?.youTubeTrailerVideoID, "dQw4w9WgXcQ")
+    }
+
+    func testTrailersSurviveLocalFailure() async throws {
+        let stub = StubHTTPClient()
+        // No LocalTrailers stub -> notFound thrown for that path, but remote still works.
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Dune","Type":"Movie",
+         "RemoteTrailers":[{"Url":"https://youtu.be/dQw4w9WgXcQ","Name":"Trailer"}]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "i1")
+        XCTAssertEqual(trailers.count, 1)
+        XCTAssertEqual(trailers.first?.youTubeTrailerVideoID, "dQw4w9WgXcQ")
+    }
+
+    func testTrailersEmptyWhenNoneAvailable() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Dune","Type":"Movie"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "i1")
+        XCTAssertTrue(trailers.isEmpty)
     }
 }

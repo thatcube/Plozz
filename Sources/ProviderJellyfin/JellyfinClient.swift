@@ -156,7 +156,7 @@ public struct JellyfinClient: Sendable {
     func item(userID: String, id: String) async throws -> BaseItemDto {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/\(id)",
-            queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,ProviderIds")],
+            queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,ProviderIds,Trickplay,Genres,People,Studios,Tags,Taglines")],
             headers: authHeaders
         )
         return try await http.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)
@@ -168,11 +168,40 @@ public struct JellyfinClient: Sendable {
             queryItems: [
                 URLQueryItem(name: "ParentId", value: parentID),
                 URLQueryItem(name: "SortBy", value: "SortName"),
-                URLQueryItem(name: "Fields", value: "Overview")
+                URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,Genres")
             ],
             headers: authHeaders
         )
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
+    /// `GET /Users/{userId}/Items/{itemId}/LocalTrailers` — the local trailer
+    /// files Jellyfin detected alongside an item. Each is a fully playable
+    /// `BaseItemDto` (its own item id), so it streams through the normal
+    /// playback path. Returns a bare array, not an `Items` envelope. Online
+    /// (e.g. YouTube) trailers come from a separate field — see
+    /// ``remoteTrailers(userID:id:)``.
+    func localTrailers(userID: String, id: String) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items/\(id)/LocalTrailers",
+            queryItems: [URLQueryItem(name: "Fields", value: "Overview")],
+            headers: authHeaders
+        )
+        return try await http.decode([BaseItemDto].self, from: endpoint, baseURL: baseURL)
+    }
+
+    /// The item's online trailer links (`BaseItemDto.RemoteTrailers`) — YouTube
+    /// watch URLs the server resolved from its own metadata provider. Unlike
+    /// local trailers these have no server item id; the caller extracts the
+    /// YouTube video id and plays it through the keyless trailer path. Returns an
+    /// empty array when the server has none.
+    func remoteTrailers(userID: String, id: String) async throws -> [MediaUrlDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items/\(id)",
+            queryItems: [URLQueryItem(name: "Fields", value: "RemoteTrailers")],
+            headers: authHeaders
+        )
+        return try await http.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL).RemoteTrailers ?? []
     }
 
     /// One page of a container's items for library browsing.
@@ -262,12 +291,31 @@ public struct JellyfinClient: Sendable {
 
     // MARK: Playback
 
-    func playbackInfo(userID: String, itemID: String, forceTranscode: Bool = false) async throws -> PlaybackInfoResponse {
+    /// How the server should deliver a media source: let it decide (`auto`),
+    /// remux the container with codecs copied (`remux` — preserves Dolby Vision),
+    /// or fully transcode (`transcode`).
+    enum PlaybackStreamMode: Sendable {
+        case auto
+        case remux
+        case transcode
+    }
+
+    func playbackInfo(userID: String, itemID: String, mode: PlaybackStreamMode = .auto) async throws -> PlaybackInfoResponse {
         var queryItems = [URLQueryItem(name: "UserId", value: userID)]
-        // Forcing a transcode: tell the server not to offer direct play/stream so
-        // it returns a TranscodingUrl. Used as the player's fallback when a
-        // direct-play stream fails to load in AVPlayer.
-        if forceTranscode {
+        switch mode {
+        case .auto:
+            // Let the server pick: DirectPlay > DirectStream > transcode.
+            break
+        case .remux:
+            // Disable direct play but keep direct stream: the server remuxes the
+            // container to seekable fMP4 HLS while **copying** the video/audio
+            // codecs (no re-encode), which preserves Dolby Vision (RPU/dvcC,
+            // tagged `dvh1`). Used to route a DoVi MKV to AVPlayer for true DoVi.
+            queryItems.append(URLQueryItem(name: "EnableDirectPlay", value: "false"))
+            queryItems.append(URLQueryItem(name: "EnableDirectStream", value: "true"))
+        case .transcode:
+            // Force a full transcode: neither direct play nor direct stream. Used
+            // as the player's fallback when a direct stream fails to load.
             queryItems.append(URLQueryItem(name: "EnableDirectPlay", value: "false"))
             queryItems.append(URLQueryItem(name: "EnableDirectStream", value: "false"))
         }
@@ -300,6 +348,18 @@ public struct JellyfinClient: Sendable {
             PositionTicks: JellyfinTicks.ticks(fromSeconds: progress.positionSeconds),
             IsPaused: progress.isPaused
         ))
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
+    /// `POST`/`DELETE /Users/{userId}/PlayedItems/{itemId}` — marks an item
+    /// played (POST) or unplayed (DELETE) for the user. For a season/series id
+    /// Jellyfin cascades the change to the contained episodes.
+    func setItemPlayed(_ played: Bool, userID: String, itemID: String) async throws {
+        let endpoint = Endpoint(
+            method: played ? .post : .delete,
+            path: "/Users/\(userID)/PlayedItems/\(itemID)",
+            headers: authHeaders
+        )
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
@@ -490,6 +550,40 @@ public struct JellyfinClient: Sendable {
         if let maxWidth {
             components.queryItems = [URLQueryItem(name: "maxWidth", value: String(maxWidth))]
         }
+        return components.url
+    }
+
+    /// Builds an absolute profile-image URL for a Jellyfin user
+    /// (`/Users/{id}/Images/Primary`). We attach `api_key` when available so the
+    /// image loads even on servers that require auth for user avatars.
+    public func userAvatarURL(userID: String, maxWidth: Int?, token: String?) -> URL? {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/Users/\(userID)/Images/Primary"
+        var queryItems: [URLQueryItem] = []
+        if let maxWidth {
+            queryItems.append(URLQueryItem(name: "maxWidth", value: String(maxWidth)))
+        }
+        if let token, !token.isEmpty {
+            queryItems.append(URLQueryItem(name: "api_key", value: token))
+        }
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        return components.url
+    }
+
+    /// Absolute URL for one trickplay tile image
+    /// (`GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`). The endpoint
+    /// requires auth, so we embed the token as `api_key` because image loaders
+    /// (URLSession data tasks here) don't carry our auth headers.
+    func trickplayTileURL(itemID: String, mediaSourceID: String?, width: Int, tileIndex: Int) -> URL? {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/Videos/\(itemID)/Trickplay/\(width)/\(tileIndex).jpg"
+        var query = [URLQueryItem(name: "api_key", value: token ?? "")]
+        if let mediaSourceID, !mediaSourceID.isEmpty {
+            query.append(URLQueryItem(name: "mediaSourceId", value: mediaSourceID))
+        }
+        components.queryItems = query
         return components.url
     }
 }

@@ -55,4 +55,22 @@ public final class HomeViewModel {
             latest: content.latest
         )
     }
+
+    /// Applies a watched-state mutation to the loaded rows **in place** so the
+    /// affected cards just flip their watched badge. Items are kept in their rows
+    /// (rather than refetched/removed) so the user's focus is preserved exactly
+    /// where it was when they invoked the menu.
+    public func applyWatchedState(_ mutation: MediaItemMutation) {
+        guard case var .loaded(content) = state else { return }
+        content.continueWatching = content.continueWatching.map { apply(mutation, to: $0) }
+        content.latest = content.latest.map { apply(mutation, to: $0) }
+        state = .loaded(content)
+    }
+
+    private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {
+        guard mutation.itemIDs.contains(item.id) else { return item }
+        var copy = item
+        copy.isPlayed = mutation.played
+        return copy
+    }
 }

@@ -57,6 +57,26 @@ public final class AppState {
     /// UI (shown at launch with >1 profile, and from "Switch Profile").
     public private(set) var isChoosingProfile = false
 
+    /// A pending Plex PIN prompt, raised when activating a profile mapped to a
+    /// PIN-protected Plex Home user. `RootView` presents an entry sheet bound to
+    /// this; `nil` when no prompt is outstanding.
+    public private(set) var pendingPlexPINRequest: PlexPINRequest?
+    /// A wrong/failed-PIN message shown in the entry sheet, or `nil`.
+    public private(set) var plexPINError: String?
+    /// Bumped whenever the active Plex identity (token override) changes so
+    /// `RootView` rebuilds the signed-in subtree and content reloads as the new
+    /// Plex Home user.
+    public private(set) var plexIdentityGeneration = 0
+
+    /// A profile activation waiting on a Plex Home user's PIN.
+    public struct PlexPINRequest: Identifiable, Equatable, Sendable {
+        /// The id of the profile being activated.
+        public let id: String
+        public let accountID: String
+        public let homeUserID: String
+        public let homeUserName: String
+    }
+
     /// Provider-agnostic external-ratings enrichment (IMDb/RT/Metacritic via
     /// OMDb when a key is configured; otherwise a no-op). Injected into item
     /// detail so ratings are fetched async without blocking the screen.
@@ -66,6 +86,13 @@ public final class AppState {
     /// scrobbler the player uses to sync watches to the user's Trakt history.
     /// A no-op when no Trakt client credentials are configured.
     public let traktService: TraktService
+
+    /// The handler behind every card's press-and-hold context menu. Lazily
+    /// created so it can capture `self`; resolves the owning provider per item
+    /// and performs watched-state (and future) actions against the server.
+    @ObservationIgnored
+    public private(set) lazy var mediaItemActionHandler: any MediaItemActionHandling =
+        MediaItemActionCoordinator(appState: self)
 
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
@@ -77,11 +104,32 @@ public final class AppState {
     /// not be rebuilt on profile switch.
     private let usesInjectedModels: Bool
 
+    /// In-memory Plex auth-token overrides keyed by `Account.id`. Set when the
+    /// active profile maps to a non-owner Plex Home user so providers resolve as
+    /// that user. **Never persisted** — protected-user tokens/PINs must not
+    /// survive relaunch; Plozz re-prompts (or re-switches) each launch.
+    private var plexTokenOverrides: [String: String] = [:]
+
+    /// Switches to a Plex Home user, returning the new auth token. Injectable for
+    /// tests; defaults to a live `PlexAuthClient` call.
+    @ObservationIgnored
+    var plexHomeUserSwitch: @Sendable (_ uuid: String, _ pin: String?, _ adminToken: String, _ deviceID: String) async throws -> String = { uuid, pin, adminToken, deviceID in
+        try await PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID))
+            .switchHomeUser(uuid: uuid, pin: pin, authToken: adminToken)
+    }
+    /// Lists a Plex account's Home users. Injectable for tests; defaults to a
+    /// live `PlexAuthClient` call.
+    @ObservationIgnored
+    var plexHomeUsersFetch: @Sendable (_ adminToken: String, _ deviceID: String) async throws -> [PlexHomeUser] = { adminToken, deviceID in
+        try await PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID))
+            .homeUsers(authToken: adminToken)
+    }
+
     public init(
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
         profilesModel: ProfilesModel? = nil,
-        systemBridge: SystemProfileBridging = AppOwnedProfileBridge(),
+        systemBridge: SystemProfileBridging? = nil,
         captionModel: CaptionSettingsModel? = nil,
         spoilerModel: SpoilerSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
@@ -92,10 +140,9 @@ public final class AppState {
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
-        self.profilesModel = profilesModel ?? ProfilesModel()
-        self.systemBridge = systemBridge
+        self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
+        self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
-        self.traktService = traktService ?? TraktServiceFactory.make()
 
         // If the caller supplied any settings model, treat them all as injected
         // (test path) and don't rebuild them on profile switch. Otherwise build
@@ -105,6 +152,9 @@ public final class AppState {
             || homeLibraryVisibilityModel != nil
         self.usesInjectedModels = injected
         let ns = (profilesModel ?? self.profilesModel).activeNamespace
+        // Seed Trakt with the active profile's namespace so its scrobbler and the
+        // Settings connection model read that profile's own Trakt tokens.
+        self.traktService = traktService ?? TraktServiceFactory.make(namespace: ns)
         self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         self.themeModel = themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
@@ -115,9 +165,31 @@ public final class AppState {
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
         #if canImport(Security)
-        return AccountStore()
+        return AccountStore(secureStore: KeychainStore())
         #else
         return AccountStore(secureStore: InMemorySecureStore())
+        #endif
+    }
+
+    /// Builds the household profiles model, backing the shared profile set with
+    /// the user-independent Keychain on Apple platforms so every Apple TV system
+    /// user sees the same profiles (the active selection stays per-user).
+    private static func makeDefaultProfilesModel() -> ProfilesModel {
+        #if canImport(Security)
+        return ProfilesModel(store: ProfileStore(secureStore: KeychainStore(service: "com.plozz.app.household")))
+        #else
+        return ProfilesModel()
+        #endif
+    }
+
+    /// Selects the tvOS system-user bridge when TVServices is available, so the
+    /// launch picker can honor each Apple TV user's remembered profile; falls
+    /// back to the app-owned no-op elsewhere (tests/previews/non-tvOS).
+    private static func makeDefaultSystemBridge() -> SystemProfileBridging {
+        #if canImport(TVServices)
+        return TVSystemProfileBridge()
+        #else
+        return AppOwnedProfileBridge()
         #endif
     }
 
@@ -126,10 +198,14 @@ public final class AppState {
     private static func makeDefaultRegistry() -> ProviderRegistry {
         let registry = ProviderRegistry()
         registry.register(.jellyfin) { session in
-            JellyfinProvider(session: session)
+            JellyfinProvider(session: session, hybridEngineEnabled: HybridPlayback.enabled)
         }
         registry.register(.plex) { session in
-            PlexProvider(session: session)
+            PlexProvider(
+                session: session,
+                hybridEngineEnabled: HybridPlayback.enabled,
+                connectionRefresh: PlexProvider.connectionRefresh(for: session)
+            )
         }
         return registry
     }
@@ -140,19 +216,29 @@ public final class AppState {
     public func bootstrap() {
         accountStore.migrateLegacySessionIfNeeded()
         reloadAccounts()
-        // Prompt for a profile at launch only when the household has more than
-        // one; a single (default) profile goes straight in.
-        isChoosingProfile = profilesModel.profiles.count > 1
+        // Show the launch picker when the household has more than one profile,
+        // unless the current Apple TV system user already has a remembered pick
+        // that the system says we may honor (per `shouldStorePreferencesForCurrentUser`).
+        // On single-Apple-TV-user devices the system signal is false, preserving
+        // the original "always show the picker for >1 profile" behavior.
+        let systemRemembers = mayRememberProfileSelection && profilesModel.hasRememberedSelection
+        isChoosingProfile = profilesModel.profiles.count > 1 && !systemRemembers
         apply(.restored(accounts))
+        // Honor a remembered/auto-landed profile's Plex Home-user mapping at
+        // launch. When the picker is shown, the switch happens once the user
+        // picks instead.
+        if !isChoosingProfile {
+            ensurePlexIdentityForActiveProfile()
+        }
     }
 
     /// Stable per-install device id used for Quick Connect + auth.
     public var deviceID: String { accountStore.deviceID() }
 
     /// Whether the environment permits remembering the selected profile for the
-    /// current Apple TV system user (see `SystemProfileBridging`). v1 shows the
-    /// launch picker for >1 profile regardless; this surfaces the one surviving,
-    /// non-deprecated tvOS system signal for future tuning.
+    /// current Apple TV system user (see `SystemProfileBridging`). Wired in
+    /// Phase 1: combined with `ProfilesModel.hasRememberedSelection`, it lets the
+    /// launch picker auto-skip for a system user who already chose a profile.
     public var mayRememberProfileSelection: Bool { systemBridge.mayRememberProfileSelection }
 
     public var lastServerStore: LastServerStoring { UserDefaultsLastServerStore() }
@@ -163,7 +249,7 @@ public final class AppState {
     /// this branch. `nil` when not signed in.
     public var primaryProvider: (any MediaProvider)? {
         guard let account = primaryActiveAccount,
-              let token = accountStore.token(for: account.id) else { return nil }
+              let token = resolvedToken(for: account.id) else { return nil }
         return try? registry.provider(for: account.session(token: token))
     }
 
@@ -180,7 +266,7 @@ public final class AppState {
     public var resolvedActiveAccounts: [ResolvedAccount] {
         accounts.compactMap { account in
             guard activeAccountIDs.contains(account.id),
-                  let token = accountStore.token(for: account.id),
+                  let token = resolvedToken(for: account.id),
                   let provider = try? registry.provider(for: account.session(token: token))
             else { return nil }
             return ResolvedAccount(account: account, provider: provider)
@@ -194,7 +280,7 @@ public final class AppState {
         let active = resolvedActiveAccounts
         if !active.isEmpty { return active }
         guard let account = primaryActiveAccount,
-              let token = accountStore.token(for: account.id),
+              let token = resolvedToken(for: account.id),
               let provider = try? registry.provider(for: account.session(token: token))
         else { return [] }
         return [ResolvedAccount(account: account, provider: provider)]
@@ -205,9 +291,110 @@ public final class AppState {
     /// resolved on demand and never stored on the value.
     public func provider(forAccountID id: String) -> (any MediaProvider)? {
         guard let account = accounts.first(where: { $0.id == id }),
-              let token = accountStore.token(for: account.id)
+              let token = resolvedToken(for: account.id)
         else { return nil }
         return try? registry.provider(for: account.session(token: token))
+    }
+
+    // MARK: Plex Home users ("Who's watching?")
+
+    /// The auth token to use for `accountID`, preferring an in-memory Plex
+    /// Home-user override over the account's stored (admin) token.
+    private func resolvedToken(for accountID: String) -> String? {
+        plexTokenOverrides[accountID] ?? accountStore.token(for: accountID)
+    }
+
+    /// Lists the Plex Home users for a signed-in Plex account (for the profile
+    /// editor's "Plex User" picker). Returns `[]` for non-Plex/unknown accounts
+    /// or on failure. Always uses the account's stored (admin) token.
+    public func plexHomeUsers(forAccountID accountID: String) async -> [PlexHomeUser] {
+        guard let account = accounts.first(where: { $0.id == accountID }),
+              account.server.provider == .plex,
+              let adminToken = accountStore.token(for: accountID) else { return [] }
+        return (try? await plexHomeUsersFetch(adminToken, deviceID)) ?? []
+    }
+
+    /// Submits a PIN for the outstanding Plex Home-user switch.
+    public func submitPlexPIN(_ pin: String) {
+        guard let request = pendingPlexPINRequest else { return }
+        plexPINError = nil
+        Task { await performPlexSwitch(accountID: request.accountID, homeUserID: request.homeUserID, pin: pin) }
+    }
+
+    /// Cancels the outstanding Plex PIN prompt, reverting to the default profile
+    /// so the UI isn't left under a profile the user couldn't unlock.
+    public func cancelPlexPIN() {
+        pendingPlexPINRequest = nil
+        plexPINError = nil
+        if let fallback = profilesModel.profiles.first?.id,
+           fallback != profilesModel.activeProfileID {
+            switchProfile(to: fallback)
+        } else {
+            clearPlexOverrides()
+        }
+    }
+
+    /// Treats a programmatic sheet dismissal as a cancel **only** when a prompt
+    /// is still outstanding (a successful switch already cleared it).
+    public func dismissPlexPINIfPresented() {
+        if pendingPlexPINRequest != nil { cancelPlexPIN() }
+    }
+
+    /// Aligns the in-memory Plex identity with the active profile's linked Home
+    /// user: unprotected users switch silently; protected users raise a PIN
+    /// prompt; an unmapped profile drops any override (back to the admin user).
+    private func ensurePlexIdentityForActiveProfile() {
+        let profile = profilesModel.activeProfile
+        guard let homeUserID = profile.plexHomeUserID,
+              let accountID = profile.plexHomeUserAccountID,
+              accounts.contains(where: { $0.id == accountID }) else {
+            clearPlexOverrides()
+            return
+        }
+        pendingPlexPINRequest = nil
+        plexPINError = nil
+        if profile.plexHomeUserRequiresPIN == true {
+            // PIN is never cached — drop any stale override and re-prompt.
+            if plexTokenOverrides[accountID] != nil {
+                plexTokenOverrides[accountID] = nil
+                plexIdentityGeneration += 1
+            }
+            pendingPlexPINRequest = PlexPINRequest(
+                id: profile.id,
+                accountID: accountID,
+                homeUserID: homeUserID,
+                homeUserName: profile.plexHomeUserName ?? "Plex User"
+            )
+        } else {
+            Task { await performPlexSwitch(accountID: accountID, homeUserID: homeUserID, pin: nil) }
+        }
+    }
+
+    /// Drops all Plex token overrides, falling back to stored (admin) tokens.
+    private func clearPlexOverrides() {
+        pendingPlexPINRequest = nil
+        plexPINError = nil
+        if !plexTokenOverrides.isEmpty {
+            plexTokenOverrides.removeAll()
+            plexIdentityGeneration += 1
+        }
+    }
+
+    /// Performs the Plex Home-user switch and installs the resulting token as the
+    /// account's override, bumping the identity generation so content reloads.
+    private func performPlexSwitch(accountID: String, homeUserID: String, pin: String?) async {
+        guard let adminToken = accountStore.token(for: accountID) else { return }
+        do {
+            let token = try await plexHomeUserSwitch(homeUserID, pin, adminToken, deviceID)
+            plexTokenOverrides[accountID] = token
+            pendingPlexPINRequest = nil
+            plexPINError = nil
+            plexIdentityGeneration += 1
+        } catch AppError.unauthorized {
+            plexPINError = "Incorrect PIN. Please try again."
+        } catch {
+            plexPINError = "Couldn’t switch Plex user. Please try again."
+        }
     }
 
     // MARK: Events
@@ -302,8 +489,10 @@ public final class AppState {
     public func switchProfile(to id: String) {
         profilesModel.select(id)
         rebuildSettingsModels()
+        updateTraktForActiveProfile()
         reloadAccounts()
         isChoosingProfile = false
+        ensurePlexIdentityForActiveProfile()
     }
 
     /// Creates or updates a profile from an editor draft. Updating the active
@@ -315,12 +504,18 @@ public final class AppState {
                 profile.avatarSymbol = draft.avatarSymbol
                 profile.colorIndex = draft.colorIndex
                 profile.linkedAccountID = draft.linkedAccountID
+                profile.plexHomeUserID = draft.plexHomeUserID
+                profile.plexHomeUserName = draft.plexHomeUserName
+                profile.plexHomeUserAccountID = draft.plexHomeUserAccountID
+                profile.plexHomeUserRequiresPIN = draft.plexHomeUserRequiresPIN
                 profilesModel.update(profile)
             }
             profilesModel.setActiveAccountIDs(draft.activeAccountIDs, for: id)
             if id == profilesModel.activeProfileID {
                 rebuildSettingsModels()
+                updateTraktForActiveProfile()
                 reloadAccounts()
+                ensurePlexIdentityForActiveProfile()
             }
         } else {
             profilesModel.add(
@@ -328,7 +523,11 @@ public final class AppState {
                 avatarSymbol: draft.avatarSymbol,
                 colorIndex: draft.colorIndex,
                 linkedAccountID: draft.linkedAccountID,
-                activeAccountIDs: draft.activeAccountIDs
+                activeAccountIDs: draft.activeAccountIDs,
+                plexHomeUserID: draft.plexHomeUserID,
+                plexHomeUserName: draft.plexHomeUserName,
+                plexHomeUserAccountID: draft.plexHomeUserAccountID,
+                plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN
             )
         }
     }
@@ -340,6 +539,7 @@ public final class AppState {
         profilesModel.remove(id)
         if wasActive {
             rebuildSettingsModels()
+            updateTraktForActiveProfile()
             reloadAccounts()
         }
     }
@@ -378,6 +578,14 @@ public final class AppState {
         themeModel = ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
+    }
+
+    /// Repoints Trakt (and its shared scrobbler) at the active profile's own
+    /// connection so each household profile scrobbles to its own Trakt account.
+    /// Fire-and-forget: the status refresh is async and best-effort.
+    private func updateTraktForActiveProfile() {
+        let ns = profilesModel.activeNamespace
+        Task { await traktService.setActiveProfile(namespace: ns) }
     }
 
     private func apply(_ event: SessionEvent) {

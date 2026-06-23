@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import CoreModels
+import MetadataKit
 import RatingsService
 
 /// Loads full detail for an item plus its children (episodes/seasons), and
@@ -15,15 +16,42 @@ public final class ItemDetailViewModel {
 
     public private(set) var state: LoadState<Detail> = .idle
 
+    /// Playable trailers for this item, loaded alongside detail. Empty until
+    /// resolved (and when the backend has none). Each is tagged with this
+    /// detail's owning account so it routes back to the right provider.
+    public private(set) var trailers: [MediaItem] = []
+
     /// Episodes for each season of a series, loaded lazily the first time a
     /// season is shown/focused and cached so re-focusing a tab is instant. Keyed
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
     public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
     private var loadingSeasons: Set<String> = []
+    /// When this detail is a series, its TMDb id. Stamped into loaded episodes
+    /// under `SeriesTmdb` once at fetch time so episode rails don't re-map every
+    /// episode on every focus movement.
+    private var seriesTMDbID: String?
+    /// When this detail is a series, the anime provider-ids (AniList/AniDB/MAL/…)
+    /// and an "Anime" marker propagated onto its episodes so each episode — and
+    /// the series-level fallback synthesized from it — classifies as anime and can
+    /// resolve the keyless AniList banner. Episodes themselves rarely carry the
+    /// show's anime ids/genre, so without this an anime episode with no still gets
+    /// no thumbnail at all.
+    private var seriesAnimeIDs: [String: String] = [:]
+    private var seriesIsAnime = false
+
+    /// When the requested item was a season, the id of that season. A season
+    /// never renders its own page — `load()` transparently redirects to the
+    /// parent series, and the series page uses this to pre-select the season the
+    /// user actually tapped. `nil` for non-season loads.
+    public private(set) var preselectedSeasonID: String?
 
     private let provider: any MediaProvider
     private let itemID: String
     private let ratingsProvider: any ExternalRatingsProviding
+    /// Resolves a keyless online trailer (public YouTube front-ends), used only
+    /// when the provider surfaces no local or server trailer. Injectable so tests
+    /// can avoid the network.
+    private let onlineTrailerResolver: OnlineTrailerResolving
     /// The account this item belongs to, propagated so the detail item and its
     /// children stay tagged with their owning provider as the user drills down
     /// (children come from the provider untagged). `nil` outside aggregated flows.
@@ -33,27 +61,38 @@ public final class ItemDetailViewModel {
         provider: any MediaProvider,
         itemID: String,
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
-        sourceAccountID: String? = nil
+        sourceAccountID: String? = nil,
+        onlineTrailerResolver: @escaping OnlineTrailerResolving = ItemDetailViewModel.defaultOnlineTrailerResolver
     ) {
         self.provider = provider
         self.itemID = itemID
         self.ratingsProvider = ratingsProvider
         self.sourceAccountID = sourceAccountID
+        self.onlineTrailerResolver = onlineTrailerResolver
+    }
+
+    /// Production online-trailer resolver: a keyless YouTube search (no API key,
+    /// no TMDb) that surfaces the best official trailer for the title.
+    public static let defaultOnlineTrailerResolver: OnlineTrailerResolving = { item in
+        await OnlineTrailerSource.trailers(for: item)
     }
 
     public func load() async {
         state = .loading
         do {
-            let item = try await provider.item(id: itemID)
+            var item = try await provider.item(id: itemID)
+            item = await redirectingSeasonToSeries(item)
+            captureSeriesContext(from: item)
             // Series/seasons have children to list; leaf items don't.
             let children: [MediaItem]
             switch item.kind {
             case .series, .season, .folder, .collection:
-                children = try await provider.children(of: itemID)
+                children = try await provider.children(of: item.id)
             default:
                 children = []
             }
             state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
+            await loadTrailers(for: item)
             await enrichRatings(for: item)
         } catch let error as AppError {
             state = .failed(error)
@@ -62,9 +101,96 @@ public final class ItemDetailViewModel {
         }
     }
 
+    /// A season must never render a page of its own. When the fetched item is a
+    /// season with a resolvable parent series, transparently swap it for that
+    /// series (remembering the season in `preselectedSeasonID` so the series page
+    /// opens on it). Returns the item unchanged for non-seasons, or when the
+    /// parent series can't be resolved. This guarantees that tapping a season
+    /// anywhere — Recently Added, Search, a deep link — lands on the rich series
+    /// page, never a standalone season page.
+    private func redirectingSeasonToSeries(_ item: MediaItem) async -> MediaItem {
+        guard item.kind == .season,
+              let seriesID = item.seriesID,
+              let series = try? await provider.item(id: seriesID) else {
+            preselectedSeasonID = nil
+            return item
+        }
+        preselectedSeasonID = item.id
+        return series
+    }
+
     /// Already-loaded episodes for `seasonID`, or `nil` if not yet fetched.
     public func episodes(for seasonID: String) -> [MediaItem]? {
         seasonEpisodes[seasonID]
+    }
+
+    /// Fetches the item's trailers off the critical path. Provider trailers come
+    /// first — local trailer files (Jellyfin `/LocalTrailers`, Plex local extras)
+    /// and server-resolved online trailers (Jellyfin `RemoteTrailers`, Plex
+    /// remote extras), the latter already YouTube-marked. Local items are tagged
+    /// with the owning account so playback routes to the right provider; online
+    /// (YouTube) items keep their marker and route to the keyless YouTube trailer
+    /// provider instead. When the server surfaces nothing, falls back to a keyless
+    /// online lookup. Best-effort: any failure leaves `trailers` empty and the
+    /// detail page hides its Trailer button.
+    private func loadTrailers(for item: MediaItem) async {
+        let provided = (try? await provider.trailers(for: item.id)) ?? []
+        let resolved = provided.isEmpty
+            ? await onlineTrailerResolver(item)
+            : provided.map { $0.isYouTubeTrailer ? $0 : tagged($0) }
+        guard case let .loaded(detail) = state, detail.item.id == item.id else { return }
+        trailers = resolved
+    }
+
+    /// Applies a watched-state mutation to the loaded detail, its children and
+    /// any loaded season episodes **in place** — flipping only the `isPlayed`
+    /// flag on the affected items. Because the arrays keep their identity and
+    /// order (no refetch, no momentary emptying), SwiftUI updates just the
+    /// watched badges and the user's focus stays exactly where it was.
+    public func applyWatchedState(_ mutation: MediaItemMutation) {
+        if case var .loaded(detail) = state {
+            if mutation.itemIDs.contains(detail.item.id) {
+                detail.item.isPlayed = mutation.played
+            }
+            detail.children = detail.children.map { apply(mutation, to: $0) }
+            state = .loaded(detail)
+        }
+        for (seasonID, episodes) in seasonEpisodes {
+            seasonEpisodes[seasonID] = episodes.map { apply(mutation, to: $0) }
+        }
+    }
+
+    private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {
+        guard mutation.itemIDs.contains(item.id) else { return item }
+        var copy = item
+        copy.isPlayed = mutation.played
+        return copy
+    }
+
+    /// Quietly re-fetches the detail, its children, and any season episode lists
+    /// already shown, **without** dropping to a full-screen loading state. Used
+    /// after a context-menu action (e.g. mark watched) so the hero, child rail
+    /// and watched badges reflect the new server state in place.
+    public func reload() async {
+        guard case .loaded = state else { await load(); return }
+        guard var item = try? await provider.item(id: itemID) else { return }
+        item = await redirectingSeasonToSeries(item)
+        captureSeriesContext(from: item)
+        let children: [MediaItem]
+        switch item.kind {
+        case .series, .season, .folder, .collection:
+            children = (try? await provider.children(of: item.id)) ?? []
+        default:
+            children = []
+        }
+        state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
+        // Refresh the episode lists that were already loaded for visible seasons.
+        let loadedSeasonIDs = Array(seasonEpisodes.keys)
+        seasonEpisodes = [:]
+        for seasonID in loadedSeasonIDs {
+            await loadEpisodes(for: seasonID)
+        }
+        await enrichRatings(for: item)
     }
 
     /// Lazily fetches and caches the episodes of one season. Idempotent: a season
@@ -77,7 +203,17 @@ public final class ItemDetailViewModel {
         loadingSeasons.insert(seasonID)
         defer { loadingSeasons.remove(seasonID) }
         let episodes = (try? await provider.children(of: seasonID)) ?? []
-        seasonEpisodes[seasonID] = episodes.map(tagged)
+        seasonEpisodes[seasonID] = stampSeriesTMDb(into: episodes.map(tagged))
+    }
+
+    /// Replaces the cached episodes for a season after the view has enriched them
+    /// — specifically, after injecting a resolved still URL into episodes the
+    /// server has no image for, so the rail re-renders seeding a synchronously
+    /// available thumbnail (no gray-placeholder flash). The ids and order are
+    /// unchanged, so SwiftUI updates artwork in place without disturbing focus.
+    public func setEpisodes(_ episodes: [MediaItem], for seasonID: String) {
+        guard seasonEpisodes[seasonID] != nil else { return }
+        seasonEpisodes[seasonID] = episodes
     }
 
     /// Stamps an item with this detail's owning account (if any) so navigation
@@ -85,6 +221,44 @@ public final class ItemDetailViewModel {
     private func tagged(_ item: MediaItem) -> MediaItem {
         guard let sourceAccountID else { return item }
         return item.taggingSource(sourceAccountID)
+    }
+
+    /// Captures the series-level context (TMDb id + anime ids/genre) used to stamp
+    /// episodes as they load. Cleared for non-series details.
+    private func captureSeriesContext(from item: MediaItem) {
+        guard item.kind == .series else {
+            seriesTMDbID = nil
+            seriesAnimeIDs = [:]
+            seriesIsAnime = false
+            return
+        }
+        seriesTMDbID = item.providerIDs["Tmdb"]
+        seriesAnimeIDs = item.providerIDs.filter { ContentClassifier.isAnimeProviderIDKey($0.key) }
+        seriesIsAnime = ContentClassifier.isAnime(item)
+    }
+
+    /// Ensures every episode carries the parent series' TMDb id under `SeriesTmdb`,
+    /// plus the series' anime ids and an "Anime" genre when the show is anime. This
+    /// is required for robust anime thumbnail/logo fallback (episodes rarely carry
+    /// the show's anime ids/genre, so the series-banner fallback would otherwise
+    /// misclassify them as non-anime and show nothing). Done here once per fetch to
+    /// avoid per-focus remapping in the view layer.
+    private func stampSeriesTMDb(into episodes: [MediaItem]) -> [MediaItem] {
+        let hasTMDb = (seriesTMDbID?.isEmpty == false)
+        guard hasTMDb || seriesIsAnime || !seriesAnimeIDs.isEmpty else { return episodes }
+        return episodes.map { episode in
+            var copy = episode
+            if let seriesTMDbID, !seriesTMDbID.isEmpty, copy.providerIDs["SeriesTmdb"] == nil {
+                copy.providerIDs["SeriesTmdb"] = seriesTMDbID
+            }
+            for (key, value) in seriesAnimeIDs where copy.providerIDs[key] == nil {
+                copy.providerIDs[key] = value
+            }
+            if seriesIsAnime, !copy.genres.contains(where: { $0.lowercased().contains("anime") }) {
+                copy.genres.append("Anime")
+            }
+            return copy
+        }
     }
 
     /// Fetches external ratings off the critical path and merges them into the

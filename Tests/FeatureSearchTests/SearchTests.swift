@@ -231,6 +231,23 @@ final class SearchDeduplicatorTests: XCTestCase {
         )
     }
 
+    private func series(
+        _ id: String,
+        title: String,
+        year: Int? = nil,
+        account: String,
+        providerIDs: [String: String] = [:]
+    ) -> MediaItem {
+        MediaItem(
+            id: id,
+            title: title,
+            kind: .series,
+            productionYear: year,
+            providerIDs: providerIDs,
+            sourceAccountID: account
+        )
+    }
+
     func testCollapsesSameTitleAcrossServersIntoOneCard() {
         // The exact same movie on a Plex account and a Jellyfin account.
         let plex = movie("p1", title: "Dune", year: 2021, account: "acct-plex")
@@ -255,6 +272,46 @@ final class SearchDeduplicatorTests: XCTestCase {
         XCTAssertEqual(merged.map(\.id), ["a", "b"], "A reboot with a different year is a different title")
     }
 
+    func testDoesNotMergeSameTitleWhenYearIsNilAndNoExternalIDs() {
+        // Series with the same name and no external IDs must never be collapsed —
+        // without an external ID there is no safe way to know they're the same show.
+        let anime = series("anime", title: "One Piece", account: "acct-jellyfin")
+        let liveAction = series("live", title: "One Piece", account: "acct-plex")
+
+        let merged = SearchDeduplicator.deduplicate([anime, liveAction])
+
+        XCTAssertEqual(merged.map(\.id), ["anime", "live"],
+                       "Series without external IDs must never be collapsed by title identity")
+    }
+
+    func testDoesNotMergeSeriesWithSameYearButDifferentExternalIDs() {
+        // The One Piece scenario: bad metadata gives the live action year=1999
+        // (matching the anime's real start year). Both are series — title identity
+        // must not be emitted for series at all, so different TMDb IDs keep them apart.
+        let liveAction = series("live", title: "One Piece", year: 1999, account: "acct-plex",
+                                providerIDs: ["Tmdb": "392768"])  // bad year
+        let anime = series("anime", title: "One Piece", year: 1999, account: "acct-jf",
+                           providerIDs: ["Tmdb": "37854"])
+
+        let merged = SearchDeduplicator.deduplicate([liveAction, anime])
+
+        XCTAssertEqual(merged.map(\.id), ["live", "anime"],
+                       "Series with different external IDs must never be merged even when title+year match")
+    }
+
+    func testMergesSeriesWithSameExternalIDAcrossServers() {
+        // The same show on Plex and Jellyfin — different internal IDs but shared TMDb.
+        let plex = series("p1", title: "One Piece", year: 1999, account: "acct-plex",
+                          providerIDs: ["Tmdb": "37854"])
+        let jellyfin = series("j1", title: "One Piece", year: 1999, account: "acct-jf",
+                              providerIDs: ["Tmdb": "37854"])
+
+        let merged = SearchDeduplicator.deduplicate([plex, jellyfin])
+
+        XCTAssertEqual(merged.count, 1, "Same show on two servers (matched by TMDb) must collapse to one card")
+        XCTAssertEqual(merged[0].additionalSourceAccountIDs, ["acct-jf"])
+    }
+
     func testMergesOnSharedExternalIDDespiteTitleDifferences() {
         // Different display titles / years but the same IMDb id ⇒ same film.
         let plex = movie("p1", title: "Spider-Man", account: "acct-plex", providerIDs: ["Imdb": "tt0145487"])
@@ -277,10 +334,12 @@ final class SearchDeduplicatorTests: XCTestCase {
     }
 
     func testTransitiveMergeAcrossThreeServers() {
-        // a↔b share an IMDb id; b↔c share title+year ⇒ all three are one card.
+        // a↔b share an IMDb id ⇒ merged. c shares the same IMDb id too ⇒ all three collapse.
+        // (Under the new rules, title identity is suppressed when external IDs are present,
+        // so the bridge must come from a shared external ID, not title+year.)
         let a = movie("a", title: "The Matrix", account: "acct-a", providerIDs: ["Imdb": "tt0133093"])
         let b = movie("b", title: "The Matrix", year: 1999, account: "acct-b", providerIDs: ["Imdb": "tt0133093"])
-        let c = movie("c", title: "the  matrix", year: 1999, account: "acct-c")
+        let c = movie("c", title: "the  matrix", year: 1999, account: "acct-c", providerIDs: ["Imdb": "tt0133093"])
 
         let merged = SearchDeduplicator.deduplicate([a, b, c])
 
@@ -288,6 +347,7 @@ final class SearchDeduplicatorTests: XCTestCase {
         XCTAssertEqual(merged[0].id, "a")
         XCTAssertEqual(merged[0].additionalSourceAccountIDs, ["acct-b", "acct-c"])
     }
+
 
     func testNormalizationIgnoresPunctuationDiacriticsAndCase() {
         let plex = movie("p1", title: "Amélie", year: 2001, account: "acct-plex")

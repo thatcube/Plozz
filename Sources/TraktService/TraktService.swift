@@ -54,6 +54,18 @@ public final class TraktService {
     /// Whether the feature is offered at all (client credentials present).
     public var isConfigured: Bool { config.isConfigured }
 
+    /// Switches the service (and its shared scrobbler) to a household profile's
+    /// own Trakt connection. Each profile connects/disconnects independently;
+    /// the default profile uses `nil` (legacy un-namespaced storage). Cancels any
+    /// in-flight connect, repoints the shared token store, then re-resolves status.
+    public func setActiveProfile(namespace: String?) async {
+        connectTask?.cancel()
+        connectTask = nil
+        tokenStore.setNamespace(namespace)
+        phase = config.isConfigured ? .unknown : .unavailable
+        await refreshStatus()
+    }
+
     /// Resolves the current connection status: verifies any stored token (and
     /// refreshes it if expired), then loads the username for display. Safe to
     /// call repeatedly (e.g. when Settings appears).
@@ -137,9 +149,12 @@ public enum TraktServiceFactory {
     public static func make(
         config: TraktConfig = .resolved(),
         http: HTTPClient = URLSessionHTTPClient(),
-        tokenStore: TraktTokenStoring? = nil
+        tokenStore: TraktTokenStoring? = nil,
+        namespace: String? = nil
     ) -> TraktService {
-        TraktService(config: config, http: http, tokenStore: tokenStore ?? defaultTokenStore())
+        let store = tokenStore ?? defaultTokenStore()
+        store.setNamespace(namespace)
+        return TraktService(config: config, http: http, tokenStore: store)
     }
 
     public static func defaultTokenStore() -> TraktTokenStoring {

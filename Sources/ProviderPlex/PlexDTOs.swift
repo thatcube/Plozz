@@ -42,9 +42,15 @@ struct PlexMetadata: Decodable {
     let ratingKey: String?
     let key: String?
     let type: String?          // "movie", "show", "season", "episode", "clip"
+    /// For extras/clips, the kind of extra, e.g. "trailer", "behindTheScenes".
+    let subtype: String?
     let title: String?
     let parentTitle: String?
     let grandparentTitle: String?
+    /// For an episode, the ratingKey of its season (parent) and series
+    /// (grandparent) — used to offer "Go to Season" / "Go to Series" jumps.
+    let parentRatingKey: String?
+    let grandparentRatingKey: String?
     let summary: String?
     let index: Int?            // episode number (or season index)
     let parentIndex: Int?      // season number for an episode
@@ -56,7 +62,33 @@ struct PlexMetadata: Decodable {
     let art: String?
     let grandparentThumb: String?
     let parentThumb: String?
+    /// Content certificate, e.g. `TV-14`, `PG-13`, `R`.
+    let contentRating: String?
+    /// Critic score (0–10 on Plex's normalised scale); `ratingImage` names the
+    /// source, e.g. `rottentomatoes://image.rating.ripe` or `imdb://…`.
+    let rating: Double?
+    let ratingImage: String?
+    /// Audience score (0–10); `audienceRatingImage` names the source.
+    let audienceRating: Double?
+    let audienceRatingImage: String?
+    /// External ids (`imdb://...`, `tmdb://...`, `tvdb://...`, `anidb://...`)
+    /// exported by Plex agents/scanners. Ingested into `MediaItem.providerIDs`
+    /// so the metadata router can match items by a stable external id (which
+    /// also sharpens anime detection) instead of a fuzzy title search.
+    let Guid: [PlexGuid]?
+    let Genre: [PlexTag]?
     let Media: [PlexMedia]?
+}
+
+/// One Plex external-id GUID, e.g. `{ "id": "imdb://tt0111161" }`.
+struct PlexGuid: Decodable {
+    let id: String?
+}
+
+/// A simple Plex tag element (genres, directors, …): only the display `tag` is
+/// used.
+struct PlexTag: Decodable {
+    let tag: String?
 }
 
 struct PlexMedia: Decodable {
@@ -65,6 +97,16 @@ struct PlexMedia: Decodable {
     let container: String?
     let videoCodec: String?
     let audioCodec: String?
+    /// Media-level facts Plex includes even in list/children responses (where
+    /// the per-stream `Stream` array may be omitted): a coarse resolution token
+    /// (`4k`, `1080`, `720`, `sd`), pixel dimensions and the audio channel
+    /// count. Used as a fallback so episode rails still earn resolution/audio
+    /// badges without a full per-item metadata fetch.
+    let videoResolution: String?
+    let width: Int?
+    let height: Int?
+    let audioChannels: Int?
+    let videoProfile: String?
     let Part: [PlexPart]?
 }
 
@@ -73,6 +115,10 @@ struct PlexPart: Decodable {
     let key: String?           // e.g. "/library/parts/123/16000/file.mkv"
     let duration: Int?
     let container: String?
+    /// Which trickplay (BIF) index resolutions the server has generated for this
+    /// part, e.g. `"sd"` or `"sd,hd"`. Present only when the server has built
+    /// "video preview thumbnails"; drives Plozz's scrubbing previews.
+    let indexes: String?
     let Stream: [PlexStream]?
 }
 
@@ -89,6 +135,10 @@ struct PlexStream: Decodable {
     let selected: Bool?
     let `default`: Bool?
     let forced: Bool?
+    /// Server-relative key for an external/sidecar subtitle file (e.g.
+    /// `/library/streams/12345`). Present for external subs; `nil` for embedded
+    /// streams. Used to deliver the subtitle text to the player.
+    let key: String?
     // Video facts
     let width: Int?
     let height: Int?
@@ -126,6 +176,33 @@ struct PlexUserDTO: Decodable {
     let username: String?
     let title: String?
     let email: String?
+    let thumb: String?
+}
+
+// MARK: Plex.tv: Home users
+
+/// `GET /api/v2/home/users` — wrapper around the Home's user list.
+struct PlexHomeUsersDTO: Decodable {
+    let users: [PlexHomeUserDTO]
+}
+
+/// One Plex Home user. `protected`/`hasPassword` mean a PIN is needed to switch.
+struct PlexHomeUserDTO: Decodable {
+    let id: Int?
+    let uuid: String?
+    let title: String?
+    let username: String?
+    let admin: Bool?
+    let restricted: Bool?
+    let protected: Bool?
+    let hasPassword: Bool?
+}
+
+/// `POST /api/v2/home/users/{uuid}/switch` — returns the switched-to user,
+/// carrying that user's auth token (key spelling varies by API surface).
+struct PlexHomeSwitchDTO: Decodable {
+    let authToken: String?
+    let authenticationToken: String?
 }
 
 // MARK: Plex.tv: resources (servers)

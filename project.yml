@@ -31,6 +31,7 @@ targets:
     sources:
       - path: App/Plozz
       - path: App/Resources/Assets.xcassets
+      - path: App/Resources/Fonts
     info:
       path: App/Resources/Info.plist
       properties:
@@ -43,6 +44,8 @@ targets:
         # background/Now-Playing behaviour (AVAudioSession .playback).
         UIBackgroundModes:
           - audio
+        UIAppFonts:
+          - "Bungee-Regular.ttf"
         # OMDb API key for external ratings enrichment (IMDb/RT/Metacritic).
         # Substituted from the OMDB_API_KEY build setting (see Config/Secrets.xcconfig
         # → optional, gitignored Config/Secrets.local.xcconfig). Empty by default,
@@ -53,20 +56,32 @@ targets:
         # from the TMDB_BEARER_TOKEN build setting (gitignored Config/Secrets.local.xcconfig).
         # Empty by default, which disables the TMDb fallback.
         TMDBBearerToken: "$(TMDB_BEARER_TOKEN)"
-        # Trakt OAuth application credentials, powering watch-history sync
-        # (scrobbling). Substituted from the TRAKT_CLIENT_ID / TRAKT_CLIENT_SECRET
-        # build settings (gitignored Config/Secrets.local.xcconfig). Empty by
-        # default, which disables Trakt sync (the Settings panel shows it as
-        # unavailable and scrobbling is a no-op). Create an app at
-        # https://trakt.tv/oauth/applications to get these.
+        # Optional base URL of a self-hostable TMDb caching proxy that holds ONE
+        # TMDb key server-side (TMDb terms forbid shipping a key in an open-source
+        # client). When set, TMDb-grade movie/western-TV backdrops, logos and
+        # episode stills are served compliantly and scalably for any number of
+        # users. Empty by default: the app then relies on the keyless providers
+        # (AniList/Kitsu/TVmaze/Deezer/MusicBrainz) and the user's own server art.
+        TMDBProxyBaseURL: "$(TMDB_PROXY_BASE_URL)"
+        # Trakt OAuth application credentials, powering per-profile watch-history
+        # sync (scrobbling). Substituted from the TRAKT_CLIENT_ID /
+        # TRAKT_CLIENT_SECRET build settings (gitignored
+        # Config/Secrets.local.xcconfig). Empty by default, which disables Trakt
+        # sync (the Settings panel shows it as unavailable and scrobbling is a
+        # no-op). Create an app at https://trakt.tv/oauth/applications to get these.
         TraktClientID: "$(TRAKT_CLIENT_ID)"
         TraktClientSecret: "$(TRAKT_CLIENT_SECRET)"
         # Local network access is required for LAN server discovery on tvOS.
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:
           - _jellyfin._tcp
-        # Jellyfin servers are often plain HTTP on the LAN. Allow local networking.
+        # Jellyfin servers are user-controlled and frequently plain HTTP — on the
+        # LAN, behind a reverse proxy, or over Tailscale (the 100.64.0.0/10 CGNAT
+        # range, which is NOT covered by NSAllowsLocalNetworking). Since the user
+        # explicitly enters their own server address, allow arbitrary HTTP loads
+        # so Tailscale IPs (http://100.x.x.x:8096) and MagicDNS names resolve.
         NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
         # Deep links that launch the app straight into playback, used by the
         # Top Shelf extension's cards (e.g. plozz://item/<id>).
@@ -82,6 +97,9 @@ targets:
         # enrichment disabled. A real key is supplied via the gitignored
         # Config/Secrets.local.xcconfig (see Config/Secrets.xcconfig).
         OMDB_API_KEY: ""
+        # Default (empty) TMDb proxy base URL. A maintainer-run/self-hosted proxy
+        # URL can be supplied via the gitignored Config/Secrets.local.xcconfig.
+        TMDB_PROXY_BASE_URL: ""
         # tvOS "Brand Assets" providing the layered app icon and Top Shelf
         # images (required by App Store Connect for any upload, incl. TestFlight).
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
@@ -89,6 +107,11 @@ targets:
         # exchange the published snapshot.
         CODE_SIGN_ENTITLEMENTS: App/Resources/Plozz.entitlements
         GENERATE_INFOPLIST_FILE: NO
+        # Force-keep the AVKit load command. AVKit is only used via the dynamic
+        # `UIWindow.avDisplayManager` ObjC category (for the Dolby Vision / HDR
+        # display-mode switch), so the linker's default `-dead_strip_dylibs`
+        # otherwise drops it and the selector is unrecognized at runtime (crash).
+        OTHER_LDFLAGS: "-Wl,-needed_framework,AVKit"
     configFiles:
       Debug: Config/Secrets.xcconfig
       Release: Config/Secrets.xcconfig
@@ -125,6 +148,29 @@ targets:
         # instantiates ContentProvider.
         LD_ENTRY_POINT: _NSExtensionMain
 
+  # COMPILE/LINK gate target. This tvOS framework links the EngineMPV package
+  # product on its own so CI / the build gate can prove it compiles + links
+  # against the tvOS SDK with its libmpv + FFmpeg xcframeworks, independent of
+  # the full app. (EngineMPV is also linked into the Plozz app itself as the sole
+  # on-device decode engine; VLCKit was removed — see tag archive/vlckit-engine.)
+  # Build via the EngineMPVProbe scheme.
+  EngineMPVProbe:
+    type: framework
+    platform: tvOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App/EngineMPVProbe
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz.EngineMPVProbe
+        PRODUCT_NAME: EngineMPVProbe
+        GENERATE_INFOPLIST_FILE: YES
+        # Probe-only; never shipped, so skip code signing entirely.
+        CODE_SIGNING_ALLOWED: NO
+    dependencies:
+      - package: Plozz
+        product: EngineMPV
+
 schemes:
   Plozz:
     build:
@@ -136,3 +182,11 @@ schemes:
       config: Debug
       # Unit tests live in the Swift package; run them via the package scheme
       # (`swift test` / `xcodebuild test -scheme Plozz-Package`).
+
+  # Compile-only gate for the otherwise-unlinked EngineMPV module.
+  EngineMPVProbe:
+    build:
+      targets:
+        EngineMPVProbe: all
+    run:
+      config: Debug

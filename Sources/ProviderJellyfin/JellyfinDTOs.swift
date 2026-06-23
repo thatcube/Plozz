@@ -56,21 +56,39 @@ struct BaseItemDto: Decodable {
     let Overview: String?
     let SeriesName: String?
     let SeasonName: String?
-    /// For an episode, the id of its parent series (used to fall back to series
-    /// artwork when the episode itself has no image).
     let SeriesId: String?
+    let SeasonId: String?
+    let ParentId: String?
     let IndexNumber: Int?
     let ParentIndexNumber: Int?
     let ProductionYear: Int?
     let RunTimeTicks: Int64?
+    let OfficialRating: String?
     let CommunityRating: Double?
     let CriticRating: Double?
     let ProviderIds: [String: String]?
+    /// Cast & crew. Present only when `People` is requested in `Fields`. Each
+    /// entry is an actor/director/writer/etc.; for anime the `Actor` entries are
+    /// the voice cast with `Role` holding the character voiced.
+    let People: [BaseItemPersonDto]?
+    /// Production studios (e.g. `MAPPA`, `Wit Studio`). Present only when
+    /// `Studios` is requested in `Fields`.
+    let Studios: [NameGuidPairDto]?
+    /// Free-form tags the server/metadata provider attached (e.g. `Isekai`,
+    /// `Shounen`). Present only when `Tags` is requested in `Fields`.
+    let Tags: [String]?
+    /// Short marketing taglines. Present only when `Taglines` is requested in
+    /// `Fields`.
+    let Taglines: [String]?
     let UserData: UserItemDataDto?
     let MediaSources: [MediaSourceInfo]?
     let MediaStreams: [MediaStreamDto]?
     let ImageTags: [String: String]?
     let BackdropImageTags: [String]?
+    /// Trickplay (scrubbing-thumbnail) manifests, keyed by media-source id then
+    /// by thumbnail width. Present only when `Trickplay` is requested in `Fields`
+    /// and the server has generated trickplay images for the item.
+    let Trickplay: [String: [String: TrickplayInfoDto]]?
 
     // MARK: Music fields (additive, all optional)
     //
@@ -92,6 +110,18 @@ struct BaseItemDto: Decodable {
     let Genres: [String]?
     /// Number of children (e.g. albums for an artist, tracks for an album).
     let ChildCount: Int?
+    /// Online trailer links the server resolved from its own metadata provider
+    /// (e.g. YouTube watch URLs). Present only when `RemoteTrailers` is requested
+    /// in `Fields`. These let Plozz surface official trailers with no client-side
+    /// metadata key — the key lives on the user's own server.
+    let RemoteTrailers: [MediaUrlDto]?
+}
+
+/// A named external media link from `BaseItemDto.RemoteTrailers` — typically a
+/// YouTube watch URL for an official trailer.
+struct MediaUrlDto: Decodable {
+    let Url: String?
+    let Name: String?
 }
 
 /// A Jellyfin `{ Name, Id }` reference pair (used for artists, genres, …).
@@ -100,10 +130,36 @@ struct NameGuidPairDto: Decodable {
     let Id: String?
 }
 
+/// One cast/crew member from `BaseItemDto.People`. `Type` is the role kind
+/// (`Actor`, `GuestStar`, `Director`, `Writer`, `Producer`, …) and `Role` is the
+/// character name for actors (the voiced character, for anime). `PrimaryImageTag`
+/// is present only when the person has a headshot on the server.
+struct BaseItemPersonDto: Decodable {
+    let Id: String?
+    let Name: String?
+    let Role: String?
+    let `Type`: String?
+    let PrimaryImageTag: String?
+}
+
 struct UserItemDataDto: Decodable {
     let PlaybackPositionTicks: Int64?
     let PlayedPercentage: Double?
     let Played: Bool?
+}
+
+/// Jellyfin trickplay tile-group metadata (`BaseItemDto.Trickplay[srcId][width]`).
+/// Geometry for the pre-generated scrubbing thumbnails: each tile image packs
+/// `TileWidth × TileHeight` thumbnails of `Width × Height` px, one thumbnail per
+/// `Interval` ms.
+struct TrickplayInfoDto: Decodable {
+    let Width: Int?
+    let Height: Int?
+    let TileWidth: Int?
+    let TileHeight: Int?
+    let ThumbnailCount: Int?
+    let Interval: Int?
+    let Bandwidth: Int?
 }
 
 struct PlaybackInfoResponse: Decodable {
@@ -136,14 +192,22 @@ struct MediaStreamDto: Decodable {
     let Index: Int
     let `Type`: String       // "Audio", "Subtitle", "Video"
     let Codec: String?
+    /// Container codec FourCC (`codec_tag_string`), e.g. `hvc1`/`hev1` for HEVC.
+    let CodecTag: String?
     let Profile: String?
     let Language: String?
     let DisplayTitle: String?
     let IsDefault: Bool?
     let IsForced: Bool?
+    /// Whether this subtitle stream is text-based (SRT/ASS/embedded text) and so
+    /// can be delivered/converted to WebVTT for the player. Image-based subs
+    /// (PGS/VOBSUB) report `false` and need server burn-in instead.
+    let IsTextSubtitleStream: Bool?
+    let IsExternal: Bool?
     // Video facts
     let Width: Int?
     let Height: Int?
+    let BitDepth: Int?
     let BitRate: Int?
     let RealFrameRate: Double?
     let AverageFrameRate: Double?

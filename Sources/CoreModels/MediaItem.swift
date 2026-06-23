@@ -12,6 +12,42 @@ public enum MediaItemKind: String, Codable, Sendable {
     case unknown
 }
 
+/// A provider-agnostic cast/crew member shown on a detail page. For anime the
+/// `Actor` entries are the voice cast, with `role` holding the voiced character.
+public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    /// The character played/voiced, when the provider reports one (actors only).
+    public var role: String?
+    /// Provider-native role kind, e.g. `Actor`, `GuestStar`, `Director`,
+    /// `Writer`, `Producer`. Used to separate cast from crew in the UI.
+    public var kind: String?
+    /// Headshot artwork, when the person has an image on the server.
+    public var imageURL: URL?
+
+    public init(
+        id: String,
+        name: String,
+        role: String? = nil,
+        kind: String? = nil,
+        imageURL: URL? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.kind = kind
+        self.imageURL = imageURL
+    }
+
+    /// True for on-screen/voice talent (vs. crew), used to build the "Cast" row.
+    public var isCast: Bool {
+        switch kind?.lowercased() {
+        case "actor", "gueststar", nil: return true
+        default: return false
+        }
+    }
+}
+
 /// A provider-agnostic media item.
 ///
 /// Providers map their native item shapes (Jellyfin `BaseItemDto`, later Plex
@@ -27,6 +63,40 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var seasonNumber: Int?
     public var episodeNumber: Int?
     public var productionYear: Int?
+
+    /// The content/age-classification certificate, e.g. `TV-14`, `PG-13`, `R`.
+    /// Provider-native string (Jellyfin `OfficialRating`); `nil` when unrated or
+    /// unreported. Rendered as an outlined badge on the detail hero.
+    public var officialRating: String?
+
+    /// Genre labels for the item, e.g. `["Action", "Adventure"]`. Ordered as the
+    /// provider returns them; the detail metadata line shows the first few.
+    public var genres: [String]
+
+    /// Cast & crew, ordered as the provider returns them (billing order). Only
+    /// populated on the detail fetch; empty for items loaded as rows/cards.
+    public var people: [MediaPerson]
+
+    /// Production studios (e.g. `MAPPA`, `Wit Studio`). Only populated on the
+    /// detail fetch.
+    public var studios: [String]
+
+    /// Free-form tags (e.g. `Isekai`, `Shounen`). Only populated on the detail
+    /// fetch.
+    public var tags: [String]
+
+    /// Short marketing taglines. Only populated on the detail fetch.
+    public var taglines: [String]
+
+    /// For an episode, the id of its owning series, enabling a "Go to Series"
+    /// jump from anywhere the episode appears. `nil` for non-episodes or when the
+    /// provider doesn't report it.
+    public var seriesID: String?
+
+    /// For an episode, the id of its owning season, enabling a "Go to Season"
+    /// jump (e.g. from a Continue Watching card). `nil` for non-episodes or when
+    /// the provider doesn't report it.
+    public var seasonID: String?
 
     /// Total runtime in seconds, if known.
     public var runtime: TimeInterval?
@@ -65,6 +135,14 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// used by enrichment services to look up additional ratings/metadata.
     public var providerIDs: [String: String]
 
+    /// Source-of-truth technical facts about the underlying file (resolution,
+    /// HDR/Dolby Vision range, audio codec/channels, …) when the provider reports
+    /// them on the detail fetch. Powers the "4K · Dolby Vision · Dolby Atmos"
+    /// technical badge row on the detail hero. `nil` for items fetched without
+    /// stream metadata (e.g. rows/cards) and for containers (series/season) that
+    /// have no single media file.
+    public var mediaInfo: MediaSourceMetadata?
+
     /// The `Account.id` this item was fetched from, stamped by the Home/Search
     /// aggregator when content from several providers is merged into one row.
     ///
@@ -98,6 +176,14 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
         productionYear: Int? = nil,
+        officialRating: String? = nil,
+        genres: [String] = [],
+        people: [MediaPerson] = [],
+        studios: [String] = [],
+        tags: [String] = [],
+        taglines: [String] = [],
+        seriesID: String? = nil,
+        seasonID: String? = nil,
         runtime: TimeInterval? = nil,
         resumePosition: TimeInterval? = nil,
         playedPercentage: Double? = nil,
@@ -110,6 +196,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         logoURL: URL? = nil,
         ratings: [ExternalRating] = [],
         providerIDs: [String: String] = [:],
+        mediaInfo: MediaSourceMetadata? = nil,
         sourceAccountID: String? = nil,
         additionalSourceAccountIDs: [String] = []
     ) {
@@ -121,6 +208,14 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.productionYear = productionYear
+        self.officialRating = officialRating
+        self.genres = genres
+        self.people = people
+        self.studios = studios
+        self.tags = tags
+        self.taglines = taglines
+        self.seriesID = seriesID
+        self.seasonID = seasonID
         self.runtime = runtime
         self.resumePosition = resumePosition
         self.playedPercentage = playedPercentage
@@ -133,6 +228,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.logoURL = logoURL
         self.ratings = ratings
         self.providerIDs = providerIDs
+        self.mediaInfo = mediaInfo
         self.sourceAccountID = sourceAccountID
         self.additionalSourceAccountIDs = additionalSourceAccountIDs
     }
@@ -150,6 +246,14 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
         episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         productionYear = try container.decodeIfPresent(Int.self, forKey: .productionYear)
+        officialRating = try container.decodeIfPresent(String.self, forKey: .officialRating)
+        genres = try container.decodeIfPresent([String].self, forKey: .genres) ?? []
+        people = try container.decodeIfPresent([MediaPerson].self, forKey: .people) ?? []
+        studios = try container.decodeIfPresent([String].self, forKey: .studios) ?? []
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        taglines = try container.decodeIfPresent([String].self, forKey: .taglines) ?? []
+        seriesID = try container.decodeIfPresent(String.self, forKey: .seriesID)
+        seasonID = try container.decodeIfPresent(String.self, forKey: .seasonID)
         runtime = try container.decodeIfPresent(TimeInterval.self, forKey: .runtime)
         resumePosition = try container.decodeIfPresent(TimeInterval.self, forKey: .resumePosition)
         playedPercentage = try container.decodeIfPresent(Double.self, forKey: .playedPercentage)
@@ -162,6 +266,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         logoURL = try container.decodeIfPresent(URL.self, forKey: .logoURL)
         ratings = try container.decodeIfPresent([ExternalRating].self, forKey: .ratings) ?? []
         providerIDs = try container.decodeIfPresent([String: String].self, forKey: .providerIDs) ?? [:]
+        mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
     }
@@ -182,6 +287,16 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         if let parentTitle { return parentTitle }
         if let productionYear { return String(productionYear) }
         return nil
+    }
+
+    /// On-screen / voice talent, in billing order (crew filtered out).
+    public var cast: [MediaPerson] {
+        people.filter(\.isCast)
+    }
+
+    /// The first marketing tagline, when present.
+    public var tagline: String? {
+        taglines.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 }
 

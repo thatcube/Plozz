@@ -70,6 +70,179 @@ final class PlexConnectionSelectorTests: XCTestCase {
     func testNilWhenNoUsableConnections() {
         XCTAssertNil(PlexConnectionSelector.best(from: connections("[]")))
     }
+
+    func testRankedReturnsAllInPreferenceOrderDeduped() {
+        let conns = connections("""
+        [
+          {"protocol":"https","uri":"https://relay.plex.direct:443","local":false,"relay":true},
+          {"protocol":"https","uri":"https://remote.plex.direct:32400","local":false,"relay":false},
+          {"protocol":"https","uri":"https://local.plex.direct:32400","local":true,"relay":false},
+          {"protocol":"https","uri":"https://local.plex.direct:32400","local":true,"relay":false}
+        ]
+        """)
+        XCTAssertEqual(PlexConnectionSelector.ranked(from: conns).map(\.absoluteString), [
+            "https://local.plex.direct:32400",
+            "https://remote.plex.direct:32400",
+            "https://relay.plex.direct:443"
+        ])
+    }
+}
+
+// MARK: - Reachability-aware server resolution
+
+final class PlexServerReachabilityTests: XCTestCase {
+    /// Probe double that answers only for hosts NOT containing `unreachableHostFragment`.
+    private final class HostAwareProbe: HTTPClient, @unchecked Sendable {
+        let unreachableHostFragment: String
+        private(set) var probedHosts: [String] = []
+        init(unreachableHostFragment: String) { self.unreachableHostFragment = unreachableHostFragment }
+
+        func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+            let host = baseURL.host ?? ""
+            probedHosts.append(host)
+            if host.contains(unreachableHostFragment) {
+                throw AppError.serverUnreachable
+            }
+            return (Data("{}".utf8), HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
+    private let resourcesJSON = """
+    [
+      {
+        "name":"Brandoland","clientIdentifier":"srv-1","provides":"server","owned":true,"accessToken":"SRVTOKEN",
+        "connections":[
+          {"protocol":"https","uri":"https://172-18-0-1.hash.plex.direct:32400","local":true,"relay":false},
+          {"protocol":"https","uri":"https://remote.hash.plex.direct:32400","local":false,"relay":false},
+          {"protocol":"https","uri":"https://relay.plex.direct:443","local":false,"relay":true}
+        ]
+      }
+    ]
+    """
+
+    func testSkipsUnreachableLocalDockerConnection() async throws {
+        let http = StubHTTPClient()
+        http.stub(pathSuffix: "/api/v2/resources", json: resourcesJSON)
+        let probe = HostAwareProbe(unreachableHostFragment: "172-18-0-1")
+        let client = PlexAuthClient(
+            deviceProfile: PlexDeviceProfile(clientIdentifier: "dev"),
+            http: http,
+            probeHTTP: probe
+        )
+
+        let servers = try await client.servers(authToken: "ACCT")
+        XCTAssertEqual(servers.count, 1)
+        XCTAssertEqual(servers.first?.baseURL.absoluteString, "https://remote.hash.plex.direct:32400")
+        XCTAssertEqual(servers.first?.accessToken, "SRVTOKEN")
+    }
+
+    func testFallsBackToTopRankedWhenNothingReachable() async throws {
+        let http = StubHTTPClient()
+        http.stub(pathSuffix: "/api/v2/resources", json: resourcesJSON)
+        // Nothing answers: every probe fails.
+        let probe = HostAwareProbe(unreachableHostFragment: ".plex.direct")
+        let client = PlexAuthClient(
+            deviceProfile: PlexDeviceProfile(clientIdentifier: "dev"),
+            http: http,
+            probeHTTP: probe
+        )
+
+        let servers = try await client.servers(authToken: "ACCT")
+        // Server still surfaces (so the UI can show "unreachable"), pinned to the
+        // most-preferred candidate.
+        XCTAssertEqual(servers.first?.baseURL.absoluteString, "https://172-18-0-1.hash.plex.direct:32400")
+    }
+}
+
+// MARK: - Connection resolver (runtime self-heal)
+
+final class PlexConnectionResolverTests: XCTestCase {
+    /// Probe whose reachable host set can change between calls, so tests can
+    /// simulate a connection going down or a server moving networks.
+    private final class MutableProbe: HTTPClient, @unchecked Sendable {
+        private let lock = NSLock()
+        private var reachableHosts: Set<String>
+        private(set) var probeCount = 0
+        init(reachable: Set<String>) { self.reachableHosts = reachable }
+
+        func setReachable(_ hosts: Set<String>) {
+            lock.lock(); reachableHosts = hosts; lock.unlock()
+        }
+
+        func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+            lock.lock(); probeCount += 1; let ok = reachableHosts.contains(baseURL.host ?? ""); lock.unlock()
+            guard ok else { throw AppError.serverUnreachable }
+            return (Data("{}".utf8), HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
+    private func url(_ s: String) -> URL { URL(string: s)! }
+    private let profile = PlexDeviceProfile(clientIdentifier: "dev")
+
+    func testSingleCandidateNoRefreshSkipsProbe() async {
+        let probe = MutableProbe(reachable: [])
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://only.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: nil
+        )
+        let resolved = await resolver.resolved()
+        XCTAssertEqual(resolved.absoluteString, "https://only.host:32400")
+        XCTAssertEqual(probe.probeCount, 0, "A fixed URL must not be probed")
+    }
+
+    func testPicksReachableAndSkipsDeadDockerCandidate() async {
+        let probe = MutableProbe(reachable: ["remote.host"])
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://172-18-0-1.host:32400"), url("https://remote.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: nil
+        )
+        let resolved = await resolver.resolved()
+        XCTAssertEqual(resolved.absoluteString, "https://remote.host:32400")
+        XCTAssertEqual(resolver.current.absoluteString, "https://remote.host:32400")
+    }
+
+    func testRefreshesFromPlexTVWhenAllKnownCandidatesDead() async {
+        let probe = MutableProbe(reachable: ["moved.host"])
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://old-dead.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe,
+            refresh: { [self] in [url("https://moved.host:32400")] }
+        )
+        let resolved = await resolver.resolved()
+        XCTAssertEqual(resolved.absoluteString, "https://moved.host:32400")
+    }
+
+    func testReportFailureReProbesAndHeals() async {
+        let probe = MutableProbe(reachable: ["a.host"])
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://a.host:32400"), url("https://b.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: nil
+        )
+        let first = await resolver.resolved()
+        XCTAssertEqual(first.absoluteString, "https://a.host:32400")
+
+        // a.host goes down, b.host comes up; report the failure and re-resolve.
+        probe.setReachable(["b.host"])
+        resolver.reportFailure(first)
+        let healed = await resolver.resolved()
+        XCTAssertEqual(healed.absoluteString, "https://b.host:32400")
+    }
+
+    func testFallsBackToFirstCandidateWhenNothingReachable() async {
+        let probe = MutableProbe(reachable: [])
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://primary.host:32400"), url("https://other.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: { [] }
+        )
+        let resolved = await resolver.resolved()
+        XCTAssertEqual(resolved.absoluteString, "https://primary.host:32400")
+        // Not cached (unreachable), so a later reachable state re-resolves.
+        probe.setReachable(["other.host"])
+        // primary still dead; resolver should now find the reachable other.host.
+        // (No reportFailure needed because an unreachable result is never cached.)
+        let retry = await resolver.resolved()
+        XCTAssertEqual(retry.absoluteString, "https://other.host:32400")
+    }
 }
 
 // MARK: - Provider mapping
@@ -97,6 +270,34 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(libs.map(\.id), ["1", "2"])
         XCTAssertEqual(libs[0].kind, .movie)
         XCTAssertEqual(libs[1].kind, .series)
+    }
+
+    func testTrailersFilterToTrailerSubtype() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/101/extras", json: """
+        {"MediaContainer":{"size":2,"Metadata":[
+          {"ratingKey":"e1","type":"clip","subtype":"trailer","title":"Trailer"},
+          {"ratingKey":"e2","type":"clip","subtype":"behindTheScenes","title":"Making Of"}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "101")
+
+        XCTAssertEqual(trailers.map(\.id), ["e1"])
+        XCTAssertEqual(trailers.first?.title, "Trailer")
+        XCTAssertEqual(trailers.first?.kind, .video)
+    }
+
+    func testTrailersEmptyWhenNoExtras() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/101/extras", json: """
+        {"MediaContainer":{"size":0}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let trailers = try await provider.trailers(for: "101")
+        XCTAssertTrue(trailers.isEmpty)
     }
 
     func testContinueWatchingMapsResumeFields() async throws {
@@ -141,6 +342,54 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.overview, "First episode")
         XCTAssertEqual(item.subtitle, "S1 · E3")
         XCTAssertEqual(item.posterURL?.absoluteString, "https://plex.host:32400/photo/:/transcode?width=500&height=750&minSize=1&upscale=1&url=%2Fshow.png%3FX-Plex-Token%3DTOKEN&X-Plex-Token=TOKEN")
+    }
+
+    func testItemMapsTechBadgesRatingGenresAndRatings() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/77", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"77","type":"movie","title":"Dune","year":2021,
+           "contentRating":"PG-13","summary":"Spice.",
+           "rating":8.3,"ratingImage":"rottentomatoes://image.rating.ripe",
+           "audienceRating":9.0,"audienceRatingImage":"imdb://image.rating",
+           "Genre":[{"tag":"Sci-Fi"},{"tag":"Adventure"}],
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
+               {"streamType":1,"codec":"hevc","width":3840,"height":2160,"colorTrc":"smpte2084"},
+               {"streamType":2,"codec":"eac3","channels":8,"audioChannelLayout":"7.1","extendedDisplayTitle":"Dolby Digital+ Atmos 7.1"}
+             ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "77")
+        XCTAssertEqual(item.officialRating, "PG-13")
+        XCTAssertEqual(item.genres, ["Sci-Fi", "Adventure"])
+        // 4K + HDR10 (from smpte2084 transfer) + HEVC codec + Dolby Atmos.
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10", "HEVC", "Dolby Atmos"])
+        // RT critic rendered as a percentage; IMDb audience stays 0–10.
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "83%")
+        XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "9")
+    }
+
+    func testItemFallsBackToMediaLevelFactsWithoutStreams() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/88", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"88","type":"episode","title":"Ep","index":1,"parentIndex":1,
+           "Media":[{"id":1,"container":"mkv","videoCodec":"h264","audioCodec":"eac3",
+             "videoResolution":"4k","width":3840,"height":2160,"audioChannels":6,
+             "Part":[{"id":2,"key":"/p","container":"mkv"}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "88")
+        // No Stream array: resolution + codec + surround come from Media-level
+        // facts; no HDR signal, so the range reads SDR. The 5.1 layout rides on
+        // the Dolby Digital+ badge as a trailing detail.
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "SDR", "H.264", "Dolby Digital+"])
+        XCTAssertEqual(item.technicalBadges.last?.detail, "5.1")
     }
 
     func testItemsPagePassesContainerParamsAndType() async throws {
@@ -246,6 +495,45 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertTrue(url.contains("X-Plex-Token=TOKEN"), url)
     }
 
+    func testPlaybackInfoBuildsPlexBIFScrubPreviewWhenIndexed() async throws {
+        // A part the server has generated BIF preview thumbnails for advertises
+        // `indexes:"sd"`, so the provider should expose a Plex BIF scrub source
+        // pointing at /library/parts/{id}/indexes/sd with the auth token.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/99", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"99","type":"movie","title":"Movie","duration":3600000,
+           "Media":[{"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac","Part":[{"id":42,"key":"/library/parts/42/16000/file.mp4","container":"mp4","indexes":"sd","Stream":[
+             {"id":10,"streamType":1,"index":0,"codec":"h264"},
+             {"id":11,"streamType":2,"index":1,"codec":"aac","selected":true}
+           ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "99")
+        let bifURL = try XCTUnwrap(request.scrubPreview?.plexBIFURL?.absoluteString)
+        XCTAssertTrue(bifURL.hasPrefix("https://plex.host:32400/library/parts/42/indexes/sd"), bifURL)
+        XCTAssertTrue(bifURL.contains("X-Plex-Token=TOKEN"), bifURL)
+    }
+
+    func testPlaybackInfoHasNoScrubPreviewWhenPartNotIndexed() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/100", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"100","type":"movie","title":"Movie","duration":3600000,
+           "Media":[{"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac","Part":[{"id":42,"key":"/library/parts/42/16000/file.mp4","container":"mp4","Stream":[
+             {"id":10,"streamType":1,"index":0,"codec":"h264"},
+             {"id":11,"streamType":2,"index":1,"codec":"aac","selected":true}
+           ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "100")
+        XCTAssertNil(request.scrubPreview)
+    }
+
     func testReportPlaybackSendsTimelineState() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/:/timeline", json: "")
@@ -279,8 +567,16 @@ final class PlexProviderMappingTests: XCTestCase {
 // MARK: - Auth client
 
 final class PlexAuthClientTests: XCTestCase {
+    /// Probe double that reports everything unreachable, so `servers()` resolves
+    /// deterministically via ranked preference order without touching the network.
+    private final class UnreachableProbe: HTTPClient, @unchecked Sendable {
+        func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+            throw AppError.serverUnreachable
+        }
+    }
+
     private func client(_ stub: StubHTTPClient) -> PlexAuthClient {
-        PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: "dev1"), http: stub)
+        PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: "dev1"), http: stub, probeHTTP: UnreachableProbe())
     }
 
     func testCreatePinParsesChallenge() async throws {
@@ -336,6 +632,66 @@ final class PlexAuthClientTests: XCTestCase {
         let user = try await client(stub).user(authToken: "ACCOUNT_TOKEN")
         XCTAssertEqual(user.id, "uuid-9")
         XCTAssertEqual(user.userName, "Alice T")
+    }
+
+    func testHomeUsersParsesAndMapsFlags() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/api/v2/home/users", json: """
+        {"users":[
+          {"id":1,"uuid":"owner-uuid","title":"Brandon","admin":true,"protected":false,"restricted":false},
+          {"id":2,"uuid":"kid-uuid","title":"Kiddo","admin":false,"protected":true,"restricted":true}
+        ]}
+        """)
+        let users = try await client(stub).homeUsers(authToken: "ADMIN_TOKEN")
+        XCTAssertEqual(users.count, 2)
+        XCTAssertEqual(users[0].id, "owner-uuid")
+        XCTAssertEqual(users[0].name, "Brandon")
+        XCTAssertTrue(users[0].isAdmin)
+        XCTAssertFalse(users[0].requiresPIN)
+        XCTAssertEqual(users[1].id, "kid-uuid")
+        XCTAssertTrue(users[1].requiresPIN)
+        XCTAssertTrue(users[1].isRestricted)
+        XCTAssertEqual(stub.method(forPathSuffix: "/api/v2/home/users"), .get)
+    }
+
+    func testHomeUsersTreatsHasPasswordAsRequiresPIN() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/api/v2/home/users", json: """
+        {"users":[{"uuid":"u","title":"Guest","hasPassword":true}]}
+        """)
+        let users = try await client(stub).homeUsers(authToken: "ADMIN_TOKEN")
+        XCTAssertEqual(users.count, 1)
+        XCTAssertTrue(users[0].requiresPIN)
+    }
+
+    func testSwitchHomeUserPassesPinAndReturnsToken() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/kid-uuid/switch", json: #"{"authToken":"KID_TOKEN"}"#)
+        let token = try await client(stub).switchHomeUser(uuid: "kid-uuid", pin: "1234", authToken: "ADMIN_TOKEN")
+        XCTAssertEqual(token, "KID_TOKEN")
+        XCTAssertEqual(stub.method(forPathSuffix: "/kid-uuid/switch"), .post)
+        let pin = stub.queryItems(forPathSuffix: "/kid-uuid/switch")?.first { $0.name == "pin" }
+        XCTAssertEqual(pin?.value, "1234")
+    }
+
+    func testSwitchHomeUserOmitsPinWhenNil() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/owner-uuid/switch", json: #"{"authenticationToken":"OWNER_TOKEN"}"#)
+        let token = try await client(stub).switchHomeUser(uuid: "owner-uuid", pin: nil, authToken: "ADMIN_TOKEN")
+        XCTAssertEqual(token, "OWNER_TOKEN")
+        let query = stub.queryItems(forPathSuffix: "/owner-uuid/switch")
+        XCTAssertNil(query?.first { $0.name == "pin" })
+    }
+
+    func testSwitchHomeUserUnauthorizedWhenNoToken() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/kid-uuid/switch", json: #"{"authToken":null}"#)
+        do {
+            _ = try await client(stub).switchHomeUser(uuid: "kid-uuid", pin: "0000", authToken: "ADMIN_TOKEN")
+            XCTFail("Expected unauthorized")
+        } catch let error as AppError {
+            XCTAssertEqual(error, .unauthorized)
+        }
     }
 }
 
@@ -494,5 +850,44 @@ final class PlexDirectPlayCapabilityTests: XCTestCase {
          ]}]}
         """
         XCTAssertFalse(try canDirectPlay(json, caps: .default))
+    }
+}
+
+final class PlexWatchStateTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "srv", name: "Home", baseURL: URL(string: "https://plex.host:32400")!, provider: .plex),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testSetPlayedTrueScrobbles() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/:/scrobble", json: "")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(true, itemID: "42")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/:/scrobble") })
+        let query = stub.queryItems(forPathSuffix: "/:/scrobble")
+        XCTAssertEqual(query?.first(where: { $0.name == "key" })?.value, "42")
+        XCTAssertEqual(
+            query?.first(where: { $0.name == "identifier" })?.value,
+            "com.plexapp.plugins.library"
+        )
+    }
+
+    func testSetPlayedFalseUnscrobbles() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/:/unscrobble", json: "")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        try await provider.setPlayed(false, itemID: "42")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/:/unscrobble") })
+        XCTAssertEqual(
+            stub.queryItems(forPathSuffix: "/:/unscrobble")?.first(where: { $0.name == "key" })?.value,
+            "42"
+        )
     }
 }

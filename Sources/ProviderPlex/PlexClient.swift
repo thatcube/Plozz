@@ -8,7 +8,10 @@ import CoreNetworking
 /// in DTOs; mapping to `CoreModels` happens in `PlexProvider`. Mirrors the role
 /// of `JellyfinClient` for the Plex backend.
 public struct PlexClient: Sendable {
-    public let baseURL: URL
+    /// Resolves (and self-heals) the working server base URL. Browsing requests
+    /// go through it so a saved-but-now-unreachable connection transparently
+    /// fails over to a reachable one.
+    private let resolver: PlexConnectionResolver
     private let deviceProfile: PlexDeviceProfile
     private let token: String
     private let http: HTTPClient
@@ -18,29 +21,94 @@ public struct PlexClient: Sendable {
     /// sets. Defaults to a live `.detected()` probe (which falls back to the
     /// conservative `.default` on Linux/CI).
     private let capabilities: MediaCapabilities
+    /// Whether the dual-engine (VLCKit) build is active. When `true`,
+    /// `canDirectPlay` additionally accepts the **extra** formats the on-device
+    /// hybrid engine handles — the Matroska / WebM container (every display-
+    /// supported range, including Dolby Vision, decoded on-device) and DTS / DTS-HD /
+    /// TrueHD audio (decoded on-device, no passthrough required). Defaults to
+    /// `false`, preserving today's native-only direct-play decisions. Must stay in
+    /// lockstep with `EngineRouter`: every extra format accepted here is one the
+    /// router sends to the hybrid engine.
+    private let hybridEngineEnabled: Bool
 
+    /// The server base URL currently in use (best-known reachable connection).
+    /// Resolved lazily on the first request; this is the synchronous best guess
+    /// used by URL builders after a request has settled it.
+    public var baseURL: URL { resolver.current }
+
+    /// Fixed-URL initializer: the client always talks to `baseURL` (no probing).
+    /// Used for manually-entered hosts and unit tests.
     public init(
         baseURL: URL,
         deviceProfile: PlexDeviceProfile,
         token: String,
         http: HTTPClient = URLSessionHTTPClient(),
-        capabilities: MediaCapabilities = .detected()
+        capabilities: MediaCapabilities = .detected(),
+        hybridEngineEnabled: Bool = false
     ) {
-        self.baseURL = baseURL
+        self.init(
+            resolver: PlexConnectionResolver(candidates: [baseURL], deviceProfile: deviceProfile, token: token),
+            deviceProfile: deviceProfile,
+            token: token,
+            http: http,
+            capabilities: capabilities,
+            hybridEngineEnabled: hybridEngineEnabled
+        )
+    }
+
+    /// Self-healing initializer: `resolver` probes its candidate connections and
+    /// keeps the client on whichever one is reachable.
+    public init(
+        resolver: PlexConnectionResolver,
+        deviceProfile: PlexDeviceProfile,
+        token: String,
+        http: HTTPClient = URLSessionHTTPClient(),
+        capabilities: MediaCapabilities = .detected(),
+        hybridEngineEnabled: Bool = false
+    ) {
+        self.resolver = resolver
         self.deviceProfile = deviceProfile
         self.token = token
         self.http = http
         self.capabilities = capabilities
+        self.hybridEngineEnabled = hybridEngineEnabled
     }
 
     private var headers: [String: String] { deviceProfile.headers(token: token) }
+
+    // MARK: Request plumbing
+
+    /// Sends `endpoint` against the resolved base URL, transparently re-resolving
+    /// and retrying once if the chosen connection is unreachable (self-heal).
+    private func send(_ endpoint: Endpoint) async throws -> (Data, HTTPURLResponse) {
+        let base = await resolver.resolved()
+        do {
+            return try await http.send(endpoint, baseURL: base)
+        } catch AppError.serverUnreachable {
+            resolver.reportFailure(base)
+            let retry = await resolver.resolved()
+            guard retry != base else { throw AppError.serverUnreachable }
+            return try await http.send(endpoint, baseURL: retry)
+        }
+    }
+
+    /// Sends and decodes JSON, with the same self-healing retry as `send`.
+    private func decode<T: Decodable>(_ type: T.Type, _ endpoint: Endpoint) async throws -> T {
+        let (data, _) = try await send(endpoint)
+        do {
+            return try JSONDecoder.plozz.decode(T.self, from: data)
+        } catch {
+            PlozzLog.networking.error("Decoding \(String(describing: T.self)) failed")
+            throw AppError.decoding
+        }
+    }
 
     // MARK: Browsing
 
     /// `GET /library/sections` — top-level libraries.
     func sections() async throws -> [PlexDirectory] {
         let endpoint = Endpoint(path: "/library/sections", headers: headers)
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Directory ?? []
     }
 
@@ -51,7 +119,7 @@ public struct PlexClient: Sendable {
             queryItems: containerQuery(start: 0, size: limit),
             headers: headers
         )
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
 
@@ -62,14 +130,18 @@ public struct PlexClient: Sendable {
             queryItems: containerQuery(start: 0, size: limit),
             headers: headers
         )
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
 
     /// `GET /library/metadata/{ratingKey}` — full detail for one item.
     func metadata(ratingKey: String) async throws -> PlexMetadata {
-        let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)", headers: headers)
-        let container = try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL).MediaContainer
+        let endpoint = Endpoint(
+            path: "/library/metadata/\(ratingKey)",
+            queryItems: [URLQueryItem(name: "includeGuids", value: "1")],
+            headers: headers
+        )
+        let container = try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
         guard let item = container.Metadata?.first else { throw AppError.notFound }
         return item
     }
@@ -78,7 +150,17 @@ public struct PlexClient: Sendable {
     /// episodes of a season, …
     func children(ratingKey: String) async throws -> [PlexMetadata] {
         let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)/children", headers: headers)
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
+            .MediaContainer.Metadata ?? []
+    }
+
+    /// `GET /library/metadata/{ratingKey}/extras` — trailers and other extras
+    /// (behind-the-scenes, deleted scenes, …) attached to an item. Each extra is
+    /// a `clip` with its own ratingKey that streams through the normal playback
+    /// path. Callers filter by `subtype` to keep only trailers.
+    func extras(ratingKey: String) async throws -> [PlexMetadata] {
+        let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)/extras", headers: headers)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
 
@@ -96,7 +178,7 @@ public struct PlexClient: Sendable {
         }
         query.append(URLQueryItem(name: "sort", value: "titleSort"))
         let endpoint = Endpoint(path: "/library/sections/\(sectionID)/all", queryItems: query, headers: headers)
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL).MediaContainer
+        return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
     }
 
     /// `GET /search?query=…` — global server search across libraries. Returns a
@@ -105,7 +187,7 @@ public struct PlexClient: Sendable {
         var items = containerQuery(start: 0, size: limit)
         items.append(URLQueryItem(name: "query", value: query))
         let endpoint = Endpoint(path: "/search", queryItems: items, headers: headers)
-        return try await http.decode(PlexMediaContainerResponse.self, from: endpoint, baseURL: baseURL)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
 
@@ -124,7 +206,23 @@ public struct PlexClient: Sendable {
             query.append(URLQueryItem(name: "duration", value: String(durationMs)))
         }
         let endpoint = Endpoint(path: "/:/timeline", queryItems: query, headers: headers)
-        _ = try await http.send(endpoint, baseURL: baseURL)
+        _ = try await send(endpoint)
+    }
+
+    /// `GET /:/scrobble` (watched) or `GET /:/unscrobble` (unwatched) — toggles
+    /// an item's watched state. Scrobbling a season/series ratingKey marks the
+    /// contained episodes too.
+    func setWatched(_ watched: Bool, ratingKey: String) async throws {
+        let endpoint = Endpoint(
+            path: watched ? "/:/scrobble" : "/:/unscrobble",
+            queryItems: [
+                URLQueryItem(name: "key", value: ratingKey),
+                URLQueryItem(name: "identifier", value: "com.plexapp.plugins.library"),
+                URLQueryItem(name: "X-Plex-Token", value: token)
+            ],
+            headers: headers
+        )
+        _ = try await send(endpoint)
     }
 
     // MARK: URLs
@@ -134,6 +232,18 @@ public struct PlexClient: Sendable {
     /// direct play of a container/codec tvOS can demux natively.
     func streamURL(forPartKey key: String) -> URL? {
         absoluteURL(serverPath: key, extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)])
+    }
+
+    /// Absolute, token-bearing URL of a part's **BIF** trickplay index file
+    /// (`GET /library/parts/{partID}/indexes/{quality}`). The whole BIF blob is
+    /// downloaded and parsed client-side for scrubbing previews; the token rides
+    /// as a query param because the image/data loader doesn't send our X-Plex
+    /// headers.
+    func bifIndexURL(partID: Int, quality: String = "sd") -> URL? {
+        absoluteURL(
+            serverPath: "/library/parts/\(partID)/indexes/\(quality)",
+            extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)]
+        )
     }
 
     /// Resolves the playable URL for a media item, choosing **direct play** when
@@ -236,6 +346,10 @@ public struct PlexClient: Sendable {
     /// by Plex's HLS transcode, which repackages them into a seekable playlist.
     private static let directPlayContainers: Set<String> = ["mp4", "m4v", "mov"]
 
+    /// Matroska-family containers AVPlayer can't demux but the hybrid (VLCKit)
+    /// engine can. Only eligible for direct play when `hybridEngineEnabled`.
+    private static let matroskaContainers: Set<String> = ["mkv", "webm", "matroska"]
+
     /// Lossy audio codecs the Apple TV always decodes in software, regardless of
     /// the connected receiver. These never need passthrough, so they're always
     /// direct-playable.
@@ -246,11 +360,24 @@ public struct PlexClient: Sendable {
     /// codec info, an unsupported codec for the current hardware, or HDR/Dolby
     /// Vision the display can't accept all fall back to a server transcode
     /// (matching server-side decisioning).
+    ///
+    /// When `hybridEngineEnabled`, also accepts the extra formats the on-device
+    /// VLCKit engine handles: an SDR Matroska/WebM file, and DTS/DTS-HD/TrueHD
+    /// audio (decoded on-device). DoVi/HDR in an MKV is deliberately rejected so
+    /// it transcodes to HLS and renders on AVPlayer — the router routes exactly
+    /// this advertised set to a working engine (advertise ⇔ route lockstep).
     func canDirectPlay(media: PlexMedia, part: PlexPart) -> Bool {
         let container = (media.container ?? part.container ?? Self.containerExtension(fromKey: part.key))?.lowercased()
-        guard let container, Self.directPlayContainers.contains(container) else { return false }
+        guard let container else { return false }
 
-        if let video = media.videoCodec?.lowercased() {
+        let isAppleContainer = Self.directPlayContainers.contains(container)
+        let isMatroska = hybridEngineEnabled && Self.matroskaContainers.contains(container)
+        guard isAppleContainer || isMatroska else { return false }
+
+        // Video codec gate. Apple containers must be a hardware-decodable codec;
+        // the hybrid engine demuxes/decodes the broad set inside Matroska, so the
+        // codec is left to VLCKit there (the SDR range gate below still applies).
+        if !isMatroska, let video = media.videoCodec?.lowercased() {
             guard let mapped = Self.directPlayVideoCodec(forPlexCodec: video),
                   capabilities.allowedDirectPlayVideoCodecs.contains(mapped) else { return false }
         }
@@ -259,7 +386,14 @@ public struct PlexClient: Sendable {
             return false
         }
 
-        guard canDirectPlayVideoRange(part: part) else { return false }
+        // Range gate. A raw MKV is direct-played on the on-device engine for SDR
+        // and display-supported HDR10/HLG, but Dolby Vision still transcodes so it
+        // renders on AVPlayer. Apple containers use the display-aware HDR policy.
+        if isMatroska {
+            guard isHybridDirectPlayableRange(part: part) else { return false }
+        } else {
+            guard canDirectPlayVideoRange(part: part) else { return false }
+        }
 
         return true
     }
@@ -282,10 +416,23 @@ public struct PlexClient: Sendable {
     /// passthrough/bitstream codec the **current route** can carry. AC-3/E-AC-3
     /// are always passthrough-eligible; DTS / DTS-HD only when the route reports
     /// `supportsDTSPassthrough`, since Apple TV cannot decode DTS itself.
+    ///
+    /// When `hybridEngineEnabled`, DTS / DTS-HD / TrueHD are additionally accepted
+    /// even without passthrough, because the on-device VLCKit engine decodes them
+    /// (the router sends these to the hybrid engine).
     private func canDirectPlayAudio(codec: String) -> Bool {
         if Self.alwaysDecodableAudioCodecs.contains(codec) { return true }
+        if hybridEngineEnabled, Self.isHybridDecodableAudio(codec) { return true }
         guard let passthrough = Self.passthroughAudioCodec(forPlexCodec: codec) else { return false }
         return capabilities.allowedPassthroughAudioCodecs.contains(passthrough)
+    }
+
+    /// DTS / DTS-HD / TrueHD audio the on-device VLCKit engine decodes regardless
+    /// of the connected receiver's passthrough support.
+    static func isHybridDecodableAudio(_ codec: String) -> Bool {
+        let codec = codec.lowercased()
+        return codec.contains("dts") || codec == "dca" || codec.hasPrefix("dca")
+            || codec.contains("truehd") || codec == "mlp"
     }
 
     /// Maps a Plex `audioCodec` token onto a `MediaCapabilities` passthrough
@@ -335,6 +482,31 @@ public struct PlexClient: Sendable {
         }
     }
 
+    /// Range gate for a raw MKV sent to the on-device engine: allows SDR and any
+    /// **display-supported** range, including HDR10 / HLG **and Dolby Vision** —
+    /// the on-device engine decodes the HEVC base layer (HDR10/SDR base for
+    /// Profile 8, tone-mapped for Profile 5), so DoVi-in-MKV plays without the
+    /// unreliable server transcode AVPlayer would otherwise need (it can't demux
+    /// MKV). Matches Infuse and mirrors `EngineRouter` (DoVi-in-MKV → hybrid).
+    private func isHybridDirectPlayableRange(part: PlexPart) -> Bool {
+        guard let video = part.Stream?.first(where: { $0.streamType == 1 }) else { return true }
+        let allowed = Set(capabilities.allowedHDRRanges)
+        if video.DOVIPresent == true {
+            // Decoded on-device whenever the display supports Dolby Vision (which,
+            // on an Apple TV 4K, tracks HEVC hardware decode — effectively always).
+            let doviRanges: Set<HDRRange> = [.dolbyVision, .dolbyVisionWithHDR10, .dolbyVisionWithHLG, .dolbyVisionWithSDR]
+            return !allowed.isDisjoint(with: doviRanges)
+        }
+        switch video.colorTrc?.lowercased() {
+        case "smpte2084", "pq":
+            return allowed.contains(.hdr10)
+        case "arib-std-b67", "hlg":
+            return allowed.contains(.hlg)
+        default:
+            return true
+        }
+    }
+
     /// Best-effort container guess from a part key's file extension
     /// (`/library/parts/2/16000/file.mkv` → `mkv`).
     static func containerExtension(fromKey key: String?) -> String? {
@@ -350,7 +522,12 @@ public struct PlexClient: Sendable {
     private func containerQuery(start: Int, size: Int) -> [URLQueryItem] {
         [
             URLQueryItem(name: "X-Plex-Container-Start", value: String(start)),
-            URLQueryItem(name: "X-Plex-Container-Size", value: String(size))
+            URLQueryItem(name: "X-Plex-Container-Size", value: String(size)),
+            // Ask Plex to inline each item's external `Guid` array (imdb://,
+            // tmdb://, anidb://, …) on list responses too — without this flag
+            // list endpoints omit it, so rail/grid items would reach the
+            // metadata router with no external ids to match (or detect anime) by.
+            URLQueryItem(name: "includeGuids", value: "1")
         ]
     }
 

@@ -15,6 +15,12 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     public var language: String?
     public var isDefault: Bool
     public var isForced: Bool
+    /// For subtitle tracks: an absolute URL that yields the subtitle text
+    /// (WebVTT, or SRT which the player normalises to WebVTT). When non-`nil`
+    /// the player can inject this track into the native picker even on direct
+    /// play. `nil` for audio tracks and for subtitles that can't be delivered
+    /// as text (e.g. image-based PGS/VOBSUB, which need server burn-in).
+    public var deliveryURL: URL?
 
     public init(
         id: Int,
@@ -22,7 +28,8 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         displayTitle: String,
         language: String? = nil,
         isDefault: Bool = false,
-        isForced: Bool = false
+        isForced: Bool = false,
+        deliveryURL: URL? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -30,6 +37,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.language = language
         self.isDefault = isDefault
         self.isForced = isForced
+        self.deliveryURL = deliveryURL
     }
 }
 
@@ -40,14 +48,21 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
 /// transcodes, the `AVPlayer` stream exposes almost no track metadata, so we
 /// rely on these provider-reported facts (codec, HDR, resolution, bitrate,
 /// channels, …) instead — the same source a client like Infuse reads.
-public struct MediaSourceMetadata: Hashable, Sendable {
-    public struct VideoStream: Hashable, Sendable {
+public struct MediaSourceMetadata: Hashable, Sendable, Codable {
+    public struct VideoStream: Hashable, Sendable, Codable {
         /// Raw codec token from the provider, e.g. `hevc`, `h264`, `av1`.
         public var codec: String?
+        /// Container codec FourCC tag, e.g. `hvc1`/`hev1` for HEVC. AVPlayer only
+        /// decodes HEVC tagged `hvc1`; `hev1` plays audio with a black screen, so
+        /// this drives a re-tag remux (Jellyfin) or an on-device engine fallback.
+        public var codecTag: String?
         /// Codec profile, e.g. `Main 10`, `High`.
         public var profile: String?
         public var width: Int?
         public var height: Int?
+        /// Bits per luma sample, e.g. `8`, `10`, `12`. AVPlayer cannot decode
+        /// 10-bit **H.264** (High 10), so this drives an on-device engine fallback.
+        public var bitDepth: Int?
         /// Declared video bitrate in bits/sec.
         public var bitrate: Int?
         public var frameRate: Double?
@@ -61,9 +76,11 @@ public struct MediaSourceMetadata: Hashable, Sendable {
 
         public init(
             codec: String? = nil,
+            codecTag: String? = nil,
             profile: String? = nil,
             width: Int? = nil,
             height: Int? = nil,
+            bitDepth: Int? = nil,
             bitrate: Int? = nil,
             frameRate: Double? = nil,
             videoRange: String? = nil,
@@ -71,9 +88,11 @@ public struct MediaSourceMetadata: Hashable, Sendable {
             colorTransfer: String? = nil
         ) {
             self.codec = codec
+            self.codecTag = codecTag
             self.profile = profile
             self.width = width
             self.height = height
+            self.bitDepth = bitDepth
             self.bitrate = bitrate
             self.frameRate = frameRate
             self.videoRange = videoRange
@@ -82,7 +101,7 @@ public struct MediaSourceMetadata: Hashable, Sendable {
         }
     }
 
-    public struct AudioStream: Hashable, Sendable {
+    public struct AudioStream: Hashable, Sendable, Codable {
         /// Raw codec token, e.g. `eac3`, `aac`, `dts`.
         public var codec: String?
         /// Codec profile, e.g. `Dolby Atmos`, `DTS-HD MA`.
@@ -115,7 +134,7 @@ public struct MediaSourceMetadata: Hashable, Sendable {
         }
     }
 
-    public struct SubtitleStream: Hashable, Sendable {
+    public struct SubtitleStream: Hashable, Sendable, Codable {
         public var codec: String?
         public var language: String?
         public var title: String?
@@ -169,10 +188,21 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// used) rather than direct-playing the original file. Surfaced by the
     /// playback diagnostics overlay.
     public var isTranscoding: Bool
+    /// How the server is delivering the stream — direct play, **remux** (lossless
+    /// container change, no re-encode), or **transcode** (re-encode). Surfaced by
+    /// the diagnostics overlay so the user can tell a lossless DoVi remux apart
+    /// from a quality-reducing re-encode. Defaults from `isTranscoding` when a
+    /// provider doesn't classify it explicitly.
+    public var deliveryMode: PlaybackDiagnostics.PlaybackMode
     /// Source-of-truth media facts (codec, HDR, resolution, channels, …) read
     /// from the provider, used to populate the playback-diagnostics overlay even
     /// when the streamed (transcoded) asset exposes no track metadata.
     public var sourceMetadata: MediaSourceMetadata?
+    /// Scrubbing-preview thumbnails for this item, when the server has generated
+    /// them (Jellyfin trickplay tiles or a Plex BIF index). `nil` (or an unusable
+    /// source) means the custom player simply shows no scrub preview — it never
+    /// blocks playback.
+    public var scrubPreview: ScrubPreviewSource?
 
     public init(
         item: MediaItem,
@@ -182,7 +212,9 @@ public struct PlaybackRequest: Hashable, Sendable {
         subtitleTracks: [MediaTrack] = [],
         startPosition: TimeInterval = 0,
         isTranscoding: Bool = false,
-        sourceMetadata: MediaSourceMetadata? = nil
+        deliveryMode: PlaybackDiagnostics.PlaybackMode? = nil,
+        sourceMetadata: MediaSourceMetadata? = nil,
+        scrubPreview: ScrubPreviewSource? = nil
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -191,7 +223,9 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.subtitleTracks = subtitleTracks
         self.startPosition = startPosition
         self.isTranscoding = isTranscoding
+        self.deliveryMode = deliveryMode ?? (isTranscoding ? .transcode : .directPlay)
         self.sourceMetadata = sourceMetadata
+        self.scrubPreview = scrubPreview
     }
 }
 

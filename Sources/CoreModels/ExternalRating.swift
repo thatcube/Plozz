@@ -14,6 +14,9 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
     /// Letterboxd average rating (0–5). No public API yet — reserved so the UI
     /// already supports it if a provider is added later.
     case letterboxd
+    /// AniList weighted community score (0–100), shown as a percentage. The rating
+    /// that actually matters for anime — sourced keyless from the AniList API.
+    case anilist
     /// The Movie Database user rating (0–10).
     case tmdb
     /// A backend's generic "community"/audience rating (e.g. Jellyfin
@@ -31,6 +34,7 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         case .rottenTomatoesAudience: return "RT Audience"
         case .metacritic: return "Metacritic"
         case .letterboxd: return "Letterboxd"
+        case .anilist: return "AniList"
         case .tmdb: return "TMDB"
         case .community: return "Community"
         case .critic: return "Critics"
@@ -41,15 +45,65 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
     public var sortRank: Int {
         switch self {
         case .imdb: return 0
-        case .rottenTomatoes: return 1
-        case .rottenTomatoesAudience: return 2
-        case .metacritic: return 3
-        case .letterboxd: return 4
-        case .tmdb: return 5
-        case .community: return 6
-        case .critic: return 7
+        case .anilist: return 1
+        case .rottenTomatoes: return 2
+        case .rottenTomatoesAudience: return 3
+        case .metacritic: return 4
+        case .letterboxd: return 5
+        case .tmdb: return 6
+        case .community: return 7
+        case .critic: return 8
         }
     }
+
+    /// The kind of icon a badge should render for this source, mirroring its
+    /// real-world branding. Kept here (not in the UI layer) so the choice is one
+    /// provider-agnostic, testable decision; the UI maps each case to a symbol,
+    /// emoji, or chip.
+    public var icon: RatingIcon {
+        switch self {
+        case .rottenTomatoes, .critic: return .tomato
+        case .rottenTomatoesAudience: return .popcorn
+        // A backend "community" score is TMDB-sourced in practice, so it shares
+        // TMDB's branding rather than a generic star.
+        case .tmdb, .community: return .tmdb
+        case .imdb, .letterboxd, .anilist: return .star
+        case .metacritic: return .metacritic
+        }
+    }
+
+    /// Whether this source carries Rotten Tomatoes-style fresh/rotten state, so
+    /// the UI can tint the score red (fresh) or green (rotten).
+    public var hasFreshness: Bool {
+        switch self {
+        case .rottenTomatoes, .rottenTomatoesAudience, .critic: return true
+        default: return false
+        }
+    }
+}
+
+/// Rotten Tomatoes-style fresh/rotten state derived from a percentage score.
+public enum RatingFreshness: String, Sendable, Hashable {
+    case fresh
+    case rotten
+    /// Not a freshness-bearing source (e.g. IMDb, Metacritic, user scores).
+    case none
+}
+
+/// The visual treatment for a rating source's icon. The UI maps each case to a
+/// concrete symbol/emoji/chip; keeping it as an enum lets the choice be unit
+/// tested without importing SwiftUI.
+public enum RatingIcon: String, Sendable, Hashable {
+    /// A filled star — user/community/aggregate scores (IMDb, community, …).
+    case star
+    /// TMDB's branded logo + source chip.
+    case tmdb
+    /// Rotten Tomatoes critic "Tomatometer".
+    case tomato
+    /// Rotten Tomatoes audience score.
+    case popcorn
+    /// Metacritic's coloured Metascore chip.
+    case metacritic
 }
 
 /// The native scale a raw rating value is expressed in.
@@ -117,6 +171,15 @@ public struct ExternalRating: Codable, Hashable, Sendable, Identifiable {
             return String(Int(value))
         }
         return String(format: "%.1f", value)
+    }
+
+    /// Rotten Tomatoes-style freshness for this rating: fresh at ≥ 60% (on the
+    /// normalized 0…1 scale), rotten below, and `.none` for sources that don't
+    /// carry freshness (IMDb, Metacritic, user scores). The 60% cutoff matches
+    /// Rotten Tomatoes' own "Fresh" threshold.
+    public var freshness: RatingFreshness {
+        guard source.hasFreshness else { return .none }
+        return normalized >= 0.6 ? .fresh : .rotten
     }
 }
 

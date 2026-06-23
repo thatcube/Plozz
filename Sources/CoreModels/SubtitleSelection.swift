@@ -159,6 +159,48 @@ public extension Array where Element == MediaTrack {
         guard let language, !language.isEmpty else { return true }
         return subtitles.contains { LanguageMatch.matches($0.language, language) }
     }
+
+    /// The subtitle track that the default-selection rule would enable on load
+    /// for the given `mode` / `preferredLanguage`, or `nil` for "no subtitles".
+    /// Mirrors what each engine applies, but over the *provider* track list (so
+    /// it can see image-based subs that AVFoundation hides), letting the router
+    /// reason about which subtitle the user will actually get.
+    func defaultSubtitleSelection(
+        mode: CaptionSettings.SubtitleMode,
+        preferredLanguage: String?
+    ) -> MediaTrack? {
+        let subtitles = filter { $0.kind == .subtitle }
+        guard !subtitles.isEmpty else { return nil }
+        let candidates = subtitles.map {
+            SubtitleCandidate(id: $0.id, languageCode: $0.language,
+                              isForced: $0.isForced, isDefault: $0.isDefault)
+        }
+        guard case .select(let id) = SubtitleSelector.decide(
+            candidates: candidates, mode: mode, preferredLanguage: preferredLanguage
+        ) else { return nil }
+        return subtitles.first { $0.id == id }
+    }
+
+    /// `true` when the subtitle that would be shown by default is **image-based**
+    /// (PGS / VOBSUB / DVDSUB — signalled by `deliveryURL == nil`) *and* no
+    /// equivalent text subtitle exists (same language and forced-ness). AVPlayer
+    /// can't render image subs, so such a file must play on the hybrid engine for
+    /// the subtitle to appear. When a text equivalent exists, the native engine
+    /// can show that instead, so we stay native and keep its advantages (e.g.
+    /// true Dolby Vision).
+    func defaultSubtitleNeedsHybridEngine(
+        mode: CaptionSettings.SubtitleMode,
+        preferredLanguage: String?
+    ) -> Bool {
+        guard let chosen = defaultSubtitleSelection(mode: mode, preferredLanguage: preferredLanguage),
+              chosen.deliveryURL == nil else { return false }
+        let hasTextEquivalent = contains {
+            $0.kind == .subtitle && $0.deliveryURL != nil
+                && $0.isForced == chosen.isForced
+                && LanguageMatch.matches($0.language, chosen.language)
+        }
+        return !hasTextEquivalent
+    }
 }
 
 // MARK: - Remote subtitle search results

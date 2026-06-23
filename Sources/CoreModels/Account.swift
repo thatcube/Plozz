@@ -17,6 +17,8 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
     public var server: MediaServer
     public var userID: String
     public var userName: String
+    /// Provider-supplied profile image URL for this account user, when available.
+    public var avatarURL: URL?
     /// Stable per-install device identifier sent on every authenticated request.
     public var deviceID: String
     /// When the account was first added — used for stable ordering.
@@ -27,6 +29,7 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
         server: MediaServer,
         userID: String,
         userName: String,
+        avatarURL: URL? = nil,
         deviceID: String,
         addedAt: Date = Date()
     ) {
@@ -34,6 +37,7 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
         self.server = server
         self.userID = userID
         self.userName = userName
+        self.avatarURL = avatarURL
         self.deviceID = deviceID
         self.addedAt = addedAt
     }
@@ -45,6 +49,7 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
             server: session.server,
             userID: session.userID,
             userName: session.userName,
+            avatarURL: session.avatarURL,
             deviceID: session.deviceID,
             addedAt: addedAt
         )
@@ -57,6 +62,7 @@ public struct Account: Codable, Hashable, Identifiable, Sendable {
             server: server,
             userID: userID,
             userName: userName,
+            avatarURL: avatarURL,
             deviceID: deviceID,
             accessToken: token
         )

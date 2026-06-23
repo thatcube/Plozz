@@ -7,6 +7,7 @@ import FeatureMusic
 import FeaturePlayback
 import FeatureSearch
 import FeatureSettings
+import ProviderTrailers
 import RatingsService
 import TraktService
 
@@ -27,6 +28,7 @@ struct MainTabView: View {
     let homeVisibility: HomeLibraryVisibilityModel
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
+    let mediaItemActionHandler: any MediaItemActionHandling
     let displayAccounts: [Account]
     let activeAccountID: String?
     let profiles: [Profile]
@@ -109,6 +111,7 @@ struct MainTabView: View {
         .task(id: accounts.map(\.account.id)) {
             await musicAvailability.probe(accounts: accounts)
         }
+        .mediaItemActionHandler(mediaItemActionHandler)
     }
 }
 
@@ -120,6 +123,37 @@ private func resolveProvider(_ accountID: String?, in accounts: [ResolvedAccount
         return match.provider
     }
     return accounts[0].provider
+}
+
+/// Builds the player for a play request. Online (TMDb → YouTube) trailers carry a
+/// YouTube video-id marker and have no backing account, so they are routed to
+/// ``YouTubeTrailerProvider`` (which extracts a playable stream); every other
+/// item resolves through its owning account provider as usual.
+@MainActor
+private func makePlayerViewModel(
+    for request: PlayRequest,
+    accounts: [ResolvedAccount],
+    captionSettings: CaptionSettings,
+    scrobbler: any TraktScrobbling
+) -> PlayerViewModel {
+    if let videoID = request.item.youTubeTrailerVideoID {
+        return PlayerViewModel(
+            provider: YouTubeTrailerProvider(item: request.item, videoID: videoID),
+            itemID: videoID,
+            captionSettings: captionSettings,
+            startPosition: request.startPosition,
+            scrobbler: scrobbler,
+            engineFactory: HybridPlayback.engineFactory()
+        )
+    }
+    return PlayerViewModel(
+        provider: resolveProvider(request.item.sourceAccountID, in: accounts),
+        itemID: request.item.id,
+        captionSettings: captionSettings,
+        startPosition: request.startPosition,
+        scrobbler: scrobbler,
+        engineFactory: HybridPlayback.engineFactory()
+    )
 }
 
 /// Home tab with its own navigation stack: Home → Library (paged) → Detail and
@@ -175,17 +209,45 @@ private struct HomeTab: View {
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
-                    onSelectChild: { navigate($0) }
+                    onSelectChild: { navigate($0) },
+                    initialSeasonID: item.seasonID
+                )
+            }
+            .navigationDestination(for: EpisodeContextRoute.self) { route in
+                ItemDetailView(
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(route.sourceAccountID, in: accounts),
+                        itemID: route.seriesID,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: route.sourceAccountID
+                    ),
+                    spoilerSettings: spoilerSettings,
+                    onPlay: { requestPlay($0) },
+                    onSelectChild: { navigate($0) },
+                    initialEpisode: route.episode
+                )
+            }
+            .navigationDestination(for: SeasonContextRoute.self) { route in
+                ItemDetailView(
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(route.sourceAccountID, in: accounts),
+                        itemID: route.seriesID,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: route.sourceAccountID
+                    ),
+                    spoilerSettings: spoilerSettings,
+                    onPlay: { requestPlay($0) },
+                    onSelectChild: { navigate($0) },
+                    initialSeasonID: route.season.id
                 )
             }
         }
         .fullScreenCover(item: $playRequest) { request in
             PlayerView(
-                viewModel: PlayerViewModel(
-                    provider: resolveProvider(request.item.sourceAccountID, in: accounts),
-                    itemID: request.item.id,
+                viewModel: makePlayerViewModel(
+                    for: request,
+                    accounts: accounts,
                     captionSettings: captionSettings,
-                    startPosition: request.startPosition,
                     scrobbler: scrobbler
                 ),
                 showDiagnostics: showDiagnostics,
@@ -196,6 +258,7 @@ private struct HomeTab: View {
             playRequest = PlayRequest(item: item, startPosition: startPosition)
         }
         .task(id: pendingPlayItemID) { await handleDeepLink() }
+        .mediaItemNavigator { navigate($0) }
     }
 
     /// Resolves a deep-linked item id (from a Top Shelf card) and routes to it,
@@ -213,12 +276,19 @@ private struct HomeTab: View {
         }
     }
 
-    /// Pushes a detail page for any item — movies and episodes get a Movie/Episode
-    /// Details page (with a Play button) before playback; series/seasons get their
-    /// children list. Immediate playback is reserved for Continue Watching and
-    /// the detail page's own Play action.
+    /// Pushes a detail page for any item — movies get a Movie Details page (with a
+    /// Play button); series/seasons get their children list. A tapped episode is
+    /// redirected to its *series* page (fronting that episode) so the user never
+    /// lands on a dead-end single-episode page. Immediate playback is reserved for
+    /// Continue Watching and the detail page's own Play action.
     private func navigate(_ item: MediaItem) {
-        path.append(item)
+        if item.kind == .episode, item.seriesID != nil {
+            path.append(EpisodeContextRoute(episode: item))
+        } else if item.kind == .season, item.seriesID != nil {
+            path.append(SeasonContextRoute(season: item))
+        } else {
+            path.append(item)
+        }
     }
 
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
@@ -238,6 +308,32 @@ private struct PlayRequest: Identifiable, Equatable {
     let item: MediaItem
     let startPosition: TimeInterval
     var id: String { item.id }
+}
+
+/// A navigation value for opening a *series* page focused on one of its
+/// episodes. Tapping a lone episode (e.g. from "Recently Added") routes through
+/// this instead of pushing the episode itself, so the user always lands on the
+/// rich series/season page — with the tapped episode fronted in the hero, its
+/// season selected, the episode row pre-scrolled to it, and Play focused at the
+/// top — rather than a dead-end single-episode page.
+private struct EpisodeContextRoute: Hashable {
+    let episode: MediaItem
+    /// The owning series' id (falls back to the episode id only if unset, which
+    /// shouldn't happen for an episode that carries a `seriesID`).
+    var seriesID: String { episode.seriesID ?? episode.id }
+    var sourceAccountID: String? { episode.sourceAccountID }
+}
+
+/// A navigation value for opening a *series* page focused on a specific season.
+/// Tapping a season item (e.g. from "Recently Added") routes through this instead
+/// of pushing the season itself, so the user always lands on the rich series page —
+/// with the tapped season selected, and the "next up" episode for that season
+/// fronted in the hero.
+private struct SeasonContextRoute: Hashable {
+    let season: MediaItem
+    /// The owning series' id.
+    var seriesID: String { season.seriesID ?? season.id }
+    var sourceAccountID: String? { season.sourceAccountID }
 }
 
 private extension View {
@@ -302,17 +398,54 @@ private struct SearchTab: View {
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
-                    onSelectChild: { open($0) }
+                    onSelectChild: { open($0) },
+                    initialSeasonID: item.seasonID
                 )
+            }
+            .navigationDestination(for: EpisodeContextRoute.self) { route in
+                ItemDetailView(
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(route.sourceAccountID, in: accounts),
+                        itemID: route.seriesID,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: route.sourceAccountID
+                    ),
+                    spoilerSettings: spoilerSettings,
+                    onPlay: { requestPlay($0) },
+                    onSelectChild: { open($0) },
+                    initialEpisode: route.episode
+                )
+            }
+            .navigationDestination(for: SeasonContextRoute.self) { route in
+                ItemDetailView(
+                    viewModel: ItemDetailViewModel(
+                        provider: resolveProvider(route.sourceAccountID, in: accounts),
+                        itemID: route.seriesID,
+                        ratingsProvider: ratingsProvider,
+                        sourceAccountID: route.sourceAccountID
+                    ),
+                    spoilerSettings: spoilerSettings,
+                    onPlay: { requestPlay($0) },
+                    onSelectChild: { open($0) },
+                    initialSeasonID: route.season.id
+                )
+            }
+        }
+        .mediaItemNavigator { item in
+            if item.kind == .episode, item.seriesID != nil {
+                path.append(EpisodeContextRoute(episode: item))
+            } else if item.kind == .season, item.seriesID != nil {
+                path.append(SeasonContextRoute(season: item))
+            } else {
+                path.append(item)
             }
         }
         .fullScreenCover(item: $playRequest) { request in
             PlayerView(
-                viewModel: PlayerViewModel(
-                    provider: resolveProvider(request.item.sourceAccountID, in: accounts),
-                    itemID: request.item.id,
+                viewModel: makePlayerViewModel(
+                    for: request,
+                    accounts: accounts,
                     captionSettings: captionSettings,
-                    startPosition: request.startPosition,
                     scrobbler: scrobbler
                 ),
                 showDiagnostics: showDiagnostics,
@@ -324,12 +457,15 @@ private struct SearchTab: View {
         }
     }
 
-    /// Playable leaves go straight to the player (in-progress ones prompt
-    /// Resume vs Start Over); containers push a detail page.
+    /// Selecting a search result always opens its detail page rather than
+    /// playing immediately; episodes/seasons route through their series context
+    /// so the detail page has the surrounding show, mirroring `mediaItemNavigator`.
     private func open(_ item: MediaItem) {
         switch item.kind {
-        case .movie, .episode, .video:
-            requestPlay(item)
+        case .episode where item.seriesID != nil:
+            path.append(EpisodeContextRoute(episode: item))
+        case .season where item.seriesID != nil:
+            path.append(SeasonContextRoute(season: item))
         default:
             path.append(item)
         }

@@ -59,6 +59,7 @@ public struct RootView: View {
                         homeVisibility: appState.homeLibraryVisibilityModel,
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,
+                        mediaItemActionHandler: appState.mediaItemActionHandler,
                         displayAccounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
                         profiles: appState.profilesModel.profiles,
@@ -72,7 +73,7 @@ public struct RootView: View {
                         onSignOutAll: { appState.signOutAll() },
                         onSwitchProfile: { appState.requestProfileSelection() }
                     )
-                    .id(appState.profilesModel.activeProfileID)
+                    .id("\(appState.profilesModel.activeProfileID)#\(appState.plexIdentityGeneration)")
                     }
                 }
 
@@ -85,8 +86,61 @@ public struct RootView: View {
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
         .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)
+        .sheet(item: Binding(
+            get: { appState.pendingPlexPINRequest },
+            set: { newValue in if newValue == nil { appState.dismissPlexPINIfPresented() } }
+        )) { request in
+            PlexPINEntryView(
+                appState: appState,
+                userName: request.homeUserName,
+                onSubmit: { appState.submitPlexPIN($0) },
+                onCancel: { appState.cancelPlexPIN() }
+            )
+        }
         .onAppear { if case .launching = appState.state { appState.bootstrap() } }
         .onOpenURL { appState.handle(url: $0) }
+    }
+}
+
+/// Modal PIN entry shown when switching to a profile mapped to a PIN-protected
+/// Plex Home user. The PIN is passed straight to Plex and never stored.
+private struct PlexPINEntryView: View {
+    let appState: AppState
+    let userName: String
+    let onSubmit: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var pin: String = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 32) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 72))
+                    .foregroundStyle(.secondary)
+                Text("Enter PIN for \(userName)")
+                    .font(.title2.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                SecureField("PIN", text: $pin)
+                    .textContentType(.password)
+                    .frame(maxWidth: 420)
+                if let error = appState.plexPINError {
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                }
+                Button("Continue") { onSubmit(pin) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(pin.isEmpty)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+            }
+        }
     }
 }
 

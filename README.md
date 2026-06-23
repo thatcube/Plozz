@@ -1,30 +1,48 @@
-# Plozz
+<p align="center">
+  <img src="Branding/plozz_logo.svg" alt="Plozz logo" width="128" />
+</p>
 
-**Plozz** is a free, open-source **tvOS** client for [Jellyfin](https://jellyfin.org).
-Discover a Jellyfin server on your local network, sign in from your couch with
-**Quick Connect**, browse your library, and play media with resume support —
-all using native tvOS controls and the Apple TV focus engine.
+<h1 align="center">Plozz</h1>
 
-> Phase 1 (this MVP) is **Jellyfin only**. Plex and Overseerr are planned for
-> later phases behind the same provider abstraction.
+<p align="center">
+  A free, open-source Apple TV app for your own media — connect a Jellyfin or Plex server and watch your library with native tvOS controls, Quick Connect sign-in, and resume support.
+</p>
 
-## Features (Phase 1 MVP)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://www.apple.com/apple-tv-4k/"><img src="https://img.shields.io/badge/Platform-tvOS-black.svg?logo=apple" alt="Platform: tvOS" /></a>
+  <a href="https://github.com/sponsors/thatcube"><img src="https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white" alt="Donate" /></a>
+</p>
 
-- **Zero-config server discovery** — finds Jellyfin servers on your LAN via the
-  Jellyfin UDP auto-discovery protocol, with manual URL entry as a fallback.
-- **Quick Connect sign-in** — TV-friendly flow that shows a code, expiry and
-  retry, polls for completion, and handles timeout/cancel gracefully. No typing
-  passwords with the remote.
-- **Persistent session** — relaunch restores your session without re-login.
-  Access tokens are stored in the **Keychain**; only non-secret metadata lives
-  in `UserDefaults`. Tokens are never written to logs.
-- **Home** — Continue Watching and Latest / Recently Added rows.
-- **Item detail + playback** — `AVPlayer`-based playback with **resume
-  position** restore/update and audio/subtitle track selection when available.
-- **Full caption customization** — font, size, color, opacity, background and
-  edge style, applied through `AVPlayer` text style rules.
-- **Robust states** — clear loading / empty / error states everywhere,
-  including graceful handling of an offline / unreachable server.
+## Features
+
+Servers & sign-in:
+
+- **Two providers, one experience** — connect a **Jellyfin** or **Plex** server; everything above the provider layer is identical, so Home, detail, and playback work the same either way.
+- **Zero-config Jellyfin discovery** — finds servers on your LAN via the Jellyfin UDP auto-discovery protocol, with manual URL entry as a fallback.
+- **Couch-friendly sign-in** — Jellyfin **Quick Connect** and Plex **Link** flows show a code, poll for completion, and handle expiry/timeout/cancel gracefully. No typing passwords with the remote.
+- **Persistent session** — relaunch restores your session without re-login. Access tokens live in the **Keychain**; only non-secret metadata lives in `UserDefaults`, and tokens are never written to logs.
+
+Browse & detail:
+
+- **Home** — Continue Watching plus Latest / Recently Added rows.
+- **Cinematic detail pages** — a full-bleed, high-resolution backdrop that fades seamlessly into the app background, with the show/movie logo, overview, ratings, and a Play/Resume button.
+- **Series done right** — one stable, high-quality series backdrop with focus-driven season tabs and an episode rail; the hero text updates as you move focus without distracting backdrop swaps.
+- **Watched state** — per-episode watched/unwatched badges and "mark watched up to here."
+- **Trailers** — plays trailers attached to your library items, with an online (TMDb → YouTube) fallback when the server has none.
+
+Playback:
+
+- **`AVPlayer` + on-device engine routing** — direct play whenever possible; tricky formats (AV1, certain HEVC/10-bit, image-based PGS/VOBSUB subtitles, and more) are routed to a hybrid on-device engine automatically.
+- **Resume** — playback position is restored and reported back to the server.
+- **Audio & subtitle track selection** when available.
+- **Full caption customization** — font, size, color, opacity, background, and edge style, applied through `AVPlayer` text style rules.
+
+Appearance & robustness:
+
+- **Themes** — System, Dark, OLED, and Light.
+- **Profiles** — multiple local profiles with their own settings.
+- **Robust states** — clear loading / empty / error states everywhere, including graceful handling of an offline or unreachable server.
 
 ## Architecture
 
@@ -36,10 +54,11 @@ app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 | `CoreModels` | Domain models, `AppError`, `LoadState`, caption settings, and the **`MediaProvider`** protocol (the provider abstraction). |
 | `CoreNetworking` | `HTTPClient`, `Endpoint`, URL normalization, and a secret-safe logger (`PlozzLog`). |
 | `ProviderJellyfin` | Jellyfin REST client, DTOs, and a `MediaProvider` implementation. |
+| `ProviderPlex` | Plex client, DTOs, and a `MediaProvider` implementation. |
 | `FeatureDiscovery` | LAN (UDP) discovery, server validation, server-picker UI, last-server persistence. |
-| `FeatureAuth` | Quick Connect service, explicit **session state machine**, Keychain-backed `SessionStore`. |
-| `FeatureHome` | Home rows + item detail. |
-| `FeaturePlayback` | `AVPlayer` view model/view, resume reporting, caption style rules. |
+| `FeatureAuth` | Quick Connect / Plex Link services, explicit **session state machine**, Keychain-backed `SessionStore`. |
+| `FeatureHome` | Home rows, item detail, and the series/season experience. |
+| `FeaturePlayback` | `AVPlayer` view model/view, engine routing, resume reporting, caption style rules. |
 | `FeatureSettings` | Settings, including caption customization. |
 | `CoreUI` | Shared focusable components and theme. |
 | `AppShell` | App state wiring and root navigation. |
@@ -47,8 +66,10 @@ app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 ### Why a `MediaProvider` protocol?
 
 Everything above the provider layer talks to the `MediaProvider` abstraction,
-not to Jellyfin directly. Adding **Plex** in Phase 2 means writing a new
-`MediaProvider` conformer — no changes to Home, Playback, or navigation.
+not to a specific backend. **Jellyfin** and **Plex** are each just a
+`MediaProvider` conformer — Home, Playback, and navigation are written once and
+work against either. Adding another backend means writing one new conformer, no
+feature rewrites.
 
 ### Session state machine
 
@@ -124,10 +145,26 @@ art is a placeholder — replace it before a public App Store release.
 
 ## Roadmap
 
-- **Phase 2:** Plex provider, Overseerr (request media).
+- **Overseerr** integration (request media).
 - App Store polish: replace the placeholder tvOS **Brand Assets** app icon &
   Top Shelf image with final artwork before a public release.
 
+## Donate
+
+Plozz is free and open source, and it always will be. There's no paywall, no
+ads, and no obligation to give anything.
+
+If the app has been useful to you and you'd like to chip in toward its upkeep —
+things like the Apple Developer Program fee and time spent maintaining it —
+donations are welcome and genuinely appreciated. Anything is plenty, and not
+donating is completely fine too.
+
+[![Donate](https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/thatcube)
+
+**[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time or recurring, whatever suits you.
+
 ## License
 
-Plozz is open source and free. See [`LICENSE`](LICENSE).
+[MIT](LICENSE) © 2026 Brandon Moore
+
+Not affiliated with or endorsed by Jellyfin or Plex, Inc.

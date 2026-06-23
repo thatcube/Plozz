@@ -6,5 +6,15 @@
     <array>
         <string>group.com.thatcube.Plozz</string>
     </array>
+    <!-- tvOS system multi-user support. "runs-as-current-user" opts the app into
+         per-Apple-TV-user data partitioning (separate UserDefaults + Keychain per
+         system user) on tvOS 16+, while "…with-user-independent-keychain" lets the
+         app keep the shared sign-in + profile set in the user-independent Keychain
+         (via kSecUseUserIndependentKeychain) so the household signs in once. See
+         FeatureAuth.KeychainStore and AppShell.SystemProfileBridge. -->
+    <key>com.apple.developer.user-management</key>
+    <array>
+        <string>runs-as-current-user-with-user-independent-keychain</string>
+    </array>
 </dict>
 </plist>

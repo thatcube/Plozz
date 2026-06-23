@@ -2,6 +2,10 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import MetadataKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The top "hero" section of a detail page: a full-bleed backdrop with the
 /// item's title, subtitle, ratings, overview, and an optional Play button.
@@ -11,131 +15,437 @@ import CoreUI
 /// whole hero animates to reflect the newly focused context.
 struct DetailHeroView: View {
     let item: MediaItem
+    /// The item whose artwork fills the backdrop. Defaults to `item`. A series
+    /// page pins this to the series itself so the background stays a single,
+    /// stable, high-quality image even as `item` (the focused season/episode)
+    /// drives the logo, title, overview and Play button. Swapping the backdrop
+    /// per focused episode reads as distracting flicker, so we don't.
+    var backdropItem: MediaItem?
+    /// Fraction of the screen height the hero backdrop occupies. Defaults to a
+    /// full-screen cinematic hero (`1.0`); a TV show shrinks this (e.g. `0.8`) so
+    /// the season tabs and episode row peek above the fold, signalling there's
+    /// more to scroll to.
+    var heroHeightFraction: CGFloat = 1.0
+    /// Extends *only the backdrop image* (and its dissolve-to-background) below
+    /// the hero content by this fraction of the screen height, without moving the
+    /// title/Play (which stay pinned within `heroHeightFraction`). Used by the
+    /// series page so the seamless fade lands closer to the top of the episode
+    /// rail instead of completing high up the page.
+    var backdropBottomExtensionFraction: CGFloat = 0
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
     let playTitle: String?
     let onPlay: (() -> Void)?
+    /// When provided (`0..<1`), a thin watched-progress bar is shown inside the
+    /// Play button, between the play icon and the remaining-time line.
+    var playProgress: Double? = nil
+    /// When provided, a "… left" remaining-time line is shown inside the Play
+    /// button, after the progress bar.
+    var playRemainingText: String? = nil
+    /// When provided, a secondary "Trailer" button is shown next to Play.
+    var onPlayTrailer: (() -> Void)? = nil
+    /// Technical badges to show when the focused item carries none of its own —
+    /// a series or season hero has no media file, so the parent derives a
+    /// representative set from the loaded episodes (best resolution/HDR/audio)
+    /// and passes it here so a show still advertises 4K/Dolby Vision/Atmos.
+    var fallbackTechnicalBadges: [MediaBadge] = []
+    /// When provided, the hero's Play button binds to this focus state (as
+    /// `true`), letting a parent give Play initial focus — used when a page is
+    /// opened targeting a specific episode so focus lands on Play at the top
+    /// rather than down in the episode row.
+    var playButtonFocus: FocusState<Bool>.Binding? = nil
 
-    @Environment(\.themePalette) private var palette
+    /// Local focus state of the Play button, so the inline resume progress bar
+    /// can flip its colours to stay visible against the button's focused (white)
+    /// vs unfocused (dark) background.
+    @FocusState private var playButtonHasFocus: Bool
+
+    /// The active light/dark appearance. The unfocused prominent button is dark
+    /// in dark mode but light in light mode, so the inline progress bar must take
+    /// the colour scheme into account — otherwise its white fill vanishes against
+    /// the light unfocused button in light mode.
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The item supplying the backdrop artwork (the pinned series, when set).
+    private var backdrop: MediaItem { backdropItem ?? item }
+
+    /// The capability badges shown above the ratings: resolution/HDR/audio. The
+    /// content-rating certificate is rendered separately, inline with the
+    /// year/runtime/genre metadata line.
+    private var featureBadges: [MediaBadge] {
+        // Prefer the focused item's own tech badges; fall back to the derived
+        // series-level set for a series/season hero (or an episode whose stream
+        // info hasn't loaded), so tech badges are present on every kind.
+        let ownTech = item.technicalBadges
+        return ownTech.isEmpty ? fallbackTechnicalBadges : ownTech
+    }
+
+    /// The content-rating certificate badge (e.g. `TV-14`). When the focused
+    /// item is an episode without its own certificate, it falls back to the
+    /// backdrop item (the series), so a show's TV rating still shows while
+    /// scrubbing episodes — matching Apple TV.
+    private var heroRatingBadge: MediaBadge? {
+        item.ratingBadge ?? backdrop.ratingBadge
+    }
+
+    /// External ratings to show. Falls back to the backdrop item (the series)
+    /// when the focused item (an episode) carries none of its own, so a show's
+    /// rating stays visible while scrubbing episodes.
+    private var heroRatings: [ExternalRating] {
+        item.ratings.isEmpty ? backdrop.ratings : item.ratings
+    }
+
+    /// True when `subtitle` is just the production year — the richer metadata
+    /// line below already opens with the year, so we drop the duplicate.
+    private func isYearOnlySubtitle(_ subtitle: String) -> Bool {
+        guard let year = item.productionYear else { return false }
+        return subtitle == String(year)
+    }
 
     var body: some View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
-        ZStack(alignment: .bottomLeading) {
-            FallbackAsyncImage(
-                urls: [item.heroBackdropURL, item.backdropURL, item.posterURL].compactMap { $0 },
-                maxAspectRatio: 3.0
-            ) {
-                Rectangle().fill(.tertiary)
-            }
-            .frame(height: 720)
-            .frame(maxWidth: .infinity)
-            .clipped()
-            .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
-            .overlay(
-                // Fade the backdrop down into the app's own background colour so
-                // the hero reads as full-bleed and dissolves seamlessly into the
-                // page right where the season tabs begin — no hard seam.
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0.0),
-                        .init(color: palette.backgroundBase.opacity(0.55), location: 0.6),
-                        .init(color: palette.backgroundBase, location: 1.0)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            // Break out of the tvOS overscan safe area so the backdrop spans the
-            // full screen width edge to edge.
-            .ignoresSafeArea(edges: .horizontal)
-
-            VStack(alignment: .leading, spacing: 16) {
-                if hideText {
+        let heroHeight = Self.screenHeight * heroHeightFraction
+        // The leading-aligned content column. It is the ONLY thing that sizes the
+        // hero, so the hero always reports the safe viewport width — never the
+        // full panel — keeping its title/logo/Play on-screen and focusable.
+        VStack(alignment: .leading, spacing: 12) {
+            if hideText {
+                titleText(hideText: hideText)
+            } else {
+                HeroLogoArtwork(
+                    primaryURL: item.logoURL,
+                    asyncFallbackURL: tmdbLogoFallback
+                ) {
                     titleText(hideText: hideText)
-                } else {
-                    HeroLogoArtwork(
-                        primaryURL: item.logoURL,
-                        asyncFallbackURL: tmdbLogoFallback
-                    ) {
-                        titleText(hideText: hideText)
-                    }
-                }
-                if let subtitle = item.subtitle {
-                    Text(subtitle).font(.title3).foregroundStyle(.secondary)
-                }
-                if !item.ratings.isEmpty {
-                    RatingsBadgeRow(ratings: item.ratings)
-                }
-                if hideText {
-                    Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: 1100, alignment: .leading)
-                } else if let overview = item.overview {
-                    Text(overview)
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(4)
-                        .frame(maxWidth: 1100, alignment: .leading)
-                }
-                if let playTitle, let onPlay {
-                    Button(action: onPlay) {
-                        Label(playTitle, systemImage: "play.fill")
-                            .frame(minWidth: 260)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, 8)
                 }
             }
-            .padding(PlozzTheme.Metrics.screenPadding)
+            if let subtitle = item.subtitle, !isYearOnlySubtitle(subtitle) {
+                Text(subtitle)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            let metadata = item.metadataComponents()
+            if heroRatingBadge != nil || !metadata.isEmpty {
+                HStack(alignment: .center, spacing: 16) {
+                    if let badge = heroRatingBadge {
+                        MediaBadgeChip(badge: badge)
+                    }
+                    if !metadata.isEmpty {
+                        Text(metadata.joined(separator: "  ·  "))
+                            .font(.system(size: 23, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            if !hideText, let tagline = item.tagline {
+                Text(tagline)
+                    .font(.system(size: 24, weight: .medium))
+                    .italic()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: 960, alignment: .topLeading)
+            }
+            if !featureBadges.isEmpty {
+                MediaBadgeRow(badges: featureBadges)
+            }
+            if !heroRatings.isEmpty && !spoilerSettings.shouldHideRatings(for: item) {
+                RatingsBadgeRow(ratings: heroRatings)
+            }
+            if hideText {
+                Label("Overview hidden to avoid spoilers", systemImage: "eye.slash.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 960, alignment: .topLeading)
+            } else if let overview = item.overview {
+                Text(overview)
+                    .font(.system(size: 22))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(2)
+                    // Reserve three lines of height even when the text is
+                    // shorter, so swapping the focused item never makes the
+                    // controls below jump up and down.
+                    .lineLimit(3, reservesSpace: true)
+                    .frame(maxWidth: 960, alignment: .topLeading)
+            }
+            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
+                HStack(spacing: 24) {
+                    if let playTitle, let onPlay {
+                        playButton(title: playTitle, action: onPlay)
+                    }
+                    if let onPlayTrailer {
+                        Button(action: onPlayTrailer) {
+                            Label("Trailer", systemImage: "film.fill")
+                        }
+                        .modifier(HeroButtonStyle(prominent: false))
+                    }
+                }
+                .padding(.top, 8)
+                // Make the action row its own focus section so pressing "up" from
+                // a season parked far to the right reliably lands here. Note we no
+                // longer stretch this to `.infinity`: a full-width focusable HStack
+                // inside the hero, combined with the over-wide full-bleed backdrop,
+                // was part of what let the focus engine pan the page off the left
+                // edge. Leading-sized + `.focusSection()` keeps the "up" target
+                // without contributing any over-wide focusable geometry.
+                .focusSection()
+            }
+        }
+        .padding(.vertical, PlozzTheme.Metrics.screenPadding)
+        .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+        .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+        // Occupy the backdrop's height and pin the content to the bottom-leading
+        // corner — exactly what the old `ZStack(alignment: .bottomLeading)` did,
+        // but measured at the *safe* viewport width (`.infinity` reports the
+        // proposed width), never the full 1920pt panel.
+        .frame(maxWidth: .infinity, minHeight: heroHeight, alignment: .bottomLeading)
+        // The full-bleed backdrop lives in a `.background`, which by definition is
+        // sized to the host and does NOT contribute to the host's measured size.
+        // That is the fix: previously the backdrop was a ZStack *sibling* whose
+        // `.ignoresSafeArea(.horizontal)` inflated the ZStack — and therefore the
+        // whole scroll column — to the full panel width (~1920). A vertical
+        // ScrollView then centred that over-wide content, throwing the
+        // leading-aligned title/Play off the left edge while the centred image
+        // still looked correct. As a background, the image bleeds edge-to-edge
+        // purely visually and the content column stays at the safe width.
+        .background(alignment: backdropBottomExtensionFraction > 0 ? .top : .bottom) {
+            heroBackdrop(hideThumbnail: hideThumbnail)
         }
         // Cross-fade the hero text as the focused context changes, while the
         // backdrop swaps underneath it.
         .animation(.easeInOut(duration: 0.2), value: item.id)
     }
 
+    /// The full-bleed backdrop image with its legibility scrim and bottom
+    /// dissolve mask. Rendered as a `.background` of the hero content so it can
+    /// ignore the horizontal/top overscan safe area and span the screen edge to
+    /// edge *without* inflating the hero's (and the scroll column's) layout width.
+    @ViewBuilder
+    private func heroBackdrop(hideThumbnail: Bool) -> some View {
+        FallbackAsyncImage(
+            urls: [backdrop.heroBackdropURL, backdrop.backdropURL].compactMap { $0 },
+            maxAspectRatio: 3.0,
+            asyncFallbackURL: tmdbBackdropFallback
+        ) {
+            heroPlaceholder
+        }
+        .frame(height: Self.screenHeight * (heroHeightFraction + backdropBottomExtensionFraction))
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
+        .overlay(
+            // Legibility scrim: darken the lower image so the title/overview
+            // read clearly. It lives *under* the mask below, so it dissolves
+            // away with the image and never tints the revealed background.
+            //
+            // The vertical ramp starts a little higher so it covers a bit more
+            // of the text, and a horizontal falloff concentrates the darkening
+            // on the leading side (where the content sits) while leaving the
+            // right side of the image clearer.
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.0),
+                    .init(color: .clear, location: 0.40),
+                    .init(color: .black.opacity(0.72), location: 1.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .white, location: 0.0),
+                        .init(color: .white, location: 0.40),
+                        .init(color: .clear, location: 0.85)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+        )
+        // Dissolve the backdrop's own alpha to transparent over the lower
+        // portion (top third stays a clean image) so the real `AppBackground`
+        // shows straight through. Because that is the *same* fixed surface the
+        // content below sits on, the transition is perfectly seamless — there
+        // is no second colour to mismatch, so no hard line ever appears.
+        .mask(
+            LinearGradient(
+                stops: [
+                    .init(color: .white, location: 0.0),
+                    .init(color: .white, location: 0.33),
+                    .init(color: .clear, location: 1.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        // Break out of the tvOS overscan safe area so the backdrop spans the
+        // full screen edge to edge — across the top as well, otherwise the
+        // top overscan inset shows through as a black bar above the artwork.
+        .ignoresSafeArea(edges: [.top, .horizontal])
+    }
+
+    /// The hero Play button. Extracted so the optional initial-focus binding can
+    /// be applied to it conditionally (a `nil` binding leaves default focus
+    /// behaviour untouched). When the resume target is partially watched the
+    /// label becomes `▶  [progress bar]  … left`, keeping the button's normal
+    /// height; otherwise it's the plain `▶  Play/Resume`.
+    @ViewBuilder
+    private func playButton(title: String, action: @escaping () -> Void) -> some View {
+        let button = Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: "play.fill")
+                if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1 {
+                    resumeProgressCapsule(progress: playProgress)
+                    Text(playRemainingText)
+                } else {
+                    Text(title)
+                }
+            }
+            .frame(minWidth: 260)
+        }
+        .modifier(HeroButtonStyle(prominent: true))
+        .focused($playButtonHasFocus)
+
+        if let playButtonFocus {
+            button.focused(playButtonFocus, equals: true)
+        } else {
+            button
+        }
+    }
+
+    /// The thin watched-progress bar shown inside the Play button between the
+    /// play icon and the "… left" line. Its colours flip to stay visible against
+    /// the button's background: the focused button is white in either appearance,
+    /// and the unfocused button is dark in dark mode but light in light mode — so
+    /// a light fill is only safe on an unfocused button in dark mode.
+    private func resumeProgressCapsule(progress: Double) -> some View {
+        let onLight = playButtonHasFocus || colorScheme == .light
+        let track = onLight ? Color.black.opacity(0.22) : Color.white.opacity(0.32)
+        let fill = onLight ? Color.black.opacity(0.85) : Color.white
+        let width: CGFloat = 150
+        return Capsule()
+            .fill(track)
+            .frame(width: width, height: 6)
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(fill)
+                    .frame(width: max(8, width * progress), height: 6)
+            }
+            .animation(.easeInOut(duration: 0.2), value: onLight)
+    }
+
     /// The plain text title, used both under spoilers and as the fallback when no
-    /// logo art can be resolved.
+    /// logo art can be resolved. Width is capped (and the text wraps/scales) so a
+    /// very long title can never render as a single line wider than the screen —
+    /// which would blow the hero's content past the viewport and shove the whole
+    /// page (title + focusable buttons) off the left edge.
     private func titleText(hideText: Bool) -> some View {
         Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
             .font(.system(size: 64, weight: .bold))
+            .lineLimit(2)
+            .minimumScaleFactor(0.5)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: 1200, alignment: .leading)
+    }
+
+    /// Full screen height, the basis for the backdrop's height (scaled by
+    /// `heroHeightFraction`). Falls back to a 1080p constant where UIKit isn't
+    /// available (non-Apple toolchains/tests).
+    private static var screenHeight: CGFloat {
+        #if canImport(UIKit)
+        return UIScreen.main.bounds.height
+        #else
+        return 1080
+        #endif
+    }
+
+    /// The hero's final, always-keyless background when no real landscape art is
+    /// available from the server or any external provider. Rather than a flat grey
+    /// panel, it blows up the item's own poster, scaled to fill and heavily blurred
+    /// into a soft cinematic wash, so a movie/show with only a poster still gets a
+    /// rich coloured hero instead of an empty one. Falls back to the neutral fill
+    /// only when there is no poster at all.
+    @ViewBuilder
+    private var heroPlaceholder: some View {
+        if let poster = backdrop.posterURL {
+            AsyncImage(url: poster) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .blur(radius: 60)
+                        .scaleEffect(1.2)
+                        .overlay(Color.black.opacity(0.35))
+                default:
+                    Rectangle().fill(.tertiary)
+                }
+            }
+        } else {
+            Rectangle().fill(.tertiary)
+        }
+    }
+
+    /// Last-resort backdrop art for the hero: look the show/movie up on TMDb and
+    /// use a wide fanart image. Many anime (via Shoko/AniDB) ship no backdrop, so
+    /// this fills the otherwise-empty hero. Uses the *backdrop* item (the series,
+    /// when pinned) and its TMDb id when that id refers to the show itself; for an
+    /// episode/season backdrop it queries by series title. Inert without a token.
+    private var tmdbBackdropFallback: (@Sendable () async -> URL?)? {
+        let source = backdrop
+        switch source.kind {
+        case .folder, .collection, .unknown:
+            return nil
+        default:
+            break
+        }
+        return {
+            await ArtworkRouter.shared.artworkURL(.hero, for: source)
+        }
     }
 
     /// Last-resort title art for the hero: look the show/movie up on TMDb and use
     /// its logo. TV uses the *series* title (never an episode name); inert when no
     /// TMDb token is configured.
     private var tmdbLogoFallback: (@Sendable () async -> URL?)? {
-        let isTV: Bool
-        let queryTitle: String
-        let tmdbID: String?
-        switch item.kind {
-        case .movie, .video:
-            isTV = false
-            queryTitle = item.title
-            tmdbID = item.providerIDs["Tmdb"]
-        case .series:
-            isTV = true
-            queryTitle = item.title
-            tmdbID = item.providerIDs["Tmdb"]
-        case .season, .episode:
-            isTV = true
-            queryTitle = item.parentTitle ?? item.title
-            // The item's own TMDb id is the episode/season, not the series, so
-            // fall back to a title search for the show logo.
-            tmdbID = nil
+        let source = item
+        switch source.kind {
         case .folder, .collection, .unknown:
             return nil
+        default:
+            break
         }
-        let year = isTV ? nil : item.productionYear
         return {
-            await TMDbArtworkResolver.shared.logoURL(
-                title: queryTitle,
-                year: year,
-                isTV: isTV,
-                tmdbID: tmdbID
-            )
+            await ArtworkRouter.shared.artworkURL(.logo, for: source)
+        }
+    }
+}
+
+/// Applies the native Liquid Glass button style to the hero's action buttons on
+/// OS versions that ship it (tvOS 26+), falling back to the classic bordered
+/// styles below that. `prominent` picks the tinted primary glass (Play) versus
+/// the lighter clear glass (secondary actions like Trailer).
+private struct HeroButtonStyle: ViewModifier {
+    let prominent: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(tvOS 26.0, *) {
+            if prominent {
+                content.buttonStyle(.glassProminent)
+            } else {
+                content.buttonStyle(.glass)
+            }
+        } else {
+            if prominent {
+                content.buttonStyle(.borderedProminent)
+            } else {
+                content.buttonStyle(.bordered)
+            }
         }
     }
 }

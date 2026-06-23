@@ -72,6 +72,25 @@ public struct MediaRowView: View {
         initialFocusID != nil || onFocusChange != nil || defaultFocusID != nil
     }
 
+    /// Whether the row restricts entry focus to a single target card — only when a
+    /// `defaultFocusID` is set *and* it exists in the row. We keep that card
+    /// scrolled into view whenever the row isn't engaged (see `handleFocusChange`
+    /// / `onChange(of: defaultFocusID)`), so it's always realised in the lazy stack
+    /// and the row never becomes unreachable while the others are disabled.
+    private var gatesFocus: Bool {
+        guard let defaultFocusID else { return false }
+        return items.contains { $0.id == defaultFocusID }
+    }
+
+    /// While the row is gated and not yet engaged, every card *except* the target
+    /// is removed from the focus system, so focus entering the row can only ever
+    /// land on the target — no transient highlight on the geometrically-nearest
+    /// card. `PosterCardView` ignores `isEnabled`, so this affects focusability
+    /// only, never appearance.
+    private func cardIsDisabled(_ item: MediaItem) -> Bool {
+        gatesFocus && !focusEngaged && item.id != defaultFocusID
+    }
+
     public var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
@@ -102,6 +121,14 @@ public struct MediaRowView: View {
                     .onChange(of: focusedID) { _, newValue in
                         handleFocusChange(to: newValue, using: proxy)
                     }
+                    .onChange(of: defaultFocusID) { _, newTarget in
+                        // The target changed (e.g. switching seasons). Re-arm the
+                        // gate and bring the new target into view so it's realised
+                        // and remains the only focusable card on the next entry.
+                        focusEngaged = false
+                        guard let newTarget, items.contains(where: { $0.id == newTarget }) else { return }
+                        proxy.scrollTo(newTarget, anchor: .leading)
+                    }
                 }
             }
         }
@@ -120,7 +147,9 @@ public struct MediaRowView: View {
             .frame(width: style == .poster ? PlozzTheme.Metrics.posterWidth : PlozzTheme.Metrics.landscapeWidth)
             .id(item.id)
         if tracksFocus {
-            card.focused($focusedID, equals: item.id)
+            card
+                .focused($focusedID, equals: item.id)
+                .disabled(cardIsDisabled(item))
         } else {
             card
         }
@@ -159,8 +188,13 @@ public struct MediaRowView: View {
     /// engaged, normal left/right browsing is untouched; leaving the row re-arms it.
     private func handleFocusChange(to newValue: String?, using proxy: ScrollViewProxy) {
         guard let newValue else {
-            // Focus left the row; re-arm so the next entry re-targets.
+            // Focus left the row; re-arm the gate and bring the target back into
+            // view so it stays realised and is the only focusable card next time —
+            // even if the user had browsed far away before leaving.
             focusEngaged = false
+            if let target = defaultFocusID, items.contains(where: { $0.id == target }) {
+                proxy.scrollTo(target, anchor: .leading)
+            }
             onFocusChange?(nil)
             return
         }
@@ -168,9 +202,9 @@ public struct MediaRowView: View {
            let target = defaultFocusID,
            newValue != target,
            items.contains(where: { $0.id == target }) {
-            // Entered on the nearest card; redirect to the target episode. Mark
-            // engaged first so neither this redirect nor the user's own later moves
-            // re-trigger it, and don't report the transient card to the hero.
+            // Safety net: if focus somehow lands on a non-target card while gated
+            // (e.g. a frame before `.disabled` applied), redirect to the target and
+            // don't report the transient card to the hero.
             focusEngaged = true
             redirectFocus(to: target, using: proxy)
             return

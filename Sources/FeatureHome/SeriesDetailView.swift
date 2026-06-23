@@ -45,6 +45,12 @@ struct SeriesDetailView: View {
     /// snap from a geometrically-nearer chip. Once true, every chip is focusable
     /// so left/right moves freely between seasons; it resets when focus leaves.
     @State private var seasonBarEngaged = false
+    /// Bumped whenever focus enters the season tab bar. Handed to the episode rail
+    /// as its `focusResetToken` so the rail re-arms its entry gate deterministically
+    /// when focus has truly left it (gone up to the bar) — rather than inferring it
+    /// from a transient `nil` during a fast horizontal hold, which could strand the
+    /// focus indicator.
+    @State private var episodeRailResetToken = 0
     /// Drives initial focus onto the hero Play button when the page is opened
     /// targeting a specific episode, so focus lands at the top rather than down
     /// in the episode row.
@@ -193,6 +199,9 @@ struct SeriesDetailView: View {
             // We're now inside the bar — open every chip to focus so left/right
             // navigation between seasons works.
             seasonBarEngaged = true
+            // Focus has genuinely left the episode rail (it's now on the bar), so
+            // tell the rail to re-arm its entry gate for the next down-press.
+            episodeRailResetToken += 1
             guard let season = seasons.first(where: { $0.id == id }) else { return }
             select(season)
             // Deliberately *don't* move the hero to the season: focusing the tab bar
@@ -254,6 +263,7 @@ struct SeriesDetailView: View {
             initialFocusID: nil,
             initialScrollID: target,
             defaultFocusID: target,
+            focusResetToken: episodeRailResetToken,
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusChange: { focused in
                 if let focused, heroItem.id != focused.id { heroItem = focused }

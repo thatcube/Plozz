@@ -24,6 +24,13 @@ public struct MediaRowView: View {
     /// geometrically nearest. Used so the episode the Play button resumes is the
     /// one focused on entry, even when it's far down a long season.
     private let defaultFocusID: String?
+    /// Bumped by the parent whenever focus moves to a sibling control *above* the
+    /// row (e.g. the season tab bar). This is the deterministic signal that focus
+    /// has genuinely left the row, so the entry gate re-arms *only* here — never by
+    /// inferring "focus left" from a transient `nil`, which a fast horizontal hold
+    /// produces constantly (the focused card is recycled between frames) and which
+    /// would otherwise disable cards mid-browse and strand the focus indicator.
+    private let focusResetToken: Int
     /// Leading inset for the row's title and first card. Defaults to the standard
     /// screen padding (Home rows); detail pages pass the larger hero leading
     /// padding so the row aligns with the hero text above it.
@@ -39,9 +46,9 @@ public struct MediaRowView: View {
     /// Whether focus currently sits inside this row. While `false` and a gate
     /// target is set, the first card focus lands on (whatever tvOS picks
     /// geometrically) is overridden by moving focus to the target. It is re-armed
-    /// whenever focus genuinely *leaves* the row (debounced via `pendingDisengage`
-    /// so transient mid-browse `nil`s don't churn it) and when the supplied
-    /// `defaultFocusID` changes (e.g. season swap).
+    /// when focus genuinely leaves the row (signalled by `focusResetToken`, e.g.
+    /// going up to the season bar) and when the supplied `defaultFocusID` changes
+    /// (e.g. season swap) — never from a transient mid-scroll `nil`.
     @State private var focusEngaged = false
     /// Card ids currently realised in the lazy stack. Used to avoid redundant
     /// `scrollTo` work that can cause visible snap/jump when the target is already
@@ -52,11 +59,6 @@ public struct MediaRowView: View {
     /// would fully rebuild + cross-fade on each one, stuttering the scroll. We defer
     /// the report a beat and only fire for the card focus actually settles on.
     @State private var pendingReport: DispatchWorkItem?
-    /// Pending "focus left the row" work, deferred briefly so a transient `nil`
-    /// reported while moving between cards during a rapid hold doesn't re-arm the
-    /// gate (which would disable cards mid-browse and strand the focus indicator).
-    /// If focus returns to a card before it fires, the non-nil branch cancels it.
-    @State private var pendingDisengage: DispatchWorkItem?
     /// The card focus last settled on inside this row, remembered after focus
     /// leaves so the gate re-targets where the user actually was — not the
     /// came-in/resume episode. A stale id from another season is ignored because it
@@ -74,6 +76,7 @@ public struct MediaRowView: View {
         initialFocusID: String? = nil,
         initialScrollID: String? = nil,
         defaultFocusID: String? = nil,
+        focusResetToken: Int = 0,
         leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding,
         onFocusChange: ((MediaItem?) -> Void)? = nil,
         onSelect: @escaping (MediaItem) -> Void
@@ -85,6 +88,7 @@ public struct MediaRowView: View {
         self.initialFocusID = initialFocusID
         self.initialScrollID = initialScrollID
         self.defaultFocusID = defaultFocusID
+        self.focusResetToken = focusResetToken
         self.leadingInset = leadingInset
         self.onFocusChange = onFocusChange
         self.onSelect = onSelect
@@ -177,6 +181,15 @@ public struct MediaRowView: View {
                         guard let newTarget, items.contains(where: { $0.id == newTarget }) else { return }
                         scrollToIfNeeded(newTarget, using: proxy)
                     }
+                    .onChange(of: focusResetToken) { _, _ in
+                        // Focus genuinely left the row for a sibling above (the season
+                        // bar told us). Re-arm the entry gate so the next down-press
+                        // lands on the episode you were last on (`lastFocusedID`, kept
+                        // so re-entry returns there — not the came-in episode), and
+                        // make sure it's realised/in view for the gate to target.
+                        focusEngaged = false
+                        if let target = gateTarget { scrollToIfNeeded(target, using: proxy) }
+                    }
                 }
             }
         }
@@ -265,20 +278,12 @@ public struct MediaRowView: View {
     /// untouched; leaving the row (debounced) re-arms entry targeting on the card
     /// you were last on.
     private func handleFocusChange(to newValue: String?, using proxy: ScrollViewProxy) {
-        guard let newValue else {
-            // Focus appears to have left the row. Defer re-arming briefly: during a
-            // rapid left/right hold tvOS can drop focus to `nil` for a frame between
-            // cards, and re-arming there would disable cards and yank the scroll back
-            // mid-browse. If focus really left (e.g. up to the season bar) the work
-            // runs and re-arms the gate to the last-focused card; if focus returned,
-            // the non-nil branch below cancels it.
-            scheduleDisengage(using: proxy)
-            return
-        }
-        // Focus is on a card; cancel any pending disengage from a transient blip and
-        // remember it as the gate's next re-entry target.
-        pendingDisengage?.cancel()
-        pendingDisengage = nil
+        // A fast horizontal hold constantly blips focus to `nil` between cards (the
+        // focused card is recycled out of the lazy stack for a frame). Ignore it
+        // entirely: re-arming here is what used to disable every card mid-scroll and
+        // strand the focus indicator. The gate now re-arms only on `focusResetToken`
+        // (focus actually left the row, up to the season bar).
+        guard let newValue else { return }
         lastFocusedID = newValue
         if !focusEngaged,
            let target = gateTarget,
@@ -294,22 +299,6 @@ public struct MediaRowView: View {
         }
         focusEngaged = true
         scheduleFocusReport(for: newValue)
-    }
-
-    /// Debounced re-arm of the entry gate once focus genuinely leaves the row.
-    /// Keeps the (last-focused) gate target realised and in view for the next
-    /// entry, but only scrolls when it isn't already visible so an up/down
-    /// round-trip to an on-screen card never snap-scrolls the rail.
-    private func scheduleDisengage(using proxy: ScrollViewProxy) {
-        guard gatesFocus else { return }
-        pendingDisengage?.cancel()
-        let work = DispatchWorkItem {
-            guard focusedID == nil else { return }
-            focusEngaged = false
-            if let target = gateTarget { scrollToIfNeeded(target, using: proxy) }
-        }
-        pendingDisengage = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     /// Coalesces hero updates: each focus change schedules a deferred report and

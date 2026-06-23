@@ -36,6 +36,11 @@ public struct MediaRowView: View {
 
     @FocusState private var focusedID: String?
     @State private var didApplyInitialFocus = false
+    /// Whether focus currently sits inside this row. Used to redirect focus to the
+    /// came-in episode exactly once per entry: while `false` and a `defaultFocusID`
+    /// is set, the first card focus lands on (whatever tvOS picks geometrically) is
+    /// overridden by moving focus to the target. Resets when focus leaves the row.
+    @State private var focusEngaged = false
 
     public init(
         title: String,
@@ -89,21 +94,13 @@ public struct MediaRowView: View {
                         // never clipped by the scroll view's bounds.
                         .padding(.top, 16)
                         .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
-                        // Make the row a single focus section and point its default
-                        // focus at the resume/target card. Entering the section from
-                        // above (down from the season tabs) then lands on that card —
-                        // the episode you came in on — rather than the geometrically
-                        // nearest one, without removing any card from the focus system
-                        // (which broke when the target was off-screen in the lazy stack).
-                        .focusSection()
-                        .modifier(RowDefaultFocus(focusedID: $focusedID, targetID: defaultFocusID))
                     }
                     // Let a focused card's lift, drop shadow and border render
                     // outside the rail's bounds instead of being clipped.
                     .scrollClipDisabled()
                     .onAppear { applyInitialFocus(using: proxy) }
                     .onChange(of: focusedID) { _, newValue in
-                        onFocusChange?(items.first { $0.id == newValue })
+                        handleFocusChange(to: newValue, using: proxy)
                     }
                 }
             }
@@ -153,21 +150,42 @@ public struct MediaRowView: View {
             DispatchQueue.main.async { proxy.scrollTo(target, anchor: .leading) }
         }
     }
-}
 
-/// Applies `.defaultFocus` to the row only when a target id is supplied, so a
-/// row can direct entry focus to a specific card (e.g. the resume episode)
-/// while leaving rows without a target on the platform's default behaviour.
-private struct RowDefaultFocus: ViewModifier {
-    let focusedID: FocusState<String?>.Binding
-    let targetID: String?
-
-    func body(content: Content) -> some View {
-        if let targetID {
-            content.defaultFocus(focusedID, targetID)
-        } else {
-            content
+    /// Responds to focus moving onto a card (`newValue` non-nil) or off the row
+    /// (`nil`). When focus *enters* the row and a `defaultFocusID` is set, the
+    /// first card tvOS picks (the geometrically-nearest one) is overridden by
+    /// moving focus to the target — the episode you came in on — so down-from-the
+    /// season tabs always lands on the right episode regardless of geometry. Once
+    /// engaged, normal left/right browsing is untouched; leaving the row re-arms it.
+    private func handleFocusChange(to newValue: String?, using proxy: ScrollViewProxy) {
+        guard let newValue else {
+            // Focus left the row; re-arm so the next entry re-targets.
+            focusEngaged = false
+            onFocusChange?(nil)
+            return
         }
+        if !focusEngaged,
+           let target = defaultFocusID,
+           newValue != target,
+           items.contains(where: { $0.id == target }) {
+            // Entered on the nearest card; redirect to the target episode. Mark
+            // engaged first so neither this redirect nor the user's own later moves
+            // re-trigger it, and don't report the transient card to the hero.
+            focusEngaged = true
+            redirectFocus(to: target, using: proxy)
+            return
+        }
+        focusEngaged = true
+        onFocusChange?(items.first { $0.id == newValue })
+    }
+
+    /// Scrolls the target card into view (realising it in the lazy stack if needed)
+    /// then moves focus onto it a runloop tick later, once it exists.
+    private func redirectFocus(to target: String, using proxy: ScrollViewProxy) {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            proxy.scrollTo(target, anchor: .leading)
+        }
+        DispatchQueue.main.async { focusedID = target }
     }
 }
 

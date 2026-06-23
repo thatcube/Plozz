@@ -26,6 +26,12 @@ struct DetailHeroView: View {
     /// the season tabs and episode row peek above the fold, signalling there's
     /// more to scroll to.
     var heroHeightFraction: CGFloat = 1.0
+    /// Extends *only the backdrop image* (and its dissolve-to-background) below
+    /// the hero content by this fraction of the screen height, without moving the
+    /// title/Play (which stay pinned within `heroHeightFraction`). Used by the
+    /// series page so the seamless fade lands closer to the top of the episode
+    /// rail instead of completing high up the page.
+    var backdropBottomExtensionFraction: CGFloat = 0
     let spoilerSettings: SpoilerSettings
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
@@ -199,7 +205,7 @@ struct DetailHeroView: View {
         // leading-aligned title/Play off the left edge while the centred image
         // still looked correct. As a background, the image bleeds edge-to-edge
         // purely visually and the content column stays at the safe width.
-        .background(alignment: .bottom) {
+        .background(alignment: backdropBottomExtensionFraction > 0 ? .top : .bottom) {
             heroBackdrop(hideThumbnail: hideThumbnail)
         }
         // Cross-fade the hero text as the focused context changes, while the
@@ -220,7 +226,7 @@ struct DetailHeroView: View {
         ) {
             heroPlaceholder
         }
-        .frame(height: Self.screenHeight * heroHeightFraction)
+        .frame(height: Self.screenHeight * (heroHeightFraction + backdropBottomExtensionFraction))
         .frame(maxWidth: .infinity)
         .clipped()
         .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)

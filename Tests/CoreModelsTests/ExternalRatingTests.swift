@@ -55,6 +55,7 @@ final class ExternalRatingTests: XCTestCase {
         XCTAssertEqual(RatingSource.critic.icon, .tomato)
         XCTAssertEqual(RatingSource.rottenTomatoesAudience.icon, .popcorn)
         XCTAssertEqual(RatingSource.imdb.icon, .star)
+        XCTAssertEqual(RatingSource.tmdb.icon, .tmdb)
         XCTAssertEqual(RatingSource.community.icon, .star)
         XCTAssertEqual(RatingSource.metacritic.icon, .metacritic)
     }

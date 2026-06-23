@@ -59,7 +59,8 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         switch self {
         case .rottenTomatoes, .critic: return .tomato
         case .rottenTomatoesAudience: return .popcorn
-        case .imdb, .tmdb, .community, .letterboxd: return .star
+        case .tmdb: return .tmdb
+        case .imdb, .community, .letterboxd: return .star
         case .metacritic: return .metacritic
         }
     }
@@ -86,8 +87,10 @@ public enum RatingFreshness: String, Sendable, Hashable {
 /// concrete symbol/emoji/chip; keeping it as an enum lets the choice be unit
 /// tested without importing SwiftUI.
 public enum RatingIcon: String, Sendable, Hashable {
-    /// A filled star — user/community/aggregate scores (IMDb, TMDB, …).
+    /// A filled star — user/community/aggregate scores (IMDb, community, …).
     case star
+    /// TMDB's branded logo + source chip.
+    case tmdb
     /// Rotten Tomatoes critic "Tomatometer".
     case tomato
     /// Rotten Tomatoes audience score.

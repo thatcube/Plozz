@@ -23,15 +23,17 @@ public struct RatingsBadgeRow: View {
 }
 
 /// A single source's rating: a compact branded icon (a filled star for
-/// user/community scores, a tomato/popcorn for Rotten Tomatoes, or a coloured
-/// Metacritic chip) beside the formatted score. Rotten Tomatoes scores tint red
-/// when fresh and green when rotten, mirroring the real badges.
+/// user/community scores, a TMDB logo chip for TMDB, a tomato/popcorn for
+/// Rotten Tomatoes, or a coloured Metacritic chip) beside the formatted score.
+/// Rotten Tomatoes scores tint red when fresh and green when rotten, mirroring
+/// the real badges.
 public struct RatingBadge: View {
     private let rating: ExternalRating
 
     /// Shared type scale so the icon and score line up to a compact cap height.
     private static let valueFont = Font.system(size: 22, weight: .semibold)
     private static let iconSize: CGFloat = 24
+    private static let tmdbBlue = Color(red: 0.05, green: 0.38, blue: 0.68)
 
     public init(rating: ExternalRating) {
         self.rating = rating
@@ -56,6 +58,8 @@ public struct RatingBadge: View {
             Image(systemName: "star.fill")
                 .font(.system(size: Self.iconSize * 0.8, weight: .semibold))
                 .foregroundStyle(Self.starGold)
+        case .tmdb:
+            tmdbBadge
         case .tomato:
             emoji("🍅")
         case .popcorn:
@@ -81,6 +85,29 @@ public struct RatingBadge: View {
             .foregroundStyle(.white)
             .frame(width: 34, height: 34)
             .background(metacriticColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    private var tmdbBadge: some View {
+        HStack(spacing: 6) {
+            Image("TMDBPrimaryShortBlue")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 42, height: 18)
+            Text("TMDB")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Self.tmdbBlue)
+                .tracking(0.25)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Self.tmdbBlue.opacity(0.16))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .stroke(Self.tmdbBlue.opacity(0.40), lineWidth: 1)
+        )
     }
 
     /// Tint for the score text — fresh/rotten for Rotten Tomatoes-style sources,

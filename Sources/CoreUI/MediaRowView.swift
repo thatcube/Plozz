@@ -47,6 +47,11 @@ public struct MediaRowView: View {
     /// `scrollTo` work that can cause visible snap/jump when the target is already
     /// on screen.
     @State private var visibleIDs: Set<String> = []
+    /// Coalesces focus-change reporting to `onFocusChange` (the page hero). Holding
+    /// RIGHT moves focus through many cards per second; without coalescing the hero
+    /// would fully rebuild + cross-fade on each one, stuttering the scroll. We defer
+    /// the report a beat and only fire for the card focus actually settles on.
+    @State private var pendingReport: DispatchWorkItem?
 
     public init(
         title: String,
@@ -228,7 +233,24 @@ public struct MediaRowView: View {
             return
         }
         focusEngaged = true
-        onFocusChange?(items.first { $0.id == newValue })
+        scheduleFocusReport(for: newValue)
+    }
+
+    /// Coalesces hero updates: each focus change schedules a deferred report and
+    /// cancels the previous one, so blasting RIGHT through a long season rebuilds
+    /// the hero once — when focus settles — instead of once per card passed.
+    private func scheduleFocusReport(for id: String) {
+        guard let onFocusChange else { return }
+        let item = items.first { $0.id == id }
+        pendingReport?.cancel()
+        let work = DispatchWorkItem {
+            // Only report the card focus actually settled on, skipping every card
+            // blown past during a rapid hold.
+            guard focusedID == id else { return }
+            onFocusChange(item)
+        }
+        pendingReport = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
 
     /// Scrolls the target card into view (realising it in the lazy stack if needed)

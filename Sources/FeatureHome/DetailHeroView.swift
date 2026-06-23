@@ -152,12 +152,16 @@ struct DetailHeroView: View {
                     Text(subtitle)
                         .font(.system(size: 26, weight: .medium))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: 1200, alignment: .leading)
                 }
                 let metadata = item.metadataComponents()
                 if !metadata.isEmpty {
                     Text(metadata.joined(separator: "  ·  "))
                         .font(.system(size: 23, weight: .medium))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: 1200, alignment: .leading)
                 }
                 if !hideText, let tagline = item.tagline {
                     Text(tagline)
@@ -269,10 +273,17 @@ struct DetailHeroView: View {
     }
 
     /// The plain text title, used both under spoilers and as the fallback when no
-    /// logo art can be resolved.
+    /// logo art can be resolved. Width is capped (and the text wraps/scales) so a
+    /// very long title can never render as a single line wider than the screen —
+    /// which would blow the hero's content past the viewport and shove the whole
+    /// page (title + focusable buttons) off the left edge.
     private func titleText(hideText: Bool) -> some View {
         Text(hideText ? spoilerSettings.maskedTitle(for: item) : item.title)
             .font(.system(size: 64, weight: .bold))
+            .lineLimit(2)
+            .minimumScaleFactor(0.5)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: 1200, alignment: .leading)
     }
 
     /// Full screen height, the basis for the backdrop's height (scaled by

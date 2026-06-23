@@ -251,3 +251,28 @@ were preserved.
 
 **Verification:** `ProviderPlexTests` 61/61 passed (tvOS Simulator); full device
 build `BUILD SUCCEEDED`. No Apple TV install/launch (forbidden for the merge).
+
+---
+
+## Phase 4 — Hero horizontal-overflow fix (long titles)
+
+On-device the detail hero appeared shifted sideways: the title and the focusable
+Play button were pushed off the left edge, and the backdrop looked "too wide".
+
+**Root cause:** `DetailHeroView.titleText` was a plain `Text` with no width cap
+or line limit. A long show title (e.g. "I've Been Killing Slimes for 300 Years
+and Maxed Out My Level Season 2") rendered as a single line far wider than the
+screen, which sized the hero/ScrollView content past the viewport and shoved the
+whole page horizontally — hiding the left side (title + focus). Every other hero
+text block was already capped at `maxWidth: 960`; the title and the subtitle/
+metadata lines were not.
+
+**Fix** (`Sources/FeatureHome/DetailHeroView.swift`):
+- `titleText`: `.lineLimit(2)`, `.minimumScaleFactor(0.5)`,
+  `.multilineTextAlignment(.leading)`, `.frame(maxWidth: 1200, alignment:
+  .leading)` — long titles now wrap/scale within bounds instead of overflowing.
+- Hero subtitle + metadata lines: added `.lineLimit(1)` +
+  `.frame(maxWidth: 1200, alignment: .leading)` as overflow insurance.
+
+No artwork/provider behaviour changed; this is layout-only. Build BUILD
+SUCCEEDED; installed + launched on the Apple TV.

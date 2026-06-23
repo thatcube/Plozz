@@ -38,6 +38,9 @@ public struct MediaBadgeChip: View {
     private static let cornerRadius: CGFloat = 6
     private static let hPadding: CGFloat = 11
     private static let vPadding: CGFloat = 5
+    /// Shared pill height so every pill badge (rating, resolution, spec) lines
+    /// up to the exact same height regardless of the font it uses.
+    private static let pillHeight: CGFloat = 36
 
     public init(badge: MediaBadge) {
         self.badge = badge
@@ -46,7 +49,7 @@ public struct MediaBadgeChip: View {
     public var body: some View {
         switch badge.style {
         case .rating:
-            label(badge.label, font: Font.custom("DMSerifDisplay-Regular", size: 21))
+            label(badge.label, font: Font.custom("Bungee-Regular", size: 18))
                 .overlay(
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.65), lineWidth: 3)
@@ -93,8 +96,10 @@ public struct MediaBadgeChip: View {
             .foregroundStyle(textColor)
             .textCase(.uppercase)
             .tracking(0.5)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .padding(.horizontal, Self.hPadding)
-            .padding(.vertical, Self.vPadding)
+            .frame(height: Self.pillHeight)
     }
 }
 

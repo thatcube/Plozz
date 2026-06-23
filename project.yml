@@ -45,7 +45,7 @@ targets:
         UIBackgroundModes:
           - audio
         UIAppFonts:
-          - "DMSerifDisplay-Regular.ttf"
+          - "Bungee-Regular.ttf"
         # OMDb API key for external ratings enrichment (IMDb/RT/Metacritic).
         # Substituted from the OMDB_API_KEY build setting (see Config/Secrets.xcconfig
         # → optional, gitignored Config/Secrets.local.xcconfig). Empty by default,

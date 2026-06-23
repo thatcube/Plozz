@@ -191,7 +191,9 @@ struct SeriesDetailView: View {
             seasonBarEngaged = true
             guard let season = seasons.first(where: { $0.id == id }) else { return }
             select(season)
-            heroItem = season
+            // Deliberately *don't* move the hero to the season: focusing the tab bar
+            // keeps the page on the episode you were last viewing, so going up and
+            // back down stays anchored to that episode rather than the season.
         }
     }
 
@@ -208,7 +210,6 @@ struct SeriesDetailView: View {
         let isFocusable = seasonBarEngaged || season.id == activeID
         return Button {
             select(season)
-            heroItem = season
         } label: {
             Text(season.title)
                 .lineLimit(1)

@@ -665,7 +665,7 @@ private struct ScrubBar: View {
 
     @ViewBuilder
     private func thumbnailPreview(width: CGFloat, knobX: CGFloat) -> some View {
-        let thumbWidth: CGFloat = 240
+        let thumbWidth: CGFloat = 300
         let aspect = previewAspect
         let thumbHeight = thumbWidth / aspect
         let clampedX = min(max(thumbWidth / 2, knobX), width - thumbWidth / 2)
@@ -682,9 +682,9 @@ private struct ScrubBar: View {
                 }
             }
             .frame(width: thumbWidth, height: thumbHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(.white.opacity(0.85), lineWidth: 2)
             )
 

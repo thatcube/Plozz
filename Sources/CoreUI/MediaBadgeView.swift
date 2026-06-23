@@ -35,6 +35,8 @@ public struct MediaBadgeChip: View {
     private static let textFont = Font.system(size: 21, weight: .semibold)
     private static let dolbyWordFont = Font.system(size: 16, weight: .semibold)
     private static let dolbyFormatFont = Font.system(size: 13, weight: .medium)
+    /// Smaller weight for the numeric variant in an HDR wordmark (`HDR` **10**).
+    private static let hdrSuffixFont = Font.system(size: 15, weight: .semibold)
     private static let cornerRadius: CGFloat = 6
     private static let hPadding: CGFloat = 11
     private static let vPadding: CGFloat = 5
@@ -69,6 +71,17 @@ public struct MediaBadgeChip: View {
                         .fill(Color.white.opacity(0.16))
                 )
                 .accessibilityLabel(badge.label)
+        case .hdr:
+            hdrLabel(badge.label)
+                .background(
+                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                        .fill(Color.white.opacity(0.10))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                        .strokeBorder(Self.hdrGradient, lineWidth: 2.5)
+                )
+                .accessibilityLabel(badge.label)
         case .dolby:
             VStack(alignment: .center, spacing: -1) {
                 HStack(alignment: .center, spacing: 5) {
@@ -101,6 +114,51 @@ public struct MediaBadgeChip: View {
             .padding(.horizontal, Self.hPadding)
             .frame(height: Self.pillHeight)
     }
+
+    /// A two-weight HDR wordmark: the format name (`HDR`/`HLG`) in the shared
+    /// semibold cap height with any numeric variant (`10`, `10+`) set smaller and
+    /// raised, so `HDR10` reads as a compact logo rather than flat text.
+    private func hdrLabel(_ text: String) -> some View {
+        let parts = Self.splitHDR(text)
+        return HStack(alignment: .firstTextBaseline, spacing: 1) {
+            Text(parts.head)
+                .font(Self.textFont)
+            if let suffix = parts.suffix {
+                Text(suffix)
+                    .font(Self.hdrSuffixFont)
+                    .baselineOffset(1)
+            }
+        }
+        .foregroundStyle(.white)
+        .tracking(0.5)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .padding(.horizontal, Self.hPadding)
+        .frame(height: Self.pillHeight)
+    }
+
+    /// Splits an HDR label into a wordmark head (`HDR`/`HLG`) and an optional
+    /// numeric variant suffix (`10`, `10+`).
+    private static func splitHDR(_ text: String) -> (head: String, suffix: String?) {
+        let upper = text.uppercased()
+        if upper.hasPrefix("HDR") {
+            let suffix = String(upper.dropFirst(3))
+            return ("HDR", suffix.isEmpty ? nil : suffix)
+        }
+        return (upper, nil)
+    }
+
+    /// HDR accent gradient (warm highlight → cool shadow) used for the badge
+    /// border, evoking the wide luminance range HDR represents.
+    private static let hdrGradient = LinearGradient(
+        colors: [
+            Color(red: 1.00, green: 0.80, blue: 0.25),
+            Color(red: 0.95, green: 0.35, blue: 0.45),
+            Color(red: 0.25, green: 0.75, blue: 0.95)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 }
 
 /// The iconic Dolby "double-D" mark: two back-to-back D shapes with their

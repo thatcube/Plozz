@@ -19,6 +19,10 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
         /// A highly visible solid pill (e.g. solid white with dark text) for
         /// the primary resolution badge.
         case prominent
+        /// A stylized HDR wordmark badge (`HDR10`, `HDR10+`, `HLG`, `HDR`)
+        /// painted with a gradient border so it reads like the HDR logo rather
+        /// than a plain spec pill.
+        case hdr
         /// A Dolby badge rendered as the double-D logo with a stacked wordmark
         /// (`Dolby` over the format, e.g. Dolby Vision / Atmos / Digital+). No
         /// pill.
@@ -55,17 +59,16 @@ public extension MediaSourceMetadata {
     /// video stream's pixel dimensions, or `nil` when no dimensions are known.
     var resolutionBadge: MediaBadge? {
         guard let video else { return nil }
-        // Use the vertical resolution where known; otherwise infer it from width
-        // assuming roughly 16:9 so unusual aspect ratios still classify sensibly.
-        let lines: Int?
-        if let height = video.height, height > 0 {
-            lines = height
-        } else if let width = video.width, width > 0 {
-            lines = width * 9 / 16
-        } else {
-            lines = nil
+        // Classify by effective lines (max of true height and the height this
+        // width implies at 16:9) so letterboxed cinematic content — e.g. a
+        // 1920×804 movie — reads by its real width (1080p) rather than its
+        // cropped height (which would wrongly read 720p).
+        guard let lines = PlaybackDiagnostics.effectiveResolutionLines(
+            width: video.width,
+            height: video.height
+        ) else {
+            return nil
         }
-        guard let lines else { return nil }
         let label: String
         switch lines {
         case 2000...: label = "4K"
@@ -77,30 +80,59 @@ public extension MediaSourceMetadata {
         return MediaBadge(label, style: .prominent)
     }
 
-    /// At most one dynamic-range badge describing the HDR/Dolby Vision signal:
-    /// `Dolby Vision`, `HDR10+`, `HDR10`, `HLG`, or a generic `HDR`. Empty for
-    /// SDR content. Premium ranges read as `.prominent`.
+    /// Dynamic-range badge(s) describing the HDR/Dolby Vision signal. A pure
+    /// Dolby Vision stream reads `Dolby Vision` alone; a Dolby Vision stream that
+    /// also carries an HDR10 base layer (Jellyfin's `DOVIWithHDR10`, Plex's
+    /// "DoVi/HDR10") reads `Dolby Vision` **and** `HDR10` so the badge row
+    /// advertises both. Otherwise a single `HDR10+`, `HDR10`, `HLG`, or generic
+    /// `HDR` badge. Empty for SDR content. HDR badges use the `.hdr` logo style;
+    /// Dolby Vision uses the `.dolby` mark.
     var dynamicRangeBadges: [MediaBadge] {
         guard let video else { return [] }
         let rangeType = (video.videoRangeType ?? "").uppercased()
         let range = (video.videoRange ?? "").uppercased()
 
-        if rangeType.hasPrefix("DOVI") || range == "DOVI" {
-            return [MediaBadge("Dolby Vision", style: .dolby)]
+        if rangeType.hasPrefix("DOVI") || rangeType.contains("DOLBY") || range == "DOVI" {
+            var badges = [MediaBadge("Dolby Vision", style: .dolby)]
+            // DoVi profiles 7/8 ship an HDR10 base layer; surface it as a second
+            // badge so a "DoVi/HDR10" file shows both. Pure DoVi (profile 5)
+            // carries no HDR10 fallback and shows Dolby Vision alone.
+            if rangeType.contains("HDR10PLUS") || rangeType.contains("HDR10+") {
+                badges.append(MediaBadge("HDR10+", style: .hdr))
+            } else if rangeType.contains("HDR10") {
+                badges.append(MediaBadge("HDR10", style: .hdr))
+            }
+            return badges
         }
         if rangeType.contains("HDR10PLUS") || rangeType.contains("HDR10+") {
-            return [MediaBadge("HDR10+", style: .spec)]
+            return [MediaBadge("HDR10+", style: .hdr)]
         }
         if rangeType.hasPrefix("HDR10") {
-            return [MediaBadge("HDR10", style: .spec)]
+            return [MediaBadge("HDR10", style: .hdr)]
         }
         if rangeType == "HLG" || rangeType.hasPrefix("HLG") {
-            return [MediaBadge("HLG", style: .spec)]
+            return [MediaBadge("HLG", style: .hdr)]
         }
         if rangeType.hasPrefix("HDR") || range == "HDR" {
-            return [MediaBadge("HDR", style: .spec)]
+            return [MediaBadge("HDR", style: .hdr)]
         }
         return []
+    }
+
+    /// A badge naming the video codec family (`HEVC`, `H.264`, `AV1`, `VP9`, …),
+    /// or `nil` when the source reports no codec. This is the "(HEVC)" / "(H.264)"
+    /// detail Plex shows alongside the resolution; the full codec profile lives in
+    /// the playback-diagnostics overlay.
+    var videoCodecBadge: MediaBadge? {
+        guard let video,
+              let name = PlaybackDiagnostics.friendlyCodecName(video.codec),
+              !name.isEmpty,
+              // The Dolby Vision case is already conveyed by the dynamic-range
+              // badge, so don't repeat it here if a codec *tag* folded to it.
+              name != "Dolby Vision" else {
+            return nil
+        }
+        return MediaBadge(name, style: .spec)
     }
 
     /// Audio capability badges: a headline format badge (Dolby Atmos, DTS:X,
@@ -141,11 +173,13 @@ public extension MediaSourceMetadata {
         return badges
     }
 
-    /// The full ordered technical badge set: resolution, dynamic range, audio.
+    /// The full ordered technical badge set: resolution, dynamic range, codec,
+    /// audio — mirroring how Plex composes "1080p · DoVi/HDR10 · HEVC".
     var technicalBadges: [MediaBadge] {
         var badges: [MediaBadge] = []
         if let resolutionBadge { badges.append(resolutionBadge) }
         badges.append(contentsOf: dynamicRangeBadges)
+        if let videoCodecBadge { badges.append(videoCodecBadge) }
         badges.append(contentsOf: audioBadges)
         return badges
     }    /// A surround-channel label (`7.1`, `5.1`) from a layout string or channel

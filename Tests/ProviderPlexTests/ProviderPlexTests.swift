@@ -365,8 +365,8 @@ final class PlexProviderMappingTests: XCTestCase {
         let item = try await provider.item(id: "77")
         XCTAssertEqual(item.officialRating, "PG-13")
         XCTAssertEqual(item.genres, ["Sci-Fi", "Adventure"])
-        // 4K + HDR10 (from smpte2084 transfer) + Dolby Atmos (from the title hint).
-        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10", "Dolby Atmos"])
+        // 4K + HDR10 (from smpte2084 transfer) + HEVC codec + Dolby Atmos.
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10", "HEVC", "Dolby Atmos"])
         // RT critic rendered as a percentage; IMDb audience stays 0–10.
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "83%")
         XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "9")
@@ -385,8 +385,8 @@ final class PlexProviderMappingTests: XCTestCase {
         let provider = PlexProvider(session: makeSession(), http: stub)
 
         let item = try await provider.item(id: "88")
-        // No Stream array: resolution + surround come from Media-level facts.
-        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "Dolby Digital+", "5.1"])
+        // No Stream array: resolution + codec + surround come from Media-level facts.
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "H.264", "Dolby Digital+", "5.1"])
     }
 
     func testItemsPagePassesContainerParamsAndType() async throws {

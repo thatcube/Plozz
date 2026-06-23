@@ -31,6 +31,11 @@ public struct MediaBadgeRow: View {
 public struct MediaBadgeChip: View {
     private let badge: MediaBadge
 
+    /// The active theme palette, so every badge paints with the theme's primary
+    /// text colour (white in dark/OLED, near-black in light) instead of a
+    /// hardcoded white that vanishes against a light-mode background.
+    @Environment(\.themePalette) private var palette
+
     /// Shared type scale so every treatment lines up to the same cap height.
     private static let textFont = Font.system(size: 21, weight: .semibold)
     private static let dolbyWordFont = Font.system(size: 16, weight: .semibold)
@@ -52,8 +57,6 @@ public struct MediaBadgeChip: View {
     private static let dtsDashRaise: CGFloat = 6
     private static let dtsDashLeading: CGFloat = 2
     private static let dtsDashOverlap: CGFloat = 2
-    /// Gray fill for the `-HD` portion of the dts-HD mark.
-    private static let dtsHDColor = Color(white: 0.62)
     /// Plain trailing channel-layout number appended to a format logo.
     private static let channelFont = Font.system(size: 18, weight: .semibold)
     /// A bolder channel number for the dts-HD mark specifically.
@@ -78,24 +81,28 @@ public struct MediaBadgeChip: View {
     public var body: some View {
         switch badge.style {
         case .rating:
-            label(badge.label, font: Font.custom("Bungee-Regular", size: 18))
+            label(badge.label, textColor: palette.primaryText, font: Font.custom("Bungee-Regular", size: 18))
                 .overlay(
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.65), lineWidth: 3)
+                        .strokeBorder(palette.primaryText.opacity(0.65), lineWidth: 3)
                 )
                 .accessibilityLabel(badge.label)
         case .prominent:
-            label(badge.label, textColor: .black)
+            // The eye-catching "chip": a solid fill of the theme's primary colour
+            // with the background colour punched through as the text, so it stays
+            // a high-contrast highlight in every theme (white-on-dark in light
+            // mode, dark-on-white in dark/OLED) rather than white-on-white.
+            label(badge.label, textColor: palette.backgroundBase)
                 .background(
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .fill(Color.white)
+                        .fill(palette.primaryText)
                 )
                 .accessibilityLabel(badge.label)
         case .spec:
-            label(badge.label)
+            label(badge.label, textColor: palette.primaryText)
                 .background(
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .fill(Color.white.opacity(0.16))
+                        .fill(palette.primaryText.opacity(0.16))
                 )
                 .accessibilityLabel(badge.label)
         case .hdr:
@@ -118,15 +125,15 @@ public struct MediaBadgeChip: View {
                 VStack(alignment: .center, spacing: -1) {
                     HStack(alignment: .center, spacing: 5) {
                         DolbyDoubleD()
-                            .fill(Color.white)
+                            .fill(palette.primaryText)
                             .frame(width: 21, height: 14)
                         Text("Dolby")
                             .font(Self.dolbyWordFont)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(palette.primaryText)
                     }
                     Text(badge.dolbyFormatWord.uppercased())
                         .font(Self.dolbyFormatFont)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(palette.primaryText)
                         .tracking(1.0)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
@@ -144,12 +151,12 @@ public struct MediaBadgeChip: View {
     private func channelText(_ text: String, font: Font = Self.channelFont) -> some View {
         Text(text)
             .font(font)
-            .foregroundStyle(.white)
+            .foregroundStyle(palette.primaryText)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
     }
 
-    private func label(_ text: String, textColor: Color = .white, font: Font? = nil) -> some View {
+    private func label(_ text: String, textColor: Color, font: Font? = nil) -> some View {
         Text(text)
             .font(font ?? Self.textFont)
             .foregroundStyle(textColor)
@@ -195,7 +202,7 @@ public struct MediaBadgeChip: View {
             Text(parts.head)
                 .font(Self.dtsHeadFont)
                 .tracking(-0.5)
-                .foregroundStyle(.white)
+                .foregroundStyle(palette.primaryText)
             if isX {
                 Text("X")
                     .font(Self.dtsXFont)
@@ -205,7 +212,7 @@ public struct MediaBadgeChip: View {
                 // with the dash drawn as a solid bar at the `H`'s mid-height and
                 // overlapped into it so the two fuse. The whole unit is gray.
                 Rectangle()
-                    .fill(Self.dtsHDColor)
+                    .fill(palette.secondaryText)
                     .frame(width: Self.dtsDashWidth, height: Self.dtsDashThickness)
                     .padding(.leading, Self.dtsDashLeading)
                     .padding(.trailing, -Self.dtsDashOverlap)
@@ -214,11 +221,11 @@ public struct MediaBadgeChip: View {
                     }
                 Text(suffix)
                     .font(Self.dtsSuffixFont)
-                    .foregroundStyle(Self.dtsHDColor)
+                    .foregroundStyle(palette.secondaryText)
             } else {
                 Text((parts.separator ?? "") + (parts.suffix ?? ""))
                     .font(Self.dtsSuffixFont)
-                    .foregroundStyle(Self.dtsHDColor)
+                    .foregroundStyle(palette.secondaryText)
             }
         }
         .lineLimit(1)

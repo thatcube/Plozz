@@ -39,6 +39,12 @@ public final class ItemDetailViewModel {
     private var seriesAnimeIDs: [String: String] = [:]
     private var seriesIsAnime = false
 
+    /// When the requested item was a season, the id of that season. A season
+    /// never renders its own page — `load()` transparently redirects to the
+    /// parent series, and the series page uses this to pre-select the season the
+    /// user actually tapped. `nil` for non-season loads.
+    public private(set) var preselectedSeasonID: String?
+
     private let provider: any MediaProvider
     private let itemID: String
     private let ratingsProvider: any ExternalRatingsProviding
@@ -73,13 +79,14 @@ public final class ItemDetailViewModel {
     public func load() async {
         state = .loading
         do {
-            let item = try await provider.item(id: itemID)
+            var item = try await provider.item(id: itemID)
+            item = await redirectingSeasonToSeries(item)
             captureSeriesContext(from: item)
             // Series/seasons have children to list; leaf items don't.
             let children: [MediaItem]
             switch item.kind {
             case .series, .season, .folder, .collection:
-                children = try await provider.children(of: itemID)
+                children = try await provider.children(of: item.id)
             default:
                 children = []
             }
@@ -91,6 +98,24 @@ public final class ItemDetailViewModel {
         } catch {
             state = .failed(.unknown(""))
         }
+    }
+
+    /// A season must never render a page of its own. When the fetched item is a
+    /// season with a resolvable parent series, transparently swap it for that
+    /// series (remembering the season in `preselectedSeasonID` so the series page
+    /// opens on it). Returns the item unchanged for non-seasons, or when the
+    /// parent series can't be resolved. This guarantees that tapping a season
+    /// anywhere — Recently Added, Search, a deep link — lands on the rich series
+    /// page, never a standalone season page.
+    private func redirectingSeasonToSeries(_ item: MediaItem) async -> MediaItem {
+        guard item.kind == .season,
+              let seriesID = item.seriesID,
+              let series = try? await provider.item(id: seriesID) else {
+            preselectedSeasonID = nil
+            return item
+        }
+        preselectedSeasonID = item.id
+        return series
     }
 
     /// Already-loaded episodes for `seasonID`, or `nil` if not yet fetched.
@@ -144,12 +169,13 @@ public final class ItemDetailViewModel {
     /// and watched badges reflect the new server state in place.
     public func reload() async {
         guard case .loaded = state else { await load(); return }
-        guard let item = try? await provider.item(id: itemID) else { return }
+        guard var item = try? await provider.item(id: itemID) else { return }
+        item = await redirectingSeasonToSeries(item)
         captureSeriesContext(from: item)
         let children: [MediaItem]
         switch item.kind {
         case .series, .season, .folder, .collection:
-            children = (try? await provider.children(of: itemID)) ?? []
+            children = (try? await provider.children(of: item.id)) ?? []
         default:
             children = []
         }

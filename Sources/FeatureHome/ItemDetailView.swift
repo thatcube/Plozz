@@ -47,7 +47,7 @@ public struct ItemDetailView: View {
                     viewModel: viewModel,
                     spoilerSettings: spoilerSettings,
                     onPlay: onPlay,
-                    initialSeasonID: initialSeasonID ?? initialEpisode?.seasonID,
+                    initialSeasonID: initialSeasonID ?? viewModel.preselectedSeasonID ?? initialEpisode?.seasonID,
                     initialEpisode: initialEpisode
                 )
             } else {

@@ -228,14 +228,30 @@ struct DetailHeroView: View {
             // Legibility scrim: darken the lower image so the title/overview
             // read clearly. It lives *under* the mask below, so it dissolves
             // away with the image and never tints the revealed background.
+            //
+            // The vertical ramp starts a little higher so it covers a bit more
+            // of the text, and a horizontal falloff concentrates the darkening
+            // on the leading side (where the content sits) while leaving the
+            // right side of the image clearer.
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0.0),
-                    .init(color: .clear, location: 0.5),
-                    .init(color: .black.opacity(0.7), location: 1.0)
+                    .init(color: .clear, location: 0.40),
+                    .init(color: .black.opacity(0.72), location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
+            )
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .white, location: 0.0),
+                        .init(color: .white, location: 0.40),
+                        .init(color: .clear, location: 0.85)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
             )
         )
         // Dissolve the backdrop's own alpha to transparent over the lower

@@ -560,19 +560,22 @@ private struct ScrubBar: View {
         GeometryReader { geo in
             let width = geo.size.width
             let knobX = width * CGFloat(model.progressFraction)
-            // The bar reads as "focused" once it owns Siri-Remote focus (the
-            // bottom control bar is engaged) or while the user is actively
-            // scrubbing. Unfocused, the played fill fades back and the playhead
-            // shrinks flush into the track so the focus cue is unmistakable.
-            let focused = model.controlBarVisible || model.isScrubbing
+            // The bar is "focused" whenever the scrub surface owns focus — the
+            // controls are up and focus hasn't dropped to the button row below
+            // (scrubbing counts as focused). Focused, the bar is full height,
+            // the played fill is bright and the playhead is a rounded pill. Once
+            // focus moves to the buttons the bar slims by 8pt, the fill fades and
+            // the playhead squares off flush into the track.
+            let focused = model.controlsVisible && !model.controlBarVisible
+            let barHeight: CGFloat = focused ? 20 : 12
             let knobWidth: CGFloat = focused ? 8 : 4
-            let knobHeight: CGFloat = focused ? (model.isScrubbing ? 40 : 32) : 20
+            let knobHeight: CGFloat = focused ? (model.isScrubbing ? 40 : 32) : barHeight
 
             ZStack(alignment: .leading) {
-                glassTrack(height: 20)
+                glassTrack(height: barHeight)
                 Capsule()
                     .fill(.white.opacity(0.14))
-                    .frame(width: width * CGFloat(model.bufferedFraction), height: 20)
+                    .frame(width: width * CGFloat(model.bufferedFraction), height: barHeight)
                 UnevenRoundedRectangle(
                     topLeadingRadius: 10,
                     bottomLeadingRadius: 10,
@@ -581,8 +584,8 @@ private struct ScrubBar: View {
                     style: .continuous
                 )
                     .fill(.white.opacity(focused ? 0.62 : 0.22))
-                    .frame(width: knobX, height: 20)
-                Capsule(style: .continuous)
+                    .frame(width: knobX, height: barHeight)
+                RoundedRectangle(cornerRadius: focused ? knobWidth / 2 : 0, style: .continuous)
                     .fill(.white)
                     .frame(width: knobWidth, height: knobHeight)
                     .offset(x: knobX - knobWidth / 2)
@@ -599,6 +602,7 @@ private struct ScrubBar: View {
             .frame(maxHeight: .infinity, alignment: .center)
             .animation(.easeOut(duration: 0.12), value: model.isScrubbing)
             .animation(.easeOut(duration: 0.2), value: model.controlBarVisible)
+            .animation(.easeOut(duration: 0.2), value: model.controlsVisible)
             .onChange(of: model.skipHintToken) { _, _ in pulseSkipPress() }
             .onChange(of: model.skipHintVisible) { _, visible in
                 if !visible { skipPressed = false }

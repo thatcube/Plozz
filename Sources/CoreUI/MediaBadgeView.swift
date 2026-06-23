@@ -46,7 +46,7 @@ public struct MediaBadgeChip: View {
     public var body: some View {
         switch badge.style {
         case .rating:
-            label(badge.label, font: Font.custom("Graduate-Regular", size: 21))
+            label(badge.label, font: Font.custom("Graduate-Regular", size: 21).bold())
                 .overlay(
                     RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.55), lineWidth: 2)
@@ -67,7 +67,7 @@ public struct MediaBadgeChip: View {
                 )
                 .accessibilityLabel(badge.label)
         case .dolby:
-            VStack(alignment: .center, spacing: -2) {
+            VStack(alignment: .center, spacing: -1) {
                 HStack(alignment: .center, spacing: 5) {
                     DolbyDoubleD()
                         .fill(Color.white)

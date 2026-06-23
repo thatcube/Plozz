@@ -41,6 +41,10 @@ public struct MediaRowView: View {
     /// is set, the first card focus lands on (whatever tvOS picks geometrically) is
     /// overridden by moving focus to the target. Resets when focus leaves the row.
     @State private var focusEngaged = false
+    /// Pending "focus left the row" work, deferred briefly so a transient `nil`
+    /// while moving between cards during fast navigation doesn't re-arm the gate
+    /// (which would disable cards and yank the scroll back to the target mid-browse).
+    @State private var pendingDisengage: DispatchWorkItem?
 
     public init(
         title: String,
@@ -113,6 +117,13 @@ public struct MediaRowView: View {
                         // never clipped by the scroll view's bounds.
                         .padding(.top, 16)
                         .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
+                        // Treat the rail as a single focus section so pressing down
+                        // *enters the section* and selects its only focusable card
+                        // (the gated target) regardless of horizontal alignment with
+                        // the season tab above — without this, a target parked far to
+                        // the right falls outside tvOS's downward search and the row
+                        // becomes unreachable.
+                        .focusSection()
                     }
                     // Let a focused card's lift, drop shadow and border render
                     // outside the rail's bounds instead of being clipped.
@@ -188,16 +199,29 @@ public struct MediaRowView: View {
     /// engaged, normal left/right browsing is untouched; leaving the row re-arms it.
     private func handleFocusChange(to newValue: String?, using proxy: ScrollViewProxy) {
         guard let newValue else {
-            // Focus left the row; re-arm the gate and bring the target back into
-            // view so it stays realised and is the only focusable card next time —
-            // even if the user had browsed far away before leaving.
-            focusEngaged = false
-            if let target = defaultFocusID, items.contains(where: { $0.id == target }) {
-                proxy.scrollTo(target, anchor: .leading)
+            // Focus appears to have left the row. Defer re-arming briefly: during
+            // fast left/right navigation tvOS can drop focus to `nil` for a frame
+            // between cards, and re-arming there would disable cards and snap the
+            // scroll back to the target. If focus really left, the work runs; if it
+            // returned, the non-nil branch below cancels it.
+            let work = DispatchWorkItem {
+                guard focusedID == nil else { return }
+                focusEngaged = false
+                // Bring the target back into view so it stays realised and is the
+                // only focusable card next time — even after browsing far away.
+                if let target = defaultFocusID, items.contains(where: { $0.id == target }) {
+                    proxy.scrollTo(target, anchor: .leading)
+                }
+                onFocusChange?(nil)
             }
-            onFocusChange?(nil)
+            pendingDisengage?.cancel()
+            pendingDisengage = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
             return
         }
+        // Focus is on a card; cancel any pending disengage from a transient blip.
+        pendingDisengage?.cancel()
+        pendingDisengage = nil
         if !focusEngaged,
            let target = defaultFocusID,
            newValue != target,

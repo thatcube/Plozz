@@ -657,6 +657,7 @@ private struct TraktConnectionView: View {
                     Text("Cancel")
                 }
                 .focused($focus, equals: .cancel)
+                .padding(.top, 16)
             }
 
             Spacer(minLength: 0)

@@ -39,11 +39,12 @@ public struct MediaBadgeChip: View {
     /// name (`HDR`/`HLG`) and its numeric variant (`10`, `10+`).
     private static let hdrHeadFont = Font.system(size: 21, weight: .black)
     private static let hdrSuffixFont = Font.system(size: 16, weight: .heavy)
-    /// DTS wordmark weights: a heavy lowercase `dts` head with a slightly
-    /// smaller, emphasized format suffix (`X`, `HD`) and a light separator.
+    /// DTS wordmark weights: a heavy lowercase `dts` head with the `-HD` suffix
+    /// rendered as one connected gray unit (dash fused to the `HD`).
     private static let dtsHeadFont = Font.system(size: 22, weight: .black)
-    private static let dtsSepFont = Font.system(size: 18, weight: .light)
-    private static let dtsSuffixFont = Font.system(size: 19, weight: .heavy)
+    private static let dtsSuffixFont = Font.system(size: 21, weight: .black)
+    /// Gray fill for the `-HD` portion of the dts-HD mark.
+    private static let dtsHDColor = Color(white: 0.62)
     /// The oversized `X` of the dts:X mark, larger than the `dts` head and
     /// filled with the orange dts:X gradient.
     private static let dtsXFont = Font.system(size: 32, weight: .black)
@@ -163,16 +164,9 @@ public struct MediaBadgeChip: View {
                     .font(Self.dtsXFont)
                     .foregroundStyle(Self.dtsXGradient)
             } else {
-                if let separator = parts.separator {
-                    Text(separator)
-                        .font(Self.dtsSepFont)
-                        .foregroundStyle(.white.opacity(0.7))
-                }
-                if let suffix = parts.suffix {
-                    Text(suffix)
-                        .font(Self.dtsSuffixFont)
-                        .foregroundStyle(.white)
-                }
+                Text((parts.separator ?? "") + (parts.suffix ?? ""))
+                    .font(Self.dtsSuffixFont)
+                    .foregroundStyle(Self.dtsHDColor)
             }
         }
         .lineLimit(1)

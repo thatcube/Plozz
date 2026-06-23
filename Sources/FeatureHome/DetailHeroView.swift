@@ -111,16 +111,18 @@ struct DetailHeroView: View {
         // hero, so the hero always reports the safe viewport width — never the
         // full panel — keeping its title/logo/Play on-screen and focusable.
         VStack(alignment: .leading, spacing: 12) {
-            if hideText {
+            // The hero logo is the *show's* branded title art — identical for
+            // every episode — so it is never a spoiler and stays visible even
+            // when an unwatched episode is focused (spoiler-hiding only masks the
+            // episode's name and overview, handled below). Only the *text*
+            // fallback respects masking, so a show with no logo still hides an
+            // unwatched episode's title rather than leaking it.
+            HeroLogoArtwork(
+                primaryURL: item.logoURL,
+                asyncFallbackURL: tmdbLogoFallback,
+                backgroundLuminance: heroBackgroundLuminance
+            ) {
                 titleText(hideText: hideText)
-            } else {
-                HeroLogoArtwork(
-                    primaryURL: item.logoURL,
-                    asyncFallbackURL: tmdbLogoFallback,
-                    backgroundLuminance: heroBackgroundLuminance
-                ) {
-                    titleText(hideText: hideText)
-                }
             }
             if let subtitle = item.subtitle, !isYearOnlySubtitle(subtitle) {
                 Text(subtitle)

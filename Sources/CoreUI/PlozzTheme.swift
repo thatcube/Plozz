@@ -35,10 +35,11 @@ public enum PlozzTheme {
         /// Scale applied to a focused browsing tile (matches Twozz Browse).
         public static let focusedCardScale: CGFloat = 1.08
         public static let screenPadding: CGFloat = 32
-        /// Leading inset for the detail hero's title/metadata block. Wider than
-        /// `screenPadding` so the hero content sits in from the edge the way the
-        /// Apple TV detail page does, rather than hugging the screen border.
-        public static let heroLeadingPadding: CGFloat = 80
+        /// Leading inset for the detail hero's title/metadata block, shared by the
+        /// rows beneath it (seasons, episodes, cast, chips) so the whole page lines
+        /// up on one edge. Matches the standard `screenPadding` used by the Home
+        /// rows so detail and Home content sit on the same left edge.
+        public static let heroLeadingPadding: CGFloat = screenPadding
     }
 }
 

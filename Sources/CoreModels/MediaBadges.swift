@@ -199,6 +199,19 @@ public extension MediaItem {
         return runtime.runtimeBadgeText
     }
 
+    /// In-progress fraction (`0..<1`) for a resumable item, or `nil` when it has
+    /// not been started or is already finished. Drives the detail Play button's
+    /// small progress bar.
+    var resumeProgressFraction: Double? { cardProgressFraction }
+
+    /// Bare remaining-time text for an in-progress item (e.g. `20m`), or `nil`
+    /// when it is not resumable. Shown inside the detail Play button (the cards
+    /// use the longer "… left" form via `remainingCardRuntimeText`).
+    var resumeRemainingText: String? {
+        guard let runtime, runtime > 0 else { return nil }
+        return remainingRuntimeLabel(for: runtime)
+    }
+
     /// The dotted metadata line components for the detail hero, in order:
     /// production year, formatted runtime, then up to `maxGenres` genres. The UI
     /// joins these with a `·` separator. Empty entries are omitted.
@@ -231,16 +244,23 @@ public extension MediaItem {
     }
 
     private func remainingCardRuntimeText(for runtime: TimeInterval) -> String? {
+        guard let label = remainingRuntimeLabel(for: runtime) else { return nil }
+        return "\(label) left"
+    }
+
+    /// The bare rounded remaining-time label (e.g. `20m`) for an in-progress item,
+    /// or `nil` when it is not partially watched. The shared basis for both the
+    /// card's "… left" text and the Play button's compact remaining time.
+    private func remainingRuntimeLabel(for runtime: TimeInterval) -> String? {
         guard let progress = cardProgressFraction, progress > 0, progress < 1 else {
             return nil
         }
         let remainingSeconds = max(0, runtime * (1 - progress))
         guard remainingSeconds > 0 else { return nil }
-        // Round up so in-progress cards don't show "0m left" near completion.
+        // Round up so in-progress cards don't show "0m" near completion.
         let roundedUpMinutes = max(1, Int(ceil(remainingSeconds / 60)))
         let roundedRemaining = TimeInterval(roundedUpMinutes * 60)
-        guard let label = roundedRemaining.runtimeBadgeText else { return nil }
-        return "\(label) left"
+        return roundedRemaining.runtimeBadgeText
     }
 }
 

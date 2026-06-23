@@ -29,9 +29,9 @@ public struct MediaRowView: View {
     /// padding so the row aligns with the hero text above it.
     private let leadingInset: CGFloat
     private let onSelect: (MediaItem) -> Void
-    /// Called whenever focus moves onto a card (with that item) or off the row
-    /// entirely (`nil`). Used by series detail to mirror the focused episode into
-    /// the page hero. When set, every card becomes individually focus-tracked.
+    /// Called whenever focus moves onto a card (with that item). Used by series
+    /// detail to mirror the focused episode into the page hero. When set, every
+    /// card becomes individually focus-tracked.
     private let onFocusChange: ((MediaItem?) -> Void)?
 
     @FocusState private var focusedID: String?
@@ -39,15 +39,14 @@ public struct MediaRowView: View {
     /// Whether focus currently sits inside this row. Used to redirect focus to the
     /// came-in episode exactly once per entry: while `false` and a `defaultFocusID`
     /// is set, the first card focus lands on (whatever tvOS picks geometrically) is
-    /// overridden by moving focus to the target. Resets when focus leaves the row.
+    /// overridden by moving focus to the target. It is re-armed only when
+    /// `defaultFocusID` changes (e.g. season swap), avoiding transient re-arming
+    /// churn while focus rapidly moves inside the row.
     @State private var focusEngaged = false
-    /// Pending "focus left the row" work, deferred briefly so a transient `nil`
-    /// while moving between cards during fast navigation doesn't re-arm the gate
-    /// (which would disable cards and yank the scroll back to the target mid-browse).
-    @State private var pendingDisengage: DispatchWorkItem?
-    /// The most recently focused card in this row, remembered after focus leaves so
-    /// the gate re-targets where the user actually was — not the came-in episode.
-    @State private var lastFocusedID: String?
+    /// Card ids currently realised in the lazy stack. Used to avoid redundant
+    /// `scrollTo` work that can cause visible snap/jump when the target is already
+    /// on screen.
+    @State private var visibleIDs: Set<String> = []
 
     public init(
         title: String,
@@ -79,16 +78,10 @@ public struct MediaRowView: View {
         initialFocusID != nil || onFocusChange != nil || defaultFocusID != nil
     }
 
-    /// The card the gate currently targets: the last card focused in this row once
-    /// the user has browsed, otherwise the externally-supplied `defaultFocusID`
-    /// (the came-in/resume episode). A stale `lastFocusedID` from another season is
-    /// ignored automatically because it won't be found in the current `items`. This
-    /// is what makes re-entry land on the episode you last looked at — not always
-    /// the one you arrived on.
+    /// The card the entry gate targets — always the externally supplied
+    /// `defaultFocusID` (typically the resume/target episode), when present.
     private var gateTarget: String? {
-        if let lastFocusedID, items.contains(where: { $0.id == lastFocusedID }) {
-            return lastFocusedID
-        }
+        guard let defaultFocusID, items.contains(where: { $0.id == defaultFocusID }) else { return nil }
         return defaultFocusID
     }
 
@@ -151,12 +144,12 @@ public struct MediaRowView: View {
                     .onChange(of: defaultFocusID) { _, newTarget in
                         // The supplied target changed (e.g. switching seasons). Drop
                         // any remembered focus from the previous set, re-arm the gate
-                        // and bring the new target into view so it's realised and is
+                        // and bring the new target into view only when needed so it's
+                        // realised and is
                         // the only focusable card on the next entry.
                         focusEngaged = false
-                        lastFocusedID = nil
                         guard let newTarget, items.contains(where: { $0.id == newTarget }) else { return }
-                        proxy.scrollTo(newTarget, anchor: .leading)
+                        scrollToIfNeeded(newTarget, using: proxy)
                     }
                 }
             }
@@ -175,6 +168,8 @@ public struct MediaRowView: View {
         let card = PosterCardView(item: item, style: style, spoilerSettings: spoilerSettings) { onSelect(item) }
             .frame(width: style == .poster ? PlozzTheme.Metrics.posterWidth : PlozzTheme.Metrics.landscapeWidth)
             .id(item.id)
+            .onAppear { visibleIDs.insert(item.id) }
+            .onDisappear { visibleIDs.remove(item.id) }
         if tracksFocus {
             card
                 .focused($focusedID, equals: item.id)
@@ -194,7 +189,7 @@ public struct MediaRowView: View {
            !didApplyInitialFocus,
            items.contains(where: { $0.id == target }) {
             didApplyInitialFocus = true
-            proxy.scrollTo(target, anchor: .leading)
+            scrollToIfNeeded(target, using: proxy)
             DispatchQueue.main.async { focusedID = target }
             return
         }
@@ -205,7 +200,7 @@ public struct MediaRowView: View {
             // Defer a tick so the LazyHStack has realised enough cards to compute
             // the target's offset before we scroll; focus is deliberately left
             // wherever it currently is (typically the hero Play button).
-            DispatchQueue.main.async { proxy.scrollTo(target, anchor: .leading) }
+            DispatchQueue.main.async { scrollToIfNeeded(target, using: proxy) }
         }
     }
 
@@ -214,34 +209,13 @@ public struct MediaRowView: View {
     /// first card tvOS picks (the geometrically-nearest one) is overridden by
     /// moving focus to the target — the episode you came in on — so down-from-the
     /// season tabs always lands on the right episode regardless of geometry. Once
-    /// engaged, normal left/right browsing is untouched; leaving the row re-arms it.
+    /// engaged, normal left/right browsing is untouched until `defaultFocusID`
+    /// changes (e.g. switching seasons), which re-arms entry targeting.
     private func handleFocusChange(to newValue: String?, using proxy: ScrollViewProxy) {
-        guard let newValue else {
-            // Focus appears to have left the row. Defer re-arming briefly: during
-            // fast left/right navigation tvOS can drop focus to `nil` for a frame
-            // between cards, and re-arming there would disable cards and snap the
-            // scroll back to the target. If focus really left, the work runs; if it
-            // returned, the non-nil branch below cancels it.
-            let work = DispatchWorkItem {
-                guard focusedID == nil else { return }
-                focusEngaged = false
-                // Bring the gate target back into view so it stays realised and is
-                // the only focusable card next time — the episode you last looked at.
-                if let target = gateTarget, items.contains(where: { $0.id == target }) {
-                    proxy.scrollTo(target, anchor: .leading)
-                }
-                onFocusChange?(nil)
-            }
-            pendingDisengage?.cancel()
-            pendingDisengage = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
-            return
-        }
-        // Focus is on a card; cancel any pending disengage from a transient blip and
-        // remember it as the gate's next target.
-        pendingDisengage?.cancel()
-        pendingDisengage = nil
-        lastFocusedID = newValue
+        // During rapid left/right movement tvOS can briefly report `nil` while focus
+        // transitions between cards. Ignore that transient state so focus gating
+        // never re-arms mid-browse and strips focusability from most cards.
+        guard let newValue else { return }
         if !focusEngaged,
            let target = gateTarget,
            newValue != target,
@@ -250,7 +224,6 @@ public struct MediaRowView: View {
             // (e.g. a frame before `.disabled` applied), redirect to the target and
             // don't report the transient card to the hero.
             focusEngaged = true
-            lastFocusedID = target
             redirectFocus(to: target, using: proxy)
             return
         }
@@ -261,10 +234,26 @@ public struct MediaRowView: View {
     /// Scrolls the target card into view (realising it in the lazy stack if needed)
     /// then moves focus onto it a runloop tick later, once it exists.
     private func redirectFocus(to target: String, using proxy: ScrollViewProxy) {
-        withAnimation(.easeInOut(duration: 0.25)) {
-            proxy.scrollTo(target, anchor: .leading)
-        }
+        scrollToIfNeeded(target, using: proxy, animated: true)
         DispatchQueue.main.async { focusedID = target }
+    }
+
+    /// Avoids unnecessary `scrollTo` calls when the target is already realised and
+    /// visible in the row, eliminating jumpy re-entry and extra layout churn.
+    private func scrollToIfNeeded(
+        _ target: String,
+        using proxy: ScrollViewProxy,
+        anchor: UnitPoint = .leading,
+        animated: Bool = false
+    ) {
+        guard !visibleIDs.contains(target) else { return }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(target, anchor: anchor)
+            }
+        } else {
+            proxy.scrollTo(target, anchor: anchor)
+        }
     }
 }
 

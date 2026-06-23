@@ -20,6 +20,9 @@ struct SeriesDetailView: View {
     /// Episodes attached directly to the series (used when a backend returns a
     /// flat episode list with no season containers).
     let looseEpisodes: [MediaItem]
+    /// `looseEpisodes` stamped once with `SeriesTmdb` so focus-driven hero updates
+    /// don't repeatedly remap huge episode arrays in `body`.
+    private let stampedLooseEpisodes: [MediaItem]
     let viewModel: ItemDetailViewModel
     let spoilerSettings: SpoilerSettings
     let onPlay: (MediaItem) -> Void
@@ -60,6 +63,7 @@ struct SeriesDetailView: View {
         self.series = series
         self.seasons = seasons
         self.looseEpisodes = looseEpisodes
+        self.stampedLooseEpisodes = Self.stampSeriesTMDb(into: looseEpisodes, seriesTMDbID: series.providerIDs["Tmdb"])
         self.viewModel = viewModel
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
@@ -252,7 +256,7 @@ struct SeriesDetailView: View {
             defaultFocusID: target,
             leadingInset: PlozzTheme.Metrics.heroLeadingPadding,
             onFocusChange: { focused in
-                if let focused { heroItem = focused }
+                if let focused, heroItem.id != focused.id { heroItem = focused }
             },
             onSelect: onPlay
         )
@@ -301,25 +305,12 @@ struct SeriesDetailView: View {
     }
 
     /// Episodes the rail should show: the selected season's loaded episodes, or
-    /// the series' loose episodes when there are no season containers. Each is
-    /// stamped with the series' TMDb id (under `SeriesTmdb`) so episode cards can
-    /// resolve the show's backdrop as a thumbnail fallback when the server has no
-    /// per-episode still (common for anime via Shoko/AniDB).
+    /// the series' loose episodes when there are no season containers.
     private var currentEpisodes: [MediaItem] {
-        let base: [MediaItem]
         if let id = selectedSeasonID, let episodes = viewModel.episodes(for: id) {
-            base = episodes
-        } else {
-            base = seasons.isEmpty ? looseEpisodes : []
+            return episodes
         }
-        guard let seriesTmdb = series.providerIDs["Tmdb"], !seriesTmdb.isEmpty else { return base }
-        return base.map { episode in
-            var copy = episode
-            if copy.providerIDs["SeriesTmdb"] == nil {
-                copy.providerIDs["SeriesTmdb"] = seriesTmdb
-            }
-            return copy
-        }
+        return seasons.isEmpty ? stampedLooseEpisodes : []
     }
 
     /// A representative tech-badge set (best resolution/HDR/audio) derived from
@@ -384,9 +375,23 @@ struct SeriesDetailView: View {
     @MainActor
     private func frontTargetEpisodeIfNeeded(in seasonID: String?) async {
         guard let target = initialEpisode else { return }
-        let pool = seasonID.flatMap { viewModel.episodes(for: $0) } ?? (seasons.isEmpty ? looseEpisodes : [])
+        let pool = seasonID.flatMap { viewModel.episodes(for: $0) } ?? (seasons.isEmpty ? stampedLooseEpisodes : [])
         if let loaded = pool.first(where: { $0.id == target.id }) {
             heroItem = loaded
+        }
+    }
+
+    /// Adds the owning series' TMDb id to each episode under `SeriesTmdb` once,
+    /// keeping per-episode artwork fallback fully functional without body-time
+    /// remapping.
+    private static func stampSeriesTMDb(into episodes: [MediaItem], seriesTMDbID: String?) -> [MediaItem] {
+        guard let seriesTMDbID, !seriesTMDbID.isEmpty else { return episodes }
+        return episodes.map { episode in
+            var copy = episode
+            if copy.providerIDs["SeriesTmdb"] == nil {
+                copy.providerIDs["SeriesTmdb"] = seriesTMDbID
+            }
+            return copy
         }
     }
 }

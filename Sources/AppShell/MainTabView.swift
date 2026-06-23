@@ -445,12 +445,13 @@ private struct SearchTab: View {
         }
     }
 
-    /// Playable leaves go straight to the player (in-progress ones prompt
-    /// Resume vs Start Over); containers push a detail page.
+    /// Selecting a search result always opens its detail page rather than
+    /// playing immediately; episodes/seasons route through their series context
+    /// so the detail page has the surrounding show, mirroring `mediaItemNavigator`.
     private func open(_ item: MediaItem) {
         switch item.kind {
-        case .movie, .episode, .video:
-            requestPlay(item)
+        case .episode where item.seriesID != nil:
+            path.append(EpisodeContextRoute(episode: item))
         case .season where item.seriesID != nil:
             path.append(SeasonContextRoute(season: item))
         default:

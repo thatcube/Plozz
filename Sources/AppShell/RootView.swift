@@ -1,15 +1,24 @@
 #if canImport(SwiftUI)
 import SwiftUI
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
 import CoreModels
 import CoreNetworking
 import CoreUI
 import FeatureAuth
 import FeatureDiscovery
+import FeaturePlayback
 
 /// Top-level view that renders one screen per `SessionState`.
 public struct RootView: View {
     @State private var appState: AppState
     @Environment(\.colorScheme) private var systemColorScheme
+    /// Window-level black veil that survives the player's dismiss into Home so it
+    /// can cover the TV's *physical* HDR/DV → SDR panel switch (which on some TVs
+    /// lags ~1s behind tvOS's `displayDidSettle`). Injected into the environment so
+    /// `PlayerView` can `engage()` it on exit; rendered as the topmost overlay here.
+    @State private var displayVeil = DisplayVeilModel()
 
     @MainActor
     public init(appState: AppState? = nil) {
@@ -102,6 +111,7 @@ public struct RootView: View {
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
+        .environment(displayVeil)
         .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)
         .fullScreenCover(item: Binding(
             get: { pinRequest },
@@ -117,6 +127,39 @@ public struct RootView: View {
         }
         .onAppear { if case .launching = appState.state { appState.bootstrap() } }
         .onOpenURL { appState.handle(url: $0) }
+        // Window-level HDR/DV exit veil: a black layer above Home that the player
+        // raises (via the injected `DisplayVeilModel`) just before it dismisses, so
+        // black survives the dismiss and keeps covering the screen through the TV's
+        // slow physical panel switch. Always returns to 0 (settle+buffer, no-settle
+        // fallback, or the safety cap), so it can never strand the user on black.
+        .overlay {
+            Color.black
+                .opacity(displayVeil.veilOpacity)
+                .ignoresSafeArea()
+                .allowsHitTesting(displayVeil.veilOpacity > 0.01)
+                .animation(.easeInOut(duration: 0.4), value: displayVeil.veilOpacity)
+        }
+        .modifier(RootDisplaySettleObserver { displayVeil.displayDidSettle() })
+    }
+}
+
+/// Observes the tvOS display manager at the app root and forwards mode-switch-end
+/// to the window-level `DisplayVeilModel`, so the exit veil can time its hold off
+/// the *reported* settle even after the player has been dismissed. A no-op on
+/// platforms without `AVDisplayManager` (e.g. macOS).
+private struct RootDisplaySettleObserver: ViewModifier {
+    let onSettle: () -> Void
+
+    func body(content: Content) -> some View {
+        #if os(tvOS)
+        content.onReceive(
+            NotificationCenter.default.publisher(for: .AVDisplayManagerModeSwitchEnd)
+        ) { _ in
+            onSettle()
+        }
+        #else
+        content
+        #endif
     }
 }
 

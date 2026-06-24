@@ -21,6 +21,11 @@ public struct PlayerView: View {
     /// around it (with a timeout so it can never strand on black).
     @State private var hdrTransition = HDRTransitionModel()
     @Environment(\.dismiss) private var dismiss
+    /// The app-root window veil (injected by `RootView`). On HDR/DV exit the player
+    /// engages it so black survives the dismiss into Home and covers the TV's slow
+    /// physical panel switch. Optional so previews/tests without it fall back to the
+    /// player-only veil behavior rather than trapping on a missing environment.
+    @Environment(DisplayVeilModel.self) private var displayVeil: DisplayVeilModel?
     private let showDiagnostics: Bool
     private let themePalette: ThemePalette
 
@@ -141,18 +146,23 @@ public struct PlayerView: View {
     }
 
     /// Dismiss with an HDR-aware fade that keeps the screen fully black from the
-    /// moment exit begins until the display has actually settled back to SDR, so
-    /// there is no flash on the player-dismiss → Home handoff.
+    /// moment exit begins until **after** the display has physically switched back
+    /// to SDR, so there is no flash on the player-dismiss → Home handoff — even on
+    /// TVs whose panel switches a beat *after* tvOS reports `displayDidSettle`.
     ///
     /// SDR playback dismisses immediately (no mode switch to hide). For HDR/DV we:
-    ///   1. raise the veil and let it reach solid black (pre-empt) before tearing
-    ///      the HDR surface down, so the switch never shows through a half frame;
-    ///   2. stop playback — this resets `preferredDisplayCriteria`, so the TV
-    ///      *starts* switching HDR/DV → SDR behind the black veil;
-    ///   3. wait for the display's mode-switch-end (or a safety timeout) so we
-    ///      dismiss only once the panel is already SDR;
-    ///   4. dismiss — Home appears already-SDR, and the veil is torn down with the
-    ///      player, so black covers the entire handoff.
+    ///   1. raise the **player** veil and let it reach solid black (pre-empt) — this
+    ///      hides the switch while the player's `fullScreenCover` is still up;
+    ///   2. engage the **window** veil (`DisplayVeilModel`) at the app root, which
+    ///      sits *beneath* the cover and survives the dismiss into Home;
+    ///   3. stop playback — this resets `preferredDisplayCriteria`, so the TV starts
+    ///      switching HDR/DV → SDR behind the black veil;
+    ///   4. dismiss promptly: the cover tears down onto the already-black window
+    ///      veil, which holds through the slow physical switch and fades out after
+    ///      an adaptive post-settle buffer (capped so it can never stick).
+    ///
+    /// If no window veil is available (previews/tests), fall back to the player-only
+    /// behavior: wait for the in-player settle/timeout before dismissing.
     private func dismissSmoothly() {
         guard viewModel.displayMode.isHDR else {
             dismiss()
@@ -160,18 +170,26 @@ public struct PlayerView: View {
         }
         guard !hdrTransition.isExiting else { return }
         hdrTransition.beginExit(isHDR: true)
+        let windowVeil = displayVeil
+        windowVeil?.engage()
         Task { @MainActor in
-            // 1. Let the veil reach solid black before tearing the HDR surface down.
+            // 1. Let the player veil reach solid black before tearing the HDR
+            //    surface down, so the switch never shows through a half-faded frame.
             await hdrTransition.awaitVeilOpaque()
-            // 2. Stop playback: this resets `preferredDisplayCriteria`, so the TV
-            //    starts switching HDR/DV → SDR behind the black veil. Run it
-            //    concurrently so the final server report (a network round-trip)
-            //    never prolongs the black — only the physical settle gates dismiss.
+            // 2. Stop playback: resets `preferredDisplayCriteria`, so the TV starts
+            //    switching HDR/DV → SDR behind black. Run concurrently so the final
+            //    server progress report never prolongs the black.
             Task { await viewModel.stop() }
-            // 3. Wait for the panel to finish switching to SDR (or a safety
-            //    timeout), then dismiss into an already-SDR Home.
-            await hdrTransition.waitForExit()
-            dismiss()
+            if windowVeil != nil {
+                // 3. The window veil now owns coverage through the physical switch —
+                //    dismiss straight onto it (black under black, no gap).
+                dismiss()
+            } else {
+                // No window veil (previews/tests): keep the legacy behavior of
+                // gating the dismiss on the in-player settle (or safety timeout).
+                await hdrTransition.waitForExit()
+                dismiss()
+            }
         }
     }
 

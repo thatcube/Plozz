@@ -15,11 +15,15 @@ import UIKit
 /// whole hero animates to reflect the newly focused context.
 struct DetailHeroView: View {
     let item: MediaItem
-    /// The item whose artwork fills the backdrop. Defaults to `item`. A series
-    /// page pins this to the series itself so the background stays a single,
-    /// stable, high-quality image even as `item` (the focused season/episode)
-    /// drives the logo, title, overview and Play button. Swapping the backdrop
-    /// per focused episode reads as distracting flicker, so we don't.
+    /// The item whose artwork fills the backdrop *and* supplies the branded title
+    /// logo. Defaults to `item`. A series page pins this to the series itself so
+    /// the background and logo stay a single, stable, show-level identity even as
+    /// `item` (the focused season/episode) drives the title text, overview and
+    /// Play button. The logo is the show's wordmark — identical for every episode
+    /// — so sourcing it here keeps it present no matter which episode is fronted
+    /// (e.g. arriving via "Go to Season"/Continue Watching fronts the next-up
+    /// episode, which has no logo of its own). Swapping the backdrop per focused
+    /// episode reads as distracting flicker, so we don't.
     var backdropItem: MediaItem?
     /// Fraction of the screen height the hero backdrop occupies. Defaults to a
     /// full-screen cinematic hero (`1.0`); a TV show shrinks this (e.g. `0.8`) so
@@ -124,7 +128,7 @@ struct DetailHeroView: View {
             // fallback respects masking, so a show with no logo still hides an
             // unwatched episode's title rather than leaking it.
             HeroLogoArtwork(
-                primaryURL: item.logoURL,
+                primaryURL: backdrop.logoURL,
                 asyncFallbackURL: tmdbLogoFallback,
                 backgroundSample: heroBackgroundSample
             ) {
@@ -425,7 +429,7 @@ struct DetailHeroView: View {
     /// its logo. TV uses the *series* title (never an episode name); inert when no
     /// TMDb token is configured.
     private var tmdbLogoFallback: (@Sendable () async -> URL?)? {
-        let source = item
+        let source = backdrop
         switch source.kind {
         case .folder, .collection, .unknown:
             return nil

@@ -61,6 +61,16 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// legacy fields so older readers stay coherent.
     public var plexHomeUserBindings: [String: PlexHomeUserBinding]?
 
+    /// Optional real photo for the profile (opt-in). When non-nil the picker
+    /// tile and Settings hero render this image (a Plex Home-user avatar or
+    /// a Jellyfin user avatar that the household has "borrowed"); when nil
+    /// the profile falls back to `avatarSymbol` + `colorIndex` as before.
+    ///
+    /// Purely cosmetic identity — has no effect on which Plex Home user is
+    /// played as (see `plexHomeUserBindings`). Decoded with `decodeIfPresent`
+    /// so older profile JSON without this field migrates to `nil` cleanly.
+    public var avatarImageURL: String?
+
     public init(
         id: String = UUID().uuidString,
         name: String,
@@ -73,7 +83,8 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         plexHomeUserAccountID: String? = nil,
         plexHomeUserRequiresPIN: Bool? = nil,
         plexHomeUserAvatarURL: String? = nil,
-        plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil
+        plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
+        avatarImageURL: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -87,6 +98,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.plexHomeUserRequiresPIN = plexHomeUserRequiresPIN
         self.plexHomeUserAvatarURL = plexHomeUserAvatarURL
         self.plexHomeUserBindings = plexHomeUserBindings
+        self.avatarImageURL = avatarImageURL
     }
 
     /// Stable namespace used to scope this profile's settings stores. The

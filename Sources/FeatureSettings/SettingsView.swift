@@ -198,7 +198,7 @@ public struct SettingsView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 2)
+                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
             )
         } else {
             // Single-profile (solo) household: the same nested container,
@@ -217,7 +217,7 @@ public struct SettingsView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
             )
         }
     }
@@ -323,17 +323,11 @@ public struct SettingsView: View {
     private var profileHeaderInline: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 24) {
-                ZStack {
-                    Circle()
-                        .fill(Color.accentColor.opacity(0.32))
-                    Circle()
-                        .strokeBorder(Color.accentColor, lineWidth: 3)
-                    Image(systemName: activeProfile.avatarSymbol)
-                        .font(.system(size: 52, weight: .semibold))
-                        .foregroundStyle(.primary)
-                }
-                .frame(width: 104, height: 104)
-                .shadow(color: Color.accentColor.opacity(0.35), radius: 12, y: 4)
+                ProfileAvatarView(profile: activeProfile, size: 104)
+                    .overlay(
+                        Circle().strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 2)
+                    )
+                    .shadow(color: Color.accentColor.opacity(0.25), radius: 10, y: 4)
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {

@@ -52,6 +52,8 @@ struct ProfileDetailView: View {
                 ProfileEditorView(
                     editingProfile: profile,
                     canDelete: profile.id != context.profiles.first?.id,
+                    photoSourceAccounts: context.accounts,
+                    plexHomeUsersFetcher: context.plexHomeUsersFetcher,
                     onSave: { draft in
                         context.onSaveProfile(draft)
                         editorContext = nil
@@ -65,6 +67,8 @@ struct ProfileDetailView: View {
             case .new:
                 ProfileEditorView(
                     canDelete: false,
+                    photoSourceAccounts: context.accounts,
+                    plexHomeUsersFetcher: context.plexHomeUsersFetcher,
                     onSave: { draft in
                         context.onSaveProfile(draft)
                         editorContext = nil
@@ -81,10 +85,7 @@ struct ProfileDetailView: View {
             footer: "Switching profiles swaps every setting on this Settings screen (theme, captions, spoilers, Trakt) and which servers/libraries you watch. The last-used profile is remembered for this Apple TV user."
         ) {
             HStack(spacing: 20) {
-                Image(systemName: context.activeProfile.avatarSymbol)
-                    .font(.largeTitle)
-                    .frame(width: 64, height: 64)
-                    .background(Circle().fill(Color.accentColor.opacity(0.25)))
+                ProfileAvatarView(profile: context.activeProfile, size: 64)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(context.activeProfile.name).font(.title3.weight(.semibold))
                     Text("Active profile")
@@ -138,11 +139,7 @@ struct ProfileDetailView: View {
 
     private func profileRow(_ profile: Profile) -> some View {
         HStack(spacing: 16) {
-            Image(systemName: profile.avatarSymbol)
-                .font(.title3)
-                .frame(width: 40, height: 40)
-                .background(Circle().fill(ProfileTileColor.color(for: profile)))
-                .foregroundStyle(.white)
+            ProfileAvatarView(profile: profile, size: 40)
             VStack(alignment: .leading, spacing: 4) {
                 Text(profile.name).font(.headline)
                 if profile.id == context.activeProfile.id {

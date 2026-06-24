@@ -32,6 +32,10 @@ public struct ProfileDraft: Equatable, Sendable {
     public var plexHomeUserAvatarURL: String?
     /// Per–Plex-account Home-user mappings (see `Profile.plexHomeUserBindings`).
     public var plexHomeUserBindings: [String: PlexHomeUserBinding]?
+    /// Optional opt-in profile photo URL (see `Profile.avatarImageURL`).
+    /// When non-nil the avatar renders this image; nil falls back to the
+    /// symbol + color combination.
+    public var avatarImageURL: String?
 
     public init(
         id: String?,
@@ -45,7 +49,8 @@ public struct ProfileDraft: Equatable, Sendable {
         plexHomeUserAccountID: String? = nil,
         plexHomeUserRequiresPIN: Bool? = nil,
         plexHomeUserAvatarURL: String? = nil,
-        plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil
+        plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil,
+        avatarImageURL: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -59,11 +64,12 @@ public struct ProfileDraft: Equatable, Sendable {
         self.plexHomeUserRequiresPIN = plexHomeUserRequiresPIN
         self.plexHomeUserAvatarURL = plexHomeUserAvatarURL
         self.plexHomeUserBindings = plexHomeUserBindings
+        self.avatarImageURL = avatarImageURL
     }
 }
 
-/// Create / edit a profile's cosmetics on tvOS: name, avatar symbol, tile
-/// color, and (when editing) a delete button.
+/// Create / edit a profile's cosmetics on tvOS: name, avatar (symbol+color
+/// OR an opt-in borrowed photo), and (when editing) a delete button.
 ///
 /// Server-account membership and Plex Home-user mapping are deliberately
 /// **not** in this view — they live in Settings → Servers & Libraries so
@@ -72,6 +78,8 @@ public struct ProfileDraft: Equatable, Sendable {
 public struct ProfileEditorView: View {
     private let editingProfile: Profile?
     private let canDelete: Bool
+    private let photoSourceAccounts: [Account]
+    private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     private let onSave: (ProfileDraft) -> Void
     private let onDelete: (() -> Void)?
     private let onCancel: () -> Void
@@ -79,22 +87,34 @@ public struct ProfileEditorView: View {
     @State private var name: String
     @State private var avatarSymbol: String
     @State private var colorIndex: Int
+    @State private var avatarImageURL: String?
+    @State private var avatarMode: AvatarMode
+    @State private var photoCandidates: [ProfilePhotoCandidate] = []
+
+    private enum AvatarMode: Hashable { case symbol, photo }
 
     public init(
         editingProfile: Profile? = nil,
         canDelete: Bool = false,
+        photoSourceAccounts: [Account] = [],
+        plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser] = { _ in [] },
         onSave: @escaping (ProfileDraft) -> Void,
         onDelete: (() -> Void)? = nil,
         onCancel: @escaping () -> Void
     ) {
         self.editingProfile = editingProfile
         self.canDelete = canDelete
+        self.photoSourceAccounts = photoSourceAccounts
+        self.plexHomeUsersFetcher = plexHomeUsersFetcher
         self.onSave = onSave
         self.onDelete = onDelete
         self.onCancel = onCancel
         _name = State(initialValue: editingProfile?.name ?? "")
         _avatarSymbol = State(initialValue: editingProfile?.avatarSymbol ?? Profile.defaultAvatarSymbols[0])
         _colorIndex = State(initialValue: editingProfile?.colorIndex ?? 0)
+        let initialPhoto = editingProfile?.avatarImageURL
+        _avatarImageURL = State(initialValue: initialPhoto)
+        _avatarMode = State(initialValue: (initialPhoto?.isEmpty == false) ? .photo : .symbol)
     }
 
     private var isEditing: Bool { editingProfile != nil }
@@ -109,8 +129,18 @@ public struct ProfileEditorView: View {
                 }
 
                 Section("Avatar") {
-                    avatarGrid
-                    colorRow
+                    Picker("Avatar style", selection: $avatarMode) {
+                        Text("Symbol").tag(AvatarMode.symbol)
+                        Text("Photo").tag(AvatarMode.photo)
+                    }
+                    .pickerStyle(.segmented)
+
+                    if avatarMode == .symbol {
+                        avatarGrid
+                        colorRow
+                    } else {
+                        photoSection
+                    }
                     previewRow
                 }
 
@@ -133,6 +163,12 @@ public struct ProfileEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save).disabled(!canSave)
+                }
+            }
+            .task { await loadPhotoCandidates() }
+            .onChange(of: avatarMode) { _, newValue in
+                if newValue == .symbol {
+                    avatarImageURL = nil
                 }
             }
         }
@@ -184,20 +220,114 @@ public struct ProfileEditorView: View {
         .padding(.vertical, 8)
     }
 
-    private var previewRow: some View {
-        HStack(spacing: 20) {
-            ZStack {
-                Circle().fill(ProfileTileColor.color(forIndex: colorIndex))
-                Image(systemName: avatarSymbol)
-                    .font(.system(size: 40, weight: .semibold))
-                    .foregroundStyle(.white)
+    /// Grid of borrowable photos sourced from signed-in Jellyfin users and
+    /// Plex Home users that have avatars. Tapping one stamps its URL onto
+    /// the draft's `avatarImageURL`; "Use a symbol instead" reverts.
+    @ViewBuilder
+    private var photoSection: some View {
+        if photoCandidates.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("No photos available to borrow")
+                    .font(.headline)
+                Text("Sign in to a Plex Home user or Jellyfin user with a profile photo, then come back to use it here.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            .frame(width: 96, height: 96)
+            .padding(.vertical, 12)
+        } else {
+            let columns = [GridItem(.adaptive(minimum: 128, maximum: 160), spacing: 22)]
+            LazyVGrid(columns: columns, spacing: 22) {
+                ForEach(photoCandidates) { candidate in
+                    photoTile(candidate)
+                }
+            }
+            .padding(.vertical, 8)
+            Button {
+                avatarMode = .symbol
+                avatarImageURL = nil
+            } label: {
+                Label("Use a symbol instead", systemImage: "face.smiling")
+            }
+        }
+    }
+
+    private func photoTile(_ candidate: ProfilePhotoCandidate) -> some View {
+        let isSelected = avatarImageURL == candidate.imageURL.absoluteString
+        return Button {
+            avatarImageURL = candidate.imageURL.absoluteString
+        } label: {
+            VStack(spacing: 8) {
+                AsyncImage(url: candidate.imageURL) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image.resizable().scaledToFill()
+                    default:
+                        ZStack {
+                            Circle().fill(Color.gray.opacity(0.25))
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(width: 112, height: 112)
+                .clipShape(Circle())
+                .overlay(
+                    Circle().strokeBorder(
+                        isSelected ? Color.accentColor : Color.clear,
+                        lineWidth: 5
+                    )
+                )
+                Text(candidate.providerLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(candidate.detailLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var previewRow: some View {
+        let previewProfile = Profile(
+            id: editingProfile?.id ?? "preview",
+            name: trimmedName,
+            avatarSymbol: avatarSymbol,
+            colorIndex: colorIndex,
+            avatarImageURL: avatarImageURL
+        )
+        return HStack(spacing: 20) {
+            ProfileAvatarView(profile: previewProfile, size: 96)
             Text(trimmedName.isEmpty ? "Preview" : trimmedName)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.secondary)
             Spacer()
         }
+    }
+
+    private func loadPhotoCandidates() async {
+        // Pull Plex Home users for every signed-in Plex account in parallel
+        // so the photo grid has every borrowable face on first render.
+        let plexAccounts = photoSourceAccounts.filter { $0.server.provider == .plex }
+        var plexHomeUsersByAccount: [String: [PlexHomeUser]] = [:]
+        await withTaskGroup(of: (String, [PlexHomeUser]).self) { group in
+            for account in plexAccounts {
+                let id = account.id
+                let fetcher = plexHomeUsersFetcher
+                group.addTask { (id, await fetcher(id)) }
+            }
+            for await (id, users) in group {
+                plexHomeUsersByAccount[id] = users
+            }
+        }
+        let candidates = ProfilePhotoCandidate.make(
+            accounts: photoSourceAccounts,
+            plexHomeUsersByAccount: plexHomeUsersByAccount
+        )
+        await MainActor.run { self.photoCandidates = candidates }
     }
 
     private func save() {
@@ -217,7 +347,8 @@ public struct ProfileEditorView: View {
             plexHomeUserAccountID: editingProfile?.plexHomeUserAccountID,
             plexHomeUserRequiresPIN: editingProfile?.plexHomeUserRequiresPIN,
             plexHomeUserAvatarURL: editingProfile?.plexHomeUserAvatarURL,
-            plexHomeUserBindings: editingProfile?.plexHomeUserBindings
+            plexHomeUserBindings: editingProfile?.plexHomeUserBindings,
+            avatarImageURL: avatarMode == .photo ? avatarImageURL : nil
         ))
     }
 }

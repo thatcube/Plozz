@@ -560,6 +560,7 @@ public final class AppState {
                 profile.plexHomeUserRequiresPIN = draft.plexHomeUserRequiresPIN
                 profile.plexHomeUserAvatarURL = draft.plexHomeUserAvatarURL
                 profile.plexHomeUserBindings = draft.plexHomeUserBindings
+                profile.avatarImageURL = draft.avatarImageURL
                 profilesModel.update(profile)
             }
             if !draft.activeAccountIDs.isEmpty {
@@ -583,7 +584,8 @@ public final class AppState {
                 plexHomeUserAccountID: draft.plexHomeUserAccountID,
                 plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN,
                 plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL,
-                plexHomeUserBindings: draft.plexHomeUserBindings
+                plexHomeUserBindings: draft.plexHomeUserBindings,
+                avatarImageURL: draft.avatarImageURL
             )
         }
     }

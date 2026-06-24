@@ -84,14 +84,7 @@ private struct ProfileTile: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 18) {
-                ZStack {
-                    Circle()
-                        .fill(ProfileTileColor.color(for: profile))
-                    Image(systemName: profile.avatarSymbol)
-                        .font(.system(size: 96, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 220, height: 220)
+                ProfileAvatarView(profile: profile, size: 220)
                 .overlay(alignment: .topTrailing) {
                     if isActive {
                         Image(systemName: "checkmark.circle.fill")

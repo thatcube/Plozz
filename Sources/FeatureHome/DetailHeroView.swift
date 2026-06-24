@@ -93,8 +93,14 @@ struct DetailHeroView: View {
 
     /// Uniform square footprint for the secondary hero icon buttons (watchlist,
     /// watched, refresh) so their differing SF Symbol widths — the `eye` glyph in
-    /// particular — don't make one button wider than the rest.
-    private let heroIconSize: CGFloat = 30
+    /// particular — don't make one button wider than the rest. This also sets the
+    /// watched-state circle's diameter.
+    private let heroIconSize: CGFloat = 38
+
+    /// Explicit point size for the secondary hero glyphs (eye/bookmark/refresh) so
+    /// they render at a consistent size that visually matches the filled circle,
+    /// rather than tvOS's oversized default button font.
+    private let heroGlyphSize: CGFloat = 30
 
     /// Drives the watched-toggle checkmark's draw-on: 0 = nothing drawn, 1 = full
     /// check. Animating this trims the stroke into view from left to top-right.
@@ -411,6 +417,7 @@ struct DetailHeroView: View {
     private func watchlistButton(action: MediaItemAction) -> some View {
         Button { performHeroAction(action) } label: {
             Image(systemName: item.isFavorite ? "bookmark.fill" : "bookmark")
+                .font(.system(size: heroGlyphSize))
                 .foregroundStyle(item.isFavorite ? Color.accentColor : Color.primary)
                 .contentTransition(.opacity)
                 .symbolEffect(.bounce, value: item.isFavorite)
@@ -425,39 +432,47 @@ struct DetailHeroView: View {
     /// Visible watched-state toggle, shown when the provider can mutate it. On a
     /// series page the hero mirrors the focused episode, so this doubles as the
     /// episode's visible watched toggle. Unwatched shows a neutral `eye`; marking
-    /// watched crossfades to a brand-blue filled circle (the same watched colour as
-    /// the episode cards) while a white checkmark *draws itself on* — stroked from
-    /// the left point, down to the bottom vertex, then up to the top-right — via an
-    /// animated path trim, so only the glyph animates, not the button.
+    /// Visible watched-state toggle, shown when the provider can mutate it. On a
+    /// series page the hero mirrors the focused episode, so this doubles as the
+    /// episode's visible watched toggle. Unwatched shows a neutral `eye`; marking
+    /// watched first pops in a brand-blue filled circle (the same watched colour as
+    /// the episode cards), then strokes a white checkmark *onto* it — drawn from the
+    /// left point, down to the bottom vertex, up to the top-right — via an animated
+    /// path so only the glyph animates, not the button.
     @ViewBuilder
     private func watchedButton(action: MediaItemAction) -> some View {
         Button { performHeroAction(action) } label: {
             ZStack {
                 Image(systemName: "eye")
+                    .font(.system(size: heroGlyphSize))
                     .foregroundStyle(Color.primary)
                     .opacity(item.isPlayed ? 0 : 1)
-                    .scaleEffect(item.isPlayed ? 0.5 : 1)
+                    .scaleEffect(item.isPlayed ? 0.4 : 1)
 
                 ZStack {
                     Circle()
                         .fill(ThemePalette.brandBlue)
                     CheckmarkShape(progress: checkDraw)
                         .stroke(Color.white,
-                                style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                                style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
                         .padding(heroIconSize * 0.30)
                 }
                 .opacity(item.isPlayed ? 1 : 0)
-                .scaleEffect(item.isPlayed ? 1 : 0.5)
+                .scaleEffect(item.isPlayed ? 1 : 0.4)
             }
             .frame(width: heroIconSize, height: heroIconSize)
-            .animation(.easeInOut(duration: 0.22), value: item.isPlayed)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: item.isPlayed)
         }
         .modifier(HeroButtonStyle(prominent: false))
         .onChange(of: item.id) { _, _ in checkDraw = item.isPlayed ? 1 : 0 }
         .onChange(of: item.isPlayed) { _, played in
+            guard played else { checkDraw = 0; return }
+            // Start undrawn, then draw on in a *later* runloop tick so SwiftUI sees
+            // a real 0 -> 1 transition (a same-tick reset+set just coalesces to 1),
+            // and so the circle has popped in first.
             checkDraw = 0
-            if played {
-                withAnimation(.easeInOut(duration: 0.5).delay(0.1)) { checkDraw = 1 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+                withAnimation(.easeInOut(duration: 0.42)) { checkDraw = 1 }
             }
         }
         .onAppear { checkDraw = item.isPlayed ? 1 : 0 }
@@ -506,6 +521,7 @@ struct DetailHeroView: View {
             switch refreshPhase {
             case .idle:
                 Image(systemName: "arrow.clockwise")
+                    .font(.system(size: heroGlyphSize))
             case .refreshing:
                 ProgressView()
                     .progressViewStyle(.circular)
@@ -513,6 +529,7 @@ struct DetailHeroView: View {
                     .scaleEffect(0.9)
             case .success:
                 Image(systemName: "checkmark")
+                    .font(.system(size: heroGlyphSize))
                     .foregroundStyle(refreshButtonHasFocus
                         ? Color(red: 0.0, green: 0.4, blue: 0.07)
                         : .green)

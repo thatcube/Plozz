@@ -394,6 +394,7 @@ struct DetailHeroView: View {
             Label(item.isFavorite ? "Watchlisted" : "Watchlist",
                   systemImage: item.isFavorite ? "bookmark.fill" : "bookmark")
         }
+        .labelStyle(.iconOnly)
         .modifier(HeroButtonStyle(prominent: false))
         .accessibilityLabel(action.title)
     }
@@ -407,6 +408,7 @@ struct DetailHeroView: View {
             Label(item.isPlayed ? "Watched" : "Mark Watched",
                   systemImage: item.isPlayed ? "checkmark.circle.fill" : "checkmark.circle")
         }
+        .labelStyle(.iconOnly)
         .modifier(HeroButtonStyle(prominent: false))
         .accessibilityLabel(action.title)
     }
@@ -426,6 +428,7 @@ struct DetailHeroView: View {
             Label(refreshConfirmed ? "Refreshing…" : "Refresh",
                   systemImage: refreshConfirmed ? "checkmark" : "arrow.clockwise")
         }
+        .labelStyle(.iconOnly)
         .modifier(HeroButtonStyle(prominent: false))
         .accessibilityLabel(MediaItemAction.refreshMetadata.title)
     }

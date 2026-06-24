@@ -43,6 +43,7 @@ public final class HomeViewModel {
         state = .loading
 
         let merged = await aggregator.content(from: accounts)
+        guard !Task.isCancelled else { return }
         let content = Content(
             continueWatching: merged.continueWatching,
             latest: merged.latest,
@@ -50,6 +51,7 @@ public final class HomeViewModel {
             libraries: merged.libraries
         )
         state = content.isEmpty ? .empty : .loaded(content)
+        guard !Task.isCancelled else { return }
 
         // Publish the playable rows to the App Group so the Top Shelf extension
         // can render them while the app is closed.

@@ -715,9 +715,10 @@ public enum HeroBackgroundSampler {
     }
 
     private static func sampleOne(_ url: URL, region: CGRect) async -> HeroBackgroundSample? {
-        guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return nil }
-        guard let image = UIImage(data: data), let cg = image.cgImage, cg.width > 0, cg.height > 0 else {
+        guard let image = await ArtworkImageCache.shared.image(for: url, variant: .heroBackdrop),
+              let cg = image.cgImage,
+              cg.width > 0,
+              cg.height > 0 else {
             return nil
         }
 

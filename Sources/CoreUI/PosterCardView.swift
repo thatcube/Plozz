@@ -199,9 +199,17 @@ public struct PosterCardView: View {
         FallbackAsyncImage(
             urls: artworkCandidates,
             maxAspectRatio: posterAspectGuard,
+            variant: artworkVariant,
             asyncFallbackURL: asyncArtworkFallback
         ) {
             neutralPlaceholder
+        }
+    }
+
+    private var artworkVariant: ArtworkImageVariant {
+        switch style {
+        case .poster: return .posterCard
+        case .landscape: return .landscapeCard
         }
     }
 
@@ -302,7 +310,10 @@ public struct PosterCardView: View {
     /// Spoiler-safe art for `.placeholder` mode: only ever the series fallback
     /// artwork (never the real episode frame), then a neutral placeholder.
     private var placeholderArtwork: some View {
-        FallbackAsyncImage(urls: [item.fallbackArtworkURL].compactMap { $0 }) {
+        FallbackAsyncImage(
+            urls: [item.fallbackArtworkURL].compactMap { $0 },
+            variant: artworkVariant
+        ) {
             neutralPlaceholder
         }
     }

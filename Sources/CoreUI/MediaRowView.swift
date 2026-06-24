@@ -40,6 +40,10 @@ public struct MediaRowView: View {
     /// detail to mirror the focused episode into the page hero. When set, every
     /// card becomes individually focus-tracked.
     private let onFocusChange: ((MediaItem?) -> Void)?
+    /// Stable lookup tables so focus/prefetch hot paths avoid repeated linear scans.
+    private let itemIDSet: Set<String>
+    private let itemIndexByID: [String: Int]
+    private let itemByID: [String: MediaItem]
 
     @FocusState private var focusedID: String?
     @State private var didApplyInitialFocus = false
@@ -92,6 +96,15 @@ public struct MediaRowView: View {
         self.leadingInset = leadingInset
         self.onFocusChange = onFocusChange
         self.onSelect = onSelect
+        self.itemIDSet = Set(items.map(\.id))
+        var indexByID: [String: Int] = [:]
+        var byID: [String: MediaItem] = [:]
+        for (offset, item) in items.enumerated() {
+            if indexByID[item.id] == nil { indexByID[item.id] = offset }
+            byID[item.id] = item
+        }
+        self.itemIndexByID = indexByID
+        self.itemByID = byID
     }
 
     /// Whether each card needs an individual focus binding installed — required
@@ -107,10 +120,10 @@ public struct MediaRowView: View {
     /// arrived on. A stale `lastFocusedID` from another season is ignored because
     /// it won't be present in the current `items`.
     private var gateTarget: String? {
-        if let lastFocusedID, items.contains(where: { $0.id == lastFocusedID }) {
+        if let lastFocusedID, itemIDSet.contains(lastFocusedID) {
             return lastFocusedID
         }
-        guard let defaultFocusID, items.contains(where: { $0.id == defaultFocusID }) else { return nil }
+        guard let defaultFocusID, itemIDSet.contains(defaultFocusID) else { return nil }
         return defaultFocusID
     }
 
@@ -121,7 +134,7 @@ public struct MediaRowView: View {
     /// and the row never becomes unreachable while the others are disabled.
     private var gatesFocus: Bool {
         guard let gateTarget else { return false }
-        return items.contains { $0.id == gateTarget }
+        return itemIDSet.contains(gateTarget)
     }
 
     /// While the row is gated and not yet engaged, every card *except* the target
@@ -178,7 +191,7 @@ public struct MediaRowView: View {
                         // the only focusable card on the next entry.
                         focusEngaged = false
                         lastFocusedID = nil
-                        guard let newTarget, items.contains(where: { $0.id == newTarget }) else { return }
+                        guard let newTarget, itemIDSet.contains(newTarget) else { return }
                         scrollToIfNeeded(newTarget, using: proxy)
                     }
                     .onChange(of: focusResetToken) { _, _ in
@@ -190,6 +203,10 @@ public struct MediaRowView: View {
                         focusEngaged = false
                         if let target = gateTarget { scrollToIfNeeded(target, using: proxy) }
                     }
+                }
+                .onDisappear {
+                    pendingReport?.cancel()
+                    pendingReport = nil
                 }
             }
         }
@@ -229,16 +246,22 @@ public struct MediaRowView: View {
     /// off the main thread, so it never stutters the scroll.
     private func prefetchArtwork(ahead item: MediaItem) {
         #if canImport(UIKit)
-        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        guard let index = itemIndexByID[item.id] else { return }
         let lookahead = 8
         let upper = min(index + lookahead, items.count - 1)
         guard index <= upper else { return }
+        let variant: ArtworkImageVariant = {
+            switch style {
+            case .poster: return .posterCard
+            case .landscape: return .landscapeCard
+            }
+        }()
         for i in index...upper {
             let candidate = items[i]
             guard !prefetchedIDs.contains(candidate.id) else { continue }
             prefetchedIDs.insert(candidate.id)
-            if let url = candidate.artworkCandidates(for: style).first {
-                ArtworkImageCache.shared.prefetch(url)
+            for url in candidate.artworkCandidates(for: style).prefix(2) {
+                ArtworkImageCache.shared.prefetch(url, variant: variant)
             }
         }
         #endif
@@ -252,7 +275,7 @@ public struct MediaRowView: View {
     private func applyInitialFocus(using proxy: ScrollViewProxy) {
         if let target = initialFocusID,
            !didApplyInitialFocus,
-           items.contains(where: { $0.id == target }) {
+           itemIDSet.contains(target) {
             didApplyInitialFocus = true
             scrollToIfNeeded(target, using: proxy)
             DispatchQueue.main.async { focusedID = target }
@@ -260,7 +283,7 @@ public struct MediaRowView: View {
         }
         if let target = initialScrollID,
            !didApplyInitialFocus,
-           items.contains(where: { $0.id == target }) {
+           itemIDSet.contains(target) {
             didApplyInitialFocus = true
             // Defer a tick so the LazyHStack has realised enough cards to compute
             // the target's offset before we scroll; focus is deliberately left
@@ -288,7 +311,7 @@ public struct MediaRowView: View {
         if !focusEngaged,
            let target = gateTarget,
            newValue != target,
-           items.contains(where: { $0.id == target }) {
+           itemIDSet.contains(target) {
             // Safety net: if focus somehow lands on a non-target card while gated
             // (e.g. a frame before `.disabled` applied), redirect to the target and
             // don't report the transient card to the hero.
@@ -306,7 +329,7 @@ public struct MediaRowView: View {
     /// the hero once — when focus settles — instead of once per card passed.
     private func scheduleFocusReport(for id: String) {
         guard let onFocusChange else { return }
-        let item = items.first { $0.id == id }
+        let item = itemByID[id]
         pendingReport?.cancel()
         let work = DispatchWorkItem {
             // Only report the card focus actually settled on, skipping every card

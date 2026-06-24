@@ -85,11 +85,14 @@ public final class LibraryBrowseViewModel {
         PlozzLog.app.info("LibraryBrowse: loading first page for \(containerID) (\(containerKind.rawValue))")
         do {
             let page = try await provider.items(in: containerID, kind: containerKind, page: pageRequest(forPage: 0))
+            guard !Task.isCancelled else { return }
             totalCount = page.totalCount
             loaded = Array(repeating: nil, count: page.totalCount)
             fill(page)
             pagesLoaded.insert(0)
             state = page.totalCount == 0 ? .empty : .loaded(page.totalCount)
+        } catch is CancellationError {
+            return
         } catch let error as AppError {
             PlozzLog.app.error("LibraryBrowse: first page failed for \(containerID): \(String(describing: error))")
             state = .failed(error)
@@ -103,7 +106,7 @@ public final class LibraryBrowseViewModel {
     /// (and prefetches the next page when `index` is in the back half of its
     /// page) so content arrives just ahead of the user's scroll.
     public func itemAppeared(at index: Int) async {
-        guard state.value != nil, index >= 0, index < totalCount else { return }
+        guard !Task.isCancelled, state.value != nil, index >= 0, index < totalCount else { return }
         let page = index / pageSize
         await ensurePageLoaded(page)
         if index % pageSize >= pageSize / 2 {
@@ -121,6 +124,7 @@ public final class LibraryBrowseViewModel {
         defer { pagesInFlight.remove(page) }
         do {
             let response = try await provider.items(in: containerID, kind: containerKind, page: pageRequest(forPage: page))
+            guard !Task.isCancelled else { return }
             // Total can shift if the library changed; keep the grid in sync.
             if response.totalCount != totalCount {
                 totalCount = response.totalCount
@@ -129,6 +133,8 @@ public final class LibraryBrowseViewModel {
             fill(response)
             pagesLoaded.insert(page)
             pageError = nil
+        } catch is CancellationError {
+            return
         } catch let error as AppError {
             PlozzLog.app.error("LibraryBrowse: page \(page) failed for \(containerID): \(String(describing: error))")
             pageError = error

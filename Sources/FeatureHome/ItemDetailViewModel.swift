@@ -27,18 +27,9 @@ public final class ItemDetailViewModel {
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
     public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
     private var loadingSeasons: Set<String> = []
-    /// When this detail is a series, its TMDb id. Stamped into loaded episodes
-    /// under `SeriesTmdb` once at fetch time so episode rails don't re-map every
-    /// episode on every focus movement.
-    private var seriesTMDbID: String?
-    /// When this detail is a series, the anime provider-ids (AniList/AniDB/MAL/…)
-    /// and an "Anime" marker propagated onto its episodes so each episode — and
-    /// the series-level fallback synthesized from it — classifies as anime and can
-    /// resolve the keyless AniList banner. Episodes themselves rarely carry the
-    /// show's anime ids/genre, so without this an anime episode with no still gets
-    /// no thumbnail at all.
-    private var seriesAnimeIDs: [String: String] = [:]
-    private var seriesIsAnime = false
+    /// When this detail is a series, context propagated onto its episodes so each
+    /// episode resolves fallback artwork/routing with full series metadata.
+    private var seriesEpisodeContext: SeriesEpisodeContext?
 
     /// When the requested item was a season, the id of that season. A season
     /// never renders its own page — `load()` transparently redirects to the
@@ -103,6 +94,7 @@ public final class ItemDetailViewModel {
         state = .loading
         do {
             var item = try await provider.item(id: itemID)
+            guard !Task.isCancelled else { return }
             item = await redirectingSeasonToSeries(item)
             captureSeriesContext(from: item)
             // Series/seasons have children to list; leaf items don't.
@@ -113,9 +105,14 @@ public final class ItemDetailViewModel {
             default:
                 children = []
             }
+            guard !Task.isCancelled else { return }
             state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
+            guard !Task.isCancelled else { return }
             await loadTrailers(for: item)
+            guard !Task.isCancelled else { return }
             await enrichRatings(for: item)
+        } catch is CancellationError {
+            return
         } catch let error as AppError {
             state = .failed(error)
         } catch {
@@ -165,7 +162,9 @@ public final class ItemDetailViewModel {
     /// player's own primary→alternatives→error fallback means an optimistic button
     /// self-heals at tap time rather than ever being a dead end.
     private func loadTrailers(for item: MediaItem) async {
+        guard !Task.isCancelled else { return }
         let provided = (try? await provider.trailers(for: item.id)) ?? []
+        guard !Task.isCancelled else { return }
 
         // 1) A real local trailer file wins outright — no network verification.
         if let local = provided.first(where: { !$0.isYouTubeTrailer }) {
@@ -196,6 +195,7 @@ public final class ItemDetailViewModel {
         // Verify (authoritative): refine to the first server id that actually
         // plays, else search for a replacement, then cache the outcome.
         var workingID = await playableVideoIDResolver(serverIDs)
+        guard !Task.isCancelled else { return }
         if workingID == nil {
             let searchIDs = orderedUnique(await onlineTrailerResolver(item).compactMap(\.youTubeTrailerVideoID))
             let fresh = searchIDs.filter { !serverIDs.contains($0) }
@@ -294,6 +294,7 @@ public final class ItemDetailViewModel {
     public func reload() async {
         guard case .loaded = state else { await load(); return }
         guard var item = try? await provider.item(id: itemID) else { return }
+        guard !Task.isCancelled else { return }
         item = await redirectingSeasonToSeries(item)
         captureSeriesContext(from: item)
         let children: [MediaItem]
@@ -303,13 +304,16 @@ public final class ItemDetailViewModel {
         default:
             children = []
         }
+        guard !Task.isCancelled else { return }
         state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
         // Refresh the episode lists that were already loaded for visible seasons.
         let loadedSeasonIDs = Array(seasonEpisodes.keys)
         seasonEpisodes = [:]
         for seasonID in loadedSeasonIDs {
+            if Task.isCancelled { return }
             await loadEpisodes(for: seasonID)
         }
+        guard !Task.isCancelled else { return }
         await enrichRatings(for: item)
     }
 
@@ -323,6 +327,7 @@ public final class ItemDetailViewModel {
         loadingSeasons.insert(seasonID)
         defer { loadingSeasons.remove(seasonID) }
         let episodes = (try? await provider.children(of: seasonID)) ?? []
+        guard !Task.isCancelled else { return }
         seasonEpisodes[seasonID] = stampSeriesTMDb(into: episodes.map(tagged))
     }
 
@@ -347,14 +352,10 @@ public final class ItemDetailViewModel {
     /// episodes as they load. Cleared for non-series details.
     private func captureSeriesContext(from item: MediaItem) {
         guard item.kind == .series else {
-            seriesTMDbID = nil
-            seriesAnimeIDs = [:]
-            seriesIsAnime = false
+            seriesEpisodeContext = nil
             return
         }
-        seriesTMDbID = item.providerIDs["Tmdb"]
-        seriesAnimeIDs = item.providerIDs.filter { ContentClassifier.isAnimeProviderIDKey($0.key) }
-        seriesIsAnime = ContentClassifier.isAnime(item)
+        seriesEpisodeContext = SeriesEpisodeContext(series: item)
     }
 
     /// Ensures every episode carries the parent series' TMDb id under `SeriesTmdb`,
@@ -364,21 +365,8 @@ public final class ItemDetailViewModel {
     /// misclassify them as non-anime and show nothing). Done here once per fetch to
     /// avoid per-focus remapping in the view layer.
     private func stampSeriesTMDb(into episodes: [MediaItem]) -> [MediaItem] {
-        let hasTMDb = (seriesTMDbID?.isEmpty == false)
-        guard hasTMDb || seriesIsAnime || !seriesAnimeIDs.isEmpty else { return episodes }
-        return episodes.map { episode in
-            var copy = episode
-            if let seriesTMDbID, !seriesTMDbID.isEmpty, copy.providerIDs["SeriesTmdb"] == nil {
-                copy.providerIDs["SeriesTmdb"] = seriesTMDbID
-            }
-            for (key, value) in seriesAnimeIDs where copy.providerIDs[key] == nil {
-                copy.providerIDs[key] = value
-            }
-            if seriesIsAnime, !copy.genres.contains(where: { $0.lowercased().contains("anime") }) {
-                copy.genres.append("Anime")
-            }
-            return copy
-        }
+        guard let seriesEpisodeContext else { return episodes }
+        return seriesEpisodeContext.stamping(episodes)
     }
 
     /// Fetches external ratings off the critical path and merges them into the
@@ -386,6 +374,7 @@ public final class ItemDetailViewModel {
     /// backend-native ratings it already has.
     private func enrichRatings(for item: MediaItem) async {
         let external = await ratingsProvider.ratings(for: item)
+        guard !Task.isCancelled else { return }
         guard !external.isEmpty else { return }
         guard case var .loaded(detail) = state, detail.item.id == item.id else { return }
         detail.item.ratings = detail.item.ratings.mergedWithAuthoritative(external)

@@ -128,6 +128,12 @@ public final class AppState {
     /// survive relaunch; Plozz re-prompts (or re-switches) each launch.
     private var plexTokenOverrides: [String: String] = [:]
 
+    /// For each account, the Plex Home-user UUID the current override resolves to.
+    /// Lets the reconciler tell an already-satisfied protected switch apart from a
+    /// stale override left by a previous profile, so a just-entered PIN isn't
+    /// re-armed into an infinite prompt/re-prompt loop.
+    private var plexResolvedHomeUser: [String: String] = [:]
+
     /// Switches to a Plex Home user, returning the new auth token. Injectable for
     /// tests; defaults to a live `PlexAuthClient` call.
     @ObservationIgnored
@@ -402,8 +408,18 @@ public final class AppState {
         for account in plexAccounts {
             if let binding = profile.homeUserBinding(forPlexAccount: account.id) {
                 if binding.requiresPIN == true {
+                    // Already resolved to exactly this user? It's satisfied —
+                    // leave it, don't re-prompt. (Was the source of the
+                    // re-entrancy loop: success cleared the override, the
+                    // reconciler immediately re-prompted, cover never tore down.)
+                    if plexTokenOverrides[account.id] != nil,
+                       plexResolvedHomeUser[account.id] == binding.homeUserID {
+                        continue
+                    }
+                    // Stale override for a DIFFERENT user — drop before prompting.
                     if plexTokenOverrides[account.id] != nil {
                         plexTokenOverrides[account.id] = nil
+                        plexResolvedHomeUser[account.id] = nil
                         plexIdentityGeneration += 1
                     }
                     if pinTarget == nil {
@@ -415,6 +431,7 @@ public final class AppState {
             } else {
                 if plexTokenOverrides[account.id] != nil {
                     plexTokenOverrides[account.id] = nil
+                    plexResolvedHomeUser[account.id] = nil
                     plexIdentityGeneration += 1
                 }
             }
@@ -422,7 +439,7 @@ public final class AppState {
 
         if let pin = pinTarget {
             pendingPlexPINRequest = PlexPINRequest(
-                id: profile.id,
+                id: "\(profile.id)#\(pin.accountID)",
                 accountID: pin.accountID,
                 homeUserID: pin.binding.homeUserID,
                 homeUserName: pin.binding.name.isEmpty ? "Plex User" : pin.binding.name,
@@ -441,6 +458,7 @@ public final class AppState {
         plexPINError = nil
         if !plexTokenOverrides.isEmpty {
             plexTokenOverrides.removeAll()
+            plexResolvedHomeUser.removeAll()
             plexIdentityGeneration += 1
         }
     }
@@ -467,6 +485,7 @@ public final class AppState {
             print("[PIN] switch OK — clearing pendingPlexPINRequest")
             #endif
             plexTokenOverrides[accountID] = token
+            plexResolvedHomeUser[accountID] = homeUserID
             pendingPlexPINRequest = nil
             plexPINError = nil
             plexIdentityGeneration += 1
@@ -536,6 +555,8 @@ public final class AppState {
     /// Removes one account; drops to onboarding if it was the last.
     public func removeAccount(id: String) {
         try? accountStore.remove(id: id)
+        plexTokenOverrides[id] = nil
+        plexResolvedHomeUser[id] = nil
         reloadAccounts()
         apply(.accountsChanged(accounts))
     }

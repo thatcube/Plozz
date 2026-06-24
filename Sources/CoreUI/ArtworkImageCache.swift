@@ -23,7 +23,7 @@ public final class ArtworkImageCache: @unchecked Sendable {
         let variant: ArtworkImageVariant
 
         var cacheKey: NSString {
-            "\(url.absoluteString)|\(variant.rawValue)" as NSString
+            variant.cacheKey(for: url) as NSString
         }
     }
 

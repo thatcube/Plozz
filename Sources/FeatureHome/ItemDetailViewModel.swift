@@ -268,7 +268,8 @@ public final class ItemDetailViewModel {
     public func applyWatchedState(_ mutation: MediaItemMutation) {
         if case var .loaded(detail) = state {
             if mutation.itemIDs.contains(detail.item.id) {
-                detail.item.isPlayed = mutation.played
+                if let played = mutation.played { detail.item.isPlayed = played }
+                if let favorite = mutation.favorite { detail.item.isFavorite = favorite }
             }
             detail.children = detail.children.map { apply(mutation, to: $0) }
             state = .loaded(detail)
@@ -281,7 +282,8 @@ public final class ItemDetailViewModel {
     private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {
         guard mutation.itemIDs.contains(item.id) else { return item }
         var copy = item
-        copy.isPlayed = mutation.played
+        if let played = mutation.played { copy.isPlayed = played }
+        if let favorite = mutation.favorite { copy.isFavorite = favorite }
         return copy
     }
 
@@ -392,9 +394,6 @@ public final class ItemDetailViewModel {
 
     /// Label for the primary action button, reflecting resume vs. play.
     public func playButtonTitle(for item: MediaItem) -> String {
-        if let resume = item.resumePosition, resume > 1 {
-            return "Resume"
-        }
-        return "Play"
+        "Play"
     }
 }

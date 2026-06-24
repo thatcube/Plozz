@@ -17,8 +17,16 @@ struct OMDbRating: Decodable {
     let Value: String
 }
 
-/// Fetches authoritative IMDb / Rotten Tomatoes / Metacritic ratings from the
-/// OMDb API using an item's IMDb id. Best-effort: returns `[]` on any failure.
+/// Fetches the authoritative **IMDb** rating from the OMDb API using an item's
+/// IMDb id. Best-effort: returns `[]` on any failure.
+///
+/// OMDb also surfaces Rotten Tomatoes and Metacritic scores, but OMDb is **not
+/// licensed to redistribute** them (it's why post-2017 OMDb keys lost Rotten
+/// Tomatoes), and both carry trademark/enforcement risk. So we deliberately map
+/// **only** IMDb here. Rotten Tomatoes still appears when the user's own media
+/// server provides it (Plex `rating`/`audienceRating`, Jellyfin `CriticRating`),
+/// which is their server's licensed metadata rather than something this app
+/// fetches.
 public struct OMDbRatingsProvider: ExternalRatingsProviding {
     private let apiKey: String
     private let baseURL: URL
@@ -82,8 +90,9 @@ public struct OMDbRatingsProvider: ExternalRatingsProviding {
     private static func source(forOMDbName name: String) -> RatingSource? {
         switch name {
         case "Internet Movie Database": return .imdb
-        case "Rotten Tomatoes": return .rottenTomatoes
-        case "Metacritic": return .metacritic
+        // Rotten Tomatoes and Metacritic are intentionally not mapped: OMDb is
+        // not licensed to redistribute them. They reach the UI only via the
+        // user's own server metadata (see the type doc comment).
         default: return nil
         }
     }

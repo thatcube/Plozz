@@ -171,6 +171,7 @@ private func makePlayerViewModel(
     return PlayerViewModel(
         provider: resolveProvider(request.item.sourceAccountID, in: accounts),
         itemID: request.item.id,
+        mediaSourceID: request.item.selectedVersionID,
         captionSettings: captionSettings,
         startPosition: request.startPosition,
         scrobbler: scrobbler,

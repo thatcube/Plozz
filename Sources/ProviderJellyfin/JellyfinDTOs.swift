@@ -146,6 +146,9 @@ struct UserItemDataDto: Decodable {
     let PlaybackPositionTicks: Int64?
     let PlayedPercentage: Double?
     let Played: Bool?
+    /// Whether the user has favourited the item — surfaced as the unified
+    /// Watchlist state.
+    let IsFavorite: Bool?
 }
 
 /// Jellyfin trickplay tile-group metadata (`BaseItemDto.Trickplay[srcId][width]`).
@@ -176,6 +179,13 @@ struct MediaSourceInfo: Decodable {
     let SupportsDirectStream: Bool?
     let SupportsTranscoding: Bool?
     let Container: String?
+    /// Human-readable source name, e.g. `Movie (2009) Bluray-2160p`. Surfaced in
+    /// the version picker when a title has several sources.
+    let Name: String?
+    /// File size in bytes, used to show "12.4 GB" per version.
+    let Size: Int64?
+    /// Overall declared bitrate in bits/sec.
+    let Bitrate: Int?
     let MediaStreams: [MediaStreamDto]?
 }
 

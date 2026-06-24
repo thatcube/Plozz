@@ -360,48 +360,52 @@ public struct PosterCardView: View {
     @ViewBuilder
     private func progressBar(height: CGFloat) -> some View {
         if let percentage = item.playedPercentage, percentage > 0.01, percentage < 0.99 {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    // Track: a dark translucent capsule so the bar reads clearly
-                    // over both bright and dark artwork, with a hairline rim.
-                    Capsule(style: .continuous)
-                        .fill(.black.opacity(0.55))
-                        .overlay {
+            ZStack(alignment: .bottom) {
+                // Scrim: a slight black gradient that fades up from the bottom edge,
+                // reaching above the bar so the indicator pops off bright artwork.
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.6)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: height + 90)
+                .frame(maxWidth: .infinity)
+                .allowsHitTesting(false)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        // Track: matches the main player's scrubber — Liquid Glass on
+                        // tvOS 26+, with a translucent-white fallback on older systems.
+                        if #available(tvOS 26.0, *) {
                             Capsule(style: .continuous)
-                                .strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
+                                .fill(.clear)
+                                .glassEffect(.regular, in: Capsule(style: .continuous))
+                        } else {
+                            Capsule(style: .continuous)
+                                .fill(.white.opacity(0.22))
                         }
 
-                    // Fill: glossy "liquid glass" blue — Plozz's brand blue lit by
-                    // a vertical sheen and a bright rim, with a subtle glow so it
-                    // pops off the poster without blooming.
-                    Capsule(style: .continuous)
-                        .fill(ThemePalette.brandBlue)
-                        .overlay {
-                            Capsule(style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            .white.opacity(0.55),
-                                            .white.opacity(0.06),
-                                            .black.opacity(0.22)
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .blendMode(.plusLighter)
-                        }
-                        .overlay {
-                            Capsule(style: .continuous)
-                                .strokeBorder(.white.opacity(0.55), lineWidth: 0.5)
+                        // Fill: Plozz's brand blue rendered as Liquid Glass on
+                        // tvOS 26+ (a tinted glass capsule), with a solid brand-blue
+                        // fallback on older systems.
+                        Group {
+                            if #available(tvOS 26.0, *) {
+                                Capsule(style: .continuous)
+                                    .fill(.clear)
+                                    .glassEffect(.regular.tint(ThemePalette.brandBlue), in: Capsule(style: .continuous))
+                            } else {
+                                Capsule(style: .continuous)
+                                    .fill(ThemePalette.brandBlue)
+                            }
                         }
                         .frame(width: max(height, geo.size.width * percentage))
-                        .shadow(color: ThemePalette.brandBlue.opacity(0.5), radius: 3)
+                        .shadow(color: .black.opacity(0.35), radius: 3)
+                    }
                 }
+                .frame(height: height)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
             }
-            .frame(height: height)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
         }
     }
 }

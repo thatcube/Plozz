@@ -38,6 +38,9 @@ public struct HomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
                     MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, spoilerSettings: spoilerSettings, onSelect: onPlayItem)
+                    if !content.watchlist.isEmpty {
+                        MediaRowView(title: "Watchlist", items: content.watchlist, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
+                    }
                     MediaRowView(title: "Recently Added", items: content.latest, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
 
                     if !visibleLibraries.isEmpty {

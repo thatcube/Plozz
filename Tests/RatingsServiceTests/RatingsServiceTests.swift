@@ -23,15 +23,17 @@ final class OMDbRatingsProviderTests: XCTestCase {
         """
     }
 
-    func testParsesAllThreeSources() async {
+    func testMapsOnlyIMDbFromOMDb() async {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/", json: omdbJSON())
         let provider = OMDbRatingsProvider(apiKey: "KEY", baseURL: omdbBaseURL, http: stub)
 
         let ratings = await provider.ratings(for: movie())
 
-        XCTAssertEqual(Set(ratings.map(\.source)), [.imdb, .rottenTomatoes, .metacritic])
-        XCTAssertEqual(ratings.first { $0.source == .rottenTomatoes }?.value, 74)
+        // OMDb is not licensed to redistribute Rotten Tomatoes / Metacritic, so
+        // the provider maps IMDb only even when OMDb returns all three.
+        XCTAssertEqual(Set(ratings.map(\.source)), [.imdb])
+        XCTAssertEqual(ratings.first { $0.source == .imdb }?.value, 8.8)
         XCTAssertEqual(ratings.first { $0.source == .imdb }?.scale, .outOfTen)
     }
 

@@ -167,6 +167,28 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         (sourceAccountID.map { [$0] } ?? []) + additionalSourceAccountIDs
     }
 
+    /// The selectable media sources ("versions") for this title — e.g. a 4K HDR
+    /// remux beside a 1080p web-dl. Populated **only** on the detail fetch (rows
+    /// and cards leave it empty); zero or one entry means there's nothing to
+    /// choose, so no picker is shown. Encoded with a back-compatible default so
+    /// older cached `MediaItem` JSON (written before versions existed) still
+    /// decodes.
+    public var versions: [MediaVersion]
+
+    /// Whether the user has favourited / watchlisted this item on its server
+    /// (Jellyfin `UserData.IsFavorite`). Drives the add-vs-remove choice for the
+    /// Watchlist action and the Home Watchlist row. Back-compatible default
+    /// `false` for older cached JSON.
+    public var isFavorite: Bool
+
+    /// The media-source id the user picked in the version picker, threaded into
+    /// playback so `Play` targets the chosen file. **Transient UI state** — it is
+    /// deliberately excluded from `Codable`/persistence (it's a per-play choice,
+    /// not a property of the title) but kept in `Equatable`/`Hashable` so a
+    /// re-stamped item triggers a fresh play request. `nil` means "use the
+    /// provider/server default source".
+    public var selectedVersionID: String?
+
     public init(
         id: String,
         title: String,
@@ -198,7 +220,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         providerIDs: [String: String] = [:],
         mediaInfo: MediaSourceMetadata? = nil,
         sourceAccountID: String? = nil,
-        additionalSourceAccountIDs: [String] = []
+        additionalSourceAccountIDs: [String] = [],
+        versions: [MediaVersion] = [],
+        isFavorite: Bool = false,
+        selectedVersionID: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -231,6 +256,22 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.mediaInfo = mediaInfo
         self.sourceAccountID = sourceAccountID
         self.additionalSourceAccountIDs = additionalSourceAccountIDs
+        self.versions = versions
+        self.isFavorite = isFavorite
+        self.selectedVersionID = selectedVersionID
+    }
+
+    /// Persisted keys. `selectedVersionID` is intentionally omitted so it is
+    /// never encoded or decoded — it is transient per-play UI state, not a fact
+    /// about the title. Listing the keys explicitly keeps `Encodable` synthesis
+    /// in sync with the custom `init(from:)` below.
+    private enum CodingKeys: String, CodingKey {
+        case id, title, kind, overview, parentTitle, seasonNumber, episodeNumber
+        case productionYear, officialRating, genres, people, studios, tags, taglines
+        case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed
+        case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
+        case fallbackArtworkURL, logoURL, ratings, providerIDs, mediaInfo
+        case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
     }
 
     /// Custom decoding so `additionalSourceAccountIDs` (added after items were
@@ -269,6 +310,9 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
+        versions = try container.decodeIfPresent([MediaVersion].self, forKey: .versions) ?? []
+        isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        selectedVersionID = nil
     }
 
     /// Returns a copy of this item tagged as belonging to `accountID`, used by the
@@ -278,6 +322,26 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         copy.sourceAccountID = accountID
         return copy
     }
+
+    /// Returns a copy of this item with `selectedVersionID` set, so a `Play`
+    /// invocation carries the user's chosen version through the existing
+    /// `(MediaItem) -> Void` play closure without changing its signature.
+    public func selectingVersion(_ versionID: String?) -> MediaItem {
+        var copy = self
+        copy.selectedVersionID = versionID
+        return copy
+    }
+
+    /// The currently-selected `MediaVersion`, resolved from `selectedVersionID`,
+    /// or `nil` when nothing is explicitly selected (use the server default).
+    public var selectedVersion: MediaVersion? {
+        guard let selectedVersionID else { return nil }
+        return versions.first { $0.id == selectedVersionID }
+    }
+
+    /// Whether a version picker should be offered: more than one selectable
+    /// source exists.
+    public var hasMultipleVersions: Bool { versions.count > 1 }
 
     /// A human-friendly subtitle line, e.g. `S1 · E3` or the production year.
     public var subtitle: String? {

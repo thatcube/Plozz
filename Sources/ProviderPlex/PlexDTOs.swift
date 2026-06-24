@@ -41,6 +41,11 @@ struct PlexDirectory: Decodable {
 struct PlexMetadata: Decodable {
     let ratingKey: String?
     let key: String?
+    /// The item's canonical **global** Plex guid (`plex://movie/<id>`,
+    /// `plex://show/<id>`, …) — distinct from the per-server `ratingKey`. The
+    /// account-level Watchlist (Discover) service keys on this, so it's stashed
+    /// into `providerIDs["PlexGuid"]` during mapping.
+    let guid: String?
     let type: String?          // "movie", "show", "season", "episode", "clip"
     /// For extras/clips, the kind of extra, e.g. "trailer", "behindTheScenes".
     let subtype: String?

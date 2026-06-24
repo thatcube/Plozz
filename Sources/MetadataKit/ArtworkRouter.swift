@@ -78,28 +78,28 @@ public actor ArtworkRouter {
             case .hero: return [tmdb, anilist, kitsu]
             case .poster: return [anilist, kitsu, tmdb]
             case .thumbnail: return [tmdb] // real anime stills; series-backdrop fallback handled by callers
-            case .logo: return [tmdb]
+            case .logo: return [tmdb, wikidata, wikipedia]
             }
         case .tvShow:
             switch kind {
             case .hero: return [tmdb, wikidata, wikipedia]
             case .poster: return [tmdb, tvmaze, wikidata, wikipedia]
             case .thumbnail: return [tmdb, tvmaze]
-            case .logo: return [tmdb, wikidata]
+            case .logo: return [tmdb, wikidata, wikipedia]
             }
         case .movie:
             switch kind {
             case .hero: return [tmdb, wikidata, wikipedia]
             case .poster: return [tmdb, wikidata, wikipedia]
             case .thumbnail: return [tmdb]
-            case .logo: return [tmdb, wikidata]
+            case .logo: return [tmdb, wikidata, wikipedia]
             }
         case .unknown:
             switch kind {
             case .hero: return [tmdb, wikidata, wikipedia]
             case .poster: return [tmdb, wikidata, wikipedia]
             case .thumbnail: return [tmdb]
-            case .logo: return [tmdb, wikidata]
+            case .logo: return [tmdb, wikidata, wikipedia]
             }
         case .music:
             return []

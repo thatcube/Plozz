@@ -76,10 +76,18 @@ struct DetailHeroView: View {
     /// Surrounding-list context, so a hero acting on a focused episode behaves
     /// exactly like that episode's context-menu would.
     @Environment(\.mediaItemActionContext) private var actionContext
-    /// Brief "Refreshing…" confirmation shown in place of the Refresh button's
-    /// label for a couple of seconds after it's pressed. The refresh itself is a
-    /// fire-and-forget server task, so this is the only feedback the user gets.
-    @State private var refreshConfirmed = false
+    /// Drives the Refresh button's animated state machine: the refresh itself is
+    /// a fire-and-forget server task, so this gives the user visible feedback —
+    /// idle ➝ a spinning "refreshing" indicator ➝ a green success check ➝ back to
+    /// idle, with each icon animating in and out.
+    @State private var refreshPhase: RefreshPhase = .idle
+    /// Continuous-rotation driver for the refreshing-phase spinner.
+    @State private var refreshSpin = false
+
+    /// The visible lifecycle of the Refresh Metadata button.
+    private enum RefreshPhase {
+        case idle, refreshing, success
+    }
 
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
@@ -391,46 +399,93 @@ struct DetailHeroView: View {
     @ViewBuilder
     private func watchlistButton(action: MediaItemAction) -> some View {
         Button { performHeroAction(action) } label: {
-            Label(item.isFavorite ? "Watchlisted" : "Watchlist",
-                  systemImage: item.isFavorite ? "bookmark.fill" : "bookmark")
+            Image(systemName: item.isFavorite ? "bookmark.fill" : "bookmark")
+                .foregroundStyle(item.isFavorite ? Color.accentColor : Color.primary)
+                .contentTransition(.symbolEffect(.replace))
         }
-        .labelStyle(.iconOnly)
         .modifier(HeroButtonStyle(prominent: false))
+        .animation(.spring(response: 0.32, dampingFraction: 0.7), value: item.isFavorite)
         .accessibilityLabel(action.title)
+        .accessibilityValue(item.isFavorite ? "On your watchlist" : "Not on your watchlist")
     }
 
     /// Visible watched-state toggle, shown when the provider can mutate it. On a
     /// series page the hero mirrors the focused episode, so this doubles as the
-    /// episode's visible watched toggle.
+    /// episode's visible watched toggle. The glyph clearly signals current state:
+    /// a green filled check when watched, a neutral outline when not — animating
+    /// between the two as the optimistic mutation flips `item.isPlayed`.
     @ViewBuilder
     private func watchedButton(action: MediaItemAction) -> some View {
         Button { performHeroAction(action) } label: {
-            Label(item.isPlayed ? "Watched" : "Mark Watched",
-                  systemImage: item.isPlayed ? "checkmark.circle.fill" : "checkmark.circle")
+            Image(systemName: item.isPlayed ? "checkmark.circle.fill" : "checkmark.circle")
+                .foregroundStyle(item.isPlayed ? Color.green : Color.primary)
+                .contentTransition(.symbolEffect(.replace))
         }
-        .labelStyle(.iconOnly)
         .modifier(HeroButtonStyle(prominent: false))
+        .animation(.spring(response: 0.32, dampingFraction: 0.7), value: item.isPlayed)
         .accessibilityLabel(action.title)
+        .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
     }
 
     /// Visible Refresh Metadata button, shown when the provider conforms to
-    /// `MetadataRefreshing`. The server task is fire-and-forget, so the label
-    /// briefly flips to a "Refreshing…" checkmark for visible confirmation.
+    /// `MetadataRefreshing`. The server task is fire-and-forget, so the icon walks
+    /// through a small animated state machine for feedback: a spinning indicator
+    /// while "refreshing", then a green success check, then back to the refresh
+    /// glyph — each state scaling/fading in and out.
     @ViewBuilder
     private func refreshButton() -> some View {
         Button {
+            guard refreshPhase == .idle else { return }
             performHeroAction(.refreshMetadata)
-            withAnimation(.easeInOut(duration: 0.2)) { refreshConfirmed = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-                withAnimation(.easeInOut(duration: 0.2)) { refreshConfirmed = false }
+            setRefreshPhase(.refreshing)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                setRefreshPhase(.success)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                    setRefreshPhase(.idle)
+                }
             }
         } label: {
-            Label(refreshConfirmed ? "Refreshing…" : "Refresh",
-                  systemImage: refreshConfirmed ? "checkmark" : "arrow.clockwise")
+            refreshIcon
         }
-        .labelStyle(.iconOnly)
+        .disabled(refreshPhase != .idle)
         .modifier(HeroButtonStyle(prominent: false))
         .accessibilityLabel(MediaItemAction.refreshMetadata.title)
+    }
+
+    /// Animates the refresh state transition (and kicks the spinner when entering
+    /// the refreshing phase).
+    private func setRefreshPhase(_ phase: RefreshPhase) {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
+            refreshPhase = phase
+        }
+    }
+
+    /// The single glyph shown for the current `refreshPhase`. Keyed by phase so a
+    /// change removes the old glyph (transition out) and inserts the new one
+    /// (transition in); the refreshing glyph spins continuously.
+    @ViewBuilder
+    private var refreshIcon: some View {
+        Group {
+            switch refreshPhase {
+            case .idle:
+                Image(systemName: "arrow.clockwise")
+            case .refreshing:
+                Image(systemName: "arrow.clockwise")
+                    .rotationEffect(.degrees(refreshSpin ? 360 : 0))
+                    .onAppear {
+                        refreshSpin = false
+                        withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
+                            refreshSpin = true
+                        }
+                    }
+                    .onDisappear { refreshSpin = false }
+            case .success:
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Color.green)
+            }
+        }
+        .id(refreshPhase)
+        .transition(.scale(scale: 0.4).combined(with: .opacity))
     }
     /// play icon and the "… left" line. Its colours flip with the button's focus
     /// state — light fill on the dark unfocused button, dark fill on the white

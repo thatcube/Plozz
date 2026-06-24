@@ -111,6 +111,16 @@ struct SeriesDetailView: View {
             // so switching seasons later is instant (no gray-placeholder flash)
             // rather than fetching that season's stills only once it is selected.
             .task { await prewarmAllSeasons() }
+            // The hero mirrors the focused episode via a local copy, so when a
+            // watched/watchlist mutation broadcasts (e.g. from the hero's own
+            // Watched button), flip the same flags on `heroItem` in place so the
+            // visible hero button reflects the new state immediately.
+            .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
+                guard let mutation = MediaItemMutation.from(note),
+                      mutation.itemIDs.contains(heroItem.id) else { return }
+                if let played = mutation.played { heroItem.isPlayed = played }
+                if let favorite = mutation.favorite { heroItem.isFavorite = favorite }
+            }
     }
 
     @ViewBuilder

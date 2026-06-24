@@ -102,10 +102,6 @@ struct DetailHeroView: View {
     /// rather than tvOS's oversized default button font.
     private let heroGlyphSize: CGFloat = 30
 
-    /// Drives the watched-toggle checkmark's draw-on: 0 = nothing drawn, 1 = full
-    /// check. Animating this trims the stroke into view from left to top-right.
-    @State private var checkDraw: CGFloat = 0
-
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
@@ -434,9 +430,6 @@ struct DetailHeroView: View {
     /// Visible watched-state toggle, shown when the provider can mutate it. On a
     /// series page the hero mirrors the focused episode, so this doubles as the
     /// episode's visible watched toggle. Unwatched shows a neutral `eye`; marking
-    /// Visible watched-state toggle, shown when the provider can mutate it. On a
-    /// series page the hero mirrors the focused episode, so this doubles as the
-    /// episode's visible watched toggle. Unwatched shows a neutral `eye`; marking
     /// watched first pops in a brand-blue filled circle (the same watched colour as
     /// the episode cards), then strokes a white checkmark *onto* it — drawn from the
     /// left point, down to the bottom vertex, up to the top-right — via an animated
@@ -454,11 +447,20 @@ struct DetailHeroView: View {
                 ZStack {
                     Circle()
                         .fill(ThemePalette.brandBlue)
-                    CheckmarkShape()
-                        .trim(from: 0, to: checkDraw)
+                    // The check's draw-on is a direct function of `item.isPlayed`
+                    // and carries its OWN animation keyed to that same value. This
+                    // is deliberate: the surrounding `.animation(value:)` on the
+                    // frame installs a *nil* animation on this whole subtree for any
+                    // transaction where `isPlayed` didn't change, which silently
+                    // squashed every previous draw-on (it ran in a separate, deferred
+                    // transaction). Keeping the draw in the one transaction where
+                    // `isPlayed` actually flips — and giving it a short delay so the
+                    // circle pops first — makes it reliably animate on-device.
+                    CheckmarkShape(progress: item.isPlayed ? 1 : 0)
                         .stroke(Color.white,
                                 style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
                         .padding(heroIconSize * 0.20)
+                        .animation(.easeOut(duration: 0.32).delay(0.14), value: item.isPlayed)
                 }
                 .opacity(item.isPlayed ? 1 : 0)
                 .scaleEffect(item.isPlayed ? 1 : 0.4)
@@ -467,18 +469,6 @@ struct DetailHeroView: View {
             .animation(.easeOut(duration: 0.18), value: item.isPlayed)
         }
         .modifier(HeroButtonStyle(prominent: false))
-        .onChange(of: item.id) { _, _ in checkDraw = item.isPlayed ? 1 : 0 }
-        .onChange(of: item.isPlayed) { _, played in
-            guard played else { checkDraw = 0; return }
-            // Start undrawn, then draw on in a *later* runloop tick so SwiftUI sees
-            // a real 0 -> 1 transition (a same-tick reset+set just coalesces to 1),
-            // and so the circle has popped in first.
-            checkDraw = 0
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-                withAnimation(.easeOut(duration: 0.3)) { checkDraw = 1 }
-            }
-        }
-        .onAppear { checkDraw = item.isPlayed ? 1 : 0 }
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
     }
@@ -673,17 +663,42 @@ private struct HeroButtonStyle: ViewModifier {
     }
 }
 
-/// The checkmark glyph used by the watched toggle. A plain static path (left point
-/// ➝ bottom vertex ➝ top-right) so it can be GPU-trimmed with `.trim(from:to:)` for
-/// a smooth draw-on, rather than rebuilt on the CPU every frame. Proportions are
-/// inset and balanced so the glyph stands tall without warping into the corners.
+/// The checkmark glyph used by the watched toggle. `progress` (0...1) is the
+/// shape's `animatableData`, and the path is built up to that fraction of its
+/// *total length* — left point ➝ bottom vertex ➝ top-right — so animating
+/// `progress` strokes the check on at a uniform speed. Proportions are inset and
+/// balanced so the glyph stands tall without warping into the corners.
 private struct CheckmarkShape: Shape {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
     func path(in rect: CGRect) -> Path {
         let w = rect.width, h = rect.height
+        let start = CGPoint(x: w * 0.26, y: h * 0.52)
+        let mid   = CGPoint(x: w * 0.44, y: h * 0.70)
+        let end   = CGPoint(x: w * 0.74, y: h * 0.24)
+
+        let firstLen = hypot(mid.x - start.x, mid.y - start.y)
+        let secondLen = hypot(end.x - mid.x, end.y - mid.y)
+        let total = firstLen + secondLen
+        let drawn = max(0, min(1, progress)) * total
+
         var path = Path()
-        path.move(to: CGPoint(x: w * 0.26, y: h * 0.52))
-        path.addLine(to: CGPoint(x: w * 0.44, y: h * 0.70))
-        path.addLine(to: CGPoint(x: w * 0.74, y: h * 0.24))
+        path.move(to: start)
+        if drawn <= firstLen {
+            let t = firstLen == 0 ? 0 : drawn / firstLen
+            path.addLine(to: CGPoint(x: start.x + t * (mid.x - start.x),
+                                     y: start.y + t * (mid.y - start.y)))
+        } else {
+            path.addLine(to: mid)
+            let t = secondLen == 0 ? 0 : (drawn - firstLen) / secondLen
+            path.addLine(to: CGPoint(x: mid.x + t * (end.x - mid.x),
+                                     y: mid.y + t * (end.y - mid.y)))
+        }
         return path
     }
 }

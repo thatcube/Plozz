@@ -31,7 +31,8 @@ public final class LibraryBrowseViewModel {
     private let provider: any MediaProvider
     private let containerID: String
     private let containerKind: MediaItemKind
-    private let pageSize: Int
+    private let firstPageSize: Int
+    private let subsequentPageSize: Int
     private let defaults: UserDefaults
     /// The account this library belongs to, stamped onto every emitted item so a
     /// tapped grid cell routes to the right provider. `nil` outside aggregated flows.
@@ -47,6 +48,18 @@ public final class LibraryBrowseViewModel {
     private var pagesInFlight: Set<Int> = []
     /// Page indices that have been fully loaded.
     private var pagesLoaded: Set<Int> = []
+    /// Page load tasks keyed by page index. Coalesces concurrent requests for a
+    /// page and lets stale/off-screen prefetches be cancelled.
+    private var pageTasks: [Int: Task<Void, Never>] = [:]
+    /// Visible-cell reference count per page. Used to keep visible-page loads alive
+    /// while allowing off-screen page loads to be cancelled.
+    private var visibleCellCountsByPage: [Int: Int] = [:]
+    /// Tracks the currently visible indices so repeated `.task(id:)` restarts for
+    /// the same cell don't inflate `visibleCellCountsByPage`.
+    private var visibleIndices: Set<Int> = []
+    /// Last index whose cell appeared. Large jumps imply a fast scroll and trigger
+    /// deeper look-ahead prefetching.
+    private var lastAppearedIndex: Int?
 
     public init(
         provider: any MediaProvider,
@@ -59,7 +72,9 @@ public final class LibraryBrowseViewModel {
         self.provider = provider
         self.containerID = containerID
         self.containerKind = containerKind
-        self.pageSize = pageSize
+        let tuned = Self.tunedPageSizes(for: pageSize)
+        self.firstPageSize = tuned.first
+        self.subsequentPageSize = tuned.subsequent
         self.defaults = defaults
         self.sourceAccountID = sourceAccountID
         self.sort = Self.loadSort(for: containerKind, from: defaults)
@@ -74,17 +89,48 @@ public final class LibraryBrowseViewModel {
     /// Number of items actually loaded so far (non-placeholder). Test/diagnostic.
     public var loadedCount: Int { loaded.reduce(0) { $0 + ($1 == nil ? 0 : 1) } }
 
+    /// Called when a cell leaves the visible viewport. Used to cancel stale,
+    /// off-screen page loads so bandwidth/CPU goes to visible content.
+    public func itemDisappeared(at index: Int) {
+        guard index >= 0 else { return }
+        let page = pageForIndex(index)
+        guard visibleIndices.remove(index) != nil else { return }
+        let remaining = max(0, (visibleCellCountsByPage[page] ?? 0) - 1)
+        if remaining == 0 {
+            visibleCellCountsByPage[page] = nil
+            if !pagesLoaded.contains(page) {
+                cancelPageLoad(page)
+            }
+        } else {
+            visibleCellCountsByPage[page] = remaining
+        }
+        let centerPage = lastAppearedIndex.map(pageForIndex) ?? page
+        pruneInFlightPages(around: centerPage, lookAhead: 1)
+    }
+
     /// Loads (or reloads) the first page and sizes the grid to the full library.
     public func loadFirstPage() async {
         state = .loading
         loaded = []
         totalCount = 0
         pageError = nil
+        cancelAllPageLoads()
         pagesInFlight = []
         pagesLoaded = []
-        PlozzLog.app.info("LibraryBrowse: loading first page for \(containerID) (\(containerKind.rawValue))")
+        visibleCellCountsByPage = [:]
+        visibleIndices = []
+        lastAppearedIndex = nil
+        PlozzLog.app.info(
+            "LibraryBrowse: loading first page for \(containerID) (\(containerKind.rawValue)) firstPage=\(firstPageSize) steadyPage=\(subsequentPageSize)"
+        )
         do {
-            let page = try await provider.items(in: containerID, kind: containerKind, page: pageRequest(forPage: 0))
+            let page = try await Self.fetchPage(
+                provider: provider,
+                containerID: containerID,
+                containerKind: containerKind,
+                request: pageRequest(forPage: 0),
+                priority: .userInitiated
+            )
             guard !Task.isCancelled else { return }
             totalCount = page.totalCount
             loaded = Array(repeating: nil, count: page.totalCount)
@@ -107,45 +153,28 @@ public final class LibraryBrowseViewModel {
     /// page) so content arrives just ahead of the user's scroll.
     public func itemAppeared(at index: Int) async {
         guard !Task.isCancelled, state.value != nil, index >= 0, index < totalCount else { return }
-        let page = index / pageSize
-        await ensurePageLoaded(page)
-        if index % pageSize >= pageSize / 2 {
-            await ensurePageLoaded(page + 1)
+        let page = pageForIndex(index)
+        if visibleIndices.insert(index).inserted {
+            visibleCellCountsByPage[page, default: 0] += 1
         }
+        await ensurePageLoaded(page)
+        let lookAhead = prefetchLookAheadPages(for: index, inPage: page)
+        if lookAhead > 0 {
+            for offset in 1...lookAhead {
+                schedulePageLoad(page + offset)
+            }
+        }
+        pruneInFlightPages(around: page, lookAhead: lookAhead)
+        lastAppearedIndex = index
     }
 
     private func ensurePageLoaded(_ page: Int) async {
-        guard page >= 0 else { return }
-        let start = page * pageSize
-        guard start < totalCount else { return }
-        guard !pagesLoaded.contains(page), !pagesInFlight.contains(page) else { return }
-
-        pagesInFlight.insert(page)
-        defer { pagesInFlight.remove(page) }
-        do {
-            let response = try await provider.items(in: containerID, kind: containerKind, page: pageRequest(forPage: page))
-            guard !Task.isCancelled else { return }
-            // Total can shift if the library changed; keep the grid in sync.
-            if response.totalCount != totalCount {
-                totalCount = response.totalCount
-                resize(to: response.totalCount)
-            }
-            fill(response)
-            pagesLoaded.insert(page)
-            pageError = nil
-        } catch is CancellationError {
-            return
-        } catch let error as AppError {
-            PlozzLog.app.error("LibraryBrowse: page \(page) failed for \(containerID): \(String(describing: error))")
-            pageError = error
-        } catch {
-            PlozzLog.app.error("LibraryBrowse: page \(page) failed for \(containerID): \(String(describing: error))")
-            pageError = .unknown("")
-        }
+        guard let task = startPageLoadIfNeeded(page) else { return }
+        await task.value
     }
 
-    private func pageRequest(forPage page: Int) -> PageRequest {
-        PageRequest(startIndex: page * pageSize, limit: pageSize, sort: sort)
+    private func schedulePageLoad(_ page: Int) {
+        _ = startPageLoadIfNeeded(page)
     }
 
     /// Applies a new sort order: persists the choice and, if it actually changed,
@@ -173,6 +202,165 @@ public final class LibraryBrowseViewModel {
     private static func saveSort(_ sort: CoreModels.SortDescriptor, for kind: MediaItemKind, to defaults: UserDefaults) {
         guard let data = try? JSONEncoder().encode(sort) else { return }
         defaults.set(data, forKey: defaultsKey(for: kind))
+    }
+
+    /// Tuned paging plan for library browse. The default provider limit (60) is
+    /// split into a small first page for near-instant first paint and a larger
+    /// steady-state page size for efficient long-scroll throughput.
+    static func tunedPageSizes(for requestedPageSize: Int) -> (first: Int, subsequent: Int) {
+        let clamped = max(requestedPageSize, 1)
+        guard clamped == PageRequest.defaultLimit else { return (clamped, clamped) }
+        let first = min(clamped, 7 * 4)        // 4 visible rows in a 7-column grid.
+        let subsequent = min(clamped, 7 * 6)   // 6-row steady-state balance.
+        return (max(first, 1), max(subsequent, 1))
+    }
+
+    private func pageRequest(forPage page: Int) -> PageRequest {
+        PageRequest(
+            startIndex: startIndex(forPage: page),
+            limit: pageSpan(forPage: page),
+            sort: sort
+        )
+    }
+
+    private func startIndex(forPage page: Int) -> Int {
+        if page <= 0 { return 0 }
+        return firstPageSize + (page - 1) * subsequentPageSize
+    }
+
+    private func pageSpan(forPage page: Int) -> Int {
+        page <= 0 ? firstPageSize : subsequentPageSize
+    }
+
+    private func pageForIndex(_ index: Int) -> Int {
+        guard index >= firstPageSize else { return 0 }
+        return 1 + ((index - firstPageSize) / max(subsequentPageSize, 1))
+    }
+
+    private func maxLookAheadPages(fromPage page: Int) -> Int {
+        guard totalCount > 0 else { return 0 }
+        let lastPage = pageForIndex(totalCount - 1)
+        return max(0, lastPage - page)
+    }
+
+    private func prefetchLookAheadPages(for index: Int, inPage page: Int) -> Int {
+        let pageStart = startIndex(forPage: page)
+        let pageLength = max(pageSpan(forPage: page), 1)
+        let indexInPage = index - pageStart
+        var lookAhead = indexInPage >= pageLength / 2 ? 1 : 0
+        if let previous = lastAppearedIndex {
+            let jump = abs(index - previous)
+            if jump >= pageLength * 2 {
+                lookAhead = max(lookAhead, 3)
+            } else if jump >= pageLength {
+                lookAhead = max(lookAhead, 2)
+            }
+        }
+        return min(lookAhead, maxLookAheadPages(fromPage: page))
+    }
+
+    private func startPageLoadIfNeeded(_ page: Int) -> Task<Void, Never>? {
+        guard page >= 0 else { return nil }
+        let start = startIndex(forPage: page)
+        guard start < totalCount else { return nil }
+        guard !pagesLoaded.contains(page) else { return nil }
+        if let existing = pageTasks[page] { return existing }
+
+        pagesInFlight.insert(page)
+        let request = pageRequest(forPage: page)
+        let priority: TaskPriority = (visibleCellCountsByPage[page] ?? 0) > 0 ? .userInitiated : .utility
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performPageLoad(page: page, request: request, priority: priority)
+        }
+        pageTasks[page] = task
+        return task
+    }
+
+    private func performPageLoad(page: Int, request: PageRequest, priority: TaskPriority) async {
+        defer { finishPageLoad(page) }
+        do {
+            let response = try await Self.fetchPage(
+                provider: provider,
+                containerID: containerID,
+                containerKind: containerKind,
+                request: request,
+                priority: priority
+            )
+            guard !Task.isCancelled else { return }
+            if response.totalCount != totalCount {
+                totalCount = response.totalCount
+                resize(to: response.totalCount)
+                pagesLoaded = Set(pagesLoaded.filter { startIndex(forPage: $0) < response.totalCount })
+            }
+            fill(response)
+            pagesLoaded.insert(page)
+            pageError = nil
+            cancelOutOfRangeInFlightPages()
+        } catch is CancellationError {
+            return
+        } catch let error as AppError {
+            PlozzLog.app.error("LibraryBrowse: page \(page) failed for \(containerID): \(String(describing: error))")
+            pageError = error
+        } catch {
+            PlozzLog.app.error("LibraryBrowse: page \(page) failed for \(containerID): \(String(describing: error))")
+            pageError = .unknown("")
+        }
+    }
+
+    private func finishPageLoad(_ page: Int) {
+        pageTasks[page] = nil
+        pagesInFlight.remove(page)
+    }
+
+    private func cancelPageLoad(_ page: Int) {
+        guard !pagesLoaded.contains(page) else { return }
+        if let task = pageTasks[page] {
+            task.cancel()
+            pageTasks[page] = nil
+        }
+        pagesInFlight.remove(page)
+    }
+
+    private func cancelAllPageLoads() {
+        for task in pageTasks.values {
+            task.cancel()
+        }
+        pageTasks = [:]
+    }
+
+    private func pruneInFlightPages(around page: Int, lookAhead: Int) {
+        let minKeep = max(0, page - 1)
+        let maxKeep = page + max(lookAhead, 1) + 1
+        for candidate in Array(pageTasks.keys) {
+            if (visibleCellCountsByPage[candidate] ?? 0) > 0 { continue }
+            if candidate < minKeep || candidate > maxKeep {
+                cancelPageLoad(candidate)
+            }
+        }
+    }
+
+    private func cancelOutOfRangeInFlightPages() {
+        for page in Array(pageTasks.keys) where startIndex(forPage: page) >= totalCount {
+            cancelPageLoad(page)
+        }
+    }
+
+    private nonisolated static func fetchPage(
+        provider: any MediaProvider,
+        containerID: String,
+        containerKind: MediaItemKind,
+        request: PageRequest,
+        priority: TaskPriority
+    ) async throws -> MediaPage {
+        let task = Task.detached(priority: priority) {
+            try await provider.items(in: containerID, kind: containerKind, page: request)
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     /// Writes a fetched page's items into their absolute slots.

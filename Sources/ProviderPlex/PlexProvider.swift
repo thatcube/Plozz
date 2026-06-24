@@ -98,14 +98,15 @@ public struct PlexProvider: MediaProvider {
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         let type = Self.sectionType(forContainerKind: kind)
         PlozzLog.networking.info(
-            "Plex library browse: section=\(containerID) kind=\(kind.rawValue) type=\(type.map(String.init) ?? "-") start=\(page.startIndex) size=\(page.limit)"
+            "Plex library browse: section=\(containerID) kind=\(kind.rawValue) type=\(type.map(String.init) ?? "-") start=\(page.startIndex) size=\(page.limit) sort=\(page.sort.field.rawValue)/\(page.sort.direction.rawValue)"
         )
         do {
             let container = try await client.sectionItems(
                 sectionID: containerID,
                 type: type,
                 start: page.startIndex,
-                size: page.limit
+                size: page.limit,
+                sort: page.sort
             )
             let items = (container.Metadata ?? []).map(map(metadata:))
             let total = container.totalSize ?? container.size ?? (page.startIndex + items.count)

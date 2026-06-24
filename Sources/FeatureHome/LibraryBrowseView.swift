@@ -15,6 +15,7 @@ import CoreUI
 /// a single all-items request.
 public struct LibraryBrowseView: View {
     @State private var viewModel: LibraryBrowseViewModel
+    @State private var prefetchedArtworkItemIDs: Set<String> = []
     private let title: String
     private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
@@ -122,16 +123,45 @@ public struct LibraryBrowseView: View {
 
     @ViewBuilder
     private func cell(at index: Int) -> some View {
-        if let item = viewModel.item(at: index) {
-            // Shared poster card — identical to Home's "Recently Added" row.
-            PosterCardView(item: item, style: .poster, spoilerSettings: spoilerSettings) {
-                onSelect(item)
+        Group {
+            if let item = viewModel.item(at: index) {
+                // Shared poster card — identical to Home's "Recently Added" row.
+                PosterCardView(
+                    item: item,
+                    style: .poster,
+                    spoilerSettings: spoilerSettings,
+                    enablesAsyncArtworkFallback: false
+                ) {
+                    onSelect(item)
+                }
+            } else {
+                PosterPlaceholderView()
             }
-            .onAppear { Task { await viewModel.itemAppeared(at: index) } }
-        } else {
-            PosterPlaceholderView()
-                .onAppear { Task { await viewModel.itemAppeared(at: index) } }
         }
+        .task(id: index) {
+            await viewModel.itemAppeared(at: index)
+            prefetchArtwork(aheadFrom: index)
+        }
+        .onDisappear { viewModel.itemDisappeared(at: index) }
+    }
+
+    /// Warms decoded poster art for a short forward window once a cell appears so
+    /// rapid right-hold scrolling reuses ready thumbnails instead of flashing gray
+    /// placeholders.
+    private func prefetchArtwork(aheadFrom index: Int) {
+        #if canImport(UIKit)
+        guard index >= 0, index < viewModel.totalCount else { return }
+        let upper = min(index + 10, viewModel.totalCount - 1)
+        guard index <= upper else { return }
+        for candidateIndex in index...upper {
+            guard let candidate = viewModel.item(at: candidateIndex) else { continue }
+            guard !prefetchedArtworkItemIDs.contains(candidate.id) else { continue }
+            prefetchedArtworkItemIDs.insert(candidate.id)
+            for url in candidate.artworkCandidates(for: .poster).prefix(2) {
+                ArtworkImageCache.shared.prefetch(url, variant: .posterCard)
+            }
+        }
+        #endif
     }
 }
 

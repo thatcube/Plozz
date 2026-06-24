@@ -190,14 +190,35 @@ public struct PlexProvider: MediaProvider {
 
     /// Builds a Plex scrubbing-preview source from a part's BIF index, when the
     /// server has generated "video preview thumbnails" (signalled by the part's
-    /// `indexes` listing `sd`). Returns `nil` otherwise so the player simply
+    /// `indexes` list). Returns `nil` otherwise so the player simply
     /// shows no preview.
     func scrubPreview(for part: PlexPart) -> ScrubPreviewSource? {
-        guard let partID = part.id,
-              let indexes = part.indexes,
-              indexes.lowercased().contains("sd"),
-              let url = client.bifIndexURL(partID: partID, quality: "sd")
-        else { return nil }
+        guard let partID = part.id else {
+            PlozzLog.playback.debug("Plex scrub preview unavailable: missing part id")
+            return nil
+        }
+        guard let rawIndexes = part.indexes, !rawIndexes.isEmpty else {
+            PlozzLog.playback.debug("Plex scrub preview unavailable: no BIF indexes partID=\(partID)")
+            return nil
+        }
+        let availableQualities = rawIndexes
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        guard !availableQualities.isEmpty else {
+            PlozzLog.playback.debug("Plex scrub preview unavailable: malformed BIF indexes partID=\(partID)")
+            return nil
+        }
+
+        // Prefer higher-resolution previews when the server advertises them.
+        let preferredOrder = ["hd", "sd"]
+        let quality = preferredOrder.first(where: { availableQualities.contains($0) }) ?? availableQualities.first
+        guard let quality, let url = client.bifIndexURL(partID: partID, quality: quality) else {
+            PlozzLog.playback.debug("Plex scrub preview unavailable: failed to build BIF URL partID=\(partID)")
+            return nil
+        }
+
+        PlozzLog.playback.debug("Plex scrub preview selected partID=\(partID) quality=\(quality)")
         return .plexBIF(url: url)
     }
 

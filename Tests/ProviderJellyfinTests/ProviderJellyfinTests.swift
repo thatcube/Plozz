@@ -431,6 +431,64 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertTrue(first.contains("mediaSourceId=src1"), first)
     }
 
+    func testPlaybackInfoParsesTrickplayManifestForEpisode() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/e1", json: """
+        {"Id":"e1","Name":"Episode 1","Type":"Episode","RunTimeTicks":0,
+        "Trickplay":{"src1":{"320":{"Width":320,"Height":180,"TileWidth":10,"TileHeight":10,
+        "ThumbnailCount":150,"Interval":10000,"Bandwidth":1000}}}}
+        """)
+        stub.stub(pathSuffix: "/Items/e1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
+        "PlaySessionId":"ps-episode"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "e1")
+        let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
+        XCTAssertEqual(manifest.thumbnailCount, 150)
+        XCTAssertTrue(manifest.tileURLs[0].absoluteString.contains("/Videos/e1/Trickplay/320/0.jpg"))
+    }
+
+    func testPlaybackInfoTrickplayFallbackUsesManifestSourceID() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i2", json: """
+        {"Id":"i2","Name":"Movie","Type":"Movie","RunTimeTicks":0,
+        "Trickplay":{"actual-src":{"320":{"Width":320,"Height":180,"TileWidth":10,"TileHeight":10,
+        "ThumbnailCount":100,"Interval":10000,"Bandwidth":1000}}}}
+        """)
+        stub.stub(pathSuffix: "/Items/i2/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"playback-src","Container":"mp4","SupportsDirectPlay":true}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "i2")
+        let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
+        let first = manifest.tileURLs[0].absoluteString
+        XCTAssertTrue(first.contains("mediaSourceId=actual-src"), first)
+        XCTAssertFalse(first.contains("mediaSourceId=playback-src"), first)
+    }
+
+    func testPlaybackInfoTrickplayParsesCompositeWidthKey() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i3", json: """
+        {"Id":"i3","Name":"Movie","Type":"Movie","RunTimeTicks":0,
+        "Trickplay":{"src1":{"320x180":{"Width":320,"Height":180,"TileWidth":10,"TileHeight":10,
+        "ThumbnailCount":100,"Interval":10000,"Bandwidth":1000}}}}
+        """)
+        stub.stub(pathSuffix: "/Items/i3/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","Container":"mp4","SupportsDirectPlay":true}],
+        "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "i3")
+        let manifest = try XCTUnwrap(request.scrubPreview?.tiledManifest)
+        XCTAssertEqual(manifest.thumbnailWidth, 320)
+        XCTAssertTrue(manifest.tileURLs[0].absoluteString.contains("/Trickplay/320/0.jpg"))
+    }
+
     func testPlaybackInfoHasNoTrickplayWhenServerOmitsIt() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """

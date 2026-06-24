@@ -591,7 +591,7 @@ private struct ScrubBar: View {
                     .offset(x: knobX - knobWidth / 2)
                     .shadow(radius: 4)
 
-                if model.isScrubbing {
+                if model.isScrubbing && model.hasPreviewFrame {
                     thumbnailPreview(width: width, knobX: knobX)
                         .transition(.thumbnailDismiss)
                 }
@@ -715,43 +715,39 @@ private struct ScrubBar: View {
 
     @ViewBuilder
     private func thumbnailPreview(width: CGFloat, knobX: CGFloat) -> some View {
-        let thumbWidth: CGFloat = 420
-        let aspect = previewAspect
-        let thumbHeight = thumbWidth / aspect
-        let edgeMargin: CGFloat = 16
-        let minX = -leadingInset + thumbWidth / 2 + edgeMargin
-        let maxX = width + trailingInset - thumbWidth / 2 - edgeMargin
-        let clampedX = min(max(minX, knobX), max(minX, maxX))
-        let corner: CGFloat = 18
-        let border: CGFloat = 12
+        if let image = model.previewImage {
+            let thumbWidth: CGFloat = 420
+            let aspect = previewAspect
+            let thumbHeight = thumbWidth / aspect
+            let edgeMargin: CGFloat = 16
+            let minX = -leadingInset + thumbWidth / 2 + edgeMargin
+            let maxX = width + trailingInset - thumbWidth / 2 - edgeMargin
+            let clampedX = min(max(minX, knobX), max(minX, maxX))
+            let corner: CGFloat = 18
+            let border: CGFloat = 12
 
-        let content = Group {
-            if let image = model.previewImage {
-                Image(decorative: image, scale: 1, orientation: .up)
-                    .resizable()
-                    .interpolation(.medium)
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                Rectangle().fill(.black.opacity(0.6))
-            }
-        }
-        .frame(width: thumbWidth, height: thumbHeight)
-        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            let content = Image(decorative: image, scale: 1, orientation: .up)
+                .resizable()
+                .interpolation(.medium)
+                .aspectRatio(contentMode: .fill)
+                .frame(width: thumbWidth, height: thumbHeight)
+                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
 
-        Group {
-            if #available(tvOS 26.0, *) {
-                content
-                    .padding(border)
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: corner + border, style: .continuous))
-            } else {
-                content
-                    .overlay(
-                        RoundedRectangle(cornerRadius: corner, style: .continuous)
-                            .stroke(.white.opacity(0.85), lineWidth: border)
-                    )
+            Group {
+                if #available(tvOS 26.0, *) {
+                    content
+                        .padding(border)
+                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: corner + border, style: .continuous))
+                } else {
+                    content
+                        .overlay(
+                            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                                .stroke(.white.opacity(0.85), lineWidth: border)
+                        )
+                }
             }
+            .position(x: clampedX, y: Self.timeRowY - 46 - thumbHeight / 2)
         }
-        .position(x: clampedX, y: Self.timeRowY - 46 - thumbHeight / 2)
     }
 
     private var previewAspect: CGFloat {

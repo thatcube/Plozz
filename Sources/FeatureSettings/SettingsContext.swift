@@ -36,6 +36,23 @@ struct SettingsContext {
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 }
 
+/// Typed routes for the Settings drill-down NavigationStack. Defined at file
+/// scope (not nested in `SettingsView`) so detail pages can push their own
+/// destinations onto the same stack — `ServersAndLibrariesDetailView` uses
+/// this to drill from a server summary row into `ServerDetailView`, and a
+/// future per-account flow can do the same without re-plumbing closures.
+enum SettingsRoute: Hashable {
+    case profile
+    case servers
+    case appearance
+    case captions
+    case spoilers
+    case integrations
+    case about
+    case plexUser(accountID: String)
+    case server(key: String)
+}
+
 /// A titled section rendered as a translucent panel. Reused by every Settings
 /// detail page so the visual treatment is consistent.
 struct SettingsPanel<Content: View>: View {

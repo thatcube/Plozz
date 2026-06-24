@@ -23,17 +23,6 @@ public struct SettingsView: View {
     /// NavigationStack on tvOS — the closure-based form sometimes hosts the
     /// destination *outside* the stack, so the Menu/Back button quits the app
     /// instead of popping back.
-    private enum SettingsRoute: Hashable {
-        case profile
-        case servers
-        case appearance
-        case captions
-        case spoilers
-        case integrations
-        case about
-        case plexUser(accountID: String)
-    }
-
     @State private var path: [SettingsRoute] = []
 
     private let captions: CaptionSettingsModel
@@ -320,6 +309,8 @@ public struct SettingsView: View {
             )
         case let .plexUser(accountID):
             PlexLinkedUserDetailView(context: context, accountID: accountID)
+        case let .server(key):
+            ServerDetailView(context: context, serverKey: key)
         }
     }
 
@@ -328,34 +319,46 @@ public struct SettingsView: View {
     /// Big avatar + name + switch button rendered as the *top* of the profile
     /// container card. Visually fused with the rows below (no card divider).
     private var profileHeaderInline: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 20) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 24) {
                 ZStack {
                     Circle()
-                        .fill(Color.accentColor.opacity(0.28))
+                        .fill(Color.accentColor.opacity(0.32))
+                    Circle()
+                        .strokeBorder(Color.accentColor, lineWidth: 3)
                     Image(systemName: activeProfile.avatarSymbol)
-                        .font(.largeTitle)
+                        .font(.system(size: 52, weight: .semibold))
                         .foregroundStyle(.primary)
                 }
-                .frame(width: 72, height: 72)
+                .frame(width: 104, height: 104)
+                .shadow(color: Color.accentColor.opacity(0.35), radius: 12, y: 4)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Settings for")
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.crop.circle.badge.checkmark")
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(Color.accentColor)
+                        Text("Active profile")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.accentColor)
+                            .textCase(.uppercase)
+                            .tracking(1.2)
+                    }
+                    Text(activeProfile.name)
+                        .font(.system(size: 44, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    Text("Settings below are saved on this profile.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                    Text(activeProfile.name)
-                        .font(.title2.weight(.semibold))
                 }
                 Spacer()
                 Button(action: onSwitchProfile) {
                     Label("Switch Profile", systemImage: "person.2.circle")
+                        .labelStyle(.titleAndIcon)
+                        .font(.headline)
                 }
             }
-            Text("Everything below is saved on this profile. Switching profiles swaps it all at once.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(28)
     }

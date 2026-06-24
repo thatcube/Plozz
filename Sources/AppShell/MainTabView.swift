@@ -99,7 +99,6 @@ struct MainTabView: View {
                 captions: captionModel,
                 spoilers: spoilerModel,
                 theme: themeModel,
-                diagnostics: diagnosticsModel,
                 homeVisibility: homeVisibility,
                 trakt: trakt,
                 discoveredLibraries: discovery.state,

@@ -12,7 +12,6 @@ struct SettingsContext {
     let captions: CaptionSettingsModel
     let spoilers: SpoilerSettingsModel
     let theme: ThemeSettingsModel
-    let diagnostics: DiagnosticsSettingsModel
     let homeVisibility: HomeLibraryVisibilityModel
     let discoveredLibraries: LoadState<[AggregatedLibrary]>
     let reloadLibraries: () async -> Void

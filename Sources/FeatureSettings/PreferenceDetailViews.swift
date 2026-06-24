@@ -46,27 +46,6 @@ struct AppearanceDetailView: View {
     }
 }
 
-struct PlaybackDetailView: View {
-    @Bindable var diagnostics: DiagnosticsSettingsModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Playback").font(.largeTitle.bold())
-                SettingsPanel(
-                    title: "Diagnostics",
-                    footer: "Overlays live stream details (resolution, bitrate, codec, HDR, buffer, dropped frames) on top of the player."
-                ) {
-                    Toggle("Show playback diagnostics", isOn: $diagnostics.settings.isEnabled)
-                }
-            }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
-        }
-        .scrollClipDisabled()
-    }
-}
-
 struct CaptionsDetailView: View {
     @Bindable var captions: CaptionSettingsModel
 

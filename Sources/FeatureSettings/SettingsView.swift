@@ -27,7 +27,6 @@ public struct SettingsView: View {
         case profile
         case servers
         case appearance
-        case playback
         case captions
         case spoilers
         case integrations
@@ -39,7 +38,6 @@ public struct SettingsView: View {
     private let captions: CaptionSettingsModel
     private let spoilers: SpoilerSettingsModel
     private let theme: ThemeSettingsModel
-    private let diagnostics: DiagnosticsSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
     private let trakt: TraktService
     private let discoveredLibraries: LoadState<[AggregatedLibrary]>
@@ -69,7 +67,6 @@ public struct SettingsView: View {
         captions: CaptionSettingsModel,
         spoilers: SpoilerSettingsModel,
         theme: ThemeSettingsModel,
-        diagnostics: DiagnosticsSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
         trakt: TraktService,
         discoveredLibraries: LoadState<[AggregatedLibrary]>,
@@ -98,7 +95,6 @@ public struct SettingsView: View {
         self.captions = captions
         self.spoilers = spoilers
         self.theme = theme
-        self.diagnostics = diagnostics
         self.homeVisibility = homeVisibility
         self.trakt = trakt
         self.discoveredLibraries = discoveredLibraries
@@ -130,7 +126,6 @@ public struct SettingsView: View {
             captions: captions,
             spoilers: spoilers,
             theme: theme,
-            diagnostics: diagnostics,
             homeVisibility: homeVisibility,
             discoveredLibraries: discoveredLibraries,
             reloadLibraries: reloadLibraries,
@@ -188,10 +183,6 @@ public struct SettingsView: View {
                                    value: theme.theme.displayName,
                                    route: .appearance)
                             Divider()
-                            navRow("Playback", icon: "play.rectangle",
-                                   value: diagnostics.settings.isEnabled ? "Diagnostics on" : nil,
-                                   route: .playback)
-                            Divider()
                             navRow("Captions", icon: "captions.bubble",
                                    value: nil,
                                    route: .captions)
@@ -235,8 +226,6 @@ public struct SettingsView: View {
             ServersAndLibrariesDetailView(context: context)
         case .appearance:
             AppearanceDetailView(theme: theme)
-        case .playback:
-            PlaybackDetailView(diagnostics: diagnostics)
         case .captions:
             CaptionsDetailView(captions: captions)
         case .spoilers:

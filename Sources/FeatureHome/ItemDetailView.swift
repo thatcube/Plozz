@@ -78,7 +78,12 @@ public struct ItemDetailView: View {
         }
         // Detail is a full-screen sub-page: hide the top tab bar.
         .toolbar(.hidden, for: .tabBar)
-        .task { if viewModel.state.value == nil { await viewModel.load() } }
+        // Always run load(), even when the page was seeded with the tapped list
+        // item for instant first paint. The seed only paints a hero; load() must
+        // still fetch the full detail AND its children (seasons/episodes). Skipping
+        // it for seeded opens stranded series pages with no seasons/episodes/Play
+        // button. load() guards against flashing `.loading` over a seeded hero.
+        .task { await viewModel.load() }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             if let mutation = MediaItemMutation.from(note) {
                 viewModel.applyWatchedState(mutation)

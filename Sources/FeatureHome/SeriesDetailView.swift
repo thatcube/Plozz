@@ -102,7 +102,12 @@ struct SeriesDetailView: View {
             // Let the hero bleed into the top overscan inset instead of the
             // ScrollView reserving it as a blank bar above the backdrop.
             .ignoresSafeArea(.container, edges: .top)
-            .task { await prepareInitialSeason() }
+            // Re-run when the season set changes — not just once on first appear.
+            // A seeded page first renders with empty `seasons` (children haven't
+            // loaded yet); keying on the season ids re-runs this the moment they
+            // arrive so a series/episode entry (selectedSeasonID still nil) picks
+            // its first season and loads episodes instead of staying empty.
+            .task(id: seasons.map(\.id)) { await prepareInitialSeason() }
             // Warm the current season's episode thumbnails as soon as they load, so
             // cards already have their thumbnail when scrolled to rather than
             // visibly fetching it on appear.
@@ -110,7 +115,7 @@ struct SeriesDetailView: View {
             // Background-warm *every* season's thumbnails the moment the page opens,
             // so switching seasons later is instant (no gray-placeholder flash)
             // rather than fetching that season's stills only once it is selected.
-            .task { await prewarmAllSeasons() }
+            .task(id: seasons.map(\.id)) { await prewarmAllSeasons() }
             // The hero mirrors the focused episode via a local copy, so when a
             // watched/watchlist mutation broadcasts (e.g. from the hero's own
             // Watched button), flip the same flags on `heroItem` in place so the

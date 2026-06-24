@@ -160,6 +160,10 @@ private func resolveOptionalProvider(_ accountID: String, in accounts: [Resolved
 /// user opened, it searches every *other* signed-in account, merges the hits with
 /// the primary by ``MediaItemIdentity`` (the same safe identity rules the Home /
 /// Search dedupe use), and returns the unified per-server ``MediaSourceRef`` list.
+/// The matching is **by provider IDs**, so a copy stored under a *different title*
+/// on another server still collapses into the picker — see
+/// ``CrossServerSourceResolver`` (which also widens the search with a normalized
+/// title so that differently-annotated copy is actually returned to be matched).
 ///
 /// This is what makes the **server picker appear from Home** even when only one
 /// server surfaced the title in its row (Recently Added / Continue Watching are
@@ -200,28 +204,21 @@ private func crossServerSourceResolver(
 ) -> (@Sendable (MediaItem) async -> [MediaSourceRef])? {
     guard accounts.count > 1 else { return nil }
     let serverInfo = accounts.sourceServerInfo()
+    let providersByAccountID: [String: any MediaProvider] = Dictionary(
+        accounts.map { ($0.account.id, $0.provider) },
+        uniquingKeysWith: { first, _ in first }
+    )
     return { primary in
-        let query = primary.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return [] }
-        let others = accounts.filter { $0.account.id != primary.sourceAccountID }
-        guard !others.isEmpty else { return [] }
-        let hits: [MediaItem] = await withTaskGroup(of: [MediaItem].self) { group in
-            for resolved in others {
-                let accountID = resolved.account.id
-                group.addTask {
-                    let found = await searchWithDeadline(
-                        resolved.provider, query: query, limit: 25, seconds: 4
-                    )
-                    return found.map { $0.taggingSource(accountID) }
-                }
-            }
-            var all: [MediaItem] = []
-            for await groupHits in group { all.append(contentsOf: groupHits) }
-            return all
-        }
-        guard !hits.isEmpty else { return [] }
-        let merged = MediaItemMerger.merge([primary] + hits, serverInfo: { serverInfo[$0] })
-        return merged.first(where: { $0.id == primary.id })?.sources ?? []
+        let others = providersByAccountID.keys.filter { $0 != primary.sourceAccountID }
+        return await CrossServerSourceResolver.resolve(
+            primary: primary,
+            otherAccountIDs: others,
+            search: { accountID, query in
+                guard let provider = providersByAccountID[accountID] else { return [] }
+                return await searchWithDeadline(provider, query: query, limit: 25, seconds: 4)
+            },
+            serverInfo: { serverInfo[$0] }
+        )
     }
 }
 

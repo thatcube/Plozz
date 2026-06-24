@@ -163,6 +163,23 @@ donating is completely fine too.
 
 **[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time or recurring, whatever suits you.
 
+## Credits & attribution
+
+Plozz is an unofficial client and is not affiliated with, endorsed, or certified
+by any of the services below.
+
+- **The Movie Database (TMDB)** — some artwork and metadata is provided by the
+  TMDB API. This product uses the TMDB API but is not endorsed or certified by
+  TMDB. TMDB's marks and logos are trademarks of TMDB.
+
+  <a href="https://www.themoviedb.org"><img src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg" alt="The Movie Database (TMDB)" height="24" /></a>
+
+- **OMDb API** — optional IMDb ratings enrichment (requires your own OMDb key).
+- **AniList** — keyless community scores for anime titles.
+- **Plex** and **Jellyfin** — the media servers Plozz connects to. All library
+  content, artwork, and ratings shown in the app are supplied by your own
+  server. "Plex" and "Jellyfin" are trademarks of their respective owners.
+
 ## License
 
 [MIT](LICENSE) © 2026 Brandon Moore

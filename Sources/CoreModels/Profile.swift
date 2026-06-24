@@ -45,6 +45,9 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// the Home-users list so Plozz knows to prompt without refetching. The PIN
     /// itself is never stored.
     public var plexHomeUserRequiresPIN: Bool?
+    /// Cached Plex `thumb` URL for the linked Home user, so Settings can show
+    /// the Plex avatar inline without re-hitting the network on every render.
+    public var plexHomeUserAvatarURL: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -56,7 +59,8 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         plexHomeUserID: String? = nil,
         plexHomeUserName: String? = nil,
         plexHomeUserAccountID: String? = nil,
-        plexHomeUserRequiresPIN: Bool? = nil
+        plexHomeUserRequiresPIN: Bool? = nil,
+        plexHomeUserAvatarURL: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -68,6 +72,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.plexHomeUserName = plexHomeUserName
         self.plexHomeUserAccountID = plexHomeUserAccountID
         self.plexHomeUserRequiresPIN = plexHomeUserRequiresPIN
+        self.plexHomeUserAvatarURL = plexHomeUserAvatarURL
     }
 
     /// Stable namespace used to scope this profile's settings stores. The

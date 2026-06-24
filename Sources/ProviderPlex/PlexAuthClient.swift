@@ -194,7 +194,8 @@ public struct PlexAuthClient: Sendable {
                 name: user.title ?? user.username ?? "Plex User",
                 requiresPIN: user.protected ?? user.hasPassword ?? false,
                 isAdmin: user.admin ?? false,
-                isRestricted: user.restricted ?? false
+                isRestricted: user.restricted ?? false,
+                avatarURL: user.thumb.flatMap(URL.init(string:))
             )
         }
     }

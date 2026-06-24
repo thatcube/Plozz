@@ -19,18 +19,23 @@ public struct PlexHomeUser: Identifiable, Hashable, Sendable, Codable {
     public let isAdmin: Bool
     /// `true` for a managed (restricted) user, e.g. a kid profile.
     public let isRestricted: Bool
+    /// Plex `thumb` URL — the Home user's avatar. Used by the linked-user picker
+    /// in Settings so the row shows the Plex avatar, not just text + an icon.
+    public let avatarURL: URL?
 
     public init(
         id: String,
         name: String,
         requiresPIN: Bool,
         isAdmin: Bool = false,
-        isRestricted: Bool = false
+        isRestricted: Bool = false,
+        avatarURL: URL? = nil
     ) {
         self.id = id
         self.name = name
         self.requiresPIN = requiresPIN
         self.isAdmin = isAdmin
         self.isRestricted = isRestricted
+        self.avatarURL = avatarURL
     }
 }

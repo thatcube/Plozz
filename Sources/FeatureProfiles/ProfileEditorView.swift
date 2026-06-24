@@ -29,6 +29,7 @@ public struct ProfileDraft: Equatable, Sendable {
     public var plexHomeUserName: String?
     public var plexHomeUserAccountID: String?
     public var plexHomeUserRequiresPIN: Bool?
+    public var plexHomeUserAvatarURL: String?
 
     public init(
         id: String?,
@@ -40,7 +41,8 @@ public struct ProfileDraft: Equatable, Sendable {
         plexHomeUserID: String? = nil,
         plexHomeUserName: String? = nil,
         plexHomeUserAccountID: String? = nil,
-        plexHomeUserRequiresPIN: Bool? = nil
+        plexHomeUserRequiresPIN: Bool? = nil,
+        plexHomeUserAvatarURL: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -52,6 +54,7 @@ public struct ProfileDraft: Equatable, Sendable {
         self.plexHomeUserName = plexHomeUserName
         self.plexHomeUserAccountID = plexHomeUserAccountID
         self.plexHomeUserRequiresPIN = plexHomeUserRequiresPIN
+        self.plexHomeUserAvatarURL = plexHomeUserAvatarURL
     }
 }
 
@@ -208,7 +211,8 @@ public struct ProfileEditorView: View {
             plexHomeUserID: editingProfile?.plexHomeUserID,
             plexHomeUserName: editingProfile?.plexHomeUserName,
             plexHomeUserAccountID: editingProfile?.plexHomeUserAccountID,
-            plexHomeUserRequiresPIN: editingProfile?.plexHomeUserRequiresPIN
+            plexHomeUserRequiresPIN: editingProfile?.plexHomeUserRequiresPIN,
+            plexHomeUserAvatarURL: editingProfile?.plexHomeUserAvatarURL
         ))
     }
 }

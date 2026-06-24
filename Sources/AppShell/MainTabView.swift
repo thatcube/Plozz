@@ -48,6 +48,8 @@ struct MainTabView: View {
     let onRemoveAccount: (Account) -> Void
     let onSignOutAll: () -> Void
     let onSwitchProfile: () -> Void
+    let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
+    let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 
     @State private var discovery = LibraryDiscoveryModel()
     @State private var audioController = AudioPlaybackController()
@@ -122,7 +124,9 @@ struct MainTabView: View {
                 onDeleteProfile: onDeleteProfile,
                 onAddAccount: onAddAccount,
                 onRemoveAccount: onRemoveAccount,
-                onSignOutAll: onSignOutAll
+                onSignOutAll: onSignOutAll,
+                plexHomeUsersFetcher: plexHomeUsersFetcher,
+                onSelectPlexHomeUser: onSelectPlexHomeUser
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }

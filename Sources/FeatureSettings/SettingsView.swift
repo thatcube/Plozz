@@ -31,6 +31,7 @@ public struct SettingsView: View {
         case spoilers
         case integrations
         case about
+        case plexUser(accountID: String)
     }
 
     @State private var path: [SettingsRoute] = []
@@ -62,6 +63,8 @@ public struct SettingsView: View {
     private let onAddAccount: () -> Void
     private let onRemoveAccount: (Account) -> Void
     private let onSignOutAll: () -> Void
+    private let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
+    private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 
     public init(
         captions: CaptionSettingsModel,
@@ -90,7 +93,9 @@ public struct SettingsView: View {
         onDeleteProfile: @escaping (String) -> Void,
         onAddAccount: @escaping () -> Void,
         onRemoveAccount: @escaping (Account) -> Void,
-        onSignOutAll: @escaping () -> Void
+        onSignOutAll: @escaping () -> Void,
+        plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
+        onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void
     ) {
         self.captions = captions
         self.spoilers = spoilers
@@ -119,6 +124,8 @@ public struct SettingsView: View {
         self.onAddAccount = onAddAccount
         self.onRemoveAccount = onRemoveAccount
         self.onSignOutAll = onSignOutAll
+        self.plexHomeUsersFetcher = plexHomeUsersFetcher
+        self.onSelectPlexHomeUser = onSelectPlexHomeUser
     }
 
     private var context: SettingsContext {
@@ -145,7 +152,9 @@ public struct SettingsView: View {
             onDeleteProfile: onDeleteProfile,
             onAddAccount: onAddAccount,
             onRemoveAccount: onRemoveAccount,
-            onSignOutAll: onSignOutAll
+            onSignOutAll: onSignOutAll,
+            plexHomeUsersFetcher: plexHomeUsersFetcher,
+            onSelectPlexHomeUser: onSelectPlexHomeUser
         )
     }
 
@@ -157,49 +166,15 @@ public struct SettingsView: View {
                         .font(.largeTitle.bold())
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // Switching profiles swaps every setting on this screen
-                    // (theme, captions, spoilers, Trakt, Home, server
-                    // inclusion). Make that explicit at the very top.
-                    if profilesEnabled {
-                        activeProfileHeader
-                    }
+                    // The profile-owned settings live INSIDE the profile's own
+                    // container, so the "this profile saves these settings"
+                    // relationship is visible at a glance. Switching profiles
+                    // swaps everything inside this container at once.
+                    profileContainer
 
-                    SettingsPanel {
-                        VStack(spacing: 0) {
-                            if profilesEnabled {
-                                navRow("Profile", icon: "person.crop.circle",
-                                       value: activeProfile.name,
-                                       route: .profile)
-                                Divider()
-                            } else {
-                                enableProfilesRow
-                                Divider()
-                            }
-                            navRow("Server Accounts", icon: "person.2.crop.square.stack",
-                                   value: serverAccountsSummary,
-                                   route: .servers)
-                            Divider()
-                            navRow("Appearance", icon: "paintpalette",
-                                   value: theme.theme.displayName,
-                                   route: .appearance)
-                            Divider()
-                            navRow("Captions", icon: "captions.bubble",
-                                   value: nil,
-                                   route: .captions)
-                            Divider()
-                            navRow("Spoilers", icon: "eye.slash",
-                                   value: spoilers.settings.isEnabled ? "On" : "Off",
-                                   route: .spoilers)
-                            Divider()
-                            navRow("Integrations", icon: "link",
-                                   value: traktSummary,
-                                   route: .integrations)
-                            Divider()
-                            navRow("About & Sign Out", icon: "info.circle",
-                                   value: nil,
-                                   route: .about)
-                        }
-                    }
+                    // Household-level controls stay outside the profile
+                    // container — they're not scoped to one profile.
+                    householdContainer
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 40)
@@ -209,6 +184,109 @@ public struct SettingsView: View {
                 destination(for: route)
             }
             .task { await reloadLibraries() }
+        }
+    }
+
+    // MARK: - Profile container (header + all settings this profile owns)
+
+    /// One visual container that wraps the active profile's identity AND
+    /// every setting it saves. The profile header is the *top* of the same
+    /// card the rows are nested in — so it reads as "the profile owns these."
+    @ViewBuilder
+    private var profileContainer: some View {
+        if profilesEnabled {
+            VStack(alignment: .leading, spacing: 0) {
+                profileHeaderInline
+                Divider()
+                    .padding(.horizontal, 28)
+                profileOwnedRows
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 8)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 2)
+            )
+        } else {
+            // Single-profile (solo) household: the same nested container,
+            // but framed as plain "Settings" with an explicit Enable Profiles
+            // entry point at the top.
+            VStack(alignment: .leading, spacing: 0) {
+                soloHeader
+                Divider().padding(.horizontal, 28)
+                profileOwnedRows
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 8)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+    }
+
+    /// Rows nested inside the profile container. Order is deliberate:
+    /// identity-shaping rows first (Plex linked user, Server accounts), then
+    /// presentation (Appearance, Captions, Spoilers), then Integrations, then
+    /// profile management (edit/delete, ask-on-startup). Each row pushes its
+    /// own detail page via the root NavigationStack.
+    @ViewBuilder
+    private var profileOwnedRows: some View {
+        VStack(spacing: 0) {
+            // Show the Plex Home user row whenever at least one Plex account
+            // is signed in. Tapping it opens the picker, which lists every
+            // signed-in Plex account's Home users with their Plex avatars.
+            if let plexAccountID = primaryPlexAccountID {
+                plexLinkedUserRow(accountID: plexAccountID)
+                Divider()
+            }
+            navRow("Server Accounts", icon: "person.2.crop.square.stack",
+                   value: serverAccountsSummary,
+                   route: .servers)
+            Divider()
+            navRow("Appearance", icon: "paintpalette",
+                   value: theme.theme.displayName,
+                   route: .appearance)
+            Divider()
+            navRow("Captions", icon: "captions.bubble",
+                   value: nil,
+                   route: .captions)
+            Divider()
+            navRow("Spoilers", icon: "eye.slash",
+                   value: spoilers.settings.isEnabled ? "On" : "Off",
+                   route: .spoilers)
+            Divider()
+            navRow("Integrations", icon: "link",
+                   value: traktSummary,
+                   route: .integrations)
+            if profilesEnabled {
+                Divider()
+                navRow("Manage Profiles", icon: "person.crop.circle",
+                       value: profiles.count == 1 ? "1 profile" : "\(profiles.count) profiles",
+                       route: .profile)
+            } else {
+                Divider()
+                enableProfilesRow
+            }
+        }
+    }
+
+    /// "About & Sign Out" lives outside the profile container — it's
+    /// household-scoped (app version, repo, sign out all accounts) not
+    /// per-profile.
+    private var householdContainer: some View {
+        SettingsPanel {
+            navRow("About & Sign Out", icon: "info.circle",
+                   value: nil,
+                   route: .about)
         }
     }
 
@@ -240,32 +318,130 @@ public struct SettingsView: View {
                 canSignOut: !accounts.isEmpty,
                 onSignOutAll: onSignOutAll
             )
+        case let .plexUser(accountID):
+            PlexLinkedUserDetailView(context: context, accountID: accountID)
         }
     }
 
-    // MARK: - Header (active profile)
+    // MARK: - Header (inside the profile container)
 
-    private var activeProfileHeader: some View {
-        SettingsPanel(
-            footer: "Switching profiles swaps every preference on this screen — theme, captions, spoilers, Trakt account, and which servers/libraries are included. Plozz remembers the last profile picked on this Apple TV user."
-        ) {
+    /// Big avatar + name + switch button rendered as the *top* of the profile
+    /// container card. Visually fused with the rows below (no card divider).
+    private var profileHeaderInline: some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 20) {
-                Image(systemName: activeProfile.avatarSymbol)
-                    .font(.largeTitle)
-                    .frame(width: 64, height: 64)
-                    .background(Circle().fill(Color.accentColor.opacity(0.25)))
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.28))
+                    Image(systemName: activeProfile.avatarSymbol)
+                        .font(.largeTitle)
+                        .foregroundStyle(.primary)
+                }
+                .frame(width: 72, height: 72)
+
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(activeProfile.name).font(.title3.weight(.semibold))
-                    Text(profiles.count == 1 ? "1 profile" : "\(profiles.count) profiles")
+                    Text("Settings for")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                    Text(activeProfile.name)
+                        .font(.title2.weight(.semibold))
                 }
                 Spacer()
                 Button(action: onSwitchProfile) {
                     Label("Switch Profile", systemImage: "person.2.circle")
                 }
             }
+            Text("Everything below is saved on this profile. Switching profiles swaps it all at once.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(28)
+    }
+
+    private var soloHeader: some View {
+        HStack(spacing: 20) {
+            Image(systemName: "gearshape.fill")
+                .font(.largeTitle)
+                .frame(width: 64, height: 64)
+                .background(Circle().fill(Color.primary.opacity(0.10)))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Settings").font(.title2.weight(.semibold))
+                Text("Used across the household. Enable profiles to give each viewer their own.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(28)
+    }
+
+    // MARK: - Plex linked user row (prominent, with Plex avatar)
+
+    /// First signed-in Plex account, used as the row's default account.
+    /// (The picker itself groups every Plex account when there are multiple.)
+    private var primaryPlexAccountID: String? {
+        accounts.first { $0.server.provider == .plex }?.id
+    }
+
+    private func plexLinkedUserRow(accountID: String) -> some View {
+        NavigationLink(value: SettingsRoute.plexUser(accountID: accountID)) {
+            HStack(spacing: 16) {
+                plexAvatar(size: 56)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Plex User")
+                        .font(.headline)
+                    Text(plexLinkedUserSubtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Big circular Plex avatar — uses the cached `plexHomeUserAvatarURL` so
+    /// the row shows the real Plex profile photo, not just text + an icon.
+    private func plexAvatar(size: CGFloat) -> some View {
+        let urlString = activeProfile.plexHomeUserAvatarURL
+        let url = urlString.flatMap(URL.init(string:))
+        return ZStack {
+            Circle()
+                .fill(ProviderIcon.tint(.plex).opacity(0.18))
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image.resizable().scaledToFill()
+                    default:
+                        ProviderIcon(provider: .plex, size: size * 0.55)
+                    }
+                }
+            } else {
+                ProviderIcon(provider: .plex, size: size * 0.55)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(ProviderIcon.tint(.plex).opacity(0.45), lineWidth: 1.5))
+    }
+
+    private var plexLinkedUserSubtitle: String {
+        if let name = activeProfile.plexHomeUserName, !name.isEmpty {
+            return activeProfile.plexHomeUserRequiresPIN == true
+                ? "\(name) • PIN required"
+                : name
+        }
+        return "Tap to pick your Plex Home user"
     }
 
     // MARK: - Enable profiles row (single-profile household)

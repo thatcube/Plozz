@@ -32,6 +32,8 @@ struct SettingsContext {
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
     let onSignOutAll: () -> Void
+    let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
+    let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 }
 
 /// A titled section rendered as a translucent panel. Reused by every Settings

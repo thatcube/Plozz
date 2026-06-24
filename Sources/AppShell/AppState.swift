@@ -319,6 +319,30 @@ public final class AppState {
         return (try? await plexHomeUsersFetch(adminToken, deviceID)) ?? []
     }
 
+    /// Links the active profile to a specific Plex Home user (or clears the
+    /// link when `user` is `nil`, falling back to the account's admin user).
+    /// Writes through to the profile, then re-applies the Plex identity so the
+    /// switch takes effect immediately (a protected user triggers the PIN
+    /// prompt via `ensurePlexIdentityForActiveProfile`).
+    public func setPlexHomeUserForActiveProfile(accountID: String, user: PlexHomeUser?) {
+        var profile = profilesModel.activeProfile
+        if let user {
+            profile.plexHomeUserID = user.id
+            profile.plexHomeUserName = user.name
+            profile.plexHomeUserAccountID = accountID
+            profile.plexHomeUserRequiresPIN = user.requiresPIN
+            profile.plexHomeUserAvatarURL = user.avatarURL?.absoluteString
+        } else {
+            profile.plexHomeUserID = nil
+            profile.plexHomeUserName = nil
+            profile.plexHomeUserAccountID = nil
+            profile.plexHomeUserRequiresPIN = nil
+            profile.plexHomeUserAvatarURL = nil
+        }
+        profilesModel.update(profile)
+        ensurePlexIdentityForActiveProfile()
+    }
+
     /// Submits a PIN for the outstanding Plex Home-user switch.
     public func submitPlexPIN(_ pin: String) {
         guard let request = pendingPlexPINRequest else { return }
@@ -518,6 +542,7 @@ public final class AppState {
                 profile.plexHomeUserName = draft.plexHomeUserName
                 profile.plexHomeUserAccountID = draft.plexHomeUserAccountID
                 profile.plexHomeUserRequiresPIN = draft.plexHomeUserRequiresPIN
+                profile.plexHomeUserAvatarURL = draft.plexHomeUserAvatarURL
                 profilesModel.update(profile)
             }
             if !draft.activeAccountIDs.isEmpty {
@@ -539,7 +564,8 @@ public final class AppState {
                 plexHomeUserID: draft.plexHomeUserID,
                 plexHomeUserName: draft.plexHomeUserName,
                 plexHomeUserAccountID: draft.plexHomeUserAccountID,
-                plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN
+                plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN,
+                plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL
             )
         }
     }

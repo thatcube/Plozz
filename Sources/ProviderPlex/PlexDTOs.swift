@@ -201,6 +201,7 @@ struct PlexHomeUserDTO: Decodable {
     let restricted: Bool?
     let protected: Bool?
     let hasPassword: Bool?
+    let thumb: String?
 }
 
 /// `POST /api/v2/home/users/{uuid}/switch` — returns the switched-to user,

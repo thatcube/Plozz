@@ -80,7 +80,9 @@ public struct RootView: View {
                         onAddAccount: { appState.addAccount() },
                         onRemoveAccount: { appState.removeAccount(id: $0.id) },
                         onSignOutAll: { appState.signOutAll() },
-                        onSwitchProfile: { appState.requestProfileSelection() }
+                        onSwitchProfile: { appState.requestProfileSelection() },
+                        plexHomeUsersFetcher: { await appState.plexHomeUsers(forAccountID: $0) },
+                        onSelectPlexHomeUser: { appState.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) }
                     )
                     .id("\(appState.profilesModel.activeProfileID)#\(appState.plexIdentityGeneration)")
                     }

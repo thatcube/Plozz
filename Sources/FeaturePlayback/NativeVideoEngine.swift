@@ -97,6 +97,11 @@ public final class NativeVideoEngine: VideoEngine {
     /// Retains the resource-loader delegate that serves injected subtitle
     /// playlists; `AVAssetResourceLoader` holds it only weakly.
     @ObservationIgnored private var subtitleLoader: SubtitleInjectingResourceLoader?
+    /// Off-critical-path default-subtitle pick. Runs concurrently with playback
+    /// startup so resolving the asset's `AVMediaSelectionGroup` never extends the
+    /// time-to-first-frame; cancelled on teardown so a stale selection never
+    /// applies to a replaced player item.
+    @ObservationIgnored private var defaultSubtitleSelectionTask: Task<Void, Never>?
     #if !os(macOS)
     @ObservationIgnored private var routeChangeObserver: NSObjectProtocol?
     @ObservationIgnored private var endOfPlaybackObserver: NSObjectProtocol?
@@ -184,7 +189,15 @@ public final class NativeVideoEngine: VideoEngine {
         player.playImmediately(atRate: Float(currentPlaybackRate))
 
         // Best-effort: pick the default subtitle for the user's mode/language.
-        await applyDefaultSubtitleSelection(for: item)
+        // Detached from the load() critical path because resolving the asset's
+        // `AVMediaSelectionGroup` involves additional I/O, and the first video
+        // frame must not wait on it. Cancelled in `teardownPlayer` so a stale
+        // selection never applies to a replaced player item.
+        defaultSubtitleSelectionTask?.cancel()
+        defaultSubtitleSelectionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.applyDefaultSubtitleSelection(for: item)
+        }
     }
 
     // MARK: - Dynamic range / Dolby Vision display switch
@@ -563,6 +576,8 @@ public final class NativeVideoEngine: VideoEngine {
         missingVideoProbeTask = nil
         formatInspectTask?.cancel()
         formatInspectTask = nil
+        defaultSubtitleSelectionTask?.cancel()
+        defaultSubtitleSelectionTask = nil
         subtitleLoader = nil
         if let endOfPlaybackObserver {
             NotificationCenter.default.removeObserver(endOfPlaybackObserver)
@@ -595,9 +610,12 @@ public final class NativeVideoEngine: VideoEngine {
     private func seekWhenReady(player: AVPlayer, to seconds: TimeInterval) async {
         guard let item = player.currentItem else { return }
         let deadline = Date().addingTimeInterval(5)
+        // 20ms poll keeps resume start-up snappy: most assets reach
+        // `.readyToPlay` within one or two ticks, instead of waiting out a
+        // coarse 50ms slot before the seek can fire.
         while item.status != .readyToPlay, Date() < deadline {
             if item.status == .failed { return }
-            try? await Task.sleep(nanoseconds: 50_000_000)
+            try? await Task.sleep(nanoseconds: 20_000_000)
         }
         await seek(player: player, to: seconds)
     }

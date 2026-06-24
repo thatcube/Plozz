@@ -71,6 +71,7 @@ public final class ItemDetailViewModel {
     public init(
         provider: any MediaProvider,
         itemID: String,
+        initialItem: MediaItem? = nil,
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
         sourceAccountID: String? = nil,
         onlineTrailerResolver: @escaping OnlineTrailerResolving = ItemDetailViewModel.defaultOnlineTrailerResolver,
@@ -84,6 +85,15 @@ public final class ItemDetailViewModel {
         self.onlineTrailerResolver = onlineTrailerResolver
         self.playableVideoIDResolver = playableVideoIDResolver
         self.trailerCache = trailerCache
+
+        // Seed the hero from the list item the user just tapped so the detail
+        // screen's first paint is INSTANT — before `provider.item(id:)` returns.
+        // `load()` then swaps in the fully-detailed item (and children/ratings)
+        // in place without ever dropping back to a loading/skeleton state.
+        if let initialItem {
+            let seeded = sourceAccountID.map(initialItem.taggingSource) ?? initialItem
+            self.state = .loaded(Detail(item: seeded, children: []))
+        }
     }
 
     /// Production online-trailer resolver: a keyless YouTube search (no API key,
@@ -100,26 +110,73 @@ public final class ItemDetailViewModel {
     }
 
     public func load() async {
-        state = .loading
+        // Don't flash a loading/skeleton state over a hero we already seeded from
+        // the tapped list item; only show `.loading` for a cold (unseeded) open.
+        if state.value == nil { state = .loading }
         do {
-            var item = try await provider.item(id: itemID)
-            item = await redirectingSeasonToSeries(item)
-            captureSeriesContext(from: item)
-            // Series/seasons have children to list; leaf items don't.
-            let children: [MediaItem]
+            var fetched = try await provider.item(id: itemID)
+            try Task.checkCancellation()
+            fetched = await redirectingSeasonToSeries(fetched)
+            try Task.checkCancellation()
+            captureSeriesContext(from: fetched)
+            // Immutable snapshot so the concurrent async-lets below capture a
+            // Sendable value (Swift 6 strict-concurrency forbids capturing
+            // mutated `var`s into concurrently-executing code).
+            let item = fetched
+            let taggedItem = tagged(item)
+
+            // Container kinds (series/season/folder/collection) have children
+            // to list; leaf items (movies, episodes, videos) don't.
+            let needsChildren: Bool
             switch item.kind {
-            case .series, .season, .folder, .collection:
-                children = try await provider.children(of: item.id)
-            default:
-                children = []
+            case .series, .season, .folder, .collection: needsChildren = true
+            default: needsChildren = false
             }
-            state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
-            await loadTrailers(for: item)
-            await enrichRatings(for: item)
+
+            // Publish the full-detail hero IMMEDIATELY so first paint isn't gated
+            // on the children round-trip. This also replaces any lighter seeded
+            // list item with the richer fetched one in place (same identity ⇒ no
+            // flicker). For container kinds the children rail starts empty and
+            // fills in below; for leaf kinds the empty list is final.
+            state = .loaded(Detail(item: taggedItem, children: []))
+
+            if needsChildren {
+                // Fan out: children, trailers, and ratings have no dependency on
+                // each other once `item` is known, so run them concurrently
+                // instead of serially. Trailers and ratings each guard against
+                // the user navigating away (`isStillLoaded` / state-id check).
+                async let childrenResult: [MediaItem] = (try? await provider.children(of: item.id)) ?? []
+                async let trailersDone: Void = loadTrailers(for: item)
+                async let ratingsDone: Void = enrichRatings(for: item)
+
+                let fetchedChildren = await childrenResult
+                // Patch children in place, preserving the loaded item identity so
+                // a fast Back-and-reopen doesn't clobber a newer load.
+                if case var .loaded(detail) = state, detail.item.id == taggedItem.id {
+                    detail.children = fetchedChildren.map(tagged)
+                    state = .loaded(detail)
+                }
+                _ = await trailersDone
+                _ = await ratingsDone
+            } else {
+                // Leaf kinds: hero is the final state for children; still load
+                // trailers/ratings off the critical path of first paint.
+                async let trailersDone: Void = loadTrailers(for: item)
+                async let ratingsDone: Void = enrichRatings(for: item)
+                _ = await trailersDone
+                _ = await ratingsDone
+            }
+        } catch is CancellationError {
+            // Back-button during load: leave whatever state we already published
+            // (seeded hero, full hero, or .loading) — never flash a failure for a
+            // clean cancel.
+            return
         } catch let error as AppError {
-            state = .failed(error)
+            // Don't bury an already-painted hero under a full-screen error just
+            // because the detail re-fetch failed; the seeded hero stays usable.
+            if state.value == nil { state = .failed(error) }
         } catch {
-            state = .failed(.unknown(""))
+            if state.value == nil { state = .failed(.unknown("")) }
         }
     }
 

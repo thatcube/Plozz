@@ -127,6 +127,14 @@ public final class PlayerViewModel {
     /// regular library playback leaves this `false`.
     private let autoDismissOnEnd: Bool
 
+    /// Optional playback bring-up started eagerly in `init` so the (network-bound)
+    /// `playbackInfo` resolution and engine warm-up overlap the SwiftUI fullscreen
+    /// navigation transition instead of starting only once the view appears. The
+    /// view's `load()` adopts (awaits) this task rather than starting a second
+    /// bring-up; `stop()` cancels it so a Back during the transition tears down
+    /// cleanly via the cancellation checks in `startPlayback`.
+    private var prefetchTask: Task<Void, Never>?
+
     public init(
         provider: any MediaProvider,
         itemID: String,
@@ -154,6 +162,13 @@ public final class PlayerViewModel {
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
         configureEngineCallbacks()
+
+        // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
+        // navigation transition. `load()` (from the view's `.task`) adopts this
+        // task; `stop()` cancels it on an early Back.
+        prefetchTask = Task { @MainActor [weak self] in
+            await self?.startPlayback(forceTranscode: false, resumeOverride: nil)
+        }
     }
 
     private func configureEngineCallbacks() {
@@ -250,6 +265,14 @@ public final class PlayerViewModel {
 
     /// Loads stream info, configures the player, and seeks to resume.
     public func load() async {
+        // Adopt the eager bring-up started in `init` (so we never resolve/bring up
+        // twice). If it already ran (or was cancelled), fall through to a normal
+        // load on a later, explicit call.
+        if let task = prefetchTask {
+            prefetchTask = nil
+            await task.value
+            return
+        }
         await startPlayback(forceTranscode: false, resumeOverride: nil)
     }
 
@@ -261,6 +284,10 @@ public final class PlayerViewModel {
         phase = .loading
         do {
             let request = try await provider.playbackInfo(for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
+            // A user-initiated Back during playbackInfo resolution should NOT
+            // proceed to bring up an engine that will immediately be torn down —
+            // short-circuit cleanly without going through the failure path.
+            try Task.checkCancellation()
             self.request = request
             configureControls(for: request)
 
@@ -303,11 +330,16 @@ public final class PlayerViewModel {
             }
 
             plozzTrace("startPlayback: routed initial engineKind=\(kind) (transcoding=\(request.isTranscoding))")
+            try Task.checkCancellation()
             await playResolved(request, engineKind: kind, startPosition: startPosition)
 
             // Best-effort, never blocking play(): (if enabled) fetch a missing
             // subtitle in the preferred language.
-            startAutoSubtitleDownloadIfNeeded(request: request)        } catch let error as AppError {
+            startAutoSubtitleDownloadIfNeeded(request: request)        } catch is CancellationError {
+            plozzTrace("startPlayback: cancelled before engine bring-up (itemID=\(itemID))")
+            // Leave `phase` as `.loading`; the view is dismissing.
+            return
+        } catch let error as AppError {
             plozzTrace("startPlayback: playbackInfo threw AppError=\(error) (itemID=\(itemID))")
             phase = .failed(error)
         } catch {
@@ -582,6 +614,8 @@ public final class PlayerViewModel {
     /// Call when leaving playback: report a final stop so the server records the
     /// resume point, then tear the engine down.
     public func stop() async {
+        prefetchTask?.cancel()
+        prefetchTask = nil
         cancelWatchdog()
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = nil

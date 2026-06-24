@@ -294,10 +294,6 @@ let package = Package(
             dependencies: ["FeatureHome", "CoreModels"]
         ),
         .testTarget(
-            name: "CoreUITests",
-            dependencies: ["CoreUI"]
-        ),
-        .testTarget(
             name: "FeatureSearchTests",
             dependencies: ["FeatureSearch", "CoreModels"]
         ),

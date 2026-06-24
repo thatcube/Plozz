@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import TraktService
 
 /// Settings: account management, appearance, caption customization, spoiler
 /// protection, playback diagnostics, and sign out.
@@ -25,6 +26,7 @@ public struct SettingsView: View {
     @State private var theme: ThemeSettingsModel
     @State private var diagnostics: DiagnosticsSettingsModel
     @State private var homeVisibility: HomeLibraryVisibilityModel
+    private let trakt: TraktService
     private let discoveredLibraries: LoadState<[AggregatedLibrary]>
     private let reloadLibraries: () async -> Void
     private let accounts: [Account]
@@ -45,6 +47,7 @@ public struct SettingsView: View {
         theme: ThemeSettingsModel,
         diagnostics: DiagnosticsSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
+        trakt: TraktService,
         discoveredLibraries: LoadState<[AggregatedLibrary]>,
         reloadLibraries: @escaping () async -> Void,
         accounts: [Account],
@@ -64,6 +67,7 @@ public struct SettingsView: View {
         _theme = State(initialValue: theme)
         _diagnostics = State(initialValue: diagnostics)
         _homeVisibility = State(initialValue: homeVisibility)
+        self.trakt = trakt
         self.discoveredLibraries = discoveredLibraries
         self.reloadLibraries = reloadLibraries
         self.accounts = accounts
@@ -101,6 +105,7 @@ public struct SettingsView: View {
                     appearancePanel
                     captionsPanel
                     spoilerPanel
+                    traktPanel
                     playbackPanel
                     if !accounts.isEmpty { signOutPanel }
                     aboutPanel
@@ -448,8 +453,29 @@ public struct SettingsView: View {
         }
     }
 
-    // MARK: - Playback
+    // MARK: - Trakt
 
+    private var traktPanel: some View {
+        SettingsPanel(
+            title: "Trakt",
+            footer: traktFooter
+        ) {
+            TraktConnectionView(trakt: trakt)
+        }
+    }
+
+    /// Only show the explanatory footer before the user connects. Once a code is
+    /// showing or the account is linked, the prompt is redundant.
+    private var traktFooter: String? {
+        switch trakt.phase {
+        case .connecting, .connected:
+            return nil
+        default:
+            return "Connect Trakt to automatically scrobble what you watch to your Trakt.tv history."
+        }
+    }
+
+    // MARK: - Playback
     private var playbackPanel: some View {
         SettingsPanel(
             title: "Playback",
@@ -518,6 +544,202 @@ private struct SettingsPanel<Content: View>: View {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         )
+    }
+}
+
+/// The Trakt connect/disconnect flow rendered inside the Settings "Trakt" panel.
+///
+/// Driven entirely by the observable `TraktService.phase`, so connecting in one
+/// place and the live device-code prompt stay in sync. The device-code flow is
+/// the TV-friendly OAuth grant: we show a short code and the user approves it at
+/// `trakt.tv/activate` on a phone or computer.
+private struct TraktConnectionView: View {
+    let trakt: TraktService
+
+    private enum Field: Hashable { case connect, cancel, disconnect, retry }
+    @FocusState private var focus: Field?
+
+    private enum PhaseTag: Equatable { case unknown, unavailable, disconnected, connecting, connected, error }
+    private var phaseTag: PhaseTag {
+        switch trakt.phase {
+        case .unknown: return .unknown
+        case .unavailable: return .unavailable
+        case .disconnected: return .disconnected
+        case .connecting: return .connecting
+        case .connected: return .connected
+        case .error: return .error
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            switch trakt.phase {
+            case .unknown:
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Checking Trakt connection…")
+                        .foregroundStyle(.secondary)
+                }
+
+            case .unavailable:
+                Text("Trakt sync isn't configured in this build. Add a Trakt client id and secret to enable it.")
+                    .foregroundStyle(.secondary)
+
+            case .disconnected:
+                Button(action: { trakt.connect() }) {
+                    Label("Connect to Trakt", systemImage: "link")
+                }
+                .focused($focus, equals: .connect)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            case let .connecting(userCode, verificationURL, expiresAt):
+                connectingView(userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt)
+
+            case let .connected(username):
+                connectedView(username: username)
+
+            case let .error(message):
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.secondary)
+                    Button(action: { trakt.connect() }) {
+                        Label("Try Again", systemImage: "arrow.clockwise")
+                    }
+                    .focused($focus, equals: .retry)
+                }
+            }
+        }
+        .task { await trakt.refreshStatus() }
+        // Keep focus inside the Trakt card across phase swaps so tvOS doesn't
+        // bounce it to the top of Settings when the focused control is replaced.
+        // Only redirect when the card already holds focus, otherwise resolving
+        // the initial status would steal focus down to Trakt on page load.
+        .onChange(of: phaseTag) { _, tag in
+            guard focus != nil else { return }
+            switch tag {
+            case .connecting: focus = .cancel
+            case .disconnected: focus = .connect
+            case .connected: focus = .disconnect
+            case .error: focus = .retry
+            default: break
+            }
+        }
+    }
+
+    private func connectingView(userCode: String, verificationURL: String, expiresAt: Date) -> some View {
+        HStack(alignment: .center, spacing: 32) {
+            QRCodeView(activationURL(userCode: userCode, verificationURL: verificationURL))
+                .frame(width: 180, height: 180)
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 16))
+
+            Text("OR")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text(displayURL(verificationURL))
+                    .font(.title2.weight(.semibold))
+                Text(userCode)
+                    .font(.plozzCode(size: 52))
+                    .tracking(8)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                HStack(spacing: 14) {
+                    TraktExpiryCountdown(expiresAt: expiresAt, lifetime: trakt.codeLifetime)
+                        .frame(width: 64, height: 64)
+                    Text("Waiting for approval…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Button(role: .cancel, action: { trakt.cancelConnect() }) {
+                    Text("Cancel")
+                }
+                .focused($focus, equals: .cancel)
+                .padding(.top, 16)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Builds the activation URL with the user code pre-filled, so scanning the
+    /// QR opens Trakt's approval page with the code already entered.
+    private func activationURL(userCode: String, verificationURL: String) -> String {
+        let encoded = userCode.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userCode
+        return "\(verificationURL)?code=\(encoded)"
+    }
+
+    private func connectedView(username: String) -> some View {
+        HStack(spacing: 16) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.title)
+                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(username).font(.headline)
+                Text("Your watches sync to Trakt")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive) {
+                Task { await trakt.disconnect() }
+            } label: {
+                Label("Disconnect", systemImage: "xmark.circle")
+            }
+            .focused($focus, equals: .disconnect)
+        }
+    }
+
+    /// Strips the scheme so the on-screen URL reads as `trakt.tv/activate`.
+    private func displayURL(_ url: String) -> String {
+        var trimmed = url
+        for prefix in ["https://", "http://"] where trimmed.hasPrefix(prefix) {
+            trimmed.removeFirst(prefix.count)
+        }
+        return trimmed
+    }
+}
+
+/// Compact ring that depletes over the life of the current Trakt device code,
+/// with the seconds remaining at its centre, shifting to a warning tint as the
+/// deadline nears. The code auto-refreshes on expiry, so this just resets.
+private struct TraktExpiryCountdown: View {
+    let expiresAt: Date
+    let lifetime: TimeInterval
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let remaining = max(0, expiresAt.timeIntervalSince(context.date))
+            let fraction = lifetime > 0 ? remaining / lifetime : 0
+            let tint: Color = remaining <= 30 ? .orange : .accentColor
+
+            ZStack {
+                Circle()
+                    .stroke(tint.opacity(0.18), lineWidth: 6)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text(Self.format(remaining, lifetime: lifetime))
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(tint)
+                    .contentTransition(.numericText())
+            }
+            .animation(.easeOut(duration: 0.3), value: tint)
+            .accessibilityLabel("Code expires in \(Self.format(remaining, lifetime: lifetime))")
+        }
+    }
+
+    /// Formats the remaining time as `m:ss`. The display is capped one second
+    /// below the full lifetime so a 600-second code starts at `9:59` rather
+    /// than `10:00`, which is wider than the ring and clips at first.
+    private static func format(_ remaining: TimeInterval, lifetime: TimeInterval) -> String {
+        let cap = lifetime > 0 ? Int(lifetime.rounded(.up)) - 1 : Int.max
+        let total = min(Int(remaining.rounded(.up)), cap)
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
 

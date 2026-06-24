@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreUI
 
 /// TV-friendly Quick Connect screen: shows the big code, a live expiry timer,
 /// and Cancel / Try Again, plus an optional low-emphasis secondary action.
@@ -91,8 +92,7 @@ public struct QuickConnectView: View {
         case let .awaitingApproval(code, expiresAt):
             VStack(spacing: 28) {
                 Text(code)
-                    .font(.system(size: 96, weight: .bold, design: .rounded))
-                    .monospacedDigit()
+                    .font(.plozzCode(size: 96))
                     .tracking(12)
                     .padding(.horizontal, 48)
                     .padding(.vertical, 24)

@@ -7,6 +7,7 @@ import FeatureProfiles
 import ProviderJellyfin
 import ProviderPlex
 import RatingsService
+import TraktService
 import TopShelfKit
 
 /// The app's composition root and single source of truth for session state.
@@ -81,6 +82,11 @@ public final class AppState {
     /// detail so ratings are fetched async without blocking the screen.
     public let ratingsProvider: any ExternalRatingsProviding
 
+    /// Trakt sync: owns the connection lifecycle for Settings and exposes the
+    /// scrobbler the player uses to sync watches to the user's Trakt history.
+    /// A no-op when no Trakt client credentials are configured.
+    public let traktService: TraktService
+
     /// The handler behind every card's press-and-hold context menu. Lazily
     /// created so it can capture `self`; resolves the owning provider per item
     /// and performs watched-state (and future) actions against the server.
@@ -129,7 +135,8 @@ public final class AppState {
         themeModel: ThemeSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
-        ratingsProvider: (any ExternalRatingsProviding)? = nil
+        ratingsProvider: (any ExternalRatingsProviding)? = nil,
+        traktService: TraktService? = nil
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
@@ -145,6 +152,9 @@ public final class AppState {
             || homeLibraryVisibilityModel != nil
         self.usesInjectedModels = injected
         let ns = (profilesModel ?? self.profilesModel).activeNamespace
+        // Seed Trakt with the active profile's namespace so its scrobbler and the
+        // Settings connection model read that profile's own Trakt tokens.
+        self.traktService = traktService ?? TraktServiceFactory.make(namespace: ns)
         self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         self.themeModel = themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
@@ -479,6 +489,7 @@ public final class AppState {
     public func switchProfile(to id: String) {
         profilesModel.select(id)
         rebuildSettingsModels()
+        updateTraktForActiveProfile()
         reloadAccounts()
         isChoosingProfile = false
         ensurePlexIdentityForActiveProfile()
@@ -502,6 +513,7 @@ public final class AppState {
             profilesModel.setActiveAccountIDs(draft.activeAccountIDs, for: id)
             if id == profilesModel.activeProfileID {
                 rebuildSettingsModels()
+                updateTraktForActiveProfile()
                 reloadAccounts()
                 ensurePlexIdentityForActiveProfile()
             }
@@ -527,6 +539,7 @@ public final class AppState {
         profilesModel.remove(id)
         if wasActive {
             rebuildSettingsModels()
+            updateTraktForActiveProfile()
             reloadAccounts()
         }
     }
@@ -565,6 +578,14 @@ public final class AppState {
         themeModel = ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
+    }
+
+    /// Repoints Trakt (and its shared scrobbler) at the active profile's own
+    /// connection so each household profile scrobbles to its own Trakt account.
+    /// Fire-and-forget: the status refresh is async and best-effort.
+    private func updateTraktForActiveProfile() {
+        let ns = profilesModel.activeNamespace
+        Task { await traktService.setActiveProfile(namespace: ns) }
     }
 
     private func apply(_ event: SessionEvent) {

@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreUI
 import ProviderPlex
 
 /// TV-friendly Plex sign-in screen: shows the big link code with a live expiry
@@ -89,8 +90,7 @@ public struct PlexLinkView: View {
                     }
 
                     Text(code)
-                        .font(.system(size: 84, weight: .bold, design: .rounded))
-                        .monospacedDigit()
+                        .font(.plozzCode(size: 84))
                         .tracking(10)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)

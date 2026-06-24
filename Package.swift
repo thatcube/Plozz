@@ -28,6 +28,7 @@ let package = Package(
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
         .library(name: "ProviderTrailers", targets: ["ProviderTrailers"]),
         .library(name: "RatingsService", targets: ["RatingsService"]),
+        .library(name: "TraktService", targets: ["TraktService"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
@@ -152,6 +153,10 @@ let package = Package(
             name: "RatingsService",
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
+        .target(
+            name: "TraktService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
 
         // MARK: Features
         .target(
@@ -160,7 +165,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureAuth",
-            dependencies: ["CoreModels", "CoreNetworking", "ProviderJellyfin", "ProviderPlex"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex"]
         ),
         .target(
             name: "FeatureHome",
@@ -168,7 +173,7 @@ let package = Package(
         ),
         .target(
             name: "FeaturePlayback",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI"],
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService"],
             linkerSettings: [
                 // Force-link AVKit on tvOS so its `UIWindow (AVAdditions)`
                 // category (which adds `avDisplayManager`, used to drive the
@@ -185,7 +190,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI"]
+            dependencies: ["CoreModels", "CoreUI", "TraktService"]
         ),
         .target(
             name: "FeatureProfiles",
@@ -228,6 +233,7 @@ let package = Package(
                 "ProviderPlex",
                 "ProviderTrailers",
                 "RatingsService",
+                "TraktService",
                 "FeatureHome",
                 "FeaturePlayback",
                 "FeatureSearch",
@@ -270,6 +276,10 @@ let package = Package(
         .testTarget(
             name: "RatingsServiceTests",
             dependencies: ["RatingsService", "CoreModels", "CoreNetworking"]
+        ),
+        .testTarget(
+            name: "TraktServiceTests",
+            dependencies: ["TraktService", "CoreModels", "CoreNetworking"]
         ),
         .testTarget(
             name: "FeatureAuthTests",

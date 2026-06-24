@@ -48,6 +48,10 @@
 	<string>$(TMDB_BEARER_TOKEN)</string>
 	<key>TMDBProxyBaseURL</key>
 	<string>$(TMDB_PROXY_BASE_URL)</string>
+	<key>TraktClientID</key>
+	<string>$(TRAKT_CLIENT_ID)</string>
+	<key>TraktClientSecret</key>
+	<string>$(TRAKT_CLIENT_SECRET)</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Bungee-Regular.ttf</string>

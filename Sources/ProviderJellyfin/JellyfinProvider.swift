@@ -235,19 +235,43 @@ public struct JellyfinProvider: MediaProvider {
         source: MediaSourceInfo,
         trickplay: [String: [String: TrickplayInfoDto]]?
     ) -> TrickplayManifest? {
-        guard let trickplay, !trickplay.isEmpty else { return nil }
-        let sourceID = source.Id ?? itemID
-        guard let widthMap = trickplay[sourceID] ?? trickplay.first?.value, !widthMap.isEmpty else {
+        guard let trickplay, !trickplay.isEmpty else {
+            PlozzLog.playback.debug("Jellyfin trickplay unavailable: no trickplay metadata itemID=\(itemID)")
             return nil
         }
+        let requestedSourceID = source.Id ?? itemID
+        let selectedSource: (id: String?, widthMap: [String: TrickplayInfoDto])? = {
+            if let exact = trickplay[requestedSourceID], !exact.isEmpty {
+                return (requestedSourceID, exact)
+            }
+            if let fallback = trickplay.first(where: { !$0.value.isEmpty }) {
+                PlozzLog.playback.debug(
+                    "Jellyfin trickplay source mismatch itemID=\(itemID) requested=\(requestedSourceID) fallback=\(fallback.key)"
+                )
+                return (fallback.key, fallback.value)
+            }
+            return nil
+        }()
+        guard let selectedSource else {
+            PlozzLog.playback.debug("Jellyfin trickplay unavailable: no non-empty source map itemID=\(itemID)")
+            return nil
+        }
+        let widthMap = selectedSource.widthMap
         // Highest available thumbnail width = best preview quality (servers
         // usually generate just one, so this is a safe default).
         let chosen = widthMap
             .compactMap { key, info -> (width: Int, info: TrickplayInfoDto)? in
-                guard let width = Int(key) else { return nil }
+                let width = Int(key) ?? Int(key.prefix(while: { $0.isNumber }))
+                guard let width else { return nil }
                 return (width, info)
             }
             .max { $0.width < $1.width }
+        guard chosen != nil else {
+            PlozzLog.playback.debug(
+                "Jellyfin trickplay unavailable: width keys not parseable itemID=\(itemID) keys=\(Array(widthMap.keys).sorted())"
+            )
+            return nil
+        }
         guard let chosen,
               let thumbWidth = chosen.info.Width, thumbWidth > 0,
               let thumbHeight = chosen.info.Height, thumbHeight > 0,
@@ -255,14 +279,28 @@ public struct JellyfinProvider: MediaProvider {
               let tileRows = chosen.info.TileHeight, tileRows > 0,
               let count = chosen.info.ThumbnailCount, count > 0,
               let interval = chosen.info.Interval, interval > 0
-        else { return nil }
+        else {
+            PlozzLog.playback.debug(
+                "Jellyfin trickplay unavailable: invalid geometry itemID=\(itemID) sourceID=\(selectedSource.id ?? "<none>")"
+            )
+            return nil
+        }
 
         let perTile = tileColumns * tileRows
         let tileCount = (count + perTile - 1) / perTile
+        let tileSourceID: String? = {
+            guard let id = selectedSource.id, !id.isEmpty else { return nil }
+            return id
+        }()
         let tileURLs = (0..<tileCount).compactMap {
-            client.trickplayTileURL(itemID: itemID, mediaSourceID: sourceID, width: chosen.width, tileIndex: $0)
+            client.trickplayTileURL(itemID: itemID, mediaSourceID: tileSourceID, width: chosen.width, tileIndex: $0)
         }
-        guard tileURLs.count == tileCount else { return nil }
+        guard tileURLs.count == tileCount else {
+            PlozzLog.playback.debug(
+                "Jellyfin trickplay unavailable: tile URL generation mismatch itemID=\(itemID) expected=\(tileCount) got=\(tileURLs.count)"
+            )
+            return nil
+        }
 
         return TrickplayManifest(
             thumbnailWidth: thumbWidth,

@@ -2,6 +2,7 @@
 import UIKit
 import SwiftUI
 import CoreModels
+import CoreNetworking
 
 /// Callbacks the input controller invokes on the owning view model. Kept as a
 /// plain value of closures so the UIKit layer never imports the view model.
@@ -192,12 +193,26 @@ final class PlayerInputViewController: UIViewController {
     override var canBecomeFirstResponder: Bool { true }
 
     func configureScrubPreview(_ source: ScrubPreviewSource?) {
-        guard let source, source.isUsable else { return }
+        thumbnailTask?.cancel()
+        thumbnailTask = nil
+        thumbnailLoader = nil
+        model.previewImage = nil
+
+        guard let source else {
+            PlozzLog.playback.debug("Scrub preview unavailable: provider did not supply a source")
+            return
+        }
+        guard source.isUsable else {
+            PlozzLog.playback.debug("Scrub preview unavailable: source exists but is not usable")
+            return
+        }
         switch source {
         case .tiled(let manifest):
             thumbnailLoader = TrickplayThumbnailLoader(manifest: manifest)
+            PlozzLog.playback.debug("Configured Jellyfin tiled scrub preview (\(manifest.tileURLs.count) tiles, intervalMs=\(manifest.intervalMs))")
         case .plexBIF(let url):
             thumbnailLoader = PlexBIFThumbnailLoader(url: url)
+            PlozzLog.playback.debug("Configured Plex BIF scrub preview url=\(PlozzLog.redact(url: url))")
         }
     }
 
@@ -468,22 +483,36 @@ final class PlayerInputViewController: UIViewController {
     }
 
     private func updatePreviewThumbnail() {
-        guard let loader = thumbnailLoader else { return }
-        let seconds = model.scrubSeconds
+        guard let loader = thumbnailLoader else {
+            model.previewImage = nil
+            return
+        }
+        let requestedSeconds = model.scrubSeconds
         // Instant swap when the tile is already cached (the common case while
         // dragging within one tile) keeps scrubbing fluid; otherwise fetch async.
-        if let cached = loader.cachedThumbnail(forSeconds: seconds) {
+        if let cached = loader.cachedThumbnail(forSeconds: requestedSeconds) {
             model.previewImage = cached
             return
         }
         thumbnailTask?.cancel()
         thumbnailTask = Task { [weak self] in
-            let image = await loader.thumbnail(forSeconds: seconds)
+            let requestedImage = await loader.thumbnail(forSeconds: requestedSeconds)
             guard let self, !Task.isCancelled, self.model.isScrubbing else { return }
-            // Only apply if the scrub head hasn't moved to a different thumbnail.
-            if self.model.scrubSeconds == seconds || abs(self.model.scrubSeconds - seconds) < 0.001 {
-                self.model.previewImage = image
+
+            let currentSeconds = self.model.scrubSeconds
+            // If the scrub head moved while this request was in flight, refresh for
+            // the current position so we don't drop previews on fast pans.
+            let image: CGImage?
+            if abs(currentSeconds - requestedSeconds) < 0.001 {
+                image = requestedImage
+            } else if let cachedCurrent = loader.cachedThumbnail(forSeconds: currentSeconds) {
+                image = cachedCurrent
+            } else {
+                image = await loader.thumbnail(forSeconds: currentSeconds)
             }
+
+            guard !Task.isCancelled, self.model.isScrubbing else { return }
+            self.model.previewImage = image
         }
     }
 

@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import UIKit
 import CoreModels
+import CoreNetworking
 
 /// Loads, caches, and crops Jellyfin trickplay tiles into single scrubbing
 /// thumbnails.
@@ -48,8 +49,25 @@ final class TrickplayThumbnailLoader: ScrubThumbnailProviding {
         if let existing = inFlight[url] { return await existing.value }
         let session = self.session
         let task = Task<CGImage?, Never> {
-            guard let (data, _) = try? await session.data(from: url) else { return nil }
-            return UIImage(data: data)?.cgImage
+            do {
+                let (data, response) = try await session.data(from: url)
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    PlozzLog.playback.debug(
+                        "Trickplay tile request failed status=\(http.statusCode) url=\(PlozzLog.redact(url: url))"
+                    )
+                    return nil
+                }
+                guard let image = UIImage(data: data)?.cgImage else {
+                    PlozzLog.playback.debug("Trickplay tile decode failed url=\(PlozzLog.redact(url: url))")
+                    return nil
+                }
+                return image
+            } catch {
+                PlozzLog.playback.debug(
+                    "Trickplay tile request error=\(String(reflecting: error)) url=\(PlozzLog.redact(url: url))"
+                )
+                return nil
+            }
         }
         inFlight[url] = task
         let result = await task.value

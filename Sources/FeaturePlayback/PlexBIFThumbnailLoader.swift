@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import UIKit
 import CoreModels
+import CoreNetworking
 
 /// Loads, parses, and slices a Plex **BIF** trickplay blob into single scrubbing
 /// thumbnails.
@@ -19,7 +20,6 @@ final class PlexBIFThumbnailLoader: ScrubThumbnailProviding {
     private var blob: Data?
     private var index: BIFIndex?
     private var loadTask: Task<Bool, Never>?
-    private var loadFailed = false
 
     /// Decoded-frame cache keyed by frame index, with FIFO eviction to bound
     /// memory (decoded SD frames are small, but a long movie has many).
@@ -33,7 +33,7 @@ final class PlexBIFThumbnailLoader: ScrubThumbnailProviding {
     }
 
     func thumbnail(forSeconds seconds: TimeInterval) async -> CGImage? {
-        if index == nil, !loadFailed {
+        if index == nil {
             _ = await ensureLoaded()
         }
         return decode(forSeconds: seconds)
@@ -54,10 +54,14 @@ final class PlexBIFThumbnailLoader: ScrubThumbnailProviding {
         if let cached = decoded[frameIndex] { return cached }
         let frame = index.frames[frameIndex]
         guard frame.offset >= 0, frame.length > 0, frame.offset + frame.length <= blob.count else {
+            PlozzLog.playback.debug("Plex BIF frame out of bounds index=\(frameIndex)")
             return nil
         }
         let jpeg = blob.subdata(in: frame.range)
-        guard let image = UIImage(data: jpeg)?.cgImage else { return nil }
+        guard let image = UIImage(data: jpeg)?.cgImage else {
+            PlozzLog.playback.debug("Plex BIF frame decode failed index=\(frameIndex)")
+            return nil
+        }
         store(image, at: frameIndex)
         return image
     }
@@ -72,21 +76,38 @@ final class PlexBIFThumbnailLoader: ScrubThumbnailProviding {
         }
     }
 
-    /// Downloads + parses the BIF blob exactly once, coalescing concurrent calls.
+    /// Downloads + parses the BIF blob, coalescing concurrent calls and retrying
+    /// later attempts after a failure.
     private func ensureLoaded() async -> Bool {
         if index != nil { return true }
-        if loadFailed { return false }
         if let existing = loadTask { return await existing.value }
         let task = Task<Bool, Never> { [weak self] in
             guard let self else { return false }
-            guard let (data, _) = try? await self.session.data(from: self.url),
-                  let parsed = BIFIndex(data: data) else {
-                self.loadFailed = true
+            do {
+                let (data, response) = try await self.session.data(from: self.url)
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    PlozzLog.playback.debug(
+                        "Plex BIF request failed status=\(http.statusCode) url=\(PlozzLog.redact(url: self.url))"
+                    )
+                    return false
+                }
+                guard let parsed = BIFIndex(data: data) else {
+                    PlozzLog.playback.debug(
+                        "Plex BIF parse failed url=\(PlozzLog.redact(url: self.url)) size=\(data.count)"
+                    )
+                    return false
+                }
+                self.blob = data
+                self.index = parsed
+                self.decoded.removeAll(keepingCapacity: true)
+                self.decodeOrder.removeAll(keepingCapacity: true)
+                return true
+            } catch {
+                PlozzLog.playback.debug(
+                    "Plex BIF request error=\(String(reflecting: error)) url=\(PlozzLog.redact(url: self.url))"
+                )
                 return false
             }
-            self.blob = data
-            self.index = parsed
-            return true
         }
         loadTask = task
         let ok = await task.value

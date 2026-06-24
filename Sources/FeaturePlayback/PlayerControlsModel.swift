@@ -76,6 +76,8 @@ public final class PlayerControlsModel {
     public var scrubSeconds: TimeInterval = 0
     /// The trickplay frame for `scrubSeconds`, shown above the scrub head.
     public var previewImage: CGImage?
+    /// Whether a real scrub-preview frame is available for display.
+    public var hasPreviewFrame: Bool { previewImage != nil }
     /// True while the focusable bottom control bar owns Siri-Remote focus. The
     /// input controller reads this to suppress scrub gestures and the control bar
     /// reads it to take/relinquish focus.

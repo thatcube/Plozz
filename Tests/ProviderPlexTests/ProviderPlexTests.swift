@@ -518,6 +518,43 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertTrue(bifURL.contains("X-Plex-Token=TOKEN"), bifURL)
     }
 
+    func testPlaybackInfoPrefersHDBIFWhenAvailable() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/101", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"101","type":"movie","title":"Movie","duration":3600000,
+           "Media":[{"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac","Part":[{"id":55,"key":"/library/parts/55/16000/file.mp4","container":"mp4","indexes":"sd,hd","Stream":[
+             {"id":10,"streamType":1,"index":0,"codec":"h264"},
+             {"id":11,"streamType":2,"index":1,"codec":"aac","selected":true}
+           ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "101")
+        let bifURL = try XCTUnwrap(request.scrubPreview?.plexBIFURL?.absoluteString)
+        XCTAssertTrue(bifURL.hasPrefix("https://plex.host:32400/library/parts/55/indexes/hd"), bifURL)
+    }
+
+    func testPlaybackInfoBuildsBIFScrubPreviewForEpisode() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/102", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"102","type":"episode","title":"Episode 1","duration":1800000,
+           "Media":[{"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac","Part":[{"id":99,"key":"/library/parts/99/16000/file.mp4","container":"mp4","indexes":"hd","Stream":[
+             {"id":10,"streamType":1,"index":0,"codec":"h264"},
+             {"id":11,"streamType":2,"index":1,"codec":"aac","selected":true}
+           ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "102")
+        let bifURL = try XCTUnwrap(request.scrubPreview?.plexBIFURL?.absoluteString)
+        XCTAssertTrue(bifURL.hasPrefix("https://plex.host:32400/library/parts/99/indexes/hd"), bifURL)
+        XCTAssertTrue(bifURL.contains("X-Plex-Token=TOKEN"), bifURL)
+    }
+
     func testPlaybackInfoHasNoScrubPreviewWhenPartNotIndexed() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/100", json: """

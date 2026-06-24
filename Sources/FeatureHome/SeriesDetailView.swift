@@ -347,6 +347,15 @@ struct SeriesDetailView: View {
     /// competes with the on-screen season's art. The currently selected season is
     /// skipped here because `prefetchSeasonStills` already owns it.
     private func prewarmAllSeasons() async {
+        // Defer the bulk all-seasons warm so it doesn't flood the (per-host capped)
+        // connection pool the instant the page opens and starve the hero backdrop /
+        // title logo and the *current* season's stills — the art the user is
+        // actually looking at. A long series (many seasons × many episodes) was
+        // otherwise firing dozens-to-hundreds of thumbnail fetches up front, which
+        // could leave the hero blank for many seconds even on a fast local server.
+        // The current season is already warmed promptly by `prefetchSeasonStills`.
+        try? await Task.sleep(for: .seconds(2.5))
+        if Task.isCancelled { return }
         for season in seasons where season.id != selectedSeasonID {
             if Task.isCancelled { return }
             await viewModel.loadEpisodes(for: season.id)

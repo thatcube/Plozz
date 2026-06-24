@@ -21,6 +21,12 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     /// Raw provider-supplied source name (Jellyfin `MediaSources[].Name`), e.g.
     /// "Movie (2009) Bluray-2160p Atmos". `nil` when the server reports none.
     public var name: String?
+    /// The edition / cut of the title when the provider states it *explicitly*
+    /// (e.g. Plex's `editionTitle`: "Director's Cut", "Theatrical"). Takes
+    /// precedence over anything parsed from `name`. `nil` when the provider
+    /// reports no explicit edition, in which case `editionLabel` falls back to
+    /// parsing `name`.
+    public var edition: String?
     /// Pixel width of the video stream, when known.
     public var width: Int?
     /// Pixel height of the video stream, when known (drives `resolutionLabel`).
@@ -51,6 +57,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     public init(
         id: String,
         name: String? = nil,
+        edition: String? = nil,
         width: Int? = nil,
         height: Int? = nil,
         bitrate: Int? = nil,
@@ -65,6 +72,7 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
     ) {
         self.id = id
         self.name = name
+        self.edition = edition
         self.width = width
         self.height = height
         self.bitrate = bitrate
@@ -133,13 +141,37 @@ public struct MediaVersion: Codable, Hashable, Identifiable, Sendable {
         return formatter.string(fromByteCount: sizeBytes)
     }
 
-    /// The primary user-facing label for a picker row. Prefers a derived
-    /// "4K HDR · 12.4 GB" form (consistent and scannable) and falls back to the
-    /// provider's own source `name`, then a generic "Version".
+    /// The edition / cut to surface for this version: the provider's explicit
+    /// `edition` when present, otherwise one parsed from the source `name`
+    /// (Extended, Theatrical, Director's Cut, …). `nil` when neither names a cut.
+    /// This is the signal that distinguishes two otherwise-identical "4K · 12 GB"
+    /// files, so the picker leads with it.
+    public var editionLabel: String? {
+        if let edition {
+            let trimmed = edition.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return EditionParser.edition(from: name)
+    }
+
+    /// The source-quality token parsed from `name` (Remux, BluRay, WEB-DL, …), or
+    /// `nil` when the name names no recognised source. Distinguishes a lossless
+    /// Remux from a re-encoded WEB-DL that would otherwise read identically.
+    public var sourceQualityLabel: String? {
+        EditionParser.sourceQuality(from: name)
+    }
+
+    /// The primary user-facing label for a picker row. Leads with the **edition**
+    /// (the cut — the thing users actually choose between) when known, then the
+    /// derived "4K · HDR · Remux · 12.4 GB" quality facts, so two files of the
+    /// same resolution are never indistinguishable. Falls back to the provider's
+    /// own source `name`, then a generic "Version".
     public var displayLabel: String {
         var parts: [String] = []
+        if let editionLabel { parts.append(editionLabel) }
         if let resolutionLabel { parts.append(resolutionLabel) }
         if let hdrLabel { parts.append(hdrLabel) }
+        if let sourceQualityLabel { parts.append(sourceQualityLabel) }
         if let sizeLabel { parts.append(sizeLabel) }
         if !parts.isEmpty { return parts.joined(separator: " · ") }
         if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }

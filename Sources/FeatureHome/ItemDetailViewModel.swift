@@ -68,6 +68,22 @@ public final class ItemDetailViewModel {
     /// (children come from the provider untagged). `nil` outside aggregated flows.
     private let sourceAccountID: String?
 
+    /// The cross-server sources of this (possibly merged) title, threaded in from
+    /// the merged card so the detail page can offer a **server picker** and play
+    /// from any server. Empty for a single-server item. The primary source's
+    /// versions/watch-state are seeded from the loaded detail; alternates are
+    /// enriched off the critical path (see ``enrichAlternateSources``).
+    private let initialSources: [MediaSourceRef]
+    /// Resolves an account id to its provider so alternate-server copies can be
+    /// fetched for their versions/watch-state. Returns `nil` for unknown accounts
+    /// (e.g. a server signed out since the merge).
+    private let alternateProviderResolver: (String) -> (any MediaProvider)?
+
+    /// The enriched per-server sources for this title, primary first. Drives the
+    /// detail server picker; each entry's `versions` fill in as alternate servers
+    /// resolve. Empty for a single-server title (no picker shown).
+    public private(set) var sources: [MediaSourceRef] = []
+
     public init(
         provider: any MediaProvider,
         itemID: String,
@@ -75,7 +91,9 @@ public final class ItemDetailViewModel {
         sourceAccountID: String? = nil,
         onlineTrailerResolver: @escaping OnlineTrailerResolving = ItemDetailViewModel.defaultOnlineTrailerResolver,
         playableVideoIDResolver: @escaping PlayableTrailerResolving = ItemDetailViewModel.defaultPlayableVideoIDResolver,
-        trailerCache: TrailerResolutionCache = .shared
+        trailerCache: TrailerResolutionCache = .shared,
+        initialSources: [MediaSourceRef] = [],
+        alternateProviderResolver: @escaping (String) -> (any MediaProvider)? = { _ in nil }
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -84,6 +102,8 @@ public final class ItemDetailViewModel {
         self.onlineTrailerResolver = onlineTrailerResolver
         self.playableVideoIDResolver = playableVideoIDResolver
         self.trailerCache = trailerCache
+        self.initialSources = initialSources
+        self.alternateProviderResolver = alternateProviderResolver
     }
 
     /// Production online-trailer resolver: a keyless YouTube search (no API key,
@@ -114,8 +134,10 @@ public final class ItemDetailViewModel {
                 children = []
             }
             state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
+            seedSources(from: tagged(item))
             await loadTrailers(for: item)
             await enrichRatings(for: item)
+            await enrichAlternateSources(primaryID: item.id)
         } catch let error as AppError {
             state = .failed(error)
         } catch {
@@ -389,6 +411,64 @@ public final class ItemDetailViewModel {
         guard !external.isEmpty else { return }
         guard case var .loaded(detail) = state, detail.item.id == item.id else { return }
         detail.item.ratings = detail.item.ratings.mergedWithAuthoritative(external)
+        state = .loaded(detail)
+    }
+
+    /// Seeds ``sources`` from the merged card's references, stamping the *primary*
+    /// source (the one this detail was loaded from) with the freshly-fetched
+    /// versions and watch-state so the server picker and version picker are
+    /// correct the instant the hero renders — before any alternate server is hit.
+    /// Leaves `sources` empty for a single-server title (no picker shown).
+    private func seedSources(from primary: MediaItem) {
+        guard initialSources.count > 1 else { sources = []; return }
+        sources = initialSources.map { source in
+            guard source.itemID == primary.id else { return source }
+            var seeded = source
+            seeded.versions = primary.versions
+            seeded.resumePosition = primary.resumePosition
+            seeded.playedPercentage = primary.playedPercentage
+            seeded.isPlayed = primary.isPlayed
+            seeded.isFavorite = primary.isFavorite
+            seeded.lastPlayedAt = primary.lastPlayedAt
+            return seeded
+        }
+        applyUnifiedWatchState()
+    }
+
+    /// Off the critical path, fetches each *alternate* server's copy of the title
+    /// to fill in its versions/watch-state, then re-folds the unified watch-state
+    /// so the hero reflects progress made on any server. Sequential and best-effort:
+    /// a slow/offline/signed-out server is skipped without blocking the others, and
+    /// a stale fetch (the user navigated away) is dropped via the loaded-id guard.
+    private func enrichAlternateSources(primaryID: String) async {
+        guard sources.count > 1 else { return }
+        for source in sources where source.itemID != primaryID {
+            guard let provider = alternateProviderResolver(source.accountID),
+                  let alt = try? await provider.item(id: source.itemID) else { continue }
+            guard case let .loaded(detail) = state, detail.item.id == primaryID else { return }
+            guard let index = sources.firstIndex(where: { $0.id == source.id }) else { continue }
+            var updated = sources[index]
+            updated.versions = alt.versions
+            updated.resumePosition = alt.resumePosition
+            updated.playedPercentage = alt.playedPercentage
+            updated.isPlayed = alt.isPlayed
+            updated.isFavorite = alt.isFavorite
+            updated.lastPlayedAt = alt.lastPlayedAt
+            sources[index] = updated
+            applyUnifiedWatchState()
+        }
+    }
+
+    /// Folds every known source's watch-state into one most-recent-wins state and
+    /// stamps it onto the loaded detail, so a merged title's hero shows unified
+    /// progress (e.g. 4 min watched on server A even when primary-backed by B).
+    private func applyUnifiedWatchState() {
+        guard sources.count > 1, case var .loaded(detail) = state else { return }
+        let unified = MediaItemMerger.unifiedWatchState(from: sources)
+        detail.item.resumePosition = unified.resumePosition
+        detail.item.playedPercentage = unified.playedPercentage
+        detail.item.isPlayed = unified.isPlayed
+        detail.item.lastPlayedAt = unified.lastPlayedAt
         state = .loaded(detail)
     }
 

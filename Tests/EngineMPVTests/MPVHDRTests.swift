@@ -78,7 +78,7 @@ final class MPVHDRFormatDescriptionTests: XCTestCase {
         let v = video(rangeType: "DOVI", codec: "hevc")
         let desc = try XCTUnwrap(MPVHDR.formatDescription(for: .dolbyVision, video: v),
                                  "Expected a CMVideoFormatDescription for .dolbyVision")
-        let codecType = CMVideoFormatDescriptionGetCodecType(desc)
+        let codecType = CMFormatDescriptionGetMediaSubType(desc)
         XCTAssertEqual(codecType, MPVHDR.dolbyVisionCodecType,
                        "DoVi display criteria must use 'dvh1' (0x64766831), got \(fourCCString(codecType))")
     }
@@ -87,14 +87,14 @@ final class MPVHDRFormatDescriptionTests: XCTestCase {
         // Profile 5: BL-only HEVC, no base-layer compatibility; still dvh1.
         let v = video(rangeType: "DOVI", codec: "hevc")
         let desc = try XCTUnwrap(MPVHDR.formatDescription(for: .dolbyVision, video: v))
-        XCTAssertEqual(CMVideoFormatDescriptionGetCodecType(desc), MPVHDR.dolbyVisionCodecType)
+        XCTAssertEqual(CMFormatDescriptionGetMediaSubType(desc), MPVHDR.dolbyVisionCodecType)
     }
 
     func testDoViFormatDescription_Profile8_usesdvh1() throws {
         // Profile 8.1: BL=HDR10 HEVC, EL RPU; still dvh1 on the criteria side.
         let v = video(rangeType: "DOVIWithHDR10", codec: "hevc")
         let desc = try XCTUnwrap(MPVHDR.formatDescription(for: .dolbyVision, video: v))
-        XCTAssertEqual(CMVideoFormatDescriptionGetCodecType(desc), MPVHDR.dolbyVisionCodecType)
+        XCTAssertEqual(CMFormatDescriptionGetMediaSubType(desc), MPVHDR.dolbyVisionCodecType)
     }
 
     // MARK: HDR10 / HLG fallback → hvc1 (unchanged)
@@ -102,14 +102,14 @@ final class MPVHDRFormatDescriptionTests: XCTestCase {
     func testHDR10FormatDescription_usesHvc1() throws {
         let v = video(rangeType: "HDR10", codec: "hevc")
         let desc = try XCTUnwrap(MPVHDR.formatDescription(for: .pq, video: v))
-        XCTAssertEqual(CMVideoFormatDescriptionGetCodecType(desc), kCMVideoCodecType_HEVC,
-                       "HDR10 must keep 'hvc1'; got \(fourCCString(CMVideoFormatDescriptionGetCodecType(desc)))")
+        XCTAssertEqual(CMFormatDescriptionGetMediaSubType(desc), kCMVideoCodecType_HEVC,
+                       "HDR10 must keep 'hvc1'; got \(fourCCString(CMFormatDescriptionGetMediaSubType(desc)))")
     }
 
     func testHLGFormatDescription_usesHvc1() throws {
         let v = video(rangeType: "HLG", codec: "hevc")
         let desc = try XCTUnwrap(MPVHDR.formatDescription(for: .hlg, video: v))
-        XCTAssertEqual(CMVideoFormatDescriptionGetCodecType(desc), kCMVideoCodecType_HEVC)
+        XCTAssertEqual(CMFormatDescriptionGetMediaSubType(desc), kCMVideoCodecType_HEVC)
     }
 
     func testSDRFormatDescription_returnsNil() {
@@ -122,8 +122,8 @@ final class MPVHDRFormatDescriptionTests: XCTestCase {
         let v = video(rangeType: "DOVI", codec: "hevc")
         let desc = try XCTUnwrap(MPVHDR.hdr10FallbackFormatDescription(video: v),
                                  "Expected an HDR10 fallback CMVideoFormatDescription")
-        XCTAssertEqual(CMVideoFormatDescriptionGetCodecType(desc), kCMVideoCodecType_HEVC,
-                       "HDR10 fallback must use 'hvc1'; got \(fourCCString(CMVideoFormatDescriptionGetCodecType(desc)))")
+        XCTAssertEqual(CMFormatDescriptionGetMediaSubType(desc), kCMVideoCodecType_HEVC,
+                       "HDR10 fallback must use 'hvc1'; got \(fourCCString(CMFormatDescriptionGetMediaSubType(desc)))")
     }
 
     // MARK: Metal surface stays on PQ path for DoVi

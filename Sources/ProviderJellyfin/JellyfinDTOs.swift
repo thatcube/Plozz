@@ -149,6 +149,9 @@ struct UserItemDataDto: Decodable {
     /// Whether the user has favourited the item — surfaced as the unified
     /// Watchlist state.
     let IsFavorite: Bool?
+    /// ISO-8601 timestamp of the user's last playback, used as the
+    /// most-recent-wins tiebreaker when unifying watch-state across servers.
+    let LastPlayedDate: String?
 }
 
 /// Jellyfin trickplay tile-group metadata (`BaseItemDto.Trickplay[srcId][width]`).

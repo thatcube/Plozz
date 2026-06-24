@@ -346,7 +346,9 @@ public struct PlexProvider: MediaProvider {
             ratings: Self.ratings(from: dto),
             providerIDs: Self.providerIDs(from: dto),
             mediaInfo: Self.sourceMetadata(from: dto),
-            versions: Self.versions(from: dto.Media)
+            versions: Self.versions(from: dto.Media, edition: dto.editionTitle),
+            isFavorite: false,
+            lastPlayedAt: dto.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
     }
 
@@ -354,12 +356,19 @@ public struct PlexProvider: MediaProvider {
     /// qualities) into provider-agnostic `MediaVersion`s. Returns `[]` unless
     /// there's a genuine choice (>1), so the picker only appears when useful. The
     /// first element is flagged `isDefault` to mirror Plex's own ordering.
-    static func versions(from media: [PlexMedia]?) -> [MediaVersion] {
+    ///
+    /// Plex records the edition (cut) at the **item** level (`editionTitle`), so
+    /// it is applied to every version; the per-file release name (the `Part`'s
+    /// file basename) is passed through as `name` so the shared `EditionParser`
+    /// can still recover the **source quality** (Remux / BluRay / WEB-DL) that
+    /// distinguishes two otherwise-identical 4K files.
+    static func versions(from media: [PlexMedia]?, edition: String? = nil) -> [MediaVersion] {
         guard let media, media.count > 1 else { return [] }
         return media.enumerated().map { index, m in
             MediaVersion(
                 id: m.id.map(String.init) ?? "\(index)",
-                name: nil,
+                name: Self.releaseName(from: m),
+                edition: edition,
                 width: m.width,
                 height: m.height,
                 bitrate: nil,
@@ -373,6 +382,17 @@ public struct PlexProvider: MediaProvider {
                 container: m.container
             )
         }
+    }
+
+    /// The release name to parse for source quality: the first part's file
+    /// basename without its extension, e.g.
+    /// `Movie (2009) Extended Bluray-2160p`. `nil` when no file path is reported.
+    static func releaseName(from media: PlexMedia) -> String? {
+        guard let file = media.Part?.first?.file, !file.isEmpty else { return nil }
+        let base = (file as NSString).lastPathComponent
+        let name = (base as NSString).deletingPathExtension
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Maps Plex `Guid` values (`imdb://...`, `tmdb://...`, …) into the shared

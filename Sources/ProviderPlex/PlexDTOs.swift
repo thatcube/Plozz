@@ -63,6 +63,13 @@ struct PlexMetadata: Decodable {
     let duration: Int?         // milliseconds
     let viewOffset: Int?       // milliseconds resumed-to
     let viewCount: Int?
+    /// Epoch-seconds timestamp of the user's last playback, used as the
+    /// most-recent-wins tiebreaker when unifying watch-state across servers.
+    let lastViewedAt: Int?
+    /// The explicit edition / cut Plex records for the item (e.g. "Director's
+    /// Cut", "Theatrical"). Surfaced as `MediaVersion.edition`, taking precedence
+    /// over anything parsed from a file name.
+    let editionTitle: String?
     let thumb: String?
     let art: String?
     let grandparentThumb: String?
@@ -118,6 +125,11 @@ struct PlexMedia: Decodable {
 struct PlexPart: Decodable {
     let id: Int?
     let key: String?           // e.g. "/library/parts/123/16000/file.mkv"
+    /// Absolute filesystem path of the file, e.g.
+    /// `/data/Movies/Movie (2009)/Movie (2009) Extended Bluray-2160p.mkv`. Its
+    /// basename is the release name we parse for the source quality (Remux /
+    /// BluRay / WEB-DL) and, as a fallback, the edition.
+    let file: String?
     let duration: Int?
     let container: String?
     /// Which trickplay (BIF) index resolutions the server has generated for this

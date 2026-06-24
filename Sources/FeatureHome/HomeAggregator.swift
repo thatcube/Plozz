@@ -45,21 +45,15 @@ public struct HomeAggregator: Sendable {
     public func content(
         from accounts: [ResolvedAccount],
         continueWatchingLimit: Int = 20,
-        latestLimit: Int = 20
+        latestLimit: Int = 20,
+        watchlistLimit: Int = 20
     ) async -> Content {
-        let perAccount = await withTaskGroup(of: (Int, AccountContent).self) { group in
-            for (index, resolved) in accounts.enumerated() {
-                group.addTask {
-                    (index, await Self.load(
-                        from: resolved,
-                        continueWatchingLimit: continueWatchingLimit,
-                        latestLimit: latestLimit
-                    ))
-                }
-            }
-            var byIndex: [Int: AccountContent] = [:]
-            for await (index, content) in group { byIndex[index] = content }
-            return accounts.indices.map { byIndex[$0] ?? AccountContent() }
+        let perAccount = await Self.loadPerAccount(accounts) { resolved in
+            await Self.load(
+                from: resolved,
+                continueWatchingLimit: continueWatchingLimit,
+                latestLimit: latestLimit
+            )
         }
 
         // Collapse the same title living on several servers into one card on the
@@ -72,12 +66,21 @@ public struct HomeAggregator: Sendable {
         let resolve: (String) -> SourceServerInfo? = { serverInfo[$0] }
 
         return Content(
-            continueWatching: MediaItemMerger.merge(
-                Self.interleave(perAccount.map(\.continueWatching)), serverInfo: resolve),
-            latest: MediaItemMerger.merge(
-                Self.interleave(perAccount.map(\.latest)), serverInfo: resolve),
-            watchlist: MediaItemMerger.merge(
-                Self.interleave(perAccount.map(\.watchlist)), serverInfo: resolve),
+            continueWatching: Self.mergedRow(
+                from: perAccount.map(\.continueWatching),
+                limit: continueWatchingLimit,
+                serverInfo: resolve
+            ),
+            latest: Self.mergedRow(
+                from: perAccount.map(\.latest),
+                limit: latestLimit,
+                serverInfo: resolve
+            ),
+            watchlist: Self.mergedRow(
+                from: perAccount.map(\.watchlist),
+                limit: watchlistLimit,
+                serverInfo: resolve
+            ),
             libraries: Self.mergeLibraries(perAccount.flatMap(\.libraries))
         )
     }
@@ -85,15 +88,8 @@ public struct HomeAggregator: Sendable {
     /// Discovers every library across `accounts`, tagged with account/provider
     /// metadata — used by the Settings checklist. Resilient per account.
     public func libraries(from accounts: [ResolvedAccount]) async -> [AggregatedLibrary] {
-        let perAccount = await withTaskGroup(of: (Int, [AggregatedLibrary]).self) { group in
-            for (index, resolved) in accounts.enumerated() {
-                group.addTask {
-                    (index, await Self.libraries(from: resolved))
-                }
-            }
-            var byIndex: [Int: [AggregatedLibrary]] = [:]
-            for await (index, libs) in group { byIndex[index] = libs }
-            return accounts.indices.map { byIndex[$0] ?? [] }
+        let perAccount = await Self.loadPerAccount(accounts) { resolved in
+            await Self.libraries(from: resolved)
         }
         return perAccount.flatMap { $0 }
     }
@@ -105,6 +101,43 @@ public struct HomeAggregator: Sendable {
         var latest: [MediaItem] = []
         var watchlist: [MediaItem] = []
         var libraries: [AggregatedLibrary] = []
+    }
+
+    /// Bounded account-level fan-out for Home aggregation so launch-time network
+    /// and decoding work can't swamp the UI and image pipeline when many accounts
+    /// are active.
+    private static let accountFanoutLimit = 3
+
+    /// Executes per-account work preserving account order while capping how many
+    /// accounts run concurrently.
+    private static func loadPerAccount<T: Sendable>(
+        _ accounts: [ResolvedAccount],
+        maxConcurrentAccounts: Int = accountFanoutLimit,
+        operation: @escaping @Sendable (ResolvedAccount) async -> T
+    ) async -> [T] {
+        guard !accounts.isEmpty else { return [] }
+        let concurrency = max(1, min(maxConcurrentAccounts, accounts.count))
+        return await withTaskGroup(of: (Int, T).self) { group in
+            var nextIndex = 0
+            for _ in 0..<concurrency {
+                let index = nextIndex
+                nextIndex += 1
+                let resolved = accounts[index]
+                group.addTask { (index, await operation(resolved)) }
+            }
+
+            var byIndex: [Int: T] = [:]
+            while let (index, value) = await group.next() {
+                byIndex[index] = value
+                if nextIndex < accounts.count {
+                    let queuedIndex = nextIndex
+                    nextIndex += 1
+                    let resolved = accounts[queuedIndex]
+                    group.addTask { (queuedIndex, await operation(resolved)) }
+                }
+            }
+            return accounts.indices.compactMap { byIndex[$0] }
+        }
     }
 
     private static func load(
@@ -165,6 +198,19 @@ public struct HomeAggregator: Sendable {
             providerKind: resolved.account.server.provider,
             library: library.taggingSource(resolved.account.id)
         )
+    }
+
+    /// Interleaves and de-duplicates one Home row, then caps the rendered count so
+    /// Home remains responsive with many accounts.
+    private static func mergedRow(
+        from groups: [[MediaItem]],
+        limit: Int,
+        serverInfo: (String) -> SourceServerInfo?
+    ) -> [MediaItem] {
+        guard limit > 0 else { return [] }
+        let merged = MediaItemMerger.merge(Self.interleave(groups), serverInfo: serverInfo)
+        guard merged.count > limit else { return merged }
+        return Array(merged.prefix(limit))
     }
 
     // MARK: - Merge

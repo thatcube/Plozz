@@ -42,7 +42,11 @@ public final class HomeViewModel {
     public func load() async {
         state = .loading
 
-        let merged = await aggregator.content(from: accounts)
+        let aggregator = self.aggregator
+        let accounts = self.accounts
+        let merged = await Task.detached(priority: .userInitiated) {
+            await aggregator.content(from: accounts)
+        }.value
         guard !Task.isCancelled else { return }
         let content = Content(
             continueWatching: merged.continueWatching,
@@ -55,10 +59,11 @@ public final class HomeViewModel {
 
         // Publish the playable rows to the App Group so the Top Shelf extension
         // can render them while the app is closed.
-        TopShelfPublisher.publish(
-            continueWatching: content.continueWatching,
-            latest: content.latest
-        )
+        let continueWatching = content.continueWatching
+        let latest = content.latest
+        Task.detached(priority: .utility) {
+            TopShelfPublisher.publish(continueWatching: continueWatching, latest: latest)
+        }
     }
 
     /// Applies a watched-state or watchlist mutation to the loaded rows **in

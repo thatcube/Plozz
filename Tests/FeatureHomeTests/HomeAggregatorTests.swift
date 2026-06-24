@@ -114,6 +114,55 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(card.sources.first?.providerKind, .plex)
     }
 
+    func testContentCapsMergedRowsToRequestedLimits() async {
+        let a = AggregatorStub(
+            continueWatching: [item("a1"), item("a2"), item("a3")],
+            latest: [item("al1"), item("al2"), item("al3")]
+        )
+        let b = AggregatorStub(
+            continueWatching: [item("b1"), item("b2"), item("b3")],
+            latest: [item("bl1"), item("bl2"), item("bl3")]
+        )
+        let accounts = [
+            resolved("acct-a", user: "A", server: "S-A", kind: .jellyfin, provider: a),
+            resolved("acct-b", user: "B", server: "S-B", kind: .plex, provider: b)
+        ]
+
+        let content = await HomeAggregator().content(
+            from: accounts,
+            continueWatchingLimit: 2,
+            latestLimit: 3
+        )
+
+        XCTAssertEqual(content.continueWatching.map(\.id), ["a1", "b1"])
+        XCTAssertEqual(content.latest.map(\.id), ["al1", "bl1", "al2"])
+    }
+
+    func testContentBoundsConcurrentAccountFanOut() async {
+        let tracker = ConcurrencyTracker()
+        let accounts: [ResolvedAccount] = (0..<8).map { index in
+            resolved(
+                "acct-\(index)",
+                user: "U\(index)",
+                server: "S\(index)",
+                kind: .jellyfin,
+                provider: DelayedAggregatorStub(
+                    itemID: "i\(index)",
+                    tracker: tracker,
+                    delayNanoseconds: 50_000_000
+                )
+            )
+        }
+
+        _ = await HomeAggregator().content(from: accounts, continueWatchingLimit: 1, latestLimit: 1)
+
+        XCTAssertLessThanOrEqual(
+            tracker.maxConcurrent,
+            3,
+            "Home aggregation should bound concurrent account fan-out to keep launch responsive"
+        )
+    }
+
     // MARK: - Helpers
 
     private func item(_ id: String) -> MediaItem {
@@ -129,7 +178,7 @@ final class HomeAggregatorTests: XCTestCase {
         user: String,
         server: String,
         kind: ProviderKind,
-        provider: AggregatorStub
+        provider: any MediaProvider
     ) -> ResolvedAccount {
         let mediaServer = MediaServer(
             id: "srv-\(id)",
@@ -193,4 +242,67 @@ private final class AggregatorStub: MediaProvider, @unchecked Sendable {
     func playbackInfo(for itemID: String) async throws -> PlaybackRequest { throw AppError.notFound }
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {}
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? { nil }
+}
+
+private final class DelayedAggregatorStub: MediaProvider, @unchecked Sendable {
+    let kind: ProviderKind = .jellyfin
+    let session: UserSession
+    private let itemID: String
+    private let tracker: ConcurrencyTracker
+    private let delayNanoseconds: UInt64
+
+    init(itemID: String, tracker: ConcurrencyTracker, delayNanoseconds: UInt64) {
+        self.itemID = itemID
+        self.tracker = tracker
+        self.delayNanoseconds = delayNanoseconds
+        self.session = UserSession(
+            server: MediaServer(id: "s-\(itemID)", name: "Home", baseURL: URL(string: "http://host")!, provider: .jellyfin),
+            userID: "u-\(itemID)", userName: "User", deviceID: "d-\(itemID)", accessToken: "TOKEN"
+        )
+    }
+
+    func libraries() async throws -> [MediaLibrary] { [] }
+
+    func continueWatching(limit: Int) async throws -> [MediaItem] {
+        tracker.enter()
+        defer { tracker.leave() }
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return [MediaItem(id: itemID, title: itemID, kind: .movie)]
+    }
+
+    func latest(limit: Int) async throws -> [MediaItem] { [] }
+    func item(id: String) async throws -> MediaItem { throw AppError.notFound }
+    func children(of itemID: String) async throws -> [MediaItem] { [] }
+    func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
+        MediaPage(items: [], startIndex: 0, totalCount: 0)
+    }
+    func search(query: String, limit: Int) async throws -> [MediaItem] { [] }
+    func playbackInfo(for itemID: String) async throws -> PlaybackRequest { throw AppError.notFound }
+    func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {}
+    func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? { nil }
+}
+
+private final class ConcurrencyTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = 0
+    private var maxSeen = 0
+
+    func enter() {
+        lock.lock()
+        current += 1
+        if current > maxSeen { maxSeen = current }
+        lock.unlock()
+    }
+
+    func leave() {
+        lock.lock()
+        current = max(0, current - 1)
+        lock.unlock()
+    }
+
+    var maxConcurrent: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return maxSeen
+    }
 }

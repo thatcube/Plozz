@@ -17,6 +17,8 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     /// Optional per-item trailers for `trailers(of:)`. Inherits the protocol's
     /// empty default when `nil`.
     var trailersByItem: [String: [MediaItem]]?
+    /// Optional per-item async gate that runs before `item(id:)` returns.
+    var itemGate: [String: @Sendable () async -> Void]?
     /// Optional start index at which `items(in:page:)` throws once.
     var failAtStartIndex: Int?
     /// When `true`, every `items(in:page:)` call throws — simulates a server that
@@ -43,6 +45,9 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     func continueWatching(limit: Int) async throws -> [MediaItem] { [] }
     func latest(limit: Int) async throws -> [MediaItem] { [] }
     func item(id: String) async throws -> MediaItem {
+        if let gate = itemGate?[id] {
+            await gate()
+        }
         guard let item = allItems.first(where: { $0.id == id }) else { throw AppError.notFound }
         return item
     }

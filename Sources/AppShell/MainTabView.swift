@@ -164,7 +164,8 @@ private func makePlayerViewModel(
             captionSettings: captionSettings,
             startPosition: request.startPosition,
             scrobbler: scrobbler,
-            engineFactory: engineFactory
+            engineFactory: engineFactory,
+            autoDismissOnEnd: true
         )
     }
     return PlayerViewModel(

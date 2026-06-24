@@ -187,6 +187,12 @@ public protocol VideoEngine: AnyObject {
     /// main actor with the engine's best classification of the failure.
     var onFailure: (@MainActor (AppError) -> Void)? { get set }
 
+    /// Fired once when playback reaches the natural end of the stream (clean
+    /// end-of-file), *not* on a user-initiated stop or a failure. The owner
+    /// decides what to do (e.g. auto-dismiss a finished trailer). Invoked on the
+    /// main actor.
+    var onEnded: (@MainActor () -> Void)? { get set }
+
     // MARK: View
 
     #if canImport(UIKit)

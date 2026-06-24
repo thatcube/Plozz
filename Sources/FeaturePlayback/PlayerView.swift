@@ -109,6 +109,10 @@ public struct PlayerView: View {
             // metrics now that there's a player to read.
             if viewModel.controls.diagnosticsEnabled { startSampling() }
         }
+        .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
+            // Playback finished on an auto-dismiss player (a trailer); close it.
+            if shouldDismiss { dismiss() }
+        }
         .onDisappear {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }

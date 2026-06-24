@@ -56,6 +56,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     /// playback is no longer advancing. Used to release the wake lock at the end
     /// of a file even though `isPaused` may still read `false`.
     private var hasReachedEnd: Bool = false
+    private var didAttachExternalAudio = false
 
     /// Keep the display awake only while mpv is actually advancing frames: not
     /// paused and not sitting at end-of-stream. Matches the native engine's
@@ -75,6 +76,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
     public var onProgress: (@MainActor () -> Void)?
     public var onFailure: (@MainActor (AppError) -> Void)?
+    public var onEnded: (@MainActor () -> Void)?
 
     // MARK: Configuration
 
@@ -180,6 +182,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         hasFailed = false
         isPaused = false
         hasReachedEnd = false
+        didAttachExternalAudio = false
         currentTime = 0
         duration = 0
         lastReportedSecond = -1
@@ -249,13 +252,15 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
         // Adaptive sources (e.g. a high-resolution YouTube DASH trailer) deliver
         // video and audio as two separate URLs. AVPlayer can't combine bare URLs,
-        // but mpv can: attach the companion audio so it plays in sync with the
-        // video-only `streamURL`. Set as an option (the CLI alias of
-        // `--audio-files-append`) before init so the whole URL is taken as a
-        // single file — no list-separator parsing of the URL's own `:`/`,`.
-        if let audioURL = request.externalAudioURL {
-            plozzTrace("MPV.load: attaching external audio track (adaptive video+audio)")
-            client.setOptionString("audio-file", audioURL.absoluteString)
+        // but mpv can. NOTE: the companion audio can NOT be attached here: mpv's
+        // `--audio-file` is a CLI/config-file-only alias that the libmpv API
+        // silently ignores, and the real `--audio-files` option splits its value
+        // on `:` — which every `https://` URL contains — so it mangles the URL.
+        // Instead we attach the audio with the `audio-add` command once the video
+        // file has loaded (see `attachExternalAudioIfNeeded`), where the URL is
+        // passed as a single atomic argv entry with no separator parsing.
+        if request.externalAudioURL != nil {
+            plozzTrace("MPV.load: external audio present; will attach via audio-add on fileLoaded")
         }
 
         plozzTrace("MPV.load: waiting for render surface readiness")
@@ -544,12 +549,35 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         case .fileLoaded:
             duration = client.getDouble(MPVProperty.duration)
             status = .ready
+            attachExternalAudioIfNeeded()
         case .propertyChanged(let name):
             handleProperty(name)
-        case .endFile(let isError):
-            if isError { fail(.invalidResponse) }
+        case .endFile(let isError, let isEOF):
+            if isError {
+                fail(.invalidResponse)
+            } else if isEOF {
+                hasReachedEnd = true
+                onEnded?()
+            }
         case .shutdown:
             status = .idle
+        }
+    }
+
+    /// Attaches the companion audio track for adaptive (separate video+audio)
+    /// sources once the video file is loaded. Uses the `audio-add` command — the
+    /// URL is passed as a single atomic argv entry, so it survives unparsed
+    /// (unlike the `--audio-file`/`--audio-files` options, which the libmpv API
+    /// ignores or mangles on `:`). `select` makes mpv play it, giving the
+    /// otherwise-silent video-only DASH stream its sound back, kept in sync with
+    /// the video timeline.
+    private func attachExternalAudioIfNeeded() {
+        guard !didAttachExternalAudio, let audioURL = request?.externalAudioURL else { return }
+        didAttachExternalAudio = true
+        plozzTrace("MPV.fileLoaded: attaching external audio via audio-add")
+        let rc = client.command(["audio-add", audioURL.absoluteString, "select"])
+        if rc < 0 {
+            plozzTrace("MPV.fileLoaded: audio-add FAILED rc=\(rc)")
         }
     }
 

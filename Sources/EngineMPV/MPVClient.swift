@@ -225,9 +225,12 @@ final class MPVClient: @unchecked Sendable {
                 // `error` is negative for a real failure; `reason == ERROR`
                 // also signals a decode/IO failure rather than a clean EOF.
                 let isError = endFile.error < 0 || endFile.reason == MPV_END_FILE_REASON_ERROR
-                return .endFile(isError: isError)
+                // A clean playthrough to the end (not a user stop / quit / file
+                // switch), so the owner can react (e.g. dismiss a finished trailer).
+                let isEOF = endFile.reason == MPV_END_FILE_REASON_EOF
+                return .endFile(isError: isError, isEOF: isEOF)
             }
-            return .endFile(isError: false)
+            return .endFile(isError: false, isEOF: false)
         case MPV_EVENT_SHUTDOWN:
             return .shutdown
         default:
@@ -240,7 +243,7 @@ final class MPVClient: @unchecked Sendable {
 enum MPVEvent: Sendable {
     case propertyChanged(String)
     case fileLoaded
-    case endFile(isError: Bool)
+    case endFile(isError: Bool, isEOF: Bool)
     case shutdown
 }
 #endif

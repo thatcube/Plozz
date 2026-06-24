@@ -36,6 +36,12 @@ public final class PlayerViewModel {
 
     public private(set) var phase: Phase = .loading
 
+    /// Set to `true` when playback reaches its natural end *and* this player was
+    /// configured to auto-dismiss on completion (currently trailers). The view
+    /// observes this and dismisses itself. Ignored for regular library playback,
+    /// which keeps the finished frame on screen as before.
+    public private(set) var shouldDismiss = false
+
     /// Shared, observable transport state for the custom player overlay. The
     /// view model writes live playback facts here; the input controller writes
     /// scrub state; the SwiftUI overlay reads.
@@ -113,6 +119,11 @@ public final class PlayerViewModel {
     /// Persisted player preferences (e.g. last-used playback speed).
     private let preferencesStore: PlaybackPreferencesStoring
 
+    /// When `true`, the player dismisses itself once playback reaches the natural
+    /// end of the stream. Used for trailers, which should close when finished;
+    /// regular library playback leaves this `false`.
+    private let autoDismissOnEnd: Bool
+
     public init(
         provider: any MediaProvider,
         itemID: String,
@@ -121,7 +132,8 @@ public final class PlayerViewModel {
         scrobbler: any TraktScrobbling = DisabledTraktScrobbler(),
         engineFactory: EngineFactory = .native,
         capabilities: MediaCapabilities = .detected(),
-        preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore()
+        preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore(),
+        autoDismissOnEnd: Bool = false
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -131,6 +143,7 @@ public final class PlayerViewModel {
         self.engineFactory = engineFactory
         self.capabilities = capabilities
         self.preferencesStore = preferencesStore
+        self.autoDismissOnEnd = autoDismissOnEnd
         self.engine = engineFactory.makeNative(captionSettings)
         self.currentEngineKind = .native
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
@@ -147,6 +160,17 @@ public final class PlayerViewModel {
             guard let self else { return }
             Task { await self.handleEngineFailure(error) }
         }
+        engine.onEnded = { [weak self] in
+            self?.handlePlaybackEnded()
+        }
+    }
+
+    /// Called when the active engine reports a clean playthrough to the end of the
+    /// stream. For auto-dismiss players (trailers) this asks the view to close;
+    /// for everything else it's a no-op so the finished frame stays on screen.
+    private func handlePlaybackEnded() {
+        guard autoDismissOnEnd else { return }
+        shouldDismiss = true
     }
 
     // MARK: - Engine selection / swapping

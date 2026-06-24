@@ -70,6 +70,7 @@ public final class NativeVideoEngine: VideoEngine {
 
     public var onProgress: (@MainActor () -> Void)?
     public var onFailure: (@MainActor (AppError) -> Void)?
+    public var onEnded: (@MainActor () -> Void)?
 
     // MARK: Configuration
 
@@ -98,6 +99,7 @@ public final class NativeVideoEngine: VideoEngine {
     @ObservationIgnored private var subtitleLoader: SubtitleInjectingResourceLoader?
     #if !os(macOS)
     @ObservationIgnored private var routeChangeObserver: NSObjectProtocol?
+    @ObservationIgnored private var endOfPlaybackObserver: NSObjectProtocol?
     #endif
     #if canImport(UIKit)
     /// A single, stable `AVPlayerLayer`-backed surface fed by whichever
@@ -166,6 +168,10 @@ public final class NativeVideoEngine: VideoEngine {
         // Watch for an item that plays audio but renders no video (e.g. an HEVC
         // stream AVPlayer can't display) so we can swap to the on-device engine.
         monitorForMissingVideo(item: item, request: request)
+
+        // Auto-notify when this item plays through to its natural end so the
+        // owner can react (e.g. dismiss a finished trailer).
+        observeEndOfPlayback(item: item)
 
         // Inspect the *real* container video format as soon as it loads (in
         // parallel — adds no startup delay) so a known AVPlayer-hostile codec can
@@ -530,6 +536,26 @@ public final class NativeVideoEngine: VideoEngine {
     /// Tears the current player down without touching the audio-session or
     /// route-change observers. Used both when reloading for a retry and as part
     /// of `stop()`.
+    /// Observes the natural end of `item` so the owner can react (e.g. dismiss a
+    /// finished trailer). `didPlayToEndTimeNotification` fires only on a clean
+    /// playthrough — never on a user-initiated stop or a failure — so it's a safe
+    /// auto-dismiss trigger. Scoped to this specific item; removed in
+    /// `teardownPlayer`.
+    private func observeEndOfPlayback(item: AVPlayerItem) {
+        if let endOfPlaybackObserver {
+            NotificationCenter.default.removeObserver(endOfPlaybackObserver)
+        }
+        endOfPlaybackObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.didPlayToEndTimeNotification,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.onEnded?()
+            }
+        }
+    }
+
     private func teardownPlayer() {
         fallbackMonitorTask?.cancel()
         fallbackMonitorTask = nil
@@ -538,6 +564,10 @@ public final class NativeVideoEngine: VideoEngine {
         formatInspectTask?.cancel()
         formatInspectTask = nil
         subtitleLoader = nil
+        if let endOfPlaybackObserver {
+            NotificationCenter.default.removeObserver(endOfPlaybackObserver)
+        }
+        endOfPlaybackObserver = nil
         if let timeObserver, let player {
             player.removeTimeObserver(timeObserver)
         }

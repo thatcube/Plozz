@@ -155,6 +155,45 @@ private func resolveOptionalProvider(_ accountID: String, in accounts: [Resolved
     accounts.first(where: { $0.account.id == accountID })?.provider
 }
 
+/// Builds the detail page's cross-server source resolver: given the title the
+/// user opened, it searches every *other* signed-in account, merges the hits with
+/// the primary by ``MediaItemIdentity`` (the same safe identity rules the Home /
+/// Search dedupe use), and returns the unified per-server ``MediaSourceRef`` list.
+///
+/// This is what makes the **server picker appear from Home** even when only one
+/// server surfaced the title in its row (Recently Added / Continue Watching are
+/// per-server, so a Home card often starts single-source) — Search already shows
+/// both servers because it queries them all, and now the detail page does the
+/// same discovery on open. Returns `nil` for a single-account setup (nothing to
+/// discover), which keeps the resolver entirely off the path for solo servers.
+private func crossServerSourceResolver(
+    in accounts: [ResolvedAccount]
+) -> (@Sendable (MediaItem) async -> [MediaSourceRef])? {
+    guard accounts.count > 1 else { return nil }
+    let serverInfo = accounts.sourceServerInfo()
+    return { primary in
+        let query = primary.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        let others = accounts.filter { $0.account.id != primary.sourceAccountID }
+        guard !others.isEmpty else { return [] }
+        let hits: [MediaItem] = await withTaskGroup(of: [MediaItem].self) { group in
+            for resolved in others {
+                let accountID = resolved.account.id
+                group.addTask {
+                    guard let found = try? await resolved.provider.search(query: query, limit: 25) else { return [] }
+                    return found.map { $0.taggingSource(accountID) }
+                }
+            }
+            var all: [MediaItem] = []
+            for await groupHits in group { all.append(contentsOf: groupHits) }
+            return all
+        }
+        guard !hits.isEmpty else { return [] }
+        let merged = MediaItemMerger.merge([primary] + hits, serverInfo: { serverInfo[$0] })
+        return merged.first(where: { $0.id == primary.id })?.sources ?? []
+    }
+}
+
 /// Builds the provider that backs a Library-browse grid for `library`. When the
 /// Home aggregator merged the same library across several servers
 /// (`allSourceAccountIDs.count > 1`) it returns an ``AggregatedLibraryProvider``
@@ -296,7 +335,8 @@ private struct HomeTab: View {
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: item.sourceAccountID,
                         initialSources: item.sources,
-                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) }
+                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts)
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -488,7 +528,8 @@ private struct SearchTab: View {
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: item.sourceAccountID,
                         initialSources: item.sources,
-                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) }
+                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts)
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },

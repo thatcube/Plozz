@@ -70,6 +70,15 @@ public final class ItemDetailViewModel {
     /// (e.g. a server signed out since the merge).
     private let alternateProviderResolver: (String) -> (any MediaProvider)?
 
+    /// Discovers *other servers* that host this same title and returns the unified
+    /// cross-server source list (primary first), so a title surfaced from a single
+    /// server (e.g. a Home row that only one server put in "Recently Added") still
+    /// gets a server picker. Given the loaded primary item it searches the other
+    /// accounts, merges by ``MediaItemIdentity``, and returns every matching
+    /// server's ``MediaSourceRef``. `nil` outside multi-account flows. Runs off the
+    /// critical path of first paint.
+    private let crossServerSourceResolver: (@Sendable (MediaItem) async -> [MediaSourceRef])?
+
     /// The enriched per-server sources for this title, primary first. Drives the
     /// detail server picker; each entry's `versions` fill in as alternate servers
     /// resolve. Empty for a single-server title (no picker shown).
@@ -77,6 +86,9 @@ public final class ItemDetailViewModel {
     /// In-flight enrichment pass for alternate sources. Kept cancellable so a
     /// reload/navigation change can drop stale work promptly.
     private var alternateSourceEnrichmentTask: Task<Void, Never>?
+    /// In-flight cross-server discovery pass (search other accounts for this
+    /// title). Cancellable so a reload/navigation change drops stale work.
+    private var crossServerDiscoveryTask: Task<Void, Never>?
     /// Bound concurrent alternate-server detail fetches to keep Home-opened
     /// details responsive and avoid saturating startup/network image traffic.
     private static let alternateSourceFanoutLimit = 3
@@ -91,7 +103,8 @@ public final class ItemDetailViewModel {
         playableVideoIDResolver: @escaping PlayableTrailerResolving = ItemDetailViewModel.defaultPlayableVideoIDResolver,
         trailerCache: TrailerResolutionCache = .shared,
         initialSources: [MediaSourceRef] = [],
-        alternateProviderResolver: @escaping (String) -> (any MediaProvider)? = { _ in nil }
+        alternateProviderResolver: @escaping (String) -> (any MediaProvider)? = { _ in nil },
+        crossServerSourceResolver: (@Sendable (MediaItem) async -> [MediaSourceRef])? = nil
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -102,6 +115,7 @@ public final class ItemDetailViewModel {
         self.trailerCache = trailerCache
         self.initialSources = initialSources
         self.alternateProviderResolver = alternateProviderResolver
+        self.crossServerSourceResolver = crossServerSourceResolver
 
         // Seed the hero from the list item the user just tapped so the detail
         // screen's first paint is INSTANT — before `provider.item(id:)` returns.
@@ -129,6 +143,8 @@ public final class ItemDetailViewModel {
     public func load() async {
         alternateSourceEnrichmentTask?.cancel()
         alternateSourceEnrichmentTask = nil
+        crossServerDiscoveryTask?.cancel()
+        crossServerDiscoveryTask = nil
         // Don't flash a loading/skeleton state over a hero we already seeded from
         // the tapped list item; only show `.loading` for a cold (unseeded) open.
         if state.value == nil { state = .loading }
@@ -173,6 +189,7 @@ public final class ItemDetailViewModel {
                 state = .loaded(Detail(item: taggedItem, children: seededChildren))
                 seedSources(from: taggedItem)
                 startAlternateSourceEnrichment(primaryID: item.id)
+                startCrossServerDiscovery(for: taggedItem)
                 async let trailersDone: Void = loadTrailers(for: item)
                 async let ratingsDone: Void = enrichRatings(for: item)
                 // Children fill in off the critical path of first paint; merge them
@@ -189,6 +206,7 @@ public final class ItemDetailViewModel {
                 state = .loaded(Detail(item: taggedItem, children: []))
                 seedSources(from: taggedItem)
                 startAlternateSourceEnrichment(primaryID: item.id)
+                startCrossServerDiscovery(for: taggedItem)
                 async let trailersDone: Void = loadTrailers(for: item)
                 async let ratingsDone: Void = enrichRatings(for: item)
                 _ = await trailersDone
@@ -488,6 +506,62 @@ public final class ItemDetailViewModel {
             return seeded
         }
         applyUnifiedWatchState()
+    }
+
+    /// Discovers other servers hosting this title (off the critical path) and folds
+    /// them into ``sources`` so a single-server card (e.g. a Home row only one
+    /// server surfaced) still gets a server picker. Idempotent: only updates when
+    /// it actually finds *more* servers than are already known, so it never
+    /// regresses a richer picker already seeded from a merged Search/Home card.
+    private func startCrossServerDiscovery(for primary: MediaItem) {
+        guard let resolver = crossServerSourceResolver else { return }
+        crossServerDiscoveryTask?.cancel()
+        crossServerDiscoveryTask = Task(priority: .utility) { [weak self] in
+            let discovered = await resolver(primary)
+            guard !Task.isCancelled, discovered.count > 1 else { return }
+            await self?.applyDiscoveredSources(discovered, primary: primary)
+        }
+    }
+
+    private func sourceKey(_ source: MediaSourceRef) -> String {
+        "\(source.accountID)#\(source.itemID)"
+    }
+
+    /// Stamps the primary source with the freshly-fetched detail so the picker and
+    /// version list are correct for the server the user is already looking at.
+    private func stampedPrimarySource(_ source: MediaSourceRef, from primary: MediaItem) -> MediaSourceRef {
+        guard source.accountID == sourceAccountID, source.itemID == primary.id else { return source }
+        var seeded = source
+        seeded.versions = primary.versions
+        seeded.resumePosition = primary.resumePosition
+        seeded.playedPercentage = primary.playedPercentage
+        seeded.isPlayed = primary.isPlayed
+        seeded.isFavorite = primary.isFavorite
+        seeded.lastPlayedAt = primary.lastPlayedAt
+        return seeded
+    }
+
+    private func applyDiscoveredSources(_ discovered: [MediaSourceRef], primary: MediaItem) {
+        guard !discovered.isEmpty else { return }
+        var result: [MediaSourceRef]
+        if sources.isEmpty {
+            // Single-server card: take the discovered cross-server set wholesale,
+            // stamping the primary with the detail we already fetched.
+            result = discovered.map { stampedPrimarySource($0, from: primary) }
+        } else {
+            // Already had a (seeded) picker: union in any newly-found servers,
+            // preserving existing order + already-enriched versions.
+            result = sources
+            var keys = Set(result.map(sourceKey))
+            for source in discovered where keys.insert(sourceKey(source)).inserted {
+                result.append(source)
+            }
+        }
+        // Only publish when discovery actually expanded the server list.
+        guard result.count > 1, result.count > sources.count else { return }
+        sources = result
+        applyUnifiedWatchState()
+        startAlternateSourceEnrichment(primaryID: primary.id)
     }
 
     private struct AlternateSourceRequest: Sendable {

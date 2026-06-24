@@ -371,37 +371,18 @@ public struct PosterCardView: View {
                                 .strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
                         }
 
-                    // Fill: glossy "liquid glass" blue — Plozz's brand blue lit by
-                    // a vertical sheen and a bright rim, with a subtle glow so it
-                    // pops off the poster without blooming.
+                    // Fill: solid white, matching the main player's scrubber —
+                    // a bright white played fill with a subtle shadow so it reads
+                    // cleanly over both bright and dark artwork.
                     Capsule(style: .continuous)
-                        .fill(ThemePalette.brandBlue)
-                        .overlay {
-                            Capsule(style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            .white.opacity(0.55),
-                                            .white.opacity(0.06),
-                                            .black.opacity(0.22)
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .blendMode(.plusLighter)
-                        }
-                        .overlay {
-                            Capsule(style: .continuous)
-                                .strokeBorder(.white.opacity(0.55), lineWidth: 0.5)
-                        }
+                        .fill(.white)
                         .frame(width: max(height, geo.size.width * percentage))
-                        .shadow(color: ThemePalette.brandBlue.opacity(0.5), radius: 3)
+                        .shadow(color: .black.opacity(0.35), radius: 3)
                 }
             }
             .frame(height: height)
             .padding(.horizontal, 16)
-            .padding(.bottom, 12)
+            .padding(.bottom, 20)
         }
     }
 }

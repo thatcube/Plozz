@@ -78,7 +78,7 @@ public struct HomeAggregator: Sendable {
                 Self.interleave(perAccount.map(\.latest)), serverInfo: resolve),
             watchlist: MediaItemMerger.merge(
                 Self.interleave(perAccount.map(\.watchlist)), serverInfo: resolve),
-            libraries: perAccount.flatMap(\.libraries)
+            libraries: Self.mergeLibraries(perAccount.flatMap(\.libraries))
         )
     }
 
@@ -168,6 +168,51 @@ public struct HomeAggregator: Sendable {
     }
 
     // MARK: - Merge
+
+    /// Collapses the *same* library living on several servers (e.g. a "Movies"
+    /// library on both a Plex and a Jellyfin account) into ONE tile on the Home
+    /// Libraries row, so its content can be browsed cross-server and a title
+    /// appears once (criterion 1, Library-browse half). The **first-seen**
+    /// `AggregatedLibrary` stays primary — preserving its stable Home-visibility
+    /// `key` — with every other server folded into its underlying
+    /// `MediaLibrary.additionalSourceAccountIDs` / `sourceContainerIDByAccount`,
+    /// so tapping the tile opens an aggregated cross-server browse.
+    ///
+    /// Grouped by normalized title + kind (libraries carry no external ids).
+    /// Untitled libraries fall back to their unique key so they never collapse by
+    /// an empty name. The Settings checklist keeps the **un-merged** per-account
+    /// list via `libraries(from:)`, so each server's library stays individually
+    /// toggleable.
+    static func mergeLibraries(_ libraries: [AggregatedLibrary]) -> [AggregatedLibrary] {
+        var order: [String] = []
+        var primaryByKey: [String: AggregatedLibrary] = [:]
+
+        for aggregated in libraries {
+            let normalized = MediaItemIdentity.normalizedTitle(aggregated.library.title)
+            let key = normalized.isEmpty
+                ? "id:\(aggregated.key)"
+                : "\(aggregated.library.kind.rawValue):\(normalized)"
+
+            guard var primary = primaryByKey[key] else {
+                primaryByKey[key] = aggregated
+                order.append(key)
+                continue
+            }
+
+            let accountID = aggregated.accountID
+            if accountID != primary.library.sourceAccountID,
+               !primary.library.additionalSourceAccountIDs.contains(accountID) {
+                primary.library.additionalSourceAccountIDs.append(accountID)
+            }
+            for (account, container) in aggregated.library.sourceContainerIDByAccount
+            where primary.library.sourceContainerIDByAccount[account] == nil {
+                primary.library.sourceContainerIDByAccount[account] = container
+            }
+            primaryByKey[key] = primary
+        }
+
+        return order.compactMap { primaryByKey[$0] }
+    }
 
     /// Round-robin interleave: take the first item of every group, then the
     /// second of every group, and so on. Preserves each group's internal order

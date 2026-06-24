@@ -463,18 +463,89 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
     /// returned directly by a single provider.
     public var sourceAccountID: String?
 
-    public init(id: String, title: String, kind: MediaItemKind, imageURL: URL? = nil, sourceAccountID: String? = nil) {
+    /// Other `Account.id`s that expose the *same* library (e.g. a "Movies"
+    /// library that exists on both a Plex and a Jellyfin server), populated when
+    /// the Home aggregator merges same-identity libraries across servers so a
+    /// single tile browses every server's copy. Empty for a single-server
+    /// library. The primary stays in `sourceAccountID`.
+    public var additionalSourceAccountIDs: [String]
+
+    /// Maps each contributing `Account.id` to **that server's** own container id
+    /// for this merged library, so an aggregated browse can page every server's
+    /// copy. Always contains the primary (`sourceAccountID` → `id`) once tagged.
+    public var sourceContainerIDByAccount: [String: String]
+
+    public init(
+        id: String,
+        title: String,
+        kind: MediaItemKind,
+        imageURL: URL? = nil,
+        sourceAccountID: String? = nil,
+        additionalSourceAccountIDs: [String] = [],
+        sourceContainerIDByAccount: [String: String] = [:]
+    ) {
         self.id = id
         self.title = title
         self.kind = kind
         self.imageURL = imageURL
         self.sourceAccountID = sourceAccountID
+        self.additionalSourceAccountIDs = additionalSourceAccountIDs
+        self.sourceContainerIDByAccount = sourceContainerIDByAccount
+        // Always keep the primary server addressable in the per-account map.
+        if let sourceAccountID, self.sourceContainerIDByAccount[sourceAccountID] == nil {
+            self.sourceContainerIDByAccount[sourceAccountID] = id
+        }
     }
 
-    /// Returns a copy of this library tagged as belonging to `accountID`.
+    /// Every account this library can be browsed from, primary first then the
+    /// merged alternates in first-seen order. A single entry means there's only
+    /// one server, so the aggregated-browse path collapses to a normal browse.
+    public var allSourceAccountIDs: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for accountID in (sourceAccountID.map { [$0] } ?? []) + additionalSourceAccountIDs
+        where seen.insert(accountID).inserted {
+            result.append(accountID)
+        }
+        return result
+    }
+
+    /// This library's own container id on `accountID`, or `nil` when that server
+    /// doesn't hold the library. Falls back to `id` for the primary account.
+    public func containerID(forSourceAccountID accountID: String) -> String? {
+        if let mapped = sourceContainerIDByAccount[accountID] { return mapped }
+        if sourceAccountID == accountID { return id }
+        return nil
+    }
+
+    /// Returns a copy of this library tagged as belonging to `accountID`, also
+    /// recording this server's container id in the per-account map so a later
+    /// cross-server merge can address it.
     public func taggingSource(_ accountID: String) -> MediaLibrary {
         var copy = self
         copy.sourceAccountID = accountID
+        copy.sourceContainerIDByAccount[accountID] = id
         return copy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, kind, imageURL, sourceAccountID
+        case additionalSourceAccountIDs, sourceContainerIDByAccount
+    }
+
+    /// Custom decoding so the cross-server fields (added after libraries were
+    /// first persisted) default to empty when absent. Encoding stays synthesized.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        kind = try container.decode(MediaItemKind.self, forKey: .kind)
+        imageURL = try container.decodeIfPresent(URL.self, forKey: .imageURL)
+        sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
+        additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
+        sourceContainerIDByAccount = try container.decodeIfPresent([String: String].self, forKey: .sourceContainerIDByAccount) ?? [:]
+        if let sourceAccountID, sourceContainerIDByAccount[sourceAccountID] == nil {
+            sourceContainerIDByAccount[sourceAccountID] = id
+        }
     }
 }

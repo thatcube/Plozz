@@ -155,6 +155,40 @@ private func resolveOptionalProvider(_ accountID: String, in accounts: [Resolved
     accounts.first(where: { $0.account.id == accountID })?.provider
 }
 
+/// Builds the provider that backs a Library-browse grid for `library`. When the
+/// Home aggregator merged the same library across several servers
+/// (`allSourceAccountIDs.count > 1`) it returns an ``AggregatedLibraryProvider``
+/// that pages and de-duplicates every server's copy into one grid (criterion 1
+/// for Library browse); otherwise it returns the single owning provider. The
+/// returned `sourceAccountID` is `nil` for the aggregated case so the browse
+/// view-model doesn't re-tag items and clobber their per-source identity.
+private func resolveLibraryBrowse(
+    for library: MediaLibrary,
+    in accounts: [ResolvedAccount]
+) -> (provider: any MediaProvider, sourceAccountID: String?) {
+    let accountIDs = library.allSourceAccountIDs
+    if accountIDs.count > 1 {
+        let sources: [AggregatedLibrarySource] = accountIDs.compactMap { accountID in
+            guard
+                let provider = resolveOptionalProvider(accountID, in: accounts),
+                let containerID = library.containerID(forSourceAccountID: accountID)
+            else { return nil }
+            return AggregatedLibrarySource(accountID: accountID, containerID: containerID, provider: provider)
+        }
+        if sources.count > 1 {
+            return (
+                AggregatedLibraryProvider(sources: sources, serverInfo: accounts.sourceServerInfo()),
+                nil
+            )
+        }
+        // Only one source still resolves (others signed out): browse it directly.
+        if let only = sources.first {
+            return (only.provider, only.accountID)
+        }
+    }
+    return (resolveProvider(library.sourceAccountID, in: accounts), library.sourceAccountID)
+}
+
 /// Builds the player for a play request. Online (TMDb → YouTube) trailers carry a
 /// YouTube video-id marker and have no backing account, so they are routed to
 /// ``YouTubeTrailerProvider`` (which extracts a playable stream); every other
@@ -240,12 +274,13 @@ private struct HomeTab: View {
                 }
             )
             .navigationDestination(for: MediaLibrary.self) { library in
+                let browse = resolveLibraryBrowse(for: library, in: accounts)
                 LibraryBrowseView(
                     viewModel: LibraryBrowseViewModel(
-                        provider: resolveProvider(library.sourceAccountID, in: accounts),
+                        provider: browse.provider,
                         containerID: library.id,
                         containerKind: library.kind,
-                        sourceAccountID: library.sourceAccountID
+                        sourceAccountID: browse.sourceAccountID
                     ),
                     title: library.title,
                     spoilerSettings: spoilerSettings,

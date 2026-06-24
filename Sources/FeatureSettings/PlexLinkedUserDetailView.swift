@@ -128,19 +128,20 @@ struct PlexLinkedUserDetailView: View {
                     }
                     Text("Main Plex account holder")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .settingsRowSecondary()
                 }
                 Spacer()
                 if isOwnerSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title3)
-                        .foregroundStyle(.green)
+                        .settingsRowGreenIndicator()
                 }
             }
             .padding(.vertical, 12)
+            .padding(.horizontal, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsFocusButtonStyle())
     }
 
     private func userRow(_ user: PlexHomeUser, account: Account) -> some View {
@@ -176,13 +177,14 @@ struct PlexLinkedUserDetailView: View {
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title3)
-                        .foregroundStyle(.green)
+                        .settingsRowGreenIndicator()
                 }
             }
             .padding(.vertical, 12)
+            .padding(.horizontal, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsFocusButtonStyle())
     }
 
     private func avatar(for user: PlexHomeUser, size: CGFloat) -> some View {

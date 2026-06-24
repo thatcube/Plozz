@@ -20,6 +20,14 @@ struct SettingsAboutSection: View {
     let repoURL: String
 
     @FocusState private var isFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var focusFill: Color {
+        colorScheme == .dark ? Color.white : Color.black
+    }
+    private var focusForeground: Color {
+        colorScheme == .dark ? Color.black : Color.white
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 36) {
@@ -38,12 +46,12 @@ struct SettingsAboutSection: View {
 
                 Text("Plozz is free and open source — an unofficial tvOS client for Jellyfin and Plex, not affiliated with or endorsed by Jellyfin or Plex.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text("This product uses the TMDB API but is not endorsed or certified by TMDB. Ratings and metadata are supplied by your media server and by TMDB, OMDb, and AniList.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,21 +63,27 @@ struct SettingsAboutSection: View {
                 Text("Scan to view the\nGitHub repo")
                     .font(.caption)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
             }
         }
         .padding(20)
+        // Unified focus look: native tvOS "inverted card" — white-on-black in
+        // light mode, black-on-white in dark mode — matching the row style in
+        // SettingsRowStyle.swift. Subtle lift + soft shadow, no hard outline.
+        .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.primary.opacity(isFocused ? 0.10 : 0))
+                .fill(isFocused ? focusFill : Color.clear)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(isFocused ? 0.9 : 0), lineWidth: isFocused ? 5 : 0)
+        .scaleEffect(isFocused ? 1.02 : 1.0)
+        .shadow(
+            color: Color.black.opacity(isFocused ? 0.28 : 0),
+            radius: isFocused ? 14 : 0,
+            y: isFocused ? 6 : 0
         )
         .focusable()
         .focused($isFocused)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .animation(.easeOut(duration: 0.16), value: isFocused)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("About Plozz. Version \(version), build \(build). Free and open source, an unofficial tvOS client for Jellyfin and Plex. This product uses the TMDB API but is not endorsed or certified by TMDB. Scan the on-screen code to view the GitHub repository.")
     }

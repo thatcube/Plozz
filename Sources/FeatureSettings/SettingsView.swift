@@ -171,6 +171,12 @@ public struct SettingsView: View {
             .scrollClipDisabled()
             .navigationDestination(for: SettingsRoute.self) { route in
                 destination(for: route)
+                    // Native tvOS hides the tab bar on drill-down pages; our
+                    // Settings tab is a TabView tab hosting a NavigationStack,
+                    // so pushed details would otherwise still show the tab
+                    // strip on top. Hiding it here makes every detail render
+                    // full-screen and the root list restores the bar on pop.
+                    .toolbar(.hidden, for: .tabBar)
             }
             .task { await reloadLibraries() }
         }
@@ -340,6 +346,8 @@ public struct SettingsView: View {
                     Text("Settings below are saved on this profile.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+
+                    signedInToCluster
                 }
                 Spacer()
                 Button(action: onSwitchProfile) {
@@ -350,6 +358,54 @@ public struct SettingsView: View {
             }
         }
         .padding(28)
+    }
+
+    /// Compact, read-only "Signed in to" glance under the active-profile
+    /// header. Purely informational — the Server Accounts row remains the
+    /// management/drill-in entry point, so this is a glance, not an action.
+    /// Capped to three entries with a trailing "+N more" so a busy household
+    /// stays one line.
+    @ViewBuilder
+    private var signedInToCluster: some View {
+        if !accounts.isEmpty {
+            HStack(alignment: .center, spacing: 10) {
+                Text("Signed in to")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(1.0)
+                let visible = Array(accounts.prefix(3))
+                let overflow = max(0, accounts.count - visible.count)
+                ForEach(Array(visible.enumerated()), id: \.element.id) { idx, account in
+                    if idx > 0 {
+                        Text("·")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 6) {
+                        AccountAvatar(name: account.userName, imageURL: account.avatarURL, size: 22)
+                        Text(signedInLabel(for: account))
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+                }
+                if overflow > 0 {
+                    Text("· +\(overflow) more")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func signedInLabel(for account: Account) -> String {
+        let name = account.userName.trimmingCharacters(in: .whitespaces)
+        let providerName = account.server.provider.displayName
+        if name.isEmpty { return providerName }
+        return "\(name)'s \(providerName)"
     }
 
     private var soloHeader: some View {
@@ -392,19 +448,19 @@ public struct SettingsView: View {
                         .font(.callout.weight(.medium))
                     Text(plexLinkedUserSubtitle(for: binding))
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .settingsRowSecondary()
                         .lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .settingsRowSecondary()
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 12)
             .contentShape(Rectangle())
         }
-        .buttonStyle(SettingsRowButtonStyle())
+        .buttonStyle(SettingsFocusButtonStyle())
     }
 
     /// Synthetic binding representing the Plex account owner — derived from
@@ -465,19 +521,19 @@ public struct SettingsView: View {
                         .font(.callout.weight(.medium))
                     Text("Add separate household profiles so each person gets their own Home, watch history, and preferences.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .settingsRowSecondary()
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .settingsRowSecondary()
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 12)
             .contentShape(Rectangle())
         }
-        .buttonStyle(SettingsRowButtonStyle())
+        .buttonStyle(SettingsFocusButtonStyle())
     }
 
     // MARK: - Helpers
@@ -509,7 +565,7 @@ public struct SettingsView: View {
         Image(systemName: name)
             .font(.system(size: 22, weight: .regular))
             .frame(width: 30, height: 30)
-            .foregroundStyle(.tint)
+            .settingsRowIcon()
     }
 
     @ViewBuilder
@@ -527,53 +583,19 @@ public struct SettingsView: View {
                 if let value {
                     Text(value)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .settingsRowSecondary()
                         .lineLimit(1)
                 }
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .settingsRowSecondary()
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 12)
             .contentShape(Rectangle())
         }
-        .buttonStyle(SettingsRowButtonStyle())
+        .buttonStyle(SettingsFocusButtonStyle())
     }
 }
 
-/// Native-feeling, contained focus treatment for Settings rows. Mimics the
-/// Apple TV "subtle lift" focus: a small scale + soft drop shadow for depth,
-/// a gentle brightened surface, no hard outline. Paired with non-zero
-/// inter-row spacing in `profileOwnedRows` so the lift never bleeds into the
-/// neighboring row or crosses a divider.
-struct SettingsRowButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        SettingsRowButtonBody(configuration: configuration)
-    }
-}
-
-private struct SettingsRowButtonBody: View {
-    let configuration: ButtonStyle.Configuration
-    @Environment(\.isFocused) private var isFocused
-    var body: some View {
-        configuration.label
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isFocused ? Color.white.opacity(0.12) : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(isFocused ? Color.white.opacity(0.10) : Color.clear, lineWidth: 1)
-            )
-            .scaleEffect(isFocused ? 1.03 : 1.0)
-            .shadow(
-                color: Color.black.opacity(isFocused ? 0.28 : 0),
-                radius: isFocused ? 12 : 0,
-                y: isFocused ? 6 : 0
-            )
-            .opacity(configuration.isPressed ? 0.85 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: isFocused)
-    }
-}
 #endif

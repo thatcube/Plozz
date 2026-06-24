@@ -65,26 +65,29 @@ struct ServersAndLibrariesDetailView: View {
                     Text(group.serverName).font(.headline)
                     Text(summary(for: group))
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .settingsRowSecondary()
                         .lineLimit(1)
                 }
                 Spacer()
                 if context.profilesEnabled, isInUse(group) {
-                    Text("In use")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.green.opacity(0.18)))
-                        .foregroundStyle(.green)
+                    inUseChip
                 }
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .settingsRowSecondary()
             }
             .padding(.vertical, 14)
+            .padding(.horizontal, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+    }
+
+    /// "In use" capsule with a focus-aware variant so the green stays legible
+    /// against the inverted card fill (darker on the white card, lighter on
+    /// the black card).
+    private var inUseChip: some View {
+        InUseChipView()
     }
 
     private func isInUse(_ group: ServerAccountGroup) -> Bool {
@@ -170,5 +173,32 @@ func serverKey(for account: Account) -> String {
     // collapsed into one group.
     let host = account.server.baseURL.host?.lowercased() ?? account.server.baseURL.absoluteString
     return "\(account.server.provider.rawValue)|\(host)"
+}
+
+/// "In use" chip with focus-aware text + capsule fill so it stays legible
+/// when the surrounding row inverts on focus. Reads the unified row focus
+/// environment so it adapts uniformly across every row that uses it.
+struct InUseChipView: View {
+    @Environment(\.settingsRowIsFocused) private var focused
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var capsuleTint: Color {
+        guard focused else { return Color.green.opacity(0.18) }
+        // On the inverted card the faint translucent green disappears; bump
+        // the opacity so the chip still reads as a green pill, then let the
+        // text color carry contrast against the card.
+        return colorScheme == .dark
+            ? Color(red: 0.10, green: 0.50, blue: 0.22).opacity(0.18) // dark green on white card
+            : Color(red: 0.55, green: 0.95, blue: 0.65).opacity(0.28) // light green on black card
+    }
+
+    var body: some View {
+        Text("In use")
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(capsuleTint))
+            .settingsRowGreenIndicator()
+    }
 }
 #endif

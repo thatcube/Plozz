@@ -140,17 +140,37 @@ public struct PlayerView: View {
         }
     }
 
-    /// Dismiss with an HDR-aware fade: when leaving HDR/Dolby-Vision content the
-    /// display will snap back to SDR, so fade to black first to hide it, then
-    /// dismiss. SDR playback dismisses immediately (no mode switch to hide).
+    /// Dismiss with an HDR-aware fade that keeps the screen fully black from the
+    /// moment exit begins until the display has actually settled back to SDR, so
+    /// there is no flash on the player-dismiss → Home handoff.
+    ///
+    /// SDR playback dismisses immediately (no mode switch to hide). For HDR/DV we:
+    ///   1. raise the veil and let it reach solid black (pre-empt) before tearing
+    ///      the HDR surface down, so the switch never shows through a half frame;
+    ///   2. stop playback — this resets `preferredDisplayCriteria`, so the TV
+    ///      *starts* switching HDR/DV → SDR behind the black veil;
+    ///   3. wait for the display's mode-switch-end (or a safety timeout) so we
+    ///      dismiss only once the panel is already SDR;
+    ///   4. dismiss — Home appears already-SDR, and the veil is torn down with the
+    ///      player, so black covers the entire handoff.
     private func dismissSmoothly() {
-        guard !hdrTransition.isVeiled, viewModel.displayMode.isHDR else {
+        guard viewModel.displayMode.isHDR else {
             dismiss()
             return
         }
-        hdrTransition.raiseVeil()
+        guard !hdrTransition.isExiting else { return }
+        hdrTransition.beginExit(isHDR: true)
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            // 1. Let the veil reach solid black before tearing the HDR surface down.
+            await hdrTransition.awaitVeilOpaque()
+            // 2. Stop playback: this resets `preferredDisplayCriteria`, so the TV
+            //    starts switching HDR/DV → SDR behind the black veil. Run it
+            //    concurrently so the final server report (a network round-trip)
+            //    never prolongs the black — only the physical settle gates dismiss.
+            Task { await viewModel.stop() }
+            // 3. Wait for the panel to finish switching to SDR (or a safety
+            //    timeout), then dismiss into an already-SDR Home.
+            await hdrTransition.waitForExit()
             dismiss()
         }
     }

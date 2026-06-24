@@ -102,7 +102,7 @@ public struct RootView: View {
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
         .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)
-        .sheet(item: Binding(
+        .fullScreenCover(item: Binding(
             get: { pinRequest },
             set: { newValue in if newValue == nil { appState.dismissPlexPINIfPresented() } }
         )) { request in
@@ -140,36 +140,40 @@ private struct PlexPINEntryView: View {
     private static let pinLength = 4
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 36) {
+        ZStack {
+            // Full-bleed dimmed backdrop so the PIN screen reads as a modal
+            // OVER the app (like Plex does), not as an opaque context switch.
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+            Color.black.opacity(0.45).ignoresSafeArea()
+
+            VStack(spacing: 32) {
                 Spacer(minLength: 0)
                 avatarBadge
                 Text(userName)
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
                 pinField
-                if let error = appState.plexPINError {
-                    Text(error)
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                }
+                // Reserve the error slot so the strip doesn't jump up/down
+                // when an error appears/clears between attempts.
+                Text(appState.plexPINError ?? " ")
+                    .font(.callout)
+                    .foregroundStyle(appState.plexPINError == nil ? Color.clear : .red)
+                    .multilineTextAlignment(.center)
                 PINStrip(onDigit: appendDigit, onDelete: deleteDigit)
-                    .padding(.horizontal, 60)
                 Spacer(minLength: 0)
+                Button("Cancel", action: onCancel)
+                    .padding(.bottom, 40)
             }
+            .padding(.horizontal, 90)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
-                }
-            }
-            .onChange(of: appState.plexPINError) { _, newValue in
-                // Wrong-PIN response: clear the entered dots so the user can
-                // retry without first backspacing four times.
-                if newValue != nil { pin = "" }
-            }
+        }
+        .onExitCommand(perform: onCancel)
+        .onChange(of: appState.plexPINError) { _, newValue in
+            // Wrong-PIN response: clear the entered dots so the user can
+            // retry without first backspacing four times.
+            if newValue != nil { pin = "" }
         }
     }
 
@@ -256,40 +260,62 @@ private struct PlexPINEntryView: View {
 /// Single horizontal row of digit keys 0–9 plus a delete key — the layout
 /// Plex itself uses on tvOS, and the one-axis path the Siri remote handles
 /// best. Each key is a focusable Button so focus is always anchored and
-/// Menu/Back can't fall through to the system.
+/// Menu/Back can't fall through to the system. Width-adaptive: keys shrink
+/// to fit the available width so the strip never overflows the screen,
+/// regardless of presenter or safe-area insets.
 private struct PINStrip: View {
     let onDigit: (String) -> Void
     let onDelete: () -> Void
 
     private let digits: [String] = ["1","2","3","4","5","6","7","8","9","0"]
+    /// 10 digits + 1 delete.
+    private let keyCount: Int = 11
+    private let spacing: CGFloat = 12
 
     var body: some View {
-        HStack(spacing: 12) {
-            ForEach(digits, id: \.self) { d in
-                digitKey(d)
+        GeometryReader { proxy in
+            // Solve for key width that exactly tiles the available width
+            // (including spacing between keys). Clamp so keys never get
+            // unusably small or so big they bloat the layout. The clamp
+            // generously covers any tvOS display from the 1080p Apple TV HD
+            // through 4K.
+            let totalSpacing = spacing * CGFloat(keyCount - 1)
+            let raw = (proxy.size.width - totalSpacing) / CGFloat(keyCount)
+            let keyWidth = min(max(raw, 56), 110)
+            let keyHeight = max(keyWidth + 8, 76)
+            HStack(spacing: spacing) {
+                ForEach(digits, id: \.self) { d in
+                    digitKey(d, width: keyWidth, height: keyHeight)
+                }
+                deleteKey(width: keyWidth, height: keyHeight)
             }
-            deleteKey
+            .frame(maxWidth: .infinity)
+            .frame(width: proxy.size.width, alignment: .center)
         }
+        // Height matches the computed key height ceiling so the strip doesn't
+        // jump as the available width changes. Adds a little vertical slack
+        // for the focus lift on top/bottom.
+        .frame(height: 130)
     }
 
-    private func digitKey(_ digit: String) -> some View {
+    private func digitKey(_ digit: String, width: CGFloat, height: CGFloat) -> some View {
         Button {
             onDigit(digit)
         } label: {
             Text(digit)
-                .font(.system(size: 30, weight: .semibold, design: .rounded))
-                .frame(width: 78, height: 88)
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .frame(width: width, height: height)
         }
         .buttonStyle(.bordered)
     }
 
-    private var deleteKey: some View {
+    private func deleteKey(width: CGFloat, height: CGFloat) -> some View {
         Button(role: .destructive) {
             onDelete()
         } label: {
             Image(systemName: "delete.left")
-                .font(.title2)
-                .frame(width: 92, height: 88)
+                .font(.title3)
+                .frame(width: width, height: height)
         }
         .buttonStyle(.bordered)
         .accessibilityLabel("Delete")

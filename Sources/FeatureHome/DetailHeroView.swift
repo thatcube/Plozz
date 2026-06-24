@@ -87,6 +87,11 @@ struct DetailHeroView: View {
         case idle, refreshing, success
     }
 
+    /// Uniform square footprint for the secondary hero icon buttons (watchlist,
+    /// watched, refresh) so their differing SF Symbol widths — the `eye` glyph in
+    /// particular — don't make one button wider than the rest.
+    private let heroIconSize: CGFloat = 30
+
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
@@ -401,6 +406,7 @@ struct DetailHeroView: View {
                 .foregroundStyle(item.isFavorite ? Color.accentColor : Color.primary)
                 .contentTransition(.opacity)
                 .symbolEffect(.bounce, value: item.isFavorite)
+                .frame(width: heroIconSize, height: heroIconSize)
         }
         .modifier(HeroButtonStyle(prominent: false))
         .animation(.easeInOut(duration: 0.2), value: item.isFavorite)
@@ -418,21 +424,22 @@ struct DetailHeroView: View {
     @ViewBuilder
     private func watchedButton(action: MediaItemAction) -> some View {
         Button { performHeroAction(action) } label: {
-            Group {
+            ZStack {
                 if item.isPlayed {
                     Image(systemName: "checkmark.circle.fill")
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(.white, ThemePalette.brandBlue)
+                        .transition(.scale(scale: 0.4).combined(with: .opacity))
                 } else {
                     Image(systemName: "eye")
                         .foregroundStyle(Color.primary)
+                        .transition(.scale(scale: 0.4).combined(with: .opacity))
                 }
             }
-            .id(item.isPlayed)
-            .transition(.scale.combined(with: .opacity))
+            .frame(width: heroIconSize, height: heroIconSize)
         }
         .modifier(HeroButtonStyle(prominent: false))
-        .animation(.easeInOut(duration: 0.22), value: item.isPlayed)
+        .animation(.spring(response: 0.34, dampingFraction: 0.62), value: item.isPlayed)
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
     }
@@ -489,6 +496,7 @@ struct DetailHeroView: View {
         }
         .id(refreshPhase)
         .transition(.scale(scale: 0.4).combined(with: .opacity))
+        .frame(width: heroIconSize, height: heroIconSize)
     }
     /// play icon and the "… left" line. Its colours flip with the button's focus
     /// state — light fill on the dark unfocused button, dark fill on the white

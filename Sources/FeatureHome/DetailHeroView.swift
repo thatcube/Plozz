@@ -441,11 +441,10 @@ struct DetailHeroView: View {
                 ZStack {
                     Circle()
                         .fill(ThemePalette.brandBlue)
-                    CheckmarkShape()
-                        .trim(from: 0, to: checkDraw)
+                    CheckmarkShape(progress: checkDraw)
                         .stroke(Color.white,
                                 style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                        .padding(heroIconSize * 0.28)
+                        .padding(heroIconSize * 0.30)
                 }
                 .opacity(item.isPlayed ? 1 : 0)
                 .scaleEffect(item.isPlayed ? 1 : 0.5)
@@ -654,15 +653,43 @@ private struct HeroButtonStyle: ViewModifier {
     }
 }
 
-/// The checkmark glyph used by the watched toggle, drawn as an explicit path so
-/// it can be animated on with `.trim`. The path runs left point ➝ bottom vertex
-/// ➝ top-right, so trimming from 0 to 1 strokes it in that natural order.
+/// The checkmark glyph used by the watched toggle, drawn proportionally so it can
+/// animate on. `progress` (0...1) is the shape's `animatableData`, and the path is
+/// built up to that fraction of its *total length* — left point ➝ bottom vertex ➝
+/// top-right — so stroking it as `progress` animates makes the check draw itself in
+/// at a uniform speed. Proportions are inset from the rect so it never warps into
+/// the corners.
 private struct CheckmarkShape: Shape {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
     func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        let start = CGPoint(x: w * 0.16, y: h * 0.52)
+        let mid   = CGPoint(x: w * 0.42, y: h * 0.72)
+        let end   = CGPoint(x: w * 0.82, y: h * 0.30)
+
+        let firstLen = hypot(mid.x - start.x, mid.y - start.y)
+        let secondLen = hypot(end.x - mid.x, end.y - mid.y)
+        let total = firstLen + secondLen
+        let drawn = max(0, min(1, progress)) * total
+
         var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY + rect.height * 0.55))
-        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.36, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.move(to: start)
+        if drawn <= firstLen {
+            let t = firstLen == 0 ? 0 : drawn / firstLen
+            path.addLine(to: CGPoint(x: start.x + t * (mid.x - start.x),
+                                     y: start.y + t * (mid.y - start.y)))
+        } else {
+            path.addLine(to: mid)
+            let t = secondLen == 0 ? 0 : (drawn - firstLen) / secondLen
+            path.addLine(to: CGPoint(x: mid.x + t * (end.x - mid.x),
+                                     y: mid.y + t * (end.y - mid.y)))
+        }
         return path
     }
 }

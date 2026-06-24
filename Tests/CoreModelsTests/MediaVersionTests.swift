@@ -36,8 +36,12 @@ final class MediaVersionTests: XCTestCase {
         XCTAssertTrue(derived.displayLabel.contains("4K"))
         XCTAssertTrue(derived.displayLabel.contains("HDR10"))
 
-        let named = MediaVersion(id: "2", name: "Bluray Remux")
-        XCTAssertEqual(named.displayLabel, "Bluray Remux")
+        // A name that names a source-quality token now surfaces that token (the
+        // edition/source recovery the picker needs) rather than echoing the raw
+        // release string verbatim.
+        XCTAssertEqual(MediaVersion(id: "2", name: "Bluray Remux").displayLabel, "Remux")
+        // A name with no recognised edition/source/quality still falls back whole.
+        XCTAssertEqual(MediaVersion(id: "2b", name: "Server Copy").displayLabel, "Server Copy")
 
         XCTAssertEqual(MediaVersion(id: "3").displayLabel, "Version")
     }

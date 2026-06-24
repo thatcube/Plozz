@@ -473,8 +473,8 @@ struct DetailHeroView: View {
             // a real 0 -> 1 transition (a same-tick reset+set just coalesces to 1),
             // and so the circle has popped in first.
             checkDraw = 0
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                withAnimation(.easeOut(duration: 0.4)) { checkDraw = 1 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                withAnimation(.easeOut(duration: 0.3)) { checkDraw = 1 }
             }
         }
         .onAppear { checkDraw = item.isPlayed ? 1 : 0 }
@@ -688,9 +688,9 @@ private struct CheckmarkShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         let w = rect.width, h = rect.height
-        let start = CGPoint(x: w * 0.16, y: h * 0.52)
-        let mid   = CGPoint(x: w * 0.42, y: h * 0.72)
-        let end   = CGPoint(x: w * 0.82, y: h * 0.30)
+        let start = CGPoint(x: w * 0.26, y: h * 0.52)
+        let mid   = CGPoint(x: w * 0.44, y: h * 0.70)
+        let end   = CGPoint(x: w * 0.74, y: h * 0.24)
 
         let firstLen = hypot(mid.x - start.x, mid.y - start.y)
         let secondLen = hypot(end.x - mid.x, end.y - mid.y)

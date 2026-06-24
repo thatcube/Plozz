@@ -82,6 +82,17 @@ public protocol MediaProvider: Sendable {
     /// ignores the flag (so this stays additive — `false` == current behaviour).
     func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest
 
+    /// Resolve a playable stream for a **specific media source** (version) of an
+    /// item — used when a title has several sources (e.g. 4K HDR vs 1080p) and
+    /// the user picked one in the version picker.
+    ///
+    /// `mediaSourceID` is the `MediaVersion.id` chosen; `nil` means "use the
+    /// provider/server default source" (identical to `playbackInfo(for:
+    /// forceTranscode:)`). Providers that don't expose multiple sources inherit a
+    /// default that ignores the id, so this is fully additive — existing
+    /// conformers and test doubles need no changes.
+    func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest
+
     /// Report progress so the server keeps resume points in sync.
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws
 
@@ -120,6 +131,14 @@ public extension MediaProvider {
     /// and other conformers inherit the safe pass-through.
     func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
         try await playbackInfo(for: itemID)
+    }
+
+    /// Default: ignore `mediaSourceID` and resolve the provider's default source,
+    /// honouring `forceTranscode`. Providers that expose multiple media sources
+    /// (Jellyfin) override this to target the chosen version; everyone else
+    /// inherits this additive pass-through.
+    func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
+        try await playbackInfo(for: itemID, forceTranscode: forceTranscode)
     }
 }
 

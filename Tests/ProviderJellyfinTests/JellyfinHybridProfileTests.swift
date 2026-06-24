@@ -31,8 +31,12 @@ final class JellyfinHybridProfileTests: XCTestCase {
     func testDefaultProfileUnchangedByFlagAddition() throws {
         // The default (no flag) and the explicit hybrid-off profile must be
         // byte-for-byte identical, proving the flag defaults to no expansion.
-        let a = try JSONEncoder().encode(JellyfinCapabilityProfile.appleTV(capabilities: caps))
-        let b = try JSONEncoder().encode(JellyfinCapabilityProfile.appleTV(capabilities: caps, hybridEngineEnabled: false))
+        // Sort keys so the comparison is deterministic (the profile contains
+        // dictionaries whose key order is otherwise unstable across encodings).
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let a = try encoder.encode(JellyfinCapabilityProfile.appleTV(capabilities: caps))
+        let b = try encoder.encode(JellyfinCapabilityProfile.appleTV(capabilities: caps, hybridEngineEnabled: false))
         XCTAssertEqual(a, b)
     }
 

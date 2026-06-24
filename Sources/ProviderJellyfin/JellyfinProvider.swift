@@ -129,17 +129,23 @@ public struct JellyfinProvider: MediaProvider {
     // MARK: Playback
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
-        try await playbackInfo(for: itemID, forceTranscode: false)
+        try await playbackInfo(for: itemID, mediaSourceID: nil, forceTranscode: false)
     }
 
     public func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
+        try await playbackInfo(for: itemID, mediaSourceID: nil, forceTranscode: forceTranscode)
+    }
+
+    public func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
         let detail = try await client.item(userID: session.userID, id: itemID)
         var info = try await client.playbackInfo(
             userID: session.userID,
             itemID: itemID,
+            mediaSourceID: mediaSourceID,
             mode: forceTranscode ? .transcode : .auto
         )
-        guard var source = info.MediaSources.first else { throw AppError.notFound }
+        // Prefer the explicitly chosen source; fall back to the server default.
+        guard var source = Self.selectSource(mediaSourceID, in: info.MediaSources) else { throw AppError.notFound }
 
         // Capture the original source facts (true container + DoVi/HDR range)
         // BEFORE any remux swap below, so diagnostics and the native engine's
@@ -169,8 +175,9 @@ public struct JellyfinProvider: MediaProvider {
             if let remuxInfo = try? await client.playbackInfo(
                 userID: session.userID,
                 itemID: itemID,
+                mediaSourceID: mediaSourceID,
                 mode: .remux
-            ), let remuxSource = remuxInfo.MediaSources.first,
+            ), let remuxSource = Self.selectSource(mediaSourceID, in: remuxInfo.MediaSources),
                remuxSource.TranscodingUrl != nil {
                 info = remuxInfo
                 source = remuxSource
@@ -200,6 +207,16 @@ public struct JellyfinProvider: MediaProvider {
             sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
             scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled)
         )
+    }
+
+    /// Picks the requested source by id, falling back to the server's first
+    /// (default) source when no id was supplied or it isn't present in the
+    /// response. Keeps version selection robust if a server reorders sources.
+    static func selectSource(_ mediaSourceID: String?, in sources: [MediaSourceInfo]) -> MediaSourceInfo? {
+        if let mediaSourceID, let match = sources.first(where: { $0.Id == mediaSourceID }) {
+            return match
+        }
+        return sources.first
     }
 
     /// Builds a provider-agnostic `TrickplayManifest` from Jellyfin's per-source,
@@ -486,8 +503,40 @@ public struct JellyfinProvider: MediaProvider {
             mediaInfo: Self.sourceMetadata(
                 container: dto.MediaSources?.first?.Container,
                 streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? []
-            )
+            ),
+            versions: Self.versions(from: dto.MediaSources),
+            isFavorite: dto.UserData?.IsFavorite ?? false
         )
+    }
+
+    /// Maps a detail item's `MediaSources` into provider-agnostic
+    /// `MediaVersion`s, deriving each version's resolution / HDR / audio facts
+    /// from its primary video and audio streams. Returns `[]` for items fetched
+    /// without source info (rows/cards) or with a single source, so the picker
+    /// only appears when there's a genuine choice. The server's first source is
+    /// flagged `isDefault`.
+    static func versions(from sources: [MediaSourceInfo]?) -> [MediaVersion] {
+        guard let sources, sources.count > 1 else { return [] }
+        return sources.enumerated().map { index, source in
+            let streams = source.MediaStreams ?? []
+            let video = streams.first { $0.`Type` == "Video" }
+            let audio = streams.first { $0.`Type` == "Audio" }
+            return MediaVersion(
+                id: source.Id ?? "\(index)",
+                name: source.Name,
+                width: video?.Width,
+                height: video?.Height,
+                bitrate: source.Bitrate ?? video?.BitRate,
+                sizeBytes: source.Size,
+                isDefault: index == 0,
+                videoCodec: video?.Codec,
+                videoRange: video?.VideoRangeType ?? video?.VideoRange,
+                audioCodec: audio?.Codec,
+                audioChannels: audio?.Channels,
+                audioProfile: audio?.Profile,
+                container: source.Container
+            )
+        }
     }
 
     /// Maps Jellyfin `People` onto provider-agnostic `MediaPerson`s, preserving
@@ -657,5 +706,34 @@ extension JellyfinProvider: WatchStateProviding {
     /// series id Jellyfin cascades the change to the contained episodes.
     public func setPlayed(_ played: Bool, itemID: String) async throws {
         try await client.setItemPlayed(played, userID: session.userID, itemID: itemID)
+    }
+}
+
+// MARK: - Watchlist (Favorites)
+
+extension JellyfinProvider: WatchlistProviding {
+    /// Jellyfin has no separate "watchlist"; its first-class equivalent is the
+    /// per-user Favorites flag, which is exactly the unified Watchlist semantics
+    /// we want (a title the user marked to find again). Writes go to
+    /// `/Users/{uid}/FavoriteItems/{id}`.
+    public func setWatchlisted(_ on: Bool, item: MediaItem) async throws {
+        try await client.setFavorite(on, userID: session.userID, itemID: item.id)
+    }
+
+    /// Returns the user's favourited movies & series as the Watchlist row.
+    /// Episodes are intentionally excluded so the row stays title-level.
+    public func watchlist() async throws -> [MediaItem] {
+        try await client.favorites(userID: session.userID).map(map(item:))
+    }
+}
+
+// MARK: - Metadata refresh
+
+extension JellyfinProvider: MetadataRefreshing {
+    /// Triggers a full server-side metadata + image refresh for the item,
+    /// replacing existing fields so corrected names/artwork propagate. Fire and
+    /// forget: the server processes it asynchronously.
+    public func refreshMetadata(itemID: String) async throws {
+        try await client.refreshMetadata(itemID: itemID)
     }
 }

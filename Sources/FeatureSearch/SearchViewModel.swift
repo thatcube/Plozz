@@ -74,7 +74,8 @@ public final class SearchViewModel {
             SearchSection(title: section.title, items: section.items.map { item in
                 guard mutation.itemIDs.contains(item.id) else { return item }
                 var copy = item
-                copy.isPlayed = mutation.played
+                if let played = mutation.played { copy.isPlayed = played }
+                if let favorite = mutation.favorite { copy.isFavorite = favorite }
                 return copy
             })
         })

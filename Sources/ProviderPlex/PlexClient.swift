@@ -225,6 +225,87 @@ public struct PlexClient: Sendable {
         _ = try await send(endpoint)
     }
 
+    /// `PUT /library/metadata/{ratingKey}/refresh` — asks the PMS to re-scan the
+    /// item's files and re-fetch metadata/artwork from its configured agents.
+    /// The server queues the work and returns immediately.
+    func refreshMetadata(ratingKey: String) async throws {
+        let endpoint = Endpoint(
+            method: .put,
+            path: "/library/metadata/\(ratingKey)/refresh",
+            queryItems: [URLQueryItem(name: "X-Plex-Token", value: token)],
+            headers: headers
+        )
+        _ = try await send(endpoint)
+    }
+
+    // MARK: Watchlist (plex.tv Discover service)
+    //
+    // Plex's Watchlist is an **account-level** feature served by the global
+    // Discover endpoints (`discover.provider.plex.tv` to mutate,
+    // `metadata.provider.plex.tv` to read) — NOT the per-server PMS API. It's
+    // keyed by the item's global `plex://` guid (its trailing id), so these
+    // requests bypass the connection resolver and hit the fixed plex.tv hosts
+    // directly with the account token. Failures surface to the caller, which
+    // reverts the optimistic UI.
+
+    private static let watchlistActionBase = URL(string: "https://discover.provider.plex.tv")!
+    private static let watchlistMetadataBase = URL(string: "https://metadata.provider.plex.tv")!
+
+    /// The Discover metadata id for a `plex://<type>/<id>` guid — the trailing
+    /// path component the watchlist endpoints key on. `nil` for a non-`plex://`
+    /// guid or one missing its `<id>` tail (e.g. `plex://movie/`), so a bare type
+    /// token is never mistaken for an id.
+    static func watchlistMetadataID(fromGuid guid: String?) -> String? {
+        guard let guid, guid.hasPrefix("plex://") else { return nil }
+        // Format is `plex://<type>/<id>`: keep empty subsequences so a trailing
+        // slash yields an empty id (→ nil) rather than collapsing onto the type.
+        let parts = guid.dropFirst("plex://".count)
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard parts.count >= 2 else { return nil }
+        let id = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? nil : id
+    }
+
+    /// `PUT https://discover.provider.plex.tv/actions/{addToWatchlist|
+    /// removeFromWatchlist}?ratingKey={metadataID}` — adds/removes the item from
+    /// the account watchlist. `metadataID` is the guid tail (see
+    /// `watchlistMetadataID(fromGuid:)`).
+    func setWatchlisted(_ on: Bool, metadataID: String) async throws {
+        let endpoint = Endpoint(
+            method: .put,
+            path: "/actions/\(on ? "addToWatchlist" : "removeFromWatchlist")",
+            queryItems: [
+                URLQueryItem(name: "ratingKey", value: metadataID),
+                URLQueryItem(name: "X-Plex-Token", value: token)
+            ],
+            headers: headers
+        )
+        _ = try await http.send(endpoint, baseURL: Self.watchlistActionBase)
+    }
+
+    /// `GET https://metadata.provider.plex.tv/library/sections/watchlist/all` —
+    /// the account's current watchlist. Items carry global Discover ids that do
+    /// not resolve against a specific PMS for playback (documented limitation).
+    func watchlist() async throws -> [PlexMetadata] {
+        let endpoint = Endpoint(
+            path: "/library/sections/watchlist/all",
+            queryItems: [
+                URLQueryItem(name: "X-Plex-Token", value: token),
+                URLQueryItem(name: "includeFields", value: "title,type,year,thumb,art,guid,ratingKey")
+            ],
+            headers: headers
+        )
+        let (data, _) = try await http.send(endpoint, baseURL: Self.watchlistMetadataBase)
+        do {
+            return try JSONDecoder.plozz.decode(PlexMediaContainerResponse.self, from: data)
+                .MediaContainer.Metadata ?? []
+        } catch {
+            PlozzLog.networking.error("Decoding Plex watchlist failed")
+            throw AppError.decoding
+        }
+    }
+
     // MARK: URLs
 
     /// Builds an absolute, token-bearing stream URL for a part `key` (which is

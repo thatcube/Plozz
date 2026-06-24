@@ -43,6 +43,9 @@ public final class PlayerViewModel {
 
     private let provider: any MediaProvider
     private let itemID: String
+    /// The chosen `MediaVersion.id` (Jellyfin `MediaSourceId` / Plex `Media` id)
+    /// to play when the title has multiple versions; `nil` plays the default.
+    private let mediaSourceID: String?
     private let captionSettings: CaptionSettings
     /// Best-effort Trakt scrobbler. Receives the same start/pause/stop lifecycle
     /// as the in-app progress report so watches sync to Trakt. A no-op when Trakt
@@ -116,6 +119,7 @@ public final class PlayerViewModel {
     public init(
         provider: any MediaProvider,
         itemID: String,
+        mediaSourceID: String? = nil,
         captionSettings: CaptionSettings = .default,
         startPosition: TimeInterval? = nil,
         scrobbler: any TraktScrobbling = DisabledTraktScrobbler(),
@@ -125,6 +129,7 @@ public final class PlayerViewModel {
     ) {
         self.provider = provider
         self.itemID = itemID
+        self.mediaSourceID = mediaSourceID
         self.captionSettings = captionSettings
         self.startPositionOverride = startPosition
         self.scrobbler = scrobbler
@@ -231,7 +236,7 @@ public final class PlayerViewModel {
     private func startPlayback(forceTranscode: Bool, resumeOverride: TimeInterval?) async {
         phase = .loading
         do {
-            let request = try await provider.playbackInfo(for: itemID, forceTranscode: forceTranscode)
+            let request = try await provider.playbackInfo(for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
             self.request = request
             configureControls(for: request)
 

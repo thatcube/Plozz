@@ -109,6 +109,7 @@ public struct RootView: View {
             PlexPINEntryView(
                 appState: appState,
                 userName: request.homeUserName,
+                avatarURLString: request.homeUserAvatarURL,
                 onSubmit: { appState.submitPlexPIN($0) },
                 onCancel: { appState.cancelPlexPIN() }
             )
@@ -123,11 +124,14 @@ public struct RootView: View {
 ///
 /// tvOS lacks a numeric keyboard (`.keyboardType(.numberPad)` is ignored), so
 /// a SecureField forces the full QWERTY remote keyboard for a 4-digit code.
-/// This view uses a custom on-screen numeric pad instead — focus-friendly on
-/// the Siri remote and the standard tvOS pattern for short numeric input.
+/// Layout mirrors Plex's own tvOS PIN screen: the Home user's avatar (with a
+/// small lock badge) and name at the top, an "PIN" pill that fills as digits
+/// are entered, and a single horizontal strip of digit keys + delete below.
+/// One axis of focus is what the Siri remote handles best.
 private struct PlexPINEntryView: View {
     let appState: AppState
     let userName: String
+    let avatarURLString: String?
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
 
@@ -137,21 +141,22 @@ private struct PlexPINEntryView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 28) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 64))
-                    .foregroundStyle(.secondary)
-                Text("Enter PIN for \(userName)")
+            VStack(spacing: 36) {
+                Spacer(minLength: 0)
+                avatarBadge
+                Text(userName)
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
-                pinDots
+                pinField
                 if let error = appState.plexPINError {
                     Text(error)
                         .font(.callout)
                         .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
                 }
-                PINPad(onDigit: appendDigit, onDelete: deleteDigit)
-                    .frame(maxWidth: 520)
+                PINStrip(onDigit: appendDigit, onDelete: deleteDigit)
+                    .padding(.horizontal, 60)
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
@@ -161,24 +166,76 @@ private struct PlexPINEntryView: View {
                 }
             }
             .onChange(of: appState.plexPINError) { _, newValue in
-                // Wrong-PIN response: clear the dots so the user can retry
-                // without first having to backspace four times.
+                // Wrong-PIN response: clear the entered dots so the user can
+                // retry without first backspacing four times.
                 if newValue != nil { pin = "" }
             }
         }
     }
 
-    private var pinDots: some View {
-        HStack(spacing: 20) {
-            ForEach(0..<Self.pinLength, id: \.self) { i in
-                Circle()
-                    .stroke(Color.primary.opacity(0.35), lineWidth: 2)
-                    .background(
-                        Circle().fill(i < pin.count ? Color.primary : Color.clear)
-                    )
-                    .frame(width: 24, height: 24)
+    /// Large circular Plex avatar with a small lock badge — matches Plex's
+    /// tvOS PIN screen. Falls back to a person glyph when no thumb is cached.
+    private var avatarBadge: some View {
+        let url = avatarURLString.flatMap(URL.init(string:))
+        return ZStack(alignment: .bottomTrailing) {
+            ZStack {
+                Circle().fill(Color.secondary.opacity(0.18))
+                if let url {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case let .success(image):
+                            image.resizable().scaledToFill()
+                        default:
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 72))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 72))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 180, height: 180)
+            .clipShape(Circle())
+
+            // Small lock badge in the corner, à la Plex.
+            ZStack {
+                Circle().fill(Color.green)
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 52, height: 52)
+            .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 2))
+            .offset(x: 4, y: 4)
+        }
+    }
+
+    /// "PIN" pill that fills with masked dots as digits are entered. Before
+    /// any entry it reads "PIN"; while typing it shows • per digit so the
+    /// user can see progress without revealing the code.
+    private var pinField: some View {
+        Group {
+            if pin.isEmpty {
+                Text("PIN")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(6)
+            } else {
+                Text(String(repeating: "•", count: pin.count))
+                    .font(.system(size: 44, weight: .bold))
+                    .tracking(10)
+                    .monospacedDigit()
             }
         }
+        .frame(minWidth: 220, minHeight: 64)
+        .padding(.horizontal, 24)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.secondary.opacity(0.15))
+        )
     }
 
     private func appendDigit(_ d: String) {
@@ -186,7 +243,7 @@ private struct PlexPINEntryView: View {
         guard pin.count < Self.pinLength else { return }
         pin.append(d)
         if pin.count == Self.pinLength {
-            // Auto-submit when the 4th digit is entered. Snappy is the goal.
+            // Auto-submit the moment the 4th digit lands. Snappy is the goal.
             onSubmit(pin)
         }
     }
@@ -196,52 +253,43 @@ private struct PlexPINEntryView: View {
     }
 }
 
-/// Focus-friendly numeric pad for tvOS: rows [1 2 3][4 5 6][7 8 9][ _ 0 ⌫ ].
-/// Each button is a focusable Button so the Siri remote can navigate the grid
-/// and focus is always anchored — Menu/Back can't fall through to the system.
-private struct PINPad: View {
+/// Single horizontal row of digit keys 0–9 plus a delete key — the layout
+/// Plex itself uses on tvOS, and the one-axis path the Siri remote handles
+/// best. Each key is a focusable Button so focus is always anchored and
+/// Menu/Back can't fall through to the system.
+private struct PINStrip: View {
     let onDigit: (String) -> Void
     let onDelete: () -> Void
 
+    private let digits: [String] = ["1","2","3","4","5","6","7","8","9","0"]
+
     var body: some View {
-        VStack(spacing: 16) {
-            row(["1", "2", "3"])
-            row(["4", "5", "6"])
-            row(["7", "8", "9"])
-            HStack(spacing: 16) {
-                Color.clear.frame(maxWidth: .infinity).frame(height: 1)
-                digitButton("0")
-                deleteButton
-            }
-        }
-    }
-
-    private func row(_ digits: [String]) -> some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             ForEach(digits, id: \.self) { d in
-                digitButton(d)
+                digitKey(d)
             }
+            deleteKey
         }
     }
 
-    private func digitButton(_ digit: String) -> some View {
+    private func digitKey(_ digit: String) -> some View {
         Button {
             onDigit(digit)
         } label: {
             Text(digit)
-                .font(.system(size: 36, weight: .semibold, design: .rounded))
-                .frame(maxWidth: .infinity, minHeight: 72)
+                .font(.system(size: 30, weight: .semibold, design: .rounded))
+                .frame(width: 78, height: 88)
         }
         .buttonStyle(.bordered)
     }
 
-    private var deleteButton: some View {
+    private var deleteKey: some View {
         Button(role: .destructive) {
             onDelete()
         } label: {
             Image(systemName: "delete.left")
-                .font(.title)
-                .frame(maxWidth: .infinity, minHeight: 72)
+                .font(.title2)
+                .frame(width: 92, height: 88)
         }
         .buttonStyle(.bordered)
         .accessibilityLabel("Delete")

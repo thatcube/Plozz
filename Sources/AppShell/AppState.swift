@@ -75,6 +75,24 @@ public final class AppState {
         public let accountID: String
         public let homeUserID: String
         public let homeUserName: String
+        /// Optional Plex thumb URL for the Home user — used by the PIN
+        /// dialog to render the real avatar above the keypad, like Plex's
+        /// own tvOS PIN screen.
+        public let homeUserAvatarURL: String?
+
+        public init(
+            id: String,
+            accountID: String,
+            homeUserID: String,
+            homeUserName: String,
+            homeUserAvatarURL: String? = nil
+        ) {
+            self.id = id
+            self.accountID = accountID
+            self.homeUserID = homeUserID
+            self.homeUserName = homeUserName
+            self.homeUserAvatarURL = homeUserAvatarURL
+        }
     }
 
     /// Provider-agnostic external-ratings enrichment (IMDb/RT/Metacritic via
@@ -404,7 +422,8 @@ public final class AppState {
                 id: profile.id,
                 accountID: pin.accountID,
                 homeUserID: pin.binding.homeUserID,
-                homeUserName: pin.binding.name.isEmpty ? "Plex User" : pin.binding.name
+                homeUserName: pin.binding.name.isEmpty ? "Plex User" : pin.binding.name,
+                homeUserAvatarURL: pin.binding.avatarURL
             )
             plexPINError = nil
         } else {

@@ -150,12 +150,16 @@ private struct LoadedLogo<TextFallback: View>: View {
     private func resolve() async {
         resolved = false
         image = nil
-        if let primaryURL, let prepared = await Self.load(primaryURL) {
+        // `HeroLogoPipeline` caches the processed result by URL and runs the heavy
+        // pixel work off the main actor, so re-appears / scheme changes / fast
+        // scrolling reuse the prepared logo instead of reprocessing it.
+        if let primaryURL, let prepared = await HeroLogoPipeline.shared.preparedLogo(for: primaryURL) {
             image = await finalize(prepared)
             resolved = true
             return
         }
-        if let asyncFallbackURL, let url = await asyncFallbackURL(), let prepared = await Self.load(url) {
+        if let asyncFallbackURL, let url = await asyncFallbackURL(),
+           let prepared = await HeroLogoPipeline.shared.preparedLogo(for: url) {
             image = await finalize(prepared)
             resolved = true
             return
@@ -227,24 +231,17 @@ private struct LoadedLogo<TextFallback: View>: View {
         let db = b1 - b2
         return ((2 + rMean) * dr * dr + 4 * dg * dg + (3 - rMean) * db * db).squareRoot()
     }
-
-    private static func load(_ url: URL) async -> PreparedLogo? {
-        guard let (data, response) = try? await URLSession.shared.data(from: url) else {
-            return nil
-        }
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            return nil
-        }
-        guard let image = UIImage(data: data) else { return nil }
-        return image.preparedAsHeroLogo()
-    }
 }
 
 /// A logo after background removal/trim, carrying the mean luminance *and* mean
 /// colour of its visible pixels (plus how much of the frame it covers) so the
 /// caller can decide whether a contrast halo is needed and whether the logo is a
 /// single-tone wordmark safe to recolour.
-struct PreparedLogo {
+///
+/// Marked `@unchecked Sendable`: it is an immutable value whose only reference
+/// type is a `UIImage` that is created once and thereafter read-only, so it is
+/// safe to cache and hand across the actor boundary in `HeroLogoPipeline`.
+struct PreparedLogo: @unchecked Sendable {
     let image: UIImage
     let luminance: Double
     let red: Double
@@ -281,6 +278,75 @@ struct ProcessedLogo {
     let isDark: Bool
     let needsHalo: Bool
     let isMonochrome: Bool
+}
+
+/// Decodes, background-strips, trims, and measures hero logos, caching the
+/// finished `PreparedLogo` by source URL.
+///
+/// Why this exists: the per-pixel work in `preparedAsHeroLogo()` is O(width ×
+/// height) and a detail hero can appear, re-render on a colour-scheme change, or
+/// scroll past many times. Without a cache the same logo is reprocessed on every
+/// appearance. This actor:
+///   * returns a cached `PreparedLogo` immediately on a hit (no pixel work),
+///   * coalesces concurrent requests for the same URL onto one in-flight task
+///     (fast scrolling can't kick off duplicate work), and
+///   * runs the decode + pixel passes on a detached task so the main actor is
+///     never blocked.
+/// A small LRU bound keeps memory flat across a large library.
+private actor HeroLogoPipeline {
+    static let shared = HeroLogoPipeline()
+
+    private var cache: [String: PreparedLogo] = [:]
+    private var order: [String] = []
+    private var inFlight: [String: Task<PreparedLogo?, Never>] = [:]
+    private let capacity = 48
+
+    func preparedLogo(for url: URL) async -> PreparedLogo? {
+        let key = url.absoluteString
+        if let hit = cache[key] {
+            promote(key)
+            return hit
+        }
+        if let running = inFlight[key] {
+            return await running.value
+        }
+        let task = Task.detached(priority: .userInitiated) {
+            await HeroLogoPipeline.fetchAndPrepare(url)
+        }
+        inFlight[key] = task
+        let result = await task.value
+        inFlight.removeValue(forKey: key)
+        if let result {
+            store(result, key: key)
+        }
+        return result
+    }
+
+    private func store(_ value: PreparedLogo, key: String) {
+        if cache[key] == nil { order.append(key) }
+        cache[key] = value
+        while order.count > capacity {
+            let evicted = order.removeFirst()
+            cache.removeValue(forKey: evicted)
+        }
+    }
+
+    private func promote(_ key: String) {
+        guard let idx = order.firstIndex(of: key) else { return }
+        order.remove(at: idx)
+        order.append(key)
+    }
+
+    private static func fetchAndPrepare(_ url: URL) async -> PreparedLogo? {
+        guard let (data, response) = try? await URLSession.shared.data(from: url) else {
+            return nil
+        }
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            return nil
+        }
+        guard let image = UIImage(data: data) else { return nil }
+        return image.preparedAsHeroLogo()
+    }
 }
 
 /// Wraps the logo in a soft, single-tone halo so it separates from the hero
@@ -342,60 +408,38 @@ private extension UIImage {
         }
         guard success else { return PreparedLogo(image: self, luminance: 0.0) }
 
-        Self.removeSolidBackground(&data, width: width, height: height, bytesPerRow: bytesPerRow)
+        // Identify an opaque background plate (a deliberate solid title-card box)
+        // from the border ring; `nil` means the logo is genuinely transparent and
+        // nothing is stripped.
+        let plate = Self.detectBackgroundPlate(data, width: width, height: height, bytesPerRow: bytesPerRow)
 
-        // Content bounds (trim) + luminance, computed in a single pass over the
-        // post-removal alpha so transparent margins and the removed plate are
-        // both excluded from the tone measurement.
-        var minX = width, minY = height, maxX = -1, maxY = -1
-        var lumaSum = 0.0
-        var lumaWeight = 0.0
-        var rSum = 0.0, gSum = 0.0, bSum = 0.0
-        for y in 0..<height {
-            let rowStart = y * bytesPerRow
-            for x in 0..<width {
-                let i = rowStart + x * bytesPerPixel
-                let a = data[i + 3]
-                if a > 10 {
-                    if x < minX { minX = x }
-                    if x > maxX { maxX = x }
-                    if y < minY { minY = y }
-                    if y > maxY { maxY = y }
-                    // Premultiplied buffer: un-premultiply so partly-transparent
-                    // edge pixels don't read as artificially dark.
-                    let af = Double(a) / 255.0
-                    let r = Double(data[i]) / 255.0 / af
-                    let g = Double(data[i + 1]) / 255.0 / af
-                    let b = Double(data[i + 2]) / 255.0 / af
-                    let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
-                    lumaSum += luma * af
-                    rSum += r * af
-                    gSum += g * af
-                    bSum += b * af
-                    lumaWeight += af
-                }
-            }
-        }
+        // Single fused pass: strip the plate (when present) *and* measure the
+        // content bounds + tone of what survives, so the full image is touched
+        // exactly once instead of in two separate O(width*height) passes.
+        let stats = Self.stripPlateAndMeasure(
+            &data, width: width, height: height, bytesPerRow: bytesPerRow, plate: plate
+        )
 
-        let luminance = lumaWeight > 0 ? (lumaSum / lumaWeight) : 0.0
-        let meanR = lumaWeight > 0 ? (rSum / lumaWeight) : 0.0
-        let meanG = lumaWeight > 0 ? (gSum / lumaWeight) : 0.0
-        let meanB = lumaWeight > 0 ? (bSum / lumaWeight) : 0.0
+        let weight = stats.weight
+        let luminance = weight > 0 ? (stats.lumaSum / weight) : 0.0
+        let meanR = weight > 0 ? (stats.rSum / weight) : 0.0
+        let meanG = weight > 0 ? (stats.gSum / weight) : 0.0
+        let meanB = weight > 0 ? (stats.bSum / weight) : 0.0
 
         // If background removal (or a fully transparent source) left essentially
         // nothing visible — e.g. a logo whose colour matched its own plate — the
         // logo is unusable. Return nil so the caller falls through to the next
         // source and ultimately the clean styled title, never a blank or boxed logo.
-        guard maxX >= minX, maxY >= minY else { return nil }
+        guard stats.maxX >= stats.minX, stats.maxY >= stats.minY else { return nil }
         // Alpha-weighted opaque fraction of the trimmed bounding box. ~1 when the
         // logo fills its box (a solid plate that was never removed), low for a
         // wordmark surrounded by — and pierced by — transparency.
-        let cropArea = Double((maxX - minX + 1) * (maxY - minY + 1))
-        let coverage = cropArea > 0 ? min(1.0, lumaWeight / cropArea) : 1.0
-        guard let processedFull = Self.makeImage(from: data, width: width, height: height, bytesPerRow: bytesPerRow) else {
+        let cropArea = Double((stats.maxX - stats.minX + 1) * (stats.maxY - stats.minY + 1))
+        let coverage = cropArea > 0 ? min(1.0, weight / cropArea) : 1.0
+        guard let processedFull = Self.makeImage(&data, width: width, height: height, bytesPerRow: bytesPerRow) else {
             return nil
         }
-        let cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+        let cropRect = CGRect(x: stats.minX, y: stats.minY, width: stats.maxX - stats.minX + 1, height: stats.maxY - stats.minY + 1)
         guard let cropped = processedFull.cropping(to: cropRect) else {
             return PreparedLogo(image: UIImage(cgImage: processedFull, scale: scale, orientation: imageOrientation), luminance: luminance, red: meanR, green: meanG, blue: meanB, coverage: coverage)
         }
@@ -407,9 +451,10 @@ private extension UIImage {
         )
     }
 
-    /// Builds a CGImage from a premultiplied-RGBA byte buffer.
-    private static func makeImage(from data: [UInt8], width: Int, height: Int, bytesPerRow: Int) -> CGImage? {
-        var data = data
+    /// Builds a CGImage from a premultiplied-RGBA byte buffer. Takes the buffer
+    /// `inout` so it can be read in place — `CGContext.makeImage()` copies the
+    /// pixels into the returned image, so no defensive copy of `data` is needed.
+    private static func makeImage(_ data: inout [UInt8], width: Int, height: Int, bytesPerRow: Int) -> CGImage? {
         return data.withUnsafeMutableBytes { raw -> CGImage? in
             guard let ctx = CGContext(
                 data: raw.baseAddress,
@@ -425,23 +470,17 @@ private extension UIImage {
     }
 
     /// Detects a logo shipped on a solid opaque plate (e.g. a black "title card"
-    /// box behind the title) and erases that colour to transparency everywhere.
+    /// box behind the title) and returns its straight (un-premultiplied) RGB, or
+    /// `nil` when there is no plate to strip.
     ///
-    /// The background colour is identified from the border ring; the removal only
-    /// runs when that ring is opaque and near-uniform, which is the signature of a
-    /// deliberate plate rather than real artwork — a genuinely transparent logo
-    /// has a transparent border, so this is a no-op for it. When it does run it is
-    /// a *global* soft chroma-key, not a border flood-fill: every pixel near the
-    /// background colour is removed, with a graded edge so anti-aliased borders
-    /// feather cleanly. Going global is what clears the colour trapped *inside*
-    /// enclosed letter shapes (the counters of B, O, D, P, R…), which a
-    /// border-connected flood-fill leaves behind as ugly solid blobs. It is safe
-    /// because the plate colour and the logo's bright/coloured letters are far
-    /// apart in colour space, so the letters survive intact. Operates in place on
-    /// a premultiplied RGBA buffer.
-    private static func removeSolidBackground(_ data: inout [UInt8], width: Int, height: Int, bytesPerRow: Int) {
+    /// The colour is identified from the border ring; a plate is only reported
+    /// when that ring is opaque and near-uniform, the signature of a deliberate
+    /// box rather than real artwork — a genuinely transparent logo has a
+    /// transparent border, so this returns `nil` for it. Reads the buffer without
+    /// mutating it; the actual removal happens in `stripPlateAndMeasure`.
+    private static func detectBackgroundPlate(_ data: [UInt8], width: Int, height: Int, bytesPerRow: Int) -> PlateColor? {
         let bpp = 4
-        guard width > 2, height > 2 else { return }
+        guard width > 2, height > 2 else { return nil }
 
         // Sample the border ring to estimate the background colour and confirm it
         // is opaque + uniform enough to be a deliberate plate rather than artwork.
@@ -459,11 +498,11 @@ private extension UIImage {
             sample(0, y)
             sample(width - 1, y)
         }
-        guard count > 0 else { return }
+        guard count > 0 else { return nil }
 
         let avgA = aSum / count
         // A transparent or semi-transparent border means there is no solid plate.
-        guard avgA > 250 else { return }
+        guard avgA > 250 else { return nil }
         let avgAf = Double(avgA) / 255.0
         // Un-premultiply the averaged border colour to its true RGB.
         let bgR = Double(rSum) / Double(count) / avgAf
@@ -491,45 +530,117 @@ private extension UIImage {
         }
         // Tolerance for "the border is one flat colour". Loose enough to absorb
         // JPEG noise, tight enough to spare gradient/photographic backgrounds.
-        guard maxDev <= 26 else { return }
+        guard maxDev <= 26 else { return nil }
 
-        // Global soft chroma-key. `innerTol` is the squared colour distance from
-        // the plate colour treated as pure background (fully transparent);
-        // `outerTol` is where a pixel becomes fully opaque logo. Between them the
-        // alpha is graded so anti-aliased edges feather instead of leaving a hard
-        // fringe. Applied to every pixel (not just border-connected ones) so the
-        // background trapped inside enclosed letters is removed too.
+        return PlateColor(red: bgR, green: bgG, blue: bgB)
+    }
+
+    /// Single fused full-image pass that both strips an opaque background `plate`
+    /// (when one was detected) *and* measures the surviving content's bounding
+    /// box, alpha-weighted luminance and mean colour. Folding removal and
+    /// measurement into one loop halves the per-pixel work versus running them
+    /// separately, while producing byte-for-byte identical output.
+    ///
+    /// Removal is a *global* soft chroma-key, not a border flood-fill: every pixel
+    /// near the plate colour is cleared, with a graded edge so anti-aliased
+    /// borders feather cleanly. Going global is what clears the colour trapped
+    /// *inside* enclosed letter shapes (the counters of B, O, D, P, R…), which a
+    /// border-connected flood-fill leaves behind as ugly solid blobs. It is safe
+    /// because the plate colour and the logo's bright/coloured letters are far
+    /// apart in colour space, so the letters survive intact. Measurement reads the
+    /// post-removal alpha so stripped pixels and transparent margins are excluded
+    /// from the tone. Operates in place on a premultiplied RGBA buffer.
+    private static func stripPlateAndMeasure(
+        _ data: inout [UInt8], width: Int, height: Int, bytesPerRow: Int, plate: PlateColor?
+    ) -> LogoStats {
+        let bpp = 4
+        // `innerTol` is the squared colour distance from the plate colour treated
+        // as pure background (fully transparent); `outerTol` is where a pixel
+        // becomes fully opaque logo. Between them the alpha is graded.
         let innerTol = 45.0 * 45.0
         let outerTol = 120.0 * 120.0
+
+        var stats = LogoStats(minX: width, minY: height, maxX: -1, maxY: -1)
         for y in 0..<height {
             let rowStart = y * bytesPerRow
             for x in 0..<width {
                 let i = rowStart + x * bpp
-                let oldA = Double(data[i + 3]) / 255.0
-                guard oldA > 0 else { continue }
-                // Un-premultiply to straight RGB to compare against the plate colour.
-                let r = Double(data[i]) / 255.0 / oldA * 255.0
-                let g = Double(data[i + 1]) / 255.0 / oldA * 255.0
-                let b = Double(data[i + 2]) / 255.0 / oldA * 255.0
-                let dr = r - bgR, dg = g - bgG, db = b - bgB
-                let distSq = dr * dr + dg * dg + db * db
-                if distSq <= innerTol {
-                    // Pure background: fully transparent.
-                    data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0
-                } else if distSq <= outerTol {
-                    // Anti-aliased edge: feather alpha toward 0.
-                    let t = (distSq - innerTol) / (outerTol - innerTol)
-                    let outA = max(0.0, min(1.0, t)) * oldA
-                    // Re-premultiply the original straight RGB by the new alpha.
-                    data[i] = UInt8(max(0, min(255, r / 255.0 * outA * 255.0)))
-                    data[i + 1] = UInt8(max(0, min(255, g / 255.0 * outA * 255.0)))
-                    data[i + 2] = UInt8(max(0, min(255, b / 255.0 * outA * 255.0)))
-                    data[i + 3] = UInt8(max(0, min(255, outA * 255.0)))
+
+                // Strip the plate first (if any) so the measurement below reads the
+                // post-removal alpha.
+                if let plate {
+                    let oldA = Double(data[i + 3]) / 255.0
+                    if oldA > 0 {
+                        // Un-premultiply to straight RGB to compare against the plate.
+                        let r = Double(data[i]) / 255.0 / oldA * 255.0
+                        let g = Double(data[i + 1]) / 255.0 / oldA * 255.0
+                        let b = Double(data[i + 2]) / 255.0 / oldA * 255.0
+                        let dr = r - plate.red, dg = g - plate.green, db = b - plate.blue
+                        let distSq = dr * dr + dg * dg + db * db
+                        if distSq <= innerTol {
+                            // Pure background: fully transparent.
+                            data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0
+                        } else if distSq <= outerTol {
+                            // Anti-aliased edge: feather alpha toward 0.
+                            let t = (distSq - innerTol) / (outerTol - innerTol)
+                            let outA = max(0.0, min(1.0, t)) * oldA
+                            // Re-premultiply the original straight RGB by the new alpha.
+                            data[i] = UInt8(max(0, min(255, r / 255.0 * outA * 255.0)))
+                            data[i + 1] = UInt8(max(0, min(255, g / 255.0 * outA * 255.0)))
+                            data[i + 2] = UInt8(max(0, min(255, b / 255.0 * outA * 255.0)))
+                            data[i + 3] = UInt8(max(0, min(255, outA * 255.0)))
+                        }
+                        // else: logo body, leave untouched.
+                    }
                 }
-                // else: logo body, leave untouched.
+
+                // Measure content bounds + tone from the (post-removal) pixel.
+                let a = data[i + 3]
+                if a > 10 {
+                    if x < stats.minX { stats.minX = x }
+                    if x > stats.maxX { stats.maxX = x }
+                    if y < stats.minY { stats.minY = y }
+                    if y > stats.maxY { stats.maxY = y }
+                    // Premultiplied buffer: un-premultiply so partly-transparent
+                    // edge pixels don't read as artificially dark.
+                    let af = Double(a) / 255.0
+                    let r = Double(data[i]) / 255.0 / af
+                    let g = Double(data[i + 1]) / 255.0 / af
+                    let b = Double(data[i + 2]) / 255.0 / af
+                    let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                    stats.lumaSum += luma * af
+                    stats.rSum += r * af
+                    stats.gSum += g * af
+                    stats.bSum += b * af
+                    stats.weight += af
+                }
             }
         }
+        return stats
     }
+}
+
+/// Straight (un-premultiplied) RGB of a detected solid background plate, 0…255
+/// per channel.
+private struct PlateColor {
+    let red: Double
+    let green: Double
+    let blue: Double
+}
+
+/// Accumulated content bounds + alpha-weighted tone produced by the fused
+/// strip/measure pass. `weight` is the summed alpha of measured pixels (the
+/// alpha-weighted opaque area).
+private struct LogoStats {
+    var minX: Int
+    var minY: Int
+    var maxX: Int
+    var maxY: Int
+    var lumaSum = 0.0
+    var rSum = 0.0
+    var gSum = 0.0
+    var bSum = 0.0
+    var weight = 0.0
 }
 
 /// Samples the effective colour of the hero artwork behind the logo, so the
@@ -546,9 +657,61 @@ public enum HeroBackgroundSampler {
         region: CGRect = CGRect(x: 0.0, y: 0.28, width: 0.5, height: 0.40)
     ) async -> HeroBackgroundSample? {
         for url in urls {
-            if let sample = await sampleOne(url, region: region) { return sample }
+            if let sample = await Cache.shared.sample(url, region: region) { return sample }
         }
         return nil
+    }
+
+    /// Memoizes backdrop samples by URL + region. The downsample is cheap per
+    /// call but a hero can re-resolve its sample on every appearance / scheme
+    /// change, and several detail views can request the same backdrop while
+    /// scrolling. Caching the (small, value-type) result — and coalescing
+    /// concurrent requests onto one in-flight task that runs off the main actor —
+    /// removes that repeated decode/downsample work. A small LRU bound keeps
+    /// memory flat across a large library.
+    private actor Cache {
+        static let shared = Cache()
+
+        private var entries: [String: HeroBackgroundSample] = [:]
+        private var order: [String] = []
+        private var inFlight: [String: Task<HeroBackgroundSample?, Never>] = [:]
+        private let capacity = 32
+
+        func sample(_ url: URL, region: CGRect) async -> HeroBackgroundSample? {
+            let key = "\(url.absoluteString)|\(region.minX),\(region.minY),\(region.width),\(region.height)"
+            if let hit = entries[key] {
+                promote(key)
+                return hit
+            }
+            if let running = inFlight[key] {
+                return await running.value
+            }
+            let task = Task.detached(priority: .utility) {
+                await HeroBackgroundSampler.sampleOne(url, region: region)
+            }
+            inFlight[key] = task
+            let result = await task.value
+            inFlight.removeValue(forKey: key)
+            if let result {
+                store(result, key: key)
+            }
+            return result
+        }
+
+        private func store(_ value: HeroBackgroundSample, key: String) {
+            if entries[key] == nil { order.append(key) }
+            entries[key] = value
+            while order.count > capacity {
+                let evicted = order.removeFirst()
+                entries.removeValue(forKey: evicted)
+            }
+        }
+
+        private func promote(_ key: String) {
+            guard let idx = order.firstIndex(of: key) else { return }
+            order.remove(at: idx)
+            order.append(key)
+        }
     }
 
     private static func sampleOne(_ url: URL, region: CGRect) async -> HeroBackgroundSample? {

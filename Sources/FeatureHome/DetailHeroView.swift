@@ -81,8 +81,6 @@ struct DetailHeroView: View {
     /// idle ➝ a spinning "refreshing" indicator ➝ a green success check ➝ back to
     /// idle, with each icon animating in and out.
     @State private var refreshPhase: RefreshPhase = .idle
-    /// Continuous-rotation driver for the refreshing-phase spinner.
-    @State private var refreshSpin = false
 
     /// The visible lifecycle of the Refresh Metadata button.
     private enum RefreshPhase {
@@ -412,29 +410,38 @@ struct DetailHeroView: View {
 
     /// Visible watched-state toggle, shown when the provider can mutate it. On a
     /// series page the hero mirrors the focused episode, so this doubles as the
-    /// episode's visible watched toggle. The glyph clearly signals current state:
-    /// a brand-blue filled check when watched (matching the episode card's watched
-    /// badge), a neutral outline when not — animating between the two as the
-    /// optimistic mutation flips `item.isPlayed`.
+    /// episode's visible watched toggle. Unwatched shows a neutral `eye`; marking
+    /// watched swaps it for a brand-blue filled circle with a white check (the
+    /// same watched colour as the episode cards), the eye scaling/fading out as
+    /// the check scales in on a single timeline so it stays in sync with the
+    /// button's own focus animation.
     @ViewBuilder
     private func watchedButton(action: MediaItemAction) -> some View {
         Button { performHeroAction(action) } label: {
-            Image(systemName: item.isPlayed ? "checkmark.circle.fill" : "checkmark.circle")
-                .foregroundStyle(item.isPlayed ? ThemePalette.brandBlue : Color.primary)
-                .contentTransition(.opacity)
-                .symbolEffect(.bounce, value: item.isPlayed)
+            Group {
+                if item.isPlayed {
+                    Image(systemName: "checkmark.circle.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, ThemePalette.brandBlue)
+                } else {
+                    Image(systemName: "eye")
+                        .foregroundStyle(Color.primary)
+                }
+            }
+            .id(item.isPlayed)
+            .transition(.scale.combined(with: .opacity))
         }
         .modifier(HeroButtonStyle(prominent: false))
-        .animation(.easeInOut(duration: 0.2), value: item.isPlayed)
+        .animation(.easeInOut(duration: 0.22), value: item.isPlayed)
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
     }
 
     /// Visible Refresh Metadata button, shown when the provider conforms to
     /// `MetadataRefreshing`. The server task is fire-and-forget, so the icon walks
-    /// through a small animated state machine for feedback: a spinning indicator
-    /// while "refreshing", then a green success check, then back to the refresh
-    /// glyph — each state scaling/fading in and out.
+    /// through a small animated state machine for feedback: a real spinning
+    /// progress indicator while "refreshing", then a brand-blue success check,
+    /// then back to the refresh glyph — each state scaling/fading in and out.
     @ViewBuilder
     private func refreshButton() -> some View {
         Button {
@@ -450,13 +457,11 @@ struct DetailHeroView: View {
         } label: {
             refreshIcon
         }
-        .disabled(refreshPhase != .idle)
         .modifier(HeroButtonStyle(prominent: false))
         .accessibilityLabel(MediaItemAction.refreshMetadata.title)
     }
 
-    /// Animates the refresh state transition (and kicks the spinner when entering
-    /// the refreshing phase).
+    /// Animates the refresh state transition.
     private func setRefreshPhase(_ phase: RefreshPhase) {
         withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
             refreshPhase = phase
@@ -465,7 +470,7 @@ struct DetailHeroView: View {
 
     /// The single glyph shown for the current `refreshPhase`. Keyed by phase so a
     /// change removes the old glyph (transition out) and inserts the new one
-    /// (transition in); the refreshing glyph spins continuously.
+    /// (transition in); the refreshing phase shows a real circular spinner.
     @ViewBuilder
     private var refreshIcon: some View {
         Group {
@@ -473,18 +478,13 @@ struct DetailHeroView: View {
             case .idle:
                 Image(systemName: "arrow.clockwise")
             case .refreshing:
-                Image(systemName: "arrow.clockwise")
-                    .rotationEffect(.degrees(refreshSpin ? 360 : 0))
-                    .onAppear {
-                        refreshSpin = false
-                        withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
-                            refreshSpin = true
-                        }
-                    }
-                    .onDisappear { refreshSpin = false }
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(ThemePalette.brandBlue)
+                    .scaleEffect(0.9)
             case .success:
                 Image(systemName: "checkmark")
-                    .foregroundStyle(Color.green)
+                    .foregroundStyle(ThemePalette.brandBlue)
             }
         }
         .id(refreshPhase)

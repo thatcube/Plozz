@@ -360,14 +360,16 @@ struct DetailHeroView: View {
         let button = Button(action: action) {
             HStack(spacing: 16) {
                 Image(systemName: "play.fill")
-                if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1 {
+                if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1, !item.isPlayed {
                     resumeProgressCapsule(progress: playProgress)
                     Text(playRemainingText)
+                        .lineLimit(1)
                 } else {
                     Text(title)
+                        .lineLimit(1)
                 }
             }
-            .frame(minWidth: 260)
+            .frame(width: 340)
         }
         .modifier(HeroButtonStyle(prominent: true))
         .focused($playButtonHasFocus)
@@ -461,7 +463,7 @@ struct DetailHeroView: View {
                 .scaleEffect(item.isPlayed ? 1 : 0.4)
             }
             .frame(width: heroIconSize, height: heroIconSize)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: item.isPlayed)
+            .animation(.easeOut(duration: 0.18), value: item.isPlayed)
         }
         .modifier(HeroButtonStyle(prominent: false))
         .onChange(of: item.id) { _, _ in checkDraw = item.isPlayed ? 1 : 0 }
@@ -471,8 +473,8 @@ struct DetailHeroView: View {
             // a real 0 -> 1 transition (a same-tick reset+set just coalesces to 1),
             // and so the circle has popped in first.
             checkDraw = 0
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
-                withAnimation(.easeInOut(duration: 0.42)) { checkDraw = 1 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                withAnimation(.easeOut(duration: 0.4)) { checkDraw = 1 }
             }
         }
         .onAppear { checkDraw = item.isPlayed ? 1 : 0 }

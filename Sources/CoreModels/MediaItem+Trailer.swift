@@ -26,6 +26,32 @@ public extension MediaItem {
     /// Whether this item is an online (YouTube) trailer rather than a library item.
     var isYouTubeTrailer: Bool { youTubeTrailerVideoID != nil }
 
+    /// A clean search subject for finding an *alternative* online trailer when
+    /// this online-trailer item's own video is unavailable (e.g. a stale server
+    /// `RemoteTrailers` URL pointing at a now-private video). Uses the parent
+    /// title when known, otherwise this item's own title with a trailing
+    /// "Trailer"/"Teaser" (and any leading separator) stripped, so the keyless
+    /// search query isn't polluted by the trailer's own name. Carries the year
+    /// through for a more precise match.
+    var alternativeTrailerSearchSubject: MediaItem {
+        let parent = parentTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = (parent?.isEmpty == false ? parent! : Self.strippingTrailerSuffix(from: title))
+        return MediaItem(id: id, title: base, kind: .movie, productionYear: productionYear)
+    }
+
+    /// Drops a trailing "Trailer"/"Teaser" token (with any preceding separator)
+    /// from a title, e.g. `"Mary Poppins Returns — Trailer"` → `"Mary Poppins
+    /// Returns"`. Leaves titles that merely contain the word elsewhere untouched.
+    static func strippingTrailerSuffix(from title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = trimmed.lowercased()
+        for token in ["trailer", "teaser"] where lowered.hasSuffix(token) {
+            let stripped = String(trimmed.dropLast(token.count))
+            return stripped.trimmingCharacters(in: CharacterSet(charactersIn: " \t—–-:|·"))
+        }
+        return trimmed
+    }
+
     /// Builds a playable online-trailer item for a YouTube `videoID`.
     ///
     /// The `id` is the YouTube video id (so the YouTube provider can resolve it)

@@ -137,8 +137,23 @@ private func makePlayerViewModel(
     scrobbler: any TraktScrobbling
 ) -> PlayerViewModel {
     if let videoID = request.item.youTubeTrailerVideoID {
+        let trailerItem = request.item
+        let onlineTrailerResolver = ItemDetailViewModel.defaultOnlineTrailerResolver
         return PlayerViewModel(
-            provider: YouTubeTrailerProvider(item: request.item, videoID: videoID),
+            provider: YouTubeTrailerProvider(
+                item: trailerItem,
+                videoID: videoID,
+                alternatives: {
+                    // The server's stored trailer URL can go stale (the YouTube
+                    // video gets made private/removed). When that happens, fall
+                    // back to a keyless search for a still-playable replacement
+                    // trailer for the same title.
+                    let results = await onlineTrailerResolver(
+                        trailerItem.alternativeTrailerSearchSubject
+                    )
+                    return results.compactMap(\.youTubeTrailerVideoID)
+                }
+            ),
             itemID: videoID,
             captionSettings: captionSettings,
             startPosition: request.startPosition,

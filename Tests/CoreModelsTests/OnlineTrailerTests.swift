@@ -81,4 +81,40 @@ final class OnlineTrailerTests: XCTestCase {
     func testYouTubeTrailerFromURLNilForUnsupported() {
         XCTAssertNil(MediaItem.youTubeTrailer(fromURL: "https://vimeo.com/123456", title: "x"))
     }
+
+    // MARK: - Replacement-trailer search subject
+
+    func testSearchSubjectPrefersParentTitleAndYear() {
+        let trailer = MediaItem.youTubeTrailer(
+            videoID: "abc",
+            title: "Some Generic Trailer",
+            parentTitle: "Mary Poppins Returns"
+        ).settingYear(2018)
+
+        let subject = trailer.alternativeTrailerSearchSubject
+        XCTAssertEqual(subject.title, "Mary Poppins Returns")
+        XCTAssertEqual(subject.productionYear, 2018)
+        XCTAssertEqual(subject.kind, .movie)
+    }
+
+    func testSearchSubjectStripsTrailerSuffixWhenNoParentTitle() {
+        let trailer = MediaItem.youTubeTrailer(videoID: "abc", title: "Dune — Trailer")
+        XCTAssertEqual(trailer.alternativeTrailerSearchSubject.title, "Dune")
+    }
+
+    func testStrippingTrailerSuffixVariants() {
+        XCTAssertEqual(MediaItem.strippingTrailerSuffix(from: "Dune - Trailer"), "Dune")
+        XCTAssertEqual(MediaItem.strippingTrailerSuffix(from: "Dune: Teaser"), "Dune")
+        XCTAssertEqual(MediaItem.strippingTrailerSuffix(from: "Dune Official Trailer"), "Dune Official")
+        // A title that merely contains the word elsewhere is left intact.
+        XCTAssertEqual(MediaItem.strippingTrailerSuffix(from: "Trailer Park Boys"), "Trailer Park Boys")
+    }
+}
+
+private extension MediaItem {
+    func settingYear(_ year: Int) -> MediaItem {
+        var copy = self
+        copy.productionYear = year
+        return copy
+    }
 }

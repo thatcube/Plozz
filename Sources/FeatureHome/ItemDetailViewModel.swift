@@ -139,7 +139,20 @@ public final class ItemDetailViewModel {
             ? await onlineTrailerResolver(item)
             : provided.map { $0.isYouTubeTrailer ? $0 : tagged($0) }
         guard case let .loaded(detail) = state, detail.item.id == item.id else { return }
-        trailers = resolved
+        trailers = resolved.map { stampTrailerContext($0, from: item) }
+    }
+
+    /// Stamps the parent title and year onto an online (YouTube) trailer so that,
+    /// if its video later proves unavailable at play time, the keyless search for
+    /// a replacement trailer has a clean title/year to work with (server trailers
+    /// often carry only a generic name like "Trailer" and no year). Local trailers
+    /// and already-populated fields are left untouched.
+    private func stampTrailerContext(_ trailer: MediaItem, from item: MediaItem) -> MediaItem {
+        guard trailer.isYouTubeTrailer else { return trailer }
+        var copy = trailer
+        if copy.parentTitle?.isEmpty != false { copy.parentTitle = item.title }
+        if copy.productionYear == nil { copy.productionYear = item.productionYear }
+        return copy
     }
 
     /// Applies a watched-state mutation to the loaded detail, its children and

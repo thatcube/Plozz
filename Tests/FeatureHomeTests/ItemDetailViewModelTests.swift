@@ -111,6 +111,27 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertNil(vm.trailers.first?.sourceAccountID)
     }
 
+    func testServerYouTubeTrailerIsStampedWithParentTitleAndYear() async {
+        let provider = FakeMediaProvider(
+            allItems: [MediaItem(id: "m1", title: "Mary Poppins Returns", kind: .movie, productionYear: 2018)]
+        )
+        // A server RemoteTrailers entry: a YouTube trailer with a generic name and
+        // no parent title/year of its own.
+        provider.trailersByItem = ["m1": [
+            MediaItem.youTubeTrailer(videoID: "deadID", title: "Trailer")
+        ]]
+        let vm = ItemDetailViewModel(provider: provider, itemID: "m1", onlineTrailerResolver: { _ in [] })
+
+        await vm.load()
+
+        // Stamped so a later replacement search has a clean title and year.
+        XCTAssertEqual(vm.trailers.first?.parentTitle, "Mary Poppins Returns")
+        XCTAssertEqual(vm.trailers.first?.productionYear, 2018)
+        let subject = vm.trailers.first?.alternativeTrailerSearchSubject
+        XCTAssertEqual(subject?.title, "Mary Poppins Returns")
+        XCTAssertEqual(subject?.productionYear, 2018)
+    }
+
     func testLoadLeavesTrailersEmptyWhenNoLocalOrOnline() async {
         let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
         let vm = ItemDetailViewModel(

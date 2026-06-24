@@ -229,6 +229,7 @@ let package = Package(
                 "EngineMPV",
                 "FeatureDiscovery",
                 "FeatureAuth",
+                "MetadataKit",
                 "ProviderJellyfin",
                 "ProviderPlex",
                 "ProviderTrailers",

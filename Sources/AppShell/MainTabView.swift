@@ -5,6 +5,7 @@ import CoreUI
 import FeatureHome
 import FeatureMusic
 import FeaturePlayback
+import MetadataKit
 import FeatureSearch
 import FeatureSettings
 import FeatureProfiles
@@ -336,7 +337,8 @@ private struct HomeTab: View {
                         sourceAccountID: item.sourceAccountID,
                         initialSources: item.sources,
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                        crossServerSourceResolver: crossServerSourceResolver(in: accounts)
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
+                        snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -349,8 +351,14 @@ private struct HomeTab: View {
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(route.sourceAccountID, in: accounts),
                         itemID: route.seriesID,
+                        // Seed the hero from the tapped episode so first paint is
+                        // INSTANT (its thumbnail + title) instead of a centered
+                        // spinner on blank gray while `item(id:)` resolves the
+                        // series. load() swaps in the full series page in place.
+                        initialItem: route.episode,
                         ratingsProvider: ratingsProvider,
-                        sourceAccountID: route.sourceAccountID
+                        sourceAccountID: route.sourceAccountID,
+                        snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -363,8 +371,13 @@ private struct HomeTab: View {
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(route.sourceAccountID, in: accounts),
                         itemID: route.seriesID,
+                        // Seed the hero from the tapped season so first paint is
+                        // INSTANT (its poster + title) instead of a centered spinner
+                        // on blank gray while `item(id:)` resolves the series.
+                        initialItem: route.season,
                         ratingsProvider: ratingsProvider,
-                        sourceAccountID: route.sourceAccountID
+                        sourceAccountID: route.sourceAccountID,
+                        snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -529,7 +542,8 @@ private struct SearchTab: View {
                         sourceAccountID: item.sourceAccountID,
                         initialSources: item.sources,
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                        crossServerSourceResolver: crossServerSourceResolver(in: accounts)
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
+                        snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -542,8 +556,13 @@ private struct SearchTab: View {
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(route.sourceAccountID, in: accounts),
                         itemID: route.seriesID,
+                        // Seed the hero from the tapped episode for INSTANT first
+                        // paint instead of a centered spinner while the series
+                        // resolves (load() swaps in the full series page in place).
+                        initialItem: route.episode,
                         ratingsProvider: ratingsProvider,
-                        sourceAccountID: route.sourceAccountID
+                        sourceAccountID: route.sourceAccountID,
+                        snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -556,8 +575,13 @@ private struct SearchTab: View {
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(route.sourceAccountID, in: accounts),
                         itemID: route.seriesID,
+                        // Seed the hero from the tapped season for INSTANT first
+                        // paint instead of a centered spinner while the series
+                        // resolves.
+                        initialItem: route.season,
                         ratingsProvider: ratingsProvider,
-                        sourceAccountID: route.sourceAccountID
+                        sourceAccountID: route.sourceAccountID,
+                        snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },

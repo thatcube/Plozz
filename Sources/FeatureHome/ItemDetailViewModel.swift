@@ -93,6 +93,16 @@ public final class ItemDetailViewModel {
     /// details responsive and avoid saturating startup/network image traffic.
     private static let alternateSourceFanoutLimit = 3
 
+    /// Persistent stale-while-revalidate store of this title's resolved detail
+    /// (item + children + episodes + cross-server sources). On a revisit `load()`
+    /// paints the last-known snapshot instantly, then refreshes it from the
+    /// network — so a show you've opened before never shows a cold spinner.
+    private let snapshotCache: DetailSnapshotCache
+    /// Stable per-title key for ``snapshotCache``. Scoped by owning account so the
+    /// same id on two servers caches independently. All routes to a series share a
+    /// key (they're all built with the series id as `itemID`).
+    private var snapshotKey: String { "\(sourceAccountID ?? "_")|\(itemID)" }
+
     public init(
         provider: any MediaProvider,
         itemID: String,
@@ -104,7 +114,8 @@ public final class ItemDetailViewModel {
         trailerCache: TrailerResolutionCache = .shared,
         initialSources: [MediaSourceRef] = [],
         alternateProviderResolver: @escaping (String) -> (any MediaProvider)? = { _ in nil },
-        crossServerSourceResolver: (@Sendable (MediaItem) async -> [MediaSourceRef])? = nil
+        crossServerSourceResolver: (@Sendable (MediaItem) async -> [MediaSourceRef])? = nil,
+        snapshotCache: DetailSnapshotCache = .ephemeral
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -116,6 +127,7 @@ public final class ItemDetailViewModel {
         self.initialSources = initialSources
         self.alternateProviderResolver = alternateProviderResolver
         self.crossServerSourceResolver = crossServerSourceResolver
+        self.snapshotCache = snapshotCache
 
         // Seed the hero from the list item the user just tapped so the detail
         // screen's first paint is INSTANT — before `provider.item(id:)` returns.
@@ -145,8 +157,15 @@ public final class ItemDetailViewModel {
         alternateSourceEnrichmentTask = nil
         crossServerDiscoveryTask?.cancel()
         crossServerDiscoveryTask = nil
+        // Stale-while-revalidate: paint the last-known snapshot (hero, seasons/
+        // episodes and server picker) INSTANTLY on a revisit so an already-seen
+        // title never shows a cold spinner, then refresh from the network below.
+        if let snapshot = await snapshotCache.snapshot(for: snapshotKey) {
+            applySnapshot(snapshot)
+        }
         // Don't flash a loading/skeleton state over a hero we already seeded from
-        // the tapped list item; only show `.loading` for a cold (unseeded) open.
+        // the tapped list item (or a restored snapshot); only show `.loading` for
+        // a cold (unseeded) open.
         if state.value == nil { state = .loading }
         do {
             var fetched = try await provider.item(id: itemID)
@@ -197,6 +216,7 @@ public final class ItemDetailViewModel {
                 let fetchedChildren = (try? await provider.children(of: item.id)) ?? []
                 try Task.checkCancellation()
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
+                persistSnapshot()
                 _ = await trailersDone
                 _ = await ratingsDone
             } else {
@@ -207,6 +227,7 @@ public final class ItemDetailViewModel {
                 seedSources(from: taggedItem)
                 startAlternateSourceEnrichment(primaryID: item.id)
                 startCrossServerDiscovery(for: taggedItem)
+                persistSnapshot()
                 async let trailersDone: Void = loadTrailers(for: item)
                 async let ratingsDone: Void = enrichRatings(for: item)
                 _ = await trailersDone
@@ -435,6 +456,7 @@ public final class ItemDetailViewModel {
         let episodes = (try? await provider.children(of: seasonID)) ?? []
         guard !Task.isCancelled else { return }
         seasonEpisodes[seasonID] = stampSeriesTMDb(into: episodes.map(tagged))
+        persistSnapshot()
     }
 
     /// Replaces the cached episodes for a season after the view has enriched them
@@ -462,6 +484,40 @@ public final class ItemDetailViewModel {
             return
         }
         seriesEpisodeContext = SeriesEpisodeContext(series: item)
+    }
+
+    /// Paints a restored ``DetailSnapshotCache`` snapshot so a revisited title
+    /// shows its hero, season/episode lists and server picker instantly. Strictly
+    /// additive to first paint — the live `load()` immediately follows and replaces
+    /// this in place with fresh data (same identity ⇒ no flicker).
+    private func applySnapshot(_ snapshot: DetailSnapshotCache.Snapshot) {
+        let item = tagged(snapshot.item)
+        captureSeriesContext(from: item)
+        state = .loaded(Detail(item: item, children: snapshot.children.map(tagged)))
+        if !snapshot.seasonEpisodes.isEmpty {
+            seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
+        }
+        if snapshot.sources.count > 1 {
+            sources = snapshot.sources
+            applyUnifiedWatchState()
+        }
+    }
+
+    /// Writes the current resolved detail (item + children + episodes + sources) to
+    /// the persistent cache for instant restore next time. Cheap and fire-and-forget
+    /// (the actor coalesces/serializes writes); only persists once a full detail has
+    /// been published so a half-loaded page never overwrites a richer snapshot.
+    private func persistSnapshot() {
+        guard let detail = state.value, !detail.item.id.isEmpty else { return }
+        let snapshot = DetailSnapshotCache.Snapshot(
+            item: detail.item,
+            children: detail.children,
+            seasonEpisodes: seasonEpisodes,
+            sources: sources
+        )
+        let key = snapshotKey
+        let cache = snapshotCache
+        Task.detached(priority: .utility) { await cache.store(snapshot, for: key) }
     }
 
     /// Ensures every episode carries the parent series' TMDb id under `SeriesTmdb`,
@@ -561,6 +617,7 @@ public final class ItemDetailViewModel {
         guard result.count > 1, result.count > sources.count else { return }
         sources = result
         applyUnifiedWatchState()
+        persistSnapshot()
         startAlternateSourceEnrichment(primaryID: primary.id)
     }
 

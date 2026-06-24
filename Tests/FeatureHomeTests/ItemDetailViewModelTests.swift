@@ -365,10 +365,13 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.value?.children, [])
     }
 
-    func testSeriesHeroPaintsBeforeChildrenFetchCompletes() async {
-        // The whole point of the hero-first refactor: render the series page
-        // hero immediately, and let the seasons rail fill in afterwards. The
-        // children fetch is gated so we can observe both intermediate states.
+    func testSeriesWaitsForChildrenBeforePublishingLoadedState() async {
+        // Regression guard: a series page must NOT publish a `.loaded` hero with
+        // an empty children list, because SeriesDetailView latches its @State
+        // (selected season + hero/Play target) from the children it first sees —
+        // a childless intermediate state strands it with no seasons, no episodes
+        // and no Play button. The series load must therefore stay non-loaded
+        // until its children resolve, then publish once, complete.
         let provider = FakeMediaProvider(allItems: [series("show")])
         provider.childrenByParent = [
             "show": [season("s1", "Book One"), season("s2", "Book Two")]
@@ -386,15 +389,19 @@ final class ItemDetailViewModelTests: XCTestCase {
 
         let loadTask = Task { await vm.load() }
 
-        // Intermediate state: hero already painted with the series item, but
-        // children still suspended → empty children list.
-        await waitUntil { vm.state.value?.item.id == "show" }
-        XCTAssertEqual(vm.state.value?.children, [], "Series hero must not wait on its children fetch")
+        // While the children fetch is suspended, the series must NOT be published
+        // in a loaded-but-childless state.
+        await waitUntil { vm.state.isLoading || vm.state.value != nil }
+        if let published = vm.state.value {
+            XCTAssertEqual(published.item.id, "show")
+            XCTAssertFalse(published.children.isEmpty, "Series must never publish a loaded state with empty children")
+        }
 
-        // Release the gate; load completes with the full children list.
+        // Release the gate; load completes with the full children list in one shot.
         gate.open()
         await loadTask.value
         XCTAssertEqual(vm.state.value?.children.map(\.id), ["s1", "s2"])
+        XCTAssertFalse(vm.state.value?.children.isEmpty ?? true)
     }
 
     // MARK: - initialItem seeding (instant first paint from the tapped list item)

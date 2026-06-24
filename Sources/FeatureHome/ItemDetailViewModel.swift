@@ -129,29 +129,27 @@ public final class ItemDetailViewModel {
             // list item with the richer fetched one in place (same identity ⇒ no
             // flicker). For container kinds the children rail starts empty and
             // fills in below; for leaf kinds the empty list is final.
-            state = .loaded(Detail(item: taggedItem, children: []))
-
             if needsChildren {
-                // Fan out: children, trailers, and ratings have no dependency on
-                // each other once `item` is known, so run them concurrently
-                // instead of serially. Trailers and ratings each guard against
-                // the user navigating away (`isStillLoaded` / state-id check).
-                async let childrenResult: [MediaItem] = (try? await provider.children(of: item.id)) ?? []
+                // Containers (series/season/folder/collection): the children ARE
+                // the content — seasons, episodes, the season picker, and the
+                // resolved Play target all derive from them. SeriesDetailView
+                // latches its @State (selected season + hero/Play target) from the
+                // children it first sees, so publishing an empty hero first would
+                // strand it with no seasons, no episodes and no Play button. Fetch
+                // children FIRST, then publish a complete detail. Trailers and
+                // ratings still run concurrently, after publish, off first paint.
+                let fetchedChildren = (try? await provider.children(of: item.id)) ?? []
+                try Task.checkCancellation()
+                state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
                 async let trailersDone: Void = loadTrailers(for: item)
                 async let ratingsDone: Void = enrichRatings(for: item)
-
-                let fetchedChildren = await childrenResult
-                // Patch children in place, preserving the loaded item identity so
-                // a fast Back-and-reopen doesn't clobber a newer load.
-                if case var .loaded(detail) = state, detail.item.id == taggedItem.id {
-                    detail.children = fetchedChildren.map(tagged)
-                    state = .loaded(detail)
-                }
                 _ = await trailersDone
                 _ = await ratingsDone
             } else {
-                // Leaf kinds: hero is the final state for children; still load
-                // trailers/ratings off the critical path of first paint.
+                // Leaf kinds (movie/episode/video): the hero IS the content, so
+                // publish it immediately, then load trailers/ratings off the
+                // critical path of first paint.
+                state = .loaded(Detail(item: taggedItem, children: []))
                 async let trailersDone: Void = loadTrailers(for: item)
                 async let ratingsDone: Void = enrichRatings(for: item)
                 _ = await trailersDone

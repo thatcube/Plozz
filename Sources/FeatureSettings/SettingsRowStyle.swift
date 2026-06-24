@@ -57,20 +57,27 @@ private struct SettingsFocusBody: View {
             // reimplementing the logic.
             .environment(\.settingsRowIsFocused, isFocused)
             .environment(\.settingsRowFocusForeground, focusForeground)
+            // The HIGHLIGHT grows on focus, NOT the content. The card
+            // background extends slightly OUTWARD via a negative padding
+            // so text/icons stay anchored in place — only the colored
+            // surface and its shadow expand. (Old scaleEffect on the
+            // whole label scaled the text too, which read as "weird"
+            // because the label visibly grew.)
             .background(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .fill(isFocused ? focusFill : Color.clear)
+                    .padding(.horizontal, isFocused ? -10 : 0)
+                    .padding(.vertical, isFocused ? -6 : 0)
+                    .shadow(
+                        color: Color.black.opacity(isFocused ? 0.30 : 0),
+                        radius: isFocused ? 14 : 0,
+                        y: isFocused ? 6 : 0
+                    )
             )
             // Primary foreground inverts on focus so untouched titles flip.
             // Explicit `.foregroundStyle(...)` on individual leaves (chips,
             // checkmarks) still wins.
             .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
-            .scaleEffect(isFocused ? 1.04 : 1.0)
-            .shadow(
-                color: Color.black.opacity(isFocused ? 0.30 : 0),
-                radius: isFocused ? 14 : 0,
-                y: isFocused ? 6 : 0
-            )
             .opacity(configuration.isPressed ? 0.88 : 1.0)
             .animation(.easeOut(duration: 0.16), value: isFocused)
     }

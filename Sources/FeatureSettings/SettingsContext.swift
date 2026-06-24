@@ -111,12 +111,32 @@ struct ProviderIcon: View {
     let provider: ProviderKind
     var size: CGFloat = 14
 
+    // Reads the unified row focus state so the brand mark flips to the
+    // focus foreground on the inverted card (avoids a tinted glyph
+    // sitting on a same-color background).
+    @Environment(\.settingsRowIsFocused) private var rowFocused
+    @Environment(\.settingsRowFocusForeground) private var rowFocusForeground
+
+    private var tint: Color {
+        rowFocused ? rowFocusForeground : Self.tint(provider)
+    }
+
+    private var assetName: String {
+        provider == .plex ? "PlexLogo" : "JellyfinLogo"
+    }
+
     var body: some View {
         ZStack {
-            Circle().fill(Self.tint(provider).opacity(0.18))
-            Image(systemName: provider == .jellyfin ? "drop.fill" : "chevron.forward")
-                .font(.system(size: provider == .jellyfin ? size * 0.58 : size * 0.52, weight: .bold))
-                .foregroundStyle(Self.tint(provider))
+            Circle().fill(Self.tint(provider).opacity(rowFocused ? 0 : 0.18))
+            // Real brand mark (template-rendered SVG in the app asset
+            // catalog) instead of an SF-symbol stand-in. Tints with the
+            // current foreground so it works on either card color.
+            Image(assetName)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .padding(size * 0.18)
+                .foregroundStyle(tint)
         }
         .frame(width: size, height: size)
     }

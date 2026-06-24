@@ -69,17 +69,19 @@ struct SettingsAboutSection: View {
         .padding(20)
         // Unified focus look: native tvOS "inverted card" — white-on-black in
         // light mode, black-on-white in dark mode — matching the row style in
-        // SettingsRowStyle.swift. Subtle lift + soft shadow, no hard outline.
+        // SettingsRowStyle.swift. Only the highlight expands outward; the
+        // content stays anchored in place (no full-label scale).
         .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(isFocused ? focusFill : Color.clear)
-        )
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .shadow(
-            color: Color.black.opacity(isFocused ? 0.28 : 0),
-            radius: isFocused ? 14 : 0,
-            y: isFocused ? 6 : 0
+                .padding(.horizontal, isFocused ? -10 : 0)
+                .padding(.vertical, isFocused ? -6 : 0)
+                .shadow(
+                    color: Color.black.opacity(isFocused ? 0.28 : 0),
+                    radius: isFocused ? 14 : 0,
+                    y: isFocused ? 6 : 0
+                )
         )
         .focusable()
         .focused($isFocused)

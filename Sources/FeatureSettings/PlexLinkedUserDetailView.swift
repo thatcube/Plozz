@@ -126,9 +126,6 @@ struct PlexLinkedUserDetailView: View {
                             .background(Capsule().fill(ProviderIcon.tint(.plex).opacity(0.18)))
                             .foregroundStyle(ProviderIcon.tint(.plex))
                     }
-                    Text("Main Plex account holder")
-                        .font(.footnote)
-                        .settingsRowSecondary()
                 }
                 Spacer()
                 if isOwnerSelected {
@@ -151,7 +148,7 @@ struct PlexLinkedUserDetailView: View {
         } label: {
             HStack(spacing: 16) {
                 avatar(for: user, size: 52)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(user.name).font(.headline)
                         if user.isRestricted {
@@ -163,14 +160,19 @@ struct PlexLinkedUserDetailView: View {
                                 .foregroundStyle(.orange)
                         }
                         if user.requiresPIN {
-                            Text("PIN")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.yellow.opacity(0.22)))
-                                .foregroundStyle(.yellow)
+                            // Subtle lock glyph instead of a washed-out "PIN"
+                            // text pill — stays legible on the inverted focus
+                            // card via the focus-adaptive secondary tint.
+                            Image(systemName: "lock.fill")
+                                .font(.caption)
+                                .settingsRowSecondary()
                                 .accessibilityLabel("PIN required")
                         }
+                    }
+                    if user.isRestricted {
+                        Text("Limited content set by the account owner.")
+                            .font(.footnote)
+                            .settingsRowSecondary()
                     }
                 }
                 Spacer()

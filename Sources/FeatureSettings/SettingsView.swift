@@ -238,7 +238,7 @@ public struct SettingsView: View {
         // Inter-row spacing replaces the previous dividers: it lets the
         // contained focus lift breathe without crossing into a neighbor row
         // or sitting on top of a divider line.
-        VStack(spacing: 10) {
+        VStack(spacing: 14) {
             // One "Plex User" row per signed-in Plex account.
             let plexAccts = plexAccountsForRows
             ForEach(Array(plexAccts.enumerated()), id: \.element.id) { _, account in
@@ -383,6 +383,7 @@ public struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     HStack(spacing: 6) {
+                        ProviderIcon(provider: account.server.provider, size: 18)
                         AccountAvatar(name: account.userName, imageURL: account.avatarURL, size: 22)
                         Text(signedInLabel(for: account))
                             .font(.footnote.weight(.medium))

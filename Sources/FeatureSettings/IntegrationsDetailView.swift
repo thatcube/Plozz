@@ -234,6 +234,8 @@ struct AboutDetailView: View {
     let canSignOut: Bool
     let onSignOutAll: () -> Void
 
+    @State private var confirmSignOutAll = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -243,7 +245,9 @@ struct AboutDetailView: View {
                 }
                 if canSignOut {
                     SettingsPanel(title: "Sign Out") {
-                        Button(role: .destructive, action: onSignOutAll) {
+                        Button(role: .destructive) {
+                            confirmSignOutAll = true
+                        } label: {
                             Label("Sign Out of All Accounts", systemImage: "rectangle.portrait.and.arrow.right")
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -254,6 +258,12 @@ struct AboutDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
+        .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
+            Button("Sign Out", role: .destructive, action: onSignOutAll)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes every Plex and Jellyfin sign-in on this Apple TV. You'll need to sign in again.")
+        }
     }
 }
 #endif

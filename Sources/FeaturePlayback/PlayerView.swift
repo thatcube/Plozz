@@ -1,6 +1,9 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import AVFoundation
+#if canImport(AVKit)
+import AVKit
+#endif
 import CoreModels
 import CoreUI
 
@@ -14,6 +17,9 @@ import CoreUI
 public struct PlayerView: View {
     @State private var viewModel: PlayerViewModel
     @State private var diagnosticsSampler = PlaybackDiagnosticsSampler()
+    /// Smooths the HDR/Dolby-Vision HDMI display-mode switch by fading to black
+    /// around it (with a timeout so it can never strand on black).
+    @State private var hdrTransition = HDRTransitionModel()
     @Environment(\.dismiss) private var dismiss
     private let showDiagnostics: Bool
     private let themePalette: ThemePalette
@@ -34,9 +40,7 @@ public struct PlayerView: View {
                     VideoSurfaceContainer(engine: viewModel.videoEngine)
                         .id(viewModel.engineToken)
                         .ignoresSafeArea()
-                    ProgressView("Loading…")
-                        .font(.title2)
-                        .tint(.white)
+                    LoadingMessagesView(spinnerTint: .white, messageColor: .white.opacity(0.85))
                 }
 
             case .ready:
@@ -52,7 +56,7 @@ public struct PlayerView: View {
                         setAudioDelay: { viewModel.setAudioDelay($0) },
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
-                        dismiss: { dismiss() }
+                        dismiss: { dismissSmoothly() }
                     ),
                     scrubPreview: viewModel.scrubPreview,
                     themePalette: ThemePaletteBox(
@@ -74,6 +78,16 @@ public struct PlayerView: View {
             case let .failed(error):
                 PlaybackErrorView(message: error.userMessage) { dismiss() }
             }
+        }
+        // HDR/Dolby-Vision veil: a black layer above everything that hides the
+        // panel's HDMI display-mode re-sync. Opacity is driven by the transition
+        // model (0 = clear, 1 = black) and always returns to 0 (settle or timeout).
+        .overlay {
+            Color.black
+                .opacity(hdrTransition.veilOpacity)
+                .ignoresSafeArea()
+                .allowsHitTesting(hdrTransition.veilOpacity > 0.01)
+                .animation(.easeInOut(duration: 0.35), value: hdrTransition.veilOpacity)
         }
         .overlay(alignment: .topLeading) {
             // Keep diagnostics off during load/failure while mpv is initializing;
@@ -113,9 +127,31 @@ public struct PlayerView: View {
             // Playback finished on an auto-dismiss player (a trailer); close it.
             if shouldDismiss { dismiss() }
         }
+        .onChange(of: viewModel.displayMode) { oldMode, newMode in
+            // The display is being driven to a new dynamic range (initial resolve
+            // on the native engine, or a cross-engine swap). If the HDMI display
+            // mode will switch, fade to black so the panel re-sync is hidden.
+            hdrTransition.beginTransition(from: oldMode, to: newMode)
+        }
+        .modifier(DisplaySettleObserver { hdrTransition.displayDidSettle() })
         .onDisappear {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }
+        }
+    }
+
+    /// Dismiss with an HDR-aware fade: when leaving HDR/Dolby-Vision content the
+    /// display will snap back to SDR, so fade to black first to hide it, then
+    /// dismiss. SDR playback dismisses immediately (no mode switch to hide).
+    private func dismissSmoothly() {
+        guard !hdrTransition.isVeiled, viewModel.displayMode.isHDR else {
+            dismiss()
+            return
+        }
+        hdrTransition.raiseVeil()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            dismiss()
         }
     }
 
@@ -130,6 +166,25 @@ public struct PlayerView: View {
             metadata: viewModel.sourceMetadata,
             engineName: viewModel.engineDisplayName
         )
+    }
+}
+
+/// Observes the tvOS display manager and reports when an HDMI display-mode switch
+/// finishes, so the HDR veil can fade back in exactly when the panel has settled.
+/// A no-op on platforms without `AVDisplayManager` (e.g. macOS test builds).
+private struct DisplaySettleObserver: ViewModifier {
+    let onSettle: () -> Void
+
+    func body(content: Content) -> some View {
+        #if os(tvOS)
+        content.onReceive(
+            NotificationCenter.default.publisher(for: .AVDisplayManagerModeSwitchEnd)
+        ) { _ in
+            onSettle()
+        }
+        #else
+        content
+        #endif
     }
 }
 

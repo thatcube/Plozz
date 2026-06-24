@@ -28,8 +28,7 @@ public struct ContentStateView<Value: Sendable, Content: View>: View {
     public var body: some View {
         switch state {
         case .idle, .loading:
-            ProgressView()
-                .scaleEffect(1.5)
+            LoadingMessagesView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case let .loaded(value):

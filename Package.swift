@@ -250,6 +250,10 @@ let package = Package(
             dependencies: ["CoreModels", "CoreUI"]
         ),
         .testTarget(
+            name: "CoreUITests",
+            dependencies: ["CoreUI", "CoreModels"]
+        ),
+        .testTarget(
             name: "CoreNetworkingTests",
             dependencies: ["CoreNetworking", "CoreModels"]
         ),

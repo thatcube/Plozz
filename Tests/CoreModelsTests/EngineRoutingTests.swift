@@ -305,4 +305,54 @@ final class EngineRoutingTests: XCTestCase {
         let mp4 = source(container: "mp4", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "wmav2")
         XCTAssertEqual(route(mp4), .hybrid)
     }
+
+    // MARK: - Transport stream containers (M2TS / MTS / TS) → hybrid
+
+    func testM2TSContainerIsHybrid() {
+        // M2TS (Blu-ray raw stream) has no seek index; AVPlayer's file demux breaks
+        // seeking. The hybrid engine (mpv) handles it correctly.
+        let m2ts = source(container: "m2ts", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "ac3")
+        XCTAssertEqual(route(m2ts), .hybrid)
+    }
+
+    func testMTSContainerIsHybrid() {
+        let mts = source(container: "mts", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "ac3")
+        XCTAssertEqual(route(mts), .hybrid)
+    }
+
+    func testRawTSContainerIsHybrid() {
+        let ts = source(container: "ts", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(ts), .hybrid)
+    }
+
+    func testHEVCM2TSIsHybrid() {
+        let m2ts = source(container: "m2ts", videoCodec: "hevc", videoRangeType: "HDR10", colorTransfer: "smpte2084", audioCodec: "eac3")
+        XCTAssertEqual(route(m2ts), .hybrid)
+    }
+
+    func testTranscodedTSStaysNative() {
+        // A transcoded (HLS) stream is always native regardless of the original container.
+        let ts = source(container: "ts", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "aac")
+        XCTAssertEqual(route(ts, isTranscoding: true), .native)
+    }
+
+    func testM2TSWithoutHybridStaysNative() {
+        let m2ts = source(container: "m2ts", videoCodec: "h264", videoRangeType: "SDR", audioCodec: "ac3")
+        XCTAssertEqual(route(m2ts, hybridAvailable: false), .native)
+    }
+
+    // MARK: - HDR10+ color transfer detection
+
+    func testHDR10PlusColorTransferIsRecognizedAsHDR() {
+        // HDR10+ (SMPTE ST 2094-40) has an HDR10 base layer and should be routed
+        // the same as HDR10: native in Apple containers, hybrid in MKV.
+        let mp4 = source(container: "mp4", videoCodec: "hevc", colorTransfer: "smpte2094-40", audioCodec: "aac")
+        // Apple container with HDR10+ → native (AVPlayer shows the HDR10 base)
+        XCTAssertEqual(route(mp4), .native)
+    }
+
+    func testHDR10PlusInMKVIsHybrid() {
+        let mkv = source(container: "mkv", videoCodec: "hevc", colorTransfer: "smpte2094-40", audioCodec: "aac")
+        XCTAssertEqual(route(mkv), .hybrid)
+    }
 }

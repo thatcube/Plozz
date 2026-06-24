@@ -108,9 +108,15 @@ extension JellyfinCapabilityProfile {
         let canBitstreamDTS = passthrough.contains(.dts) || passthrough.contains(.dtsHD)
         let dtsTokens = (hybrid || canBitstreamDTS) ? ["dts", "dca"] : []
         let trueHDTokens = hybrid ? ["truehd", "mlp"] : []
+        // Opus and Vorbis are not decodable by AVPlayer in an MP4/MOV/TS container —
+        // the file plays video with no sound. Only include them in Apple containers
+        // when the hybrid engine is available (mpv decodes them fine). They're
+        // always included in the MKV/WebM profile below.
+        let opusTokens = hybrid ? ["opus"] : []
+        let vorbisTokens = hybrid ? ["vorbis"] : []
 
         func audio(_ base: [String], allowExtras: Bool) -> String {
-            (allowExtras ? base + dtsTokens + trueHDTokens : base).joined(separator: ",")
+            (allowExtras ? base + dtsTokens + trueHDTokens + opusTokens + vorbisTokens : base).joined(separator: ",")
         }
 
         var profiles = [
@@ -118,7 +124,7 @@ extension JellyfinCapabilityProfile {
                 type: "Video",
                 container: "mp4,m4v",
                 videoCodec: mp4Video.joined(separator: ","),
-                audioCodec: audio(["aac", "ac3", "alac", "eac3", "flac", "mp3", "opus"], allowExtras: true)
+                audioCodec: audio(["aac", "ac3", "alac", "eac3", "flac", "mp3"], allowExtras: true)
             ),
             DirectPlayProfile(
                 type: "Video",
@@ -128,7 +134,7 @@ extension JellyfinCapabilityProfile {
             ),
             DirectPlayProfile(
                 type: "Video",
-                container: "mpegts",
+                container: "mpegts,m2ts,mts",
                 videoCodec: tsVideo.joined(separator: ","),
                 audioCodec: audio(["aac", "ac3", "eac3", "mp3"], allowExtras: true)
             ),
@@ -251,8 +257,19 @@ extension JellyfinCapabilityProfile {
     private static func subtitles() -> [SubtitleProfile] {
         [
             SubtitleProfile(format: "vtt", method: "Hls"),
+            // "External" sidecar subtitles: the server returns a separate text file
+            // that the player fetches and injects into the native picker. Our
+            // SubtitleInjectingResourceLoader normalises SRT → WebVTT transparently.
+            SubtitleProfile(format: "vtt", method: "External"),
+            SubtitleProfile(format: "srt", method: "External"),
+            SubtitleProfile(format: "subrip", method: "External"),
             SubtitleProfile(format: "cc_dec", method: "Embed"),
             SubtitleProfile(format: "ttml", method: "Embed"),
+            // Image-based and styled subtitles need the server to burn them into
+            // the video (Encode). ASS/SSA carry complex font/colour/positioning
+            // metadata that the native text renderer can't reproduce faithfully.
+            SubtitleProfile(format: "ass", method: "Encode"),
+            SubtitleProfile(format: "ssa", method: "Encode"),
             SubtitleProfile(format: "dvbsub", method: "Encode"),
             SubtitleProfile(format: "dvdsub", method: "Encode"),
             SubtitleProfile(format: "pgssub", method: "Encode"),

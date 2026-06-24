@@ -157,4 +157,123 @@ final class PlexHybridDirectPlayTests: XCTestCase {
         XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: false))
         XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true))
     }
+
+    // MARK: FLAC audio — always decodable by AVFoundation
+
+    func testFLACInMP4DirectPlaysNativelyWithoutHybrid() throws {
+        // FLAC has been natively decodable in AVFoundation since tvOS 11, so it
+        // must direct-play regardless of the hybrid flag.
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"flac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264"},
+           {"id":11,"streamType":2,"index":1,"codec":"flac"}
+         ]}]}
+        """
+        let caps = MediaCapabilities(supportsHEVC: true)
+        XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: false),
+                      "FLAC must direct-play natively (AVFoundation supports it since tvOS 11)")
+        XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: true))
+    }
+
+    // MARK: Opus / Vorbis audio — hybrid decodable
+
+    func testOpusInMKVDirectPlaysWhenHybridOn() throws {
+        let json = """
+        {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"opus",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc"},
+           {"id":11,"streamType":2,"index":1,"codec":"opus"}
+         ]}]}
+        """
+        let caps = MediaCapabilities(supportsHEVC: true)
+        XCTAssertFalse(try canDirectPlay(json, caps: caps, hybrid: false),
+                       "Opus-in-MKV must not direct-play when hybrid is off (container blocked)")
+        XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: true),
+                      "Opus-in-MKV must direct-play on the hybrid mpv engine")
+    }
+
+    func testOpusInAppleContainerDirectPlaysWhenHybridOn() throws {
+        // Opus in an MP4/MOV container — AVPlayer can't decode Opus in these, but
+        // when hybrid is on the router sends it to mpv.
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"opus",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264"},
+           {"id":11,"streamType":2,"index":1,"codec":"opus"}
+         ]}]}
+        """
+        XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false),
+                       "Opus-in-MP4 must not direct-play without hybrid (AVPlayer can't decode it)")
+        XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true),
+                      "Opus-in-MP4 must direct-play when hybrid is on (mpv decodes it)")
+    }
+
+    func testVorbisInMKVDirectPlaysWhenHybridOn() throws {
+        let json = """
+        {"id":1,"container":"mkv","videoCodec":"h264","audioCodec":"vorbis",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264"},
+           {"id":11,"streamType":2,"index":1,"codec":"vorbis"}
+         ]}]}
+        """
+        XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false))
+        XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true))
+    }
+
+    // MARK: M2TS / TS transport-stream containers — hybrid only
+
+    private let sdrM2TS = """
+    {"id":1,"container":"m2ts","videoCodec":"h264","audioCodec":"ac3",
+     "Part":[{"id":2,"key":"/library/parts/2/16000/file.m2ts","container":"m2ts","Stream":[
+       {"id":10,"streamType":1,"index":0,"codec":"h264"},
+       {"id":11,"streamType":2,"index":1,"codec":"ac3"}
+     ]}]}
+    """
+
+    func testM2TSTranscodesWhenHybridOff() throws {
+        // AVPlayer's file-based TS demux has broken seeking; must transcode.
+        XCTAssertFalse(try canDirectPlay(sdrM2TS, caps: .default, hybrid: false))
+    }
+
+    func testM2TSDirectPlaysWhenHybridOn() throws {
+        // mpv handles M2TS with correct seeking.
+        XCTAssertTrue(try canDirectPlay(sdrM2TS, caps: .default, hybrid: true))
+    }
+
+    func testMTSDirectPlaysWhenHybridOn() throws {
+        let json = """
+        {"id":1,"container":"mts","videoCodec":"h264","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mts","container":"mts","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264"},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false))
+        XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true))
+    }
+
+    func testHEVCM2TSWithHDR10DirectPlaysOnHDRDisplayWithHybridOn() throws {
+        let json = """
+        {"id":1,"container":"m2ts","videoCodec":"hevc","audioCodec":"eac3",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.m2ts","container":"m2ts","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc","colorTrc":"smpte2084"},
+           {"id":11,"streamType":2,"index":1,"codec":"eac3"}
+         ]}]}
+        """
+        let caps = MediaCapabilities(supportsHEVC: true, supportsHDR10: true)
+        XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: true))
+    }
+
+    func testHEVCM2TSWithHDR10TranscodesOnSDRDisplay() throws {
+        let json = """
+        {"id":1,"container":"m2ts","videoCodec":"hevc","audioCodec":"eac3",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.m2ts","container":"m2ts","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc","colorTrc":"smpte2084"},
+           {"id":11,"streamType":2,"index":1,"codec":"eac3"}
+         ]}]}
+        """
+        let caps = MediaCapabilities(supportsHEVC: true, supportsHDR10: false, supportsHLG: false)
+        XCTAssertFalse(try canDirectPlay(json, caps: caps, hybrid: true))
+    }
 }

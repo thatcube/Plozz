@@ -87,6 +87,13 @@ public enum EngineRouter {
         // AVPlayer cannot demux Matroska/WebM; the hybrid engine can.
         if isMatroska(source.container) { return .hybrid }
 
+        // Raw MPEG-TS / M2TS file-based playback via AVPlayer has broken seeking
+        // (no index — the demuxer must scan forward from the beginning). The hybrid
+        // engine demuxes and seeks transport streams correctly, so route them there.
+        // HLS transcodes (isTranscoding, caught by the guard above) are unaffected —
+        // they're already seekable HLS and stay on the efficient AVPlayer path.
+        if isTransportStreamContainer(source.container) { return .hybrid }
+
         // AVPlayer/VideoToolbox only decode HEVC tagged `hvc1`; an HEVC stream
         // tagged `hev1` (in-band parameter sets) in an Apple/MP4-family container
         // plays audio with a **black screen** on AVPlayer. When it hasn't been
@@ -147,6 +154,17 @@ public enum EngineRouter {
             || container.contains("matroska")
     }
 
+    /// Raw MPEG-TS / M2TS / MTS containers whose file-based seeking is broken in
+    /// AVPlayer (no index → seeks from start). The hybrid engine (libmpv) handles
+    /// transport-stream seeking correctly, so these are routed there for direct
+    /// play. This does **not** affect HLS playback (caught by `isTranscoding`).
+    static func isTransportStreamContainer(_ container: String?) -> Bool {
+        guard let container = container?.lowercased() else { return false }
+        return container == "m2ts" || container == "mts"
+            || container == "ts" || container == "m2t"
+            || container == "bdav" || container == "bdmv"
+    }
+
     /// True when the video stream carries a **Dolby Vision** signal (any profile).
     /// Only DoVi forces the native engine; plain HDR10/HLG follow the container
     /// rules (Apple container → native, MKV → on-device hybrid).
@@ -182,9 +200,10 @@ public enum EngineRouter {
             return true
         }
 
-        // Color transfer characteristics (PQ / HLG) — what Plex reports.
+        // Color transfer characteristics (PQ / HLG / HDR10+) — what Plex reports.
         switch video.colorTransfer?.lowercased() {
-        case "smpte2084", "pq", "arib-std-b67", "hlg":
+        case "smpte2084", "pq", "arib-std-b67", "hlg",
+             "smpte2094-40":   // HDR10+ (ST 2094-40 dynamic metadata; base layer is HDR10)
             return true
         default:
             return false

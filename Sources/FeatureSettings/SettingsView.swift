@@ -229,42 +229,35 @@ public struct SettingsView: View {
     /// own detail page via the root NavigationStack.
     @ViewBuilder
     private var profileOwnedRows: some View {
-        VStack(spacing: 0) {
-            // One "Plex User" row per signed-in Plex account. Each row shows
-            // the Home user currently bound to THAT account for the active
-            // profile, with its Plex avatar, and drills into a picker scoped
-            // to that one account.
+        // Inter-row spacing replaces the previous dividers: it lets the
+        // contained focus lift breathe without crossing into a neighbor row
+        // or sitting on top of a divider line.
+        VStack(spacing: 10) {
+            // One "Plex User" row per signed-in Plex account.
             let plexAccts = plexAccountsForRows
             ForEach(Array(plexAccts.enumerated()), id: \.element.id) { _, account in
                 plexLinkedUserRow(account: account, multiple: plexAccts.count > 1)
-                Divider()
             }
             navRow("Server Accounts", icon: "person.2.crop.square.stack",
                    value: serverAccountsSummary,
                    route: .servers)
-            Divider()
             navRow("Appearance", icon: "paintpalette",
                    value: theme.theme.displayName,
                    route: .appearance)
-            Divider()
             navRow("Captions", icon: "captions.bubble",
                    value: nil,
                    route: .captions)
-            Divider()
             navRow("Spoilers", icon: "eye.slash",
                    value: spoilers.settings.isEnabled ? "On" : "Off",
                    route: .spoilers)
-            Divider()
             navRow("Integrations", icon: "link",
                    value: traktSummary,
                    route: .integrations)
             if profilesEnabled {
-                Divider()
                 navRow("Manage Profiles", icon: "person.crop.circle",
                        value: profiles.count == 1 ? "1 profile" : "\(profiles.count) profiles",
                        route: .profile)
             } else {
-                Divider()
                 enableProfilesRow
             }
         }
@@ -393,10 +386,10 @@ public struct SettingsView: View {
             ?? ownerBinding(for: account)
         return NavigationLink(value: SettingsRoute.plexUser(accountID: account.id)) {
             HStack(spacing: 16) {
-                plexAvatar(for: binding, size: 56)
+                plexAvatar(for: binding, size: 44)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(multiple ? "Plex User on \(account.server.name)" : "Plex User")
-                        .font(.headline)
+                        .font(.callout.weight(.medium))
                     Text(plexLinkedUserSubtitle(for: binding))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -407,10 +400,11 @@ public struct SettingsView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsRowButtonStyle())
     }
 
     /// Synthetic binding representing the Plex account owner — derived from
@@ -465,12 +459,10 @@ public struct SettingsView: View {
     private var enableProfilesRow: some View {
         Button(action: onEnableProfiles) {
             HStack(spacing: 16) {
-                Image(systemName: "person.crop.circle.badge.plus")
-                    .frame(width: 28)
-                    .foregroundStyle(.tint)
+                rowIcon("person.crop.circle.badge.plus")
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Enable Profiles")
-                        .font(.headline)
+                        .font(.callout.weight(.medium))
                     Text("Add separate household profiles so each person gets their own Home, watch history, and preferences.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -481,9 +473,11 @@ public struct SettingsView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsRowButtonStyle())
     }
 
     // MARK: - Helpers
@@ -508,12 +502,16 @@ public struct SettingsView: View {
         }
     }
 
-    /// Settings drill-down row. Uses a value-based `NavigationLink` that pushes
-    /// onto the root `NavigationStack` via `navigationDestination(for:)` — this
-    /// is the only pattern that reliably keeps the Menu/Back button bound to
-    /// "pop one level" on tvOS. Closure-based `NavigationLink(destination:)`
-    /// inside a ScrollView occasionally hosts the destination outside the
-    /// stack, in which case Menu quits the app.
+    /// Shared leading icon for every Settings row. Explicit point size +
+    /// fixed square frame so glyphs of different widths optically align with
+    /// the row title and stay consistent across rows.
+    private func rowIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 22, weight: .regular))
+            .frame(width: 30, height: 30)
+            .foregroundStyle(.tint)
+    }
+
     @ViewBuilder
     private func navRow(
         _ title: String,
@@ -523,10 +521,8 @@ public struct SettingsView: View {
     ) -> some View {
         NavigationLink(value: route) {
             HStack(spacing: 16) {
-                Image(systemName: icon)
-                    .frame(width: 28)
-                    .foregroundStyle(.tint)
-                Text(title).font(.headline)
+                rowIcon(icon)
+                Text(title).font(.callout.weight(.medium))
                 Spacer()
                 if let value {
                     Text(value)
@@ -538,7 +534,7 @@ public struct SettingsView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
             .padding(.horizontal, 12)
             .contentShape(Rectangle())
         }
@@ -546,11 +542,11 @@ public struct SettingsView: View {
     }
 }
 
-/// Contained focus treatment for Settings rows. Default `.plain` on tvOS
-/// draws an enlarged focus halo that overflows row bounds — with zero-spaced
-/// rows it visibly bleeds into the neighbors and sits on top of dividers.
-/// This style keeps focus INSIDE the row: a clipped rounded rect background
-/// fills only the row's frame, no scale.
+/// Native-feeling, contained focus treatment for Settings rows. Mimics the
+/// Apple TV "subtle lift" focus: a small scale + soft drop shadow for depth,
+/// a gentle brightened surface, no hard outline. Paired with non-zero
+/// inter-row spacing in `profileOwnedRows` so the lift never bleeds into the
+/// neighboring row or crosses a divider.
 struct SettingsRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         SettingsRowButtonBody(configuration: configuration)
@@ -563,15 +559,21 @@ private struct SettingsRowButtonBody: View {
     var body: some View {
         configuration.label
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isFocused ? Color.white.opacity(0.14) : Color.clear)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isFocused ? Color.white.opacity(0.12) : Color.clear)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(isFocused ? Color.white.opacity(0.35) : Color.clear, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(isFocused ? Color.white.opacity(0.10) : Color.clear, lineWidth: 1)
+            )
+            .scaleEffect(isFocused ? 1.03 : 1.0)
+            .shadow(
+                color: Color.black.opacity(isFocused ? 0.28 : 0),
+                radius: isFocused ? 12 : 0,
+                y: isFocused ? 6 : 0
             )
             .opacity(configuration.isPressed ? 0.85 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: isFocused)
+            .animation(.easeOut(duration: 0.15), value: isFocused)
     }
 }
 #endif

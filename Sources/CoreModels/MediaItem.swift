@@ -161,10 +161,17 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// non-merged items.
     public var additionalSourceAccountIDs: [String]
 
-    /// Every account this item can be played from, primary first: the merged
-    /// `sourceAccountID` followed by any de-duplicated alternates.
+    /// Every account this item can be played from, primary first. Derived from
+    /// the richer `sources` when the cross-server merge populated them (so the
+    /// order matches the server picker), falling back to the legacy
+    /// `sourceAccountID` + `additionalSourceAccountIDs` for un-merged items and
+    /// older cached JSON.
     public var allSourceAccountIDs: [String] {
-        (sourceAccountID.map { [$0] } ?? []) + additionalSourceAccountIDs
+        if !sources.isEmpty {
+            var seen = Set<String>()
+            return sources.compactMap { seen.insert($0.accountID).inserted ? $0.accountID : nil }
+        }
+        return (sourceAccountID.map { [$0] } ?? []) + additionalSourceAccountIDs
     }
 
     /// The selectable media sources ("versions") for this title — e.g. a 4K HDR
@@ -188,6 +195,29 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// re-stamped item triggers a fresh play request. `nil` means "use the
     /// provider/server default source".
     public var selectedVersionID: String?
+
+    /// Every server that holds this same title, captured by the cross-server
+    /// merge (``MediaItemMerger``). Primary source first (it backs this card's
+    /// id/artwork), then the de-duplicated alternates. Each ref carries **that
+    /// server's** own item id, versions and watch-state, so playback, the server
+    /// picker, watch-state fan-out and the unified-state fold can address the
+    /// right file on the right server. Empty for non-merged items (a single
+    /// server's own result), so it never bloats ordinary rows. Encoded with a
+    /// back-compatible default so older cached JSON still decodes.
+    public var sources: [MediaSourceRef]
+
+    /// When the title was last played on the source server, used as the
+    /// most-recent-wins tiebreaker when folding watch-state across servers (and
+    /// to order Continue Watching). `nil` when the provider doesn't report it.
+    public var lastPlayedAt: Date?
+
+    /// The account/server the user picked in the **server picker** for this play,
+    /// threaded into playback so `Play` targets the chosen server's copy.
+    /// **Transient UI state** — like `selectedVersionID` it is excluded from
+    /// `Codable`/persistence (it's a per-play choice, not a property of the
+    /// title) but kept in `Equatable`/`Hashable` so a re-stamped item triggers a
+    /// fresh play request. `nil` means "use the primary source".
+    public var selectedSourceAccountID: String?
 
     public init(
         id: String,
@@ -223,7 +253,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         additionalSourceAccountIDs: [String] = [],
         versions: [MediaVersion] = [],
         isFavorite: Bool = false,
-        selectedVersionID: String? = nil
+        selectedVersionID: String? = nil,
+        sources: [MediaSourceRef] = [],
+        lastPlayedAt: Date? = nil,
+        selectedSourceAccountID: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -259,6 +292,9 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.versions = versions
         self.isFavorite = isFavorite
         self.selectedVersionID = selectedVersionID
+        self.sources = sources
+        self.lastPlayedAt = lastPlayedAt
+        self.selectedSourceAccountID = selectedSourceAccountID
     }
 
     /// Persisted keys. `selectedVersionID` is intentionally omitted so it is
@@ -272,6 +308,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
         case fallbackArtworkURL, logoURL, ratings, providerIDs, mediaInfo
         case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
+        case sources, lastPlayedAt
     }
 
     /// Custom decoding so `additionalSourceAccountIDs` (added after items were
@@ -312,7 +349,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
         versions = try container.decodeIfPresent([MediaVersion].self, forKey: .versions) ?? []
         isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        sources = try container.decodeIfPresent([MediaSourceRef].self, forKey: .sources) ?? []
+        lastPlayedAt = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
         selectedVersionID = nil
+        selectedSourceAccountID = nil
     }
 
     /// Returns a copy of this item tagged as belonging to `accountID`, used by the
@@ -342,6 +382,53 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// Whether a version picker should be offered: more than one selectable
     /// source exists.
     public var hasMultipleVersions: Bool { versions.count > 1 }
+
+    /// Whether a **server** picker should be offered: the same title was merged
+    /// from more than one distinct server/account.
+    public var hasMultipleSources: Bool {
+        Set(sources.map(\.accountID)).count > 1
+    }
+
+    /// The source ref for a given account id, or `nil` when this title isn't
+    /// known on that server.
+    public func source(forAccountID accountID: String) -> MediaSourceRef? {
+        sources.first { $0.accountID == accountID }
+    }
+
+    /// The currently-selected source ref, resolved from `selectedSourceAccountID`
+    /// (falling back to the primary source), or `nil` when no `sources` exist.
+    public var selectedSource: MediaSourceRef? {
+        if let selectedSourceAccountID, let match = source(forAccountID: selectedSourceAccountID) {
+            return match
+        }
+        return sources.first
+    }
+
+    /// Returns a copy retargeted to play from `source` (and optionally a specific
+    /// version on that server). The returned item's `id`, `sourceAccountID`,
+    /// `versions` and watch-state are swapped to the chosen server's copy so the
+    /// existing play-routing (`provider(forAccountID:)` → play `item.id` +
+    /// `selectedVersionID`) targets the right file on the right server, while
+    /// `sources`/identity are preserved for further switching. A no-op-safe
+    /// `versionID` that isn't on the target server is dropped (server default).
+    public func selectingSource(_ source: MediaSourceRef, versionID: String? = nil) -> MediaItem {
+        var copy = self
+        copy.id = source.itemID
+        copy.sourceAccountID = source.accountID
+        copy.selectedSourceAccountID = source.accountID
+        copy.versions = source.versions
+        copy.resumePosition = source.resumePosition
+        copy.playedPercentage = source.playedPercentage
+        copy.isPlayed = source.isPlayed
+        copy.isFavorite = source.isFavorite
+        copy.lastPlayedAt = source.lastPlayedAt
+        if let versionID, source.versions.contains(where: { $0.id == versionID }) {
+            copy.selectedVersionID = versionID
+        } else {
+            copy.selectedVersionID = nil
+        }
+        return copy
+    }
 
     /// A human-friendly subtitle line, e.g. `S1 · E3` or the production year.
     public var subtitle: String? {
@@ -376,18 +463,89 @@ public struct MediaLibrary: Codable, Hashable, Identifiable, Sendable {
     /// returned directly by a single provider.
     public var sourceAccountID: String?
 
-    public init(id: String, title: String, kind: MediaItemKind, imageURL: URL? = nil, sourceAccountID: String? = nil) {
+    /// Other `Account.id`s that expose the *same* library (e.g. a "Movies"
+    /// library that exists on both a Plex and a Jellyfin server), populated when
+    /// the Home aggregator merges same-identity libraries across servers so a
+    /// single tile browses every server's copy. Empty for a single-server
+    /// library. The primary stays in `sourceAccountID`.
+    public var additionalSourceAccountIDs: [String]
+
+    /// Maps each contributing `Account.id` to **that server's** own container id
+    /// for this merged library, so an aggregated browse can page every server's
+    /// copy. Always contains the primary (`sourceAccountID` → `id`) once tagged.
+    public var sourceContainerIDByAccount: [String: String]
+
+    public init(
+        id: String,
+        title: String,
+        kind: MediaItemKind,
+        imageURL: URL? = nil,
+        sourceAccountID: String? = nil,
+        additionalSourceAccountIDs: [String] = [],
+        sourceContainerIDByAccount: [String: String] = [:]
+    ) {
         self.id = id
         self.title = title
         self.kind = kind
         self.imageURL = imageURL
         self.sourceAccountID = sourceAccountID
+        self.additionalSourceAccountIDs = additionalSourceAccountIDs
+        self.sourceContainerIDByAccount = sourceContainerIDByAccount
+        // Always keep the primary server addressable in the per-account map.
+        if let sourceAccountID, self.sourceContainerIDByAccount[sourceAccountID] == nil {
+            self.sourceContainerIDByAccount[sourceAccountID] = id
+        }
     }
 
-    /// Returns a copy of this library tagged as belonging to `accountID`.
+    /// Every account this library can be browsed from, primary first then the
+    /// merged alternates in first-seen order. A single entry means there's only
+    /// one server, so the aggregated-browse path collapses to a normal browse.
+    public var allSourceAccountIDs: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for accountID in (sourceAccountID.map { [$0] } ?? []) + additionalSourceAccountIDs
+        where seen.insert(accountID).inserted {
+            result.append(accountID)
+        }
+        return result
+    }
+
+    /// This library's own container id on `accountID`, or `nil` when that server
+    /// doesn't hold the library. Falls back to `id` for the primary account.
+    public func containerID(forSourceAccountID accountID: String) -> String? {
+        if let mapped = sourceContainerIDByAccount[accountID] { return mapped }
+        if sourceAccountID == accountID { return id }
+        return nil
+    }
+
+    /// Returns a copy of this library tagged as belonging to `accountID`, also
+    /// recording this server's container id in the per-account map so a later
+    /// cross-server merge can address it.
     public func taggingSource(_ accountID: String) -> MediaLibrary {
         var copy = self
         copy.sourceAccountID = accountID
+        copy.sourceContainerIDByAccount[accountID] = id
         return copy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, kind, imageURL, sourceAccountID
+        case additionalSourceAccountIDs, sourceContainerIDByAccount
+    }
+
+    /// Custom decoding so the cross-server fields (added after libraries were
+    /// first persisted) default to empty when absent. Encoding stays synthesized.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        kind = try container.decode(MediaItemKind.self, forKey: .kind)
+        imageURL = try container.decodeIfPresent(URL.self, forKey: .imageURL)
+        sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
+        additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
+        sourceContainerIDByAccount = try container.decodeIfPresent([String: String].self, forKey: .sourceContainerIDByAccount) ?? [:]
+        if let sourceAccountID, sourceContainerIDByAccount[sourceAccountID] == nil {
+            sourceContainerIDByAccount[sourceAccountID] = id
+        }
     }
 }

@@ -61,6 +61,17 @@ struct DetailHeroView: View {
     var capabilities: MediaCapabilities = .detected()
     /// Invoked with the chosen `MediaVersion.id` when the user picks a version.
     var onSelectVersion: ((String) -> Void)? = nil
+    /// The cross-server sources for this (possibly merged) title. When more than
+    /// one *distinct server* holds the title and `onSelectSource` is set, a
+    /// "Server" picker button is shown next to Play (in the same style as the
+    /// version picker) so the user can choose which server `Play` targets. Empty
+    /// or single-server titles show no server picker.
+    var sources: [MediaSourceRef] = []
+    /// The currently-effective selected source's account id (drives the server
+    /// picker's label and the menu checkmark). `nil` falls back to the primary.
+    var selectedSourceAccountID: String? = nil
+    /// Invoked with the chosen source's `accountID` when the user picks a server.
+    var onSelectSource: ((String) -> Void)? = nil
     /// Technical badges to show when the focused item carries none of its own —
     /// a series or season hero has no media file, so the parent derives a
     /// representative set from the loaded episodes (best resolution/HDR/audio)
@@ -269,10 +280,13 @@ struct DetailHeroView: View {
                     .lineLimit(3, reservesSpace: true)
                     .frame(maxWidth: 960, alignment: .topLeading)
             }
-            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || (versions.count > 1 && onSelectVersion != nil) || hasHeroActionButtons {
+            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || (versions.count > 1 && onSelectVersion != nil) || (serverChoices.count > 1 && onSelectSource != nil) || hasHeroActionButtons {
                 HStack(spacing: 24) {
                     if let playTitle, let onPlay {
                         playButton(title: playTitle, action: onPlay)
+                    }
+                    if serverChoices.count > 1, let onSelectSource {
+                        serverButton(onSelect: onSelectSource)
                     }
                     if versions.count > 1, let onSelectVersion {
                         versionButton(onSelect: onSelectVersion)
@@ -431,6 +445,45 @@ struct DetailHeroView: View {
         } else {
             button
         }
+    }
+
+    /// The distinct servers offered in the server picker, primary first, one row
+    /// per account (two accounts on the same backend stay distinct). A title held
+    /// on a single server yields a single entry, which hides the picker.
+    private var serverChoices: [MediaSourceRef] {
+        var seen = Set<String>()
+        var result: [MediaSourceRef] = []
+        for source in sources where seen.insert(source.accountID).inserted {
+            result.append(source)
+        }
+        return result
+    }
+
+    /// The server-picker button shown next to Play when a merged title lives on
+    /// more than one server. Mirrors the version picker's style: its label shows
+    /// the active server, and the menu lists every server (provider kind + name)
+    /// with a checkmark on the active one. Picking a server retargets `Play` and
+    /// repopulates the version picker with that server's files.
+    @ViewBuilder
+    private func serverButton(onSelect: @escaping (String) -> Void) -> some View {
+        let current = serverChoices.first { $0.accountID == selectedSourceAccountID } ?? serverChoices.first
+        Menu {
+            ForEach(serverChoices) { source in
+                Button {
+                    onSelect(source.accountID)
+                } label: {
+                    if source.accountID == current?.accountID {
+                        Label(source.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(source.displayName)
+                    }
+                }
+            }
+        } label: {
+            Label(current?.displayName ?? "Server", systemImage: "server.rack")
+                .frame(minWidth: 160)
+        }
+        .modifier(HeroButtonStyle(prominent: false))
     }
 
     /// The version-picker button shown next to Play when a title has more than

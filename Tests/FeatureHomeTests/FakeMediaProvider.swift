@@ -19,6 +19,9 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     var trailersByItem: [String: [MediaItem]]?
     /// Optional start index at which `items(in:page:)` throws once.
     var failAtStartIndex: Int?
+    /// When `true`, every `items(in:page:)` call throws — simulates a server that
+    /// is offline for the whole browse session.
+    var alwaysFail = false
     private(set) var requestedPages: [PageRequest] = []
 
     init(allItems: [MediaItem]) {
@@ -59,6 +62,7 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
 
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         requestedPages.append(page)
+        if alwaysFail { throw AppError.serverUnreachable }
         if let failAt = failAtStartIndex, failAt == page.startIndex {
             failAtStartIndex = nil
             throw AppError.serverUnreachable

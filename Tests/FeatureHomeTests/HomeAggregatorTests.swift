@@ -85,6 +85,35 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(Set(libraries.map(\.key)).count, 3)
     }
 
+    func testContentDedupesSameTitleAcrossServersAndUnifiesState() async {
+        // The same movie (shared Tmdb id) on Plex and Jellyfin, watched more
+        // recently on Jellyfin.
+        let plexCopy = MediaItem(id: "p-dune", title: "Dune", kind: .movie,
+                                 productionYear: 2021, providerIDs: ["Tmdb": "438631"])
+        let jellyCopy = MediaItem(id: "j-dune", title: "Dune", kind: .movie,
+                                  productionYear: 2021, resumePosition: 240,
+                                  providerIDs: ["Tmdb": "438631"],
+                                  lastPlayedAt: Date(timeIntervalSince1970: 999))
+        let plex = AggregatorStub(continueWatching: [plexCopy])
+        let jelly = AggregatorStub(continueWatching: [jellyCopy])
+        let accounts = [
+            resolved("acct-plex", user: "Bob", server: "Plex", kind: .plex, provider: plex),
+            resolved("acct-jelly", user: "Alice", server: "Jelly", kind: .jellyfin, provider: jelly)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(content.continueWatching.count, 1, "Same movie on two servers shows once")
+        let card = content.continueWatching[0]
+        XCTAssertEqual(card.sourceAccountID, "acct-plex", "First server stays primary")
+        XCTAssertEqual(Set(card.allSourceAccountIDs), ["acct-plex", "acct-jelly"])
+        XCTAssertEqual(card.resumePosition, 240, "Unified watch-state reflects the newer Jellyfin progress")
+        XCTAssertEqual(card.sources.first { $0.accountID == "acct-jelly" }?.itemID, "j-dune",
+                       "Each server's own item id is retained for playback")
+        // Server labels come from the resolved accounts.
+        XCTAssertEqual(card.sources.first?.providerKind, .plex)
+    }
+
     // MARK: - Helpers
 
     private func item(_ id: String) -> MediaItem {

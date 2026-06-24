@@ -48,74 +48,81 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
     // MARK: - Watched state
 
     private func performWatchState(_ action: MediaItemAction, on item: MediaItem, context: MediaItemActionContext) {
-        guard let watch = provider(for: item) as? WatchStateProviding else { return }
-        guard let plan = mutationPlan(for: action, item: item, context: context) else { return }
-
-        // Optimistic update: reflect the change in the UI immediately so the
-        // watched badge flips the instant the menu dismisses, instead of after
-        // the server round-trip. The network call then runs in the background and
-        // only the rare failure case reconciles (reverts) the badge.
-        MediaItemMutation(itemIDs: plan.affectedIDs, played: plan.played).post()
-        Task { await commit(plan, using: watch) }
-    }
-
-    // MARK: - Execution
-
-    /// What a watched-state action changes, computed synchronously (no network)
-    /// so the UI can update optimistically before the request is sent.
-    private struct MutationPlan {
-        let action: MediaItemAction
-        let targetID: String
-        let affectedIDs: Set<String>
-        let played: Bool
-        /// Whether a failed request should roll the optimistic change back. Only
-        /// the single-item toggles do; "up to here" is best-effort per item.
-        let revertOnFailure: Bool
-    }
-
-    private func mutationPlan(
-        for action: MediaItemAction,
-        item: MediaItem,
-        context: MediaItemActionContext
-    ) -> MutationPlan? {
         switch action {
-        case .markWatched:
-            return MutationPlan(action: action, targetID: item.id, affectedIDs: [item.id], played: true, revertOnFailure: true)
-        case .markUnwatched:
-            return MutationPlan(action: action, targetID: item.id, affectedIDs: [item.id], played: false, revertOnFailure: true)
+        case .markWatched, .markUnwatched:
+            performPlayedToggle(played: action == .markWatched, on: item, action: action)
         case .markWatchedUpToHere:
-            var ids = Set(context.precedingContainerIDs)
-            ids.formUnion(MediaItemActionCatalog.siblingsToMarkUpToHere(item, in: context.orderedSiblings).map(\.id))
-            ids.insert(item.id)
-            return MutationPlan(action: action, targetID: item.id, affectedIDs: ids, played: true, revertOnFailure: false)
+            performMarkUpToHere(on: item, context: context)
         default:
-            return nil
+            break
         }
     }
 
-    /// Sends the watched-state change(s) to the server. On failure of a
-    /// revertible action, posts a compensating mutation so the optimistic badge
-    /// flips back to its true state.
-    private func commit(_ plan: MutationPlan, using watch: any WatchStateProviding) async {
-        do {
-            switch plan.action {
-            case .markWatched, .markUnwatched:
-                try await watch.setPlayed(plan.played, itemID: plan.targetID)
-            case .markWatchedUpToHere:
-                // Best-effort per item so one unreachable episode doesn't abort
-                // the rest; the optimistic UI already reflects the intent.
-                for id in plan.affectedIDs {
-                    try? await watch.setPlayed(true, itemID: id)
+    /// Marks a whole title played/unplayed across **every** server that holds it.
+    ///
+    /// A merged card carries one ``MediaSourceRef`` per server (each with that
+    /// server's own item id), so a single "mark watched" lands on the title
+    /// wherever it is known — Jellyfin and Plex alike. The optimistic mutation
+    /// covers every per-server item id (plus the merged card's own id) so the
+    /// badge flips immediately on the merged card and on any per-server copy that
+    /// happens to be on screen. Reverts only if **every** source write fails.
+    private func performPlayedToggle(played: Bool, on item: MediaItem, action: MediaItemAction) {
+        let targets = watchTargets(for: item)
+        guard !targets.isEmpty else { return }
+
+        var ids = Set(targets.map(\.itemID))
+        ids.insert(item.id)
+        MediaItemMutation(itemIDs: ids, played: played).post()
+
+        Task {
+            var anySucceeded = false
+            for target in targets {
+                do {
+                    try await target.provider.setPlayed(played, itemID: target.itemID)
+                    anySucceeded = true
+                } catch {
+                    PlozzLog.app.error("Mark \(action.rawValue) failed on a source")
                 }
-            default:
-                break
             }
-        } catch {
-            PlozzLog.app.error("Media item action \(plan.action.rawValue) failed")
-            if plan.revertOnFailure {
-                MediaItemMutation(itemIDs: plan.affectedIDs, played: !plan.played).post()
+            if !anySucceeded {
+                MediaItemMutation(itemIDs: ids, played: !played).post()
             }
         }
+    }
+
+    /// "Mark watched up to here" stays scoped to the primary server: the preceding
+    /// siblings are this server's episode ids, which don't map 1:1 onto another
+    /// server's library, so fanning them out isn't meaningful. Best-effort per
+    /// item so one unreachable episode doesn't abort the rest.
+    private func performMarkUpToHere(on item: MediaItem, context: MediaItemActionContext) {
+        guard let watch = provider(for: item) as? WatchStateProviding else { return }
+        var ids = Set(context.precedingContainerIDs)
+        ids.formUnion(MediaItemActionCatalog.siblingsToMarkUpToHere(item, in: context.orderedSiblings).map(\.id))
+        ids.insert(item.id)
+        MediaItemMutation(itemIDs: ids, played: true).post()
+        Task {
+            for id in ids {
+                try? await watch.setPlayed(true, itemID: id)
+            }
+        }
+    }
+
+    /// Every `(provider, itemID)` this title should be marked on: one per
+    /// cross-server source (each addressed by *that server's* own item id), or
+    /// just the primary owner for a single-source / untagged item.
+    private func watchTargets(for item: MediaItem) -> [(provider: any WatchStateProviding, itemID: String)] {
+        if !item.sources.isEmpty {
+            return item.sources.compactMap { source in
+                guard let provider = appState.provider(forAccountID: source.accountID) as? WatchStateProviding else {
+                    return nil
+                }
+                return (provider, source.itemID)
+            }
+        }
+        if let watch = provider(for: item) as? WatchStateProviding {
+            return [(watch, item.id)]
+        }
+        return []
     }
 
     // MARK: - Watchlist

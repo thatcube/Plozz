@@ -513,7 +513,8 @@ public struct JellyfinProvider: MediaProvider {
                 streams: dto.MediaStreams ?? dto.MediaSources?.first?.MediaStreams ?? []
             ),
             versions: Self.versions(from: dto.MediaSources),
-            isFavorite: dto.UserData?.IsFavorite ?? false
+            isFavorite: dto.UserData?.IsFavorite ?? false,
+            lastPlayedAt: Self.parseDate(dto.UserData?.LastPlayedDate)
         )
     }
 
@@ -547,7 +548,32 @@ public struct JellyfinProvider: MediaProvider {
         }
     }
 
-    /// Maps Jellyfin `People` onto provider-agnostic `MediaPerson`s, preserving
+    private static let iso8601Fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let iso8601Plain: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    /// Parses a Jellyfin ISO-8601 timestamp (e.g. `LastPlayedDate`). Jellyfin
+    /// emits .NET-style 7-digit fractional seconds, which `ISO8601DateFormatter`
+    /// rejects, so the fraction is trimmed to 3 digits before parsing; a plain
+    /// (fraction-free) parse is tried as a fallback.
+    static func parseDate(_ raw: String?) -> Date? {
+        guard var value = raw, !value.isEmpty else { return nil }
+        if let dot = value.range(of: #"\.\d+"#, options: .regularExpression) {
+            let digits = value[dot].dropFirst().prefix(3)
+            value.replaceSubrange(dot, with: "." + digits)
+        }
+        return iso8601Fractional.date(from: value) ?? iso8601Plain.date(from: value)
+    }
+
+
     /// billing order. A headshot URL is built only when the person advertises a
     /// `PrimaryImageTag`, so we never point an avatar at a guaranteed 404.
     /// Entries without a usable id/name are dropped.

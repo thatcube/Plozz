@@ -384,7 +384,7 @@ public struct PosterCardView: View {
             }
             .frame(height: height)
             .padding(.horizontal, 16)
-            .padding(.bottom, 20)
+            .padding(.bottom, 16)
         }
     }
 }

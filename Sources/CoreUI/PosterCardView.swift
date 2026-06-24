@@ -364,11 +364,11 @@ public struct PosterCardView: View {
                 // Scrim: a slight black gradient that fades up from the bottom edge,
                 // reaching above the bar so the indicator pops off bright artwork.
                 LinearGradient(
-                    colors: [.clear, .black.opacity(0.45)],
+                    colors: [.clear, .black.opacity(0.6)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: height + 56)
+                .frame(height: height + 90)
                 .frame(maxWidth: .infinity)
                 .allowsHitTesting(false)
 

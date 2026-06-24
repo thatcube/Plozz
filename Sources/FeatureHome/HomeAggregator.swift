@@ -18,16 +18,22 @@ public struct HomeAggregator: Sendable {
     public struct Content: Equatable, Sendable {
         public var continueWatching: [MediaItem]
         public var latest: [MediaItem]
+        /// The unified Watchlist row, merged across every `WatchlistProviding`
+        /// account (Jellyfin Favorites today). Empty when nothing is saved or no
+        /// active account supports a watchlist — the UI then hides the row.
+        public var watchlist: [MediaItem]
         /// Every discovered library (unfiltered); callers apply Home-visibility.
         public var libraries: [AggregatedLibrary]
 
         public init(
             continueWatching: [MediaItem] = [],
             latest: [MediaItem] = [],
+            watchlist: [MediaItem] = [],
             libraries: [AggregatedLibrary] = []
         ) {
             self.continueWatching = continueWatching
             self.latest = latest
+            self.watchlist = watchlist
             self.libraries = libraries
         }
     }
@@ -59,6 +65,7 @@ public struct HomeAggregator: Sendable {
         return Content(
             continueWatching: Self.interleave(perAccount.map(\.continueWatching)),
             latest: Self.interleave(perAccount.map(\.latest)),
+            watchlist: Self.interleave(perAccount.map(\.watchlist)),
             libraries: perAccount.flatMap(\.libraries)
         )
     }
@@ -84,6 +91,7 @@ public struct HomeAggregator: Sendable {
     private struct AccountContent: Sendable {
         var continueWatching: [MediaItem] = []
         var latest: [MediaItem] = []
+        var watchlist: [MediaItem] = []
         var libraries: [AggregatedLibrary] = []
     }
 
@@ -100,10 +108,13 @@ public struct HomeAggregator: Sendable {
         async let resume = try? provider.continueWatching(limit: continueWatchingLimit)
         async let recent = try? provider.latest(limit: latestLimit)
         async let libs = try? provider.libraries()
+        // Only providers that advertise a watchlist contribute to that row.
+        async let saved = Self.watchlist(from: provider)
 
         let cw = (await resume) ?? []
         let lt = (await recent) ?? []
         let rawLibs = (await libs) ?? []
+        let wl = await saved
 
         if cw.isEmpty && lt.isEmpty && rawLibs.isEmpty {
             PlozzLog.app.error("Aggregation: no content from account \(accountID)")
@@ -112,8 +123,16 @@ public struct HomeAggregator: Sendable {
         return AccountContent(
             continueWatching: cw.map { $0.taggingSource(accountID) },
             latest: lt.map { $0.taggingSource(accountID) },
+            watchlist: wl.map { $0.taggingSource(accountID) },
             libraries: rawLibs.map { aggregated($0, from: resolved) }
         )
+    }
+
+    /// Best-effort watchlist fetch for one provider: `[]` when the provider can't
+    /// express a watchlist or the request fails, so the row degrades gracefully.
+    private static func watchlist(from provider: any MediaProvider) async -> [MediaItem] {
+        guard let watchlistProvider = provider as? WatchlistProviding else { return [] }
+        return (try? await watchlistProvider.watchlist()) ?? []
     }
 
     private static func libraries(from resolved: ResolvedAccount) async -> [AggregatedLibrary] {

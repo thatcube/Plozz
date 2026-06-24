@@ -49,6 +49,18 @@ struct DetailHeroView: View {
     var playRemainingText: String? = nil
     /// When provided, a secondary "Trailer" button is shown next to Play.
     var onPlayTrailer: (() -> Void)? = nil
+    /// The selectable versions for this title. When more than one exists and
+    /// `onSelectVersion` is set, a "Version" picker button is shown next to Play
+    /// so the user can choose which source `Play` targets.
+    var versions: [MediaVersion] = []
+    /// The currently-effective selected version id (drives the picker's label and
+    /// the menu checkmark). `nil` falls back to the first/recommended version.
+    var selectedVersionID: String? = nil
+    /// This device's capabilities, used to predict Direct Play vs Transcode for
+    /// each version in the picker (the creative compatibility badge).
+    var capabilities: MediaCapabilities = .detected()
+    /// Invoked with the chosen `MediaVersion.id` when the user picks a version.
+    var onSelectVersion: ((String) -> Void)? = nil
     /// Technical badges to show when the focused item carries none of its own —
     /// a series or season hero has no media file, so the parent derives a
     /// representative set from the loaded episodes (best resolution/HDR/audio)
@@ -64,6 +76,41 @@ struct DetailHeroView: View {
     /// can flip its colours to stay visible against the button's focused (white)
     /// vs unfocused (dark) background.
     @FocusState private var playButtonHasFocus: Bool
+    /// Whether the Refresh Metadata button currently holds focus. On tvOS 26 the
+    /// focused glass button turns near-white, so the standard green success check
+    /// washes out — when focused we switch it to a darker green that stays legible.
+    @FocusState private var refreshButtonHasFocus: Bool
+
+    /// The app-installed action handler (the SAME one the press-and-hold context
+    /// menu reads). Drives the visible Watchlist / Watched / Refresh hero buttons
+    /// so they are byte-for-byte consistent with the long-press menu — optimistic
+    /// update, cross-provider fan-out and mutation broadcast all go through it.
+    /// `nil` in previews/tests, which simply hides the buttons.
+    @Environment(\.mediaItemActionHandler) private var actionHandler
+    /// Surrounding-list context, so a hero acting on a focused episode behaves
+    /// exactly like that episode's context-menu would.
+    @Environment(\.mediaItemActionContext) private var actionContext
+    /// Drives the Refresh button's animated state machine: the refresh itself is
+    /// a fire-and-forget server task, so this gives the user visible feedback —
+    /// idle ➝ a spinning "refreshing" indicator ➝ a green success check ➝ back to
+    /// idle, with each icon animating in and out.
+    @State private var refreshPhase: RefreshPhase = .idle
+
+    /// The visible lifecycle of the Refresh Metadata button.
+    private enum RefreshPhase {
+        case idle, refreshing, success
+    }
+
+    /// Uniform square footprint for the secondary hero icon buttons (watchlist,
+    /// watched, refresh) so their differing SF Symbol widths — the `eye` glyph in
+    /// particular — don't make one button wider than the rest. This also sets the
+    /// watched-state circle's diameter.
+    private let heroIconSize: CGFloat = 38
+
+    /// Explicit point size for the secondary hero glyphs (eye/bookmark/refresh) so
+    /// they render at a consistent size that visually matches the filled circle,
+    /// rather than tvOS's oversized default button font.
+    private let heroGlyphSize: CGFloat = 30
 
     /// The active light/dark appearance. The unfocused prominent button is dark
     /// in dark mode but light in light mode, so the inline progress bar must take
@@ -79,6 +126,44 @@ struct DetailHeroView: View {
     /// content does). The scrim geometry is identical across modes — only this
     /// tone flips — so legibility stays consistent between appearances.
     private var scrimTone: Color { colorScheme == .dark ? .black : .white }
+
+    // MARK: - Visible item actions (discoverability)
+
+    /// The capability-gated actions the installed handler offers for the focused
+    /// `item`. Identical to what the context menu shows, so the visible buttons
+    /// and the long-press menu can never drift apart.
+    private var heroActions: [MediaItemAction] {
+        actionHandler?.actions(for: item, context: actionContext) ?? []
+    }
+
+    /// The watchlist toggle for `item`, if its resolving provider conforms to
+    /// `WatchlistProviding` (offered only for whole titles — movies/series).
+    private var heroWatchlistAction: MediaItemAction? {
+        heroActions.first { $0 == .addToWatchlist || $0 == .removeFromWatchlist }
+    }
+
+    /// The watched-state toggle for `item`, if its provider can mutate it. On a
+    /// series page this lights up for the focused *episode* (the hero mirrors it),
+    /// giving episodes a visible watched toggle without touching the rail.
+    private var heroWatchedAction: MediaItemAction? {
+        heroActions.first { $0 == .markWatched || $0 == .markUnwatched }
+    }
+
+    /// Whether to show the Refresh Metadata button (provider conforms to
+    /// `MetadataRefreshing`).
+    private var heroOffersRefresh: Bool { heroActions.contains(.refreshMetadata) }
+
+    /// Whether any visible item-action button should render — used to decide
+    /// whether the action row appears even when there's no Play/Trailer/Version.
+    private var hasHeroActionButtons: Bool {
+        heroWatchlistAction != nil || heroWatchedAction != nil || heroOffersRefresh
+    }
+
+    /// Routes a hero button through the shared action handler with this hero's
+    /// item + context — the exact same path the context menu uses.
+    private func performHeroAction(_ action: MediaItemAction) {
+        actionHandler?.perform(action, on: item, context: actionContext)
+    }
 
     /// The capability badges shown above the ratings: resolution/HDR/audio. The
     /// content-rating certificate is rendered separately, inline with the
@@ -184,16 +269,28 @@ struct DetailHeroView: View {
                     .lineLimit(3, reservesSpace: true)
                     .frame(maxWidth: 960, alignment: .topLeading)
             }
-            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil {
+            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || (versions.count > 1 && onSelectVersion != nil) || hasHeroActionButtons {
                 HStack(spacing: 24) {
                     if let playTitle, let onPlay {
                         playButton(title: playTitle, action: onPlay)
+                    }
+                    if versions.count > 1, let onSelectVersion {
+                        versionButton(onSelect: onSelectVersion)
                     }
                     if let onPlayTrailer {
                         Button(action: onPlayTrailer) {
                             Label("Trailer", systemImage: "film.fill")
                         }
                         .modifier(HeroButtonStyle(prominent: false))
+                    }
+                    if let heroWatchlistAction {
+                        watchlistButton(action: heroWatchlistAction)
+                    }
+                    if let heroWatchedAction {
+                        watchedButton(action: heroWatchedAction)
+                    }
+                    if heroOffersRefresh {
+                        refreshButton()
                     }
                 }
                 .padding(.top, 8)
@@ -315,14 +412,16 @@ struct DetailHeroView: View {
         let button = Button(action: action) {
             HStack(spacing: 16) {
                 Image(systemName: "play.fill")
-                if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1 {
+                if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1, !item.isPlayed {
                     resumeProgressCapsule(progress: playProgress)
                     Text(playRemainingText)
+                        .lineLimit(1)
                 } else {
                     Text(title)
+                        .lineLimit(1)
                 }
             }
-            .frame(minWidth: 260)
+            .frame(width: 340)
         }
         .modifier(HeroButtonStyle(prominent: true))
         .focused($playButtonHasFocus)
@@ -334,11 +433,164 @@ struct DetailHeroView: View {
         }
     }
 
-    /// The thin watched-progress bar shown inside the Play button between the
-    /// play icon and the "… left" line. Its colours flip to stay visible against
-    /// the button's background: the focused button is white in either appearance,
-    /// and the unfocused button is dark in dark mode but light in light mode — so
-    /// a light fill is only safe on an unfocused button in dark mode.
+    /// The version-picker button shown next to Play when a title has more than
+    /// one source. Its label reflects the currently-selected version's quality
+    /// ("4K · Dolby Vision"); the menu lists every version with a visual quality
+    /// diff and a predicted Direct Play / Transcode badge for *this* device, with
+    /// a checkmark on the active one.
+    @ViewBuilder
+    private func versionButton(onSelect: @escaping (String) -> Void) -> some View {
+        let current = versions.first { $0.id == selectedVersionID } ?? versions.first
+        Menu {
+            ForEach(versions) { version in
+                Button {
+                    onSelect(version.id)
+                } label: {
+                    let badge = version.compatibility(with: capabilities).badge
+                    let suffix = badge.isEmpty ? "" : "  •  \(badge)"
+                    if version.id == current?.id {
+                        Label(version.displayLabel + suffix, systemImage: "checkmark")
+                    } else {
+                        Text(version.displayLabel + suffix)
+                    }
+                }
+            }
+        } label: {
+            Label(current?.resolutionLabel ?? "Version", systemImage: "rectangle.stack.fill")
+                .frame(minWidth: 160)
+        }
+        .modifier(HeroButtonStyle(prominent: false))
+    }
+
+    /// Visible Watchlist toggle, shown when the resolving provider conforms to
+    /// `WatchlistProviding`. A filled bookmark + "Watchlisted" reflects current
+    /// membership; an outline bookmark + "Watchlist" prompts adding. Tapping
+    /// routes through the shared handler (optimistic update + cross-provider
+    /// fan-out), so the icon flips the instant the mutation broadcasts back.
+    @ViewBuilder
+    private func watchlistButton(action: MediaItemAction) -> some View {
+        Button { performHeroAction(action) } label: {
+            Image(systemName: item.isFavorite ? "bookmark.fill" : "bookmark")
+                .font(.system(size: heroGlyphSize))
+                .foregroundStyle(item.isFavorite ? Color.accentColor : Color.primary)
+                .contentTransition(.opacity)
+                .symbolEffect(.bounce, value: item.isFavorite)
+                .frame(width: heroIconSize, height: heroIconSize)
+        }
+        .modifier(HeroButtonStyle(prominent: false))
+        .animation(.easeInOut(duration: 0.2), value: item.isFavorite)
+        .accessibilityLabel(action.title)
+        .accessibilityValue(item.isFavorite ? "On your watchlist" : "Not on your watchlist")
+    }
+
+    /// Visible watched-state toggle, shown when the provider can mutate it. On a
+    /// series page the hero mirrors the focused episode, so this doubles as the
+    /// episode's visible watched toggle. Unwatched shows a neutral `eye`; marking
+    /// watched first pops in a brand-blue filled circle (the same watched colour as
+    /// the episode cards), then strokes a white checkmark *onto* it — drawn from the
+    /// left point, down to the bottom vertex, up to the top-right — via an animated
+    /// path so only the glyph animates, not the button.
+    @ViewBuilder
+    private func watchedButton(action: MediaItemAction) -> some View {
+        Button { performHeroAction(action) } label: {
+            ZStack {
+                Image(systemName: "eye")
+                    .font(.system(size: heroGlyphSize))
+                    .foregroundStyle(Color.primary)
+                    .opacity(item.isPlayed ? 0 : 1)
+                    .scaleEffect(item.isPlayed ? 0.4 : 1)
+
+                ZStack {
+                    Circle()
+                        .fill(ThemePalette.brandBlue)
+                    // The check's draw-on is a direct function of `item.isPlayed`
+                    // and carries its OWN animation keyed to that same value. This
+                    // is deliberate: the surrounding `.animation(value:)` on the
+                    // frame installs a *nil* animation on this whole subtree for any
+                    // transaction where `isPlayed` didn't change, which silently
+                    // squashed every previous draw-on (it ran in a separate, deferred
+                    // transaction). Keeping the draw in the one transaction where
+                    // `isPlayed` actually flips — and giving it a short delay so the
+                    // circle pops first — makes it reliably animate on-device.
+                    CheckmarkShape(progress: item.isPlayed ? 1 : 0)
+                        .stroke(Color.white,
+                                style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
+                        .padding(heroIconSize * 0.20)
+                        .animation(.easeOut(duration: 0.32).delay(0.24), value: item.isPlayed)
+                }
+                .opacity(item.isPlayed ? 1 : 0)
+                .scaleEffect(item.isPlayed ? 1 : 0.4)
+            }
+            .frame(width: heroIconSize, height: heroIconSize)
+            .animation(.easeOut(duration: 0.18), value: item.isPlayed)
+        }
+        .modifier(HeroButtonStyle(prominent: false))
+        .accessibilityLabel(action.title)
+        .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
+    }
+
+    /// Visible Refresh Metadata button, shown when the provider conforms to
+    /// `MetadataRefreshing`. The server task is fire-and-forget, so the icon walks
+    /// through a small animated state machine for feedback: a real spinning
+    /// progress indicator while "refreshing", then a green success check,
+    /// then back to the refresh glyph — each state scaling/fading in and out.
+    @ViewBuilder
+    private func refreshButton() -> some View {
+        Button {
+            guard refreshPhase == .idle else { return }
+            performHeroAction(.refreshMetadata)
+            setRefreshPhase(.refreshing)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                setRefreshPhase(.success)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                    setRefreshPhase(.idle)
+                }
+            }
+        } label: {
+            refreshIcon
+        }
+        .modifier(HeroButtonStyle(prominent: false))
+        .focused($refreshButtonHasFocus)
+        .accessibilityLabel(MediaItemAction.refreshMetadata.title)
+    }
+
+    /// Animates the refresh state transition.
+    private func setRefreshPhase(_ phase: RefreshPhase) {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
+            refreshPhase = phase
+        }
+    }
+
+    /// The single glyph shown for the current `refreshPhase`. Keyed by phase so a
+    /// change removes the old glyph (transition out) and inserts the new one
+    /// (transition in); the refreshing phase shows a real circular spinner.
+    @ViewBuilder
+    private var refreshIcon: some View {
+        Group {
+            switch refreshPhase {
+            case .idle:
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: heroGlyphSize))
+            case .refreshing:
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.primary)
+                    .scaleEffect(0.9)
+            case .success:
+                Image(systemName: "checkmark")
+                    .font(.system(size: heroGlyphSize))
+                    .foregroundStyle(refreshButtonHasFocus
+                        ? Color(red: 0.0, green: 0.4, blue: 0.07)
+                        : .green)
+            }
+        }
+        .id(refreshPhase)
+        .transition(.scale(scale: 0.4).combined(with: .opacity))
+        .frame(width: heroIconSize, height: heroIconSize)
+    }
+    /// play icon and the "… left" line. Its colours flip with the button's focus
+    /// state — light fill on the dark unfocused button, dark fill on the white
+    /// focused button — so it stays clearly visible either way.
     private func resumeProgressCapsule(progress: Double) -> some View {
         let onLight = playButtonHasFocus || colorScheme == .light
         let track = onLight ? Color.black.opacity(0.22) : Color.white.opacity(0.32)
@@ -486,6 +738,50 @@ private struct HeroButtonStyle: ViewModifier {
                 content.buttonStyle(.bordered)
             }
         }
+    }
+}
+
+/// The checkmark glyph used by the watched toggle. `progress` (0...1) is the
+/// shape's `animatableData`, and the path is built up to that fraction of its
+/// *total length* — left point ➝ bottom vertex ➝ top-right — so animating
+/// `progress` strokes the check on at a uniform speed. Proportions are inset and
+/// balanced so the glyph stands tall without warping into the corners.
+private struct CheckmarkShape: Shape {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        // Nothing drawn yet: return an *empty* path so the round line cap doesn't
+        // render a dot at the start point while the check is still hidden/delayed.
+        guard progress > 0 else { return path }
+
+        let w = rect.width, h = rect.height
+        let start = CGPoint(x: w * 0.26, y: h * 0.52)
+        let mid   = CGPoint(x: w * 0.44, y: h * 0.70)
+        let end   = CGPoint(x: w * 0.74, y: h * 0.24)
+
+        let firstLen = hypot(mid.x - start.x, mid.y - start.y)
+        let secondLen = hypot(end.x - mid.x, end.y - mid.y)
+        let total = firstLen + secondLen
+        let drawn = min(1, progress) * total
+
+        path.move(to: start)
+        if drawn <= firstLen {
+            let t = firstLen == 0 ? 0 : drawn / firstLen
+            path.addLine(to: CGPoint(x: start.x + t * (mid.x - start.x),
+                                     y: start.y + t * (mid.y - start.y)))
+        } else {
+            path.addLine(to: mid)
+            let t = secondLen == 0 ? 0 : (drawn - firstLen) / secondLen
+            path.addLine(to: CGPoint(x: mid.x + t * (end.x - mid.x),
+                                     y: mid.y + t * (end.y - mid.y)))
+        }
+        return path
     }
 }
 

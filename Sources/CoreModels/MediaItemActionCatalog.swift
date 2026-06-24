@@ -35,10 +35,19 @@ public enum MediaItemActionCatalog {
     ///   - supportsWatchState: whether the item's provider can mutate watched
     ///     state (i.e. conforms to `WatchStateProviding`). When `false` no
     ///     watched-state actions are offered.
+    ///   - supportsWatchlist: whether the item's provider conforms to
+    ///     `WatchlistProviding`. When `true` an add/remove-watchlist action is
+    ///     offered for watchlist-eligible items (the item's `isFavorite` flag
+    ///     decides add vs remove).
+    ///   - supportsMetadataRefresh: whether the item's provider conforms to
+    ///     `MetadataRefreshing`. When `true` a "Refresh Metadata" action is
+    ///     offered for refreshable items.
     ///   - context: any surrounding-list context (see `MediaItemActionContext`).
     public static func actions(
         for item: MediaItem,
         supportsWatchState: Bool,
+        supportsWatchlist: Bool = false,
+        supportsMetadataRefresh: Bool = false,
         context: MediaItemActionContext = .none
     ) -> [MediaItemAction] {
         var actions: [MediaItemAction] = []
@@ -56,6 +65,13 @@ public enum MediaItemActionCatalog {
             }
         }
 
+        // Watchlist action: a single toggle whose direction follows the item's
+        // current favourite/watchlist state. Offered for the same content kinds
+        // that carry a watched state (movies, episodes, series, …) — not folders.
+        if supportsWatchlist, isWatchlistEligible(item) {
+            actions.append(item.isFavorite ? .removeFromWatchlist : .addToWatchlist)
+        }
+
         // Navigation actions: independent of watched-state capability.
         if canGoToSeason(item, in: context) {
             actions.append(.goToSeason)
@@ -63,6 +79,12 @@ public enum MediaItemActionCatalog {
 
         if canGoToMovie(item, in: context) {
             actions.append(.goToMovie)
+        }
+
+        // Refresh Metadata: a server-side maintenance task, offered last for any
+        // refreshable content item when the provider supports it.
+        if supportsMetadataRefresh, isWatchStateEligible(item) {
+            actions.append(.refreshMetadata)
         }
 
         return actions
@@ -101,8 +123,25 @@ public enum MediaItemActionCatalog {
         }
     }
 
+    /// Whether `item` is a kind a user would reasonably save to a watchlist. We
+    /// scope this to whole titles — movies and series — rather than individual
+    /// episodes/seasons, matching how Plex's account watchlist and a typical
+    /// "save for later" mental model work.
+    private static func isWatchlistEligible(_ item: MediaItem) -> Bool {
+        switch item.kind {
+        case .movie, .series, .video: return true
+        case .episode, .season, .folder, .collection, .unknown: return false
+        }
+    }
+
     private static func hasUnwatchedUpToHere(_ item: MediaItem, in context: MediaItemActionContext) -> Bool {
         if !context.precedingContainerIDs.isEmpty { return true }
-        return !siblingsToMarkUpToHere(item, in: context.orderedSiblings).isEmpty
+        // Only meaningful when something *strictly before* the target is still
+        // unwatched. If the only unwatched item up to here is the target itself,
+        // "up to here" is redundant with plain "mark watched", so we hide it.
+        guard let index = context.orderedSiblings.firstIndex(where: { $0.id == item.id }) else {
+            return false
+        }
+        return context.orderedSiblings[..<index].contains { !$0.isPlayed }
     }
 }

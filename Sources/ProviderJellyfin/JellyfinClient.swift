@@ -300,8 +300,13 @@ public struct JellyfinClient: Sendable {
         case transcode
     }
 
-    func playbackInfo(userID: String, itemID: String, mode: PlaybackStreamMode = .auto) async throws -> PlaybackInfoResponse {
+    func playbackInfo(userID: String, itemID: String, mediaSourceID: String? = nil, mode: PlaybackStreamMode = .auto) async throws -> PlaybackInfoResponse {
         var queryItems = [URLQueryItem(name: "UserId", value: userID)]
+        // Target a specific version when one was chosen; otherwise the server
+        // returns every source and picks its default.
+        if let mediaSourceID {
+            queryItems.append(URLQueryItem(name: "MediaSourceId", value: mediaSourceID))
+        }
         switch mode {
         case .auto:
             // Let the server pick: DirectPlay > DirectStream > transcode.
@@ -358,6 +363,58 @@ public struct JellyfinClient: Sendable {
         let endpoint = Endpoint(
             method: played ? .post : .delete,
             path: "/Users/\(userID)/PlayedItems/\(itemID)",
+            headers: authHeaders
+        )
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
+    /// `POST`/`DELETE /Users/{userId}/FavoriteItems/{itemId}` — adds (POST) or
+    /// removes (DELETE) the item from the user's Favorites, which backs the
+    /// unified Watchlist.
+    func setFavorite(_ favorite: Bool, userID: String, itemID: String) async throws {
+        let endpoint = Endpoint(
+            method: favorite ? .post : .delete,
+            path: "/Users/\(userID)/FavoriteItems/\(itemID)",
+            headers: authHeaders
+        )
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
+    /// `GET /Users/{userId}/Items?Filters=IsFavorite` — the user's favourited
+    /// movies & series, newest first, for the Watchlist row. Requests the same
+    /// card-level fields as other rows so artwork resolves.
+    func favorites(userID: String, limit: Int = 60) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items",
+            queryItems: [
+                URLQueryItem(name: "Filters", value: "IsFavorite"),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
+                URLQueryItem(name: "SortBy", value: "DateCreated"),
+                URLQueryItem(name: "SortOrder", value: "Descending"),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio"),
+                URLQueryItem(name: "ImageTypeLimit", value: "1"),
+                URLQueryItem(name: "EnableTotalRecordCount", value: "false")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
+    /// `POST /Items/{itemId}/Refresh` — asks the server to re-scan metadata &
+    /// images for the item, replacing existing values so corrected data flows in.
+    /// The server queues the work and returns immediately.
+    func refreshMetadata(itemID: String) async throws {
+        let endpoint = Endpoint(
+            method: .post,
+            path: "/Items/\(itemID)/Refresh",
+            queryItems: [
+                URLQueryItem(name: "MetadataRefreshMode", value: "FullRefresh"),
+                URLQueryItem(name: "ImageRefreshMode", value: "FullRefresh"),
+                URLQueryItem(name: "ReplaceAllMetadata", value: "true"),
+                URLQueryItem(name: "ReplaceAllImages", value: "true")
+            ],
             headers: authHeaders
         )
         _ = try await http.send(endpoint, baseURL: baseURL)

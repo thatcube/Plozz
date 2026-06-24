@@ -35,6 +35,17 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     /// the movie's own detail page instead of playing it. A pure navigation
     /// action (no provider mutation) handled by the view layer's router.
     case goToMovie
+    /// Add this item to the user's Watchlist (Jellyfin Favorites / Plex
+    /// Watchlist). Offered only when the owning provider conforms to
+    /// `WatchlistProviding`.
+    case addToWatchlist
+    /// Remove this item from the user's Watchlist. Offered only when the item is
+    /// currently watchlisted and the provider conforms to `WatchlistProviding`.
+    case removeFromWatchlist
+    /// Ask the server to refresh this item's metadata/artwork. A background
+    /// server task; offered only when the provider conforms to
+    /// `MetadataRefreshing`.
+    case refreshMetadata
 
     public var id: String { rawValue }
 
@@ -46,6 +57,9 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .markWatchedUpToHere: return "Mark Watched Up to Here"
         case .goToSeason: return "Go to Season"
         case .goToMovie: return "Go to Movie"
+        case .addToWatchlist: return "Add to Watchlist"
+        case .removeFromWatchlist: return "Remove from Watchlist"
+        case .refreshMetadata: return "Refresh Metadata"
         }
     }
 
@@ -57,6 +71,9 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
         case .markWatchedUpToHere: return "checkmark.circle.fill"
         case .goToSeason: return "rectangle.stack"
         case .goToMovie: return "film"
+        case .addToWatchlist: return "bookmark"
+        case .removeFromWatchlist: return "bookmark.slash"
+        case .refreshMetadata: return "arrow.clockwise"
         }
     }
 
@@ -66,7 +83,8 @@ public enum MediaItemAction: String, CaseIterable, Sendable, Identifiable {
     public var isNavigation: Bool {
         switch self {
         case .goToSeason, .goToMovie: return true
-        case .markWatched, .markUnwatched, .markWatchedUpToHere: return false
+        case .markWatched, .markUnwatched, .markWatchedUpToHere,
+             .addToWatchlist, .removeFromWatchlist, .refreshMetadata: return false
         }
     }
 

@@ -13,11 +13,13 @@ public final class HomeViewModel {
     public struct Content: Equatable, Sendable {
         public var continueWatching: [MediaItem]
         public var latest: [MediaItem]
+        /// The unified Watchlist row, merged across `WatchlistProviding` accounts.
+        public var watchlist: [MediaItem]
         /// Every discovered library (unfiltered), tagged with its owning account.
         public var libraries: [AggregatedLibrary]
 
         public var isEmpty: Bool {
-            continueWatching.isEmpty && latest.isEmpty && libraries.isEmpty
+            continueWatching.isEmpty && latest.isEmpty && watchlist.isEmpty && libraries.isEmpty
         }
     }
 
@@ -44,6 +46,7 @@ public final class HomeViewModel {
         let content = Content(
             continueWatching: merged.continueWatching,
             latest: merged.latest,
+            watchlist: merged.watchlist,
             libraries: merged.libraries
         )
         state = content.isEmpty ? .empty : .loaded(content)
@@ -56,21 +59,51 @@ public final class HomeViewModel {
         )
     }
 
-    /// Applies a watched-state mutation to the loaded rows **in place** so the
-    /// affected cards just flip their watched badge. Items are kept in their rows
-    /// (rather than refetched/removed) so the user's focus is preserved exactly
-    /// where it was when they invoked the menu.
+    /// Applies a watched-state or watchlist mutation to the loaded rows **in
+    /// place** so the affected cards just flip their badge. Items are kept in
+    /// their rows (rather than refetched/removed) so the user's focus is
+    /// preserved exactly where it was when they invoked the menu. A watchlist
+    /// add/remove also inserts/removes the title from the Watchlist row.
     public func applyWatchedState(_ mutation: MediaItemMutation) {
         guard case var .loaded(content) = state else { return }
         content.continueWatching = content.continueWatching.map { apply(mutation, to: $0) }
         content.latest = content.latest.map { apply(mutation, to: $0) }
+        content.watchlist = updatedWatchlist(content.watchlist, mutation: mutation, in: content)
         state = .loaded(content)
+    }
+
+    /// Reconciles the Watchlist row with a favorite mutation: removes titles that
+    /// were un-favorited, and surfaces newly-favorited titles already present in
+    /// another loaded row (so the row updates without a full reload). Non-favorite
+    /// mutations only refresh the favorite flag on existing cards.
+    private func updatedWatchlist(
+        _ watchlist: [MediaItem],
+        mutation: MediaItemMutation,
+        in content: Content
+    ) -> [MediaItem] {
+        var updated = watchlist.map { apply(mutation, to: $0) }
+        guard let favorite = mutation.favorite else { return updated }
+        if favorite {
+            let present = Set(updated.map(\.id))
+            let candidates = (content.continueWatching + content.latest)
+                .filter { mutation.itemIDs.contains($0.id) && !present.contains($0.id) }
+            var seen = present
+            for candidate in candidates where seen.insert(candidate.id).inserted {
+                var copy = candidate
+                copy.isFavorite = true
+                updated.insert(copy, at: 0)
+            }
+        } else {
+            updated.removeAll { mutation.itemIDs.contains($0.id) }
+        }
+        return updated
     }
 
     private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {
         guard mutation.itemIDs.contains(item.id) else { return item }
         var copy = item
-        copy.isPlayed = mutation.played
+        if let played = mutation.played { copy.isPlayed = played }
+        if let favorite = mutation.favorite { copy.isFavorite = favorite }
         return copy
     }
 }

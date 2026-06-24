@@ -62,10 +62,22 @@ public struct HomeAggregator: Sendable {
             return accounts.indices.map { byIndex[$0] ?? AccountContent() }
         }
 
+        // Collapse the same title living on several servers into one card on the
+        // aggregated rows, sharing the exact identity/merge core Search uses. Each
+        // merged card keeps every server's own item id / versions / watch-state
+        // (in `sources`) and surfaces a unified, most-recent-wins watch-state, so
+        // progress made on any server shows here regardless of which one backs the
+        // card. Per-library browse stays single-source (see the brief's carve-out).
+        let serverInfo = accounts.sourceServerInfo()
+        let resolve: (String) -> SourceServerInfo? = { serverInfo[$0] }
+
         return Content(
-            continueWatching: Self.interleave(perAccount.map(\.continueWatching)),
-            latest: Self.interleave(perAccount.map(\.latest)),
-            watchlist: Self.interleave(perAccount.map(\.watchlist)),
+            continueWatching: MediaItemMerger.merge(
+                Self.interleave(perAccount.map(\.continueWatching)), serverInfo: resolve),
+            latest: MediaItemMerger.merge(
+                Self.interleave(perAccount.map(\.latest)), serverInfo: resolve),
+            watchlist: MediaItemMerger.merge(
+                Self.interleave(perAccount.map(\.watchlist)), serverInfo: resolve),
             libraries: perAccount.flatMap(\.libraries)
         )
     }

@@ -82,14 +82,20 @@ final class JellyfinVersionsWatchlistRefreshTests: XCTestCase {
     func testWatchlistFetchesFavoriteItems() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items", json: """
-        {"Items":[{"Id":"f1","Name":"Saved Movie","Type":"Movie"}],"TotalRecordCount":1}
+        {"Items":[{"Id":"f1","Name":"Saved Movie","Type":"Movie","ProviderIds":{"Tmdb":"11"}}],"TotalRecordCount":1}
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
 
         let saved = try await provider.watchlist()
         XCTAssertEqual(saved.map(\.title), ["Saved Movie"])
+        XCTAssertEqual(saved.first?.providerIDs["Tmdb"], "11")
         let query = stub.queryItems(forPathSuffix: "/Users/u1/Items")
         XCTAssertEqual(query?.first { $0.name == "Filters" }?.value, "IsFavorite")
+        let fields = query?.first { $0.name == "Fields" }?.value ?? ""
+        XCTAssertTrue(
+            fields.split(separator: ",").contains(where: { $0.lowercased() == "providerids" }),
+            "Favorites requests must include ProviderIds so Home watchlist de-dup can match across servers"
+        )
     }
 
     // MARK: - Feature C: metadata refresh

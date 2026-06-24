@@ -320,6 +320,26 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.runtime, 7200)
         XCTAssertEqual(item.resumePosition, 1800)
         XCTAssertEqual(item.playedPercentage ?? 0, 0.25, accuracy: 0.001)
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/library/onDeck"))
+        XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
+    }
+
+    func testLatestRequestsIncludeGuidsForHomeDedup() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/recentlyAdded", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"r1","type":"movie","title":"Dune","Guid":[{"id":"imdb://tt1160419"}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let latest = try await provider.latest(limit: 10)
+        XCTAssertEqual(latest.map(\.id), ["r1"])
+        XCTAssertEqual(latest.first?.providerIDs["Imdb"], "tt1160419")
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/library/recentlyAdded"))
+        XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
     }
 
     func testEpisodeMapsSeriesTitleAndNumbers() async throws {
@@ -414,6 +434,7 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "X-Plex-Container-Start" })?.value, "60")
         XCTAssertEqual(query.first(where: { $0.name == "X-Plex-Container-Size" })?.value, "60")
         XCTAssertEqual(query.first(where: { $0.name == "type" })?.value, "1")
+        XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
     }
 
     func testSeriesLibraryUsesShowType() async throws {
@@ -424,6 +445,29 @@ final class PlexProviderMappingTests: XCTestCase {
         _ = try await provider.items(in: "2", kind: .series, page: PageRequest())
         let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/library/sections/2/all"))
         XCTAssertEqual(query.first(where: { $0.name == "type" })?.value, "2")
+        XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
+    }
+
+    func testSearchIncludesGuidsAndMapsProviderIDs() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/search", json: """
+        {"MediaContainer":{"size":2,"Metadata":[
+          {"ratingKey":"m1","type":"movie","title":"Dune","Guid":[{"id":"imdb://tt1160419"}]},
+          {"ratingKey":"s1","type":"show","title":"Dune: Prophecy","Guid":[{"id":"tmdb://225634"}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let results = try await provider.search(query: " dune ", limit: 25)
+
+        XCTAssertEqual(results.map(\.id), ["m1", "s1"])
+        XCTAssertEqual(results.map(\.kind), [.movie, .series])
+        XCTAssertEqual(results[0].providerIDs["Imdb"], "tt1160419")
+        XCTAssertEqual(results[1].providerIDs["Tmdb"], "225634")
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/search"))
+        XCTAssertEqual(query.first(where: { $0.name == "query" })?.value, "dune")
+        XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
     }
 
     func testChildrenMapSeasons() async throws {

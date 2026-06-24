@@ -51,6 +51,9 @@ struct UserViewsResponse: Decodable {
 struct BaseItemDto: Decodable {
     let Id: String
     let Name: String?
+    /// The original-language title (Jellyfin's `OriginalTitle`), present when it
+    /// differs from the localised `Name`. Requested via `Fields=OriginalTitle`.
+    let OriginalTitle: String?
     let `Type`: String?
     let CollectionType: String?
     let Overview: String?

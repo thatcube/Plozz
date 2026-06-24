@@ -365,6 +365,7 @@ public struct PlexProvider: MediaProvider {
         return MediaItem(
             id: dto.ratingKey ?? "",
             title: dto.title ?? "Untitled",
+            originalTitle: dto.originalTitle,
             kind: kind,
             overview: dto.summary,
             parentTitle: parentTitle,

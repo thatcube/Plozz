@@ -521,6 +521,7 @@ public struct JellyfinProvider: MediaProvider {
         MediaItem(
             id: dto.Id,
             title: dto.Name ?? "Untitled",
+            originalTitle: dto.OriginalTitle,
             kind: Self.kind(forItemType: dto.`Type`),
             overview: dto.Overview,
             parentTitle: dto.SeriesName ?? dto.SeasonName,

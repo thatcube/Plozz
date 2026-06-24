@@ -16,31 +16,51 @@ import Foundation
 /// id (IMDb/TMDb/TVDb).
 ///
 /// The recall fix that makes "differing titles" work is ``searchQueries(for:)``:
-/// in addition to the raw title we also search with the normalized title, so the
-/// candidate is actually *returned* by the other server's search and can reach the
-/// provider-ID merge. Precision is unchanged — the merge only folds in hits that
-/// genuinely share the primary's identity, so widening the query never attaches an
+/// in addition to the raw display title we also search with the item's
+/// **original-language title** and the normalized forms of both, so a copy that
+/// the other server stores under a *different* name (most importantly a foreign
+/// film whose display title is localised on one server and original on the other)
+/// is actually *returned* by that server's search and can reach the provider-ID
+/// merge. Precision is unchanged — the merge only folds in hits that genuinely
+/// share the primary's identity, so widening the query never attaches an
 /// unrelated title to the picker.
 public enum CrossServerSourceResolver {
     /// The search queries to issue against each other server when hunting for
     /// copies of `item`, most specific first.
     ///
-    /// 1. the raw, trimmed title (what most servers index verbatim);
-    /// 2. the normalized title (``MediaItemIdentity/normalizedTitle(_:)`` —
+    /// 1. the raw, trimmed display title (what most servers index verbatim);
+    /// 2. the raw, trimmed **original-language title** (``MediaItem/originalTitle``)
+    ///    when present and distinct — the decisive lever for a title named
+    ///    differently on each server (e.g. a film stored as the Spanish
+    ///    "Turbulencia en la oficina" on one server and under its English original
+    ///    on another): the foreign server's display title usually *equals* the
+    ///    original title, so this query is what actually returns the twin;
+    /// 3. the normalized display title (``MediaItemIdentity/normalizedTitle(_:)`` —
     ///    accent-folded, punctuation-stripped, lower-cased) when it differs, to
     ///    catch servers that store the title with extra annotations / different
-    ///    punctuation / accents.
+    ///    punctuation / accents;
+    /// 4. the normalized original title, likewise, when it adds anything.
     ///
-    /// Empty when the item has no usable title.
+    /// Order is "most specific first" and every entry is de-duplicated
+    /// case-insensitively so the raw/normalized/original passes never repeat a
+    /// query. Empty when the item has no usable title.
     public static func searchQueries(for item: MediaItem) -> [String] {
         let raw = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return [] }
 
-        var queries = [raw]
-        let normalized = MediaItemIdentity.normalizedTitle(raw)
-        if !normalized.isEmpty,
-           normalized.caseInsensitiveCompare(raw) != .orderedSame {
-            queries.append(normalized)
+        var queries: [String] = []
+        func add(_ candidate: String) {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            guard !queries.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
+            queries.append(trimmed)
+        }
+
+        add(raw)
+        if let original = item.originalTitle { add(original) }
+        add(MediaItemIdentity.normalizedTitle(raw))
+        if let original = item.originalTitle {
+            add(MediaItemIdentity.normalizedTitle(original))
         }
         return queries
     }

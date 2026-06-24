@@ -556,6 +556,25 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
     }
 
+    func testSearchMapsOriginalTitle() async throws {
+        // Plex stores the foreign film under its English title with the original
+        // recorded in `originalTitle`; the mapping must surface it for cross-server
+        // discovery queries.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/search", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"m1","type":"movie","title":"Office Turbulence","originalTitle":"Turbulencia en la oficina","Guid":[{"id":"tmdb://55555"}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let results = try await provider.search(query: "office turbulence", limit: 25)
+
+        XCTAssertEqual(results.first?.title, "Office Turbulence")
+        XCTAssertEqual(results.first?.originalTitle, "Turbulencia en la oficina",
+                       "Plex originalTitle must map to MediaItem.originalTitle")
+    }
+
     func testChildrenMapSeasons() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/9/children", json: """

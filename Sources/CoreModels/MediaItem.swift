@@ -55,6 +55,12 @@ public struct MediaPerson: Codable, Hashable, Identifiable, Sendable {
 public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public var id: String
     public var title: String
+    /// The title in the work's original/production language, when the server
+    /// records one distinct from the (often localised) display `title`. Foreign
+    /// films routinely carry e.g. a Spanish display title with the original
+    /// English title here. Used as an extra cross-server discovery query so a
+    /// title named differently on each server is still found and matched by id.
+    public var originalTitle: String?
     public var kind: MediaItemKind
     public var overview: String?
 
@@ -222,6 +228,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     public init(
         id: String,
         title: String,
+        originalTitle: String? = nil,
         kind: MediaItemKind,
         overview: String? = nil,
         parentTitle: String? = nil,
@@ -260,6 +267,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     ) {
         self.id = id
         self.title = title
+        self.originalTitle = originalTitle
         self.kind = kind
         self.overview = overview
         self.parentTitle = parentTitle
@@ -303,6 +311,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// in sync with the custom `init(from:)` below.
     private enum CodingKeys: String, CodingKey {
         case id, title, kind, overview, parentTitle, seasonNumber, episodeNumber
+        case originalTitle
         case productionYear, officialRating, genres, people, studios, tags, taglines
         case seriesID, seasonID, runtime, resumePosition, playedPercentage, isPlayed
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
@@ -318,6 +327,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
+        originalTitle = try container.decodeIfPresent(String.self, forKey: .originalTitle)
         kind = try container.decode(MediaItemKind.self, forKey: .kind)
         overview = try container.decodeIfPresent(String.self, forKey: .overview)
         parentTitle = try container.decodeIfPresent(String.self, forKey: .parentTitle)

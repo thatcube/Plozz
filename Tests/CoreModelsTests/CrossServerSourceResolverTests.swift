@@ -47,6 +47,34 @@ final class CrossServerSourceResolverTests: XCTestCase {
         XCTAssertTrue(CrossServerSourceResolver.searchQueries(for: item).isEmpty)
     }
 
+    func testSearchQueriesIncludesOriginalTitle() {
+        // The foreign-film case: Jellyfin shows the Spanish title, but records the
+        // English original. The original must be one of the queries (most-specific
+        // first, after the raw display title) so the English-titled copy on another
+        // server is actually returned by search.
+        let item = MediaItem(
+            id: "x", title: "Turbulencia en la oficina",
+            originalTitle: "Office Turbulence", kind: .movie, productionYear: 2018
+        )
+        XCTAssertEqual(
+            CrossServerSourceResolver.searchQueries(for: item),
+            ["Turbulencia en la oficina", "Office Turbulence"],
+            "Raw display title plus the original title; case-only normalized variants are deduped away (servers search case-insensitively)"
+        )
+    }
+
+    func testSearchQueriesDeduplicatesOriginalEqualToTitle() {
+        // When originalTitle matches the display title there's nothing extra to add.
+        let item = MediaItem(
+            id: "x", title: "Dune", originalTitle: "Dune", kind: .movie, productionYear: 2021
+        )
+        XCTAssertEqual(
+            CrossServerSourceResolver.searchQueries(for: item),
+            ["Dune"],
+            "An original title equal to the display title must not add duplicate queries"
+        )
+    }
+
     // MARK: resolve — differing titles, matched by provider IDs
 
     func testResolvesDifferentlyTitledMovieAcrossServersByProviderID() async {
@@ -128,6 +156,43 @@ final class CrossServerSourceResolverTests: XCTestCase {
             sources.count <= 1,
             "A same-name title with a different external id must never be folded into the picker"
         )
+    }
+
+    // MARK: resolve — foreign film discovered via original title
+
+    func testResolvesForeignTitledMovieViaOriginalTitle() async {
+        // Problem B's real case: the user opens the Jellyfin movie shown as the
+        // Spanish "Turbulencia en la oficina"; Plex stores the same film under its
+        // English title. No display-title search would ever cross the language gap —
+        // only the *original title* query ("Office Turbulence") returns the Plex
+        // copy, which then matches the primary by TMDb id and yields the picker.
+        let primary = MediaItem(
+            id: "jf-turb", title: "Turbulencia en la oficina",
+            originalTitle: "Office Turbulence", kind: .movie, productionYear: 2018,
+            providerIDs: ["Tmdb": "55555"], sourceAccountID: jellyAccount
+        )
+        let plexCopy = MediaItem(
+            id: "plex-turb", title: "Office Turbulence", kind: .movie, productionYear: 2018,
+            providerIDs: ["Tmdb": "55555"]
+        )
+
+        let sources = await CrossServerSourceResolver.resolve(
+            primary: primary,
+            otherAccountIDs: [plexAccount],
+            search: { accountID, query in
+                guard accountID == self.plexAccount else { return [] }
+                // Plex only knows the English title — reachable solely by the
+                // original-title query (raw or normalized form).
+                return query.caseInsensitiveCompare("Office Turbulence") == .orderedSame
+                    ? [plexCopy] : []
+            },
+            serverInfo: serverInfo
+        )
+
+        XCTAssertEqual(sources.count, 2, "Foreign-titled same-TMDb movie must expose a 2-server picker via its original title")
+        XCTAssertEqual(Set(sources.map(\.accountID)), [jellyAccount, plexAccount])
+        XCTAssertEqual(sources.first?.accountID, jellyAccount, "Primary (opened) server leads the picker")
+        XCTAssertEqual(sources.map(\.itemID).sorted(), ["jf-turb", "plex-turb"])
     }
 
     func testReturnsEmptyWhenNoOtherServerHasIt() async {

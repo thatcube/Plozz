@@ -293,6 +293,32 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "ImageTypeLimit" })?.value, "1")
     }
 
+    func testSearchMapsOriginalTitleAndRequestsItInFields() async throws {
+        // Problem B: a foreign film whose display Name is localised but whose
+        // OriginalTitle is the other server's title. The mapping must carry
+        // OriginalTitle, and the search request must ask for it.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[
+          {"Id":"m1","Name":"Turbulencia en la oficina","OriginalTitle":"Office Turbulence","Type":"Movie","ProviderIds":{"Tmdb":"55555"}}
+        ]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let results = try await provider.search(query: "office turbulence", limit: 25)
+
+        XCTAssertEqual(results.first?.title, "Turbulencia en la oficina")
+        XCTAssertEqual(results.first?.originalTitle, "Office Turbulence",
+                       "Jellyfin OriginalTitle must map to MediaItem.originalTitle")
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        let fields = query.first(where: { $0.name == "Fields" })?.value ?? ""
+        XCTAssertTrue(
+            fields.split(separator: ",").contains(where: { $0.lowercased() == "originaltitle" }),
+            "Search requests must include OriginalTitle so cross-server discovery can query by it"
+        )
+    }
+
     func testSearchWithBlankQuerySkipsNetwork() async throws {
         let stub = StubHTTPClient()
         let provider = JellyfinProvider(session: makeSession(), http: stub)

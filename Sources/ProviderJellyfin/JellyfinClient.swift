@@ -144,7 +144,7 @@ public struct JellyfinClient: Sendable {
             queryItems: [
                 URLQueryItem(name: "Limit", value: String(limit)),
                 URLQueryItem(name: "MediaTypes", value: "Video"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,ProviderIds")
+                URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,PrimaryImageAspectRatio,ProviderIds")
             ],
             headers: authHeaders
         )
@@ -156,7 +156,7 @@ public struct JellyfinClient: Sendable {
             path: "/Users/\(userID)/Items/Latest",
             queryItems: [
                 URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: "Overview,ProviderIds")
+                URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,ProviderIds")
             ],
             headers: authHeaders
         )
@@ -168,7 +168,7 @@ public struct JellyfinClient: Sendable {
     func item(userID: String, id: String) async throws -> BaseItemDto {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/\(id)",
-            queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,ProviderIds,Trickplay,Genres,People,Studios,Tags,Taglines")],
+            queryItems: [URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,MediaStreams,MediaSources,ProviderIds,Trickplay,Genres,People,Studios,Tags,Taglines")],
             headers: authHeaders
         )
         DLog.mark("JFclient.item PRE-decode id=\(id)")
@@ -297,7 +297,7 @@ public struct JellyfinClient: Sendable {
                 URLQueryItem(name: "Recursive", value: "true"),
                 URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")),
                 URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: "Overview,ProviderIds"),
+                URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,ProviderIds"),
                 URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
                 URLQueryItem(name: "ImageTypeLimit", value: "1")
             ],

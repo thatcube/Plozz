@@ -50,6 +50,9 @@ struct PlexMetadata: Decodable {
     /// For extras/clips, the kind of extra, e.g. "trailer", "behindTheScenes".
     let subtype: String?
     let title: String?
+    /// Original-language title (`originalTitle`), present when distinct from the
+    /// localised `title`. Used as an extra cross-server discovery query.
+    let originalTitle: String?
     let parentTitle: String?
     let grandparentTitle: String?
     /// For an episode, the ratingKey of its season (parent) and series

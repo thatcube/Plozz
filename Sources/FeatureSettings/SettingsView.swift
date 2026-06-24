@@ -230,11 +230,13 @@ public struct SettingsView: View {
     @ViewBuilder
     private var profileOwnedRows: some View {
         VStack(spacing: 0) {
-            // Show the Plex Home user row whenever at least one Plex account
-            // is signed in. Tapping it opens the picker, which lists every
-            // signed-in Plex account's Home users with their Plex avatars.
-            if let plexAccountID = primaryPlexAccountID {
-                plexLinkedUserRow(accountID: plexAccountID)
+            // One "Plex User" row per signed-in Plex account. Each row shows
+            // the Home user currently bound to THAT account for the active
+            // profile, with its Plex avatar, and drills into a picker scoped
+            // to that one account.
+            let plexAccts = plexAccountsForRows
+            ForEach(Array(plexAccts.enumerated()), id: \.element.id) { _, account in
+                plexLinkedUserRow(account: account, multiple: plexAccts.count > 1)
                 Divider()
             }
             navRow("Server Accounts", icon: "person.2.crop.square.stack",
@@ -381,22 +383,23 @@ public struct SettingsView: View {
         .padding(28)
     }
 
-    // MARK: - Plex linked user row (prominent, with Plex avatar)
+    // MARK: - Plex linked user row (one per signed-in Plex account)
 
-    /// First signed-in Plex account, used as the row's default account.
-    /// (The picker itself groups every Plex account when there are multiple.)
-    private var primaryPlexAccountID: String? {
-        accounts.first { $0.server.provider == .plex }?.id
+    /// All distinct signed-in Plex accounts. Each gets its own row so the
+    /// active profile's Home-user choice can differ per Plex sign-in.
+    private var plexAccountsForRows: [Account] {
+        accounts.filter { $0.server.provider == .plex }
     }
 
-    private func plexLinkedUserRow(accountID: String) -> some View {
-        NavigationLink(value: SettingsRoute.plexUser(accountID: accountID)) {
+    private func plexLinkedUserRow(account: Account, multiple: Bool) -> some View {
+        let binding = activeProfile.homeUserBinding(forPlexAccount: account.id)
+        return NavigationLink(value: SettingsRoute.plexUser(accountID: account.id)) {
             HStack(spacing: 16) {
-                plexAvatar(size: 56)
+                plexAvatar(for: binding, size: 56)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Plex User")
+                    Text(multiple ? "Plex User on \(account.server.name)" : "Plex User")
                         .font(.headline)
-                    Text(plexLinkedUserSubtitle)
+                    Text(plexLinkedUserSubtitle(for: binding))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -412,11 +415,10 @@ public struct SettingsView: View {
         .buttonStyle(.plain)
     }
 
-    /// Big circular Plex avatar — uses the cached `plexHomeUserAvatarURL` so
+    /// Big circular Plex avatar — uses this binding's cached `avatarURL` so
     /// the row shows the real Plex profile photo, not just text + an icon.
-    private func plexAvatar(size: CGFloat) -> some View {
-        let urlString = activeProfile.plexHomeUserAvatarURL
-        let url = urlString.flatMap(URL.init(string:))
+    private func plexAvatar(for binding: PlexHomeUserBinding?, size: CGFloat) -> some View {
+        let url = binding?.avatarURL.flatMap(URL.init(string:))
         return ZStack {
             Circle()
                 .fill(ProviderIcon.tint(.plex).opacity(0.18))
@@ -438,13 +440,11 @@ public struct SettingsView: View {
         .overlay(Circle().strokeBorder(ProviderIcon.tint(.plex).opacity(0.45), lineWidth: 1.5))
     }
 
-    private var plexLinkedUserSubtitle: String {
-        if let name = activeProfile.plexHomeUserName, !name.isEmpty {
-            return activeProfile.plexHomeUserRequiresPIN == true
-                ? "\(name) • PIN required"
-                : name
+    private func plexLinkedUserSubtitle(for binding: PlexHomeUserBinding?) -> String {
+        guard let binding, !binding.name.isEmpty else {
+            return "Tap to pick your Plex Home user"
         }
-        return "Tap to pick your Plex Home user"
+        return binding.requiresPIN == true ? "\(binding.name) • PIN required" : binding.name
     }
 
     // MARK: - Enable profiles row (single-profile household)

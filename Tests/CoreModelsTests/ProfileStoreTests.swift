@@ -300,6 +300,79 @@ final class ProfilesModelTests: XCTestCase {
         XCTAssertNil(profile.plexHomeUserName)
         XCTAssertNil(profile.plexHomeUserAccountID)
         XCTAssertNil(profile.plexHomeUserRequiresPIN)
+        XCTAssertNil(profile.plexHomeUserBindings)
+    }
+
+    // MARK: Per-account Plex Home-user bindings
+
+    func testHomeUserBindingFallsBackToLegacyFields() {
+        // A profile encoded before per-account bindings shipped exposes its
+        // single legacy mapping through the new helper.
+        let profile = Profile(
+            name: "Me",
+            plexHomeUserID: "kid-uuid",
+            plexHomeUserName: "Kiddo",
+            plexHomeUserAccountID: "acct-1",
+            plexHomeUserRequiresPIN: true,
+            plexHomeUserAvatarURL: "https://plex.tv/u/k.png"
+        )
+        let binding = profile.homeUserBinding(forPlexAccount: "acct-1")
+        XCTAssertEqual(binding?.homeUserID, "kid-uuid")
+        XCTAssertEqual(binding?.name, "Kiddo")
+        XCTAssertEqual(binding?.requiresPIN, true)
+        XCTAssertEqual(binding?.avatarURL, "https://plex.tv/u/k.png")
+        // A different Plex account on the same profile must NOT inherit it.
+        XCTAssertNil(profile.homeUserBinding(forPlexAccount: "acct-2"))
+    }
+
+    func testSettingBindingsForTwoPlexAccountsKeepsBothDistinct() {
+        var profile = Profile(name: "Me")
+        let a = PlexHomeUserBinding(homeUserID: "uid-a", name: "A", requiresPIN: false)
+        let b = PlexHomeUserBinding(homeUserID: "uid-b", name: "B", requiresPIN: true)
+        profile = profile.settingHomeUserBinding(a, forPlexAccount: "acct-A")
+        profile = profile.settingHomeUserBinding(b, forPlexAccount: "acct-B")
+        XCTAssertEqual(profile.plexHomeUserBindings?.count, 2)
+        XCTAssertEqual(profile.homeUserBinding(forPlexAccount: "acct-A")?.homeUserID, "uid-a")
+        XCTAssertEqual(profile.homeUserBinding(forPlexAccount: "acct-B")?.homeUserID, "uid-b")
+        // Round-trip through Codable.
+        let data = try! JSONEncoder().encode(profile)
+        let decoded = try! JSONDecoder().decode(Profile.self, from: data)
+        XCTAssertEqual(decoded.homeUserBinding(forPlexAccount: "acct-A")?.homeUserID, "uid-a")
+        XCTAssertEqual(decoded.homeUserBinding(forPlexAccount: "acct-B")?.homeUserID, "uid-b")
+    }
+
+    func testClearingOneBindingKeepsOthers() {
+        var profile = Profile(name: "Me")
+        profile = profile.settingHomeUserBinding(
+            PlexHomeUserBinding(homeUserID: "uid-a", name: "A"),
+            forPlexAccount: "acct-A"
+        )
+        profile = profile.settingHomeUserBinding(
+            PlexHomeUserBinding(homeUserID: "uid-b", name: "B"),
+            forPlexAccount: "acct-B"
+        )
+        profile = profile.settingHomeUserBinding(nil, forPlexAccount: "acct-A")
+        XCTAssertNil(profile.homeUserBinding(forPlexAccount: "acct-A"))
+        XCTAssertEqual(profile.homeUserBinding(forPlexAccount: "acct-B")?.homeUserID, "uid-b")
+    }
+
+    func testSettingBindingMigratesLegacySingleMapping() {
+        // Profile starts with only the legacy fields set (as if loaded from
+        // an older persisted blob); adding a binding for a NEW account must
+        // preserve the legacy account's mapping in the new dict.
+        var profile = Profile(
+            name: "Me",
+            plexHomeUserID: "legacy-uid",
+            plexHomeUserName: "Legacy",
+            plexHomeUserAccountID: "acct-legacy",
+            plexHomeUserRequiresPIN: false
+        )
+        profile = profile.settingHomeUserBinding(
+            PlexHomeUserBinding(homeUserID: "new-uid", name: "New"),
+            forPlexAccount: "acct-new"
+        )
+        XCTAssertEqual(profile.homeUserBinding(forPlexAccount: "acct-legacy")?.homeUserID, "legacy-uid")
+        XCTAssertEqual(profile.homeUserBinding(forPlexAccount: "acct-new")?.homeUserID, "new-uid")
     }
 }
 

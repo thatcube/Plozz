@@ -49,6 +49,18 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     /// the Plex avatar inline without re-hitting the network on every render.
     public var plexHomeUserAvatarURL: String?
 
+    /// Per–Plex-account Home-user mappings. Keyed by the Plex `Account.id`,
+    /// so a profile with TWO distinct Plex sign-ins can have a different
+    /// Home user on each.
+    ///
+    /// Optional + lazily migrated: pre-existing profiles encoded before this
+    /// field existed will decode with `nil` here, and the
+    /// `homeUserBinding(forPlexAccount:)` helper falls back to the legacy
+    /// single-mapping fields above. When a new selection is written we update
+    /// this dict (authoritative) AND mirror the just-written entry to the
+    /// legacy fields so older readers stay coherent.
+    public var plexHomeUserBindings: [String: PlexHomeUserBinding]?
+
     public init(
         id: String = UUID().uuidString,
         name: String,
@@ -60,7 +72,8 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         plexHomeUserName: String? = nil,
         plexHomeUserAccountID: String? = nil,
         plexHomeUserRequiresPIN: Bool? = nil,
-        plexHomeUserAvatarURL: String? = nil
+        plexHomeUserAvatarURL: String? = nil,
+        plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil
     ) {
         self.id = id
         self.name = name
@@ -73,6 +86,7 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.plexHomeUserAccountID = plexHomeUserAccountID
         self.plexHomeUserRequiresPIN = plexHomeUserRequiresPIN
         self.plexHomeUserAvatarURL = plexHomeUserAvatarURL
+        self.plexHomeUserBindings = plexHomeUserBindings
     }
 
     /// Stable namespace used to scope this profile's settings stores. The
@@ -115,5 +129,98 @@ extension Profile: CustomStringConvertible {
     /// Profiles carry no secret; keep logging terse and stable.
     public var description: String {
         "Profile(id: \(id), name: \(name))"
+    }
+}
+
+/// One profile's Plex Home-user selection for ONE Plex account. A profile
+/// can hold several of these (keyed by `Account.id`) so each distinct
+/// `plex.tv` sign-in plays as the right Home user.
+public struct PlexHomeUserBinding: Codable, Hashable, Sendable {
+    public var homeUserID: String
+    public var name: String
+    public var avatarURL: String?
+    public var requiresPIN: Bool?
+
+    public init(homeUserID: String, name: String, avatarURL: String? = nil, requiresPIN: Bool? = nil) {
+        self.homeUserID = homeUserID
+        self.name = name
+        self.avatarURL = avatarURL
+        self.requiresPIN = requiresPIN
+    }
+}
+
+extension Profile {
+    /// Returns this profile's Plex Home-user binding for `accountID`, falling
+    /// back to the legacy single-mapping fields (`plexHomeUserID` et al.)
+    /// when no per-account dict exists yet. This is the **upgrade path**:
+    /// profiles encoded before the per-account map shipped continue to work
+    /// transparently.
+    public func homeUserBinding(forPlexAccount accountID: String) -> PlexHomeUserBinding? {
+        if let dict = plexHomeUserBindings, let entry = dict[accountID] {
+            return entry
+        }
+        // Legacy single-mapping fallback: only honor it when it actually
+        // targets this account.
+        guard plexHomeUserAccountID == accountID,
+              let id = plexHomeUserID else { return nil }
+        return PlexHomeUserBinding(
+            homeUserID: id,
+            name: plexHomeUserName ?? "",
+            avatarURL: plexHomeUserAvatarURL,
+            requiresPIN: plexHomeUserRequiresPIN
+        )
+    }
+
+    /// Writes (or clears) the Plex Home-user binding for `accountID`. Returns
+    /// the updated profile. Authoritative storage is the dict; the legacy
+    /// single-mapping fields are mirrored to the just-written entry so older
+    /// readers still see a coherent (most-recent) selection. Clearing the
+    /// last entry clears the legacy fields too.
+    public func settingHomeUserBinding(_ binding: PlexHomeUserBinding?, forPlexAccount accountID: String) -> Profile {
+        var copy = self
+        var dict = copy.plexHomeUserBindings ?? [:]
+        // Seed dict from legacy fields on first migration so we don't lose
+        // an existing single mapping when we add a NEW per-account entry.
+        if copy.plexHomeUserBindings == nil,
+           let legacyID = copy.plexHomeUserID,
+           let legacyAcct = copy.plexHomeUserAccountID,
+           dict[legacyAcct] == nil {
+            dict[legacyAcct] = PlexHomeUserBinding(
+                homeUserID: legacyID,
+                name: copy.plexHomeUserName ?? "",
+                avatarURL: copy.plexHomeUserAvatarURL,
+                requiresPIN: copy.plexHomeUserRequiresPIN
+            )
+        }
+        if let binding {
+            dict[accountID] = binding
+            copy.plexHomeUserID = binding.homeUserID
+            copy.plexHomeUserName = binding.name
+            copy.plexHomeUserAccountID = accountID
+            copy.plexHomeUserRequiresPIN = binding.requiresPIN
+            copy.plexHomeUserAvatarURL = binding.avatarURL
+        } else {
+            dict.removeValue(forKey: accountID)
+            if copy.plexHomeUserAccountID == accountID {
+                copy.plexHomeUserID = nil
+                copy.plexHomeUserName = nil
+                copy.plexHomeUserAccountID = nil
+                copy.plexHomeUserRequiresPIN = nil
+                copy.plexHomeUserAvatarURL = nil
+            }
+            // If another binding still exists, surface one of them in the
+            // legacy fields so an older build/codepath that only reads them
+            // sees *something* sane (deterministic — the lex-first key).
+            if copy.plexHomeUserAccountID == nil,
+               let next = dict.sorted(by: { $0.key < $1.key }).first {
+                copy.plexHomeUserAccountID = next.key
+                copy.plexHomeUserID = next.value.homeUserID
+                copy.plexHomeUserName = next.value.name
+                copy.plexHomeUserAvatarURL = next.value.avatarURL
+                copy.plexHomeUserRequiresPIN = next.value.requiresPIN
+            }
+        }
+        copy.plexHomeUserBindings = dict.isEmpty ? nil : dict
+        return copy
     }
 }

@@ -325,21 +325,17 @@ public final class AppState {
     /// switch takes effect immediately (a protected user triggers the PIN
     /// prompt via `ensurePlexIdentityForActiveProfile`).
     public func setPlexHomeUserForActiveProfile(accountID: String, user: PlexHomeUser?) {
-        var profile = profilesModel.activeProfile
-        if let user {
-            profile.plexHomeUserID = user.id
-            profile.plexHomeUserName = user.name
-            profile.plexHomeUserAccountID = accountID
-            profile.plexHomeUserRequiresPIN = user.requiresPIN
-            profile.plexHomeUserAvatarURL = user.avatarURL?.absoluteString
-        } else {
-            profile.plexHomeUserID = nil
-            profile.plexHomeUserName = nil
-            profile.plexHomeUserAccountID = nil
-            profile.plexHomeUserRequiresPIN = nil
-            profile.plexHomeUserAvatarURL = nil
+        let profile = profilesModel.activeProfile
+        let binding: PlexHomeUserBinding? = user.map {
+            PlexHomeUserBinding(
+                homeUserID: $0.id,
+                name: $0.name,
+                avatarURL: $0.avatarURL?.absoluteString,
+                requiresPIN: $0.requiresPIN
+            )
         }
-        profilesModel.update(profile)
+        let updated = profile.settingHomeUserBinding(binding, forPlexAccount: accountID)
+        profilesModel.update(updated)
         ensurePlexIdentityForActiveProfile()
     }
 
@@ -369,33 +365,51 @@ public final class AppState {
         if pendingPlexPINRequest != nil { cancelPlexPIN() }
     }
 
-    /// Aligns the in-memory Plex identity with the active profile's linked Home
-    /// user: unprotected users switch silently; protected users raise a PIN
-    /// prompt; an unmapped profile drops any override (back to the admin user).
+    /// Aligns the in-memory Plex identity for **every** signed-in Plex account
+    /// with the active profile's per-account Home-user bindings:
+    /// - Unprotected bindings switch silently on each account.
+    /// - The first protected binding (in account order) raises a PIN prompt;
+    ///   subsequent ones are processed after the user submits or cancels.
+    /// - An account with no binding drops any existing override for that
+    ///   account (back to the admin user).
     private func ensurePlexIdentityForActiveProfile() {
         let profile = profilesModel.activeProfile
-        guard let homeUserID = profile.plexHomeUserID,
-              let accountID = profile.plexHomeUserAccountID,
-              accounts.contains(where: { $0.id == accountID }) else {
-            clearPlexOverrides()
-            return
-        }
-        pendingPlexPINRequest = nil
-        plexPINError = nil
-        if profile.plexHomeUserRequiresPIN == true {
-            // PIN is never cached — drop any stale override and re-prompt.
-            if plexTokenOverrides[accountID] != nil {
-                plexTokenOverrides[accountID] = nil
-                plexIdentityGeneration += 1
+        let plexAccounts = accounts.filter { $0.server.provider == .plex }
+
+        var pinTarget: (accountID: String, binding: PlexHomeUserBinding)?
+
+        for account in plexAccounts {
+            if let binding = profile.homeUserBinding(forPlexAccount: account.id) {
+                if binding.requiresPIN == true {
+                    if plexTokenOverrides[account.id] != nil {
+                        plexTokenOverrides[account.id] = nil
+                        plexIdentityGeneration += 1
+                    }
+                    if pinTarget == nil {
+                        pinTarget = (account.id, binding)
+                    }
+                } else {
+                    Task { await performPlexSwitch(accountID: account.id, homeUserID: binding.homeUserID, pin: nil) }
+                }
+            } else {
+                if plexTokenOverrides[account.id] != nil {
+                    plexTokenOverrides[account.id] = nil
+                    plexIdentityGeneration += 1
+                }
             }
+        }
+
+        if let pin = pinTarget {
             pendingPlexPINRequest = PlexPINRequest(
                 id: profile.id,
-                accountID: accountID,
-                homeUserID: homeUserID,
-                homeUserName: profile.plexHomeUserName ?? "Plex User"
+                accountID: pin.accountID,
+                homeUserID: pin.binding.homeUserID,
+                homeUserName: pin.binding.name.isEmpty ? "Plex User" : pin.binding.name
             )
+            plexPINError = nil
         } else {
-            Task { await performPlexSwitch(accountID: accountID, homeUserID: homeUserID, pin: nil) }
+            pendingPlexPINRequest = nil
+            plexPINError = nil
         }
     }
 
@@ -419,6 +433,8 @@ public final class AppState {
             pendingPlexPINRequest = nil
             plexPINError = nil
             plexIdentityGeneration += 1
+            // If another Plex account still needs a PIN, surface that next.
+            if pin != nil { ensurePlexIdentityForActiveProfile() }
         } catch AppError.unauthorized {
             plexPINError = "Incorrect PIN. Please try again."
         } catch {
@@ -543,6 +559,7 @@ public final class AppState {
                 profile.plexHomeUserAccountID = draft.plexHomeUserAccountID
                 profile.plexHomeUserRequiresPIN = draft.plexHomeUserRequiresPIN
                 profile.plexHomeUserAvatarURL = draft.plexHomeUserAvatarURL
+                profile.plexHomeUserBindings = draft.plexHomeUserBindings
                 profilesModel.update(profile)
             }
             if !draft.activeAccountIDs.isEmpty {
@@ -565,7 +582,8 @@ public final class AppState {
                 plexHomeUserName: draft.plexHomeUserName,
                 plexHomeUserAccountID: draft.plexHomeUserAccountID,
                 plexHomeUserRequiresPIN: draft.plexHomeUserRequiresPIN,
-                plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL
+                plexHomeUserAvatarURL: draft.plexHomeUserAvatarURL,
+                plexHomeUserBindings: draft.plexHomeUserBindings
             )
         }
     }

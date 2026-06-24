@@ -30,6 +30,8 @@ public struct ProfileDraft: Equatable, Sendable {
     public var plexHomeUserAccountID: String?
     public var plexHomeUserRequiresPIN: Bool?
     public var plexHomeUserAvatarURL: String?
+    /// Per–Plex-account Home-user mappings (see `Profile.plexHomeUserBindings`).
+    public var plexHomeUserBindings: [String: PlexHomeUserBinding]?
 
     public init(
         id: String?,
@@ -42,7 +44,8 @@ public struct ProfileDraft: Equatable, Sendable {
         plexHomeUserName: String? = nil,
         plexHomeUserAccountID: String? = nil,
         plexHomeUserRequiresPIN: Bool? = nil,
-        plexHomeUserAvatarURL: String? = nil
+        plexHomeUserAvatarURL: String? = nil,
+        plexHomeUserBindings: [String: PlexHomeUserBinding]? = nil
     ) {
         self.id = id
         self.name = name
@@ -55,6 +58,7 @@ public struct ProfileDraft: Equatable, Sendable {
         self.plexHomeUserAccountID = plexHomeUserAccountID
         self.plexHomeUserRequiresPIN = plexHomeUserRequiresPIN
         self.plexHomeUserAvatarURL = plexHomeUserAvatarURL
+        self.plexHomeUserBindings = plexHomeUserBindings
     }
 }
 
@@ -212,7 +216,8 @@ public struct ProfileEditorView: View {
             plexHomeUserName: editingProfile?.plexHomeUserName,
             plexHomeUserAccountID: editingProfile?.plexHomeUserAccountID,
             plexHomeUserRequiresPIN: editingProfile?.plexHomeUserRequiresPIN,
-            plexHomeUserAvatarURL: editingProfile?.plexHomeUserAvatarURL
+            plexHomeUserAvatarURL: editingProfile?.plexHomeUserAvatarURL,
+            plexHomeUserBindings: editingProfile?.plexHomeUserBindings
         ))
     }
 }

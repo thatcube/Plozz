@@ -79,7 +79,8 @@ struct PlexLinkedUserDetailView: View {
     }
 
     private var isClearSelected: Bool {
-        context.activeProfile.plexHomeUserID == nil
+        guard let account else { return true }
+        return context.activeProfile.homeUserBinding(forPlexAccount: account.id) == nil
     }
 
     /// "Use Plex account owner" — clears the Home-user mapping and falls back
@@ -120,8 +121,7 @@ struct PlexLinkedUserDetailView: View {
     }
 
     private func userRow(_ user: PlexHomeUser, account: Account) -> some View {
-        let isSelected = context.activeProfile.plexHomeUserID == user.id
-            && context.activeProfile.plexHomeUserAccountID == account.id
+        let isSelected = context.activeProfile.homeUserBinding(forPlexAccount: account.id)?.homeUserID == user.id
         return Button {
             context.onSelectPlexHomeUser(account.id, user)
         } label: {

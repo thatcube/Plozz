@@ -120,6 +120,11 @@ public struct RootView: View {
 
 /// Modal PIN entry shown when switching to a profile mapped to a PIN-protected
 /// Plex Home user. The PIN is passed straight to Plex and never stored.
+///
+/// tvOS lacks a numeric keyboard (`.keyboardType(.numberPad)` is ignored), so
+/// a SecureField forces the full QWERTY remote keyboard for a 4-digit code.
+/// This view uses a custom on-screen numeric pad instead — focus-friendly on
+/// the Siri remote and the standard tvOS pattern for short numeric input.
 private struct PlexPINEntryView: View {
     let appState: AppState
     let userName: String
@@ -128,26 +133,25 @@ private struct PlexPINEntryView: View {
 
     @State private var pin: String = ""
 
+    private static let pinLength = 4
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 32) {
+            VStack(spacing: 28) {
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 72))
+                    .font(.system(size: 64))
                     .foregroundStyle(.secondary)
                 Text("Enter PIN for \(userName)")
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
-                SecureField("PIN", text: $pin)
-                    .textContentType(.password)
-                    .frame(maxWidth: 420)
+                pinDots
                 if let error = appState.plexPINError {
                     Text(error)
                         .font(.callout)
                         .foregroundStyle(.red)
                 }
-                Button("Continue") { onSubmit(pin) }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(pin.isEmpty)
+                PINPad(onDigit: appendDigit, onDelete: deleteDigit)
+                    .frame(maxWidth: 520)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
@@ -156,7 +160,91 @@ private struct PlexPINEntryView: View {
                     Button("Cancel", action: onCancel)
                 }
             }
+            .onChange(of: appState.plexPINError) { _, newValue in
+                // Wrong-PIN response: clear the dots so the user can retry
+                // without first having to backspace four times.
+                if newValue != nil { pin = "" }
+            }
         }
+    }
+
+    private var pinDots: some View {
+        HStack(spacing: 20) {
+            ForEach(0..<Self.pinLength, id: \.self) { i in
+                Circle()
+                    .stroke(Color.primary.opacity(0.35), lineWidth: 2)
+                    .background(
+                        Circle().fill(i < pin.count ? Color.primary : Color.clear)
+                    )
+                    .frame(width: 24, height: 24)
+            }
+        }
+    }
+
+    private func appendDigit(_ d: String) {
+        guard d.count == 1, d.first?.isNumber == true else { return }
+        guard pin.count < Self.pinLength else { return }
+        pin.append(d)
+        if pin.count == Self.pinLength {
+            // Auto-submit when the 4th digit is entered. Snappy is the goal.
+            onSubmit(pin)
+        }
+    }
+
+    private func deleteDigit() {
+        if !pin.isEmpty { pin.removeLast() }
+    }
+}
+
+/// Focus-friendly numeric pad for tvOS: rows [1 2 3][4 5 6][7 8 9][ _ 0 ⌫ ].
+/// Each button is a focusable Button so the Siri remote can navigate the grid
+/// and focus is always anchored — Menu/Back can't fall through to the system.
+private struct PINPad: View {
+    let onDigit: (String) -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            row(["1", "2", "3"])
+            row(["4", "5", "6"])
+            row(["7", "8", "9"])
+            HStack(spacing: 16) {
+                Color.clear.frame(maxWidth: .infinity).frame(height: 1)
+                digitButton("0")
+                deleteButton
+            }
+        }
+    }
+
+    private func row(_ digits: [String]) -> some View {
+        HStack(spacing: 16) {
+            ForEach(digits, id: \.self) { d in
+                digitButton(d)
+            }
+        }
+    }
+
+    private func digitButton(_ digit: String) -> some View {
+        Button {
+            onDigit(digit)
+        } label: {
+            Text(digit)
+                .font(.system(size: 36, weight: .semibold, design: .rounded))
+                .frame(maxWidth: .infinity, minHeight: 72)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            onDelete()
+        } label: {
+            Image(systemName: "delete.left")
+                .font(.title)
+                .frame(maxWidth: .infinity, minHeight: 72)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel("Delete")
     }
 }
 

@@ -84,7 +84,7 @@ struct ServerDetailView: View {
 
     private func header(_ group: ServerAccountGroup) -> some View {
         HStack(spacing: 16) {
-            ProviderIcon(provider: group.providerKind, size: 36)
+            ProviderIcon(provider: group.providerKind, size: 44)
                 .frame(width: 44)
             VStack(alignment: .leading, spacing: 4) {
                 Text(group.serverName).font(.largeTitle.bold())

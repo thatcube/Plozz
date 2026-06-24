@@ -160,13 +160,16 @@ struct PlexLinkedUserDetailView: View {
                                 .foregroundStyle(.orange)
                         }
                         if user.requiresPIN {
-                            // Subtle lock glyph instead of a washed-out "PIN"
-                            // text pill — stays legible on the inverted focus
-                            // card via the focus-adaptive secondary tint.
-                            Image(systemName: "lock.fill")
-                                .font(.caption)
-                                .settingsRowSecondary()
-                                .accessibilityLabel("PIN required")
+                            // Lock + "PIN" together — the lock alone read as
+                            // unclear; keep it focus-adaptive so it stays
+                            // legible on the inverted card.
+                            HStack(spacing: 3) {
+                                Image(systemName: "lock.fill")
+                                Text("PIN")
+                            }
+                            .font(.caption2.weight(.semibold))
+                            .settingsRowSecondary()
+                            .accessibilityLabel("PIN required")
                         }
                     }
                     if user.isRestricted {

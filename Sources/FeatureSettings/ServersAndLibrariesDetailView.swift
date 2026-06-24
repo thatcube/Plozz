@@ -59,7 +59,7 @@ struct ServersAndLibrariesDetailView: View {
     private func serverSummaryRow(_ group: ServerAccountGroup) -> some View {
         NavigationLink(value: SettingsRoute.server(key: group.serverKey)) {
             HStack(spacing: 16) {
-                ProviderIcon(provider: group.providerKind, size: 28)
+                ProviderIcon(provider: group.providerKind, size: 48)
                     .frame(width: 36)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(group.serverName).font(.headline)

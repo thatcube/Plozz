@@ -422,7 +422,7 @@ public struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     HStack(spacing: 6) {
-                        ProviderIcon(provider: account.server.provider, size: 18)
+                        ProviderIcon(provider: account.server.provider, size: 26)
                         AccountAvatar(name: account.userName, imageURL: account.avatarURL, size: 22)
                         Text(signedInLabel(for: account))
                             .font(.footnote.weight(.medium))

@@ -135,7 +135,7 @@ struct ProviderIcon: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .padding(size * 0.18)
+                .padding(size * 0.12)
                 .foregroundStyle(tint)
         }
         .frame(width: size, height: size)

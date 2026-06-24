@@ -140,6 +140,7 @@ private func makePlayerViewModel(
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
         let onlineTrailerResolver = ItemDetailViewModel.defaultOnlineTrailerResolver
+        let engineFactory = HybridPlayback.engineFactory()
         plozzTrace("makePlayerViewModel: routing to YouTubeTrailerProvider videoID=\(videoID)")
         return PlayerViewModel(
             provider: YouTubeTrailerProvider(
@@ -154,13 +155,16 @@ private func makePlayerViewModel(
                         trailerItem.alternativeTrailerSearchSubject
                     )
                     return results.compactMap(\.youTubeTrailerVideoID)
-                }
+                },
+                // Only resolve the higher-resolution adaptive (separate audio)
+                // path when a hybrid engine is wired in to mux the two tracks.
+                allowsSeparateAudio: engineFactory.hybridAvailable
             ),
             itemID: videoID,
             captionSettings: captionSettings,
             startPosition: request.startPosition,
             scrobbler: scrobbler,
-            engineFactory: HybridPlayback.engineFactory()
+            engineFactory: engineFactory
         )
     }
     return PlayerViewModel(

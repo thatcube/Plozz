@@ -36,17 +36,25 @@ public struct YouTubeTrailerProvider: MediaProvider {
     /// Optional source of replacement trailer video ids, tried in order when the
     /// primary video is unavailable. `nil` (the default) means no fallback.
     private let alternatives: AlternativeResolving?
+    /// Whether this provider may resolve a higher-resolution **adaptive** stream
+    /// (separate video + audio tracks the hybrid mpv engine muxes). Set from the
+    /// player composition: `true` only when a hybrid engine is actually wired in,
+    /// so a build with native-AVPlayer-only playback never gets a video-only URL
+    /// it can't add sound to.
+    private let allowsSeparateAudio: Bool
 
     public init(
         item: MediaItem,
         videoID: String,
         methods: [YouTube.ExtractionMethod] = [.local, .remote],
-        alternatives: AlternativeResolving? = nil
+        alternatives: AlternativeResolving? = nil,
+        allowsSeparateAudio: Bool = true
     ) {
         self.trailerItem = item
         self.videoID = videoID
         self.methods = methods
         self.alternatives = alternatives
+        self.allowsSeparateAudio = allowsSeparateAudio
     }
 
     /// Placeholder — unused: nothing reads a trailer provider's kind, the player
@@ -73,17 +81,28 @@ public struct YouTubeTrailerProvider: MediaProvider {
     // MARK: Playback (the only real work)
 
     public func playbackInfo(for itemID: String) async throws -> PlaybackRequest {
-        plozzTrace("YTTrailer.playbackInfo: primary videoID=\(videoID) methods=\(methods)")
+        try await resolvePlayback(allowAdaptive: allowsSeparateAudio)
+    }
+
+    /// The engine-failure fallback asks for a "safe" stream (`forceTranscode`)
+    /// when the high-resolution adaptive (hybrid) path fails mid-playback: a
+    /// self-contained muxed/HLS URL AVPlayer plays directly, so a failed hybrid
+    /// trailer recovers *with sound* instead of a silent video-only swap.
+    public func playbackInfo(for itemID: String, forceTranscode: Bool) async throws -> PlaybackRequest {
+        try await resolvePlayback(allowAdaptive: forceTranscode ? false : allowsSeparateAudio)
+    }
+
+    /// Resolves a playable request for the primary trailer video, falling back to
+    /// replacement videos when the primary is unavailable. `allowAdaptive` gates
+    /// the higher-resolution separate-track path (off for the safe/recovery pass).
+    private func resolvePlayback(allowAdaptive: Bool) async throws -> PlaybackRequest {
+        plozzTrace("YTTrailer.playbackInfo: primary videoID=\(videoID) methods=\(methods) adaptive=\(allowAdaptive)")
         // Try the primary (server- or search-resolved) video first.
         let primaryError: Error
         do {
-            let url = try await resolveStreamURL(forVideoID: videoID)
-            plozzTrace("YTTrailer.playbackInfo: primary RESOLVED url=\(url.absoluteString.prefix(120))")
-            return PlaybackRequest(
-                item: trailerItem,
-                streamURL: url,
-                startPosition: 0
-            )
+            let stream = try await resolveTrailerStream(forVideoID: videoID, allowAdaptive: allowAdaptive)
+            plozzTrace("YTTrailer.playbackInfo: primary RESOLVED res=\(stream.resolution ?? -1) adaptive=\(stream.isAdaptive)")
+            return makeRequest(from: stream)
         } catch {
             primaryError = error
             plozzTrace("YTTrailer.playbackInfo: primary FAILED error=\(String(reflecting: error))")
@@ -95,9 +114,9 @@ public struct YouTubeTrailerProvider: MediaProvider {
         // same title and play the first one that resolves.
         for altID in await alternatives?() ?? [] where altID != videoID {
             plozzTrace("YTTrailer.playbackInfo: trying alternative videoID=\(altID)")
-            if let url = try? await resolveStreamURL(forVideoID: altID) {
-                plozzTrace("YTTrailer.playbackInfo: alternative RESOLVED \(altID) url=\(url.absoluteString.prefix(120))")
-                return PlaybackRequest(item: trailerItem, streamURL: url, startPosition: 0)
+            if let stream = try? await resolveTrailerStream(forVideoID: altID, allowAdaptive: allowAdaptive) {
+                plozzTrace("YTTrailer.playbackInfo: alternative RESOLVED \(altID) res=\(stream.resolution ?? -1)")
+                return makeRequest(from: stream)
             }
         }
 
@@ -116,35 +135,70 @@ public struct YouTubeTrailerProvider: MediaProvider {
         throw AppError.unknown("trailer-extract")
     }
 
+    /// Builds a `PlaybackRequest` from a resolved stream, carrying the companion
+    /// audio URL for an adaptive (separate-track) source so the hybrid engine can
+    /// mux it.
+    private func makeRequest(from stream: TrailerStream) -> PlaybackRequest {
+        PlaybackRequest(
+            item: trailerItem,
+            streamURL: stream.videoURL,
+            externalAudioURL: stream.audioURL,
+            startPosition: 0
+        )
+    }
+
     /// Returns the first candidate video id that resolves to a playable **public**
-    /// stream, trying each in order and skipping any YouTube reports as
-    /// private/removed/region-blocked. `nil` when none are playable.
+    /// stream, skipping any YouTube reports as private/removed/region-blocked.
+    /// `nil` when none are playable.
+    ///
+    /// Candidates are verified **concurrently** (extraction + a byte-reach check
+    /// each), but the result preserves priority order: the lowest-index candidate
+    /// that actually streams wins. Verifying in parallel keeps the authoritative
+    /// pass fast even with several fallback ids, instead of paying each round-trip
+    /// serially.
     ///
     /// Used to decide whether to surface a Trailer button (and which video to
-    /// play) *before* showing it, so a stale server `RemoteTrailers` link that
-    /// points at a now-private video never produces an unplayable button. All
-    /// interaction goes through YouTubeKit — this never bypasses a private gate,
-    /// it only filters dead candidates out.
+    /// play), so a stale server `RemoteTrailers` link that points at a now-private
+    /// video never produces an unplayable button. All interaction goes through
+    /// YouTubeKit — this never bypasses a private gate, it only filters dead
+    /// candidates out.
     public static func firstPlayableVideoID(
         in candidates: [String],
         methods: [YouTube.ExtractionMethod] = [.local, .remote]
     ) async -> String? {
-        for id in candidates where !id.isEmpty {
-            guard let url = try? await resolveStreamURL(forVideoID: id, methods: methods) else {
-                plozzTrace("YTTrailer.firstPlayableVideoID: \(id) did not resolve, trying next")
-                continue
+        let indexed = candidates.enumerated().filter { !$0.element.isEmpty }
+        guard !indexed.isEmpty else { return nil }
+
+        let bestIndex = await withTaskGroup(of: (Int, Bool).self) { group -> Int? in
+            for (index, id) in indexed {
+                group.addTask { (index, await isPlayable(videoID: id, methods: methods)) }
             }
-            // Extraction succeeding isn't enough — the resolved URL must actually
-            // serve media bytes. A YouTube HLS manifest can load (HTTP 200) while
-            // its segments 403, so confirm the chosen stream is reachable before
-            // surfacing it.
-            if await isStreamReachable(url) {
-                plozzTrace("YTTrailer.firstPlayableVideoID: \(id) is playable")
-                return id
+            var best: Int?
+            for await (index, playable) in group where playable {
+                best = min(best ?? index, index)
             }
-            plozzTrace("YTTrailer.firstPlayableVideoID: \(id) resolved but not reachable, trying next")
+            return best
         }
-        return nil
+
+        guard let bestIndex else { return nil }
+        return indexed.first(where: { $0.offset == bestIndex })?.element
+    }
+
+    /// Whether one candidate resolves to a stream that actually serves bytes.
+    /// Verification uses the reliable muxed/HLS path (`allowAdaptive: false`): if
+    /// that plays, the higher-res adaptive upgrade chosen at play time is safe (it
+    /// shares the same video) and self-heals to this stream if it ever fails.
+    private static func isPlayable(videoID id: String, methods: [YouTube.ExtractionMethod]) async -> Bool {
+        guard let stream = try? await resolveTrailerStream(forVideoID: id, methods: methods, allowAdaptive: false) else {
+            plozzTrace("YTTrailer.isPlayable: \(id) did not resolve")
+            return false
+        }
+        // Extraction succeeding isn't enough — the resolved URL must actually
+        // serve media bytes. A YouTube HLS manifest can load (HTTP 200) while its
+        // segments 403, so confirm the chosen stream is reachable.
+        let reachable = await isStreamReachable(stream.videoURL)
+        plozzTrace("YTTrailer.isPlayable: \(id) reachable=\(reachable)")
+        return reachable
     }
 
     /// Whether `url`'s media bytes are actually fetchable — a tiny ranged GET that
@@ -162,33 +216,28 @@ public struct YouTubeTrailerProvider: MediaProvider {
         return (200...299).contains(http.statusCode)
     }
 
-    /// Resolves a natively-playable stream URL for one YouTube `id`.
+    /// Resolves the best playable stream for one YouTube `id`.
     ///
-    /// Prefers YouTube's HLS manifest — an adaptive, audio+video-muxed,
-    /// full-resolution playlist that `AVPlayer` plays natively on tvOS and that
-    /// stays available even when progressive streams don't. Falls back to a
-    /// progressive (muxed) stream, then any natively-decodable stream. Throws
-    /// ``TrailerVideoUnavailable`` when YouTube reports the video can't be played
-    /// (private/removed/age-restricted/region-blocked) so callers can try a
+    /// Selection (see ``TrailerStreamSelector``) prefers, in order: a
+    /// higher-resolution **adaptive** video+audio pair the hybrid engine muxes
+    /// (when `allowAdaptive`), then a **progressive muxed** MP4 AVPlayer plays
+    /// directly, then any single natively-playable stream, then YouTube's HLS
+    /// manifest. Progressive/adaptive googlevideo URLs serve their bytes directly;
+    /// HLS is last because its segments are currently PO-token gated (HTTP 403).
+    /// Throws ``TrailerVideoUnavailable`` when YouTube reports the video can't be
+    /// played (private/removed/age-restricted/region-blocked) so callers can try a
     /// replacement.
-    /// Resolves a natively-playable stream URL for one YouTube `id`.
-    ///
-    /// Prefers a **progressive muxed** (audio+video) MP4 stream: these serve their
-    /// media bytes directly and play natively on `AVPlayer`. YouTube's HLS variant
-    /// manifest is only used as a fallback (live content, or the rare video with no
-    /// muxed progressive) because its media segments are currently PO-token gated
-    /// and return HTTP 403 — the manifest/playlist load (200) but every segment
-    /// fails, which surfaces as a mid-playback `invalidResponse`. Throws
-    /// ``TrailerVideoUnavailable`` when YouTube reports the video can't be played
-    /// (private/removed/age-restricted/region-blocked) so callers can try a
-    /// replacement.
-    private func resolveStreamURL(forVideoID id: String) async throws -> URL {
-        try await Self.resolveStreamURL(forVideoID: id, methods: methods)
+    private func resolveTrailerStream(forVideoID id: String, allowAdaptive: Bool) async throws -> TrailerStream {
+        try await Self.resolveTrailerStream(forVideoID: id, methods: methods, allowAdaptive: allowAdaptive)
     }
 
     /// Stateless stream resolution shared by instance playback and the static
     /// ``firstPlayableVideoID(in:methods:)`` verifier.
-    private static func resolveStreamURL(forVideoID id: String, methods: [YouTube.ExtractionMethod]) async throws -> URL {
+    private static func resolveTrailerStream(
+        forVideoID id: String,
+        methods: [YouTube.ExtractionMethod],
+        allowAdaptive: Bool
+    ) async throws -> TrailerStream {
         let video = YouTube(videoID: id, methods: methods)
 
         // Resolve concrete streams first so YouTube's unavailability signal
@@ -196,39 +245,31 @@ public struct YouTubeTrailerProvider: MediaProvider {
         let streams: [YouTubeKit.Stream]
         do {
             streams = try await video.streams
-            plozzTrace("YTTrailer.resolveStreamURL[\(id)]: streams count=\(streams.count)")
+            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: streams count=\(streams.count)")
         } catch let ytError as YouTubeKitError where Self.isUnavailable(ytError) {
-            plozzTrace("YTTrailer.resolveStreamURL[\(id)]: UNAVAILABLE ytError=\(ytError)")
+            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: UNAVAILABLE ytError=\(ytError)")
             throw TrailerVideoUnavailable()
         } catch {
-            plozzTrace("YTTrailer.resolveStreamURL[\(id)]: streams threw non-availability error=\(String(reflecting: error)); trying HLS")
+            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: streams threw non-availability error=\(String(reflecting: error)); trying HLS")
             streams = []
         }
 
-        let playable = streams.filter { $0.isNativelyPlayable }
-
-        // 1) Progressive muxed (audio+video) — the reliable path. AVPlayer can't
-        //    mux separate adaptive tracks from bare URLs, and these progressive
-        //    URLs (unlike HLS segments) serve bytes directly.
-        if let muxed = playable.filterVideoAndAudio().highestResolutionStream() {
-            plozzTrace("YTTrailer.resolveStreamURL[\(id)]: using progressive muxed stream")
-            return muxed.url
+        // 1-3) Adaptive hi-res pair / progressive muxed / any native single.
+        let candidates = streams.map(TrailerStreamCandidate.init)
+        if let chosen = TrailerStreamSelector.selectTrailerStream(from: candidates, allowAdaptive: allowAdaptive) {
+            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: selected res=\(chosen.resolution ?? -1) adaptive=\(chosen.isAdaptive)")
+            return chosen
         }
 
-        // 2) HLS manifest — fallback for livestreams and the rare VOD without a
-        //    muxed progressive. May fail on PO-token-gated segments.
+        // 4) HLS manifest — fallback for livestreams and the rare VOD without a
+        //    usable progressive/adaptive stream. May fail on PO-token-gated
+        //    segments, so it's the last resort.
         if let hls = (try? await video.livestreams)?.first?.url {
-            plozzTrace("YTTrailer.resolveStreamURL[\(id)]: no muxed progressive; using HLS manifest")
-            return hls
+            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: no progressive/adaptive; using HLS manifest")
+            return TrailerStream(videoURL: hls)
         }
 
-        // 3) Last resort: any natively-playable stream (e.g. video-only).
-        if let best = playable.highestResolutionStream() {
-            plozzTrace("YTTrailer.resolveStreamURL[\(id)]: using best natively-playable stream")
-            return best.url
-        }
-
-        plozzTrace("YTTrailer.resolveStreamURL[\(id)]: no playable stream -> notFound")
+        plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: no playable stream -> notFound")
         throw AppError.notFound
     }
 

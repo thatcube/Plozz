@@ -247,6 +247,17 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             client.setOptionString(key, value)
         }
 
+        // Adaptive sources (e.g. a high-resolution YouTube DASH trailer) deliver
+        // video and audio as two separate URLs. AVPlayer can't combine bare URLs,
+        // but mpv can: attach the companion audio so it plays in sync with the
+        // video-only `streamURL`. Set as an option (the CLI alias of
+        // `--audio-files-append`) before init so the whole URL is taken as a
+        // single file — no list-separator parsing of the URL's own `:`/`,`.
+        if let audioURL = request.externalAudioURL {
+            plozzTrace("MPV.load: attaching external audio track (adaptive video+audio)")
+            client.setOptionString("audio-file", audioURL.absoluteString)
+        }
+
         plozzTrace("MPV.load: waiting for render surface readiness")
         guard await waitForRenderableSurface() else {
             teardownClient()

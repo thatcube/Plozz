@@ -81,7 +81,8 @@ final class ItemDetailViewModelTests: XCTestCase {
             provider: provider,
             itemID: "m1",
             sourceAccountID: "acct-9",
-            onlineTrailerResolver: { _ in [MediaItem.youTubeTrailer(videoID: "yt1", title: "online")] }
+            onlineTrailerResolver: { _ in [MediaItem.youTubeTrailer(videoID: "yt1", title: "online")] },
+            trailerCache: TrailerResolutionCache()
         )
 
         await vm.load()
@@ -102,7 +103,8 @@ final class ItemDetailViewModelTests: XCTestCase {
             onlineTrailerResolver: { item in
                 [MediaItem.youTubeTrailer(videoID: "yt1", title: "\(item.title) — Trailer")]
             },
-            playableVideoIDResolver: { $0.first }
+            playableVideoIDResolver: { $0.first },
+            trailerCache: TrailerResolutionCache()
         )
 
         await vm.load()
@@ -125,7 +127,8 @@ final class ItemDetailViewModelTests: XCTestCase {
             provider: provider,
             itemID: "m1",
             onlineTrailerResolver: { _ in [] },
-            playableVideoIDResolver: { $0.first }
+            playableVideoIDResolver: { $0.first },
+            trailerCache: TrailerResolutionCache()
         )
 
         await vm.load()
@@ -154,7 +157,8 @@ final class ItemDetailViewModelTests: XCTestCase {
                 [MediaItem.youTubeTrailer(videoID: "freshID", title: "Mary Poppins Returns — Trailer")]
             },
             // Dead server id doesn't verify; the searched replacement does.
-            playableVideoIDResolver: { ids in ids.contains("deadID") ? nil : ids.first }
+            playableVideoIDResolver: { ids in ids.contains("deadID") ? nil : ids.first },
+            trailerCache: TrailerResolutionCache()
         )
 
         await vm.load()
@@ -176,7 +180,8 @@ final class ItemDetailViewModelTests: XCTestCase {
             onlineTrailerResolver: { _ in
                 [MediaItem.youTubeTrailer(videoID: "alsoDead", title: "Mary Poppins Returns — Trailer")]
             },
-            playableVideoIDResolver: { _ in nil }
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
         )
 
         await vm.load()
@@ -193,7 +198,8 @@ final class ItemDetailViewModelTests: XCTestCase {
             provider: provider,
             itemID: "m1",
             onlineTrailerResolver: { _ in searchCalled.set(); return [] },
-            playableVideoIDResolver: { _ in verifyCalled.set(); return nil }
+            playableVideoIDResolver: { _ in verifyCalled.set(); return nil },
+            trailerCache: TrailerResolutionCache()
         )
 
         await vm.load()
@@ -209,12 +215,160 @@ final class ItemDetailViewModelTests: XCTestCase {
             provider: provider,
             itemID: "m1",
             onlineTrailerResolver: { _ in [] },
-            playableVideoIDResolver: { _ in nil }
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
         )
 
         await vm.load()
 
         XCTAssertTrue(vm.trailers.isEmpty)
+    }
+
+    // MARK: - Fast button: optimistic surfacing + caching
+
+    func testServerTrailerShowsButtonOptimisticallyBeforeVerification() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        provider.trailersByItem = ["m1": [MediaItem.youTubeTrailer(videoID: "serverID", title: "Trailer")]]
+        let gate = AsyncGate()
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            // Verification blocks until released — modelling a slow network so the
+            // button must appear before it finishes.
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { ids in await gate.wait(); return ids.first },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        let loadTask = Task { await vm.load() }
+        // The button appears optimistically from the server id while the gated
+        // verification is still suspended.
+        await waitUntil { !vm.trailers.isEmpty }
+        XCTAssertEqual(vm.trailers.first?.youTubeTrailerVideoID, "serverID")
+
+        gate.open()
+        await loadTask.value
+        // The verified id (here the same) remains after the pass completes.
+        XCTAssertEqual(vm.trailers.first?.youTubeTrailerVideoID, "serverID")
+    }
+
+    func testCachedWorkingOutcomeShowsButtonWithoutReResolving() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        provider.trailersByItem = ["m1": [MediaItem.youTubeTrailer(videoID: "serverID", title: "Trailer")]]
+        let cache = TrailerResolutionCache()
+        cache.record(.working("cachedID"), for: "m1")
+        let searchCalled = LockedFlag()
+        let verifyCalled = LockedFlag()
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            onlineTrailerResolver: { _ in searchCalled.set(); return [] },
+            playableVideoIDResolver: { _ in verifyCalled.set(); return nil },
+            trailerCache: cache
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.trailers.first?.youTubeTrailerVideoID, "cachedID")
+        XCTAssertFalse(verifyCalled.value, "A cached outcome should not re-verify")
+        XCTAssertFalse(searchCalled.value, "A cached outcome should not re-search")
+    }
+
+    func testCachedNoneHidesButtonWithoutWork() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        provider.trailersByItem = ["m1": [MediaItem.youTubeTrailer(videoID: "serverID", title: "Trailer")]]
+        let cache = TrailerResolutionCache()
+        cache.record(.none, for: "m1")
+        let verifyCalled = LockedFlag()
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in verifyCalled.set(); return nil },
+            trailerCache: cache
+        )
+
+        await vm.load()
+
+        XCTAssertTrue(vm.trailers.isEmpty)
+        XCTAssertFalse(verifyCalled.value, "A cached 'none' should not re-verify")
+    }
+
+    func testVerifiedOutcomeIsCachedForNextVisit() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        provider.trailersByItem = ["m1": [MediaItem.youTubeTrailer(videoID: "serverID", title: "Trailer")]]
+        let cache = TrailerResolutionCache()
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { $0.first },
+            trailerCache: cache
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(cache.outcome(for: "m1"), .working("serverID"))
+    }
+
+    func testNoPlayableTrailerIsCachedAsNone() async {
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        provider.trailersByItem = ["m1": [MediaItem.youTubeTrailer(videoID: "deadID", title: "Trailer")]]
+        let cache = TrailerResolutionCache()
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: cache
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(cache.outcome(for: "m1"), .none)
+        XCTAssertTrue(vm.trailers.isEmpty)
+    }
+
+    /// Spins the cooperative runtime until `condition` holds (or a bounded number
+    /// of yields elapse), so a test can observe an optimistic state set before a
+    /// later `await` resumes.
+    private func waitUntil(_ condition: @MainActor () -> Bool) async {
+        for _ in 0..<10_000 {
+            if condition() { return }
+            await Task.yield()
+        }
+        XCTFail("Condition not met before timeout")
+    }
+}
+
+/// A one-shot async gate: `wait()` suspends until `open()` is called (or returns
+/// immediately if already open). Lets a test hold an injected async closure at a
+/// known suspension point to observe intermediate view-model state.
+private final class AsyncGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func open() {
+        lock.lock()
+        opened = true
+        let pending = waiters
+        waiters = []
+        lock.unlock()
+        pending.forEach { $0.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if opened {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+                lock.unlock()
+            }
+        }
     }
 }
 

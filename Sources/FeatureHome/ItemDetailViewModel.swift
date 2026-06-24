@@ -59,6 +59,10 @@ public final class ItemDetailViewModel {
     /// trailer link with no playable replacement yields no button. Injectable so
     /// tests stay off the network.
     private let playableVideoIDResolver: PlayableTrailerResolving
+    /// Memo of trailer-resolution outcomes so a revisited detail page surfaces its
+    /// Trailer button instantly instead of re-running extraction/search. Injected
+    /// so tests can supply an isolated cache.
+    private let trailerCache: TrailerResolutionCache
     /// The account this item belongs to, propagated so the detail item and its
     /// children stay tagged with their owning provider as the user drills down
     /// (children come from the provider untagged). `nil` outside aggregated flows.
@@ -70,7 +74,8 @@ public final class ItemDetailViewModel {
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
         sourceAccountID: String? = nil,
         onlineTrailerResolver: @escaping OnlineTrailerResolving = ItemDetailViewModel.defaultOnlineTrailerResolver,
-        playableVideoIDResolver: @escaping PlayableTrailerResolving = ItemDetailViewModel.defaultPlayableVideoIDResolver
+        playableVideoIDResolver: @escaping PlayableTrailerResolving = ItemDetailViewModel.defaultPlayableVideoIDResolver,
+        trailerCache: TrailerResolutionCache = .shared
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -78,6 +83,7 @@ public final class ItemDetailViewModel {
         self.sourceAccountID = sourceAccountID
         self.onlineTrailerResolver = onlineTrailerResolver
         self.playableVideoIDResolver = playableVideoIDResolver
+        self.trailerCache = trailerCache
     }
 
     /// Production online-trailer resolver: a keyless YouTube search (no API key,
@@ -140,36 +146,56 @@ public final class ItemDetailViewModel {
         seasonEpisodes[seasonID]
     }
 
-    /// Fetches the item's trailers off the critical path and **verifies** an
-    /// online trailer actually plays before surfacing the Trailer button, so a
-    /// stale server link to a now-private video never shows a dead button.
+    /// Fetches the item's trailers off the critical path. The Trailer button is
+    /// surfaced **fast** (optimistically, from the server's own trailer id) and
+    /// the verified, actually-playable id is refined in the background — so the
+    /// button appears in well under a second instead of waiting 5–10s for the full
+    /// extract → byte-check → keyless-search chain to finish.
     ///
-    /// Priority chain:
-    ///  1. A local server trailer file (Jellyfin `/LocalTrailers`, Plex local
-    ///     extras) — a real asset streamed through the owning provider; assumed
-    ///     playable and used as-is.
-    ///  2. The server `RemoteTrailers` YouTube id(s) — verified by extraction.
-    ///  3. A keyless online search for a replacement official trailer — verified
-    ///     by extraction (only run when the server ids don't resolve, to avoid an
-    ///     extra search on every detail page).
+    /// Flow:
+    ///  1. A local server trailer file wins outright (a real asset, no network).
+    ///  2. A cached outcome for this item (working id or "none") applies instantly.
+    ///  3. Otherwise, if the server has a remote (YouTube) trailer id, show the
+    ///     button **immediately** from it, then verify in the same pass: refine to
+    ///     the first id that actually plays, search for a replacement when the
+    ///     server ids are all dead, and retract only when nothing plays at all.
+    ///  4. With no server id, a keyless search decides whether to show a button.
     ///
-    /// When nothing in the chain yields a playable public video, `trailers` stays
-    /// empty and the detail page hides its Trailer button. Best-effort throughout.
+    /// The verified outcome is cached so revisiting the page is instant, and the
+    /// player's own primary→alternatives→error fallback means an optimistic button
+    /// self-heals at tap time rather than ever being a dead end.
     private func loadTrailers(for item: MediaItem) async {
         let provided = (try? await provider.trailers(for: item.id)) ?? []
 
         // 1) A real local trailer file wins outright — no network verification.
         if let local = provided.first(where: { !$0.isYouTubeTrailer }) {
-            guard case let .loaded(detail) = state, detail.item.id == item.id else { return }
+            guard isStillLoaded(item) else { return }
             trailers = [tagged(local)]
             return
         }
 
-        // 2) Verify the server's own remote (YouTube) trailer id(s).
         let serverIDs = orderedUnique(provided.compactMap(\.youTubeTrailerVideoID))
-        var workingID = await playableVideoIDResolver(serverIDs)
 
-        // 3) Server trailer dead/absent → keyless search for a public replacement.
+        // 2) A cached decision applies instantly — the main reason a revisited page
+        //    no longer re-pays the extraction/search cost.
+        if let cached = trailerCache.outcome(for: item.id) {
+            guard isStillLoaded(item) else { return }
+            switch cached {
+            case .working(let id): surfaceTrailer(videoID: id, for: item)
+            case .none: trailers = []
+            }
+            return
+        }
+
+        // 3) Optimistically show the button from the server's first trailer id
+        //    while verification runs, so it isn't gated on the network.
+        if let optimistic = serverIDs.first {
+            surfaceTrailer(videoID: optimistic, for: item)
+        }
+
+        // Verify (authoritative): refine to the first server id that actually
+        // plays, else search for a replacement, then cache the outcome.
+        var workingID = await playableVideoIDResolver(serverIDs)
         if workingID == nil {
             let searchIDs = orderedUnique(await onlineTrailerResolver(item).compactMap(\.youTubeTrailerVideoID))
             let fresh = searchIDs.filter { !serverIDs.contains($0) }
@@ -178,18 +204,36 @@ public final class ItemDetailViewModel {
             }
         }
 
-        guard case let .loaded(detail) = state, detail.item.id == item.id else { return }
+        guard isStillLoaded(item) else { return }
         if let workingID {
-            let trailer = MediaItem.youTubeTrailer(
-                videoID: workingID,
-                title: "\(item.title) — Trailer",
-                parentTitle: item.title,
-                posterURL: item.posterURL
-            )
-            trailers = [stampTrailerContext(trailer, from: item)]
+            surfaceTrailer(videoID: workingID, for: item)
+            trailerCache.record(.working(workingID), for: item.id)
         } else {
+            // Nothing playable anywhere — retract the optimistic button (rare; a
+            // server trailer with no working video and no findable replacement).
             trailers = []
+            trailerCache.record(.none, for: item.id)
         }
+    }
+
+    /// Whether the loaded detail is still this `item` (guards against a stale
+    /// trailer resolution landing after the user navigated away / reloaded).
+    private func isStillLoaded(_ item: MediaItem) -> Bool {
+        if case let .loaded(detail) = state, detail.item.id == item.id { return true }
+        return false
+    }
+
+    /// Builds and shows the online (YouTube) Trailer button for `videoID`, stamped
+    /// with the item's context so a play-time replacement search has a clean
+    /// title/year to work with.
+    private func surfaceTrailer(videoID: String, for item: MediaItem) {
+        let trailer = MediaItem.youTubeTrailer(
+            videoID: videoID,
+            title: "\(item.title) — Trailer",
+            parentTitle: item.title,
+            posterURL: item.posterURL
+        )
+        trailers = [stampTrailerContext(trailer, from: item)]
     }
 
     /// De-duplicates `ids` preserving first-seen order and dropping empties.

@@ -247,6 +247,15 @@ public final class PlayerViewModel {
                 hybridAvailable: engineFactory.hybridAvailable
             )
 
+            // An adaptive source carries its audio as a *separate* track (e.g. a
+            // high-resolution YouTube DASH trailer). Only the hybrid (mpv) engine
+            // can mux two bare URLs, so force it there — AVPlayer would otherwise
+            // play the video-only stream silently.
+            if request.externalAudioURL != nil, engineFactory.hybridAvailable {
+                plozzTrace("startPlayback: request has external audio; forcing hybrid engine")
+                kind = .hybrid
+            }
+
             // If the subtitle that would be shown by default is image-based
             // (PGS/VOBSUB), AVPlayer can't render it — route to the hybrid engine
             // so it appears, but only when we're direct-playing and a hybrid
@@ -384,8 +393,12 @@ public final class PlayerViewModel {
         let resume = resumeFrom > 1 ? resumeFrom : (startPositionOverride ?? request.startPosition)
 
         // 1) Direct play failed on the chosen engine → try the other engine once,
-        //    re-using the same raw stream (no re-resolve needed).
-        if !request.isTranscoding, !hasTriedAlternateEngine, let alternate = alternateEngineKind {
+        //    re-using the same raw stream (no re-resolve needed). Skipped for an
+        //    adaptive source (separate audio track): only the hybrid engine can
+        //    mux it, so swapping to native would play silent video — go straight
+        //    to the re-resolved safe (muxed) fallback below instead.
+        if !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
+           let alternate = alternateEngineKind {
             hasTriedAlternateEngine = true
             PlozzLog.playback.info("Engine failed; swapping to the alternate engine")
             await playResolved(request, engineKind: alternate, startPosition: resume)

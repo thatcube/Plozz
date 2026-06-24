@@ -460,7 +460,7 @@ struct DetailHeroView: View {
                         .stroke(Color.white,
                                 style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
                         .padding(heroIconSize * 0.20)
-                        .animation(.easeOut(duration: 0.32).delay(0.14), value: item.isPlayed)
+                        .animation(.easeOut(duration: 0.32).delay(0.24), value: item.isPlayed)
                 }
                 .opacity(item.isPlayed ? 1 : 0)
                 .scaleEffect(item.isPlayed ? 1 : 0.4)
@@ -677,6 +677,11 @@ private struct CheckmarkShape: Shape {
     }
 
     func path(in rect: CGRect) -> Path {
+        var path = Path()
+        // Nothing drawn yet: return an *empty* path so the round line cap doesn't
+        // render a dot at the start point while the check is still hidden/delayed.
+        guard progress > 0 else { return path }
+
         let w = rect.width, h = rect.height
         let start = CGPoint(x: w * 0.26, y: h * 0.52)
         let mid   = CGPoint(x: w * 0.44, y: h * 0.70)
@@ -685,9 +690,8 @@ private struct CheckmarkShape: Shape {
         let firstLen = hypot(mid.x - start.x, mid.y - start.y)
         let secondLen = hypot(end.x - mid.x, end.y - mid.y)
         let total = firstLen + secondLen
-        let drawn = max(0, min(1, progress)) * total
+        let drawn = min(1, progress) * total
 
-        var path = Path()
         path.move(to: start)
         if drawn <= firstLen {
             let t = firstLen == 0 ? 0 : drawn / firstLen

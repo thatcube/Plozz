@@ -412,13 +412,14 @@ struct DetailHeroView: View {
     /// Visible watched-state toggle, shown when the provider can mutate it. On a
     /// series page the hero mirrors the focused episode, so this doubles as the
     /// episode's visible watched toggle. The glyph clearly signals current state:
-    /// a green filled check when watched, a neutral outline when not — animating
-    /// between the two as the optimistic mutation flips `item.isPlayed`.
+    /// a brand-blue filled check when watched (matching the episode card's watched
+    /// badge), a neutral outline when not — animating between the two as the
+    /// optimistic mutation flips `item.isPlayed`.
     @ViewBuilder
     private func watchedButton(action: MediaItemAction) -> some View {
         Button { performHeroAction(action) } label: {
             Image(systemName: item.isPlayed ? "checkmark.circle.fill" : "checkmark.circle")
-                .foregroundStyle(item.isPlayed ? Color.green : Color.primary)
+                .foregroundStyle(item.isPlayed ? ThemePalette.brandBlue : Color.primary)
                 .contentTransition(.symbolEffect(.replace))
         }
         .modifier(HeroButtonStyle(prominent: false))

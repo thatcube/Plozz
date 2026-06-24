@@ -96,6 +96,10 @@ struct DetailHeroView: View {
     /// particular — don't make one button wider than the rest.
     private let heroIconSize: CGFloat = 30
 
+    /// Drives the watched-toggle checkmark's draw-on: 0 = nothing drawn, 1 = full
+    /// check. Animating this trims the stroke into view from left to top-right.
+    @State private var checkDraw: CGFloat = 0
+
     /// The item supplying the backdrop artwork (the pinned series, when set).
     private var backdrop: MediaItem { backdropItem ?? item }
 
@@ -421,29 +425,43 @@ struct DetailHeroView: View {
     /// Visible watched-state toggle, shown when the provider can mutate it. On a
     /// series page the hero mirrors the focused episode, so this doubles as the
     /// episode's visible watched toggle. Unwatched shows a neutral `eye`; marking
-    /// watched swaps it for a brand-blue filled circle with a white check (the
-    /// same watched colour as the episode cards), the eye scaling/fading out as
-    /// the check scales in on a single timeline so it stays in sync with the
-    /// button's own focus animation.
+    /// watched crossfades to a brand-blue filled circle (the same watched colour as
+    /// the episode cards) while a white checkmark *draws itself on* — stroked from
+    /// the left point, down to the bottom vertex, then up to the top-right — via an
+    /// animated path trim, so only the glyph animates, not the button.
     @ViewBuilder
     private func watchedButton(action: MediaItemAction) -> some View {
         Button { performHeroAction(action) } label: {
             ZStack {
-                if item.isPlayed {
-                    Image(systemName: "checkmark.circle.fill")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, ThemePalette.brandBlue)
-                        .transition(.scale(scale: 0.4).combined(with: .opacity))
-                } else {
-                    Image(systemName: "eye")
-                        .foregroundStyle(Color.primary)
-                        .transition(.scale(scale: 0.4).combined(with: .opacity))
+                Image(systemName: "eye")
+                    .foregroundStyle(Color.primary)
+                    .opacity(item.isPlayed ? 0 : 1)
+                    .scaleEffect(item.isPlayed ? 0.5 : 1)
+
+                ZStack {
+                    Circle()
+                        .fill(ThemePalette.brandBlue)
+                    CheckmarkShape()
+                        .trim(from: 0, to: checkDraw)
+                        .stroke(Color.white,
+                                style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                        .padding(heroIconSize * 0.28)
                 }
+                .opacity(item.isPlayed ? 1 : 0)
+                .scaleEffect(item.isPlayed ? 1 : 0.5)
             }
             .frame(width: heroIconSize, height: heroIconSize)
-            .animation(.spring(response: 0.34, dampingFraction: 0.62), value: item.isPlayed)
+            .animation(.easeInOut(duration: 0.22), value: item.isPlayed)
         }
         .modifier(HeroButtonStyle(prominent: false))
+        .onChange(of: item.id) { _, _ in checkDraw = item.isPlayed ? 1 : 0 }
+        .onChange(of: item.isPlayed) { _, played in
+            checkDraw = 0
+            if played {
+                withAnimation(.easeInOut(duration: 0.5).delay(0.1)) { checkDraw = 1 }
+            }
+        }
+        .onAppear { checkDraw = item.isPlayed ? 1 : 0 }
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
     }
@@ -633,6 +651,19 @@ private struct HeroButtonStyle: ViewModifier {
                 content.buttonStyle(.bordered)
             }
         }
+    }
+}
+
+/// The checkmark glyph used by the watched toggle, drawn as an explicit path so
+/// it can be animated on with `.trim`. The path runs left point ➝ bottom vertex
+/// ➝ top-right, so trimming from 0 to 1 strokes it in that natural order.
+private struct CheckmarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY + rect.height * 0.55))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.36, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
     }
 }
 

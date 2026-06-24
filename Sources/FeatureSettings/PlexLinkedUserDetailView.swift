@@ -32,12 +32,14 @@ struct PlexLinkedUserDetailView: View {
                 Text("Plex User").font(.largeTitle.bold())
 
                 if let account {
+                    let admin = users.first(where: { $0.isAdmin })
+                    let managed = users.filter { !$0.isAdmin }
                     SettingsPanel(
                         title: "On \(account.server.name)",
-                        footer: "Switching the Plex user changes the watch history, On Deck, and library restrictions Plozz uses for this profile. Protected users need a PIN — Plozz asks for it on playback and never stores it."
+                        footer: "The account owner is the main Plex account holder; the others are managed/family users under it and may need a PIN. Plozz asks for the PIN on playback and never stores it."
                     ) {
                         VStack(spacing: 0) {
-                            clearRow
+                            ownerRow(admin: admin, account: account)
                             if loading && users.isEmpty {
                                 Divider()
                                 HStack(spacing: 12) {
@@ -46,13 +48,15 @@ struct PlexLinkedUserDetailView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .padding(.vertical, 16)
-                            } else if users.isEmpty {
+                            } else if managed.isEmpty {
                                 Divider()
-                                Text("No Plex Home users found for this account.")
+                                Text(users.isEmpty
+                                     ? "No Plex Home users found for this account."
+                                     : "No managed users on this Plex account.")
                                     .foregroundStyle(.secondary)
                                     .padding(.vertical, 12)
                             } else {
-                                ForEach(users) { user in
+                                ForEach(managed) { user in
                                     Divider()
                                     userRow(user, account: account)
                                 }
@@ -78,37 +82,50 @@ struct PlexLinkedUserDetailView: View {
         }
     }
 
-    private var isClearSelected: Bool {
+    private var isOwnerSelected: Bool {
         guard let account else { return true }
         return context.activeProfile.homeUserBinding(forPlexAccount: account.id) == nil
     }
 
-    /// "Use Plex account owner" — clears the Home-user mapping and falls back
-    /// to the admin token. Useful when a profile shouldn't be tied to any
-    /// Home user.
-    private var clearRow: some View {
-        Button {
-            if let account {
-                context.onSelectPlexHomeUser(account.id, nil)
-            }
+    /// The single "play as the account owner" row. Uses the admin Home
+    /// user's real name + Plex avatar when available, so this row reads as
+    /// the owner themselves — not a generic placeholder above a duplicate
+    /// admin entry. Selecting it clears the per-account binding (same as
+    /// before: no Home-user switch, admin token, no PIN).
+    private func ownerRow(admin: PlexHomeUser?, account: Account) -> some View {
+        let displayName = admin?.name ?? "Account owner"
+        return Button {
+            context.onSelectPlexHomeUser(account.id, nil)
         } label: {
             HStack(spacing: 16) {
-                ZStack {
-                    Circle().fill(Color.primary.opacity(0.10))
-                    Image(systemName: "person.crop.circle.dashed")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
+                if let admin {
+                    avatar(for: admin, size: 52)
+                } else {
+                    ZStack {
+                        Circle().fill(ProviderIcon.tint(.plex).opacity(0.18))
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(ProviderIcon.tint(.plex))
+                    }
+                    .frame(width: 52, height: 52)
+                    .overlay(Circle().strokeBorder(ProviderIcon.tint(.plex).opacity(0.45), lineWidth: 1.5))
                 }
-                .frame(width: 52, height: 52)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Use account owner")
-                        .font(.headline)
-                    Text("No Home user — play as the signed-in Plex account")
+                    HStack(spacing: 6) {
+                        Text(displayName).font(.headline)
+                        Text("Account owner")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(ProviderIcon.tint(.plex).opacity(0.18)))
+                            .foregroundStyle(ProviderIcon.tint(.plex))
+                    }
+                    Text("Main Plex account holder — no PIN")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if isClearSelected {
+                if isOwnerSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title3)
                         .foregroundStyle(.green)

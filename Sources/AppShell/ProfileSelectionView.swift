@@ -22,6 +22,17 @@ struct ProfileSelectionView: View {
             onAddProfile: nil,
             onCancel: canCancel ? { appState.cancelProfileSelection() } : nil
         )
+        // tvOS Menu button: the picker is rendered as a top-level view (not
+        // a sheet / NavigationStack push), so without this handler Menu falls
+        // through to the system and quits the app.
+        //
+        // - canCancel: act like Cancel — dismiss back to the current profile.
+        // - !canCancel: first launch / no active profile yet — consume the
+        //   event silently so Menu can't exit the app from the mandatory
+        //   startup picker.
+        .onExitCommand {
+            if canCancel { appState.cancelProfileSelection() }
+        }
     }
 }
 #endif

@@ -41,9 +41,18 @@ public final class ArtworkImageCache: @unchecked Sendable {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
-        config.waitsForConnectivity = false
         config.httpMaximumConnectionsPerHost = 6
-        config.urlCache = URLCache.shared
+        // A generous, dedicated *byte* cache. The decoded NSCache above is capped
+        // (and evicts under memory pressure), so during fast horizontal scroll on a
+        // large multi-server Home a card's decoded image can be evicted; when the
+        // card scrolls back its art would otherwise re-fetch over the network and
+        // flash a gray placeholder ("art goes away on scroll"). URLSession.shared's
+        // tiny default URLCache (~512KB on tvOS) made that re-fetch hit the network
+        // almost every time. A large disk-backed byte cache lets the evicted image
+        // re-decode from cached bytes instantly instead — no network, no gray flash.
+        config.urlCache = URLCache(memoryCapacity: 64 * 1024 * 1024,
+                                   diskCapacity: 512 * 1024 * 1024,
+                                   diskPath: "plozz-artwork")
         config.requestCachePolicy = .returnCacheDataElseLoad
         return URLSession(configuration: config)
     }()

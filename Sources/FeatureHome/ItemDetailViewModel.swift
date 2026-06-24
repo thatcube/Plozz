@@ -158,21 +158,28 @@ public final class ItemDetailViewModel {
             // flicker). For container kinds the children rail starts empty and
             // fills in below; for leaf kinds the empty list is final.
             if needsChildren {
-                // Containers (series/season/folder/collection): the children ARE
-                // the content — seasons, episodes, the season picker, and the
-                // resolved Play target all derive from them. SeriesDetailView
-                // latches its @State (selected season + hero/Play target) from the
-                // children it first sees, so publishing an empty hero first would
-                // strand it with no seasons, no episodes and no Play button. Fetch
-                // children FIRST, then publish a complete detail. Trailers and
-                // ratings still run concurrently, after publish, off first paint.
-                let fetchedChildren = (try? await provider.children(of: item.id)) ?? []
-                try Task.checkCancellation()
-                state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
+                // Containers (series/season/folder/collection): publish the
+                // full-detail hero IMMEDIATELY (carrying whatever children we have
+                // already — usually none on a cold open) so the hero backdrop,
+                // title logo and overview are NOT gated on the children round-trip.
+                // A remote server with a large episode list (e.g. a long anime
+                // series on someone else's Jellyfin) could otherwise leave the hero
+                // blank for many seconds while `children(of:)` runs. SeriesDetailView
+                // re-latches its selected season + episodes + Play target via
+                // `.task(id: seasons.map(\.id))` the moment the children arrive —
+                // exactly as it already does for a seeded open — so an empty-children
+                // first paint is safe and never strands the season picker.
+                let seededChildren = state.value?.children ?? []
+                state = .loaded(Detail(item: taggedItem, children: seededChildren))
                 seedSources(from: taggedItem)
                 startAlternateSourceEnrichment(primaryID: item.id)
                 async let trailersDone: Void = loadTrailers(for: item)
                 async let ratingsDone: Void = enrichRatings(for: item)
+                // Children fill in off the critical path of first paint; merge them
+                // in (same item identity ⇒ no hero flicker) when they arrive.
+                let fetchedChildren = (try? await provider.children(of: item.id)) ?? []
+                try Task.checkCancellation()
+                state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
                 _ = await trailersDone
                 _ = await ratingsDone
             } else {

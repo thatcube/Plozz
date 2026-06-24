@@ -267,7 +267,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ProviderJellyfinTests",
-            dependencies: ["ProviderJellyfin", "CoreModels", "CoreNetworking"]
+            dependencies: ["ProviderJellyfin", "ProviderPlex", "CoreModels", "CoreNetworking"]
         ),
         .testTarget(
             name: "ProviderPlexTests",

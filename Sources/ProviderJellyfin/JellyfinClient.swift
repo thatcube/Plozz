@@ -228,8 +228,10 @@ public struct JellyfinClient: Sendable {
             URLQueryItem(name: "Limit", value: String(limit)),
             URLQueryItem(name: "SortBy", value: Self.sortBy(for: sort.field)),
             URLQueryItem(name: "SortOrder", value: Self.sortOrder(for: sort.direction)),
-            // Minimal fields keep the first-page payload small for a fast grid.
-            URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio"),
+            // Minimal fields keep the first-page payload small for a fast grid;
+            // ProviderIds is included so the aggregated cross-server library
+            // browse can collapse a title that lives on multiple servers.
+            URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio,ProviderIds"),
             URLQueryItem(name: "ImageTypeLimit", value: "1"),
             URLQueryItem(name: "EnableTotalRecordCount", value: "true")
         ]

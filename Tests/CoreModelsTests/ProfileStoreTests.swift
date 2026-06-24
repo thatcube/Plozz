@@ -192,8 +192,6 @@ final class ProfilesModelTests: XCTestCase {
         XCTAssertFalse(relaunched.hasRememberedSelection)
     }
 
-    func testAskOnStartupRemainsTrueEvenAfterPickIsRemembered() {
-
     // MARK: Household preferences (opt-in profiles + startup picker)
 
     func testAskOnStartupRemainsTrueEvenAfterPickIsRemembered() {

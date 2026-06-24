@@ -360,31 +360,44 @@ public struct PosterCardView: View {
     @ViewBuilder
     private func progressBar(height: CGFloat) -> some View {
         if let percentage = item.playedPercentage, percentage > 0.01, percentage < 0.99 {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    // Track: matches the main player's scrubber — Liquid Glass on
-                    // tvOS 26+, with a translucent-white fallback on older systems.
-                    if #available(tvOS 26.0, *) {
-                        Capsule(style: .continuous)
-                            .fill(.clear)
-                            .glassEffect(.regular, in: Capsule(style: .continuous))
-                    } else {
-                        Capsule(style: .continuous)
-                            .fill(.white.opacity(0.22))
-                    }
+            ZStack(alignment: .bottom) {
+                // Scrim: a slight black gradient that fades up from the bottom edge,
+                // reaching above the bar so the indicator pops off bright artwork.
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.45)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: height + 56)
+                .frame(maxWidth: .infinity)
+                .allowsHitTesting(false)
 
-                    // Fill: solid white, matching the main player's scrubber —
-                    // a bright white played fill with a subtle shadow so it reads
-                    // cleanly over both bright and dark artwork.
-                    Capsule(style: .continuous)
-                        .fill(.white)
-                        .frame(width: max(height, geo.size.width * percentage))
-                        .shadow(color: .black.opacity(0.35), radius: 3)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        // Track: matches the main player's scrubber — Liquid Glass on
+                        // tvOS 26+, with a translucent-white fallback on older systems.
+                        if #available(tvOS 26.0, *) {
+                            Capsule(style: .continuous)
+                                .fill(.clear)
+                                .glassEffect(.regular, in: Capsule(style: .continuous))
+                        } else {
+                            Capsule(style: .continuous)
+                                .fill(.white.opacity(0.22))
+                        }
+
+                        // Fill: solid white, matching the main player's scrubber —
+                        // a bright white played fill with a subtle shadow so it reads
+                        // cleanly over both bright and dark artwork.
+                        Capsule(style: .continuous)
+                            .fill(.white)
+                            .frame(width: max(height, geo.size.width * percentage))
+                            .shadow(color: .black.opacity(0.35), radius: 3)
+                    }
                 }
+                .frame(height: height)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
             }
-            .frame(height: height)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
         }
     }
 }

@@ -120,23 +120,19 @@ private struct LoadedLogo<TextFallback: View>: View {
     /// black wordmark on a dark hero flips to white and stays legible, matching how
     /// the rest of the UI adapts. Its alpha (the letter shapes) is preserved as a
     /// template mask, so only single-tone logos qualify (guarded in `finalize`),
-    /// never multi-colour brand art.
+    /// never multi-colour brand art. It needs no halo: it is recoloured to the
+    /// scheme's foreground tone and the hero scrim is the scheme's background tone,
+    /// so it is guaranteed to contrast with what sits behind it.
     @ViewBuilder
     private func logo(_ processed: ProcessedLogo) -> some View {
         if processed.isMonochrome {
             let tintLight = colorScheme == .dark   // dark mode → light (white) logo
-            let tintLuminance = tintLight ? 1.0 : 0.0
-            let needsHalo: Bool = {
-                guard let bg = processed.backgroundLuminance else { return true }
-                return abs(tintLuminance - bg) < Self.haloLuminanceThreshold
-            }()
             Image(uiImage: processed.image)
                 .renderingMode(.template)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: .leading)
                 .foregroundStyle(tintLight ? Color.white : Color.black)
-                .modifier(LogoLegibilityHalo(isDark: !tintLight, active: needsHalo))
         } else {
             Image(uiImage: processed.image)
                 .resizable()
@@ -191,9 +187,7 @@ private struct LoadedLogo<TextFallback: View>: View {
             && (prepared.luminance < 0.22 || prepared.luminance > 0.85)
 
         var needsHalo = true
-        var backgroundLuminance: Double?
         if let bg = await backgroundSample?() {
-            backgroundLuminance = bg.luminance
             let lumaGap = abs(prepared.luminance - bg.luminance)
             let colorGap = Self.perceptualDistance(
                 r1: prepared.red, g1: prepared.green, b1: prepared.blue,
@@ -206,8 +200,7 @@ private struct LoadedLogo<TextFallback: View>: View {
             image: prepared.image,
             isDark: isDark,
             needsHalo: needsHalo,
-            isMonochrome: isMonochrome,
-            backgroundLuminance: backgroundLuminance
+            isMonochrome: isMonochrome
         )
     }
 
@@ -280,15 +273,14 @@ struct PreparedLogo {
 }
 
 /// A fully-resolved hero logo ready to render: the processed image, whether it
-/// reads as dark (halo colour), whether the halo should be shown at all, whether
-/// it is a single-tone wordmark (recoloured to the scheme's foreground), and the
-/// sampled background luminance (for the recoloured logo's own halo decision).
+/// reads as dark (halo colour), whether the halo should be shown at all, and
+/// whether it is a single-tone wordmark (recoloured to the scheme's foreground,
+/// in which case it needs no halo).
 struct ProcessedLogo {
     let image: UIImage
     let isDark: Bool
     let needsHalo: Bool
     let isMonochrome: Bool
-    let backgroundLuminance: Double?
 }
 
 /// Wraps the logo in a soft, single-tone halo so it separates from the hero

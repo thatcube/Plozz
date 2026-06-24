@@ -15,6 +15,18 @@ struct ServerDetailView: View {
     let context: SettingsContext
     let serverKey: String
 
+    /// Account the user has asked to sign out, captured at button-tap so the
+    /// confirmation alert can show its name + recompute "is this the last
+    /// account?" wording even if the underlying group changes.
+    @State private var pendingSignOut: PendingSignOut?
+
+    private struct PendingSignOut: Identifiable {
+        let id: String
+        let account: Account
+        let serverName: String
+        let isLastAccount: Bool
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -34,6 +46,27 @@ struct ServerDetailView: View {
         }
         .scrollClipDisabled()
         .task { await context.reloadLibraries() }
+        .alert(item: $pendingSignOut) { pending in
+            Alert(
+                title: Text("Sign out \(pending.account.userName)?"),
+                message: Text(signOutMessage(for: pending)),
+                primaryButton: .destructive(Text("Sign Out")) {
+                    context.onRemoveAccount(pending.account)
+                },
+                secondaryButton: .cancel()
+            )
+        }
+    }
+
+    private func signOutMessage(for pending: PendingSignOut) -> String {
+        let provider = pending.account.server.provider
+        let scope = provider == .plex
+            ? "This removes the Plex sign-in for \(pending.account.userName) on this Apple TV."
+            : "This removes \(pending.account.userName)'s sign-in to \(pending.serverName) on this Apple TV."
+        if pending.isLastAccount {
+            return scope + " No one else in your household is signed in, so \(pending.serverName) will be removed from your servers until someone signs in again."
+        }
+        return scope
     }
 
     private var currentGroup: ServerAccountGroup? {
@@ -111,7 +144,10 @@ struct ServerDetailView: View {
     }
 
     private func accountRow(_ account: Account) -> some View {
-        HStack(spacing: 16) {
+        let group = currentGroup
+        let isLast = (group?.accounts.count ?? 1) <= 1
+        let serverName = group?.serverName ?? account.server.name
+        return HStack(spacing: 16) {
             AccountAvatar(name: account.userName, imageURL: resolvedAvatarURL(for: account), size: 40)
             VStack(alignment: .leading, spacing: 4) {
                 Text(account.userName).font(.headline)
@@ -129,11 +165,18 @@ struct ServerDetailView: View {
                     .accessibilityLabel("Primary account")
             }
             Button(role: .destructive) {
-                context.onRemoveAccount(account)
+                pendingSignOut = PendingSignOut(
+                    id: account.id,
+                    account: account,
+                    serverName: serverName,
+                    isLastAccount: isLast
+                )
             } label: {
-                Image(systemName: "trash")
+                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    .labelStyle(.titleAndIcon)
+                    .font(.callout.weight(.semibold))
             }
-            .accessibilityLabel("Remove \(account.userName)")
+            .accessibilityLabel("Sign out \(account.userName) from \(serverName)")
         }
         .padding(.vertical, 2)
     }

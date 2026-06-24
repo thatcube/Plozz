@@ -30,6 +30,48 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.value?.children.map(\.id), ["s1", "s2"])
     }
 
+    func testEnrichesAlternateSourcesAndUnifiesWatchState() async {
+        let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021,
+                                sourceAccountID: "plex",
+                                versions: [MediaVersion(id: "pv", height: 1080)])
+        let alt = MediaItem(id: "j1", title: "Dune", kind: .movie, productionYear: 2021,
+                            resumePosition: 300,
+                            sourceAccountID: "jelly",
+                            versions: [MediaVersion(id: "jv", height: 2160)],
+                            lastPlayedAt: Date(timeIntervalSince1970: 1000))
+        let provider = FakeMediaProvider(allItems: [primary, alt])
+        let sources = [
+            MediaSourceRef(accountID: "plex", itemID: "p1"),
+            MediaSourceRef(accountID: "jelly", itemID: "j1")
+        ]
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "p1", sourceAccountID: "plex",
+            initialSources: sources,
+            alternateProviderResolver: { _ in provider }
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.sources.count, 2)
+        XCTAssertEqual(vm.sources.first { $0.accountID == "plex" }?.versions.map(\.id), ["pv"],
+                       "Primary source seeded with the loaded detail's own versions")
+        let jelly = vm.sources.first { $0.accountID == "jelly" }
+        XCTAssertEqual(jelly?.versions.map(\.id), ["jv"], "Alternate server's versions fetched off the critical path")
+        XCTAssertEqual(jelly?.resumePosition, 300)
+        XCTAssertEqual(vm.state.value?.item.resumePosition, 300,
+                       "Detail hero reflects unified (newest-wins) progress from the alternate server")
+    }
+
+    func testSingleSourceItemHasNoSourcePicker() async {
+        let movie = MediaItem(id: "m1", title: "Arrival", kind: .movie, productionYear: 2016,
+                              sourceAccountID: "plex")
+        let provider = FakeMediaProvider(allItems: [movie])
+        let vm = ItemDetailViewModel(provider: provider, itemID: "m1", sourceAccountID: "plex",
+                                     initialSources: [MediaSourceRef(accountID: "plex", itemID: "m1")])
+        await vm.load()
+        XCTAssertTrue(vm.sources.isEmpty, "A single-server title carries no sources (no server picker)")
+    }
+
     func testLoadEpisodesFetchesAndCachesPerSeason() async {
         let provider = FakeMediaProvider(allItems: [series("show")])
         provider.childrenByParent = [
@@ -325,7 +367,7 @@ final class ItemDetailViewModelTests: XCTestCase {
 
         await vm.load()
 
-        XCTAssertEqual(cache.outcome(for: "m1"), .none)
+        XCTAssertEqual(cache.outcome(for: "m1"), TrailerResolutionCache.Outcome.none)
         XCTAssertTrue(vm.trailers.isEmpty)
     }
 

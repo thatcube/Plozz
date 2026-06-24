@@ -31,6 +31,9 @@ public struct ItemDetailView: View {
     /// The user's explicit version override for this visit. `nil` means "use the
     /// remembered preference, else the smart recommended default".
     @State private var versionOverride: String?
+    /// The user's explicit server override for this visit (an `Account.id`). `nil`
+    /// means "use the cross-server best-source default". Cleared sources reset it.
+    @State private var sourceOverride: String?
 
     public init(
         viewModel: ItemDetailViewModel,
@@ -93,7 +96,10 @@ public struct ItemDetailView: View {
     private static let topAnchorID = "item-hero-top"
 
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {
-        let effectiveVersionID = effectiveVersionID(for: detail.item)
+        let sources = viewModel.sources
+        let effectiveSource = effectiveSource(for: detail.item, sources: sources)
+        let effectiveVersions = effectiveVersions(for: detail.item, source: effectiveSource)
+        let effectiveVersionID = effectiveVersionID(for: detail.item, in: effectiveVersions)
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 32) {
@@ -102,14 +108,17 @@ public struct ItemDetailView: View {
                         heroHeightFraction: detail.children.isEmpty ? 1.0 : 0.8,
                         spoilerSettings: spoilerSettings,
                         playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
-                        onPlay: isPlayable(detail.item) ? { onPlay(detail.item.selectingVersion(effectiveVersionID)) } : nil,
+                        onPlay: isPlayable(detail.item) ? { onPlay(playItem(for: detail.item, source: effectiveSource, versionID: effectiveVersionID)) } : nil,
                         playProgress: isPlayable(detail.item) ? detail.item.resumeProgressFraction : nil,
                         playRemainingText: isPlayable(detail.item) ? detail.item.resumeRemainingText : nil,
                         onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
-                        versions: detail.item.versions,
+                        versions: effectiveVersions,
                         selectedVersionID: effectiveVersionID,
                         capabilities: capabilities,
                         onSelectVersion: { id in selectVersion(id, for: detail.item) },
+                        sources: sources,
+                        selectedSourceAccountID: effectiveSource?.accountID,
+                        onSelectSource: sources.count > 1 ? { id in selectSource(id) } : nil,
                         fallbackTechnicalBadges: detail.children.representativeTechnicalBadges,
                         playButtonFocus: $playFocused
                     )
@@ -173,18 +182,59 @@ public struct ItemDetailView: View {
 
     /// The version id `Play` should target right now: the user's in-session
     /// override, else their remembered per-title preference (if still offered),
-    /// else the smart capability-aware recommended default. `nil` when the title
-    /// has no selectable versions (server picks).
-    private func effectiveVersionID(for item: MediaItem) -> String? {
-        guard item.hasMultipleVersions else { return nil }
-        if let versionOverride, item.versions.contains(where: { $0.id == versionOverride }) {
+    /// else the smart capability-aware recommended default. `nil` when the chosen
+    /// source has no selectable versions (server picks). Computed against the
+    /// *effective source's* versions so switching servers re-defaults correctly.
+    private func effectiveVersionID(for item: MediaItem, in versions: [MediaVersion]) -> String? {
+        guard versions.count > 1 else { return nil }
+        if let versionOverride, versions.contains(where: { $0.id == versionOverride }) {
             return versionOverride
         }
         let remembered = versionPreferences.preferredVersionID(forTitle: versionPreferenceKey(for: item))
-        if let remembered, item.versions.contains(where: { $0.id == remembered }) {
+        if let remembered, versions.contains(where: { $0.id == remembered }) {
             return remembered
         }
-        return item.versions.recommendedSelection(for: capabilities)?.id
+        return versions.recommendedSelection(for: capabilities)?.id
+    }
+
+    /// The server `Play` should target right now: the user's in-session server
+    /// override, else the cross-server best-source default (highest-quality
+    /// Direct-Play option this device can play), else the primary. `nil` for a
+    /// single-server title (no server picker; legacy version-only flow).
+    private func effectiveSource(for item: MediaItem, sources: [MediaSourceRef]) -> MediaSourceRef? {
+        guard sources.count > 1 else { return nil }
+        if let sourceOverride, let match = sources.first(where: { $0.accountID == sourceOverride }) {
+            return match
+        }
+        if let best = CrossSourceSelector.bestSelection(from: sources, capabilities: capabilities) {
+            return best.source
+        }
+        return sources.first
+    }
+
+    /// The versions to offer in the version picker: the chosen server's files when
+    /// a source is selected (empty until that server's detail resolves → server
+    /// default plays), else the loaded item's own versions (single-server flow).
+    private func effectiveVersions(for item: MediaItem, source: MediaSourceRef?) -> [MediaVersion] {
+        guard let source else { return item.versions }
+        return source.versions
+    }
+
+    /// Builds the retargeted item `Play` should launch: when a cross-server source
+    /// is chosen, the item is repointed to that server's id/versions/watch-state
+    /// (and version, if any); otherwise the legacy single-server version select.
+    private func playItem(for item: MediaItem, source: MediaSourceRef?, versionID: String?) -> MediaItem {
+        if let source {
+            return item.selectingSource(source, versionID: versionID)
+        }
+        return item.selectingVersion(versionID)
+    }
+
+    /// Records the user's server choice for this visit and clears the version
+    /// override so the newly-selected server re-defaults to its own best version.
+    private func selectSource(_ accountID: String) {
+        sourceOverride = accountID
+        versionOverride = nil
     }
 
     /// Records the user's version choice for this visit and remembers it for next

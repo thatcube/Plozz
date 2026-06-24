@@ -147,6 +147,14 @@ private func resolveProvider(_ accountID: String?, in accounts: [ResolvedAccount
     return accounts[0].provider
 }
 
+/// Resolves a specific account id to its provider, or `nil` when that account is
+/// no longer signed in. Used by the detail page to fetch a merged title's
+/// *alternate* servers' versions/watch-state for the server picker — a missing
+/// account simply drops that source rather than falling back to another server.
+private func resolveOptionalProvider(_ accountID: String, in accounts: [ResolvedAccount]) -> (any MediaProvider)? {
+    accounts.first(where: { $0.account.id == accountID })?.provider
+}
+
 /// Builds the player for a play request. Online (TMDb → YouTube) trailers carry a
 /// YouTube video-id marker and have no backing account, so they are routed to
 /// ``YouTubeTrailerProvider`` (which extracts a playable stream); every other
@@ -250,7 +258,9 @@ private struct HomeTab: View {
                         provider: resolveProvider(item.sourceAccountID, in: accounts),
                         itemID: item.id,
                         ratingsProvider: ratingsProvider,
-                        sourceAccountID: item.sourceAccountID
+                        sourceAccountID: item.sourceAccountID,
+                        initialSources: item.sources,
+                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) }
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },
@@ -439,7 +449,9 @@ private struct SearchTab: View {
                         provider: resolveProvider(item.sourceAccountID, in: accounts),
                         itemID: item.id,
                         ratingsProvider: ratingsProvider,
-                        sourceAccountID: item.sourceAccountID
+                        sourceAccountID: item.sourceAccountID,
+                        initialSources: item.sources,
+                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) }
                     ),
                     spoilerSettings: spoilerSettings,
                     onPlay: { requestPlay($0) },

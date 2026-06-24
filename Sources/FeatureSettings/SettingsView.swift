@@ -17,6 +17,25 @@ import TraktService
 /// destinations don't render blank — pushed pickers inside tvOS sheets are
 /// the known IA pitfall this rewrite explicitly avoids.
 public struct SettingsView: View {
+    /// Typed routes for the Settings drill-down. Using `navigationDestination(for:)`
+    /// (instead of `NavigationLink(destination:label:)` closures inside a
+    /// ScrollView) is the pattern that reliably pushes onto the tab's
+    /// NavigationStack on tvOS — the closure-based form sometimes hosts the
+    /// destination *outside* the stack, so the Menu/Back button quits the app
+    /// instead of popping back.
+    private enum SettingsRoute: Hashable {
+        case profile
+        case servers
+        case appearance
+        case playback
+        case captions
+        case spoilers
+        case integrations
+        case about
+    }
+
+    @State private var path: [SettingsRoute] = []
+
     private let captions: CaptionSettingsModel
     private let spoilers: SpoilerSettingsModel
     private let theme: ThemeSettingsModel
@@ -136,7 +155,7 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     Text("Settings")
@@ -154,59 +173,40 @@ public struct SettingsView: View {
                         VStack(spacing: 0) {
                             if profilesEnabled {
                                 navRow("Profile", icon: "person.crop.circle",
-                                       value: activeProfile.name) {
-                                    ProfileDetailView(
-                                        context: context,
-                                        appVersion: appVersion,
-                                        appBuild: appBuild,
-                                        repoURL: repoURL
-                                    )
-                                }
+                                       value: activeProfile.name,
+                                       route: .profile)
                                 Divider()
                             } else {
                                 enableProfilesRow
                                 Divider()
                             }
                             navRow("Server Accounts", icon: "person.2.crop.square.stack",
-                                   value: serverAccountsSummary) {
-                                ServersAndLibrariesDetailView(context: context)
-                            }
+                                   value: serverAccountsSummary,
+                                   route: .servers)
                             Divider()
                             navRow("Appearance", icon: "paintpalette",
-                                   value: theme.theme.displayName) {
-                                AppearanceDetailView(theme: theme)
-                            }
+                                   value: theme.theme.displayName,
+                                   route: .appearance)
                             Divider()
                             navRow("Playback", icon: "play.rectangle",
-                                   value: diagnostics.settings.isEnabled ? "Diagnostics on" : nil) {
-                                PlaybackDetailView(diagnostics: diagnostics)
-                            }
+                                   value: diagnostics.settings.isEnabled ? "Diagnostics on" : nil,
+                                   route: .playback)
                             Divider()
                             navRow("Captions", icon: "captions.bubble",
-                                   value: nil) {
-                                CaptionsDetailView(captions: captions)
-                            }
+                                   value: nil,
+                                   route: .captions)
                             Divider()
                             navRow("Spoilers", icon: "eye.slash",
-                                   value: spoilers.settings.isEnabled ? "On" : "Off") {
-                                SpoilersDetailView(spoilers: spoilers)
-                            }
+                                   value: spoilers.settings.isEnabled ? "On" : "Off",
+                                   route: .spoilers)
                             Divider()
                             navRow("Integrations", icon: "link",
-                                   value: traktSummary) {
-                                IntegrationsDetailView(trakt: trakt)
-                            }
+                                   value: traktSummary,
+                                   route: .integrations)
                             Divider()
                             navRow("About & Sign Out", icon: "info.circle",
-                                   value: nil) {
-                                AboutDetailView(
-                                    version: appVersion,
-                                    build: appBuild,
-                                    repoURL: repoURL,
-                                    canSignOut: !accounts.isEmpty,
-                                    onSignOutAll: onSignOutAll
-                                )
-                            }
+                                   value: nil,
+                                   route: .about)
                         }
                     }
                 }
@@ -214,7 +214,43 @@ public struct SettingsView: View {
                 .padding(.vertical, 40)
             }
             .scrollClipDisabled()
+            .navigationDestination(for: SettingsRoute.self) { route in
+                destination(for: route)
+            }
             .task { await reloadLibraries() }
+        }
+    }
+
+    @ViewBuilder
+    private func destination(for route: SettingsRoute) -> some View {
+        switch route {
+        case .profile:
+            ProfileDetailView(
+                context: context,
+                appVersion: appVersion,
+                appBuild: appBuild,
+                repoURL: repoURL
+            )
+        case .servers:
+            ServersAndLibrariesDetailView(context: context)
+        case .appearance:
+            AppearanceDetailView(theme: theme)
+        case .playback:
+            PlaybackDetailView(diagnostics: diagnostics)
+        case .captions:
+            CaptionsDetailView(captions: captions)
+        case .spoilers:
+            SpoilersDetailView(spoilers: spoilers)
+        case .integrations:
+            IntegrationsDetailView(trakt: trakt)
+        case .about:
+            AboutDetailView(
+                version: appVersion,
+                build: appBuild,
+                repoURL: repoURL,
+                canSignOut: !accounts.isEmpty,
+                onSignOutAll: onSignOutAll
+            )
         }
     }
 
@@ -291,19 +327,20 @@ public struct SettingsView: View {
         }
     }
 
-    /// Settings drill-down row. Uses a `NavigationLink` so destinations are
-    /// pushed onto the root `NavigationStack` (not into a sheet) — this is
-    /// the only pattern that renders correctly with pushed pickers on tvOS.
+    /// Settings drill-down row. Uses a value-based `NavigationLink` that pushes
+    /// onto the root `NavigationStack` via `navigationDestination(for:)` — this
+    /// is the only pattern that reliably keeps the Menu/Back button bound to
+    /// "pop one level" on tvOS. Closure-based `NavigationLink(destination:)`
+    /// inside a ScrollView occasionally hosts the destination outside the
+    /// stack, in which case Menu quits the app.
     @ViewBuilder
-    private func navRow<Destination: View>(
+    private func navRow(
         _ title: String,
         icon: String,
         value: String?,
-        @ViewBuilder destination: () -> Destination
+        route: SettingsRoute
     ) -> some View {
-        NavigationLink {
-            destination()
-        } label: {
+        NavigationLink(value: route) {
             HStack(spacing: 16) {
                 Image(systemName: icon)
                     .frame(width: 28)

@@ -192,7 +192,28 @@ final class ProfilesModelTests: XCTestCase {
         XCTAssertFalse(relaunched.hasRememberedSelection)
     }
 
+    func testAskOnStartupRemainsTrueEvenAfterPickIsRemembered() {
+
     // MARK: Household preferences (opt-in profiles + startup picker)
+
+    func testAskOnStartupRemainsTrueEvenAfterPickIsRemembered() {
+        // The "Ask on startup" toggle is the single source of truth for the
+        // launch picker. Picking a profile must not silently flip it off, and
+        // it must not be suppressed by the system-user "remembered selection"
+        // path on its own — that path provides the picker's *initial* focus,
+        // not a reason to skip the picker entirely.
+        let defaults = makeDefaults()
+        let model = ProfilesModel(store: ProfileStore(defaults: defaults))
+        let kid = model.add(name: "Kid")
+        XCTAssertTrue(model.askProfileOnStartup)
+        model.select(kid.id)
+        XCTAssertTrue(model.hasRememberedSelection)
+        XCTAssertTrue(model.askProfileOnStartup, "Picking a profile must not turn off the launch toggle")
+        // Survives relaunch.
+        let relaunched = ProfilesModel(store: ProfileStore(defaults: defaults))
+        XCTAssertTrue(relaunched.hasRememberedSelection)
+        XCTAssertTrue(relaunched.askProfileOnStartup)
+    }
 
     func testSoloHouseholdDefaultsToProfilesDisabledAndNoStartupAsk() {
         // A brand-new install with the single migrated default profile must

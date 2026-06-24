@@ -212,21 +212,22 @@ public final class AppState {
 
     /// Restores stored accounts on launch (relaunch without re-login), migrating
     /// any legacy single session first. Shows the profile picker when the
-    /// household has opted into "ask on startup" (default = `profiles.count > 1`).
+    /// household has opted into "ask on startup".
     public func bootstrap() {
         accountStore.migrateLegacySessionIfNeeded()
         reloadAccounts()
-        // Honor the household-level "Ask which profile on startup" toggle.
-        // With more than one profile, the toggle defaults to true (preserving
-        // the old "always show the picker" behavior) but the user can turn it
-        // off — turning it off makes the picker not auto-appear and the app
-        // boots straight into the last-used profile (or the only one).
-        // Within a single Apple TV system user that already has a remembered
-        // pick, we still respect that remembered pick.
-        let systemRemembers = mayRememberProfileSelection && profilesModel.hasRememberedSelection
+        // The "Ask which profile on startup" toggle is the single source of
+        // truth for whether the launch picker appears. When it's ON we MUST
+        // show the picker even if the Apple TV system user has a remembered
+        // selection — the remembered pick becomes the picker's initial focus,
+        // not a reason to skip the picker entirely. Otherwise an already-
+        // selected household would never see the picker again, which
+        // contradicts what the toggle promises.
+        //
+        // When the toggle is OFF, the remembered selection (or default
+        // profile) is used silently and the picker stays hidden.
         isChoosingProfile = profilesModel.askProfileOnStartup
             && profilesModel.profiles.count > 1
-            && !systemRemembers
         apply(.restored(accounts))
         // Honor a remembered/auto-landed profile's Plex Home-user mapping at
         // launch. When the picker is shown, the switch happens once the user

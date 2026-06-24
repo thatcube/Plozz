@@ -18,6 +18,7 @@ public struct PosterCardView: View {
     private let item: MediaItem
     private let style: Style
     private let spoilerSettings: SpoilerSettings
+    private let enablesAsyncArtworkFallback: Bool
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -28,11 +29,13 @@ public struct PosterCardView: View {
         item: MediaItem,
         style: Style = .poster,
         spoilerSettings: SpoilerSettings = .default,
+        enablesAsyncArtworkFallback: Bool = true,
         action: @escaping () -> Void
     ) {
         self.item = item
         self.style = style
         self.spoilerSettings = spoilerSettings
+        self.enablesAsyncArtworkFallback = enablesAsyncArtworkFallback
         self.action = action
     }
 
@@ -219,6 +222,7 @@ public struct PosterCardView: View {
     /// genuine thumbnail), then falls back to the show's backdrop — anime via
     /// Shoko/AniDB usually ship no per-episode image, so TMDb supplies it.
     private var asyncArtworkFallback: (@Sendable () async -> URL?)? {
+        guard enablesAsyncArtworkFallback else { return nil }
         if style == .poster { return tmdbPosterFallback }
         if item.kind == .episode,
            item.seasonNumber != nil,

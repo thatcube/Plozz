@@ -170,13 +170,14 @@ public struct PlexClient: Sendable {
         sectionID: String,
         type: Int?,
         start: Int,
-        size: Int
+        size: Int,
+        sort: CoreModels.SortDescriptor
     ) async throws -> PlexMediaContainer {
         var query = containerQuery(start: start, size: size)
         if let type {
             query.append(URLQueryItem(name: "type", value: String(type)))
         }
-        query.append(URLQueryItem(name: "sort", value: "titleSort"))
+        query.append(URLQueryItem(name: "sort", value: Self.sortQuery(for: sort)))
         let endpoint = Endpoint(path: "/library/sections/\(sectionID)/all", queryItems: query, headers: headers)
         return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
     }
@@ -623,6 +624,28 @@ public struct PlexClient: Sendable {
             // metadata router with no external ids to match (or detect anime) by.
             URLQueryItem(name: "includeGuids", value: "1")
         ]
+    }
+
+    /// Maps provider-agnostic browse sorting to Plex's `sort` query language
+    /// (`field:asc|desc`, with `random` as a standalone key).
+    private static func sortQuery(for sort: CoreModels.SortDescriptor) -> String {
+        let field: String
+        switch sort.field {
+        case .name:
+            field = "titleSort"
+        case .dateAdded:
+            field = "addedAt"
+        case .releaseDate:
+            field = "originallyAvailableAt"
+        case .communityRating:
+            field = "rating"
+        case .runtime:
+            field = "duration"
+        case .random:
+            return "random"
+        }
+        let direction = (sort.direction == .ascending) ? "asc" : "desc"
+        return "\(field):\(direction)"
     }
 
     private func absoluteURL(serverPath path: String, extraQuery: [URLQueryItem]) -> URL? {

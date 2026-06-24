@@ -20,6 +20,13 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     /// Optional start index at which `items(in:page:)` throws once.
     var failAtStartIndex: Int?
     private(set) var requestedPages: [PageRequest] = []
+    /// Optional hook called as soon as `items(in:page:)` is requested.
+    var onItemsRequest: (@Sendable (PageRequest) -> Void)?
+    /// Optional per-page async hook that runs before the page response is returned.
+    /// Useful for tests that need to hold/cancel a page load while it is in-flight.
+    var pageHooks: [Int: @Sendable () async throws -> Void] = [:]
+    /// Start indices whose page request was cancelled while awaiting `pageHooks`.
+    private(set) var cancelledPageStartIndices: [Int] = []
 
     init(allItems: [MediaItem]) {
         self.allItems = allItems
@@ -59,6 +66,15 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
 
     func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         requestedPages.append(page)
+        onItemsRequest?(page)
+        do {
+            if let hook = pageHooks[page.startIndex] {
+                try await hook()
+            }
+        } catch is CancellationError {
+            cancelledPageStartIndices.append(page.startIndex)
+            throw CancellationError()
+        }
         if let failAt = failAtStartIndex, failAt == page.startIndex {
             failAtStartIndex = nil
             throw AppError.serverUnreachable

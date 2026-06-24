@@ -10,6 +10,19 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         return (vm, provider)
     }
 
+    private func waitUntil(
+        _ message: String = "Condition not met before timeout",
+        timeout: TimeInterval = 1.0,
+        _ condition: @escaping () -> Bool
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail(message)
+    }
+
     func testLoadFirstPageSizesGridToTotalAndLoadsOnlyFirstPage() async {
         let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
         await vm.loadFirstPage()
@@ -44,7 +57,12 @@ final class LibraryBrowseViewModelTests: XCTestCase {
         // Index 5 is in the back half of page 0, so page 1 is prefetched.
         await vm.itemAppeared(at: 5)
 
-        XCTAssertTrue(provider.requestedPages.contains { $0.startIndex == 10 })
+        await waitUntil("Expected prefetch of page 1") {
+            provider.requestedPages.contains { $0.startIndex == 10 }
+        }
+        await waitUntil("Expected prefetched items to be filled") {
+            vm.item(at: 12) != nil
+        }
         XCTAssertNotNil(vm.item(at: 12))
     }
 
@@ -69,6 +87,83 @@ final class LibraryBrowseViewModelTests: XCTestCase {
 
         let page2Requests = provider.requestedPages.filter { $0.startIndex == 20 }
         XCTAssertEqual(page2Requests.count, 1, "A loaded page is never re-requested")
+    }
+
+    func testDuplicateInFlightPageRequestsAreCoalesced() async {
+        let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
+        provider.pageHooks[20] = { try await Task.sleep(nanoseconds: 300_000_000) }
+        await vm.loadFirstPage()
+
+        async let first: Void = vm.itemAppeared(at: 20)
+        async let second: Void = vm.itemAppeared(at: 21)
+        _ = await (first, second)
+
+        let page2Requests = provider.requestedPages.filter { $0.startIndex == 20 }
+        XCTAssertEqual(page2Requests.count, 1, "Concurrent visible cells coalesce onto one in-flight page request")
+    }
+
+    func testFastScrollJumpPrefetchesFurtherAhead() async {
+        let (vm, provider) = makeVM(itemCount: 200, pageSize: 10)
+        await vm.loadFirstPage()
+        await vm.itemAppeared(at: 5)
+        await vm.itemAppeared(at: 26) // jump > 2 pages, should widen look-ahead prefetch
+
+        await waitUntil("Expected widened prefetch window after fast jump") {
+            let starts = Set(provider.requestedPages.map(\.startIndex))
+            return starts.contains(30) && starts.contains(40)
+        }
+        let starts = Set(provider.requestedPages.map(\.startIndex))
+        XCTAssertTrue(starts.contains(30))
+        XCTAssertTrue(starts.contains(40))
+    }
+
+    func testScrolledAwayPageCancelsInFlightLoad() async {
+        let (vm, provider) = makeVM(itemCount: 100, pageSize: 10)
+        provider.pageHooks[20] = { try await Task.sleep(nanoseconds: 5_000_000_000) }
+        await vm.loadFirstPage()
+
+        let appearTask = Task { await vm.itemAppeared(at: 20) }
+        await waitUntil("Expected page 20 request to start") {
+            provider.requestedPages.contains { $0.startIndex == 20 }
+        }
+
+        vm.itemDisappeared(at: 20)
+        appearTask.cancel()
+
+        await waitUntil("Expected page 20 request to cancel") {
+            provider.cancelledPageStartIndices.contains(20)
+        }
+        XCTAssertNil(vm.item(at: 20))
+    }
+
+    func testDefaultPageSizeUsesFastFirstPageThenSteadyStatePageSize() async {
+        let provider = FakeMediaProvider(allItems: makeItems(300))
+        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie)
+        await vm.loadFirstPage()
+
+        XCTAssertEqual(provider.requestedPages.first?.startIndex, 0)
+        XCTAssertEqual(provider.requestedPages.first?.limit, 28, "Default browse should use a smaller first page for fast first paint")
+
+        await vm.itemAppeared(at: 20) // back half of first page -> prefetch next
+        await waitUntil("Expected steady-state page request") {
+            provider.requestedPages.contains { $0.startIndex == 28 }
+        }
+        let steady = provider.requestedPages.first { $0.startIndex == 28 }
+        XCTAssertEqual(steady?.limit, 42, "After first paint, browse should use larger steady-state page size")
+    }
+
+    func testCustomPageSizeRemainsUntuned() async {
+        let provider = FakeMediaProvider(allItems: makeItems(100))
+        let vm = LibraryBrowseViewModel(provider: provider, containerID: "lib1", containerKind: .movie, pageSize: 15)
+        await vm.loadFirstPage()
+
+        XCTAssertEqual(provider.requestedPages.first?.limit, 15)
+        await vm.itemAppeared(at: 10)
+        await waitUntil("Expected second custom-sized page request") {
+            provider.requestedPages.contains { $0.startIndex == 15 }
+        }
+        let second = provider.requestedPages.first { $0.startIndex == 15 }
+        XCTAssertEqual(second?.limit, 15)
     }
 
     func testAppearingOutOfRangeIsIgnored() async {

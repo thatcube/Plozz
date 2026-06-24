@@ -121,9 +121,9 @@ ids fixes matching accuracy across every provider.
 
 ## Build status
 
-`xcodegen generate` + tvOS device `xcodebuild` → **BUILD SUCCEEDED** (no new
-warnings in any changed file). `swift test` is not runnable in this repo (mpv
-xcframeworks are tvOS‑only), so the device build is the authoritative check.
+`swift test` covers the pure-logic package modules. tvOS `xcodebuild` (plus the
+EngineMPVProbe gate when run) remains the authoritative check for the mpv-backed
+on-device engine because its local xcframeworks are tvOS-only.
 
 ---
 

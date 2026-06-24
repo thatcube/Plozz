@@ -73,6 +73,14 @@ final class UserSessionRedactionTests: XCTestCase {
     }
 }
 
+final class ProviderKindTests: XCTestCase {
+    func testJellyfinAndPlexAreBothFirstClassProviders() {
+        XCTAssertEqual(Set(ProviderKind.allCases), [.jellyfin, .plex])
+        XCTAssertEqual(ProviderKind.jellyfin.displayName, "Jellyfin")
+        XCTAssertEqual(ProviderKind.plex.displayName, "Plex")
+    }
+}
+
 final class SpoilerSettingsTests: XCTestCase {
     private let enabled = SpoilerSettings(isEnabled: true, mode: .blur)
 

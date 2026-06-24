@@ -4,7 +4,7 @@ import Foundation
 /// loading / loaded / empty / error rendering.
 ///
 /// Keeping this in `CoreModels` means every feature renders these states the
-/// same way (a Phase 1 UX requirement) without duplicating the enum.
+/// same way without duplicating the enum.
 public enum LoadState<Value: Sendable>: Sendable {
     case idle
     case loading

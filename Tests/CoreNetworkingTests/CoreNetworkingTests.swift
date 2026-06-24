@@ -41,11 +41,41 @@ final class PlozzLogRedactionTests: XCTestCase {
         XCTAssertEqual(redacted["Accept"], "application/json")
     }
 
+    func testAllProviderSensitiveHeadersRedacted() {
+        // Every header that may carry a backend access token must be redacted —
+        // covers Jellyfin (X-Emby-Authorization / X-MediaBrowser-Token), Plex
+        // (X-Plex-Token), and the generic `Authorization` bearer, including
+        // case-insensitive variants.
+        let redacted = PlozzLog.redact(headers: [
+            "authorization": "Bearer xyz",
+            "X-Emby-Authorization": "MediaBrowser Token=\"s\"",
+            "x-mediabrowser-token": "tok",
+            "X-Plex-Token": "plextok",
+            "Accept-Language": "en"
+        ])
+        XCTAssertEqual(redacted["authorization"], "<redacted>")
+        XCTAssertEqual(redacted["X-Emby-Authorization"], "<redacted>")
+        XCTAssertEqual(redacted["x-mediabrowser-token"], "<redacted>")
+        XCTAssertEqual(redacted["X-Plex-Token"], "<redacted>")
+        XCTAssertEqual(redacted["Accept-Language"], "en")
+    }
+
     func testSecretQueryItemsRedacted() {
         let url = URL(string: "http://h/QuickConnect/Connect?secret=abc&Limit=5")!
         let result = PlozzLog.redact(url: url)
         XCTAssertFalse(result.contains("abc"))
         XCTAssertTrue(result.contains("Limit=5"))
+    }
+
+    func testAllSensitiveQueryParametersRedacted() {
+        // Each provider has its own conventional name for a per-request token /
+        // key in the query string. Each must be stripped to <redacted> in logs.
+        let url = URL(string: "http://h/x?secret=A&api_key=B&apikey=C&token=D&X-Plex-Token=E&keep=ok")!
+        let result = PlozzLog.redact(url: url)
+        for leak in ["A", "B", "C", "D", "E"] {
+            XCTAssertFalse(result.contains("=\(leak)"), "Expected secret value '\(leak)' to be redacted, got: \(result)")
+        }
+        XCTAssertTrue(result.contains("keep=ok"))
     }
 }
 

@@ -51,17 +51,30 @@ app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 | Module | Responsibility |
 | --- | --- |
-| `CoreModels` | Domain models, `AppError`, `LoadState`, caption settings, and the **`MediaProvider`** protocol (the provider abstraction). |
-| `CoreNetworking` | `HTTPClient`, `Endpoint`, URL normalization, and a secret-safe logger (`PlozzLog`). |
-| `ProviderJellyfin` | Jellyfin REST client, DTOs, and a `MediaProvider` implementation. |
-| `ProviderPlex` | Plex client, DTOs, and a `MediaProvider` implementation. |
-| `FeatureDiscovery` | LAN (UDP) discovery, server validation, server-picker UI, last-server persistence. |
-| `FeatureAuth` | Quick Connect / Plex Link services, explicit **session state machine**, Keychain-backed `SessionStore`. |
-| `FeatureHome` | Home rows, item detail, and the series/season experience. |
-| `FeaturePlayback` | `AVPlayer` view model/view, engine routing, resume reporting, caption style rules. |
-| `FeatureSettings` | Settings, including caption customization. |
-| `CoreUI` | Shared focusable components and theme. |
-| `AppShell` | App state wiring and root navigation. |
+| [`CoreModels`](Sources/CoreModels/README.md) | Domain models, `AppError`, `LoadState`, caption settings, and the **`MediaProvider`** protocol (the provider abstraction). |
+| [`CoreNetworking`](Sources/CoreNetworking/README.md) | `HTTPClient`, `Endpoint`, URL normalization, and a secret-safe logger (`PlozzLog`). |
+| [`CoreUI`](Sources/CoreUI/README.md) | Shared focusable components, theme, image cache, content-state views. |
+| [`ProviderJellyfin`](Sources/ProviderJellyfin/README.md) | Jellyfin REST client, DTOs, device profile, and a `MediaProvider` implementation. |
+| [`ProviderPlex`](Sources/ProviderPlex/README.md) | Plex client, DTOs, PIN/auth, connection resolver/selector, and a `MediaProvider` implementation. |
+| [`ProviderTrailers`](Sources/ProviderTrailers/README.md) | Synthetic `MediaProvider` for online (YouTube) trailers, with stream extraction via YouTubeKit. |
+| [`MetadataKit`](Sources/MetadataKit/README.md) | Keyless-first artwork & metadata enrichment (AniList, Kitsu, TVmaze, Deezer, MusicBrainz/CAA, Wikidata/Wikipedia) routed by content type with a persistent on-disk cache. Optional maintainer-hosted TMDb tier. |
+| [`RatingsService`](Sources/RatingsService/README.md) | External ratings enrichment (OMDb optional key, keyless AniList) with on-disk cache. |
+| [`TraktService`](Sources/TraktService/README.md) | Optional Trakt OAuth, scrobbling, and watched/sync helpers. |
+| [`EngineMPV`](Sources/EngineMPV/README.md) | libmpv-backed `VideoEngine` conformer for codecs/containers AVPlayer can't decode (linked at the composition root). |
+| [`TopShelfKit`](Sources/TopShelfKit/README.md) | Domain-to-snapshot mapping for the Top Shelf extension; writes to the shared App Group container. |
+| [`FeatureDiscovery`](Sources/FeatureDiscovery/README.md) | LAN (UDP) discovery, server validation, server-picker UI, last-server persistence. |
+| [`FeatureAuth`](Sources/FeatureAuth/README.md) | Quick Connect, Plex Link, password sign-in, the explicit **session state machine**, Keychain-backed account/session stores. |
+| [`FeatureHome`](Sources/FeatureHome/README.md) | Home rows, item detail, series/season experience, online trailer fallback. |
+| [`FeaturePlayback`](Sources/FeaturePlayback/README.md) | `AVPlayer` view model/view, engine routing, resume reporting, caption style rules, idle-sleep handling, diagnostics overlay. |
+| [`FeatureSearch`](Sources/FeatureSearch/README.md) | Search view & view model, deduplication, search policy. |
+| [`FeatureSettings`](Sources/FeatureSettings/README.md) | Settings (profiles, integrations, server, caption customization, preference detail). |
+| [`FeatureProfiles`](Sources/FeatureProfiles/README.md) | Profile picker, editor, avatar/photo capture (household "Who's watching?"). |
+| [`FeatureMusic`](Sources/FeatureMusic/README.md) | Music browsing, mini-player, queue/now-playing, background audio. |
+| [`AppShell`](Sources/AppShell/README.md) | App state wiring, root navigation, profile selection, provider/registry composition. |
+
+Each module's `README.md` documents its responsibility, public surface,
+invariants (secrets, provider-agnosticism, platform portability), and the
+right entry points to read first.
 
 ### Why a `MediaProvider` protocol?
 
@@ -87,6 +100,7 @@ keeping UI free of ad-hoc boolean flags.
 ### Generate the project and run
 
 ```bash
+tools/setup-mpv.sh   # stage the gitignored libmpv/FFmpeg xcframeworks (instant)
 xcodegen generate
 open Plozz.xcodeproj
 # Select the "Plozz" scheme and an Apple TV simulator, then Run.
@@ -104,7 +118,12 @@ swift test
 On Linux/macOS without UI frameworks, the SwiftUI/AVKit/UIKit views compile out
 behind `#if canImport(...)` guards, so `swift test` exercises the models,
 networking, discovery, provider mapping, and auth logic directly. CI runs
-`swift test` on Linux and an `xcodebuild` tvOS build on macOS.
+`swift test` on Linux and an `xcodebuild` tvOS simulator build on macOS.
+
+The libmpv-backed `EngineMPV` is intentionally excluded from the host
+`swift test` graph: its binary xcframeworks are tvOS-only, and its sources
+compile out behind `#if canImport(Libmpv)` on other platforms. It is covered by
+the tvOS simulator/app build instead.
 
 ## Releasing to TestFlight & versioning
 

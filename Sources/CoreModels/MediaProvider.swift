@@ -2,9 +2,10 @@ import Foundation
 
 /// The provider abstraction that lets Plozz support multiple backends.
 ///
-/// Phase 1 ships a single conformer (`ProviderJellyfin.JellyfinProvider`).
-/// Phase 2 adds a Plex conformer **without** changing any feature module:
-/// features depend only on this protocol and the `CoreModels` value types.
+/// Plozz ships **two** first-class conformers — `ProviderJellyfin.JellyfinProvider`
+/// and `ProviderPlex.PlexProvider` — and treats them as co-equal: features above
+/// this protocol are written once and work against either. Adding another backend
+/// (e.g. Overseerr) means writing one new conformer plus a `ProviderKind` case.
 ///
 /// All methods are `async` and throw `AppError`. Implementations must:
 ///  * never log secrets/tokens;

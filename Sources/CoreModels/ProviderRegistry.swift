@@ -14,9 +14,9 @@ public protocol ProviderResolving: Sendable {
 /// A registry mapping `ProviderKind` → provider factory.
 ///
 /// The composition root (`AppShell`) registers the concrete factories it links
-/// (Phase 1: `.jellyfin`). Adding Plex (branch G) is a one-line `register(.plex,
-/// …)` at the composition root — **no change** to this type, `AppState`, or any
-/// feature module.
+/// (today: `.jellyfin` and `.plex`). Adding another backend is a one-line
+/// `register(.someKind, …)` at the composition root — **no change** to this
+/// type, `AppState`, or any feature module.
 public final class ProviderRegistry: ProviderResolving, @unchecked Sendable {
     public typealias Factory = @Sendable (UserSession) -> any MediaProvider
 
@@ -45,13 +45,11 @@ public final class ProviderRegistry: ProviderResolving, @unchecked Sendable {
 
 /// A runtime pairing of an `Account` with its resolved `MediaProvider`.
 ///
-/// ## Aggregation seam (branch H)
-/// Multi-account aggregation (a customizable, combined Home across several
-/// servers) is **not** built in this branch. The seam is: `AppState` exposes the
-/// active accounts as `[ResolvedAccount]`, and a future Home view model fans out
-/// over that list (one provider call per account, merged by the VM). This branch
-/// only consumes the *primary* active account for the existing single-provider
-/// Home; nothing else needs to change in core when branch H lands.
+/// Multi-account aggregation (Home & Search fanning out across several
+/// servers) consumes `[ResolvedAccount]` — `AppState` exposes the active set
+/// and feature view-models (`HomeAggregator`, `SearchViewModel`, …) merge per
+/// account via the `MediaProvider` protocol, so adding/removing accounts
+/// never requires changes to core.
 public struct ResolvedAccount: Sendable {
     public let account: Account
     public let provider: any MediaProvider

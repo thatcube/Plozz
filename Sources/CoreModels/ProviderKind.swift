@@ -2,9 +2,10 @@ import Foundation
 
 /// The media backends Plozz can talk to.
 ///
-/// Phase 1 ships `.jellyfin` only. `.plex` is reserved for Phase 2 and exists
-/// here so that persisted data and the `MediaProvider` abstraction are already
-/// provider-aware — no migration needed when Plex lands.
+/// Plozz is dual-provider: **Jellyfin** and **Plex** are first-class, co-equal
+/// backends. Everything above the provider layer talks to ``MediaProvider``, so
+/// adding a new backend (e.g. Overseerr) only requires a new conformer and a
+/// case here — no feature rewrites.
 public enum ProviderKind: String, Codable, Sendable, CaseIterable {
     case jellyfin
     case plex

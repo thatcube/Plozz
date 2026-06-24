@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreNetworking
 import CoreUI
 import FeatureAuth
 import FeatureDiscovery
@@ -200,9 +201,7 @@ private struct PlexPINEntryView: View {
             // the pending request (success path). This is the authoritative
             // signal that the PIN was accepted.
             if newValue == nil {
-                #if DEBUG
-                print("[PIN] pendingPlexPINRequest cleared — calling dismiss()")
-                #endif
+                PlozzLog.auth.debug("pendingPlexPINRequest cleared — calling dismiss()")
                 dismiss()
             }
         }
@@ -285,9 +284,7 @@ private struct PlexPINEntryView: View {
             // Auto-submit the moment the 4th digit lands. Snappy is the goal.
             // Flip isSubmitting so the user sees a spinner instead of "four
             // dots and nothing happens" while the network round-trip runs.
-            #if DEBUG
-            print("[PIN] auto-submit at 4 digits")
-            #endif
+            PlozzLog.auth.debug("PIN auto-submit at 4 digits")
             isSubmitting = true
             onSubmit(pin)
         }

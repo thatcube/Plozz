@@ -208,7 +208,6 @@ Sources/MetadataKit/
 
 ---
 
-*Verification: tvOS device `xcodebuild` is the authoritative compile check
-(`swift test` can't run here because mpv xcframeworks are tvOS‑only). Pure‑logic
-unit tests for classification, query normalization, cache keys and TMDb selection
-live in `Tests/MetadataKitTests`.*
+*Verification: `swift test` runs the pure-logic suite without linking EngineMPV's
+tvOS-only mpv xcframeworks; the tvOS simulator/app build and `EngineMPVProbe`
+remain the authoritative compile/link checks for the on-device engine.*

@@ -632,9 +632,17 @@ public final class PlayerViewModel {
         Task { await report(event: paused ? .pause : .unpause, isPaused: paused) }
     }
 
+    /// Guards against a double teardown: `PlayerView` may call `stop()` itself on
+    /// an HDR-aware dismiss (to start the SDR switch behind the veil) and then the
+    /// view's `onDisappear` fires a second `stop()` once it's torn down. Without
+    /// this the server would get two `.stop` reports for one playback.
+    private var didStop = false
+
     /// Call when leaving playback: report a final stop so the server records the
     /// resume point, then tear the engine down.
     public func stop() async {
+        guard !didStop else { return }
+        didStop = true
         prefetchTask?.cancel()
         prefetchTask = nil
         cancelWatchdog()

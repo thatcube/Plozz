@@ -52,7 +52,12 @@ final class HDRTransitionModelTests: XCTestCase {
 
     private func makeModel(_ sleeper: TaggedSleeper) -> HDRTransitionModel {
         HDRTransitionModel(
-            configuration: HDRTransitionModel.Configuration(maxBlackout: 4.5, minVeil: 0.35),
+            configuration: HDRTransitionModel.Configuration(
+                maxBlackout: 4.5,
+                minVeil: 0.35,
+                veilFade: 0.1,
+                exitSettleTimeout: 5.0
+            ),
             sleep: { try await sleeper.sleep($0) }
         )
     }
@@ -151,6 +156,148 @@ final class HDRTransitionModelTests: XCTestCase {
         model.displayDidSettle()
         for _ in 0..<20 { await Task.yield() }
         XCTAssertEqual(sleeper.pendingCount, 2)
+    }
+
+    // MARK: Exit (HDR/DV → SDR on leaving playback)
+
+    func testSDRExitRaisesNoVeil() {
+        // Leaving SDR content has no panel mode switch to hide — no needless black.
+        let model = HDRTransitionModel()
+        XCTAssertFalse(model.beginExit(isHDR: false))
+        XCTAssertEqual(model.veilOpacity, 0)
+        XCTAssertFalse(model.isVeiled)
+        XCTAssertFalse(model.isExiting)
+    }
+
+    func testExitRaisesVeilAndArmsSafetyTimeout() async {
+        let sleeper = TaggedSleeper()
+        let model = makeModel(sleeper)
+
+        XCTAssertTrue(model.beginExit(isHDR: true))
+        XCTAssertEqual(model.veilOpacity, 1)
+        XCTAssertTrue(model.isExiting)
+        // The exit safety timeout (5.0) is armed up front so a missing settle
+        // callback can never strand the user on black.
+        await assertEventually { sleeper.pendingCount == 1 }
+    }
+
+    func testExitWaitsForSettleNotAFixedDelay() async {
+        let sleeper = TaggedSleeper()
+        let model = makeModel(sleeper)
+
+        XCTAssertTrue(model.beginExit(isHDR: true))
+        await assertEventually { sleeper.pendingCount == 1 } // exit safety timeout
+
+        var exited = false
+        let waiter = Task { @MainActor in
+            await model.waitForExit()
+            exited = true
+        }
+
+        // The exit must NOT resolve on any fixed delay — only a real settle (or
+        // the safety timeout) ends it. Pump the runloop: still waiting.
+        for _ in 0..<50 { await Task.yield() }
+        XCTAssertFalse(exited)
+        XCTAssertEqual(model.veilOpacity, 1, "veil must stay raised across the exit window")
+
+        // Display reports mode-switch-end; the model holds minVeil (0.35) then
+        // resolves the exit.
+        model.displayDidSettle()
+        await assertEventually { sleeper.pendingCount == 2 } // minVeil hold armed
+        XCTAssertFalse(exited)
+        XCTAssertEqual(model.veilOpacity, 1, "veil stays black until the hold elapses")
+
+        sleeper.release(matching: 0.35)
+        _ = await waiter.value
+        XCTAssertTrue(exited)
+        // The veil is intentionally left raised — the caller dismisses while black,
+        // and the veil is torn down with the player so it covers the handoff.
+        XCTAssertEqual(model.veilOpacity, 1)
+    }
+
+    func testExitSafetyTimeoutResolvesWithoutSettle() async {
+        let sleeper = TaggedSleeper()
+        let model = makeModel(sleeper)
+
+        XCTAssertTrue(model.beginExit(isHDR: true))
+        await assertEventually { sleeper.pendingCount == 1 }
+
+        var exited = false
+        let waiter = Task { @MainActor in
+            await model.waitForExit()
+            exited = true
+        }
+
+        // No settle ever arrives; the exit safety timeout (5.0) must still resolve
+        // the wait so the user is never stranded on black.
+        for _ in 0..<50 { await Task.yield() }
+        XCTAssertFalse(exited)
+        XCTAssertEqual(model.veilOpacity, 1)
+
+        sleeper.release(matching: 5.0)
+        _ = await waiter.value
+        XCTAssertTrue(exited)
+    }
+
+    func testWaitForExitReturnsImmediatelyWhenSettledBeforeWaiting() async {
+        let sleeper = TaggedSleeper()
+        let model = makeModel(sleeper)
+
+        XCTAssertTrue(model.beginExit(isHDR: true))
+        await assertEventually { sleeper.pendingCount == 1 }
+
+        // Settle arrives and the hold elapses before anyone awaits the exit.
+        model.displayDidSettle()
+        await assertEventually { sleeper.pendingCount == 2 }
+        sleeper.release(matching: 0.35)
+        // Let finishExit run.
+        for _ in 0..<20 { await Task.yield() }
+
+        // A late waiter must not hang — the exit already resolved.
+        var exited = false
+        let waiter = Task { @MainActor in
+            await model.waitForExit()
+            exited = true
+        }
+        _ = await waiter.value
+        XCTAssertTrue(exited)
+    }
+
+    func testAwaitVeilOpaqueWaitsForVeilFade() async {
+        let sleeper = TaggedSleeper()
+        let model = makeModel(sleeper)
+
+        XCTAssertTrue(model.beginExit(isHDR: true))
+
+        var faded = false
+        let waiter = Task { @MainActor in
+            await model.awaitVeilOpaque()
+            faded = true
+        }
+        // It must wait the veil-fade (0.1) before letting the caller tear down.
+        await assertEventually { sleeper.pendingCount == 2 } // safety timeout + veil fade
+        XCTAssertFalse(faded)
+        sleeper.release(matching: 0.1)
+        _ = await waiter.value
+        XCTAssertTrue(faded)
+    }
+
+    func testEnterRevealUnaffectedByExitPath() async {
+        // The enter transition still fades to black and reveals on settle exactly
+        // as before — the exit path doesn't change it.
+        let sleeper = TaggedSleeper()
+        let model = makeModel(sleeper)
+
+        XCTAssertTrue(model.beginTransition(from: .sdr, to: .dolbyVision))
+        XCTAssertEqual(model.veilOpacity, 1)
+        XCTAssertFalse(model.isExiting)
+        await assertEventually { sleeper.pendingCount == 1 } // enter safety timeout
+
+        model.displayDidSettle()
+        await assertEventually { sleeper.pendingCount == 2 } // min-hold
+        sleeper.release(matching: 0.35)
+        await assertEventually { model.veilOpacity == 0 }
+        XCTAssertFalse(model.isVeiled)
     }
 }
 #endif

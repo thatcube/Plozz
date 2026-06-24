@@ -43,6 +43,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
         {"Items":[{"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":36000000000,
+        "ProviderIds":{"Tmdb":"438631"},
         "UserData":{"PlaybackPositionTicks":18000000000,"PlayedPercentage":50.0,"Played":false}}],
         "TotalRecordCount":1}
         """)
@@ -55,6 +56,33 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(items[0].runtime, 3600)
         XCTAssertEqual(items[0].resumePosition, 1800)
         XCTAssertEqual(items[0].playedPercentage ?? 0, 0.5, accuracy: 0.001)
+        XCTAssertEqual(items[0].providerIDs["Tmdb"], "438631")
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items/Resume"))
+        let fields = query.first(where: { $0.name == "Fields" })?.value ?? ""
+        XCTAssertTrue(
+            fields.split(separator: ",").contains(where: { $0.lowercased() == "providerids" }),
+            "Resume requests must include ProviderIds so Home de-dup can match across servers"
+        )
+    }
+
+    func testLatestIncludesProviderIDsForHomeDedup() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Latest", json: """
+        [{"Id":"m1","Name":"Dune","Type":"Movie","ProviderIds":{"Imdb":"tt1160419"}}]
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let latest = try await provider.latest(limit: 20)
+        XCTAssertEqual(latest.map(\.id), ["m1"])
+        XCTAssertEqual(latest.first?.providerIDs["Imdb"], "tt1160419")
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items/Latest"))
+        let fields = query.first(where: { $0.name == "Fields" })?.value ?? ""
+        XCTAssertTrue(
+            fields.split(separator: ",").contains(where: { $0.lowercased() == "providerids" }),
+            "Latest requests must include ProviderIds so Home de-dup can match across servers"
+        )
     }
 
     func testLibrariesMapCollectionType() async throws {
@@ -237,8 +265,8 @@ final class JellyfinProviderMappingTests: XCTestCase {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items", json: """
         {"Items":[
-          {"Id":"m1","Name":"Dune","Type":"Movie"},
-          {"Id":"s1","Name":"Dune: Prophecy","Type":"Series"}
+          {"Id":"m1","Name":"Dune","Type":"Movie","ProviderIds":{"Imdb":"tt1160419"}},
+          {"Id":"s1","Name":"Dune: Prophecy","Type":"Series","ProviderIds":{"Tmdb":"225634"}}
         ]}
         """)
         let provider = JellyfinProvider(session: makeSession(), http: stub)
@@ -247,6 +275,8 @@ final class JellyfinProviderMappingTests: XCTestCase {
 
         XCTAssertEqual(results.map(\.title), ["Dune", "Dune: Prophecy"])
         XCTAssertEqual(results.map(\.kind), [.movie, .series])
+        XCTAssertEqual(results[0].providerIDs["Imdb"], "tt1160419")
+        XCTAssertEqual(results[1].providerIDs["Tmdb"], "225634")
 
         let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
         // Whitespace is trimmed before the request is issued.
@@ -254,6 +284,11 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "Recursive" })?.value, "true")
         XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Movie,Series,Episode")
         XCTAssertEqual(query.first(where: { $0.name == "Limit" })?.value, "25")
+        let fields = query.first(where: { $0.name == "Fields" })?.value ?? ""
+        XCTAssertTrue(
+            fields.split(separator: ",").contains(where: { $0.lowercased() == "providerids" }),
+            "Search requests must include ProviderIds so cross-server de-dup has strong ids"
+        )
         XCTAssertEqual(query.first(where: { $0.name == "EnableTotalRecordCount" })?.value, "false")
         XCTAssertEqual(query.first(where: { $0.name == "ImageTypeLimit" })?.value, "1")
     }

@@ -394,4 +394,38 @@ final class SearchViewModelDedupTests: XCTestCase {
         XCTAssertEqual(movies?.items.count, 1, "Duplicate across providers collapses to one card")
         XCTAssertEqual(movies?.items.first?.allSourceAccountIDs, ["acct-plex", "acct-jelly"])
     }
+
+    func testSeriesWithSharedExternalIDShowsOneCardAndTwoSources() async {
+        let plexSeries = MediaItem(
+            id: "plex-one-piece",
+            title: "One Piece",
+            kind: .series,
+            productionYear: 1999,
+            providerIDs: ["Tmdb": "37854"]
+        )
+        let jellySeries = MediaItem(
+            id: "jelly-one-piece",
+            title: "One Piece",
+            kind: .series,
+            productionYear: 2023,
+            providerIDs: ["Tmdb": "37854"]
+        )
+        let plex = SearchStubProvider(results: [plexSeries], providerKind: .plex, accountID: "acct-plex")
+        let jellyfin = SearchStubProvider(results: [jellySeries], providerKind: .jellyfin, accountID: "acct-jelly")
+        let accounts = [plex, jellyfin].map {
+            ResolvedAccount(account: Account(id: $0.accountID, from: $0.session), provider: $0)
+        }
+        let vm = SearchViewModel(accounts: accounts, debounceMilliseconds: 0)
+        vm.query = "one piece"
+
+        await vm.search()
+
+        guard case let .loaded(sections) = vm.state else {
+            return XCTFail("Expected loaded, got \(vm.state)")
+        }
+        let shows = sections.first { $0.title == "TV Shows" }
+        XCTAssertEqual(shows?.items.count, 1)
+        XCTAssertEqual(shows?.items.first?.sources.count, 2, "Merged hit keeps both sources for the server picker")
+        XCTAssertEqual(shows?.items.first?.allSourceAccountIDs, ["acct-plex", "acct-jelly"])
+    }
 }

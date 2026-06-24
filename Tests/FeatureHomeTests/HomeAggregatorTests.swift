@@ -114,6 +114,29 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(card.sources.first?.providerKind, .plex)
     }
 
+    func testContentDedupesSeriesAcrossServersWhenExternalIDsPresent() async {
+        // Series identity is external-id-only (never title/year), so this must
+        // collapse only because both servers carry the same TMDb id.
+        let plexCopy = MediaItem(id: "p-op", title: "One Piece", kind: .series,
+                                 productionYear: 1999, providerIDs: ["Tmdb": "37854"])
+        let jellyCopy = MediaItem(id: "j-op", title: "One Piece", kind: .series,
+                                  productionYear: 2023, providerIDs: ["Tmdb": "37854"])
+        let plex = AggregatorStub(latest: [plexCopy])
+        let jelly = AggregatorStub(latest: [jellyCopy])
+        let accounts = [
+            resolved("acct-plex", user: "Bob", server: "Plex", kind: .plex, provider: plex),
+            resolved("acct-jelly", user: "Alice", server: "Jelly", kind: .jellyfin, provider: jelly)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(content.latest.count, 1)
+        let card = content.latest[0]
+        XCTAssertEqual(card.id, "p-op")
+        XCTAssertEqual(card.sources.count, 2, "Merged card exposes both server sources for the picker")
+        XCTAssertEqual(Set(card.allSourceAccountIDs), ["acct-plex", "acct-jelly"])
+    }
+
     // MARK: - Helpers
 
     private func item(_ id: String) -> MediaItem {

@@ -132,7 +132,7 @@ public struct JellyfinClient: Sendable {
             queryItems: [
                 URLQueryItem(name: "Limit", value: String(limit)),
                 URLQueryItem(name: "MediaTypes", value: "Video"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio")
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,ProviderIds")
             ],
             headers: authHeaders
         )
@@ -144,7 +144,7 @@ public struct JellyfinClient: Sendable {
             path: "/Users/\(userID)/Items/Latest",
             queryItems: [
                 URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: "Overview")
+                URLQueryItem(name: "Fields", value: "Overview,ProviderIds")
             ],
             headers: authHeaders
         )
@@ -280,7 +280,7 @@ public struct JellyfinClient: Sendable {
                 URLQueryItem(name: "Recursive", value: "true"),
                 URLQueryItem(name: "IncludeItemTypes", value: includeItemTypes.joined(separator: ",")),
                 URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: "Overview"),
+                URLQueryItem(name: "Fields", value: "Overview,ProviderIds"),
                 URLQueryItem(name: "EnableTotalRecordCount", value: "false"),
                 URLQueryItem(name: "ImageTypeLimit", value: "1")
             ],
@@ -393,7 +393,7 @@ public struct JellyfinClient: Sendable {
                 URLQueryItem(name: "SortBy", value: "DateCreated"),
                 URLQueryItem(name: "SortOrder", value: "Descending"),
                 URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio"),
+                URLQueryItem(name: "Fields", value: "PrimaryImageAspectRatio,ProviderIds"),
                 URLQueryItem(name: "ImageTypeLimit", value: "1"),
                 URLQueryItem(name: "EnableTotalRecordCount", value: "false")
             ],

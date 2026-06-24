@@ -58,6 +58,10 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
         public var codecTag: String?
         /// Codec profile, e.g. `Main 10`, `High`.
         public var profile: String?
+        /// Whether the source stream is interlaced (`true`) rather than
+        /// progressive (`false`/`nil`). Interlaced direct-play is routed to the
+        /// on-device engine when available.
+        public var isInterlaced: Bool?
         public var width: Int?
         public var height: Int?
         /// Bits per luma sample, e.g. `8`, `10`, `12`. AVPlayer cannot decode
@@ -78,6 +82,7 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
             codec: String? = nil,
             codecTag: String? = nil,
             profile: String? = nil,
+            isInterlaced: Bool? = nil,
             width: Int? = nil,
             height: Int? = nil,
             bitDepth: Int? = nil,
@@ -90,6 +95,7 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
             self.codec = codec
             self.codecTag = codecTag
             self.profile = profile
+            self.isInterlaced = isInterlaced
             self.width = width
             self.height = height
             self.bitDepth = bitDepth

@@ -205,6 +205,7 @@ struct MediaStreamDto: Decodable {
     /// Container codec FourCC (`codec_tag_string`), e.g. `hvc1`/`hev1` for HEVC.
     let CodecTag: String?
     let Profile: String?
+    let IsInterlaced: Bool?
     let Language: String?
     let DisplayTitle: String?
     let IsDefault: Bool?

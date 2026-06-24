@@ -31,8 +31,9 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
 ///     cannot demux Matroska and a server transcode of DoVi is unreliable, so
 ///     **DoVi in an MKV** goes to the on-device engine (which decodes the HEVC
 ///     base layer), matching Infuse.
-///   * **Matroska (incl. HDR10/HLG and DoVi in an MKV), AV1, DTS/DTS-HD/TrueHD
-///     audio, or an AVPlayer-incompatible video codec** → ``PlaybackEngineKind/hybrid``
+///   * **Hybrid-only containers (Matroska/WebM/transport-stream variants),
+///     AV1, DTS/DTS-HD/TrueHD audio, interlaced video, or an
+///     AVPlayer-incompatible video codec** → ``PlaybackEngineKind/hybrid``
 ///     (decode on-device, no transcode). Plain HDR10/HLG in an *Apple* container
 ///     stays native — AVPlayer renders it on the efficient hardware path.
 ///   * **Ambiguous/unknown, already transcoding, or no hybrid engine available**
@@ -82,17 +83,18 @@ public enum EngineRouter {
         // is decoded on-device instead: the engine decodes the HEVC base layer
         // (HDR10/HLG/SDR for Profile 8, tone-mapped for Profile 5), exactly as
         // Infuse does. DoVi in an Apple container still goes native.
-        if isDolbyVision(source.video), !isMatroska(source.container) { return .native }
+        if isDolbyVision(source.video), !isHybridContainer(source.container) { return .native }
 
-        // AVPlayer cannot demux Matroska/WebM; the hybrid engine can.
-        if isMatroska(source.container) { return .hybrid }
+        // AVPlayer cannot demux hybrid-only containers (Matroska/WebM and
+        // transport-stream variants); the hybrid engine can.
+        if isHybridContainer(source.container) { return .hybrid }
 
         // AVPlayer/VideoToolbox only decode HEVC tagged `hvc1`; an HEVC stream
         // tagged `hev1` (in-band parameter sets) in an Apple/MP4-family container
         // plays audio with a **black screen** on AVPlayer. When it hasn't been
         // remuxed to `hvc1` (this branch only runs for non-transcoded sources),
         // decode it on-device instead — the hybrid engine handles `hev1` fine.
-        // `hev1` in Matroska already falls under the Matroska rule above.
+        // `hev1` in hybrid-only containers already falls under the container rule above.
         if isHevcHev1(source.video) { return .hybrid }
 
         // AV1 has no hardware decoder on current Apple TV silicon, so AVPlayer
@@ -111,6 +113,10 @@ public enum EngineRouter {
         // VideoToolbox's Main/Main 10 hardware decode, so they black-screen on
         // AVPlayer even under an `hvc1` tag. The on-device engine decodes them.
         if isHevcRangeExtensions(source.video) { return .hybrid }
+
+        // Interlaced content is better handled on the on-device engine; AVPlayer
+        // often deinterlaces poorly or trips into compatibility transcodes.
+        if isInterlaced(source.video) { return .hybrid }
 
         if let audio = source.audio?.codec?.lowercased() {
             // AVPlayer can't decode TrueHD/MLP at all → hybrid.
@@ -139,17 +145,24 @@ public enum EngineRouter {
 
     // MARK: - Classifiers (pure)
 
-    /// Matroska family containers AVPlayer cannot demux from a file URL.
-    static func isMatroska(_ container: String?) -> Bool {
+    /// Containers AVPlayer cannot reliably direct-play from a raw file URL but the
+    /// hybrid engine can decode on-device.
+    static func isHybridContainer(_ container: String?) -> Bool {
         guard let container = container?.lowercased() else { return false }
         return container == "mkv"
             || container == "webm"
             || container.contains("matroska")
+            || container == "ts"
+            || container == "m2ts"
+            || container == "mts"
+            || container == "m2t"
+            || container == "mpegts"
+            || container == "bdav" || container == "bdmv"
     }
 
     /// True when the video stream carries a **Dolby Vision** signal (any profile).
     /// Only DoVi forces the native engine; plain HDR10/HLG follow the container
-    /// rules (Apple container → native, MKV → on-device hybrid).
+    /// rules (Apple container → native, hybrid-only container → on-device hybrid).
     static func isDolbyVision(_ video: MediaSourceMetadata.VideoStream?) -> Bool {
         guard let video else { return false }
 
@@ -182,9 +195,10 @@ public enum EngineRouter {
             return true
         }
 
-        // Color transfer characteristics (PQ / HLG) — what Plex reports.
+        // Color transfer characteristics (PQ / HLG / HDR10+) — what Plex reports.
         switch video.colorTransfer?.lowercased() {
-        case "smpte2084", "pq", "arib-std-b67", "hlg":
+        case "smpte2084", "pq", "arib-std-b67", "hlg",
+             "smpte2094-40":   // HDR10+ (ST 2094-40 dynamic metadata; base layer is HDR10)
             return true
         default:
             return false
@@ -235,6 +249,13 @@ public enum EngineRouter {
         }
         if let depth = video.bitDepth { return depth >= 12 }
         return false
+    }
+
+    /// True when the stream is interlaced.
+    static func isInterlaced(_ video: MediaSourceMetadata.VideoStream?) -> Bool {
+        guard let video else { return false }
+        if let isInterlaced = video.isInterlaced { return isInterlaced }
+        return (video.profile ?? "").lowercased().contains("interlac")
     }
 
     /// Audio codecs AVPlayer can't decode in an MP4-family container (their usual

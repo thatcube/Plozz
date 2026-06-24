@@ -17,7 +17,8 @@ final class JellyfinCapabilityProfileTests: XCTestCase {
             .compactMap { $0["Container"] as? String }
         XCTAssertTrue(videoContainers.contains("mp4,m4v"))
         XCTAssertTrue(videoContainers.contains("mov"))
-        XCTAssertTrue(videoContainers.contains("mpegts"))
+        // Transport-stream profile: mpegts + m2ts/mts in one entry.
+        XCTAssertTrue(videoContainers.contains { $0.contains("mpegts") })
         // MKV is intentionally absent — AVPlayer cannot demux it, so it must
         // fall through to the HLS transcoding profile.
         XCTAssertFalse(videoContainers.contains { $0.contains("mkv") })
@@ -58,6 +59,18 @@ final class JellyfinCapabilityProfileTests: XCTestCase {
         // Conditions must be advisory, not required, so unknown properties don't
         // force a needless transcode.
         XCTAssertTrue(conditions.allSatisfy { ($0["IsRequired"] as? Bool) == false })
+    }
+
+    func testNativeProfileRejectsInterlacedH264() throws {
+        let json = try encoded(.appleTV(capabilities: .default, hybridEngineEnabled: false))
+        let codecs = try XCTUnwrap(json["CodecProfiles"] as? [[String: Any]])
+        let h264 = try XCTUnwrap(codecs.first { ($0["Codec"] as? String) == "h264" })
+        let conditions = try XCTUnwrap(h264["Conditions"] as? [[String: Any]])
+        XCTAssertTrue(conditions.contains {
+            ($0["Property"] as? String) == "IsInterlaced"
+                && ($0["Condition"] as? String) == "NotEquals"
+                && ($0["Value"] as? String) == "true"
+        })
     }
 
     // MARK: - HDR / Dolby Vision correctness
@@ -101,9 +114,12 @@ final class JellyfinCapabilityProfileTests: XCTestCase {
 
     // MARK: - DTS passthrough
 
-    private func directPlayAudio(_ json: [String: Any], container: String) throws -> String {
+    private func directPlayAudio(_ json: [String: Any], containerPrefix: String) throws -> String {
         let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
-        let entry = try XCTUnwrap(direct.first { ($0["Container"] as? String) == container })
+        let entry = try XCTUnwrap(
+            direct.first { ($0["Container"] as? String)?.hasPrefix(containerPrefix) == true },
+            "No direct-play entry for container prefix: \(containerPrefix)"
+        )
         return try XCTUnwrap(entry["AudioCodec"] as? String)
     }
 
@@ -111,18 +127,19 @@ final class JellyfinCapabilityProfileTests: XCTestCase {
         let withDTS = MediaCapabilities(supportsDTSPassthrough: true)
         let withoutDTS = MediaCapabilities(supportsDTSPassthrough: false)
 
-        for container in ["mp4,m4v", "mov", "mpegts"] {
-            let on = try directPlayAudio(encoded(.appleTV(capabilities: withDTS)), container: container)
-            let off = try directPlayAudio(encoded(.appleTV(capabilities: withoutDTS)), container: container)
-            XCTAssertTrue(on.split(separator: ",").contains("dts"), "expected dts in \(container)")
-            XCTAssertFalse(off.split(separator: ",").contains("dts"), "unexpected dts in \(container)")
+        // TS container entry is now "mpegts,m2ts,mts" — match by prefix.
+        for containerPrefix in ["mp4", "mov", "mpegts"] {
+            let on = try directPlayAudio(encoded(.appleTV(capabilities: withDTS)), containerPrefix: containerPrefix)
+            let off = try directPlayAudio(encoded(.appleTV(capabilities: withoutDTS)), containerPrefix: containerPrefix)
+            XCTAssertTrue(on.split(separator: ",").contains("dts"), "expected dts in \(containerPrefix)")
+            XCTAssertFalse(off.split(separator: ",").contains("dts"), "unexpected dts in \(containerPrefix)")
         }
     }
 
     func testEAC3AtmosDirectPlayAlwaysPresent() throws {
         // eac3 (Atmos JOC carrier) must remain direct-playable regardless of DTS.
         let stereo = MediaCapabilities(supportsDTSPassthrough: false)
-        let audio = try directPlayAudio(encoded(.appleTV(capabilities: stereo)), container: "mp4,m4v")
+        let audio = try directPlayAudio(encoded(.appleTV(capabilities: stereo)), containerPrefix: "mp4")
         XCTAssertTrue(audio.split(separator: ",").contains("eac3"))
     }
 
@@ -154,5 +171,96 @@ final class JellyfinCapabilityProfileTests: XCTestCase {
                 "DirectPlayProfiles", "TranscodingProfiles", "CodecProfiles", "SubtitleProfiles"
             ]
         )
+    }
+
+    // MARK: - Opus / Vorbis: native vs. hybrid
+
+    func testOpusAbsentFromNativeMP4Profile() throws {
+        // AVPlayer cannot decode Opus in an MP4/MOV/TS container — the file plays
+        // video with no sound. Opus must NOT appear in the base audio list when
+        // the hybrid engine is disabled.
+        let json = try encoded(.appleTV(capabilities: .default, hybridEngineEnabled: false))
+        let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
+        for entry in direct where (entry["Type"] as? String) == "Video" {
+            let audio = (entry["AudioCodec"] as? String) ?? ""
+            XCTAssertFalse(audio.split(separator: ",").contains("opus"),
+                           "Opus must not be advertised for native (AVPlayer-only) playback in \(entry["Container"] ?? "?")")
+        }
+    }
+
+    func testOpusPresentInHybridMP4Profile() throws {
+        // When the hybrid engine is on, mpv decodes Opus, so we can advertise it
+        // even in Apple containers (the router sends Opus-in-MP4 to mpv).
+        let json = try encoded(.appleTV(capabilities: .default, hybridEngineEnabled: true))
+        let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
+        let mp4 = try XCTUnwrap(direct.first { ($0["Container"] as? String) == "mp4,m4v" })
+        XCTAssertTrue((mp4["AudioCodec"] as? String ?? "").split(separator: ",").contains("opus"),
+                      "Opus must be advertised in MP4 when hybrid engine is enabled")
+    }
+
+    func testVorbisAbsentFromNativeProfile() throws {
+        let json = try encoded(.appleTV(capabilities: .default, hybridEngineEnabled: false))
+        let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
+        for entry in direct where (entry["Type"] as? String) == "Video" {
+            let audio = (entry["AudioCodec"] as? String) ?? ""
+            XCTAssertFalse(audio.split(separator: ",").contains("vorbis"),
+                           "Vorbis must not be advertised in native profile")
+        }
+    }
+
+    // MARK: - M2TS / TS containers
+
+    func testM2TSInTransportStreamProfile() throws {
+        // m2ts and mts should be included alongside mpegts for direct play.
+        let json = try encoded(.appleTV(capabilities: .init(supportsHEVC: true)))
+        let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
+        let containers = direct
+            .filter { ($0["Type"] as? String) == "Video" }
+            .compactMap { $0["Container"] as? String }
+        let hasM2TS = containers.contains { $0.contains("m2ts") }
+        XCTAssertTrue(hasM2TS, "m2ts must be included in the transport-stream direct-play profile")
+    }
+
+    // MARK: - Subtitle profiles (External SRT, Encode ASS)
+
+    private func subtitleProfiles(_ json: [String: Any]) throws -> [[String: Any]] {
+        try XCTUnwrap(json["SubtitleProfiles"] as? [[String: Any]])
+    }
+
+    func testSRTSubtitleHasExternalMethod() throws {
+        let subs = try subtitleProfiles(encoded(.appleTV()))
+        // Both "srt" and "subrip" (the canonical IANA token) should be External.
+        let srtMethods = subs.filter { ($0["Format"] as? String) == "srt" }.compactMap { $0["Method"] as? String }
+        let subripMethods = subs.filter { ($0["Format"] as? String) == "subrip" }.compactMap { $0["Method"] as? String }
+        XCTAssertTrue(srtMethods.contains("External") || subripMethods.contains("External"),
+                      "srt/subrip must have an External subtitle profile for sidecar delivery")
+    }
+
+    func testVTTSubtitleHasExternalMethod() throws {
+        let subs = try subtitleProfiles(encoded(.appleTV()))
+        let vttMethods = subs.filter { ($0["Format"] as? String) == "vtt" }.compactMap { $0["Method"] as? String }
+        XCTAssertTrue(vttMethods.contains("External"),
+                      "vtt must have an External method for direct-play sidecar injection")
+    }
+
+    func testASSSubtitleHasEncodeMethod() throws {
+        let subs = try subtitleProfiles(encoded(.appleTV()))
+        let assMethods = subs.filter { ($0["Format"] as? String) == "ass" }.compactMap { $0["Method"] as? String }
+        XCTAssertTrue(assMethods.contains("Encode"),
+                      "ASS must use Encode (server burn-in) — the native renderer can't reproduce its styling")
+    }
+
+    func testSSASubtitleHasEncodeMethod() throws {
+        let subs = try subtitleProfiles(encoded(.appleTV()))
+        let ssaMethods = subs.filter { ($0["Format"] as? String) == "ssa" }.compactMap { $0["Method"] as? String }
+        XCTAssertTrue(ssaMethods.contains("Encode"),
+                      "SSA must use Encode (server burn-in)")
+    }
+
+    func testHLSVTTMethodStillPresent() throws {
+        // Regression guard: the original Hls method for vtt must not be removed.
+        let subs = try subtitleProfiles(encoded(.appleTV()))
+        let vttMethods = subs.filter { ($0["Format"] as? String) == "vtt" }.compactMap { $0["Method"] as? String }
+        XCTAssertTrue(vttMethods.contains("Hls"), "vtt/Hls profile must remain for HLS manifest subtitles")
     }
 }

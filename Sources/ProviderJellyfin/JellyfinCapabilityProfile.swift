@@ -108,9 +108,15 @@ extension JellyfinCapabilityProfile {
         let canBitstreamDTS = passthrough.contains(.dts) || passthrough.contains(.dtsHD)
         let dtsTokens = (hybrid || canBitstreamDTS) ? ["dts", "dca"] : []
         let trueHDTokens = hybrid ? ["truehd", "mlp"] : []
+        // Opus and Vorbis are not decodable by AVPlayer in an MP4/MOV/TS container —
+        // the file plays video with no sound. Only include them in Apple containers
+        // when the hybrid engine is available (mpv decodes them fine). They're
+        // always included in the MKV/WebM profile below.
+        let opusTokens = hybrid ? ["opus"] : []
+        let vorbisTokens = hybrid ? ["vorbis"] : []
 
         func audio(_ base: [String], allowExtras: Bool) -> String {
-            (allowExtras ? base + dtsTokens + trueHDTokens : base).joined(separator: ",")
+            (allowExtras ? base + dtsTokens + trueHDTokens + opusTokens + vorbisTokens : base).joined(separator: ",")
         }
 
         var profiles = [
@@ -118,19 +124,13 @@ extension JellyfinCapabilityProfile {
                 type: "Video",
                 container: "mp4,m4v",
                 videoCodec: mp4Video.joined(separator: ","),
-                audioCodec: audio(["aac", "ac3", "alac", "eac3", "flac", "mp3", "opus"], allowExtras: true)
+                audioCodec: audio(["aac", "ac3", "alac", "eac3", "flac", "mp3"], allowExtras: true)
             ),
             DirectPlayProfile(
                 type: "Video",
                 container: "mov",
                 videoCodec: movVideo.joined(separator: ","),
                 audioCodec: audio(["aac", "ac3", "alac", "eac3", "mp3", "pcm_s16be", "pcm_s16le", "pcm_s24be", "pcm_s24le"], allowExtras: true)
-            ),
-            DirectPlayProfile(
-                type: "Video",
-                container: "mpegts",
-                videoCodec: tsVideo.joined(separator: ","),
-                audioCodec: audio(["aac", "ac3", "eac3", "mp3"], allowExtras: true)
             ),
             DirectPlayProfile(
                 type: "Video",
@@ -149,14 +149,23 @@ extension JellyfinCapabilityProfile {
             DirectPlayProfile(type: "Audio", container: "flac", audioCodec: "flac")
         ]
 
-        // Hybrid engine: advertise the Matroska / WebM container the on-device
-        // VLCKit/mpv engine demuxes. The companion codec profiles
-        // (see `codec(_:hybrid:)`) constrain MKV HEVC/AV1 to non-DoVi ranges so
-        // Dolby Vision in an MKV still transcodes to HLS and renders on AVPlayer —
-        // keeping the "DoVi always native" guarantee intact. HEVC and AV1 are
-        // listed unconditionally here (not gated on hardware decode) because the
-        // on-device engine software-decodes them regardless of VideoToolbox AV1
-        // support, exactly as the router expects (MKV → hybrid).
+        // Native path: keep transport streams conservative for AVPlayer.
+        if !hybrid {
+            profiles.append(
+                DirectPlayProfile(
+                    type: "Video",
+                    container: "mpegts,m2ts,mts",
+                    videoCodec: tsVideo.joined(separator: ","),
+                    audioCodec: audio(["aac", "ac3", "eac3", "mp3"], allowExtras: true)
+                )
+            )
+        }
+
+        // Hybrid engine: advertise the extra containers the on-device mpv engine
+        // demuxes directly (Matroska/WebM + transport-stream variants). HEVC and
+        // AV1 are listed unconditionally here (not gated on hardware decode)
+        // because the on-device engine software-decodes them regardless of
+        // VideoToolbox AV1 support, exactly as the router expects.
         if hybrid {
             let mkvVideo = ["h264", "hevc", "mpeg4", "vc1", "mpeg2video", "vp8", "vp9", "av1"]
             let mkvAudio = [
@@ -167,7 +176,7 @@ extension JellyfinCapabilityProfile {
             profiles.append(
                 DirectPlayProfile(
                     type: "Video",
-                    container: "mkv,webm",
+                    container: "mkv,webm,ts,m2ts,mts,m2t,mpegts,bdav,bdmv",
                     videoCodec: mkvVideo.joined(separator: ","),
                     audioCodec: mkvAudio.joined(separator: ",")
                 )
@@ -204,10 +213,14 @@ extension JellyfinCapabilityProfile {
             CodecProfile(type: "Video", codec: "h264", conditions: [
                 ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
                 ProfileCondition(condition: "EqualsAny", property: "VideoProfile", value: "high|main|baseline|constrained baseline", isRequired: false),
-                ProfileCondition(condition: "LessThanEqual", property: "VideoLevel", value: "52", isRequired: false),
-                ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false)
+                ProfileCondition(condition: "LessThanEqual", property: "VideoLevel", value: "52", isRequired: false)
             ])
         ]
+        if !hybrid {
+            profiles[0].conditions.append(
+                ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false)
+            )
+        }
 
         if allowed.contains(.hevc) {
             // VideoRangeType comes straight from the shared HDR policy: SDR plus
@@ -215,23 +228,31 @@ extension JellyfinCapabilityProfile {
             // Profile 5 / Profile 8 cross-compatible tokens. This deliberately
             // omits HDR10Plus and Profile 7, which Apple TV cannot present.
             let ranges = caps.allowedHDRRanges.map(\.rawValue).joined(separator: "|")
-            profiles.append(
-                CodecProfile(type: "Video", codec: "hevc", conditions: [
-                    ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
-                    ProfileCondition(condition: "EqualsAny", property: "VideoProfile", value: "main|main 10", isRequired: false),
-                    ProfileCondition(condition: "LessThanEqual", property: "VideoLevel", value: "183", isRequired: false),
-                    ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false),
-                    ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: ranges, isRequired: false)
-                ])
-            )
+            var conditions: [ProfileCondition] = [
+                ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
+                ProfileCondition(condition: "EqualsAny", property: "VideoProfile", value: "main|main 10", isRequired: false),
+                ProfileCondition(condition: "LessThanEqual", property: "VideoLevel", value: "183", isRequired: false),
+                ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: ranges, isRequired: false)
+            ]
+            if !hybrid {
+                conditions.append(
+                    ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false)
+                )
+            }
+            profiles.append(CodecProfile(type: "Video", codec: "hevc", conditions: conditions))
         }
 
         if allowed.contains(.av1) {
-            profiles.append(
-                CodecProfile(type: "Video", codec: "av1", conditions: [
-                    ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
+            var conditions: [ProfileCondition] = [
+                ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false)
+            ]
+            if !hybrid {
+                conditions.append(
                     ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false)
-                ])
+                )
+            }
+            profiles.append(
+                CodecProfile(type: "Video", codec: "av1", conditions: conditions)
             )
         }
 
@@ -242,17 +263,29 @@ extension JellyfinCapabilityProfile {
         // profiles above already gate on the display's supported ranges (which on
         // an Apple TV 4K include Dolby Vision, since DoVi support tracks HEVC
         // hardware decode). The hybrid flag still gates MKV entirely via the
-        // `mkv,webm` DirectPlayProfile, so flag-off advertises no MKV at all. This
-        // makes HDR10/HLG and DoVi MKV direct-play on the on-device engine (no
-        // server transcode), matching Infuse.
+        // `mkv,webm,ts,m2ts,mts,m2t,mpegts,bdav,bdmv` DirectPlayProfile, so
+        // flag-off advertises none of those hybrid-only containers. This makes
+        // HDR10/HLG and DoVi MKV direct-play on the on-device engine (no server
+        // transcode), matching Infuse.
         return profiles
     }
 
     private static func subtitles() -> [SubtitleProfile] {
         [
             SubtitleProfile(format: "vtt", method: "Hls"),
+            // "External" sidecar subtitles: the server returns a separate text file
+            // that the player fetches and injects into the native picker. Our
+            // SubtitleInjectingResourceLoader normalises SRT → WebVTT transparently.
+            SubtitleProfile(format: "vtt", method: "External"),
+            SubtitleProfile(format: "srt", method: "External"),
+            SubtitleProfile(format: "subrip", method: "External"),
             SubtitleProfile(format: "cc_dec", method: "Embed"),
             SubtitleProfile(format: "ttml", method: "Embed"),
+            // Image-based and styled subtitles need the server to burn them into
+            // the video (Encode). ASS/SSA carry complex font/colour/positioning
+            // metadata that the native text renderer can't reproduce faithfully.
+            SubtitleProfile(format: "ass", method: "Encode"),
+            SubtitleProfile(format: "ssa", method: "Encode"),
             SubtitleProfile(format: "dvbsub", method: "Encode"),
             SubtitleProfile(format: "dvdsub", method: "Encode"),
             SubtitleProfile(format: "pgssub", method: "Encode"),

@@ -333,7 +333,8 @@ final class JellyfinProviderMappingTests: XCTestCase {
         """)
         stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
         {"MediaSources":[{"Id":"src1","ETag":"etag9","Container":"mp4","SupportsDirectPlay":true,
-        "MediaStreams":[{"Index":1,"Type":"Audio","Language":"eng","DisplayTitle":"English"},
+        "MediaStreams":[{"Index":0,"Type":"Video","Codec":"h264","IsInterlaced":true},
+        {"Index":1,"Type":"Audio","Language":"eng","DisplayTitle":"English"},
         {"Index":2,"Type":"Subtitle","Language":"eng","DisplayTitle":"English (SRT)"}]}],
         "PlaySessionId":"ps1"}
         """)
@@ -349,6 +350,7 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertTrue(url.contains("mediaSourceId=src1"))
         XCTAssertTrue(url.contains("playSessionId=ps1"))
         XCTAssertTrue(url.contains("tag=etag9"))
+        XCTAssertEqual(request.sourceMetadata?.video?.isInterlaced, true)
     }
 
     func testPlaybackInfoPrefersTranscodingHLSURL() async throws {

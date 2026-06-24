@@ -355,7 +355,7 @@ final class PlexProviderMappingTests: XCTestCase {
            "Genre":[{"tag":"Sci-Fi"},{"tag":"Adventure"}],
            "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
              "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
-               {"streamType":1,"codec":"hevc","width":3840,"height":2160,"colorTrc":"smpte2084"},
+               {"streamType":1,"codec":"hevc","width":3840,"height":2160,"colorTrc":"smpte2084","scanType":"interlaced"},
                {"streamType":2,"codec":"eac3","channels":8,"audioChannelLayout":"7.1","extendedDisplayTitle":"Dolby Digital+ Atmos 7.1"}
              ]}]}]}
         ]}}
@@ -367,6 +367,7 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.genres, ["Sci-Fi", "Adventure"])
         // 4K + HDR10 (from smpte2084 transfer) + HEVC codec + Dolby Atmos.
         XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10", "HEVC", "Dolby Atmos"])
+        XCTAssertEqual(item.mediaInfo?.video?.isInterlaced, true)
         // RT critic rendered as a percentage; IMDb audience stays 0–10.
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "83%")
         XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "9")
@@ -761,6 +762,19 @@ final class PlexDirectPlayCapabilityTests: XCTestCase {
         """
         let av1Yes = MediaCapabilities(supportsAV1: true)
         XCTAssertFalse(try canDirectPlay(json, caps: .default), "AV1 must transcode without support")
+        XCTAssertTrue(try canDirectPlay(json, caps: av1Yes))
+    }
+
+    func testAV01AliasGatedOnSupport() throws {
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"av01","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"av01"},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
+         ]}]}
+        """
+        let av1Yes = MediaCapabilities(supportsAV1: true)
+        XCTAssertFalse(try canDirectPlay(json, caps: .default))
         XCTAssertTrue(try canDirectPlay(json, caps: av1Yes))
     }
 

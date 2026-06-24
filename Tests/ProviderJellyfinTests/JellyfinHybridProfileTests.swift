@@ -2,9 +2,9 @@ import XCTest
 import CoreModels
 @testable import ProviderJellyfin
 
-/// Verifies the capability-expansion policy: turning the hybrid (VLCKit) engine
-/// on/off changes exactly the advertised direct-play formats, and keeps DoVi/HDR
-/// in MKV out of direct play so the advertise ⇔ route invariant holds.
+/// Verifies the capability-expansion policy: turning the hybrid engine on/off
+/// changes exactly the advertised direct-play formats while keeping advertise ⇔
+/// route in lockstep with the display-aware range gates.
 final class JellyfinHybridProfileTests: XCTestCase {
     private func encoded(_ profile: JellyfinCapabilityProfile) throws -> [String: Any] {
         let data = try JSONEncoder().encode(profile)
@@ -48,6 +48,13 @@ final class JellyfinHybridProfileTests: XCTestCase {
         XCTAssertTrue(containers.contains { $0.contains("mkv") })
     }
 
+    func testHybridOnAdvertisesTSFamilyContainers() throws {
+        let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: true))
+        let containers = try videoContainers(json)
+        XCTAssertTrue(containers.contains { $0.contains("m2ts") })
+        XCTAssertTrue(containers.contains { $0.contains("ts") })
+    }
+
     func testHybridOnAddsDTSAndTrueHDToMP4Audio() throws {
         let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: true))
         let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
@@ -79,6 +86,14 @@ final class JellyfinHybridProfileTests: XCTestCase {
         let codecs = try XCTUnwrap(json["CodecProfiles"] as? [[String: Any]])
         XCTAssertFalse(codecs.contains { ($0["Container"] as? String) != nil },
                        "MKV must not carry a container-scoped codec restriction; the global policy governs it")
+    }
+
+    func testHybridOnDropsInterlacedCodecRestriction() throws {
+        let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: true))
+        let codecs = try XCTUnwrap(json["CodecProfiles"] as? [[String: Any]])
+        let h264 = try XCTUnwrap(codecs.first { ($0["Codec"] as? String) == "h264" })
+        let conditions = try XCTUnwrap(h264["Conditions"] as? [[String: Any]])
+        XCTAssertFalse(conditions.contains { ($0["Property"] as? String) == "IsInterlaced" })
     }
 
     func testHybridOnAdvertisesAV1Matroska() throws {

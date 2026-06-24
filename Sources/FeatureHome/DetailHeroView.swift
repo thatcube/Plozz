@@ -440,7 +440,7 @@ struct DetailHeroView: View {
     /// Visible Refresh Metadata button, shown when the provider conforms to
     /// `MetadataRefreshing`. The server task is fire-and-forget, so the icon walks
     /// through a small animated state machine for feedback: a real spinning
-    /// progress indicator while "refreshing", then a brand-blue success check,
+    /// progress indicator while "refreshing", then a green success check,
     /// then back to the refresh glyph — each state scaling/fading in and out.
     @ViewBuilder
     private func refreshButton() -> some View {
@@ -480,11 +480,11 @@ struct DetailHeroView: View {
             case .refreshing:
                 ProgressView()
                     .progressViewStyle(.circular)
-                    .tint(ThemePalette.brandBlue)
+                    .tint(.primary)
                     .scaleEffect(0.9)
             case .success:
                 Image(systemName: "checkmark")
-                    .foregroundStyle(ThemePalette.brandBlue)
+                    .foregroundStyle(.green)
             }
         }
         .id(refreshPhase)

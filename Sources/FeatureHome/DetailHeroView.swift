@@ -66,6 +66,10 @@ struct DetailHeroView: View {
     /// can flip its colours to stay visible against the button's focused (white)
     /// vs unfocused (dark) background.
     @FocusState private var playButtonHasFocus: Bool
+    /// Whether the Refresh Metadata button currently holds focus. On tvOS 26 the
+    /// focused glass button turns near-white, so the standard green success check
+    /// washes out — when focused we switch it to a darker green that stays legible.
+    @FocusState private var refreshButtonHasFocus: Bool
 
     /// The app-installed action handler (the SAME one the press-and-hold context
     /// menu reads). Drives the visible Watchlist / Watched / Refresh hero buttons
@@ -437,9 +441,9 @@ struct DetailHeroView: View {
                 }
             }
             .frame(width: heroIconSize, height: heroIconSize)
+            .animation(.spring(response: 0.34, dampingFraction: 0.62), value: item.isPlayed)
         }
         .modifier(HeroButtonStyle(prominent: false))
-        .animation(.spring(response: 0.34, dampingFraction: 0.62), value: item.isPlayed)
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
     }
@@ -465,6 +469,7 @@ struct DetailHeroView: View {
             refreshIcon
         }
         .modifier(HeroButtonStyle(prominent: false))
+        .focused($refreshButtonHasFocus)
         .accessibilityLabel(MediaItemAction.refreshMetadata.title)
     }
 
@@ -491,7 +496,9 @@ struct DetailHeroView: View {
                     .scaleEffect(0.9)
             case .success:
                 Image(systemName: "checkmark")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(refreshButtonHasFocus
+                        ? Color(red: 0.0, green: 0.4, blue: 0.07)
+                        : .green)
             }
         }
         .id(refreshPhase)

@@ -392,7 +392,11 @@ public struct SettingsView: View {
     }
 
     private func plexLinkedUserRow(account: Account, multiple: Bool) -> some View {
+        // A nil binding MEANS "play as the account owner" (no Home-user switch,
+        // no PIN). Render it as the owner so "default" and "explicitly picked
+        // owner" look identical — they are the same thing semantically.
         let binding = activeProfile.homeUserBinding(forPlexAccount: account.id)
+            ?? ownerBinding(for: account)
         return NavigationLink(value: SettingsRoute.plexUser(accountID: account.id)) {
             HStack(spacing: 16) {
                 plexAvatar(for: binding, size: 56)
@@ -413,6 +417,21 @@ public struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// Synthetic binding representing the Plex account owner — derived from
+    /// the signed-in Account (its userName + avatarURL), so we don't need to
+    /// fetch Home users just to display the default identity. Owner never
+    /// requires a PIN.
+    private func ownerBinding(for account: Account) -> PlexHomeUserBinding? {
+        let name = account.userName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return nil }
+        return PlexHomeUserBinding(
+            homeUserID: "",
+            name: name,
+            avatarURL: account.avatarURL?.absoluteString,
+            requiresPIN: false
+        )
     }
 
     /// Big circular Plex avatar — uses this binding's cached `avatarURL` so
@@ -442,7 +461,7 @@ public struct SettingsView: View {
 
     private func plexLinkedUserSubtitle(for binding: PlexHomeUserBinding?) -> String {
         guard let binding, !binding.name.isEmpty else {
-            return "Tap to pick your Plex Home user"
+            return "Select Plex user"
         }
         return binding.requiresPIN == true ? "\(binding.name) • PIN required" : binding.name
     }

@@ -24,6 +24,7 @@ public struct SettingsView: View {
     /// destination *outside* the stack, so the Menu/Back button quits the app
     /// instead of popping back.
     @State private var path: [SettingsRoute] = []
+    @State private var confirmSignOutAll = false
 
     private let captions: CaptionSettingsModel
     private let spoilers: SpoilerSettingsModel
@@ -150,7 +151,7 @@ public struct SettingsView: View {
     public var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 36) {
                     Text("Settings")
                         .font(.largeTitle.bold())
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -161,12 +162,13 @@ public struct SettingsView: View {
                     // swaps everything inside this container at once.
                     profileContainer
 
-                    // Household-level controls stay outside the profile
-                    // container — they're not scoped to one profile.
-                    householdContainer
+                    // About + Attributions + Sign Out render INLINE at the
+                    // bottom of the main page (no drill-down for About). Only
+                    // Attributions & Licensing pushes one level deeper.
+                    aboutAndSignOut
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, 40)
+                .padding(.vertical, 48)
             }
             .scrollClipDisabled()
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -179,6 +181,12 @@ public struct SettingsView: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { await reloadLibraries() }
+        }
+        .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
+            Button("Sign Out", role: .destructive, action: onSignOutAll)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes every Plex and Jellyfin sign-in on this Apple TV. You'll need to sign in again.")
         }
     }
 
@@ -196,7 +204,8 @@ public struct SettingsView: View {
                     .padding(.horizontal, 28)
                 profileOwnedRows
                     .padding(.horizontal, 28)
-                    .padding(.bottom, 8)
+                    .padding(.top, 16)
+                    .padding(.bottom, 16)
             }
             .background(
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
@@ -215,7 +224,8 @@ public struct SettingsView: View {
                 Divider().padding(.horizontal, 28)
                 profileOwnedRows
                     .padding(.horizontal, 28)
-                    .padding(.bottom, 8)
+                    .padding(.top, 16)
+                    .padding(.bottom, 16)
             }
             .background(
                 RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
@@ -269,15 +279,50 @@ public struct SettingsView: View {
         }
     }
 
-    /// "About & Sign Out" lives outside the profile container — it's
-    /// household-scoped (app version, repo, sign out all accounts) not
-    /// per-profile.
-    private var householdContainer: some View {
-        SettingsPanel {
-            navRow("About & Sign Out", icon: "info.circle",
+    /// About info + Attributions entry + Sign Out, rendered INLINE at the
+    /// bottom of the main Settings page. About no longer drills in — only
+    /// "Attributions & Licensing" pushes one level deeper. Spacing here mirrors
+    /// the roomy cadence of the About panel itself.
+    @ViewBuilder
+    private var aboutAndSignOut: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            // Self-contained focusable inverted-card panel (logo / version /
+            // build / disclaimers / QR) — perfect to drop in inline.
+            SettingsAboutSection(version: appVersion, build: appBuild, repoURL: repoURL)
+
+            // The one acceptable deeper page: open-source credits & licensing.
+            navRow("Attributions & Licensing", icon: "doc.text.magnifyingglass",
                    value: nil,
-                   route: .about)
+                   route: .attributions)
+
+            // The only Sign-Out-All entry point now lives here, inline, guarded
+            // by the are-you-sure confirmation alert on the root view.
+            if !accounts.isEmpty {
+                signOutAllRow
+            }
         }
+    }
+
+    /// Destructive "Sign Out of All Accounts" row. Keeps the red tint on both
+    /// idle and the inverted focus card (legible on white or black), and arms
+    /// the confirmation alert rather than signing out immediately.
+    private var signOutAllRow: some View {
+        Button(role: .destructive) {
+            confirmSignOutAll = true
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 22, weight: .regular))
+                    .frame(width: 30, height: 30)
+                Text("Sign Out of All Accounts").font(.callout.weight(.medium))
+                Spacer()
+            }
+            .foregroundStyle(.red)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsFocusButtonStyle())
     }
 
     @ViewBuilder
@@ -300,14 +345,8 @@ public struct SettingsView: View {
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
             IntegrationsDetailView(trakt: trakt)
-        case .about:
-            AboutDetailView(
-                version: appVersion,
-                build: appBuild,
-                repoURL: repoURL,
-                canSignOut: !accounts.isEmpty,
-                onSignOutAll: onSignOutAll
-            )
+        case .attributions:
+            AttributionsDetailView()
         case let .plexUser(accountID):
             PlexLinkedUserDetailView(context: context, accountID: accountID)
         case let .server(key):

@@ -227,43 +227,90 @@ struct TraktExpiryCountdown: View {
     }
 }
 
-struct AboutDetailView: View {
-    let version: String
-    let build: String
-    let repoURL: String
-    let canSignOut: Bool
-    let onSignOutAll: () -> Void
-
-    @State private var confirmSignOutAll = false
-
+/// Open-source credits & licensing — the one acceptable level deeper from the
+/// inline About section on the main Settings page. Each credit is a focusable
+/// inverted-card so the page is reachable on the 10-foot UI and Menu/Back pops
+/// reliably (a fully non-interactive page can trap focus and quit the app).
+struct AttributionsDetailView: View {
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("About").font(.largeTitle.bold())
-                SettingsPanel(title: "About") {
-                    SettingsAboutSection(version: version, build: build, repoURL: repoURL)
-                }
-                if canSignOut {
-                    SettingsPanel(title: "Sign Out") {
-                        Button(role: .destructive) {
-                            confirmSignOutAll = true
-                        } label: {
-                            Label("Sign Out of All Accounts", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Attributions & Licensing").font(.largeTitle.bold())
+
+                Text("Plozz is free and open source, and stands on the shoulders of these projects and services. It is not affiliated with, endorsed, or certified by any of them.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                attribution(
+                    "Media servers",
+                    "Jellyfin — the free software media system. Plozz is an unofficial client and is not affiliated with the Jellyfin project. Plex is a trademark of Plex, Inc.; Plozz is an unofficial client and is not affiliated with or endorsed by Plex, Inc."
+                )
+                attribution(
+                    "Brand marks",
+                    "The Plex and Jellyfin logos are used nominatively, solely to identify which server type an account connects to. They are unmodified and are not used as Plozz's own branding."
+                )
+                attribution(
+                    "Playback",
+                    "Playback is powered by mpv and libmpv (GPL/LGPL), together with the FFmpeg-family libraries (libass, dav1d, libplacebo, libbluray, and related components) packaged by the mpvkit project."
+                )
+                attribution(
+                    "Metadata",
+                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Additional ratings and metadata are supplied by your media server and by TMDB, OMDb, and AniList."
+                )
+                attribution(
+                    "Swift packages",
+                    "YouTubeKit and additional open-source Swift packages are used under their respective licenses."
+                )
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
-        .alert("Sign out of all accounts?", isPresented: $confirmSignOutAll) {
-            Button("Sign Out", role: .destructive, action: onSignOutAll)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes every Plex and Jellyfin sign-in on this Apple TV. You'll need to sign in again.")
+    }
+
+    private func attribution(_ title: String, _ text: String) -> some View {
+        AttributionCard(title: title, text: text)
+    }
+}
+
+/// A single focusable credit card with the shared inverted-card focus look.
+private struct AttributionCard: View {
+    let title: String
+    let text: String
+
+    @FocusState private var isFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var focusFill: Color { colorScheme == .dark ? .white : .black }
+    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.headline.weight(.semibold))
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.78)) : AnyShapeStyle(.secondary))
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(24)
+        .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
+        .background(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .fill(isFocused ? AnyShapeStyle(focusFill) : AnyShapeStyle(.ultraThinMaterial))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .strokeBorder(Color.primary.opacity(isFocused ? 0 : 0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(isFocused ? 0.28 : 0), radius: isFocused ? 14 : 0, y: isFocused ? 6 : 0)
+        .focusable()
+        .focused($isFocused)
+        .animation(.easeOut(duration: 0.16), value: isFocused)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title). \(text)")
     }
 }
 #endif

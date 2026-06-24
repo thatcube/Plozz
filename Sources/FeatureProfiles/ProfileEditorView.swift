@@ -2,19 +2,29 @@
 import SwiftUI
 import CoreModels
 
-/// The edits collected by `ProfileEditorView`, handed back to the app so it can
-/// create or update a profile and persist its account subset.
+/// The edits collected by `ProfileEditorView`, handed back to the app so it
+/// can create or update a profile.
+///
+/// Account selection and Plex Home-user mapping no longer live in the editor
+/// — they moved out to Settings → Servers & Libraries → per-server details.
+/// The fields are still on the draft so callers can preserve them across an
+/// update (e.g. Settings carries the existing values through unchanged).
 public struct ProfileDraft: Equatable, Sendable {
     /// `nil` when creating a new profile; the existing id when editing.
     public var id: String?
     public var name: String
     public var avatarSymbol: String
     public var colorIndex: Int
-    /// Optional account this profile is *backed by* (Plex or Jellyfin).
+    /// Optional account this profile is *backed by* (Plex or Jellyfin). Kept
+    /// on the draft for callers that want to preserve it; not editable here.
     public var linkedAccountID: String?
-    /// The account subset this profile uses (household account ids).
+    /// The account subset this profile uses. Kept on the draft for callers
+    /// that want to preserve it; not editable here. Settings → Servers &
+    /// Libraries is the new authoritative surface for this.
     public var activeAccountIDs: [String]
-    /// The linked Plex Home user's `uuid` (when mapped), and cached metadata.
+    /// Plex Home user fields. Kept on the draft for callers that want to
+    /// preserve them; not editable here. Settings → Servers & Libraries →
+    /// Plex server is the new authoritative surface.
     public var plexHomeUserID: String?
     public var plexHomeUserName: String?
     public var plexHomeUserAccountID: String?
@@ -25,8 +35,8 @@ public struct ProfileDraft: Equatable, Sendable {
         name: String,
         avatarSymbol: String,
         colorIndex: Int,
-        linkedAccountID: String?,
-        activeAccountIDs: [String],
+        linkedAccountID: String? = nil,
+        activeAccountIDs: [String] = [],
         plexHomeUserID: String? = nil,
         plexHomeUserName: String? = nil,
         plexHomeUserAccountID: String? = nil,
@@ -45,63 +55,44 @@ public struct ProfileDraft: Equatable, Sendable {
     }
 }
 
-/// Create / edit a profile on tvOS: name, avatar symbol, tile color, which
-/// accounts back it, and an optional linked (Plex/Jellyfin) account.
+/// Create / edit a profile's cosmetics on tvOS: name, avatar symbol, tile
+/// color, and (when editing) a delete button.
+///
+/// Server-account membership and Plex Home-user mapping are deliberately
+/// **not** in this view — they live in Settings → Servers & Libraries so
+/// "what the profile looks like" is cleanly separated from "what the profile
+/// can watch."
 public struct ProfileEditorView: View {
     private let editingProfile: Profile?
-    private let accounts: [Account]
     private let canDelete: Bool
     private let onSave: (ProfileDraft) -> Void
     private let onDelete: (() -> Void)?
     private let onCancel: () -> Void
-    /// Loads the Plex Home users for a given account id (async). `nil` hides the
-    /// "Plex User" section (e.g. previews/tests without a Plex account).
-    private let loadPlexHomeUsers: ((String) async -> [PlexHomeUser])?
 
     @State private var name: String
     @State private var avatarSymbol: String
     @State private var colorIndex: Int
-    @State private var linkedAccountID: String?
-    @State private var selectedAccountIDs: Set<String>
-    @State private var plexHomeUserID: String?
-    @State private var plexHomeUsers: [PlexHomeUser] = []
-    @State private var isLoadingPlexUsers = false
 
     public init(
         editingProfile: Profile? = nil,
-        accounts: [Account],
-        selectedAccountIDs: [String],
         canDelete: Bool = false,
-        loadPlexHomeUsers: ((String) async -> [PlexHomeUser])? = nil,
         onSave: @escaping (ProfileDraft) -> Void,
         onDelete: (() -> Void)? = nil,
         onCancel: @escaping () -> Void
     ) {
         self.editingProfile = editingProfile
-        self.accounts = accounts
         self.canDelete = canDelete
-        self.loadPlexHomeUsers = loadPlexHomeUsers
         self.onSave = onSave
         self.onDelete = onDelete
         self.onCancel = onCancel
         _name = State(initialValue: editingProfile?.name ?? "")
         _avatarSymbol = State(initialValue: editingProfile?.avatarSymbol ?? Profile.defaultAvatarSymbols[0])
         _colorIndex = State(initialValue: editingProfile?.colorIndex ?? 0)
-        _linkedAccountID = State(initialValue: editingProfile?.linkedAccountID)
-        _selectedAccountIDs = State(initialValue: Set(selectedAccountIDs))
-        _plexHomeUserID = State(initialValue: editingProfile?.plexHomeUserID)
     }
 
     private var isEditing: Bool { editingProfile != nil }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSave: Bool { !trimmedName.isEmpty }
-
-    /// The "Backed by" account when it is a Plex login — the Home whose users we
-    /// can map this profile to.
-    private var linkedPlexAccount: Account? {
-        guard let linkedAccountID else { return nil }
-        return accounts.first { $0.id == linkedAccountID && $0.server.provider == .plex }
-    }
 
     public var body: some View {
         NavigationStack {
@@ -116,45 +107,13 @@ public struct ProfileEditorView: View {
                     previewRow
                 }
 
-                if !accounts.isEmpty {
-                    Section {
-                        ForEach(accounts) { account in
-                            accountToggle(account)
-                        }
-                    } header: {
-                        Text("Accounts")
-                    } footer: {
-                        Text("Choose which signed-in servers this profile uses. With none selected, the profile uses all accounts.")
-                    }
-
-                    Section {
-                        selectableRow(title: "None", selected: linkedAccountID == nil) {
-                            linkedAccountID = nil
-                        }
-                        ForEach(accounts) { account in
-                            selectableRow(
-                                title: "\(account.userName) · \(account.server.provider.displayName)",
-                                selected: linkedAccountID == account.id
-                            ) {
-                                linkedAccountID = account.id
-                            }
-                        }
-                    } header: {
-                        Text("Linked Account")
-                    } footer: {
-                        Text("Optionally tie this profile to a Plex or Jellyfin login. The linked account is included in the profile's accounts.")
-                    }
-
-                    if let plexAccount = linkedPlexAccount, loadPlexHomeUsers != nil {
-                        plexUserSection(for: plexAccount)
-                    }
-                }
-
                 if canDelete, let onDelete {
                     Section {
                         Button(role: .destructive, action: onDelete) {
                             Label("Delete Profile", systemImage: "trash")
                         }
+                    } footer: {
+                        Text("Deleting a profile removes its preferences (theme, captions, spoilers, Trakt) and which servers it includes. Signed-in server accounts stay in the household pool.")
                     }
                 }
             }
@@ -234,117 +193,22 @@ public struct ProfileEditorView: View {
         }
     }
 
-    private func accountToggle(_ account: Account) -> some View {
-        Button {
-            if selectedAccountIDs.contains(account.id) {
-                selectedAccountIDs.remove(account.id)
-            } else {
-                selectedAccountIDs.insert(account.id)
-            }
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(account.userName).font(.headline)
-                    Text("\(account.server.name) · \(account.server.provider.displayName)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if selectedAccountIDs.contains(account.id) {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
-                }
-            }
-        }
-    }
-
-    /// A tappable selection row that toggles a single-choice value inline (no
-    /// navigation push — the pushed-picker style renders blank in a tvOS sheet).
-    private func selectableRow(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                Spacer()
-                if selected {
-                    Image(systemName: "checkmark").foregroundStyle(.tint)
-                }
-            }
-        }
-    }
-
-    private func plexUserSection(for plexAccount: Account) -> some View {
-        Section {
-            if isLoadingPlexUsers {
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("Loading Plex users…").foregroundStyle(.secondary)
-                }
-            } else if plexHomeUsers.isEmpty {
-                Text("No Plex Home users found for this account.")
-                    .foregroundStyle(.secondary)
-            } else {
-                selectableRow(title: "None", selected: plexHomeUserID == nil) {
-                    plexHomeUserID = nil
-                }
-                ForEach(plexHomeUsers) { user in
-                    selectableRow(
-                        title: user.requiresPIN ? "\(user.name)  🔒" : user.name,
-                        selected: plexHomeUserID == user.id
-                    ) {
-                        plexHomeUserID = user.id
-                    }
-                }
-            }
-        } header: {
-            Text("Plex User")
-        } footer: {
-            Text("Map this profile to a Plex Home user. Switching to this profile shows that user's library and watch state. PIN-protected users are asked for their PIN each time they're switched to.")
-        }
-        .task(id: plexAccount.id) { await loadUsers(for: plexAccount.id) }
-    }
-
-    private func loadUsers(for accountID: String) async {
-        guard let loadPlexHomeUsers else { return }
-        isLoadingPlexUsers = true
-        let users = await loadPlexHomeUsers(accountID)
-        plexHomeUsers = users
-        isLoadingPlexUsers = false
-        // Drop a stale selection no longer present in the fetched list.
-        if let id = plexHomeUserID, !users.contains(where: { $0.id == id }) {
-            plexHomeUserID = nil
-        }
-    }
-
-    /// Resolves the Plex-user fields to persist, preserving an existing mapping
-    /// when the Home-users list couldn't be (re)loaded.
-    private func resolvedPlexFields() -> (id: String?, name: String?, account: String?, requiresPIN: Bool?) {
-        guard let plexAccount = linkedPlexAccount, let id = plexHomeUserID else {
-            return (nil, nil, nil, nil)
-        }
-        if let user = plexHomeUsers.first(where: { $0.id == id }) {
-            return (id, user.name, plexAccount.id, user.requiresPIN)
-        }
-        if id == editingProfile?.plexHomeUserID {
-            return (id, editingProfile?.plexHomeUserName, plexAccount.id, editingProfile?.plexHomeUserRequiresPIN)
-        }
-        return (id, nil, plexAccount.id, nil)
-    }
-
     private func save() {
-        var ids = selectedAccountIDs
-        if let linkedAccountID { ids.insert(linkedAccountID) }
-        let plex = resolvedPlexFields()
+        // Carry through the existing non-cosmetic fields so callers that
+        // dispatch a single `saveProfile(draft)` path don't accidentally wipe
+        // server membership or Plex Home-user mapping when only cosmetics
+        // changed.
         onSave(ProfileDraft(
             id: editingProfile?.id,
             name: trimmedName,
             avatarSymbol: avatarSymbol,
             colorIndex: colorIndex,
-            linkedAccountID: linkedAccountID,
-            activeAccountIDs: Array(ids),
-            plexHomeUserID: plex.id,
-            plexHomeUserName: plex.name,
-            plexHomeUserAccountID: plex.account,
-            plexHomeUserRequiresPIN: plex.requiresPIN
+            linkedAccountID: editingProfile?.linkedAccountID,
+            activeAccountIDs: [],
+            plexHomeUserID: editingProfile?.plexHomeUserID,
+            plexHomeUserName: editingProfile?.plexHomeUserName,
+            plexHomeUserAccountID: editingProfile?.plexHomeUserAccountID,
+            plexHomeUserRequiresPIN: editingProfile?.plexHomeUserRequiresPIN
         ))
     }
 }

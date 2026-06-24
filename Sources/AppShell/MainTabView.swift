@@ -7,6 +7,7 @@ import FeatureMusic
 import FeaturePlayback
 import FeatureSearch
 import FeatureSettings
+import FeatureProfiles
 import ProviderTrailers
 import RatingsService
 import TraktService
@@ -33,7 +34,16 @@ struct MainTabView: View {
     let activeAccountID: String?
     let profiles: [Profile]
     let activeProfile: Profile
+    let askProfileOnStartup: Bool
+    let profilesEnabled: Bool
     @Binding var pendingPlayItemID: String?
+    let isAccountIncludedInActiveProfile: (String) -> Bool
+    let onSetAccountIncluded: (String, Bool) -> Void
+    let onSetAskProfileOnStartup: (Bool) -> Void
+    let onEnableProfiles: () -> Void
+    let onDisableProfiles: () -> Void
+    let onSaveProfile: (ProfileDraft) -> Void
+    let onDeleteProfile: (String) -> Void
     let onAddAccount: () -> Void
     let onRemoveAccount: (Account) -> Void
     let onSignOutAll: () -> Void
@@ -98,13 +108,22 @@ struct MainTabView: View {
                 activeAccountID: activeAccountID,
                 profiles: profiles,
                 activeProfile: activeProfile,
+                askProfileOnStartup: askProfileOnStartup,
+                profilesEnabled: profilesEnabled,
                 appVersion: AppInfo.version,
                 appBuild: AppInfo.build,
                 repoURL: AppInfo.repoURLString,
+                isAccountIncludedInActiveProfile: isAccountIncludedInActiveProfile,
+                onSetAccountIncluded: onSetAccountIncluded,
+                onSetAskProfileOnStartup: onSetAskProfileOnStartup,
+                onEnableProfiles: onEnableProfiles,
+                onDisableProfiles: onDisableProfiles,
+                onSwitchProfile: onSwitchProfile,
+                onSaveProfile: onSaveProfile,
+                onDeleteProfile: onDeleteProfile,
                 onAddAccount: onAddAccount,
                 onRemoveAccount: onRemoveAccount,
-                onSignOutAll: onSignOutAll,
-                onSwitchProfile: onSwitchProfile
+                onSignOutAll: onSignOutAll
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }

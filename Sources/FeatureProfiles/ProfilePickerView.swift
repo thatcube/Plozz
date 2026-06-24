@@ -5,20 +5,19 @@ import CoreUI
 
 /// tvOS profile picker — the "Who's watching?" screen.
 ///
-/// Shown at launch (when the household has more than one profile and no
-/// remembered selection) and from Settings via "Switch Profile". Selecting a
-/// tile activates that profile; the optional **Edit** mode routes tile taps to
-/// the editor instead, and exposes an "Add Profile" tile.
+/// Selection-only. Tapping a tile activates that profile; there is no Edit
+/// mode and no per-tile account toggles. Profile editing lives in Settings →
+/// Profile after selection. An "Add Profile" tile is shown only when the
+/// caller passes a non-nil `onAddProfile` (i.e. from Settings → "Manage
+/// Profiles"); the launch picker hides it.
 public struct ProfilePickerView: View {
     private let profiles: [Profile]
     private let activeProfileID: String?
     private let title: String
     private let onSelect: (Profile) -> Void
-    private let onAddProfile: () -> Void
-    private let onEditProfile: (Profile) -> Void
+    private let onAddProfile: (() -> Void)?
     private let onCancel: (() -> Void)?
 
-    @State private var isEditing = false
     @Environment(\.themePalette) private var palette
 
     public init(
@@ -26,8 +25,7 @@ public struct ProfilePickerView: View {
         activeProfileID: String?,
         title: String = "Who's watching?",
         onSelect: @escaping (Profile) -> Void,
-        onAddProfile: @escaping () -> Void,
-        onEditProfile: @escaping (Profile) -> Void,
+        onAddProfile: (() -> Void)? = nil,
         onCancel: (() -> Void)? = nil
     ) {
         self.profiles = profiles
@@ -35,7 +33,6 @@ public struct ProfilePickerView: View {
         self.title = title
         self.onSelect = onSelect
         self.onAddProfile = onAddProfile
-        self.onEditProfile = onEditProfile
         self.onCancel = onCancel
     }
 
@@ -43,7 +40,7 @@ public struct ProfilePickerView: View {
 
     public var body: some View {
         VStack(spacing: 48) {
-            Text(isEditing ? "Manage Profiles" : title)
+            Text(title)
                 .font(.system(size: 56, weight: .bold, design: .rounded))
                 .foregroundStyle(palette.primaryText)
 
@@ -51,40 +48,34 @@ public struct ProfilePickerView: View {
                 ForEach(profiles) { profile in
                     ProfileTile(
                         profile: profile,
-                        isActive: profile.id == activeProfileID,
-                        isEditing: isEditing
+                        isActive: profile.id == activeProfileID
                     ) {
-                        if isEditing { onEditProfile(profile) } else { onSelect(profile) }
+                        onSelect(profile)
                     }
                 }
-                AddProfileTile(action: onAddProfile)
+                if let onAddProfile {
+                    AddProfileTile(action: onAddProfile)
+                }
             }
             .padding(.horizontal, 80)
             .focusSection()
 
-            HStack(spacing: 24) {
-                Button(isEditing ? "Done" : "Edit Profiles") {
-                    isEditing.toggle()
-                }
-                if let onCancel {
-                    Button("Cancel", action: onCancel)
-                }
+            if let onCancel {
+                Button("Cancel", action: onCancel)
+                    .padding(.top, 8)
+                    .focusSection()
             }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 8)
-            .focusSection()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 80)
     }
 }
 
-/// A single selectable/editable profile tile: avatar symbol on a colored disc
-/// plus the profile name, with a tvOS focus scale + an "active"/"edit" badge.
+/// A single selectable profile tile: avatar symbol on a colored disc plus the
+/// profile name, with a tvOS focus scale + an "active" badge.
 private struct ProfileTile: View {
     let profile: Profile
     let isActive: Bool
-    let isEditing: Bool
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -99,17 +90,10 @@ private struct ProfileTile: View {
                     Image(systemName: profile.avatarSymbol)
                         .font(.system(size: 96, weight: .semibold))
                         .foregroundStyle(.white)
-                    if isEditing {
-                        Circle()
-                            .fill(.black.opacity(0.45))
-                        Image(systemName: "pencil")
-                            .font(.system(size: 64, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
                 }
                 .frame(width: 220, height: 220)
                 .overlay(alignment: .topTrailing) {
-                    if isActive && !isEditing {
+                    if isActive {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 40))
                             .foregroundStyle(.green)
@@ -136,7 +120,9 @@ private struct ProfileTile: View {
     }
 }
 
-/// The trailing "Add Profile" tile shown after the profiles.
+/// The trailing "Add Profile" tile shown after the profiles. Only rendered
+/// when the caller wants to expose adding (Settings → manage profiles); the
+/// launch picker never shows it.
 private struct AddProfileTile: View {
     let action: () -> Void
 

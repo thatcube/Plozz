@@ -211,18 +211,22 @@ public final class AppState {
     }
 
     /// Restores stored accounts on launch (relaunch without re-login), migrating
-    /// any legacy single session first. With more than one profile, opens the
-    /// profile picker before the signed-in UI.
+    /// any legacy single session first. Shows the profile picker when the
+    /// household has opted into "ask on startup" (default = `profiles.count > 1`).
     public func bootstrap() {
         accountStore.migrateLegacySessionIfNeeded()
         reloadAccounts()
-        // Show the launch picker when the household has more than one profile,
-        // unless the current Apple TV system user already has a remembered pick
-        // that the system says we may honor (per `shouldStorePreferencesForCurrentUser`).
-        // On single-Apple-TV-user devices the system signal is false, preserving
-        // the original "always show the picker for >1 profile" behavior.
+        // Honor the household-level "Ask which profile on startup" toggle.
+        // With more than one profile, the toggle defaults to true (preserving
+        // the old "always show the picker" behavior) but the user can turn it
+        // off — turning it off makes the picker not auto-appear and the app
+        // boots straight into the last-used profile (or the only one).
+        // Within a single Apple TV system user that already has a remembered
+        // pick, we still respect that remembered pick.
         let systemRemembers = mayRememberProfileSelection && profilesModel.hasRememberedSelection
-        isChoosingProfile = profilesModel.profiles.count > 1 && !systemRemembers
+        isChoosingProfile = profilesModel.askProfileOnStartup
+            && profilesModel.profiles.count > 1
+            && !systemRemembers
         apply(.restored(accounts))
         // Honor a remembered/auto-landed profile's Plex Home-user mapping at
         // launch. When the picker is shown, the switch happens once the user
@@ -497,6 +501,11 @@ public final class AppState {
 
     /// Creates or updates a profile from an editor draft. Updating the active
     /// profile re-applies its settings + account scope immediately.
+    ///
+    /// A cosmetic-only edit (the new Settings → Profile editor) passes an
+    /// empty `activeAccountIDs` to mean "leave membership alone." Settings →
+    /// Servers & Libraries is the authoritative surface for membership now and
+    /// writes through `setAccount(_, includedInActiveProfile:)`.
     public func saveProfile(_ draft: ProfileDraft) {
         if let id = draft.id {
             if var profile = profilesModel.profiles.first(where: { $0.id == id }) {
@@ -510,7 +519,9 @@ public final class AppState {
                 profile.plexHomeUserRequiresPIN = draft.plexHomeUserRequiresPIN
                 profilesModel.update(profile)
             }
-            profilesModel.setActiveAccountIDs(draft.activeAccountIDs, for: id)
+            if !draft.activeAccountIDs.isEmpty {
+                profilesModel.setActiveAccountIDs(draft.activeAccountIDs, for: id)
+            }
             if id == profilesModel.activeProfileID {
                 rebuildSettingsModels()
                 updateTraktForActiveProfile()
@@ -542,6 +553,46 @@ public final class AppState {
             updateTraktForActiveProfile()
             reloadAccounts()
         }
+    }
+
+    // MARK: Household preferences
+
+    /// Opt the household into the profile UX (shows the "Enable Profiles"
+    /// affordance in Settings, surfaces profile management). Idempotent.
+    public func enableProfiles() {
+        profilesModel.enableProfiles()
+    }
+
+    /// Opt the household out of the profile UX. Only honored with a single
+    /// profile — `ProfilesModel.disableProfiles()` refuses when there are
+    /// multiple profiles so they don't become unreachable.
+    public func disableProfiles() {
+        profilesModel.disableProfiles()
+    }
+
+    /// Persists the "Ask which profile on startup" launch-picker toggle.
+    public func setAskProfileOnStartup(_ value: Bool) {
+        profilesModel.setAskProfileOnStartup(value)
+    }
+
+    /// Whether `accountID` is included in the active profile's "Use this
+    /// server" set. Used by Settings to drive the per-server toggle.
+    public func isAccountIncludedInActiveProfile(_ accountID: String) -> Bool {
+        activeAccountIDs.contains(accountID)
+    }
+
+    /// Toggles inclusion of `accountID` in the active profile's account set
+    /// ("Use this server" toggle on Settings → Servers & Libraries → server).
+    public func setAccount(_ accountID: String, includedInActiveProfile included: Bool) {
+        let profileID = profilesModel.activeProfileID
+        let current = Set(profilesModel.activeAccountIDs(
+            for: profileID,
+            fallback: accountStore.activeAccountIDs()
+        ))
+        var next = current
+        if included { next.insert(accountID) } else { next.remove(accountID) }
+        profilesModel.setActiveAccountIDs(Array(next), for: profileID)
+        reloadAccounts()
     }
 
     /// The account subset currently stored for a profile (for the editor), or

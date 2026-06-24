@@ -190,7 +190,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "TraktService"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService"]
         ),
         .target(
             name: "FeatureProfiles",

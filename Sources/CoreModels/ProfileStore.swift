@@ -33,6 +33,35 @@ public protocol ProfilePersisting: Sendable {
     /// active. Idempotent; returns the profile list after running.
     @discardableResult
     func migrateLegacyIfNeeded(defaultName: String, defaultActiveAccountIDs: [String]) -> [Profile]
+
+    // MARK: Household preferences (opt-in profiles UX)
+    //
+    // These are household-wide, not per-profile: they govern whether the
+    // launch picker appears at all, and whether profile UI is shown in
+    // Settings. They live in the same shared/secure store as the profile
+    // list so every Apple TV system user sees the same value.
+
+    /// `true`/`false` if the household explicitly set the "Ask which profile
+    /// on startup" preference; `nil` when never set (caller picks a default,
+    /// typically `profiles.count > 1`).
+    func askProfileOnStartupOverride() -> Bool?
+    /// Persists (or clears with `nil`) the launch-picker preference.
+    func setAskProfileOnStartupOverride(_ value: Bool?)
+    /// `true`/`false` if the household explicitly opted profiles in or out;
+    /// `nil` when never set. With multiple profiles the UI is always shown
+    /// regardless of this flag.
+    func profilesEnabledOverride() -> Bool?
+    /// Persists (or clears with `nil`) the profiles-enabled preference.
+    func setProfilesEnabledOverride(_ value: Bool?)
+}
+
+extension ProfilePersisting {
+    // Default no-op implementations so optional stores (tests/previews) do not
+    // need to opt into the household-preferences additions to keep compiling.
+    public func askProfileOnStartupOverride() -> Bool? { nil }
+    public func setAskProfileOnStartupOverride(_ value: Bool?) {}
+    public func profilesEnabledOverride() -> Bool? { nil }
+    public func setProfilesEnabledOverride(_ value: Bool?) {}
 }
 
 public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
@@ -51,6 +80,8 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     private let profilesKey = "com.plozz.profiles.v1"
     private let activeProfileIDKey = "com.plozz.profiles.activeID"
     private let perProfileActiveAccountsPrefix = "com.plozz.profile.activeAccounts."
+    private let askOnStartupKey = "com.plozz.profiles.askOnStartup"
+    private let profilesEnabledKey = "com.plozz.profiles.enabled"
     /// Stable id assigned to the migrated default profile so its identity is the
     /// same across launches and its `isDefault` status is unambiguous.
     public static let defaultProfileID = "com.plozz.profile.default"
@@ -105,6 +136,55 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         if let data = try? JSONEncoder().encode(ids) {
             setSharedData(data, forKey: accountsKey(profileID))
+        }
+    }
+
+    // MARK: Household preferences
+
+    public func askProfileOnStartupOverride() -> Bool? {
+        lock.lock(); defer { lock.unlock() }
+        return readSharedBool(forKey: askOnStartupKey)
+    }
+
+    public func setAskProfileOnStartupOverride(_ value: Bool?) {
+        lock.lock(); defer { lock.unlock() }
+        writeSharedBool(value, forKey: askOnStartupKey)
+    }
+
+    public func profilesEnabledOverride() -> Bool? {
+        lock.lock(); defer { lock.unlock() }
+        return readSharedBool(forKey: profilesEnabledKey)
+    }
+
+    public func setProfilesEnabledOverride(_ value: Bool?) {
+        lock.lock(); defer { lock.unlock() }
+        writeSharedBool(value, forKey: profilesEnabledKey)
+    }
+
+    private func readSharedBool(forKey key: String) -> Bool? {
+        guard let data = sharedData(forKey: key),
+              let raw = String(data: data, encoding: .utf8) else { return nil }
+        switch raw {
+        case "true": return true
+        case "false": return false
+        default: return nil
+        }
+    }
+
+    private func writeSharedBool(_ value: Bool?, forKey key: String) {
+        guard let value else {
+            // Clearing: best-effort. Defaults path stores plain Data, secure
+            // path stores a string — wipe whichever applies.
+            if let secureStore {
+                try? secureStore.removeValue(for: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+            return
+        }
+        let json = value ? "true" : "false"
+        if let data = json.data(using: .utf8) {
+            setSharedData(data, forKey: key)
         }
     }
 
@@ -219,6 +299,14 @@ public final class ProfilesModel {
     /// multi-user support, a user with no remembered pick still sees the picker
     /// even though `activeProfile` resolves to a sensible default.
     public private(set) var hasRememberedSelection: Bool
+    /// Household-level "Profiles are turned on" flag. With more than one
+    /// profile in the household, the profile UI is *always* shown (you can't
+    /// have multiple profiles without the picker). With exactly one profile,
+    /// this reflects an explicit opt-in (Settings → "Enable Profiles").
+    public private(set) var profilesEnabled: Bool
+    /// Household-level "Ask which profile on startup" flag. Defaults to
+    /// `profiles.count > 1` until the user explicitly toggles it.
+    public private(set) var askProfileOnStartup: Bool
 
     private let store: ProfilePersisting
 
@@ -240,6 +328,13 @@ public final class ProfilesModel {
         let remembered = store.activeProfileID()
         self.hasRememberedSelection = remembered != nil
         self.activeProfileID = remembered ?? migrated.first?.id ?? ProfileStore.defaultProfileID
+        // Resolve the household preferences. Defaults are "smart" — profiles
+        // are considered enabled (and the launch picker shown) whenever the
+        // household has more than one profile, even before the user has
+        // explicitly toggled either flag. Explicit overrides win.
+        let multi = migrated.count > 1
+        self.profilesEnabled = store.profilesEnabledOverride() ?? multi
+        self.askProfileOnStartup = store.askProfileOnStartupOverride() ?? multi
         // Intentionally does *not* persist a defaulted selection: leaving it
         // unstored is what lets a fresh Apple TV system user get the picker.
     }
@@ -298,6 +393,11 @@ public final class ProfilesModel {
         if !activeAccountIDs.isEmpty {
             store.setActiveAccountIDs(activeAccountIDs, forProfile: profile.id)
         }
+        // Crossing into multi-profile territory implicitly enables profiles
+        // and the launch picker (unless the user has explicitly turned either
+        // off). Without this a freshly-added second profile would never be
+        // reachable until the user toggled "Enable Profiles" by hand.
+        recomputeHouseholdDefaults()
         return profile
     }
 
@@ -318,6 +418,7 @@ public final class ProfilesModel {
             activeProfileID = profiles.first?.id ?? ProfileStore.defaultProfileID
             store.setActiveProfileID(activeProfileID)
         }
+        recomputeHouseholdDefaults()
     }
 
     // MARK: Per-profile active accounts
@@ -329,5 +430,52 @@ public final class ProfilesModel {
 
     public func setActiveAccountIDs(_ ids: [String], for profileID: String) {
         store.setActiveAccountIDs(ids, forProfile: profileID)
+    }
+
+    // MARK: Household preferences
+
+    /// Explicit opt-in. Idempotent: also turns on the launch picker the first
+    /// time the user enables profiles so they can actually *see* the picker.
+    public func enableProfiles() {
+        store.setProfilesEnabledOverride(true)
+        profilesEnabled = true
+        if store.askProfileOnStartupOverride() == nil {
+            store.setAskProfileOnStartupOverride(true)
+            askProfileOnStartup = true
+        }
+    }
+
+    /// Explicit opt-out. Refuses to turn profiles off while more than one
+    /// profile exists — the picker is the only way to reach those other
+    /// profiles, so hiding it would orphan them.
+    public func disableProfiles() {
+        guard profiles.count <= 1 else { return }
+        store.setProfilesEnabledOverride(false)
+        profilesEnabled = false
+        store.setAskProfileOnStartupOverride(false)
+        askProfileOnStartup = false
+    }
+
+    /// Persists the "Ask which profile on startup" toggle.
+    public func setAskProfileOnStartup(_ value: Bool) {
+        store.setAskProfileOnStartupOverride(value)
+        askProfileOnStartup = value
+    }
+
+    /// Re-derives the household defaults after a profile add/remove. Explicit
+    /// overrides set by `enableProfiles` / `disableProfiles` / the launch toggle
+    /// always win; this only fills in the defaults when none has been set.
+    private func recomputeHouseholdDefaults() {
+        let multi = profiles.count > 1
+        if let override = store.profilesEnabledOverride() {
+            profilesEnabled = override || multi
+        } else {
+            profilesEnabled = multi
+        }
+        if let override = store.askProfileOnStartupOverride() {
+            askProfileOnStartup = override
+        } else {
+            askProfileOnStartup = multi
+        }
     }
 }

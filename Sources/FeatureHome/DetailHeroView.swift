@@ -401,10 +401,11 @@ struct DetailHeroView: View {
         Button { performHeroAction(action) } label: {
             Image(systemName: item.isFavorite ? "bookmark.fill" : "bookmark")
                 .foregroundStyle(item.isFavorite ? Color.accentColor : Color.primary)
-                .contentTransition(.symbolEffect(.replace))
+                .contentTransition(.opacity)
+                .symbolEffect(.bounce, value: item.isFavorite)
         }
         .modifier(HeroButtonStyle(prominent: false))
-        .animation(.spring(response: 0.32, dampingFraction: 0.7), value: item.isFavorite)
+        .animation(.easeInOut(duration: 0.2), value: item.isFavorite)
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isFavorite ? "On your watchlist" : "Not on your watchlist")
     }
@@ -420,10 +421,11 @@ struct DetailHeroView: View {
         Button { performHeroAction(action) } label: {
             Image(systemName: item.isPlayed ? "checkmark.circle.fill" : "checkmark.circle")
                 .foregroundStyle(item.isPlayed ? ThemePalette.brandBlue : Color.primary)
-                .contentTransition(.symbolEffect(.replace))
+                .contentTransition(.opacity)
+                .symbolEffect(.bounce, value: item.isPlayed)
         }
         .modifier(HeroButtonStyle(prominent: false))
-        .animation(.spring(response: 0.32, dampingFraction: 0.7), value: item.isPlayed)
+        .animation(.easeInOut(duration: 0.2), value: item.isPlayed)
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
     }

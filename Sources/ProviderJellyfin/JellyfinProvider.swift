@@ -137,13 +137,20 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     public func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
-        let detail = try await client.item(userID: session.userID, id: itemID)
-        var info = try await client.playbackInfo(
+        // Jellyfin needs two independent round-trips here — the item detail and
+        // the playback decision (media sources). They don't depend on each other,
+        // so issue them concurrently to halve the time-to-first-frame latency
+        // versus awaiting them serially. (Plex resolves both in one `metadata`
+        // call, so its provider has nothing to parallelize — see PlexProvider.)
+        async let detailTask = client.item(userID: session.userID, id: itemID)
+        async let infoTask = client.playbackInfo(
             userID: session.userID,
             itemID: itemID,
             mediaSourceID: mediaSourceID,
             mode: forceTranscode ? .transcode : .auto
         )
+        let detail = try await detailTask
+        var info = try await infoTask
         // Prefer the explicitly chosen source; fall back to the server default.
         guard var source = Self.selectSource(mediaSourceID, in: info.MediaSources) else { throw AppError.notFound }
 

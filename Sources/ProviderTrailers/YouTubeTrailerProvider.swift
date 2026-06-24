@@ -33,6 +33,51 @@ public struct YouTubeTrailerProvider: MediaProvider {
     /// updated. The remote service makes its requests *through* this device, so
     /// resolved stream URLs stay valid for playback here.
     private let methods: [YouTube.ExtractionMethod]
+
+    /// Process-wide, time-bounded cache of in-flight and recently-resolved
+    /// YouTube stream extractions, keyed by video id. Two callers race for the
+    /// same id during trailer fast-start: the detail screen verifies which
+    /// trailer id plays (warming this cache), then a Play tap resolves the *same*
+    /// id again. Sharing the resolution makes that second resolve effectively
+    /// instant. A short TTL bounds reuse because resolved stream URLs carry a
+    /// time-limited signature — long enough to cover verify→play and brief
+    /// revisits, short enough to never hand back a stale (expired) URL.
+    actor StreamCache {
+        static let shared = StreamCache()
+
+        private struct Entry {
+            let task: Task<[YouTubeKit.Stream], Error>
+            let createdAt: Date
+        }
+        private var entries: [String: Entry] = [:]
+        /// Reuse window. Trailer extraction itself takes a couple of seconds, so
+        /// this leaves a comfortable post-resolution reuse margin while staying
+        /// well inside YouTube's URL signature lifetime.
+        private let ttl: TimeInterval = 180
+
+        func streams(for id: String, methods: [YouTube.ExtractionMethod]) async throws -> [YouTubeKit.Stream] {
+            if let entry = entries[id], Date().timeIntervalSince(entry.createdAt) < ttl {
+                do {
+                    return try await entry.task.value
+                } catch {
+                    // A cached failure is not sticky: drop it so a later attempt
+                    // (or a recovered network) can re-resolve.
+                    if entries[id]?.createdAt == entry.createdAt { entries[id] = nil }
+                    throw error
+                }
+            }
+            let task = Task { () throws -> [YouTubeKit.Stream] in
+                try await YouTube(videoID: id, methods: methods).streams
+            }
+            entries[id] = Entry(task: task, createdAt: Date())
+            do {
+                return try await task.value
+            } catch {
+                entries[id] = nil
+                throw error
+            }
+        }
+    }
     /// Optional source of replacement trailer video ids, tried in order when the
     /// primary video is unavailable. `nil` (the default) means no fallback.
     private let alternatives: AlternativeResolving?
@@ -238,13 +283,11 @@ public struct YouTubeTrailerProvider: MediaProvider {
         methods: [YouTube.ExtractionMethod],
         allowAdaptive: Bool
     ) async throws -> TrailerStream {
-        let video = YouTube(videoID: id, methods: methods)
-
         // Resolve concrete streams first so YouTube's unavailability signal
         // (private/removed/region-blocked) surfaces as TrailerVideoUnavailable.
         let streams: [YouTubeKit.Stream]
         do {
-            streams = try await video.streams
+            streams = try await StreamCache.shared.streams(for: id, methods: methods)
             plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: streams count=\(streams.count)")
         } catch let ytError as YouTubeKitError where Self.isUnavailable(ytError) {
             plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: UNAVAILABLE ytError=\(ytError)")
@@ -264,7 +307,7 @@ public struct YouTubeTrailerProvider: MediaProvider {
         // 4) HLS manifest — fallback for livestreams and the rare VOD without a
         //    usable progressive/adaptive stream. May fail on PO-token-gated
         //    segments, so it's the last resort.
-        if let hls = (try? await video.livestreams)?.first?.url {
+        if let hls = (try? await YouTube(videoID: id, methods: methods).livestreams)?.first?.url {
             plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: no progressive/adaptive; using HLS manifest")
             return TrailerStream(videoURL: hls)
         }

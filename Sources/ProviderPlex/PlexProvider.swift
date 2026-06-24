@@ -138,6 +138,12 @@ public struct PlexProvider: MediaProvider {
     }
 
     public func playbackInfo(for itemID: String, mediaSourceID: String?, forceTranscode: Bool) async throws -> PlaybackRequest {
+        // Single round-trip: Plex's `metadata` response already carries the
+        // Media/Part (version) elements and the stream URL is then built locally,
+        // so — unlike Jellyfin's separate item + playback-decision calls — there's
+        // nothing here to parallelize for time-to-first-frame. This is the Plex
+        // mirror of Jellyfin's concurrent playbackInfo: fetch the one decision as
+        // early as possible.
         let detail = try await client.metadata(ratingKey: itemID)
         // Pick the chosen Media element (version) by id, else Plex's first.
         let chosenMedia = mediaSourceID.flatMap { id in

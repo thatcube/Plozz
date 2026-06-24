@@ -325,7 +325,12 @@ final class ItemDetailViewModelTests: XCTestCase {
 
         await vm.load()
 
-        XCTAssertEqual(cache.outcome(for: "m1"), .none)
+        // NB: `.none` here must be the Outcome case, not Optional.none. Written as
+        // a bare `.none`, Swift binds it to `Optional<Outcome>.none` (nil) and the
+        // test silently checks the opposite of its intent. `.some(.none)` pins it to
+        // a cached `Outcome.none`, which is the documented behavior: a verified
+        // "no playable trailer" is memoized so a revisit hides the button instantly.
+        XCTAssertEqual(cache.outcome(for: "m1"), .some(.none))
         XCTAssertTrue(vm.trailers.isEmpty)
     }
 
@@ -338,6 +343,138 @@ final class ItemDetailViewModelTests: XCTestCase {
             await Task.yield()
         }
         XCTFail("Condition not met before timeout")
+    }
+
+    // MARK: - Hero-first paint (TTFP: don't gate the hero on children/trailers)
+
+    func testHeroPaintsImmediatelyForLeafKinds() async {
+        // For movies/episodes there are no children, so the loaded state should
+        // appear the moment `item` is fetched.
+        let provider = FakeMediaProvider(allItems: [MediaItem(id: "m1", title: "Dune", kind: .movie)])
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.state.value?.item.id, "m1")
+        XCTAssertEqual(vm.state.value?.children, [])
+    }
+
+    func testSeriesHeroPaintsBeforeChildrenFetchCompletes() async {
+        // The whole point of the hero-first refactor: render the series page
+        // hero immediately, and let the seasons rail fill in afterwards. The
+        // children fetch is gated so we can observe both intermediate states.
+        let provider = FakeMediaProvider(allItems: [series("show")])
+        provider.childrenByParent = [
+            "show": [season("s1", "Book One"), season("s2", "Book Two")]
+        ]
+        let gate = AsyncGate()
+        provider.childrenGate = ["show": { await gate.wait() }]
+
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "show",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        let loadTask = Task { await vm.load() }
+
+        // Intermediate state: hero already painted with the series item, but
+        // children still suspended → empty children list.
+        await waitUntil { vm.state.value?.item.id == "show" }
+        XCTAssertEqual(vm.state.value?.children, [], "Series hero must not wait on its children fetch")
+
+        // Release the gate; load completes with the full children list.
+        gate.open()
+        await loadTask.value
+        XCTAssertEqual(vm.state.value?.children.map(\.id), ["s1", "s2"])
+    }
+
+    // MARK: - initialItem seeding (instant first paint from the tapped list item)
+
+    func testInitialItemSeedsLoadedStateBeforeLoad() async {
+        // Constructing the VM with the tapped list item must paint a hero
+        // *immediately* — before `load()` and before any network call returns.
+        let listItem = MediaItem(id: "m1", title: "Dune", kind: .movie)
+        let provider = FakeMediaProvider(allItems: [
+            MediaItem(id: "m1", title: "Dune: Part Two", kind: .movie)
+        ])
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            initialItem: listItem,
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        // Seeded synchronously in init.
+        XCTAssertEqual(vm.state.value?.item.id, "m1")
+        XCTAssertEqual(vm.state.value?.item.title, "Dune")
+
+        await vm.load()
+
+        // After load() the fully-detailed item replaces the seeded one in place.
+        XCTAssertEqual(vm.state.value?.item.id, "m1")
+        XCTAssertEqual(vm.state.value?.item.title, "Dune: Part Two")
+    }
+
+    func testSeededHeroIsNeverReplacedByLoadingState() async {
+        // A seeded hero must not flash back to a full-screen loading/skeleton
+        // state while the detail re-fetch is in flight: load() observes a gated
+        // children fetch but the seeded hero stays loaded throughout.
+        let provider = FakeMediaProvider(allItems: [series("show")])
+        provider.childrenByParent = ["show": [season("s1", "Book One")]]
+        let gate = AsyncGate()
+        provider.childrenGate = ["show": { await gate.wait() }]
+
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "show",
+            initialItem: series("show"),
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        let loadTask = Task { await vm.load() }
+        // Throughout the gated load the state is continuously `.loaded` — never
+        // `.loading`/`.idle`/`.failed`.
+        for _ in 0..<50 {
+            XCTAssertNotNil(vm.state.value, "Seeded hero must stay loaded during re-fetch")
+            await Task.yield()
+        }
+        gate.open()
+        await loadTask.value
+        XCTAssertEqual(vm.state.value?.children.map(\.id), ["s1"])
+    }
+
+    func testSeededHeroSurvivesDetailFetchFailure() async {
+        // If the detail re-fetch fails, a seeded hero must remain usable rather
+        // than being buried under a full-screen error.
+        let provider = FakeMediaProvider(allItems: []) // item(id:) throws .notFound
+        let vm = ItemDetailViewModel(
+            provider: provider,
+            itemID: "m1",
+            initialItem: MediaItem(id: "m1", title: "Dune", kind: .movie),
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache()
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.state.value?.item.id, "m1")
+        if case .failed = vm.state {
+            XCTFail("Seeded hero must not be replaced by a full-screen error")
+        }
     }
 }
 

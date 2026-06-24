@@ -249,6 +249,7 @@ private struct HomeTab: View {
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(item.sourceAccountID, in: accounts),
                         itemID: item.id,
+                        initialItem: item,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: item.sourceAccountID
                     ),
@@ -438,6 +439,7 @@ private struct SearchTab: View {
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(item.sourceAccountID, in: accounts),
                         itemID: item.id,
+                        initialItem: item,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: item.sourceAccountID
                     ),

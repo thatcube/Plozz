@@ -36,8 +36,16 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
         guard let item = allItems.first(where: { $0.id == id }) else { throw AppError.notFound }
         return item
     }
+    /// Optional gate that, when present for a given parent id, suspends the
+    /// `children(of:)` call until released. Lets tests observe state published
+    /// between an item arriving and its children arriving.
+    var childrenGate: [String: @Sendable () async -> Void]?
+
     func children(of itemID: String) async throws -> [MediaItem] {
         childrenCallCount[itemID, default: 0] += 1
+        if let gate = childrenGate?[itemID] {
+            await gate()
+        }
         if let childrenByParent {
             return childrenByParent[itemID] ?? []
         }

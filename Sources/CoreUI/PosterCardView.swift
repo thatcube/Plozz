@@ -385,13 +385,21 @@ public struct PosterCardView: View {
                                 .fill(.white.opacity(0.22))
                         }
 
-                        // Fill: solid white, matching the main player's scrubber —
-                        // a bright white played fill with a subtle shadow so it reads
-                        // cleanly over both bright and dark artwork.
-                        Capsule(style: .continuous)
-                            .fill(.white)
-                            .frame(width: max(height, geo.size.width * percentage))
-                            .shadow(color: .black.opacity(0.35), radius: 3)
+                        // Fill: Plozz's brand blue rendered as Liquid Glass on
+                        // tvOS 26+ (a tinted glass capsule), with a solid brand-blue
+                        // fallback on older systems.
+                        Group {
+                            if #available(tvOS 26.0, *) {
+                                Capsule(style: .continuous)
+                                    .fill(.clear)
+                                    .glassEffect(.regular.tint(ThemePalette.brandBlue), in: Capsule(style: .continuous))
+                            } else {
+                                Capsule(style: .continuous)
+                                    .fill(ThemePalette.brandBlue)
+                            }
+                        }
+                        .frame(width: max(height, geo.size.width * percentage))
+                        .shadow(color: .black.opacity(0.35), radius: 3)
                     }
                 }
                 .frame(height: height)

@@ -36,9 +36,16 @@ struct ServerDetailView: View {
                     accountsPanel(group)
                     librariesPanel(group)
                 } else {
-                    Text("This server is no longer signed in.")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
+                    // Focusable so Menu/Back can pop back to the Servers list
+                    // instead of falling through and quitting the app.
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("This server is no longer signed in.")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Button { /* no-op — anchors focus */ } label: {
+                            Label("Go back", systemImage: "chevron.backward")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

@@ -66,8 +66,18 @@ struct TraktConnectionView: View {
                 }
 
             case .unavailable:
-                Text("Trakt sync isn't configured in this build. Add a Trakt client id and secret to enable it.")
-                    .foregroundStyle(.secondary)
+                // tvOS requires at least one focusable element on a pushed
+                // view, otherwise focus is unanchored and Menu/Back falls
+                // through to the system and exits the app. An enabled but
+                // inert button keeps focus inside this view so Back pops.
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Trakt sync isn't configured in this build. Add a Trakt client id and secret to enable it.")
+                        .foregroundStyle(.secondary)
+                    Button { /* no-op — anchors focus */ } label: {
+                        Label("Trakt unavailable", systemImage: "xmark.circle")
+                    }
+                    .focused($focus, equals: .connect)
+                }
 
             case .disconnected:
                 Button(action: { trakt.connect() }) {

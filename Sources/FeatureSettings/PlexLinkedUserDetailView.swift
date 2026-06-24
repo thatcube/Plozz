@@ -65,8 +65,14 @@ struct PlexLinkedUserDetailView: View {
                     }
                 } else {
                     SettingsPanel(title: "No Plex Account") {
-                        Text("Sign in to a Plex account in Server Accounts to pick a Plex Home user.")
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Sign in to a Plex account in Server Accounts to pick a Plex Home user.")
+                                .foregroundStyle(.secondary)
+                            // tvOS: at least one focusable element so Menu pops.
+                            Button { /* no-op — anchors focus */ } label: {
+                                Label("No Plex account", systemImage: "person.crop.circle.badge.xmark")
+                            }
+                        }
                     }
                 }
             }
@@ -120,7 +126,7 @@ struct PlexLinkedUserDetailView: View {
                             .background(Capsule().fill(ProviderIcon.tint(.plex).opacity(0.18)))
                             .foregroundStyle(ProviderIcon.tint(.plex))
                     }
-                    Text("Main Plex account holder — no PIN")
+                    Text("Main Plex account holder")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -147,14 +153,6 @@ struct PlexLinkedUserDetailView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(user.name).font(.headline)
-                        if user.isAdmin {
-                            Text("Admin")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(ProviderIcon.tint(.plex).opacity(0.18)))
-                                .foregroundStyle(ProviderIcon.tint(.plex))
-                        }
                         if user.isRestricted {
                             Text("Restricted")
                                 .font(.caption2.weight(.semibold))
@@ -163,10 +161,16 @@ struct PlexLinkedUserDetailView: View {
                                 .background(Capsule().fill(Color.orange.opacity(0.18)))
                                 .foregroundStyle(.orange)
                         }
+                        if user.requiresPIN {
+                            Text("PIN")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.yellow.opacity(0.22)))
+                                .foregroundStyle(.yellow)
+                                .accessibilityLabel("PIN required")
+                        }
                     }
-                    Text(user.requiresPIN ? "PIN required" : "No PIN")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 if isSelected {

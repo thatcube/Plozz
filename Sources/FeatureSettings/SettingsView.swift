@@ -526,9 +526,39 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 14)
+            .padding(.horizontal, 12)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsRowButtonStyle())
+    }
+}
+
+/// Contained focus treatment for Settings rows. Default `.plain` on tvOS
+/// draws an enlarged focus halo that overflows row bounds — with zero-spaced
+/// rows it visibly bleeds into the neighbors and sits on top of dividers.
+/// This style keeps focus INSIDE the row: a clipped rounded rect background
+/// fills only the row's frame, no scale.
+struct SettingsRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        SettingsRowButtonBody(configuration: configuration)
+    }
+}
+
+private struct SettingsRowButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    @Environment(\.isFocused) private var isFocused
+    var body: some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isFocused ? Color.white.opacity(0.14) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(isFocused ? Color.white.opacity(0.35) : Color.clear, lineWidth: 2)
+            )
+            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 }
 #endif

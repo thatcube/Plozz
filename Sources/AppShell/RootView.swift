@@ -22,7 +22,12 @@ public struct RootView: View {
     }
 
     public var body: some View {
-        Group {
+        // Read the PIN request HERE so the @Observable system registers it
+        // as a dependency of body. The sheet's Binding closures aren't
+        // tracked, so without this body never re-evaluates when the request
+        // clears and the sheet stays up after a successful PIN.
+        let pinRequest = appState.pendingPlexPINRequest
+        return Group {
             switch appState.state {
             case .launching:
                 LaunchView()
@@ -98,7 +103,7 @@ public struct RootView: View {
         .environment(\.themePalette, resolvedPalette)
         .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)
         .sheet(item: Binding(
-            get: { appState.pendingPlexPINRequest },
+            get: { pinRequest },
             set: { newValue in if newValue == nil { appState.dismissPlexPINIfPresented() } }
         )) { request in
             PlexPINEntryView(

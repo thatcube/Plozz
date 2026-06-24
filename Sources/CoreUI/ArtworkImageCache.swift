@@ -29,6 +29,24 @@ public final class ArtworkImageCache: @unchecked Sendable {
 
     private let cache = NSCache<NSString, UIImage>()
     private let lock = NSLock()
+    /// Dedicated session for artwork byte fetches. `URLSession.shared` uses a 60s
+    /// default request timeout, so a poster/logo download to a slow or unreachable
+    /// host (a sleeping server, a dead external-metadata CDN URL) holds one of the
+    /// ~6 per-host HTTP/1.1 connections for up to a full minute. On a long-running
+    /// session those hung transfers accumulate and starve the pool, so fresh art
+    /// "takes ages or never loads" — and it gets worse the longer the app is open.
+    /// Short, explicit timeouts free the connection quickly so a stuck URL can't
+    /// poison subsequent loads (mirrors MetadataHTTP / CoreNetworking timeouts).
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        config.waitsForConnectivity = false
+        config.httpMaximumConnectionsPerHost = 6
+        config.urlCache = URLCache.shared
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        return URLSession(configuration: config)
+    }()
     /// In-flight image loads keyed by URL+variant so a card's own load and the
     /// rail's prefetch never decode the same target twice.
     private var inFlight: [CacheKey: Task<UIImage?, Never>] = [:]
@@ -121,7 +139,7 @@ public final class ArtworkImageCache: @unchecked Sendable {
     }
 
     private static func downloadData(_ url: URL) async -> Data? {
-        guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+        guard let (data, response) = try? await session.data(from: url) else { return nil }
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return nil }
         return data
     }

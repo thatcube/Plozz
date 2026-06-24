@@ -54,6 +54,15 @@ public final class PlayerViewModel {
     /// agnostic — derived from `MediaSourceMetadata`, identical for Plex/Jellyfin.
     private(set) var displayMode: HDRDisplayMode = .sdr
 
+    /// The dynamic range of the **content** being played, independent of which
+    /// engine renders it. `displayMode` only goes HDR for the native engine
+    /// (the only one that drives `AVDisplayManager`'s mode switch *itself*), but
+    /// on some TVs the mpv engine's HDR/DV output still makes the panel switch
+    /// HDMI modes — so the exit veil must cover that switch for *any* engine
+    /// playing HDR/DV content. Gating the exit veil on content (not engine)
+    /// avoids the flash-on-Home when an mpv-played HDR/DV title is dismissed.
+    private(set) var contentDisplayMode: HDRDisplayMode = .sdr
+
     /// Shared, observable transport state for the custom player overlay. The
     /// view model writes live playback facts here; the input controller writes
     /// scrub state; the SwiftUI overlay reads.
@@ -380,6 +389,10 @@ public final class PlayerViewModel {
         // engine's teardown restores SDR — a real switch the view should veil),
         // and hybrid→native rises to HDR (the new switch the view should veil).
         displayMode = engineKind == .native ? HDRDisplayMode(request.sourceMetadata) : .sdr
+        // Engine-independent: tracks the *content's* range so the exit veil can
+        // cover a panel HDR/DV → SDR switch even when mpv (which stays `.sdr`
+        // above) drove the panel into HDR on this TV.
+        contentDisplayMode = HDRDisplayMode(request.sourceMetadata)
         // Arm the stall watchdog around load() so a hang that never reports an
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)

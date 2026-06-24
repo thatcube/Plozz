@@ -164,7 +164,7 @@ public struct PlayerView: View {
     /// If no window veil is available (previews/tests), fall back to the player-only
     /// behavior: wait for the in-player settle/timeout before dismissing.
     private func dismissSmoothly() {
-        guard viewModel.displayMode.isHDR else {
+        guard viewModel.contentDisplayMode.isHDR else {
             dismiss()
             return
         }

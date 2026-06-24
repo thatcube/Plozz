@@ -137,7 +137,12 @@ public struct RootView: View {
                 .opacity(displayVeil.veilOpacity)
                 .ignoresSafeArea()
                 .allowsHitTesting(displayVeil.veilOpacity > 0.01)
-                .animation(.easeInOut(duration: 0.4), value: displayVeil.veilOpacity)
+                // Snap to black *instantly* on engage (rising edge → no animation)
+                // so the player's dismiss lands on an already-opaque window veil and
+                // Home never shows through. Only the fade-OUT (falling edge, after
+                // the panel settles) is animated.
+                .animation(displayVeil.veilOpacity == 0 ? .easeInOut(duration: 0.4) : nil,
+                           value: displayVeil.veilOpacity)
         }
         .modifier(RootDisplaySettleObserver { displayVeil.displayDidSettle() })
     }

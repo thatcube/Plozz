@@ -13,7 +13,7 @@ public struct RatingsBadgeRow: View {
 
     public var body: some View {
         if !ratings.isEmpty {
-            HStack(spacing: 22) {
+            HStack(alignment: .firstTextBaseline, spacing: 22) {
                 ForEach(ratings) { rating in
                     RatingBadge(rating: rating)
                 }
@@ -40,12 +40,19 @@ public struct RatingBadge: View {
     }
 
     public var body: some View {
-        HStack(spacing: 7) {
-            icon
-            Text(rating.displayValue)
-                .font(valueFont)
-                .monospacedDigit()
-                .foregroundStyle(valueColor)
+        VStack(spacing: 5) {
+            HStack(spacing: 7) {
+                icon
+                Text(rating.displayValue)
+                    .font(valueFont)
+                    .monospacedDigit()
+                    .foregroundStyle(valueColor)
+            }
+            Text(rating.source.shortLabel)
+                .font(.system(size: 14, weight: .semibold))
+                .textCase(.uppercase)
+                .tracking(0.6)
+                .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(rating.source.displayName) rating \(rating.displayValue)")
@@ -57,7 +64,7 @@ public struct RatingBadge: View {
         case .star:
             Image(systemName: "star.fill")
                 .font(.system(size: Self.iconSize * 0.8, weight: .semibold))
-                .foregroundStyle(Self.starGold)
+                .foregroundStyle(starColor)
         case .tmdb:
             tmdbBadge
         case .tomato:
@@ -67,6 +74,12 @@ public struct RatingBadge: View {
         case .metacritic:
             metacriticChip
         }
+    }
+
+    /// Tint for star-based sources: AniList in its signature blue so it reads as
+    /// distinct from a gold IMDb/user star sitting beside it.
+    private var starColor: Color {
+        rating.source == .anilist ? Self.anilistBlue : Self.starGold
     }
 
     /// An emoji icon sized to sit on the shared cap height. Emoji ignore
@@ -124,6 +137,7 @@ public struct RatingBadge: View {
 
     // Brand-ish colours.
     private static let starGold = Color(red: 0.96, green: 0.77, blue: 0.13)
+    private static let anilistBlue = Color(red: 0.13, green: 0.62, blue: 1.0)
     private static let freshRed = Color(red: 0.98, green: 0.27, blue: 0.20)
     private static let rottenGreen = Color(red: 0.18, green: 0.70, blue: 0.40)
     private static let metacriticGreen = Color(red: 0.40, green: 0.73, blue: 0.27)

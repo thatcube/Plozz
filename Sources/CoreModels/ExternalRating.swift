@@ -41,6 +41,22 @@ public enum RatingSource: String, Codable, Sendable, Hashable, CaseIterable {
         }
     }
 
+    /// A compact caption shown under the score in the badge so sources that
+    /// share an icon family (e.g. star-based IMDb vs AniList) stay legible.
+    public var shortLabel: String {
+        switch self {
+        case .imdb: return "IMDb"
+        case .rottenTomatoes: return "Critics"
+        case .rottenTomatoesAudience: return "Audience"
+        case .metacritic: return "Metacritic"
+        case .letterboxd: return "Letterboxd"
+        case .anilist: return "AniList"
+        case .tmdb: return "TMDB"
+        case .community: return "Community"
+        case .critic: return "Critics"
+        }
+    }
+
     /// Stable ordering for consistent UI layout (lower sorts first).
     public var sortRank: Int {
         switch self {

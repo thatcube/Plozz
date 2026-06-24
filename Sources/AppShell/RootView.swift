@@ -135,13 +135,20 @@ private struct PlexPINEntryView: View {
     let onSubmit: (String) -> Void
     let onCancel: () -> Void
 
+    @Environment(\.dismiss) private var dismiss
     @State private var pin: String = ""
     @State private var isSubmitting: Bool = false
 
     private static let pinLength = 4
 
     var body: some View {
-        ZStack {
+        // Track the request directly so a successful switch (which clears
+        // pendingPlexPINRequest on AppState) re-evaluates THIS view and
+        // triggers the onChange-based dismiss below. Belt-and-suspenders
+        // dismissal that does NOT rely on the outer cover binding tracking
+        // anything — call dismiss() ourselves from inside the cover.
+        let pendingRequest = appState.pendingPlexPINRequest
+        return ZStack {
             // Full-bleed dimmed backdrop so the PIN screen reads as a modal
             // OVER the app (like Plex does), not as an opaque context switch.
             Rectangle()
@@ -156,7 +163,7 @@ private struct PlexPINEntryView: View {
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
                 HStack(spacing: 16) {
-                    pinField
+                    pinBoxes
                     if isSubmitting {
                         ProgressView()
                             .controlSize(.large)
@@ -180,11 +187,23 @@ private struct PlexPINEntryView: View {
         }
         .onExitCommand(perform: onCancel)
         .onChange(of: appState.plexPINError) { _, newValue in
-            // Wrong-PIN response: clear the entered dots + drop the submitting
+            // Wrong-PIN response: clear the entered boxes + drop the submitting
             // state so the user can retry without first backspacing four times.
             if newValue != nil {
                 pin = ""
                 isSubmitting = false
+            }
+        }
+        .onChange(of: pendingRequest?.id) { _, newValue in
+            // The cover's outer Binding tracking has been flaky on tvOS — call
+            // dismiss() directly from inside the cover when AppState clears
+            // the pending request (success path). This is the authoritative
+            // signal that the PIN was accepted.
+            if newValue == nil {
+                #if DEBUG
+                print("[PIN] pendingPlexPINRequest cleared — calling dismiss()")
+                #endif
+                dismiss()
             }
         }
     }
@@ -229,29 +248,32 @@ private struct PlexPINEntryView: View {
         }
     }
 
-    /// "PIN" pill that fills with masked dots as digits are entered. Before
-    /// any entry it reads "PIN"; while typing it shows • per digit so the
-    /// user can see progress without revealing the code.
-    private var pinField: some View {
-        Group {
-            if pin.isEmpty {
-                Text("PIN")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .tracking(6)
-            } else {
-                Text(String(repeating: "•", count: pin.count))
-                    .font(.system(size: 44, weight: .bold))
-                    .tracking(10)
-                    .monospacedDigit()
+    /// Four large rounded boxes that fill as digits land. Each is dark/outline
+    /// when empty and solid+dot when filled. The next-to-fill box gets a thin
+    /// highlight so the user can see entry progress without any focus on the
+    /// boxes themselves (the strip below owns focus).
+    private var pinBoxes: some View {
+        HStack(spacing: 18) {
+            ForEach(0..<Self.pinLength, id: \.self) { idx in
+                let filled = idx < pin.count
+                let next = !filled && idx == pin.count
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(filled ? Color.white.opacity(0.95) : Color.white.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(
+                            next ? Color.white.opacity(0.85) : Color.white.opacity(filled ? 0 : 0.25),
+                            lineWidth: next ? 3 : 2
+                        )
+                    if filled {
+                        Circle()
+                            .fill(Color.black)
+                            .frame(width: 18, height: 18)
+                    }
+                }
+                .frame(width: 72, height: 84)
             }
         }
-        .frame(minWidth: 220, minHeight: 64)
-        .padding(.horizontal, 24)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.secondary.opacity(0.15))
-        )
     }
 
     private func appendDigit(_ d: String) {
@@ -263,6 +285,9 @@ private struct PlexPINEntryView: View {
             // Auto-submit the moment the 4th digit lands. Snappy is the goal.
             // Flip isSubmitting so the user sees a spinner instead of "four
             // dots and nothing happens" while the network round-trip runs.
+            #if DEBUG
+            print("[PIN] auto-submit at 4 digits")
+            #endif
             isSubmitting = true
             onSubmit(pin)
         }

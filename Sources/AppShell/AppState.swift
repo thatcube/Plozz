@@ -360,6 +360,9 @@ public final class AppState {
     /// Submits a PIN for the outstanding Plex Home-user switch.
     public func submitPlexPIN(_ pin: String) {
         guard let request = pendingPlexPINRequest else { return }
+        #if DEBUG
+        print("[PIN] submitPlexPIN len=\(pin.count) acct=\(request.accountID)")
+        #endif
         plexPINError = nil
         Task { await performPlexSwitch(accountID: request.accountID, homeUserID: request.homeUserID, pin: pin) }
     }
@@ -445,9 +448,24 @@ public final class AppState {
     /// Performs the Plex Home-user switch and installs the resulting token as the
     /// account's override, bumping the identity generation so content reloads.
     private func performPlexSwitch(accountID: String, homeUserID: String, pin: String?) async {
-        guard let adminToken = accountStore.token(for: accountID) else { return }
+        #if DEBUG
+        print("[PIN] performPlexSwitch acct=\(accountID) home=\(homeUserID) pin?=\(pin != nil)")
+        #endif
+        guard let adminToken = accountStore.token(for: accountID) else {
+            // Surface a user-visible error instead of silently returning; otherwise a
+            // PIN submission with no cached admin token vanishes (no dismissal, no error)
+            // and the user can't tell whether the PIN was accepted.
+            #if DEBUG
+            print("[PIN] no admin token cached for acct=\(accountID) — surfacing error")
+            #endif
+            if pin != nil { plexPINError = "Couldn’t reach this Plex account. Try signing in again." }
+            return
+        }
         do {
             let token = try await plexHomeUserSwitch(homeUserID, pin, adminToken, deviceID)
+            #if DEBUG
+            print("[PIN] switch OK — clearing pendingPlexPINRequest")
+            #endif
             plexTokenOverrides[accountID] = token
             pendingPlexPINRequest = nil
             plexPINError = nil
@@ -455,8 +473,14 @@ public final class AppState {
             // If another Plex account still needs a PIN, surface that next.
             if pin != nil { ensurePlexIdentityForActiveProfile() }
         } catch AppError.unauthorized {
+            #if DEBUG
+            print("[PIN] switch unauthorized — wrong PIN")
+            #endif
             plexPINError = "Incorrect PIN. Please try again."
         } catch {
+            #if DEBUG
+            print("[PIN] switch failed: \(error)")
+            #endif
             plexPINError = "Couldn’t switch Plex user. Please try again."
         }
     }

@@ -199,7 +199,7 @@ public actor TMDbArtworkResolver {
                         // card seeds its still synchronously on appear (no gray
                         // flash) rather than re-decoding from URLCache bytes.
                         #if canImport(UIKit)
-                        await ArtworkImageCache.shared.image(for: url)
+                        await ArtworkImageCache.shared.image(for: url, variant: .landscapeCard)
                         #else
                         _ = try? await URLSession.shared.data(from: url)
                         #endif

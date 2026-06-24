@@ -72,7 +72,7 @@ struct SeriesDetailView: View {
         self.series = series
         self.seasons = seasons
         self.looseEpisodes = looseEpisodes
-        self.stampedLooseEpisodes = Self.stampSeriesTMDb(into: looseEpisodes, series: series)
+        self.stampedLooseEpisodes = SeriesEpisodeContext(series: series).stamping(looseEpisodes)
         self.viewModel = viewModel
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
@@ -376,7 +376,7 @@ struct SeriesDetailView: View {
             let episode = resolved[index]
             if let url = episode.artworkCandidates(for: .landscape).first {
                 #if canImport(UIKit)
-                await ArtworkImageCache.shared.image(for: url)
+                await ArtworkImageCache.shared.image(for: url, variant: .landscapeCard)
                 #endif
                 continue
             }
@@ -393,7 +393,7 @@ struct SeriesDetailView: View {
             }
             guard let still else { continue }
             #if canImport(UIKit)
-            await ArtworkImageCache.shared.image(for: still)
+            await ArtworkImageCache.shared.image(for: still, variant: .landscapeCard)
             #endif
             resolved[index].posterURL = still
             changed = true
@@ -410,7 +410,7 @@ struct SeriesDetailView: View {
         #if canImport(UIKit)
         for episode in episodes {
             guard let url = episode.artworkCandidates(for: .landscape).first else { continue }
-            ArtworkImageCache.shared.prefetch(url)
+            ArtworkImageCache.shared.prefetch(url, variant: .landscapeCard)
         }
         #endif
     }
@@ -498,30 +498,6 @@ struct SeriesDetailView: View {
         }
     }
 
-    /// Adds the owning series' TMDb id to each episode under `SeriesTmdb`, plus the
-    /// series' anime ids and an "Anime" genre when the show is anime, once — keeping
-    /// per-episode artwork fallback (including the keyless AniList banner for anime)
-    /// fully functional without body-time remapping.
-    private static func stampSeriesTMDb(into episodes: [MediaItem], series: MediaItem) -> [MediaItem] {
-        let seriesTMDbID = series.providerIDs["Tmdb"]
-        let animeIDs = series.providerIDs.filter { ContentClassifier.isAnimeProviderIDKey($0.key) }
-        let isAnime = ContentClassifier.isAnime(series)
-        let hasTMDb = (seriesTMDbID?.isEmpty == false)
-        guard hasTMDb || isAnime || !animeIDs.isEmpty else { return episodes }
-        return episodes.map { episode in
-            var copy = episode
-            if let seriesTMDbID, !seriesTMDbID.isEmpty, copy.providerIDs["SeriesTmdb"] == nil {
-                copy.providerIDs["SeriesTmdb"] = seriesTMDbID
-            }
-            for (key, value) in animeIDs where copy.providerIDs[key] == nil {
-                copy.providerIDs[key] = value
-            }
-            if isAnime, !copy.genres.contains(where: { $0.lowercased().contains("anime") }) {
-                copy.genres.append("Anime")
-            }
-            return copy
-        }
-    }
 }
 
 #endif

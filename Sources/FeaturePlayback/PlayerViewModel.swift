@@ -42,6 +42,18 @@ public final class PlayerViewModel {
     /// which keeps the finished frame on screen as before.
     public private(set) var shouldDismiss = false
 
+    /// The dynamic-range class the connected display is currently being driven
+    /// to. `.sdr` until a request resolves on the **native** engine. Drives the
+    /// HDR/Dolby-Vision display-mode transition smoothing in `PlayerView`: when
+    /// this moves off `.sdr`, the TV switches HDMI display mode, so the view
+    /// fades to black around the switch.
+    ///
+    /// Only the native engine drives `AVDisplayManager`'s HDMI mode switch; the
+    /// hybrid (mpv) engine renders HDR without a panel mode switch, so it stays
+    /// `.sdr` here and the view never raises an unnecessary veil. Provider-
+    /// agnostic — derived from `MediaSourceMetadata`, identical for Plex/Jellyfin.
+    private(set) var displayMode: HDRDisplayMode = .sdr
+
     /// Shared, observable transport state for the custom player overlay. The
     /// view model writes live playback facts here; the input controller writes
     /// scrub state; the SwiftUI overlay reads.
@@ -327,6 +339,15 @@ public final class PlayerViewModel {
     ) async {
         plozzTrace("playResolved: engineKind=\(engineKind) start=\(startPosition) (current=\(currentEngineKind))")
         commitEngineForPlayback(engineKind)
+        // Publish the dynamic range the display is being driven to *before*
+        // engine.load() requests the actual HDMI mode switch, so the view can
+        // fade to black ahead of it. Only the native engine drives the panel's
+        // display-mode switch; the hybrid (mpv) engine plays HDR without one, so
+        // it stays `.sdr` and no veil is raised. On a cross-engine fallback this
+        // re-evaluates correctly: native→hybrid drops to `.sdr` (the native
+        // engine's teardown restores SDR — a real switch the view should veil),
+        // and hybrid→native rises to HDR (the new switch the view should veil).
+        displayMode = engineKind == .native ? HDRDisplayMode(request.sourceMetadata) : .sdr
         // Arm the stall watchdog around load() so a hang that never reports an
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)

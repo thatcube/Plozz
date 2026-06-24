@@ -141,4 +141,137 @@ final class KeylessArtworkProviderTests: XCTestCase {
         let response = try JSONDecoder().decode(WikipediaArtworkProvider.QueryResponse.self, from: json)
         XCTAssertNil(response.original)
     }
+
+    // MARK: - Wikipedia: QID (logo) resolution
+
+    func testWikipediaQIDSearchURLRequestsWikibaseItem() {
+        let url = WikipediaArtworkProvider.qidSearchURL(title: "Spirited Away", year: 2001, isTV: false)
+        let string = (url?.absoluteString ?? "")
+        XCTAssertTrue(string.contains("prop=pageprops"))
+        XCTAssertTrue(string.contains("ppprop=wikibase_item"))
+        XCTAssertTrue(string.contains("generator=search"))
+        XCTAssertTrue(string.lowercased().contains("film"))
+    }
+
+    func testWikipediaSearchTermSharedByImageAndQIDQueries() {
+        XCTAssertEqual(
+            WikipediaArtworkProvider.searchTerm(title: "Severance", year: nil, isTV: true),
+            "Severance television series"
+        )
+        XCTAssertEqual(
+            WikipediaArtworkProvider.searchTerm(title: "The Matrix", year: 1999, isTV: false),
+            "The Matrix 1999 film"
+        )
+        XCTAssertNil(WikipediaArtworkProvider.searchTerm(title: "  ", year: nil, isTV: false))
+    }
+
+    func testWikipediaPagePropsDecodesWikibaseItem() throws {
+        let json = """
+        {"query":{"pages":{"42":{"pageprops":{"wikibase_item":"Q83495"}}}}}
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(WikipediaArtworkProvider.PagePropsResponse.self, from: json)
+        XCTAssertEqual(response.wikibaseItem, "Q83495")
+    }
+
+    func testWikipediaPagePropsMissingReturnsNil() throws {
+        let json = """
+        {"query":{"pages":{"42":{}}}}
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(WikipediaArtworkProvider.PagePropsResponse.self, from: json)
+        XCTAssertNil(response.wikibaseItem)
+    }
+
+    // MARK: - Wikidata: language-aware logo claim parsing
+
+    func testDataValueDecodesEntityID() throws {
+        let json = """
+        {"entities":{"Q1":{"claims":{
+          "P364":[{"mainsnak":{"datavalue":{"value":{"entity-type":"item","numeric-id":1860,"id":"Q1860"},"type":"wikibase-entityid"}}}]
+        }}}}
+        """.data(using: .utf8)!
+        let claims = try JSONDecoder().decode(WikidataArtworkProvider.ClaimsResponse.self, from: json)
+        XCTAssertEqual(WikidataArtworkProvider.originalLanguages(in: claims, qid: "Q1"), ["Q1860"])
+    }
+
+    func testLogoCandidatesParseLanguageQualifiers() throws {
+        let json = """
+        {"entities":{"Q1":{"claims":{
+          "P154":[
+            {"mainsnak":{"datavalue":{"value":"English logo.svg","type":"string"}},
+             "qualifiers":{"P407":[{"datavalue":{"value":{"id":"Q1860"},"type":"wikibase-entityid"}}]}},
+            {"mainsnak":{"datavalue":{"value":"Japanese logo.svg","type":"string"}},
+             "qualifiers":{"P407":[{"datavalue":{"value":{"id":"Q5287"},"type":"wikibase-entityid"}}]}},
+            {"mainsnak":{"datavalue":{"value":"Untagged logo.svg","type":"string"}}}
+          ]
+        }}}}
+        """.data(using: .utf8)!
+        let claims = try JSONDecoder().decode(WikidataArtworkProvider.ClaimsResponse.self, from: json)
+        let candidates = WikidataArtworkProvider.logoCandidates(in: claims, qid: "Q1")
+        XCTAssertEqual(candidates.count, 3)
+        XCTAssertEqual(candidates[0], .init(file: "English logo.svg", languages: ["Q1860"]))
+        XCTAssertEqual(candidates[1], .init(file: "Japanese logo.svg", languages: ["Q5287"]))
+        XCTAssertEqual(candidates[2], .init(file: "Untagged logo.svg", languages: []))
+    }
+
+    // MARK: - Wikidata: kind-aware logo selection policy
+
+    private typealias Candidate = WikidataArtworkProvider.LogoCandidate
+
+    func testSelectLogoPrefersEnglishForNonAnime() {
+        let candidates = [
+            Candidate(file: "jp.svg", languages: ["Q5287"]),
+            Candidate(file: "en.svg", languages: ["Q1860"])
+        ]
+        XCTAssertEqual(
+            WikidataArtworkProvider.selectLogoFilename(candidates: candidates, originalLanguages: ["Q5287"], isAnime: false),
+            "en.svg"
+        )
+    }
+
+    func testSelectLogoRejectsForeignOnlyForNonAnime() {
+        let candidates = [Candidate(file: "jp.svg", languages: ["Q5287"])]
+        XCTAssertNil(
+            WikidataArtworkProvider.selectLogoFilename(candidates: candidates, originalLanguages: ["Q5287"], isAnime: false),
+            "an unreadable foreign logo must fall through to the text title"
+        )
+    }
+
+    func testSelectLogoAnimeAcceptsAnyLanguage() {
+        let candidates = [Candidate(file: "jp.svg", languages: ["Q5287"])]
+        XCTAssertEqual(
+            WikidataArtworkProvider.selectLogoFilename(candidates: candidates, originalLanguages: ["Q5287"], isAnime: true),
+            "jp.svg",
+            "for anime, any logo beats no title art"
+        )
+    }
+
+    func testSelectLogoUntaggedAcceptedForEnglishOriginWork() {
+        let candidates = [Candidate(file: "logo.svg", languages: [])]
+        XCTAssertEqual(
+            WikidataArtworkProvider.selectLogoFilename(candidates: candidates, originalLanguages: ["Q1860"], isAnime: false),
+            "logo.svg"
+        )
+    }
+
+    func testSelectLogoUntaggedAcceptedWhenWorkLanguageUnknown() {
+        let candidates = [Candidate(file: "logo.svg", languages: [])]
+        XCTAssertEqual(
+            WikidataArtworkProvider.selectLogoFilename(candidates: candidates, originalLanguages: [], isAnime: false),
+            "logo.svg"
+        )
+    }
+
+    func testSelectLogoUntaggedRejectedForForeignOriginNonAnime() {
+        let candidates = [Candidate(file: "logo.svg", languages: [])]
+        XCTAssertNil(
+            WikidataArtworkProvider.selectLogoFilename(candidates: candidates, originalLanguages: ["Q150"], isAnime: false),
+            "an untagged logo on a foreign-origin work is assumed unreadable"
+        )
+    }
+
+    func testSelectLogoEmptyCandidatesReturnsNil() {
+        XCTAssertNil(
+            WikidataArtworkProvider.selectLogoFilename(candidates: [], originalLanguages: [], isAnime: true)
+        )
+    }
 }

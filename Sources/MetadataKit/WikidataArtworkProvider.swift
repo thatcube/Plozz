@@ -8,10 +8,14 @@ import CoreModels
 /// open-source friendly. This is the general-content counterpart to the keyless
 /// anime backbone (AniList/Kitsu) and the keyless TV stills (TVmaze).
 ///
-/// Capabilities (movies, western TV, and unknown content):
-///  - `logo`   → the work's clear-logo (`P154`), a genuine transparent title PNG.
-///               Wikidata's standout keyless strength — especially for Plex,
-///               which surfaces no logo of its own.
+/// Capabilities (movies, western TV, anime title logos, and unknown content):
+///  - `logo`   → the work's clear-logo (`P154`), a genuine transparent title PNG,
+///               selected **language-awarely**: an English logo is preferred, anime
+///               accepts any language, and other content rejects an unreadable
+///               foreign logo (via the `P407` language qualifier / `P364` original
+///               language) so the styled text title shows instead. Wikidata's
+///               standout keyless strength — especially for Plex, which surfaces
+///               no logo of its own.
 ///  - `hero`   → the work's image (`P18`) **only when it is genuinely landscape**,
 ///               so a portrait poster is never stretched into the 16:9 hero.
 ///  - `poster` → the work's image (`P18`), which for films is usually the poster.
@@ -28,7 +32,12 @@ public struct WikidataArtworkProvider: ArtworkProvider {
     public func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {
         switch query.contentType {
         case .movie, .tvShow, .unknown: break
-        case .anime, .music: return nil // served by their specialized keyless chains
+        case .anime:
+            // Wikidata only contributes a *logo* for anime (its hero/poster come
+            // from the AniList/Kitsu keyless chain); a title logo is still a real
+            // coverage win for anime, where any logo beats none.
+            guard kind == .logo else { return nil }
+        case .music: return nil // served by its specialized keyless chain
         }
         switch kind {
         case .thumbnail: return nil // Wikidata has no per-episode stills
@@ -40,8 +49,7 @@ public struct WikidataArtworkProvider: ArtworkProvider {
 
         switch kind {
         case .logo:
-            guard let file = Self.filename(in: claims, qid: qid, property: "P154") else { return nil }
-            return Self.commonsFileURL(file, width: Self.width(for: .logo))
+            return Self.logoURL(from: claims, qid: qid, contentType: query.contentType)
         case .poster:
             guard let file = Self.filename(in: claims, qid: qid, property: "P18") else { return nil }
             return Self.commonsFileURL(file, width: Self.width(for: .poster))
@@ -57,6 +65,14 @@ public struct WikidataArtworkProvider: ArtworkProvider {
     }
 
     // MARK: - QID resolution
+
+    /// Resolves a logo for an already-known Wikidata `qid` (used by the Wikipedia
+    /// provider, which resolves the QID via a full-text article search — a
+    /// different, complementary path to this provider's id/label resolution).
+    func logoURL(forQID qid: String, contentType: ContentType) async -> URL? {
+        guard let claims = await fetchClaims(qid: qid) else { return nil }
+        return Self.logoURL(from: claims, qid: qid, contentType: contentType)
+    }
 
     private func resolveQID(for query: MetadataQuery) async -> String? {
         // 1) IMDb id is the most reliable cross-reference.
@@ -155,6 +171,87 @@ public struct WikidataArtworkProvider: ArtworkProvider {
         return nil
     }
 
+    // MARK: - Language-aware logo selection (keyless)
+
+    /// Wikidata QIDs that denote English (and its regional variants), used to keep
+    /// an English-readable title logo on English-origin content while still letting
+    /// anime accept a logo in any language.
+    static let englishLanguageQIDs: Set<String> = [
+        "Q1860", // English
+        "Q7979", // British English
+        "Q7976"  // American English
+    ]
+
+    /// One `P154` logo statement: its Commons filename plus any `P407` "language of
+    /// work or name" qualifier QIDs attached to that statement.
+    struct LogoCandidate: Equatable {
+        let file: String
+        let languages: [String]
+    }
+
+    /// All `P154` logo candidates for `qid`, each with its `P407` language
+    /// qualifiers (empty when the logo carries no language tag).
+    static func logoCandidates(in claims: ClaimsResponse, qid: String) -> [LogoCandidate] {
+        guard let entity = claims.entities?[qid],
+              let statements = entity.claims?["P154"] else { return [] }
+        return statements.compactMap { statement in
+            guard let file = statement.mainsnak?.datavalue?.stringValue, !file.isEmpty else { return nil }
+            let languages = (statement.qualifiers?["P407"] ?? [])
+                .compactMap { $0.datavalue?.entityID }
+            return LogoCandidate(file: file, languages: languages)
+        }
+    }
+
+    /// The work's original languages (`P364`) as QIDs — the fallback signal for
+    /// untagged logos (a logo with no `P407` is treated as English-readable only
+    /// when the work itself is English-origin or its language is unknown).
+    static func originalLanguages(in claims: ClaimsResponse, qid: String) -> [String] {
+        guard let entity = claims.entities?[qid],
+              let statements = entity.claims?["P364"] else { return [] }
+        return statements.compactMap { $0.mainsnak?.datavalue?.entityID }
+    }
+
+    /// Picks the best logo filename for the content kind, or `nil` to fall through
+    /// to the next provider / the styled text title:
+    ///  - an explicitly English logo always wins;
+    ///  - anime then accepts *any* logo (any language beats no title art);
+    ///  - other content accepts an untagged logo only when the work is English-origin
+    ///    (or of unknown language); a logo the viewer can't read is rejected so the
+    ///    clean text title shows instead.
+    static func selectLogoFilename(
+        candidates: [LogoCandidate],
+        originalLanguages: [String],
+        isAnime: Bool
+    ) -> String? {
+        guard !candidates.isEmpty else { return nil }
+        if let english = candidates.first(where: { candidate in
+            candidate.languages.contains(where: englishLanguageQIDs.contains)
+        }) {
+            return english.file
+        }
+        if isAnime {
+            return candidates.first?.file
+        }
+        let workEnglishOrUnknown = originalLanguages.isEmpty
+            || originalLanguages.contains(where: englishLanguageQIDs.contains)
+        if workEnglishOrUnknown,
+           let untagged = candidates.first(where: { $0.languages.isEmpty }) {
+            return untagged.file
+        }
+        return nil
+    }
+
+    /// Resolves the kind-aware logo URL from a decoded claims response.
+    static func logoURL(from claims: ClaimsResponse, qid: String, contentType: ContentType) -> URL? {
+        let file = selectLogoFilename(
+            candidates: logoCandidates(in: claims, qid: qid),
+            originalLanguages: originalLanguages(in: claims, qid: qid),
+            isAnime: contentType == .anime
+        )
+        guard let file else { return nil }
+        return commonsFileURL(file, width: width(for: .logo))
+    }
+
     // MARK: - DTOs
 
     struct SearchResponse: Decodable {
@@ -175,19 +272,31 @@ public struct WikidataArtworkProvider: ArtworkProvider {
         }
         struct Statement: Decodable {
             let mainsnak: Snak?
+            /// Per-statement qualifiers keyed by property (e.g. `P407` language).
+            let qualifiers: [String: [Snak]]?
         }
         struct Snak: Decodable {
             let datavalue: DataValue?
         }
-        /// Commons-filename claims carry a bare string `value`; other claim types
-        /// carry an object, which we simply ignore (decode to `nil`).
+        /// Commons-filename claims carry a bare string `value`; entity-reference
+        /// claims/qualifiers (e.g. `P407` language, `P364` original language) carry
+        /// an object with an `id` (a QID). Other claim shapes decode to `nil`.
         struct DataValue: Decodable {
             let stringValue: String?
+            let entityID: String?
             init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                stringValue = try? container.decode(String.self, forKey: .value)
+                let string = try? container.decode(String.self, forKey: .value)
+                stringValue = string
+                if string == nil,
+                   let nested = try? container.nestedContainer(keyedBy: EntityKeys.self, forKey: .value) {
+                    entityID = try? nested.decode(String.self, forKey: .id)
+                } else {
+                    entityID = nil
+                }
             }
             enum CodingKeys: String, CodingKey { case value }
+            enum EntityKeys: String, CodingKey { case id }
         }
     }
 

@@ -18,16 +18,27 @@ import CoreModels
 public struct WikipediaArtworkProvider: ArtworkProvider {
     public let id = "wikipedia"
 
+    /// Resolves the logo from Wikidata once this provider has found the QID via a
+    /// full-text article search — a different resolution path than the Wikidata
+    /// provider's id/label match, so the two together catch more titles.
+    private let wikidata = WikidataArtworkProvider()
+
     public init() {}
 
     public func artworkURL(_ kind: ArtworkKind, for query: MetadataQuery) async -> URL? {
         switch query.contentType {
         case .movie, .tvShow, .unknown: break
-        case .anime, .music: return nil
+        case .anime:
+            // Anime hero/poster come from AniList/Kitsu; Wikipedia only adds a logo.
+            guard kind == .logo else { return nil }
+        case .music: return nil
         }
         switch kind {
         case .hero, .poster: break
-        case .thumbnail, .logo: return nil // no episode stills or clear logos here
+        case .logo:
+            guard let qid = await resolveQID(for: query) else { return nil }
+            return await wikidata.logoURL(forQID: qid, contentType: query.contentType)
+        case .thumbnail: return nil // no episode stills here
         }
 
         guard let url = Self.searchURL(title: query.title, year: query.year, isTV: query.isTV),
@@ -49,11 +60,22 @@ public struct WikipediaArtworkProvider: ArtworkProvider {
         }
     }
 
+    // MARK: - QID resolution (logo path)
+
+    /// Finds the Wikidata QID of the best-matching English Wikipedia article via a
+    /// search-generator + `pageprops` query (`wikibase_item`).
+    private func resolveQID(for query: MetadataQuery) async -> String? {
+        guard let url = Self.qidSearchURL(title: query.title, year: query.year, isTV: query.isTV),
+              let response = await MetadataHTTP.get(PagePropsResponse.self, url: url)
+        else { return nil }
+        return response.wikibaseItem
+    }
+
     // MARK: - Pure helpers (unit-tested)
 
-    /// Builds the search-generator + pageimages request. A type hint
-    /// (`film` / `television series`) disambiguates same-named works.
-    static func searchURL(title: String, year: Int?, isTV: Bool) -> URL? {
+    /// The disambiguating search term (`<title> television series` / `<title> <year>
+    /// film`) shared by the image and QID queries.
+    static func searchTerm(title: String, year: Int?, isTV: Bool) -> String? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         var search = trimmed
@@ -64,9 +86,27 @@ public struct WikipediaArtworkProvider: ArtworkProvider {
         } else {
             search += " film"
         }
-        guard let escaped = metadataEscaped(search) else { return nil }
+        return search
+    }
+
+    /// Builds the search-generator + pageimages request. A type hint
+    /// (`film` / `television series`) disambiguates same-named works.
+    static func searchURL(title: String, year: Int?, isTV: Bool) -> URL? {
+        guard let search = searchTerm(title: title, year: year, isTV: isTV),
+              let escaped = metadataEscaped(search) else { return nil }
         let string = "https://en.wikipedia.org/w/api.php?action=query&format=json"
             + "&prop=pageimages&piprop=original&generator=search&gsrnamespace=0&gsrlimit=1"
+            + "&gsrsearch=\(escaped)"
+        return URL(string: string)
+    }
+
+    /// Builds the search-generator + `pageprops` request that yields the matched
+    /// article's Wikidata QID (`wikibase_item`), used to resolve a keyless logo.
+    static func qidSearchURL(title: String, year: Int?, isTV: Bool) -> URL? {
+        guard let search = searchTerm(title: title, year: year, isTV: isTV),
+              let escaped = metadataEscaped(search) else { return nil }
+        let string = "https://en.wikipedia.org/w/api.php?action=query&format=json"
+            + "&prop=pageprops&ppprop=wikibase_item&generator=search&gsrnamespace=0&gsrlimit=1"
             + "&gsrsearch=\(escaped)"
         return URL(string: string)
     }
@@ -85,5 +125,15 @@ public struct WikipediaArtworkProvider: ArtworkProvider {
 
         /// The first page's original image (the generator returns a single page).
         var original: Image? { query?.pages?.values.first?.original }
+    }
+
+    struct PagePropsResponse: Decodable {
+        let query: Query?
+        struct Query: Decodable { let pages: [String: Page]? }
+        struct Page: Decodable { let pageprops: PageProps? }
+        struct PageProps: Decodable { let wikibase_item: String? }
+
+        /// The first page's linked Wikidata QID, if any.
+        var wikibaseItem: String? { query?.pages?.values.first?.pageprops?.wikibase_item }
     }
 }

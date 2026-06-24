@@ -74,6 +74,12 @@ public final class ItemDetailViewModel {
     /// detail server picker; each entry's `versions` fill in as alternate servers
     /// resolve. Empty for a single-server title (no picker shown).
     public private(set) var sources: [MediaSourceRef] = []
+    /// In-flight enrichment pass for alternate sources. Kept cancellable so a
+    /// reload/navigation change can drop stale work promptly.
+    private var alternateSourceEnrichmentTask: Task<Void, Never>?
+    /// Bound concurrent alternate-server detail fetches to keep Home-opened
+    /// details responsive and avoid saturating startup/network image traffic.
+    private static let alternateSourceFanoutLimit = 3
 
     public init(
         provider: any MediaProvider,
@@ -121,6 +127,8 @@ public final class ItemDetailViewModel {
     }
 
     public func load() async {
+        alternateSourceEnrichmentTask?.cancel()
+        alternateSourceEnrichmentTask = nil
         // Don't flash a loading/skeleton state over a hero we already seeded from
         // the tapped list item; only show `.loading` for a cold (unseeded) open.
         if state.value == nil { state = .loading }
@@ -162,22 +170,22 @@ public final class ItemDetailViewModel {
                 try Task.checkCancellation()
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
                 seedSources(from: taggedItem)
+                startAlternateSourceEnrichment(primaryID: item.id)
                 async let trailersDone: Void = loadTrailers(for: item)
                 async let ratingsDone: Void = enrichRatings(for: item)
                 _ = await trailersDone
                 _ = await ratingsDone
-                await enrichAlternateSources(primaryID: item.id)
             } else {
                 // Leaf kinds (movie/episode/video): the hero IS the content, so
                 // publish it immediately, then load trailers/ratings off the
                 // critical path of first paint.
                 state = .loaded(Detail(item: taggedItem, children: []))
                 seedSources(from: taggedItem)
+                startAlternateSourceEnrichment(primaryID: item.id)
                 async let trailersDone: Void = loadTrailers(for: item)
                 async let ratingsDone: Void = enrichRatings(for: item)
                 _ = await trailersDone
                 _ = await ratingsDone
-                await enrichAlternateSources(primaryID: item.id)
             }
         } catch is CancellationError {
             // Back-button during load: leave whatever state we already published
@@ -475,28 +483,123 @@ public final class ItemDetailViewModel {
         applyUnifiedWatchState()
     }
 
-    /// Off the critical path, fetches each *alternate* server's copy of the title
-    /// to fill in its versions/watch-state, then re-folds the unified watch-state
-    /// so the hero reflects progress made on any server. Sequential and best-effort:
-    /// a slow/offline/signed-out server is skipped without blocking the others, and
-    /// a stale fetch (the user navigated away) is dropped via the loaded-id guard.
-    private func enrichAlternateSources(primaryID: String) async {
+    private struct AlternateSourceRequest: Sendable {
+        var sourceID: String
+        var itemID: String
+        var provider: any MediaProvider
+    }
+
+    private struct AlternateSourceUpdate: Sendable {
+        var sourceID: String
+        var versions: [MediaVersion]
+        var resumePosition: TimeInterval?
+        var playedPercentage: Double?
+        var isPlayed: Bool
+        var isFavorite: Bool
+        var lastPlayedAt: Date?
+    }
+
+    /// Starts best-effort alternate-server enrichment off the critical path with a
+    /// bounded concurrent fan-out, then applies all resolved updates in one batch.
+    private func startAlternateSourceEnrichment(primaryID: String) {
         guard sources.count > 1 else { return }
-        for source in sources where source.itemID != primaryID {
-            guard let provider = alternateProviderResolver(source.accountID),
-                  let alt = try? await provider.item(id: source.itemID) else { continue }
-            guard case let .loaded(detail) = state, detail.item.id == primaryID else { return }
-            guard let index = sources.firstIndex(where: { $0.id == source.id }) else { continue }
-            var updated = sources[index]
-            updated.versions = alt.versions
-            updated.resumePosition = alt.resumePosition
-            updated.playedPercentage = alt.playedPercentage
-            updated.isPlayed = alt.isPlayed
-            updated.isFavorite = alt.isFavorite
-            updated.lastPlayedAt = alt.lastPlayedAt
-            sources[index] = updated
-            applyUnifiedWatchState()
+        let requests: [AlternateSourceRequest] = sources.compactMap { source in
+            guard source.itemID != primaryID,
+                  let provider = alternateProviderResolver(source.accountID) else { return nil }
+            return AlternateSourceRequest(sourceID: source.id, itemID: source.itemID, provider: provider)
         }
+        guard !requests.isEmpty else { return }
+
+        alternateSourceEnrichmentTask = Task(priority: .utility) { [weak self] in
+            let updates = await Self.fetchAlternateSourceUpdates(
+                requests,
+                maxConcurrent: Self.alternateSourceFanoutLimit
+            )
+            guard !Task.isCancelled, !updates.isEmpty else { return }
+            await self?.applyAlternateSourceUpdates(updates, primaryID: primaryID)
+        }
+    }
+
+    /// Fetches alternate-server copies concurrently (bounded), preserving
+    /// first-seen source order in the resulting updates.
+    private nonisolated static func fetchAlternateSourceUpdates(
+        _ requests: [AlternateSourceRequest],
+        maxConcurrent: Int
+    ) async -> [AlternateSourceUpdate] {
+        guard !requests.isEmpty else { return [] }
+        let concurrency = max(1, min(maxConcurrent, requests.count))
+        return await withTaskGroup(of: (Int, AlternateSourceUpdate?).self) { group in
+            var nextIndex = 0
+            for _ in 0..<concurrency {
+                let index = nextIndex
+                nextIndex += 1
+                let request = requests[index]
+                group.addTask {
+                    guard let alt = try? await request.provider.item(id: request.itemID) else {
+                        return (index, nil)
+                    }
+                    return (index, AlternateSourceUpdate(
+                        sourceID: request.sourceID,
+                        versions: alt.versions,
+                        resumePosition: alt.resumePosition,
+                        playedPercentage: alt.playedPercentage,
+                        isPlayed: alt.isPlayed,
+                        isFavorite: alt.isFavorite,
+                        lastPlayedAt: alt.lastPlayedAt
+                    ))
+                }
+            }
+
+            var byIndex: [Int: AlternateSourceUpdate] = [:]
+            while let (index, update) = await group.next() {
+                if let update { byIndex[index] = update }
+                if nextIndex < requests.count {
+                    let queuedIndex = nextIndex
+                    nextIndex += 1
+                    let request = requests[queuedIndex]
+                    group.addTask {
+                        guard let alt = try? await request.provider.item(id: request.itemID) else {
+                            return (queuedIndex, nil)
+                        }
+                        return (queuedIndex, AlternateSourceUpdate(
+                            sourceID: request.sourceID,
+                            versions: alt.versions,
+                            resumePosition: alt.resumePosition,
+                            playedPercentage: alt.playedPercentage,
+                            isPlayed: alt.isPlayed,
+                            isFavorite: alt.isFavorite,
+                            lastPlayedAt: alt.lastPlayedAt
+                        ))
+                    }
+                }
+            }
+            return requests.indices.compactMap { byIndex[$0] }
+        }
+    }
+
+    /// Applies alternate-source metadata updates in one publish to minimise
+    /// repeated main-actor churn while preserving unified watch-state behaviour.
+    private func applyAlternateSourceUpdates(_ updates: [AlternateSourceUpdate], primaryID: String) {
+        guard case let .loaded(detail) = state, detail.item.id == primaryID else { return }
+        var updatedSources = sources
+        var changed = false
+        for update in updates {
+            guard let index = updatedSources.firstIndex(where: { $0.id == update.sourceID }) else { continue }
+            var source = updatedSources[index]
+            source.versions = update.versions
+            source.resumePosition = update.resumePosition
+            source.playedPercentage = update.playedPercentage
+            source.isPlayed = update.isPlayed
+            source.isFavorite = update.isFavorite
+            source.lastPlayedAt = update.lastPlayedAt
+            if source != updatedSources[index] {
+                updatedSources[index] = source
+                changed = true
+            }
+        }
+        guard changed else { return }
+        sources = updatedSources
+        applyUnifiedWatchState()
     }
 
     /// Folds every known source's watch-state into one most-recent-wins state and

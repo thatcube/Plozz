@@ -51,6 +51,9 @@ final class ItemDetailViewModelTests: XCTestCase {
         )
 
         await vm.load()
+        await waitUntil {
+            vm.sources.first { $0.accountID == "jelly" }?.versions.map(\.id) == ["jv"]
+        }
 
         XCTAssertEqual(vm.sources.count, 2)
         XCTAssertEqual(vm.sources.first { $0.accountID == "plex" }?.versions.map(\.id), ["pv"],
@@ -60,6 +63,51 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(jelly?.resumePosition, 300)
         XCTAssertEqual(vm.state.value?.item.resumePosition, 300,
                        "Detail hero reflects unified (newest-wins) progress from the alternate server")
+    }
+
+    func testLoadDoesNotWaitForAlternateSourceEnrichment() async {
+        let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021,
+                                sourceAccountID: "plex",
+                                versions: [MediaVersion(id: "pv", height: 1080)])
+        let alt = MediaItem(id: "j1", title: "Dune", kind: .movie, productionYear: 2021,
+                            resumePosition: 300,
+                            sourceAccountID: "jelly",
+                            versions: [MediaVersion(id: "jv", height: 2160)],
+                            lastPlayedAt: Date(timeIntervalSince1970: 1000))
+        let primaryProvider = FakeMediaProvider(allItems: [primary])
+        let alternateProvider = FakeMediaProvider(allItems: [alt])
+        let gate = AsyncGate()
+        alternateProvider.itemGate = ["j1": { await gate.wait() }]
+        let vm = ItemDetailViewModel(
+            provider: primaryProvider,
+            itemID: "p1",
+            sourceAccountID: "plex",
+            onlineTrailerResolver: { _ in [] },
+            playableVideoIDResolver: { _ in nil },
+            trailerCache: TrailerResolutionCache(),
+            initialSources: [
+                MediaSourceRef(accountID: "plex", itemID: "p1"),
+                MediaSourceRef(accountID: "jelly", itemID: "j1")
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "jelly" ? alternateProvider : nil
+            }
+        )
+
+        await vm.load()
+
+        XCTAssertEqual(vm.sources.first { $0.accountID == "plex" }?.versions.map(\.id), ["pv"])
+        XCTAssertEqual(
+            vm.sources.first { $0.accountID == "jelly" }?.versions,
+            [],
+            "Alternate metadata should enrich off the critical path"
+        )
+
+        gate.open()
+        await waitUntil {
+            vm.sources.first { $0.accountID == "jelly" }?.versions.map(\.id) == ["jv"]
+        }
+        XCTAssertEqual(vm.state.value?.item.resumePosition, 300)
     }
 
     func testSingleSourceItemHasNoSourcePicker() async {

@@ -427,15 +427,13 @@ public struct PlexClient: Sendable {
     /// by Plex's HLS transcode, which repackages them into a seekable playlist.
     private static let directPlayContainers: Set<String> = ["mp4", "m4v", "mov"]
 
-    /// Matroska-family containers AVPlayer can't demux but the hybrid (mpv)
-    /// engine can. Only eligible for direct play when `hybridEngineEnabled`.
-    private static let matroskaContainers: Set<String> = ["mkv", "webm", "matroska"]
-
-    /// MPEG transport-stream containers (M2TS / MTS / TS) the hybrid engine
-    /// handles with correct seeking. AVPlayer's file-based TS demux has broken
-    /// seeking (no index), so these always go via the hybrid engine.
-    /// Only eligible for direct play when `hybridEngineEnabled`.
-    private static let transportStreamContainers: Set<String> = ["m2ts", "mts", "ts", "m2t", "bdav"]
+    /// Containers AVPlayer can't reliably direct-play from a raw file URL but the
+    /// hybrid engine can decode on-device. Only eligible when
+    /// `hybridEngineEnabled`.
+    private static let hybridDirectPlayContainers: Set<String> = [
+        "mkv", "webm", "matroska",
+        "ts", "m2ts", "mts", "m2t", "mpegts", "bdav", "bdmv"
+    ]
 
     /// Lossy audio codecs the Apple TV always decodes in software, regardless of
     /// the connected receiver. These never need passthrough, so they're always
@@ -450,25 +448,27 @@ public struct PlexClient: Sendable {
     /// (matching server-side decisioning).
     ///
     /// When `hybridEngineEnabled`, also accepts the extra formats the on-device
-    /// mpv engine handles: Matroska/WebM, M2TS/TS transport streams, and
-    /// DTS/DTS-HD/TrueHD/Opus/Vorbis audio (all decoded on-device). DoVi/HDR in
-    /// an MKV is allowed when the display can accept it — the engine decodes the
-    /// HEVC base layer (matching Infuse). The router routes exactly this advertised
-    /// set to a working engine (advertise ⇔ route lockstep).
+    /// engine handles: hybrid-only containers (Matroska/WebM/TS-family),
+    /// interlaced video, and DTS/DTS-HD/TrueHD/Opus/Vorbis audio (decoded
+    /// on-device).
     func canDirectPlay(media: PlexMedia, part: PlexPart) -> Bool {
         let container = (media.container ?? part.container ?? Self.containerExtension(fromKey: part.key))?.lowercased()
         guard let container else { return false }
 
         let isAppleContainer = Self.directPlayContainers.contains(container)
-        let isMatroska = hybridEngineEnabled && Self.matroskaContainers.contains(container)
-        let isTransportStream = hybridEngineEnabled && Self.transportStreamContainers.contains(container)
-        guard isAppleContainer || isMatroska || isTransportStream else { return false }
+        let isHybridContainer = hybridEngineEnabled && Self.hybridDirectPlayContainers.contains(container)
+        guard isAppleContainer || isHybridContainer else { return false }
 
-        // Video codec gate. Apple containers and raw transport streams must carry a
-        // hardware-decodable codec; the hybrid engine demuxes/decodes the broad set
-        // inside Matroska, so the codec is left to mpv there (the range gate below
-        // still applies).
-        if !isMatroska, let video = media.videoCodec?.lowercased() {
+        let videoStream = part.Stream?.first(where: { $0.streamType == 1 })
+        if Self.isInterlaced(videoStream), !hybridEngineEnabled {
+            return false
+        }
+
+        // Video codec gate. Apple containers must be a hardware-decodable codec;
+        // the hybrid engine demuxes/decodes the broad set inside hybrid-only
+        // containers, so the
+        // codec is left to VLCKit there (the SDR range gate below still applies).
+        if !isHybridContainer, let video = media.videoCodec?.lowercased() {
             guard let mapped = Self.directPlayVideoCodec(forPlexCodec: video),
                   capabilities.allowedDirectPlayVideoCodecs.contains(mapped) else { return false }
         }
@@ -477,10 +477,7 @@ public struct PlexClient: Sendable {
             return false
         }
 
-        // Range gate. Matroska and transport-stream files are decoded on the hybrid
-        // engine for SDR and any display-supported HDR range (incl. Dolby Vision).
-        // Apple containers use the display-aware HDR policy.
-        if isMatroska || isTransportStream {
+        if isHybridContainer {
             guard isHybridDirectPlayableRange(part: part) else { return false }
         } else {
             guard canDirectPlayVideoRange(part: part) else { return false }
@@ -497,7 +494,7 @@ public struct PlexClient: Sendable {
         switch codec {
         case "h264", "avc": return .h264
         case "hevc", "h265": return .hevc
-        case "av1": return .av1
+        case "av1", "av01": return .av1
         default: return nil
         }
     }
@@ -539,6 +536,11 @@ public struct PlexClient: Sendable {
         case "dts-hd", "dtshd", "dca-ma": return .dtsHD
         default: return nil
         }
+    }
+
+    static func isInterlaced(_ stream: PlexStream?) -> Bool {
+        guard let scanType = stream?.scanType?.lowercased(), !scanType.isEmpty else { return false }
+        return scanType.contains("interlac")
     }
 
     /// Gates direct play on the video stream's HDR/Dolby Vision range against

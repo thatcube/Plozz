@@ -358,6 +358,7 @@ public struct JellyfinProvider: MediaProvider {
                 codec: v.Codec,
                 codecTag: v.CodecTag,
                 profile: v.Profile,
+                isInterlaced: v.IsInterlaced,
                 width: v.Width,
                 height: v.Height,
                 bitDepth: v.BitDepth,

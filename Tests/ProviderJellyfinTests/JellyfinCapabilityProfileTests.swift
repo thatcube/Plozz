@@ -61,6 +61,18 @@ final class JellyfinCapabilityProfileTests: XCTestCase {
         XCTAssertTrue(conditions.allSatisfy { ($0["IsRequired"] as? Bool) == false })
     }
 
+    func testNativeProfileRejectsInterlacedH264() throws {
+        let json = try encoded(.appleTV(capabilities: .default, hybridEngineEnabled: false))
+        let codecs = try XCTUnwrap(json["CodecProfiles"] as? [[String: Any]])
+        let h264 = try XCTUnwrap(codecs.first { ($0["Codec"] as? String) == "h264" })
+        let conditions = try XCTUnwrap(h264["Conditions"] as? [[String: Any]])
+        XCTAssertTrue(conditions.contains {
+            ($0["Property"] as? String) == "IsInterlaced"
+                && ($0["Condition"] as? String) == "NotEquals"
+                && ($0["Value"] as? String) == "true"
+        })
+    }
+
     // MARK: - HDR / Dolby Vision correctness
 
     private func hevcVideoRange(_ json: [String: Any]) throws -> String {

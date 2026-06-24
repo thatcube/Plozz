@@ -230,6 +230,7 @@ public struct PlexProvider: MediaProvider {
             return MediaSourceMetadata.VideoStream(
                 codec: v.codec,
                 profile: v.profile,
+                isInterlaced: Self.isInterlacedVideo(v),
                 width: v.width,
                 height: v.height,
                 bitrate: bps(fromKbps: v.bitrate),
@@ -433,6 +434,13 @@ public struct PlexProvider: MediaProvider {
         // coarser Media-level facts so episode rails still earn resolution/audio
         // badges (HDR/Atmos need the stream detail and are simply absent here).
         return mediaLevelMetadata(from: media)
+    }
+
+    private static func isInterlacedVideo(_ stream: PlexStream) -> Bool? {
+        guard let scanType = stream.scanType?.lowercased(), !scanType.isEmpty else { return nil }
+        if scanType.contains("interlac") { return true }
+        if scanType.contains("progress") { return false }
+        return nil
     }
 
     /// A coarse `MediaSourceMetadata` from Plex's Media-element attributes, used

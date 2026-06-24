@@ -134,12 +134,6 @@ extension JellyfinCapabilityProfile {
             ),
             DirectPlayProfile(
                 type: "Video",
-                container: "mpegts,m2ts,mts",
-                videoCodec: tsVideo.joined(separator: ","),
-                audioCodec: audio(["aac", "ac3", "eac3", "mp3"], allowExtras: true)
-            ),
-            DirectPlayProfile(
-                type: "Video",
                 container: "3gp,3g2",
                 videoCodec: "h264,mpeg4",
                 audioCodec: "aac,amr_nb"
@@ -155,14 +149,23 @@ extension JellyfinCapabilityProfile {
             DirectPlayProfile(type: "Audio", container: "flac", audioCodec: "flac")
         ]
 
-        // Hybrid engine: advertise the Matroska / WebM container the on-device
-        // VLCKit/mpv engine demuxes. The companion codec profiles
-        // (see `codec(_:hybrid:)`) constrain MKV HEVC/AV1 to non-DoVi ranges so
-        // Dolby Vision in an MKV still transcodes to HLS and renders on AVPlayer —
-        // keeping the "DoVi always native" guarantee intact. HEVC and AV1 are
-        // listed unconditionally here (not gated on hardware decode) because the
-        // on-device engine software-decodes them regardless of VideoToolbox AV1
-        // support, exactly as the router expects (MKV → hybrid).
+        // Native path: keep transport streams conservative for AVPlayer.
+        if !hybrid {
+            profiles.append(
+                DirectPlayProfile(
+                    type: "Video",
+                    container: "mpegts,m2ts,mts",
+                    videoCodec: tsVideo.joined(separator: ","),
+                    audioCodec: audio(["aac", "ac3", "eac3", "mp3"], allowExtras: true)
+                )
+            )
+        }
+
+        // Hybrid engine: advertise the extra containers the on-device mpv engine
+        // demuxes directly (Matroska/WebM + transport-stream variants). HEVC and
+        // AV1 are listed unconditionally here (not gated on hardware decode)
+        // because the on-device engine software-decodes them regardless of
+        // VideoToolbox AV1 support, exactly as the router expects.
         if hybrid {
             let mkvVideo = ["h264", "hevc", "mpeg4", "vc1", "mpeg2video", "vp8", "vp9", "av1"]
             let mkvAudio = [
@@ -173,7 +176,7 @@ extension JellyfinCapabilityProfile {
             profiles.append(
                 DirectPlayProfile(
                     type: "Video",
-                    container: "mkv,webm",
+                    container: "mkv,webm,ts,m2ts,mts,m2t,mpegts,bdav,bdmv",
                     videoCodec: mkvVideo.joined(separator: ","),
                     audioCodec: mkvAudio.joined(separator: ",")
                 )
@@ -210,10 +213,14 @@ extension JellyfinCapabilityProfile {
             CodecProfile(type: "Video", codec: "h264", conditions: [
                 ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
                 ProfileCondition(condition: "EqualsAny", property: "VideoProfile", value: "high|main|baseline|constrained baseline", isRequired: false),
-                ProfileCondition(condition: "LessThanEqual", property: "VideoLevel", value: "52", isRequired: false),
-                ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false)
+                ProfileCondition(condition: "LessThanEqual", property: "VideoLevel", value: "52", isRequired: false)
             ])
         ]
+        if !hybrid {
+            profiles[0].conditions.append(
+                ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false)
+            )
+        }
 
         if allowed.contains(.hevc) {
             // VideoRangeType comes straight from the shared HDR policy: SDR plus
@@ -221,23 +228,31 @@ extension JellyfinCapabilityProfile {
             // Profile 5 / Profile 8 cross-compatible tokens. This deliberately
             // omits HDR10Plus and Profile 7, which Apple TV cannot present.
             let ranges = caps.allowedHDRRanges.map(\.rawValue).joined(separator: "|")
-            profiles.append(
-                CodecProfile(type: "Video", codec: "hevc", conditions: [
-                    ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
-                    ProfileCondition(condition: "EqualsAny", property: "VideoProfile", value: "main|main 10", isRequired: false),
-                    ProfileCondition(condition: "LessThanEqual", property: "VideoLevel", value: "183", isRequired: false),
-                    ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false),
-                    ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: ranges, isRequired: false)
-                ])
-            )
+            var conditions: [ProfileCondition] = [
+                ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
+                ProfileCondition(condition: "EqualsAny", property: "VideoProfile", value: "main|main 10", isRequired: false),
+                ProfileCondition(condition: "LessThanEqual", property: "VideoLevel", value: "183", isRequired: false),
+                ProfileCondition(condition: "EqualsAny", property: "VideoRangeType", value: ranges, isRequired: false)
+            ]
+            if !hybrid {
+                conditions.append(
+                    ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false)
+                )
+            }
+            profiles.append(CodecProfile(type: "Video", codec: "hevc", conditions: conditions))
         }
 
         if allowed.contains(.av1) {
-            profiles.append(
-                CodecProfile(type: "Video", codec: "av1", conditions: [
-                    ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false),
+            var conditions: [ProfileCondition] = [
+                ProfileCondition(condition: "NotEquals", property: "IsAnamorphic", value: "true", isRequired: false)
+            ]
+            if !hybrid {
+                conditions.append(
                     ProfileCondition(condition: "NotEquals", property: "IsInterlaced", value: "true", isRequired: false)
-                ])
+                )
+            }
+            profiles.append(
+                CodecProfile(type: "Video", codec: "av1", conditions: conditions)
             )
         }
 
@@ -248,9 +263,10 @@ extension JellyfinCapabilityProfile {
         // profiles above already gate on the display's supported ranges (which on
         // an Apple TV 4K include Dolby Vision, since DoVi support tracks HEVC
         // hardware decode). The hybrid flag still gates MKV entirely via the
-        // `mkv,webm` DirectPlayProfile, so flag-off advertises no MKV at all. This
-        // makes HDR10/HLG and DoVi MKV direct-play on the on-device engine (no
-        // server transcode), matching Infuse.
+        // `mkv,webm,ts,m2ts,mts,m2t,mpegts,bdav,bdmv` DirectPlayProfile, so
+        // flag-off advertises none of those hybrid-only containers. This makes
+        // HDR10/HLG and DoVi MKV direct-play on the on-device engine (no server
+        // transcode), matching Infuse.
         return profiles
     }
 

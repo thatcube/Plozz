@@ -3,9 +3,9 @@ import CoreModels
 @testable import ProviderPlex
 
 /// Verifies the Plex capability-expansion policy: the `hybridEngineEnabled` flag
-/// flips exactly the extra direct-play formats the on-device VLCKit engine can
-/// handle (Matroska container; DTS / DTS-HD / TrueHD audio), while keeping
-/// DoVi/HDR-in-MKV out of direct play so advertise ⇔ route stays in lockstep.
+/// flips exactly the extra direct-play formats the on-device hybrid engine can
+/// handle (Matroska + transport-stream containers; DTS/DTS-HD/TrueHD/Opus/Vorbis
+/// audio), while keeping range decisions display-aware.
 final class PlexHybridDirectPlayTests: XCTestCase {
 
     private func makeClient(_ caps: MediaCapabilities, hybrid: Bool) -> PlexClient {
@@ -52,7 +52,17 @@ final class PlexHybridDirectPlayTests: XCTestCase {
         XCTAssertTrue(try canDirectPlay(sdrMKV, caps: caps, hybrid: true))
     }
 
-    // MARK: DoVi/HDR-in-MKV must stay out of direct play even with hybrid on
+    func testMPEGTSDirectPlaysWhenHybridOn() throws {
+        let json = """
+        {"id":1,"container":"mpegts","videoCodec":"h264","audioCodec":"ac3",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.ts","container":"mpegts","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264"},
+           {"id":11,"streamType":2,"index":1,"codec":"ac3"}
+         ]}]}
+        """
+        XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false))
+        XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true))
+    }
 
     // MARK: DoVi-in-MKV is decoded on-device when the device supports Dolby Vision
 
@@ -138,6 +148,18 @@ final class PlexHybridDirectPlayTests: XCTestCase {
          "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
            {"id":10,"streamType":1,"index":0,"codec":"h264"},
            {"id":11,"streamType":2,"index":1,"codec":"truehd"}
+         ]}]}
+        """
+        XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false))
+        XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true))
+    }
+
+    func testInterlacedMp4DirectPlaysOnlyWhenHybridOn() throws {
+        let json = """
+        {"id":1,"container":"mp4","videoCodec":"h264","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mp4","container":"mp4","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"h264","scanType":"interlaced"},
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
          ]}]}
         """
         XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false))

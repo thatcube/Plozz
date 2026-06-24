@@ -148,6 +148,7 @@ struct PlexStream: Decodable {
     let width: Int?
     let height: Int?
     let frameRate: Double?
+    let scanType: String?
     let colorTrc: String?
     let DOVIPresent: Bool?
     /// Dolby Vision profile number (Plex reports it as a JSON number, same as

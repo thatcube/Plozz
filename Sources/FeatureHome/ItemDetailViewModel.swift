@@ -3,6 +3,7 @@ import Observation
 import CoreModels
 import MetadataKit
 import RatingsService
+import ProviderTrailers
 
 /// Loads full detail for an item plus its children (episodes/seasons), and
 /// asynchronously enriches it with external ratings (IMDb/RT/Metacritic).
@@ -52,6 +53,12 @@ public final class ItemDetailViewModel {
     /// when the provider surfaces no local or server trailer. Injectable so tests
     /// can avoid the network.
     private let onlineTrailerResolver: OnlineTrailerResolving
+    /// Verifies which (if any) of an ordered list of YouTube video ids actually
+    /// resolves to a playable **public** stream, returning the first that does.
+    /// Used to decide whether to show the Trailer button at all — a dead server
+    /// trailer link with no playable replacement yields no button. Injectable so
+    /// tests stay off the network.
+    private let playableVideoIDResolver: PlayableTrailerResolving
     /// The account this item belongs to, propagated so the detail item and its
     /// children stay tagged with their owning provider as the user drills down
     /// (children come from the provider untagged). `nil` outside aggregated flows.
@@ -62,19 +69,28 @@ public final class ItemDetailViewModel {
         itemID: String,
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
         sourceAccountID: String? = nil,
-        onlineTrailerResolver: @escaping OnlineTrailerResolving = ItemDetailViewModel.defaultOnlineTrailerResolver
+        onlineTrailerResolver: @escaping OnlineTrailerResolving = ItemDetailViewModel.defaultOnlineTrailerResolver,
+        playableVideoIDResolver: @escaping PlayableTrailerResolving = ItemDetailViewModel.defaultPlayableVideoIDResolver
     ) {
         self.provider = provider
         self.itemID = itemID
         self.ratingsProvider = ratingsProvider
         self.sourceAccountID = sourceAccountID
         self.onlineTrailerResolver = onlineTrailerResolver
+        self.playableVideoIDResolver = playableVideoIDResolver
     }
 
     /// Production online-trailer resolver: a keyless YouTube search (no API key,
-    /// no TMDb) that surfaces the best official trailer for the title.
+    /// no TMDb) that surfaces ranked official-trailer candidates for the title.
     public static let defaultOnlineTrailerResolver: OnlineTrailerResolving = { item in
         await OnlineTrailerSource.trailers(for: item)
+    }
+
+    /// Production playability verifier: extracts via YouTubeKit (in
+    /// `ProviderTrailers`) and returns the first candidate that yields a playable
+    /// public stream, skipping any private/removed video.
+    public static let defaultPlayableVideoIDResolver: PlayableTrailerResolving = { candidates in
+        await YouTubeTrailerProvider.firstPlayableVideoID(in: candidates)
     }
 
     public func load() async {
@@ -124,22 +140,67 @@ public final class ItemDetailViewModel {
         seasonEpisodes[seasonID]
     }
 
-    /// Fetches the item's trailers off the critical path. Provider trailers come
-    /// first — local trailer files (Jellyfin `/LocalTrailers`, Plex local extras)
-    /// and server-resolved online trailers (Jellyfin `RemoteTrailers`, Plex
-    /// remote extras), the latter already YouTube-marked. Local items are tagged
-    /// with the owning account so playback routes to the right provider; online
-    /// (YouTube) items keep their marker and route to the keyless YouTube trailer
-    /// provider instead. When the server surfaces nothing, falls back to a keyless
-    /// online lookup. Best-effort: any failure leaves `trailers` empty and the
-    /// detail page hides its Trailer button.
+    /// Fetches the item's trailers off the critical path and **verifies** an
+    /// online trailer actually plays before surfacing the Trailer button, so a
+    /// stale server link to a now-private video never shows a dead button.
+    ///
+    /// Priority chain:
+    ///  1. A local server trailer file (Jellyfin `/LocalTrailers`, Plex local
+    ///     extras) — a real asset streamed through the owning provider; assumed
+    ///     playable and used as-is.
+    ///  2. The server `RemoteTrailers` YouTube id(s) — verified by extraction.
+    ///  3. A keyless online search for a replacement official trailer — verified
+    ///     by extraction (only run when the server ids don't resolve, to avoid an
+    ///     extra search on every detail page).
+    ///
+    /// When nothing in the chain yields a playable public video, `trailers` stays
+    /// empty and the detail page hides its Trailer button. Best-effort throughout.
     private func loadTrailers(for item: MediaItem) async {
         let provided = (try? await provider.trailers(for: item.id)) ?? []
-        let resolved = provided.isEmpty
-            ? await onlineTrailerResolver(item)
-            : provided.map { $0.isYouTubeTrailer ? $0 : tagged($0) }
+
+        // 1) A real local trailer file wins outright — no network verification.
+        if let local = provided.first(where: { !$0.isYouTubeTrailer }) {
+            guard case let .loaded(detail) = state, detail.item.id == item.id else { return }
+            trailers = [tagged(local)]
+            return
+        }
+
+        // 2) Verify the server's own remote (YouTube) trailer id(s).
+        let serverIDs = orderedUnique(provided.compactMap(\.youTubeTrailerVideoID))
+        var workingID = await playableVideoIDResolver(serverIDs)
+
+        // 3) Server trailer dead/absent → keyless search for a public replacement.
+        if workingID == nil {
+            let searchIDs = orderedUnique(await onlineTrailerResolver(item).compactMap(\.youTubeTrailerVideoID))
+            let fresh = searchIDs.filter { !serverIDs.contains($0) }
+            if !fresh.isEmpty {
+                workingID = await playableVideoIDResolver(fresh)
+            }
+        }
+
         guard case let .loaded(detail) = state, detail.item.id == item.id else { return }
-        trailers = resolved.map { stampTrailerContext($0, from: item) }
+        if let workingID {
+            let trailer = MediaItem.youTubeTrailer(
+                videoID: workingID,
+                title: "\(item.title) — Trailer",
+                parentTitle: item.title,
+                posterURL: item.posterURL
+            )
+            trailers = [stampTrailerContext(trailer, from: item)]
+        } else {
+            trailers = []
+        }
+    }
+
+    /// De-duplicates `ids` preserving first-seen order and dropping empties.
+    private func orderedUnique(_ ids: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for id in ids where !id.isEmpty && !seen.contains(id) {
+            seen.insert(id)
+            out.append(id)
+        }
+        return out
     }
 
     /// Stamps the parent title and year onto an online (YouTube) trailer so that,

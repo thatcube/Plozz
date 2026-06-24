@@ -270,8 +270,10 @@ public final class PlayerViewModel {
             // Best-effort, never blocking play(): (if enabled) fetch a missing
             // subtitle in the preferred language.
             startAutoSubtitleDownloadIfNeeded(request: request)        } catch let error as AppError {
+            plozzTrace("startPlayback: playbackInfo threw AppError=\(error) (itemID=\(itemID))")
             phase = .failed(error)
         } catch {
+            plozzTrace("startPlayback: playbackInfo threw NON-AppError=\(String(reflecting: error)) (itemID=\(itemID))")
             phase = .failed(.unknown(""))
         }
     }

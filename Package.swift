@@ -169,7 +169,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers"]
         ),
         .target(
             name: "FeaturePlayback",

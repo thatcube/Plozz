@@ -121,7 +121,11 @@ final class OnlineTrailerSourceTests: XCTestCase {
         let fetch: OnlineTrailerSource.Fetcher = { _ in payload }
         let movie = MediaItem(id: "m", title: "Dune", kind: .movie, productionYear: 2021)
 
-        let trailers = await OnlineTrailerSource.trailers(for: movie, fetch: fetch)
+        // youtubeFetch returns nil so the chain falls through to the injected
+        // Invidious fetcher.
+        let trailers = await OnlineTrailerSource.trailers(
+            for: movie, fetch: fetch, youtubeFetch: { _ in nil }
+        )
         XCTAssertEqual(trailers.count, 1)
         XCTAssertEqual(trailers.first?.youTubeTrailerVideoID, "dQw4w9WgXcQ")
         XCTAssertEqual(trailers.first?.parentTitle, "Dune")
@@ -130,7 +134,79 @@ final class OnlineTrailerSourceTests: XCTestCase {
     func testTrailersEmptyWhenNothingFound() async {
         let fetch: OnlineTrailerSource.Fetcher = { _ in "[]".data(using: .utf8) }
         let movie = MediaItem(id: "m", title: "Dune", kind: .movie, productionYear: 2021)
-        let trailers = await OnlineTrailerSource.trailers(for: movie, fetch: fetch)
+        let trailers = await OnlineTrailerSource.trailers(
+            for: movie, fetch: fetch, youtubeFetch: { _ in nil }
+        )
         XCTAssertTrue(trailers.isEmpty)
+    }
+
+    func testTrailersPrefersYouTubeSourceFirst() async {
+        // YouTube HTML yields a match → the Invidious fetcher must never be used.
+        let youtubeHTML = """
+        var ytInitialData = {"videoRenderer":{"videoId":"ytaaaaaaaaa","title":{"runs":[{"text":"Dune | Official Trailer"}]}}};
+        """.data(using: .utf8)!
+        let invidious = """
+        [{"type":"video","videoId":"invaaaaaaaa","title":"Dune | Official Trailer","author":"Warner"}]
+        """.data(using: .utf8)!
+        let movie = MediaItem(id: "m", title: "Dune", kind: .movie, productionYear: 2021)
+
+        let trailers = await OnlineTrailerSource.trailers(
+            for: movie,
+            fetch: { _ in invidious },
+            youtubeFetch: { _ in youtubeHTML }
+        )
+        XCTAssertEqual(trailers.first?.youTubeTrailerVideoID, "ytaaaaaaaaa")
+    }
+
+    func testTrailersReturnsMultipleRankedCandidates() async {
+        // Two valid trailer candidates → both surface, best first, capped by limit.
+        let youtubeHTML = """
+        {"videoRenderer":{"videoId":"officialaaa","title":{"runs":[{"text":"Dune | Official Trailer"}]}}}
+        {"videoRenderer":{"videoId":"teaseraaaaa","title":{"runs":[{"text":"Dune | Official Teaser"}]}}}
+        """.data(using: .utf8)!
+        let movie = MediaItem(id: "m", title: "Dune", kind: .movie, productionYear: 2021)
+
+        let trailers = await OnlineTrailerSource.trailers(
+            for: movie, limit: 5,
+            fetch: { _ in nil }, youtubeFetch: { _ in youtubeHTML }
+        )
+        XCTAssertEqual(trailers.map(\.youTubeTrailerVideoID), ["officialaaa", "teaseraaaaa"])
+    }
+
+    // MARK: - YouTube HTML parsing
+
+    func testParseYouTubeExtractsOrderedVideoIDs() {
+        let html = """
+        garbage {"videoRenderer":{"videoId":"aaaaaaaaaaa","title":{"runs":[{"text":"Dune | Official Trailer"}]}}}
+        more {"videoRenderer":{"videoId":"bbbbbbbbbbb","title":{"runs":[{"text":"Dune Teaser"}]}}}
+        """.data(using: .utf8)!
+        let parsed = OnlineTrailerSource.parseYouTube(html)
+        XCTAssertEqual(parsed?.map(\.videoID), ["aaaaaaaaaaa", "bbbbbbbbbbb"])
+        XCTAssertEqual(parsed?.first?.title, "Dune | Official Trailer")
+    }
+
+    func testParseYouTubeDecodesEscapesAndDedupes() {
+        let html = """
+        {"videoRenderer":{"videoId":"ccccccccccc","title":{"runs":[{"text":"Spider-Man: \\u0026 Friends"}]}}}
+        {"videoRenderer":{"videoId":"ccccccccccc","title":{"runs":[{"text":"dup"}]}}}
+        """.data(using: .utf8)!
+        let parsed = OnlineTrailerSource.parseYouTube(html)
+        XCTAssertEqual(parsed?.count, 1)
+        XCTAssertEqual(parsed?.first?.title, "Spider-Man: & Friends")
+    }
+
+    func testParseYouTubeReturnsNilWhenNoRenderers() {
+        let html = "<html>consent interstitial, no data</html>".data(using: .utf8)!
+        XCTAssertNil(OnlineTrailerSource.parseYouTube(html))
+    }
+
+    func testBestVideoIDsRanksAndCaps() {
+        let results = [
+            r("teaser", "Dune | Official Teaser"),
+            r("junk", "random unrelated clip"),
+            r("official", "Dune | Official Trailer")
+        ]
+        let ids = OnlineTrailerSource.bestVideoIDs(from: results, title: "Dune", year: 2021, limit: 2)
+        XCTAssertEqual(ids, ["official", "teaser"])
     }
 }

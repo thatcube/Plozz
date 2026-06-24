@@ -136,9 +136,11 @@ private func makePlayerViewModel(
     captionSettings: CaptionSettings,
     scrobbler: any TraktScrobbling
 ) -> PlayerViewModel {
+    plozzTrace("makePlayerViewModel: id=\(request.item.id) title=\(request.item.title) kind=\(request.item.kind) ytTrailerID=\(request.item.youTubeTrailerVideoID ?? "nil") sourceAccountID=\(request.item.sourceAccountID ?? "nil")")
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
         let onlineTrailerResolver = ItemDetailViewModel.defaultOnlineTrailerResolver
+        plozzTrace("makePlayerViewModel: routing to YouTubeTrailerProvider videoID=\(videoID)")
         return PlayerViewModel(
             provider: YouTubeTrailerProvider(
                 item: trailerItem,

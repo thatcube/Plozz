@@ -362,14 +362,16 @@ public struct PosterCardView: View {
         if let percentage = item.playedPercentage, percentage > 0.01, percentage < 0.99 {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    // Track: a dark translucent capsule so the bar reads clearly
-                    // over both bright and dark artwork, with a hairline rim.
-                    Capsule(style: .continuous)
-                        .fill(.black.opacity(0.55))
-                        .overlay {
-                            Capsule(style: .continuous)
-                                .strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
-                        }
+                    // Track: matches the main player's scrubber — Liquid Glass on
+                    // tvOS 26+, with a translucent-white fallback on older systems.
+                    if #available(tvOS 26.0, *) {
+                        Capsule(style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular, in: Capsule(style: .continuous))
+                    } else {
+                        Capsule(style: .continuous)
+                            .fill(.white.opacity(0.22))
+                    }
 
                     // Fill: solid white, matching the main player's scrubber —
                     // a bright white played fill with a subtle shadow so it reads

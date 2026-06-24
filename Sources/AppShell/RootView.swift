@@ -136,6 +136,7 @@ private struct PlexPINEntryView: View {
     let onCancel: () -> Void
 
     @State private var pin: String = ""
+    @State private var isSubmitting: Bool = false
 
     private static let pinLength = 4
 
@@ -154,7 +155,13 @@ private struct PlexPINEntryView: View {
                 Text(userName)
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
-                pinField
+                HStack(spacing: 16) {
+                    pinField
+                    if isSubmitting {
+                        ProgressView()
+                            .controlSize(.large)
+                    }
+                }
                 // Reserve the error slot so the strip doesn't jump up/down
                 // when an error appears/clears between attempts.
                 Text(appState.plexPINError ?? " ")
@@ -162,6 +169,8 @@ private struct PlexPINEntryView: View {
                     .foregroundStyle(appState.plexPINError == nil ? Color.clear : .red)
                     .multilineTextAlignment(.center)
                 PINStrip(onDigit: appendDigit, onDelete: deleteDigit)
+                    .disabled(isSubmitting)
+                    .opacity(isSubmitting ? 0.5 : 1.0)
                 Spacer(minLength: 0)
                 Button("Cancel", action: onCancel)
                     .padding(.bottom, 40)
@@ -171,9 +180,12 @@ private struct PlexPINEntryView: View {
         }
         .onExitCommand(perform: onCancel)
         .onChange(of: appState.plexPINError) { _, newValue in
-            // Wrong-PIN response: clear the entered dots so the user can
-            // retry without first backspacing four times.
-            if newValue != nil { pin = "" }
+            // Wrong-PIN response: clear the entered dots + drop the submitting
+            // state so the user can retry without first backspacing four times.
+            if newValue != nil {
+                pin = ""
+                isSubmitting = false
+            }
         }
     }
 
@@ -243,16 +255,21 @@ private struct PlexPINEntryView: View {
     }
 
     private func appendDigit(_ d: String) {
+        guard !isSubmitting else { return }
         guard d.count == 1, d.first?.isNumber == true else { return }
         guard pin.count < Self.pinLength else { return }
         pin.append(d)
         if pin.count == Self.pinLength {
             // Auto-submit the moment the 4th digit lands. Snappy is the goal.
+            // Flip isSubmitting so the user sees a spinner instead of "four
+            // dots and nothing happens" while the network round-trip runs.
+            isSubmitting = true
             onSubmit(pin)
         }
     }
 
     private func deleteDigit() {
+        guard !isSubmitting else { return }
         if !pin.isEmpty { pin.removeLast() }
     }
 }
@@ -260,65 +277,94 @@ private struct PlexPINEntryView: View {
 /// Single horizontal row of digit keys 0–9 plus a delete key — the layout
 /// Plex itself uses on tvOS, and the one-axis path the Siri remote handles
 /// best. Each key is a focusable Button so focus is always anchored and
-/// Menu/Back can't fall through to the system. Width-adaptive: keys shrink
-/// to fit the available width so the strip never overflows the screen,
-/// regardless of presenter or safe-area insets.
+/// Menu/Back can't fall through to the system.
+///
+/// Compact, FIXED-size keys (no tile-to-fill). With 11 keys at 84pt + 10×16
+/// spacing the strip is ~1080pt and centers naturally on a 1920pt tvOS
+/// screen, leaving ~400pt clearance per side — zero clipping, and plenty
+/// of room for the focused-key scale lift.
 private struct PINStrip: View {
     let onDigit: (String) -> Void
     let onDelete: () -> Void
 
     private let digits: [String] = ["1","2","3","4","5","6","7","8","9","0"]
-    /// 10 digits + 1 delete.
-    private let keyCount: Int = 11
-    private let spacing: CGFloat = 12
+    private let digitKeyWidth: CGFloat = 84
+    private let deleteKeyWidth: CGFloat = 104
+    private let keyHeight: CGFloat = 100
 
     var body: some View {
-        GeometryReader { proxy in
-            // Solve for key width that exactly tiles the available width
-            // (including spacing between keys). Clamp so keys never get
-            // unusably small or so big they bloat the layout. The clamp
-            // generously covers any tvOS display from the 1080p Apple TV HD
-            // through 4K.
-            let totalSpacing = spacing * CGFloat(keyCount - 1)
-            let raw = (proxy.size.width - totalSpacing) / CGFloat(keyCount)
-            let keyWidth = min(max(raw, 56), 110)
-            let keyHeight = max(keyWidth + 8, 76)
-            HStack(spacing: spacing) {
-                ForEach(digits, id: \.self) { d in
-                    digitKey(d, width: keyWidth, height: keyHeight)
+        HStack(spacing: 16) {
+            ForEach(digits, id: \.self) { d in
+                Button {
+                    onDigit(d)
+                } label: {
+                    Text(d)
+                        .font(.system(size: 32, weight: .semibold, design: .rounded))
                 }
-                deleteKey(width: keyWidth, height: keyHeight)
+                .buttonStyle(PINKeyStyle(width: digitKeyWidth, height: keyHeight, isDestructive: false))
             }
-            .frame(maxWidth: .infinity)
-            .frame(width: proxy.size.width, alignment: .center)
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Image(systemName: "delete.left")
+                    .font(.system(size: 28, weight: .semibold))
+            }
+            .buttonStyle(PINKeyStyle(width: deleteKeyWidth, height: keyHeight, isDestructive: true))
+            .accessibilityLabel("Delete")
         }
-        // Height matches the computed key height ceiling so the strip doesn't
-        // jump as the available width changes. Adds a little vertical slack
-        // for the focus lift on top/bottom.
-        .frame(height: 130)
+        // Vertical slack so the focus lift has clearance without bumping
+        // neighbors in the column.
+        .padding(.vertical, 12)
     }
+}
 
-    private func digitKey(_ digit: String, width: CGFloat, height: CGFloat) -> some View {
-        Button {
-            onDigit(digit)
-        } label: {
-            Text(digit)
-                .font(.system(size: 28, weight: .semibold, design: .rounded))
-                .frame(width: width, height: height)
-        }
-        .buttonStyle(.bordered)
+/// Fixed-size, focus-friendly key button. Drawn entirely by this style so
+/// the key's rendered frame is exactly width×height — no auto-expanding
+/// fill from a bordered/prominent style and no inheritance from the parent
+/// layout. Focused state lifts (scale 1.08) and brightens (white fill,
+/// black foreground), with a soft drop shadow for depth.
+private struct PINKeyStyle: ButtonStyle {
+    let width: CGFloat
+    let height: CGFloat
+    let isDestructive: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        PINKeyBody(
+            configuration: configuration,
+            width: width,
+            height: height,
+            isDestructive: isDestructive
+        )
     }
+}
 
-    private func deleteKey(width: CGFloat, height: CGFloat) -> some View {
-        Button(role: .destructive) {
-            onDelete()
-        } label: {
-            Image(systemName: "delete.left")
-                .font(.title3)
-                .frame(width: width, height: height)
-        }
-        .buttonStyle(.bordered)
-        .accessibilityLabel("Delete")
+private struct PINKeyBody: View {
+    let configuration: ButtonStyle.Configuration
+    let width: CGFloat
+    let height: CGFloat
+    let isDestructive: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        configuration.label
+            .frame(width: width, height: height)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(isFocused ? Color.white : Color.white.opacity(0.18))
+            )
+            .foregroundStyle(
+                isFocused
+                ? (isDestructive ? Color.red : Color.black)
+                : Color.primary
+            )
+            .scaleEffect(isFocused ? 1.08 : 1.0)
+            .shadow(
+                color: Color.black.opacity(isFocused ? 0.38 : 0),
+                radius: isFocused ? 14 : 0,
+                y: isFocused ? 6 : 0
+            )
+            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .animation(.easeOut(duration: 0.15), value: isFocused)
     }
 }
 

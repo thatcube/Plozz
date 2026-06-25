@@ -222,8 +222,19 @@ struct DetailHeroView: View {
         // / 7.1 off and shows the 720p file's facts). Falls through to the
         // focused item's own tech badges, then to the series-derived fallback
         // for a series/season hero whose episode mediaInfo hasn't loaded.
-        if versions.count > 1,
-           let selected = versions.first(where: { $0.id == selectedVersionID }) ?? versions.first {
+        //
+        // We ALSO use the selected version when there's only one but it carries
+        // authoritative `sourceMetadata` (a synthesised cross-server version):
+        // for a title merged across servers the loaded `item.mediaInfo` can be a
+        // sparse/low-quality copy (e.g. a 720p SDR stereo file from whichever
+        // server the page opened against) while the effective source's version
+        // holds the real 4K HDR10/Atmos facts. Without this the hero rendered
+        // the sparse item facts even though Play targeted the rich source.
+        // Intrinsic single versions (no `sourceMetadata`) still defer to
+        // `item.technicalBadges`, which is authoritative for a direct full fetch
+        // and can be richer than the version's flattened fields.
+        if let selected = versions.first(where: { $0.id == selectedVersionID }) ?? versions.first,
+           versions.count > 1 || selected.sourceMetadata != nil {
             let versionBadges = selected.technicalBadges
             if !versionBadges.isEmpty { return versionBadges }
         }

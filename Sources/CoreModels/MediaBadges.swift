@@ -223,10 +223,29 @@ public extension MediaSourceMetadata {
     /// Dolby Atmos) adjacent rather than separated by an `HDR10` pill, mirroring
     /// how Apple TV composes "4K · Dolby Vision · Dolby Atmos · HDR10".
     var technicalBadges: [MediaBadge] {
+        Self.dolbyGroupedTechnicalBadges(
+            resolution: resolutionBadge,
+            range: dynamicRangeBadges,
+            audio: audioBadges
+        )
+    }
+
+    /// Composes a resolution/HDR/audio badge list in the Apple-TV-style Dolby
+    /// grouped order — resolution, then any Dolby-styled range badges (Dolby
+    /// Vision), then any Dolby-styled audio badges (Dolby Atmos, TrueHD,
+    /// Digital+/Digital), then the remaining range badges (HDR10+, HDR10,
+    /// HLG, HDR, SDR), then the remaining audio (DTS:X / DTS-HD / channels).
+    ///
+    /// Single source of truth for the ordering used by both an item's own
+    /// `technicalBadges` and the cross-source `representativeTechnicalBadges`
+    /// summary — they used to maintain inline copies that could drift.
+    static func dolbyGroupedTechnicalBadges(
+        resolution: MediaBadge?,
+        range: [MediaBadge],
+        audio: [MediaBadge]
+    ) -> [MediaBadge] {
         var badges: [MediaBadge] = []
-        if let resolutionBadge { badges.append(resolutionBadge) }
-        let range = dynamicRangeBadges
-        let audio = audioBadges
+        if let resolution { badges.append(resolution) }
         let dolbyRange = range.filter { $0.style == .dolby }
         let otherRange = range.filter { $0.style != .dolby }
         let dolbyAudio = audio.filter { $0.style == .dolby }
@@ -236,7 +255,8 @@ public extension MediaSourceMetadata {
         badges.append(contentsOf: otherRange)
         badges.append(contentsOf: otherAudio)
         return badges
-    }    /// A surround-channel label (`7.1`, `5.1`) from a layout string or channel
+    }
+    /// A surround-channel label (`7.1`, `5.1`) from a layout string or channel
     /// count. Returns `nil` for stereo/mono (not a highlight) or unknown.
     private static func surroundLabel(channelLayout: String?, channels: Int?) -> String? {
         if let layout = channelLayout?.lowercased() {
@@ -419,16 +439,14 @@ public extension MediaSourceMetadata {
             audioBadge = MediaBadge(bestChannels, style: .spec)
         }
 
-        // Compose the same Dolby-grouped order as `technicalBadges`.
-        var badges: [MediaBadge] = []
-        if let resolution { badges.append(resolution) }
-        let dolbyRange = rangeBadges.filter { $0.style == .dolby }
-        let otherRange = rangeBadges.filter { $0.style != .dolby }
-        badges.append(contentsOf: dolbyRange)
-        if let audioBadge, audioBadge.style == .dolby { badges.append(audioBadge) }
-        badges.append(contentsOf: otherRange)
-        if let audioBadge, audioBadge.style != .dolby { badges.append(audioBadge) }
-        return badges
+        // Compose the same Dolby-grouped order as `technicalBadges` via the
+        // shared helper, so resolution/HDR/audio ordering lives in exactly one
+        // place.
+        return dolbyGroupedTechnicalBadges(
+            resolution: resolution,
+            range: rangeBadges,
+            audio: audioBadge.map { [$0] } ?? []
+        )
     }
 
     /// Highest `dynamicRangeRank` across a badge array, used to pick the source

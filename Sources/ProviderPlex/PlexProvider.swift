@@ -195,7 +195,8 @@ public struct PlexProvider: MediaProvider {
             sourceMetadata: Self.sourceMetadata(
                 container: media.container ?? part.container,
                 streams: streams,
-                mediaAudioProfile: media.audioProfile
+                mediaAudioProfile: media.audioProfile,
+                mediaVideoDisplayTitle: media.videoStreamDisplayTitle
             ),
             scrubPreview: scrubPreview(for: part)
         )
@@ -307,7 +308,8 @@ public struct PlexProvider: MediaProvider {
     static func sourceMetadata(
         container: String?,
         streams: [PlexStream],
-        mediaAudioProfile: String? = nil
+        mediaAudioProfile: String? = nil,
+        mediaVideoDisplayTitle: String? = nil
     ) -> MediaSourceMetadata? {
         let video = streams.first { $0.streamType == 1 }
         let audio = streams.first { ($0.streamType == 2) && ($0.selected ?? $0.default ?? false) }
@@ -322,13 +324,22 @@ public struct PlexProvider: MediaProvider {
             // SDR — see `mediaLevelMetadata` — because the trimmed children
             // response can strip the HDR hint without meaning the content is
             // SDR.
+            //
+            // We also fold the parent `<Media>`'s `videoStreamDisplayTitle`
+            // (e.g. "4K DoVi/HDR10") into the title-hint list alongside the
+            // stream's own titles. Some Plex servers / agents emit a present
+            // `<Stream>` with a sparse `displayTitle` (just a profile, no
+            // HDR/DoVi tag) while the media-level summary carries the full
+            // marketing label — so this is a belt-and-braces hint that lets
+            // DoVi/HDR survive even when DOVI*/colorTrc happen to be missing
+            // from the stream itself.
             let detectedRange = Self.dynamicRangeType(
                 colorTransfer: v.colorTrc,
                 doviPresent: v.DOVIPresent,
                 doviProfile: v.DOVIProfile,
                 doviLevel: v.DOVILevel,
                 doviBLPresent: v.DOVIBLPresent,
-                displayTitles: [v.displayTitle, v.extendedDisplayTitle]
+                displayTitles: [v.displayTitle, v.extendedDisplayTitle, mediaVideoDisplayTitle]
             )
             let rangeType = detectedRange ?? "SDR"
             return MediaSourceMetadata.VideoStream(
@@ -552,7 +563,8 @@ public struct PlexProvider: MediaProvider {
             return sourceMetadata(
                 container: part?.container ?? media.container,
                 streams: streams,
-                mediaAudioProfile: media.audioProfile
+                mediaAudioProfile: media.audioProfile,
+                mediaVideoDisplayTitle: media.videoStreamDisplayTitle
             )
         }
         // List/children responses can omit the per-stream array; fall back to the

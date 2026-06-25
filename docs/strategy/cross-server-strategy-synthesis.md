@@ -384,6 +384,22 @@ ones.
    "row soup." Built-ins visible by default; discovered server rows are **opt-in**
    and promotable.
 
+8. **🔒 HARD INVARIANT — server rows carry *membership*, never *state*.** A server-
+   defined row contributes only its **membership/order-intent** (which items were
+   curated); its baked-in per-item **state** (progress, watched, unwatched-count) is
+   **never trusted** — every item's state is re-projected through Plozz's unified
+   watch-state fold (the `MediaItemMutation` bus) before display. This is the bridge
+   between the rows feature and the §2 watch-state-correctness work: without it you
+   get a live on-screen contradiction (a Plex "Continue Watching" hub showing 4 min
+   next to our synthesized row showing finished because it was watched on Jellyfin —
+   the row-level form of §2's "illusion breaks" bug). Two direct corollaries:
+   **(i)** never ingest/mirror a server row of a *kind Plozz already synthesizes*
+   (Continue Watching / Recently Added / Next Up) — ingest only editorial membership
+   (playlists/collections) and re-fold state; **(ii)** two refresh clocks —
+   membership cached slowly (snapshot for zero-spinner first paint), state recomputed
+   on every appearance; an offline server's rows drop gracefully and never block Home.
+   *(Detail and the freshness tiebreaker in §8.9.6.)*
+
 ### 8.2 The one genuine disagreement — what to do with Plex's algorithmic/promoted hubs
 
 The branches split on a clean spectrum, exactly mirroring the §4 control-vs-

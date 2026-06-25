@@ -331,8 +331,176 @@ ones.
 
 ---
 
+## 8. Addendum — Server-defined rows & customizable Home
+
+> **Added in a second research pass** answering a specific Brandon question the
+> original 5 branches did not cover: *most users have only one server, and Plex/
+> Jellyfin already expose user playlists, collections, and (Plex) curated hubs that
+> Plozz throws away today. Should we surface those, how, and should Home be
+> customizable?* Run the same way — **3 independent branches, same brief, different
+> models, no knowledge of each other:**
+>
+> | # | Model | Branch | One-line thesis |
+> |---|---|---|---|
+> | S1 | Opus 4.8 (high) | `thatcube-home-rows-strategy-research` | Surface **user-authored containers** (playlists+collections) as rows; server hubs are **signals, never rows** |
+> | S2 | GPT-5.3-Codex (xhigh) | `thatcube-srvrows-r2-codex` | **Unified-first + opt-in row catalog** that *may* include selective server rows (incl. Plex hubs) |
+> | S3 | Gemini 3.1 Pro (high) | `thatcube-scaling-enigma` | **Lenses, not server mirrors** — pin curated entities (playlists, collections, *promoted* hubs) |
+
+### 8.1 What all three independently agreed on
+
+1. **Plozz owns the Home layout — always.** No branch wants to mirror a server's
+   home feed. Jellyfin doesn't even *have* a server-defined layout (it's a client
+   preference), and mirroring Plex's would re-introduce the banned "server as
+   layout" and be unmatchable on Jellyfin. Plozz synthesizes the layout; servers
+   contribute *content for* rows, never the row arrangement.
+
+2. **One unified row abstraction, multiple source kinds.** A playlist, a collection,
+   and a built-in (Continue Watching) all render as the same `HomeRow` UI concept.
+   Parity is achieved at the **UX layer**, not by fabricating fake "Jellyfin hubs."
+
+3. **Cards inside every row still pass through `MediaItemMerger`.** This is
+   unanimous and non-negotiable: a Plex-sourced playlist row can contain a card
+   that plays from Jellyfin if that's the better source. The row is a *discovery
+   vector*; card identity stays globally unified with the source picker intact.
+
+4. **Rows are distinct by default; no aggressive auto-merge of rows.** Built-ins are
+   global singletons; user containers are source-scoped identities. (S1/S3 allow an
+   *optional* high-confidence same-name row merge; S2 says keep them distinct. All
+   three agree the safe default is **distinct**.)
+
+5. **Customizable Home lives Plozz-side, per-profile** — generalize the existing
+   `HomeLibraryVisibilityStore` into a `HomeLayoutStore` holding an ordered list of
+   row configs (id, visible, sortIndex). It *must* be Plozz-side: Jellyfin has no
+   server layout, Plex's is per-server, and Plozz is the unified layer.
+
+6. **One model for N=1 and N>1 — the difference is defaults, not code.** This is the
+   key unlock for Brandon's "most people have one server" point: the strategy is
+   **user-content-centric, not cross-server-centric**, so it's valuable even when
+   the cross-server merge is a no-op. For N=1 it finally surfaces the playlists/
+   collections we discard today (the most valuable thrown-away data); for N>1 the
+   same rows simply span servers.
+
+7. **Reject Infuse's "show every row."** On tvOS every extra row is a D-pad tax →
+   "row soup." Built-ins visible by default; discovered server rows are **opt-in**
+   and promotable.
+
+### 8.2 The one genuine disagreement — what to do with Plex's algorithmic/promoted hubs
+
+The branches split on a clean spectrum, exactly mirroring the §4 control-vs-
+opinionation tension:
+
+| | **S1 (Opus) — purist** | **S3 (Gemini) — middle** | **S2 (Codex) — permissive** |
+|---|---|---|---|
+| User playlists + collections as rows | ✅ yes | ✅ yes | ✅ yes |
+| Plex **functional** hubs (Continue Watching, Recently Added) | ❌ Plozz already synthesizes these globally | ❌ reject — synthesize globally | ❌ avoid duplicating built-ins |
+| Plex **promoted/pinned** hubs (admin/user-curated) | ❌ **signals only**, feed a future "For You", never passthrough | ✅ elevate as a pinnable Lens | ✅ allowed as an optional row |
+| Why | Hub passthrough = server-as-layout creeping back + Jellyfin can't match → asymmetry returns | Promoted hubs *are* curation, not layout | More user choice; let defaults tune it |
+
+**Synthesis recommendation:** Ship the **symmetric, unanimous layer first**
+(user-authored playlists + collections), and **defer hubs**. When/if hubs come, take
+the **Gemini middle** but with the **Opus guardrail**: only *promoted/pinned* hubs
+(never the functional CW/Recently-Added we already synthesize), and prefer treating
+them as **signals into a Plozz-synthesized "For You"** rather than raw passthrough —
+so we never hand Jellyfin a row type it structurally cannot offer.
+
+### 8.3 Answers to Brandon's questions a–e
+
+- **(a) Surface server rows at all?** Yes, *selectively and opt-in* — user-authored
+  containers, not the whole server feed. Built-ins stay the curated anchors.
+- **(b) How, given the asymmetry?** One `HomeRow` abstraction with a typed source
+  (`.system`, `.playlist`, `.collection`, and *later* `.promotedHub`). Plex and
+  Jellyfin playlists/collections render through the same door; no invented
+  "Jellyfin hubs." Plex-only promoted hubs (if enabled) are a distinct source type,
+  not forced into false parity.
+- **(c) Cross-server dedup:** **Cards always merge** (existing identity logic);
+  **rows stay distinct by default**, with an *optional* high-confidence same-name
+  merge the user can accept/split. A Plex promoted hub with no Jellyfin twin is a
+  valid standalone row.
+- **(d) Customizable Home model:** an ordered `[HomeRowConfig { rowID, isVisible,
+  sortIndex }]` persisted Plozz-side per-profile (generalize
+  `HomeLibraryVisibilityStore` → `HomeLayoutStore`); an "Edit Home" sheet lists all
+  available rows (built-in + discovered) to toggle and reorder. Default order:
+  Continue Watching, Latest, Watchlist, then libraries.
+- **(e) N=1 vs N>1:** one engine, **defaults differ** — N=1 surfaces more server-
+  curated rows by default (rich, personal Home, solves the "empty Home" feeling);
+  N>1 is conservative-by-default to avoid soup, with the same opt-in catalog.
+
+### 8.4 Reconciling §1's "server is never a browsing axis"
+
+A user-defined row is **content/curation, not topology.** "Everything on Server X"
+is a browsing axis (banned). "The playlist I built" is a content list — *exactly the
+precedent the existing Watchlist row already sets.* We preserve the rule by: stripping
+server names from row titles, never adding a Plex/Jellyfin tab or mode, keeping the
+server as a card chip + source picker only, and routing every card through the unified
+merger. **The server hands us a list of IDs, not a playback silo.**
+
+### 8.5 Concrete data model & provider fetches (precise on existing vs net-new)
+
+**Model** (converged from all three):
+- `HomeRow` / `HomeRowDescriptor { id, kind, source, title, defaultRank, enabled }`
+- `HomeRowSource`: `.system` · `.playlist(accountID, provider, id)` ·
+  `.collection(accountID, provider, id)` · *(deferred)* `.promotedHub(accountID, id)`
+- `HomeAggregator.Content` moves from **4 fixed fields**
+  (`continueWatching/latest/watchlist/libraries`) → **`rows: [HomeRow]`**.
+- Additive provider capability `HomeContainersProviding { playlists, collections,
+  containerItems }`, mirroring the existing optional `WatchlistProviding` pattern.
+
+**Fetches — accurate to the current codebase:**
+- **Jellyfin** = *generalize one existing fetch + add two list endpoints* (not
+  greenfield): `userViews` (library list) and `playlistItems` (one playlist's items,
+  currently music-only) already exist; **net-new** = list playlists
+  (`/Items?IncludeItemTypes=Playlist&Recursive=true`), list collections
+  (`IncludeItemTypes=BoxSet&Recursive=true`), and lifting the item fetch out of the
+  music path.
+- **Plex** = *fully greenfield*: today only `onDeck` + `recentlyAdded` exist;
+  **net-new** = `/playlists` + `/playlists/{id}/items` and
+  `/library/sections/{id}/collections`. (Hubs `/hubs` deliberately **not** wired as
+  rows in phase 1.)
+
+### 8.6 Top risks (and the sharp one to not miss)
+
+1. **Row soup** → containers are opt-in, built-ins are the default anchors.
+2. **Launch latency** from extra endpoints → fetch row *lists* eagerly, row *items*
+   lazily; behind a flag initially.
+3. **⚠️ Ordered-row interleave bug (S1's catch):** the current cross-server merge
+   uses **round-robin interleave**, which is correct for CW/Latest but **wrong for an
+   ordered playlist** — it would scramble the user's deliberate order. Ordered rows
+   must use **in-place dedup that preserves the source order**, not interleave.
+4. **Stable row identity** across reload/rename (don't lose the user's pin when a
+   playlist is renamed server-side).
+5. **Smart vs dumb Plex playlists** (DTO shape differences) and **collection
+   double-listing** vs the per-library tiles.
+
+### 8.7 Recommended sequencing (value → risk)
+
+1. **`HomeRow` abstraction + `HomeLayoutStore`** (generalize
+   `HomeLibraryVisibilityStore`); migrate `HomeAggregator.Content` to `rows: [HomeRow]`
+   with today's built-ins as the default rows. *No new network — pure refactor, de-risks
+   everything after.*
+2. **Playlists as opt-in rows — Jellyfin first** (smaller lift), then Plex. Biggest
+   N=1 win, smallest risk. Apply the ordered-row dedup (not interleave).
+3. **Collections as rows** (both servers).
+4. **"Customize Home" UI** — show/hide/reorder, persisted per-profile.
+5. **Optional, later:** cross-server same-name row merge + manual split; and a Plozz-
+   synthesized **"For You"** from Plex promoted-hub *signals* (never raw passthrough).
+
+### 8.8 Open questions for Brandon (this section)
+
+1. **Hubs:** agree to **ship playlists+collections first and defer Plex hubs**? And
+   when hubs come, the "promoted-only, as *signals* into a Plozz 'For You'" guardrail
+   — or would you rather pass promoted Plex hubs straight through as rows (simpler,
+   but asymmetric vs Jellyfin)?
+2. **Default density:** for a 1-server user, how aggressive should the *default* be —
+   auto-surface their playlists/collections, or keep Home minimal and make everything
+   opt-in via "Edit Home"?
+3. **Row merge:** when the same-named collection exists on two servers, default to
+   **two distinct rows** (safe) or **one merged row** with a split affordance?
+
+---
+
 *Full individual proposals (with code citations, trade-off tables, and per-branch
 implementation sketches) are preserved in each research branch's `plan.md`. Branches:
 `thatcube-strategy-research-opus48`, `thatcube-strategy-r2-codex-5-3-xhigh`,
 `thatcube-didactic-dollop`, `thatcube-strategy-r4-opus-xhigh`,
-`thatcube-strategy-research-r5`.*
+`thatcube-strategy-research-r5`; §8 addendum: `thatcube-home-rows-strategy-research`,
+`thatcube-srvrows-r2-codex`, `thatcube-scaling-enigma`.*

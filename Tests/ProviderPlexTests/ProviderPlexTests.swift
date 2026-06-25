@@ -566,6 +566,40 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertFalse(labels.contains("SDR"))
     }
 
+    func testItemDecodesRealPlexDolbyVisionStreamWithIntegerAndStringFlags() async throws {
+        // Mirrors a REAL Plex JSON video stream for a single 4K Dolby Vision file:
+        // Plex serialises the boolean-ish flags as integers (`"DOVIPresent": 1`,
+        // `"selected": 1`) and the DoVi profile/level can arrive as strings. A
+        // synthesised `Bool?`/`Int?` decode throws on these, discarding the whole
+        // stream so the hero fell back to "1080p · SDR". With lenient scalar
+        // decoding the stream survives and badges 4K · Dolby Vision · HDR10 · Atmos.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/92", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"92","type":"movie","title":"Turbulence",
+           "Media":[{"id":60392,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "videoResolution":"4k","width":3840,"height":2160,"audioChannels":6,
+             "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
+               {"id":242139,"streamType":1,"default":1,"selected":1,"codec":"hevc",
+                "width":3840,"height":2160,"colorTrc":"smpte2084","bitDepth":10,
+                "DOVIPresent":1,"DOVIBLPresent":1,"DOVIProfile":"8","DOVILevel":"6",
+                "displayTitle":"4K DoVi/HDR10","extendedDisplayTitle":"4K DoVi/HDR10 (HEVC Main 10)"},
+               {"id":2,"streamType":2,"selected":1,"codec":"eac3","channels":6,
+                "audioChannelLayout":"5.1","extendedDisplayTitle":"Dolby Digital Plus + Dolby Atmos 5.1 (English)"}
+             ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "92")
+        let labels = item.technicalBadges.map(\.label)
+        XCTAssertEqual(item.mediaInfo?.resolutionBadge?.label, "4K")
+        XCTAssertEqual(item.mediaInfo?.dynamicRangeBadges.map(\.label), ["Dolby Vision", "HDR10"])
+        XCTAssertTrue(labels.contains("Dolby Atmos"))
+        XCTAssertFalse(labels.contains("1080p"))
+        XCTAssertFalse(labels.contains("SDR"))
+    }
+
     func testItemFallsBackToMediaLevelFactsWithoutStreams() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/88", json: """

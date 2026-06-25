@@ -126,6 +126,27 @@ struct PlexMedia: Decodable {
     /// Present even when the detailed `Part.Stream` array is omitted.
     let videoStreamDisplayTitle: String?
     let Part: [PlexPart]?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.flexibleInt(.id)
+        duration = c.flexibleInt(.duration)
+        container = c.flexibleString(.container)
+        videoCodec = c.flexibleString(.videoCodec)
+        audioCodec = c.flexibleString(.audioCodec)
+        videoResolution = c.flexibleString(.videoResolution)
+        width = c.flexibleInt(.width)
+        height = c.flexibleInt(.height)
+        audioChannels = c.flexibleInt(.audioChannels)
+        videoProfile = c.flexibleString(.videoProfile)
+        videoStreamDisplayTitle = c.flexibleString(.videoStreamDisplayTitle)
+        Part = try c.decodeIfPresent([PlexPart].self, forKey: .Part)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, duration, container, videoCodec, audioCodec, videoResolution
+        case width, height, audioChannels, videoProfile, videoStreamDisplayTitle, Part
+    }
 }
 
 struct PlexPart: Decodable {
@@ -181,6 +202,44 @@ struct PlexStream: Decodable {
     let audioChannelLayout: String?
     /// Per-stream bitrate, in **kbps** (Plex convention).
     let bitrate: Int?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.flexibleInt(.id)
+        streamType = c.flexibleInt(.streamType)
+        index = c.flexibleInt(.index)
+        codec = c.flexibleString(.codec)
+        profile = c.flexibleString(.profile)
+        language = c.flexibleString(.language)
+        languageTag = c.flexibleString(.languageTag)
+        displayTitle = c.flexibleString(.displayTitle)
+        extendedDisplayTitle = c.flexibleString(.extendedDisplayTitle)
+        selected = c.flexibleBool(.selected)
+        `default` = c.flexibleBool(.default)
+        forced = c.flexibleBool(.forced)
+        key = c.flexibleString(.key)
+        width = c.flexibleInt(.width)
+        height = c.flexibleInt(.height)
+        frameRate = c.flexibleDouble(.frameRate)
+        scanType = c.flexibleString(.scanType)
+        colorTrc = c.flexibleString(.colorTrc)
+        DOVIPresent = c.flexibleBool(.DOVIPresent)
+        DOVIProfile = c.flexibleInt(.DOVIProfile)
+        DOVILevel = c.flexibleInt(.DOVILevel)
+        DOVIBLPresent = c.flexibleBool(.DOVIBLPresent)
+        channels = c.flexibleInt(.channels)
+        samplingRate = c.flexibleInt(.samplingRate)
+        audioChannelLayout = c.flexibleString(.audioChannelLayout)
+        bitrate = c.flexibleInt(.bitrate)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, streamType, index, codec, profile, language, languageTag
+        case displayTitle, extendedDisplayTitle, selected, `default`, forced, key
+        case width, height, frameRate, scanType, colorTrc
+        case DOVIPresent, DOVIProfile, DOVILevel, DOVIBLPresent
+        case channels, samplingRate, audioChannelLayout, bitrate
+    }
 }
 
 // MARK: Plex.tv: PIN flow
@@ -256,6 +315,52 @@ struct PlexConnectionDTO: Decodable {
     let local: Bool?
     let relay: Bool?
     let IPv6: Bool?
+}
+
+// MARK: - Lenient scalar decoding
+
+// Plex Media Server's JSON serialises XML attributes inconsistently: numeric and
+// boolean-ish fields can arrive as JSON numbers (`"DOVIPresent": 1`), JSON
+// strings (`"DOVIProfile": "8"`) **or** JSON booleans depending on the field,
+// server version and codepath. A plain synthesised `Decodable` declares these as
+// `Bool?`/`Int?` and **throws** a type mismatch when the representation differs —
+// which discards the entire stream (and, cascading up, the whole metadata item),
+// silently dropping a 4K Dolby Vision file to a coarse/empty badge set. These
+// helpers accept any of the representations so a single quirky field can never
+// nuke an item's technical badges.
+private extension KeyedDecodingContainer {
+    func flexibleBool(_ key: Key) -> Bool? {
+        if let value = try? decode(Bool.self, forKey: key) { return value }
+        if let value = try? decode(Int.self, forKey: key) { return value != 0 }
+        if let value = try? decode(String.self, forKey: key) {
+            switch value.lowercased() {
+            case "1", "true", "yes": return true
+            case "0", "false", "no": return false
+            default: return nil
+            }
+        }
+        return nil
+    }
+
+    func flexibleInt(_ key: Key) -> Int? {
+        if let value = try? decode(Int.self, forKey: key) { return value }
+        if let value = try? decode(String.self, forKey: key) { return Int(value) }
+        if let value = try? decode(Double.self, forKey: key) { return Int(value) }
+        return nil
+    }
+
+    func flexibleDouble(_ key: Key) -> Double? {
+        if let value = try? decode(Double.self, forKey: key) { return value }
+        if let value = try? decode(String.self, forKey: key) { return Double(value) }
+        return nil
+    }
+
+    func flexibleString(_ key: Key) -> String? {
+        if let value = try? decode(String.self, forKey: key) { return value }
+        if let value = try? decode(Int.self, forKey: key) { return String(value) }
+        if let value = try? decode(Double.self, forKey: key) { return String(value) }
+        return nil
+    }
 }
 
 // MARK: - Time helpers

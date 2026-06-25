@@ -150,10 +150,16 @@ public struct PlexClient: Sendable {
     }
 
     /// `GET /library/metadata/{ratingKey}` — full detail for one item.
+    /// `includeStreams=1` is defensive: single-item fetches usually inline the
+    /// per-`<Stream>` array but some PMS endpoints / proxies strip it without
+    /// the flag, which is what makes DoVi/HDR badges silently disappear.
     func metadata(ratingKey: String) async throws -> PlexMetadata {
         let endpoint = Endpoint(
             path: "/library/metadata/\(ratingKey)",
-            queryItems: [URLQueryItem(name: "includeGuids", value: "1")],
+            queryItems: [
+                URLQueryItem(name: "includeGuids", value: "1"),
+                URLQueryItem(name: "includeStreams", value: "1")
+            ],
             headers: headers
         )
         let container = try await decode(PlexMediaContainerResponse.self, endpoint, using: interactiveHTTP).MediaContainer
@@ -163,8 +169,18 @@ public struct PlexClient: Sendable {
 
     /// `GET /library/metadata/{ratingKey}/children` — seasons of a show,
     /// episodes of a season, …
+    ///
+    /// **`includeStreams=1` is REQUIRED** for episode rails / season views.
+    /// Without it Plex omits each Media's per-`<Stream>` array (and thus all
+    /// DOVI* / colorTrc / bitDepth fields), so DoVi/HDR badges silently
+    /// disappear and the coarse media-level fallback runs instead — making a
+    /// Dolby Vision episode badge as plain "4K" with no range pill.
     func children(ratingKey: String) async throws -> [PlexMetadata] {
-        let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)/children", headers: headers)
+        let endpoint = Endpoint(
+            path: "/library/metadata/\(ratingKey)/children",
+            queryItems: [URLQueryItem(name: "includeStreams", value: "1")],
+            headers: headers
+        )
         return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
@@ -637,7 +653,12 @@ public struct PlexClient: Sendable {
             // tmdb://, anidb://, …) on list responses too — without this flag
             // list endpoints omit it, so rail/grid items would reach the
             // metadata router with no external ids to match (or detect anime) by.
-            URLQueryItem(name: "includeGuids", value: "1")
+            URLQueryItem(name: "includeGuids", value: "1"),
+            // Inline the per-`<Stream>` array on list responses so movie /
+            // episode rail cards can badge DoVi/HDR/Atmos from real stream
+            // facts. Without this flag Plex strips the streams and the coarse
+            // media-level fallback runs, dropping the range badge entirely.
+            URLQueryItem(name: "includeStreams", value: "1")
         ]
     }
 

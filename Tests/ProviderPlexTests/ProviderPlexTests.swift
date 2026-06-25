@@ -740,6 +740,10 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "X-Plex-Container-Size" })?.value, "60")
         XCTAssertEqual(query.first(where: { $0.name == "type" })?.value, "1")
         XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
+        // List endpoints must inline streams so movie rail cards can badge
+        // DoVi/HDR/Atmos from real stream facts; the bare media-level fallback
+        // can't recover HDR signal on its own.
+        XCTAssertEqual(query.first(where: { $0.name == "includeStreams" })?.value, "1")
     }
 
     func testSeriesLibraryUsesShowType() async throws {
@@ -810,6 +814,43 @@ final class PlexProviderMappingTests: XCTestCase {
         // A season item must carry its own ordinal so cross-server season matching
         // (by NUMBER) works instead of collapsing to the first season.
         XCTAssertEqual(children[0].seasonNumber, 1)
+        // The /children endpoint must ask for the per-Stream array; without
+        // `includeStreams=1` Plex strips DOVI* / colorTrc fields and DoVi/HDR
+        // badges silently disappear from season/episode rails.
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/library/metadata/9/children"))
+        XCTAssertEqual(query.first(where: { $0.name == "includeStreams" })?.value, "1")
+    }
+
+    func testChildrenStreamsYieldFullDoViBadges() async throws {
+        // Regression: the Fallout-on-Plex episode badge bug. Even when an
+        // episode is fetched via /library/metadata/{key}/children, Plex returns
+        // the per-Stream array (because we send `includeStreams=1`) so DoVi +
+        // HDR10 + Atmos must all render — not just "4K · Dolby Atmos".
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/s1/children", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"e1","type":"episode","title":"The End","index":1,"parentIndex":1,
+           "Media":[{"id":60393,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "videoResolution":"4k","audioChannels":6,
+             "audioProfile":"dolby digital plus + dolby atmos","videoProfile":"main 10",
+             "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
+               {"id":1,"streamType":1,"codec":"hevc","width":3840,"height":2160,
+                "DOVIBLCompatID":1,"DOVIBLPresent":1,"DOVILevel":6,"DOVIPresent":1,
+                "DOVIProfile":8,"DOVIRPUPresent":1,"bitDepth":10,
+                "colorPrimaries":"bt2020","colorSpace":"bt2020nc","colorTrc":"smpte2084",
+                "profile":"main 10","displayTitle":"4K DoVi/HDR10",
+                "extendedDisplayTitle":"4K DoVi/HDR10 (HEVC Main 10)"},
+               {"id":2,"streamType":2,"codec":"eac3","channels":6,"audioChannelLayout":"5.1"}
+             ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let children = try await provider.children(of: "s1")
+        XCTAssertEqual(children.count, 1)
+        let labels = children[0].technicalBadges.map(\.label)
+        XCTAssertEqual(labels, ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"],
+                       "DoVi/HDR10/Atmos must all survive the /children path; got \(labels)")
     }
 
     func testPlaybackInfoTranscodesUnsupportedContainer() async throws {

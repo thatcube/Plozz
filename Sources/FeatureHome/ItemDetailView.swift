@@ -206,16 +206,22 @@ public struct ItemDetailView: View {
     }
 
     /// The server `Play` should target right now: the user's in-session server
-    /// override, else the cross-server best-source default (highest-quality
-    /// Direct-Play option this device can play), else the primary. `nil` for a
-    /// single-server title (no server picker; legacy version-only flow).
+    /// override, else the default source — which honors the **origin** when the
+    /// detail was opened from a library tile (that library's server), otherwise
+    /// the cross-server best-source default (highest-quality Direct-Play option
+    /// this device can play) — else the primary. `nil` for a single-server title
+    /// (no server picker; legacy version-only flow).
     private func effectiveSource(for item: MediaItem, sources: [MediaSourceRef]) -> MediaSourceRef? {
         guard sources.count > 1 else { return nil }
         if let sourceOverride, let match = sources.first(where: { $0.accountID == sourceOverride }) {
             return match
         }
-        if let best = CrossSourceSelector.bestSelection(from: sources, capabilities: capabilities) {
-            return best.source
+        if let selection = CrossSourceSelector.selection(
+            from: sources,
+            capabilities: capabilities,
+            preferredAccountID: viewModel.originSourceAccountID
+        ) {
+            return selection.source
         }
         return sources.first
     }

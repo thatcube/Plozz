@@ -60,6 +60,16 @@ public final class ItemDetailViewModel {
     /// (children come from the provider untagged). `nil` outside aggregated flows.
     private let sourceAccountID: String?
 
+    /// The **origin** server this detail was opened from, when that origin should
+    /// drive the default source.
+    ///
+    /// Set only when the detail was reached from a single specific server's
+    /// **library tile** (browse): the cross-server picker then defaults to *this*
+    /// account's copy/version (the user can still switch). `nil` for titles opened
+    /// from the cross-server-merged Home/Search rows, which keep the smart
+    /// best-version default. See ``CrossSourceSelector/selection(from:capabilities:preferredAccountID:)``.
+    public let originSourceAccountID: String?
+
     /// The cross-server sources of this (possibly merged) title, threaded in from
     /// the merged card so the detail page can offer a **server picker** and play
     /// from any server. Empty for a single-server item. The primary source's
@@ -146,6 +156,7 @@ public final class ItemDetailViewModel {
         initialItem: MediaItem? = nil,
         ratingsProvider: any ExternalRatingsProviding = DisabledRatingsProvider(),
         sourceAccountID: String? = nil,
+        originSourceAccountID: String? = nil,
         onlineTrailerResolver: @escaping OnlineTrailerResolving = ItemDetailViewModel.defaultOnlineTrailerResolver,
         playableVideoIDResolver: @escaping PlayableTrailerResolving = ItemDetailViewModel.defaultPlayableVideoIDResolver,
         trailerCache: TrailerResolutionCache = .shared,
@@ -158,6 +169,7 @@ public final class ItemDetailViewModel {
         self.itemID = itemID
         self.ratingsProvider = ratingsProvider
         self.sourceAccountID = sourceAccountID
+        self.originSourceAccountID = originSourceAccountID
         self.onlineTrailerResolver = onlineTrailerResolver
         self.playableVideoIDResolver = playableVideoIDResolver
         self.trailerCache = trailerCache

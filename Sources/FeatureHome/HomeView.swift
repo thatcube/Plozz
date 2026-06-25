@@ -80,7 +80,7 @@ public struct HomeView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(aggregated.library.title)
                                         .font(.title3).bold()
-                                    Text(aggregated.serverName)
+                                    Text(Self.librarySubtitle(for: aggregated, in: libraries))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -101,6 +101,28 @@ public struct HomeView: View {
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
         }
+    }
+
+    /// The tile's secondary line. Library TILES are never merged across servers,
+    /// so two same-named libraries (e.g. "Movies" on two Plex servers, or two
+    /// Jellyfin logins on one box) appear as distinct tiles — this surfaces enough
+    /// of `serverName`/`accountName` to tell them apart. Shows the server name,
+    /// and appends the account/user when another visible tile shares that server
+    /// name (so the server alone is ambiguous); falls back to the account name
+    /// when the server name is missing.
+    static func librarySubtitle(for aggregated: AggregatedLibrary, in libraries: [AggregatedLibrary]) -> String {
+        let server = aggregated.serverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let account = aggregated.accountName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !server.isEmpty else { return account }
+        let serverIsAmbiguous = libraries.contains {
+            $0.id != aggregated.id
+                && $0.serverName == aggregated.serverName
+                && $0.accountID != aggregated.accountID
+        }
+        if serverIsAmbiguous, !account.isEmpty, account != server {
+            return "\(server) · \(account)"
+        }
+        return server
     }
 }
 

@@ -291,6 +291,55 @@ final class CrossSourceSelectorTests: XCTestCase {
     func testEmptySourcesIsNil() {
         XCTAssertNil(CrossSourceSelector.bestSelection(from: [], capabilities: .default))
     }
+
+    // MARK: - Origin-aware selection
+
+    func testOriginPreferenceDefaultsToThatServerEvenOverBetterAlternative() {
+        // The origin (library tile) server holds only a 720p file; another server
+        // holds a 1080p Direct Play. Without an origin preference `bestSelection`
+        // would pick the 1080p; with the origin set we must stay on the origin.
+        let lo = MediaVersion(id: "lo", height: 720, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
+        let hi = MediaVersion(id: "hi", height: 1080, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
+        let origin = source("origin", versions: [lo])
+        let other = source("other", versions: [hi])
+
+        let pick = CrossSourceSelector.selection(
+            from: [other, origin],
+            capabilities: .default,
+            preferredAccountID: "origin"
+        )
+        XCTAssertEqual(pick?.source.accountID, "origin", "Item opened from a library tile defaults to that server")
+        XCTAssertEqual(pick?.version?.id, "lo", "Origin's own smart-recommended version is selected")
+    }
+
+    func testNilPreferenceFallsBackToBestSelection() {
+        let lo = MediaVersion(id: "lo", height: 720, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
+        let hi = MediaVersion(id: "hi", height: 1080, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
+        let pick = CrossSourceSelector.selection(
+            from: [source("a", versions: [lo]), source("b", versions: [hi])],
+            capabilities: .default,
+            preferredAccountID: nil
+        )
+        XCTAssertEqual(pick?.source.accountID, "b", "Home/Search (no origin) keeps the smart best default")
+        XCTAssertEqual(pick?.version?.id, "hi")
+    }
+
+    func testAbsentPreferenceFallsBackToBestSelection() {
+        // The preferred account isn't among the sources (e.g. that server signed
+        // out) → fall back to best rather than returning nil.
+        let lo = MediaVersion(id: "lo", height: 720, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
+        let hi = MediaVersion(id: "hi", height: 1080, videoCodec: "h264", videoRange: "SDR", audioCodec: "aac")
+        let pick = CrossSourceSelector.selection(
+            from: [source("a", versions: [lo]), source("b", versions: [hi])],
+            capabilities: .default,
+            preferredAccountID: "ghost"
+        )
+        XCTAssertEqual(pick?.source.accountID, "b")
+    }
+
+    func testOriginPreferenceEmptySourcesIsNil() {
+        XCTAssertNil(CrossSourceSelector.selection(from: [], capabilities: .default, preferredAccountID: "x"))
+    }
 }
 
 final class MediaItemSourceHelpersTests: XCTestCase {

@@ -61,7 +61,7 @@ public struct HomeAggregator: Sendable {
         // merged card keeps every server's own item id / versions / watch-state
         // (in `sources`) and surfaces a unified, most-recent-wins watch-state, so
         // progress made on any server shows here regardless of which one backs the
-        // card. Per-library browse stays single-source (see the brief's carve-out).
+        // card.
         let serverInfo = accounts.sourceServerInfo()
         let resolve: (String) -> SourceServerInfo? = { serverInfo[$0] }
 
@@ -81,7 +81,15 @@ public struct HomeAggregator: Sendable {
                 limit: watchlistLimit,
                 serverInfo: resolve
             ),
-            libraries: Self.mergeLibraries(perAccount.flatMap(\.libraries))
+            // Library TILES are NEVER merged across accounts/servers: every
+            // enabled library keeps its own tile (keyed `accountID:library.id`)
+            // showing exactly that server's content, so same-named libraries on
+            // different servers/users don't fold into one and vanish. Cross-server
+            // CONTENT merging is preserved on the rows above (`mergedRow`) and in
+            // the detail server picker. Order is first account first, then each
+            // account's own library order — matching the Settings checklist
+            // (`libraries(from:)`).
+            libraries: perAccount.flatMap(\.libraries)
         )
     }
 
@@ -214,51 +222,6 @@ public struct HomeAggregator: Sendable {
     }
 
     // MARK: - Merge
-
-    /// Collapses the *same* library living on several servers (e.g. a "Movies"
-    /// library on both a Plex and a Jellyfin account) into ONE tile on the Home
-    /// Libraries row, so its content can be browsed cross-server and a title
-    /// appears once (criterion 1, Library-browse half). The **first-seen**
-    /// `AggregatedLibrary` stays primary — preserving its stable Home-visibility
-    /// `key` — with every other server folded into its underlying
-    /// `MediaLibrary.additionalSourceAccountIDs` / `sourceContainerIDByAccount`,
-    /// so tapping the tile opens an aggregated cross-server browse.
-    ///
-    /// Grouped by normalized title + kind (libraries carry no external ids).
-    /// Untitled libraries fall back to their unique key so they never collapse by
-    /// an empty name. The Settings checklist keeps the **un-merged** per-account
-    /// list via `libraries(from:)`, so each server's library stays individually
-    /// toggleable.
-    static func mergeLibraries(_ libraries: [AggregatedLibrary]) -> [AggregatedLibrary] {
-        var order: [String] = []
-        var primaryByKey: [String: AggregatedLibrary] = [:]
-
-        for aggregated in libraries {
-            let normalized = MediaItemIdentity.normalizedTitle(aggregated.library.title)
-            let key = normalized.isEmpty
-                ? "id:\(aggregated.key)"
-                : "\(aggregated.library.kind.rawValue):\(normalized)"
-
-            guard var primary = primaryByKey[key] else {
-                primaryByKey[key] = aggregated
-                order.append(key)
-                continue
-            }
-
-            let accountID = aggregated.accountID
-            if accountID != primary.library.sourceAccountID,
-               !primary.library.additionalSourceAccountIDs.contains(accountID) {
-                primary.library.additionalSourceAccountIDs.append(accountID)
-            }
-            for (account, container) in aggregated.library.sourceContainerIDByAccount
-            where primary.library.sourceContainerIDByAccount[account] == nil {
-                primary.library.sourceContainerIDByAccount[account] = container
-            }
-            primaryByKey[key] = primary
-        }
-
-        return order.compactMap { primaryByKey[$0] }
-    }
 
     /// Round-robin interleave: take the first item of every group, then the
     /// second of every group, and so on. Preserves each group's internal order

@@ -89,4 +89,30 @@ public enum CrossSourceSelector {
         guard let winner else { return nil }
         return CrossSourceSelection(source: winner.source, version: winner.version)
     }
+
+    /// The default server+version to play across `sources`, honoring an explicit
+    /// **origin** preference.
+    ///
+    /// When `preferredAccountID` matches one of the `sources` — i.e. the item was
+    /// opened from *that* server's library tile — that source is the default, with
+    /// its own smart recommended version selected, so the detail page and playback
+    /// follow the library's server (the picker still lets the user switch). When
+    /// `preferredAccountID` is `nil` or no source matches it (e.g. a title opened
+    /// from a cross-server-merged Home/Search row), it falls back to the smart
+    /// cross-server best (``bestSelection(from:capabilities:)``).
+    public static func selection(
+        from sources: [MediaSourceRef],
+        capabilities: MediaCapabilities,
+        preferredAccountID: String?
+    ) -> CrossSourceSelection? {
+        guard !sources.isEmpty else { return nil }
+        if let preferredAccountID,
+           let origin = sources.first(where: { $0.accountID == preferredAccountID }) {
+            return CrossSourceSelection(
+                source: origin,
+                version: origin.versions.recommendedSelection(for: capabilities)
+            )
+        }
+        return bestSelection(from: sources, capabilities: capabilities)
+    }
 }

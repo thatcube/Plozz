@@ -349,27 +349,18 @@ private struct HomeTab: View {
                     ),
                     title: library.title,
                     spoilerSettings: spoilerSettings,
-                    onSelect: { navigate($0) }
+                    onSelect: { navigate($0, libraryOrigin: browse.sourceAccountID) }
                 )
             }
             .navigationDestination(for: MediaItem.self) { item in
-                ItemDetailView(
-                    viewModel: ItemDetailViewModel(
-                        provider: resolveProvider(item.sourceAccountID, in: accounts),
-                        itemID: item.id,
-                        initialItem: item,
-                        ratingsProvider: ratingsProvider,
-                        sourceAccountID: item.sourceAccountID,
-                        initialSources: item.sources,
-                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
-                        snapshotCache: .shared
-                    ),
-                    spoilerSettings: spoilerSettings,
-                    onPlay: { requestPlay($0) },
-                    onSelectChild: { navigate($0) },
-                    initialSeasonID: item.seasonID
-                )
+                // Home/Search rows: cross-server-merged, so the detail picker
+                // defaults to the smart best version (no library origin).
+                itemDetail(for: item, libraryOrigin: nil)
+            }
+            .navigationDestination(for: LibraryDetailRoute.self) { route in
+                // Opened from a library tile: default detail + playback to THAT
+                // library's server (the picker still lets the user switch).
+                itemDetail(for: route.item, libraryOrigin: route.originAccountID)
             }
             .navigationDestination(for: EpisodeContextRoute.self) { route in
                 ItemDetailView(
@@ -450,14 +441,49 @@ private struct HomeTab: View {
     /// redirected to its *series* page (fronting that episode) so the user never
     /// lands on a dead-end single-episode page. Immediate playback is reserved for
     /// Continue Watching and the detail page's own Play action.
-    private func navigate(_ item: MediaItem) {
+    ///
+    /// `libraryOrigin` carries the owning `Account.id` when the navigation springs
+    /// from a single-server library tile, so the pushed detail (and any movie/
+    /// collection children it spawns) defaults its cross-server picker to that
+    /// server. `nil` for Home/Search rows, which keep the smart best-version
+    /// default. Episode/season routes do no cross-server discovery (no picker), so
+    /// they need not carry the origin — they already play from their own provider.
+    private func navigate(_ item: MediaItem, libraryOrigin: String? = nil) {
         if item.kind == .episode, item.seriesID != nil {
             path.append(EpisodeContextRoute(episode: item))
         } else if item.kind == .season, item.seriesID != nil {
             path.append(SeasonContextRoute(season: item))
+        } else if let libraryOrigin {
+            path.append(LibraryDetailRoute(item: item, originAccountID: libraryOrigin))
         } else {
             path.append(item)
         }
+    }
+
+    /// Builds the item-detail page, threading the optional `libraryOrigin` into the
+    /// view model (so the picker defaults origin-aware) and forwarding it to child
+    /// navigation so a movie/collection opened deeper inside a library stays
+    /// pinned to its library's server.
+    @ViewBuilder
+    private func itemDetail(for item: MediaItem, libraryOrigin: String?) -> some View {
+        ItemDetailView(
+            viewModel: ItemDetailViewModel(
+                provider: resolveProvider(item.sourceAccountID, in: accounts),
+                itemID: item.id,
+                initialItem: item,
+                ratingsProvider: ratingsProvider,
+                sourceAccountID: item.sourceAccountID,
+                originSourceAccountID: libraryOrigin,
+                initialSources: item.sources,
+                alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
+                crossServerSourceResolver: crossServerSourceResolver(in: accounts),
+                snapshotCache: .shared
+            ),
+            spoilerSettings: spoilerSettings,
+            onPlay: { requestPlay($0) },
+            onSelectChild: { navigate($0, libraryOrigin: libraryOrigin) },
+            initialSeasonID: item.seasonID
+        )
     }
 
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
@@ -477,6 +503,18 @@ private struct PlayRequest: Identifiable, Equatable {
     let item: MediaItem
     let startPosition: TimeInterval
     var id: String { item.id }
+}
+
+/// A navigation value for opening an item's detail page **from a library tile**,
+/// carrying the library's owning `Account.id` so the detail/playback default to
+/// that server's copy (the cross-server picker still lets the user switch). Home
+/// and Search push the bare ``MediaItem`` instead, which keeps the smart
+/// best-version default.
+private struct LibraryDetailRoute: Hashable {
+    let item: MediaItem
+    /// The owning `Account.id` of the library this item was opened from, or `nil`
+    /// when the origin can't be resolved (then the detail falls back to best).
+    let originAccountID: String?
 }
 
 /// A navigation value for opening a *series* page focused on one of its

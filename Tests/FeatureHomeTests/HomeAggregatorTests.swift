@@ -85,6 +85,49 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(Set(libraries.map(\.key)).count, 3)
     }
 
+    func testContentNeverMergesSameTitleLibraryTilesAcrossAccounts() async {
+        // The bug: two accounts each expose a "Movies" library (same kind+title).
+        // Library TILES must NOT be merged across accounts — each must get its own
+        // tile keyed `accountID:library.id`, so the second one never vanishes.
+        let plex = AggregatorStub(libraries: [library("movies-plex", "Movies"), library("anime-plex", "Anime")])
+        let jelly = AggregatorStub(libraries: [library("movies-jelly", "Movies")])
+        let accounts = [
+            resolved("acct-plex", user: "Bob", server: "Plex", kind: .plex, provider: plex),
+            resolved("acct-jelly", user: "Alice", server: "Jelly", kind: .jellyfin, provider: jelly)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(content.libraries.count, 3, "Every library keeps its own tile — same-named ones don't fold")
+        XCTAssertEqual(content.libraries.map(\.key),
+                       ["acct-plex:movies-plex", "acct-plex:anime-plex", "acct-jelly:movies-jelly"],
+                       "First account first, then each account's own order — matches the Settings checklist")
+        // Each tile stays single-source so its browse targets its own server only.
+        for tile in content.libraries {
+            XCTAssertEqual(tile.library.allSourceAccountIDs.count, 1,
+                           "Un-merged tiles are single-source")
+        }
+        // The two same-named "Movies" tiles are distinct, each on its own account.
+        let movies = content.libraries.filter { $0.library.title == "Movies" }
+        XCTAssertEqual(movies.count, 2)
+        XCTAssertEqual(Set(movies.map(\.accountID)), ["acct-plex", "acct-jelly"])
+    }
+
+    func testContentKeepsEveryAccountsTileEvenWithIdenticalLibraryIDs() async {
+        // Two accounts whose libraries collide on raw id ("1") AND title still
+        // produce two tiles — the visibility key namespaces by account.
+        let a = AggregatorStub(libraries: [library("1", "Movies")])
+        let b = AggregatorStub(libraries: [library("1", "Movies")])
+        let accounts = [
+            resolved("acct-a", user: "A", server: "Server A", kind: .plex, provider: a),
+            resolved("acct-b", user: "B", server: "Server B", kind: .jellyfin, provider: b)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(content.libraries.map(\.key), ["acct-a:1", "acct-b:1"])
+    }
+
     func testContentDedupesSameTitleAcrossServersAndUnifiesState() async {
         // The same movie (shared Tmdb id) on Plex and Jellyfin, watched more
         // recently on Jellyfin.

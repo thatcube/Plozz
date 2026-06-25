@@ -120,6 +120,22 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertTrue(vm.sources.isEmpty, "A single-server title carries no sources (no server picker)")
     }
 
+    func testOriginSourceAccountIDDefaultsNilForHomeAndSearchFlows() {
+        let provider = FakeMediaProvider(allItems: [])
+        let vm = ItemDetailViewModel(provider: provider, itemID: "m1", sourceAccountID: "plex")
+        XCTAssertNil(vm.originSourceAccountID,
+                     "Home/Search details carry no origin, so the picker defaults to the smart best version")
+    }
+
+    func testOriginSourceAccountIDIsThreadedForLibraryOpenedItems() {
+        // Items opened from a library tile carry the library's owning account as
+        // the origin, so the cross-server picker defaults to that server.
+        let provider = FakeMediaProvider(allItems: [])
+        let vm = ItemDetailViewModel(provider: provider, itemID: "m1",
+                                     sourceAccountID: "jelly", originSourceAccountID: "jelly")
+        XCTAssertEqual(vm.originSourceAccountID, "jelly")
+    }
+
     func testLoadEpisodesFetchesAndCachesPerSeason() async {
         let provider = FakeMediaProvider(allItems: [series("show")])
         provider.childrenByParent = [

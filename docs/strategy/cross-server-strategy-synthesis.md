@@ -878,6 +878,82 @@ opt-out **reveal** model handles cleanly.
 3. **Home cleanup:** confirm you're OK **removing the library rail from Home** (the move all four
    branches depend on) — Home becomes CW/Watchlist/Recent/featured only.
 
+> **Superseded by §10.7.** Question 3 here is REVISED by the focused follow-up below: don't remove
+> the rail outright — replace the library *content* rail with a small library *access* shelf.
+
+### 10.7 Refinement — user-curated libraries ARE the navigation primitive
+
+*Brandon pushed back on §10.3/§10.4's instinct to group browse by canonical TYPE: "a library is
+the user's own curation unit — my sister has a dedicated **Anime** library; people make
+**Animated Movies**, **Home Media**, **4K**, **Kids** — and removing the Anime rail can't mean she
+has to search for anime." A focused blind pass (Opus 4.8 high, GPT-5.3-Codex xhigh, Gemini 3.1 Pro
+high) pressure-tested exactly this. All three converged hard; the result amends §10.*
+
+**Decisive finding (r1 Opus):** §10.3's own illustration — a type strip reading
+`Movies | TV | Kids | 4K` — already leaks: **"Kids" and "4K" are custom library NAMES, not canonical
+types.** The type abstraction breaks the instant you draw a real user's libraries. So the fix is to
+**delete the canonical-type layer, not patch it.**
+
+**Unanimous across all three branches:**
+1. **The library — with its human NAME — is the navigation primitive.** Browse lists the user's
+   named, server-merged libraries directly (Anime, Animated Movies, Home Media, 4K…). There is **no
+   Movies/TV grouping layer** above them.
+2. **Merge by NAME, never by type.** Merge key = `(normalize(displayName), kind/mediaDomain)` with
+   normalization limited to **case + whitespace only** — so "Anime" on Plex + "Anime" on Jellyfin
+   become one destination, while "Movies" and "Animated Movies" and "4K Movies" stay distinct.
+   Never strip qualifiers like Animated/4K/Kids; never merge by canonical type. Provide a per-library
+   **"keep separate"** override for rare false merges. Server is still never an axis. (Code note: this
+   name-merge is a **dormant** capability today — `MediaLibrary.additionalSourceAccountIDs`,
+   `AggregatedLibraryProvider`, `resolveLibraryBrowse` exist but the aggregator never populates them;
+   wiring it is scoped, not a rewrite.)
+3. **Genres are in-grid FILTERS, not destinations.** "Action films" = a filter/sort inside a grid,
+   optionally *promotable* to a saved "smart shortcut / lens" — never a top-level Browse entry.
+4. **"Trending" / Continue Watching / Recently Added are Home highlight rows** (synthesized),
+   never Browse entries.
+5. **Preserve a FAST PATH to a favorite library** — the controlled survivor of "pinning." This is
+   the explicit fix for the sister-regression: §10 said remove the Home library rail; this refinement
+   says remove the library **content rail** but **keep a small library ACCESS affordance** so Anime
+   stays one tap from Home.
+6. **Adapt 1→N with the same components:** N=1 → Browse deep-links straight into the single grid
+   (no index, no shelf); 2–3 → named cards; 7+/across servers → name-merge first, then an
+   alphabetized named grid + jump-search. Music reuses the identical named-library paradigm.
+7. **Onboarding asks nothing about this** — auto-adapt; favorites are learned or set later in
+   Settings/long-press.
+
+**The one divergence — how the fast path works:**
+
+| Branch | Fast-path mechanism |
+|---|---|
+| **r1 Opus** | A capped **auto-ranked MRU shortcut shelf** on Home (~5 named tiles; Anime floats to front by usage) + optional long-press "keep at front." Ship the shelf **atomically with** rail removal. |
+| **r2 Codex** | One explicit **Primary library** (long-press to set) → a single Home hero shortcut + Browse focuses it; bounded shortcut layer (Primary + ~2 recents). |
+| **r3 Gemini** | **State restoration** — Browse reopens your last-used library (Anime already selected) — + optional library-seeded Home *content* row. |
+
+**Orchestrator recommendation:** Adopt the unanimous core (libraries are named first-class
+destinations; delete the type layer; name+kind merge with conservative normalization; genres =
+filters; trending = Home rows). For the fast path, combine **r1's auto-MRU shortcut shelf as the
+zero-config default** (it makes Anime one tap away with no setup — directly answers the sister case)
+**with r2's optional explicit pin** as the power-user override, and adopt **r3's Browse
+state-restoration** for free (it's additive and costs nothing). Crucially: **ship the access shelf
+in the same change that removes the content rail** — never remove the rail first, or you reintroduce
+the regression. This makes §10.4's Browse a **named-library index/grid**, not a type strip.
+
+**Value→risk sequence (converged):** (1) Browse named-library grid + deep-link at N=1 [additive];
+(2) wire the dormant name+kind merge; (3) Home highlights + capped access shelf — **shipped
+atomically with** library-content-rail removal; (4) in-grid genre filters; (5) Settings overrides
+(hide / keep-separate / pin); (6) promotable smart-shortcuts/lenses last. **Top risks:**
+over-normalization fusing distinct libraries (mitigate: case+whitespace only + override); large-N
+discoverability/peek fan-out (lazy-load + jump-search); shelf cold-start (seed by size/recency);
+**never remove the content rail before the access shelf ships.**
+
+### 10.8 Open questions for Brandon (refined)
+
+1. **Confirm the primitive:** libraries are **named first-class destinations** with **no
+   canonical-type grouping** layer (all three branches + the leak finding say yes)?
+2. **Fast path:** auto-**MRU shortcut shelf** on Home (zero-config, my rec) + optional explicit
+   **pin** — vs an explicit **Primary-only** model — vs **last-used reopen** only?
+3. **Home:** OK to remove library **content** rails but **keep a capped library access shelf**
+   (the revised answer to §10.6 Q3 — this is what keeps your sister's Anime one tap away)?
+
 ---
 
 *Full individual proposals (with code citations, trade-off tables, and per-branch
@@ -888,4 +964,6 @@ implementation sketches) are preserved in each research branch's `plan.md`. Bran
 `thatcube-srvrows-r2-codex`, `thatcube-scaling-enigma`; §9 addendum:
 `thatcube-onboarding-research-opus48`, `thatcube-onboarding-r2-codex`,
 `thatcube-jubilant-couscous`; §10 navigation: `thatcube-nav-arch-r1-opus48`,
-`thatcube-nav-arch-r2-codex`, `thatcube-animated-pancake`, `thatcube-nav-arch-r4-sonnet46`.*
+`thatcube-nav-arch-r2-codex`, `thatcube-animated-pancake`, `thatcube-nav-arch-r4-sonnet46`;
+§10.7 curated-libraries refinement: `thatcube-curated-libraries-research`,
+`thatcube-curated-libraries-pressure-test`, `thatcube-special-couscous`.*

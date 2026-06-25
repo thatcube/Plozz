@@ -816,6 +816,21 @@ extension JellyfinProvider: WatchStateProviding {
     }
 }
 
+extension JellyfinProvider: ResumeStateWriting {
+    /// Writes a resume position session-lessly by reporting a `stop` at that
+    /// position for `itemID`, which updates the user's `PlaybackPositionTicks`.
+    /// A position of `0` clears the resume point.
+    public func setResumePosition(_ seconds: TimeInterval, itemID: String) async throws {
+        let progress = PlaybackProgress(
+            itemID: itemID,
+            playSessionID: nil,
+            positionSeconds: max(seconds, 0),
+            isPaused: true
+        )
+        try await reportPlayback(progress, event: .stop)
+    }
+}
+
 // MARK: - Watchlist (Favorites)
 
 extension JellyfinProvider: WatchlistProviding {

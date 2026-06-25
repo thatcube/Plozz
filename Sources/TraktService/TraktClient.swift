@@ -93,9 +93,20 @@ struct TraktClient: Sendable {
 
     /// `POST /scrobble/{action}` — records playback state. A `stop` past Trakt's
     /// watched threshold (80%) adds the item to the user's history.
+    ///
+    /// A `409 Conflict` is **success, not failure**: Trakt returns it when the
+    /// item was already scrobbled within its cooldown window (account-scoped,
+    /// client-agnostic self-dedupe), which is exactly the "already recorded"
+    /// outcome we want. Swallowing it here means a duplicate scrobble (e.g. a
+    /// server-side Trakt plugin beat us, or our own outbox retried) is treated as
+    /// confirmed — no phantom error, no retry.
     func scrobble(action: String, body: TraktScrobbleBody, accessToken: String) async throws {
         let endpoint = try Endpoint(method: .post, path: "/scrobble/\(action)", headers: headers(accessToken: accessToken))
             .jsonBody(body)
-        _ = try await http.send(endpoint, baseURL: baseURL)
+        do {
+            _ = try await http.send(endpoint, baseURL: baseURL)
+        } catch AppError.conflict {
+            // 409 = already scrobbled = success.
+        }
     }
 }

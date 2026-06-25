@@ -31,6 +31,7 @@ struct MainTabView: View {
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
     let mediaItemActionHandler: any MediaItemActionHandling
+    let enqueueWatchMutation: (WatchMutation) -> Void
     let displayAccounts: [Account]
     let activeAccountID: String?
     let profiles: [Profile]
@@ -72,6 +73,7 @@ struct MainTabView: View {
                 themePalette: resolvedPalette,
                 ratingsProvider: ratingsProvider,
                 scrobbler: trakt.scrobbler,
+                enqueueWatchMutation: enqueueWatchMutation,
                 pendingPlayItemID: $pendingPlayItemID
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
@@ -83,7 +85,8 @@ struct MainTabView: View {
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
                 themePalette: resolvedPalette,
                 ratingsProvider: ratingsProvider,
-                scrobbler: trakt.scrobbler
+                scrobbler: trakt.scrobbler,
+                enqueueWatchMutation: enqueueWatchMutation
             )
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
@@ -270,7 +273,8 @@ private func makePlayerViewModel(
     for request: PlayRequest,
     accounts: [ResolvedAccount],
     captionSettings: CaptionSettings,
-    scrobbler: any TraktScrobbling
+    scrobbler: any TraktScrobbling,
+    enqueueWatchMutation: @escaping (WatchMutation) -> Void
 ) -> PlayerViewModel {
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
@@ -302,6 +306,11 @@ private func makePlayerViewModel(
             autoDismissOnEnd: true
         )
     }
+    // Capture only Sendable value types for the durable convergence hook so it can
+    // run off the main actor when the player stops. The item carries its cross-server
+    // sources, so the mutation fans out to every server holding the title + Trakt.
+    let convergingItem = request.item
+    let primaryAccountID = accounts.first?.account.id
     return PlayerViewModel(
         provider: resolveProvider(request.item.sourceAccountID, in: accounts),
         itemID: request.item.id,
@@ -309,7 +318,16 @@ private func makePlayerViewModel(
         captionSettings: captionSettings,
         startPosition: request.startPosition,
         scrobbler: scrobbler,
-        engineFactory: HybridPlayback.engineFactory()
+        engineFactory: HybridPlayback.engineFactory(),
+        onPlaybackStopped: { position, percent in
+            guard let mutation = WatchMutationFactory.playbackStop(
+                item: convergingItem,
+                position: position,
+                watchedPercent: percent,
+                primaryAccountID: primaryAccountID
+            ) else { return }
+            enqueueWatchMutation(mutation)
+        }
     )
 }
 
@@ -325,6 +343,7 @@ private struct HomeTab: View {
     let themePalette: ThemePalette
     let ratingsProvider: any ExternalRatingsProviding
     let scrobbler: any TraktScrobbling
+    let enqueueWatchMutation: (WatchMutation) -> Void
     @Binding var pendingPlayItemID: String?
 
     @State private var path = NavigationPath()
@@ -423,7 +442,8 @@ private struct HomeTab: View {
                     for: request,
                     accounts: accounts,
                     captionSettings: captionSettings,
-                    scrobbler: scrobbler
+                    scrobbler: scrobbler,
+                    enqueueWatchMutation: enqueueWatchMutation
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
@@ -598,6 +618,7 @@ private struct SearchTab: View {
     let themePalette: ThemePalette
     let ratingsProvider: any ExternalRatingsProviding
     let scrobbler: any TraktScrobbling
+    let enqueueWatchMutation: (WatchMutation) -> Void
 
     @State private var path = NavigationPath()
     @State private var playRequest: PlayRequest?
@@ -691,7 +712,8 @@ private struct SearchTab: View {
                     for: request,
                     accounts: accounts,
                     captionSettings: captionSettings,
-                    scrobbler: scrobbler
+                    scrobbler: scrobbler,
+                    enqueueWatchMutation: enqueueWatchMutation
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette

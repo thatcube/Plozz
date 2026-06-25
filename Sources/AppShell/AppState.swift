@@ -113,6 +113,62 @@ public final class AppState {
     public private(set) lazy var mediaItemActionHandler: any MediaItemActionHandling =
         MediaItemActionCoordinator(appState: self)
 
+    /// Durable cross-server watch-state outbox + reconciler. Persists each watch
+    /// mutation's intent to disk before the network call and drains it on launch /
+    /// foreground / reachability so a watch made while a server was asleep (or the
+    /// app offline) still converges every server + Trakt. Profile-scoped store, so
+    /// it is rebuilt (and the old one flushed) when the active profile changes.
+    @ObservationIgnored
+    private var _watchReconciler: WatchStateReconciler?
+    public var watchReconciler: WatchStateReconciler {
+        if let existing = _watchReconciler { return existing }
+        let created = makeWatchReconciler()
+        _watchReconciler = created
+        return created
+    }
+
+    /// Builds the reconciler with a profile-scoped file store and an applier that
+    /// resolves providers / the Trakt scrobbler live on the main actor.
+    private func makeWatchReconciler() -> WatchStateReconciler {
+        let store = FileWatchMutationStore(namespace: profilesModel.activeNamespace)
+        let applier = AppShellWatchMutationApplier(
+            resolveProvider: { [weak self] accountID in
+                await MainActor.run { self?.provider(forAccountID: accountID) }
+            },
+            traktScrobbler: { [weak self] in
+                await MainActor.run { self?.traktService.scrobbler ?? DisabledTraktScrobbler() }
+            }
+        )
+        return WatchStateReconciler(store: store, applier: applier)
+    }
+
+    /// Flushes and drops the current reconciler so the next access rebuilds it for
+    /// the now-active profile's namespace.
+    private func resetWatchReconciler() {
+        guard let old = _watchReconciler else { return }
+        _watchReconciler = nil
+        Task { await old.drain() }
+    }
+
+    /// Drains the watch-state outbox. Safe to call repeatedly (no-op when empty);
+    /// invoked on launch, on foreground, and after a watch mutation is enqueued.
+    public func drainWatchOutbox() {
+        let reconciler = watchReconciler
+        Task { await reconciler.drain() }
+    }
+
+    /// Records a watch mutation's intent durably (stale-suppressed + coalesced) and
+    /// immediately attempts to drain it. The single entry point the action
+    /// coordinator and player use so every watch fans out to all servers + Trakt and
+    /// survives relaunch.
+    public func enqueueWatchMutation(_ mutation: WatchMutation) {
+        let reconciler = watchReconciler
+        Task {
+            await reconciler.enqueue(mutation)
+            await reconciler.drain()
+        }
+    }
+
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry
@@ -741,6 +797,7 @@ public final class AppState {
     /// Fire-and-forget: the status refresh is async and best-effort.
     private func updateTraktForActiveProfile() {
         let ns = profilesModel.activeNamespace
+        resetWatchReconciler()
         Task { await traktService.setActiveProfile(namespace: ns) }
     }
 

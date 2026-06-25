@@ -10,6 +10,20 @@ import CoreNetworking
 public protocol TraktScrobbling: Sendable {
     /// Records a playback event for `item` at `progress` (watched percent, 0...100).
     func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async
+
+    /// Durable variant for the watch-state outbox: performs the same scrobble but
+    /// **surfaces a failure** (so the reconciler can retry it) while treating
+    /// "already scrobbled" (Trakt 409) and "nothing to scrobble" (not connected /
+    /// unidentifiable item) as success — i.e. it only throws on a genuinely
+    /// retryable error (token refresh / network).
+    func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws
+}
+
+public extension TraktScrobbling {
+    /// Default bridges to the best-effort `scrobble` (success unless overridden).
+    func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws {
+        await scrobble(item: item, progress: progress, event: event)
+    }
 }
 
 /// No-op scrobbler used when Trakt is unconfigured or disconnected, so callers
@@ -45,6 +59,17 @@ public actor TraktScrobbler: TraktScrobbling {
         } catch {
             PlozzLog.playback.debug("Trakt scrobble failed (non-fatal)")
         }
+    }
+
+    /// Durable variant: same scrobble, but rethrows a retryable failure (network /
+    /// token refresh) so the outbox can retry, while a 409 is already swallowed as
+    /// success inside ``TraktClient/scrobble`` and an unidentifiable / not-connected
+    /// item is a no-op success.
+    public func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws {
+        guard let action = Self.action(for: event) else { return }
+        guard let body = Self.scrobbleBody(for: item, progress: progress) else { return }
+        guard let token = await validAccessToken() else { return }
+        try await client.scrobble(action: action, body: body, accessToken: token)
     }
 
     /// Returns a usable access token, refreshing (and persisting) an expired one.

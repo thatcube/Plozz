@@ -251,6 +251,33 @@ public enum MediaItemMerger {
             lastPlayedAt: nil
         )
     }
+
+    /// The resume position **playback** should seek to for a title that lives on
+    /// several servers — the cross-server *furthest progress*, independent of
+    /// which server backs the chosen stream.
+    ///
+    /// This is the convergence rule from the strategy (resume authority = servers,
+    /// **furthest-progress wins**) and the fix for the best-source-routing bug: the
+    /// merged card shows "4 min watched on Plex", best-source routing picks the
+    /// Jellyfin copy whose own `resumePosition` is `0`, and playback must still
+    /// resume at 4 min. It deliberately differs from ``unifiedWatchState`` (which
+    /// is *most-recent-wins* for **display**): for the act of pressing Play we never
+    /// want to rewind below the furthest point any server knows about.
+    ///
+    /// Returns `nil` (start from the beginning) when the unified state reads as
+    /// fully **played** — i.e. the title is finished, so Play is a rewatch — using
+    /// the same most-recent-wins authority the card displays, so an explicit
+    /// newer "unwatch" still re-enables resume.
+    public static func playbackResumePosition(from sources: [MediaSourceRef]) -> TimeInterval? {
+        guard !sources.isEmpty else { return nil }
+        if unifiedWatchState(from: sources).isPlayed { return nil }
+        let furthest = sources
+            .filter { !$0.isPlayed }
+            .compactMap(\.resumePosition)
+            .max()
+        guard let furthest, furthest > 0 else { return nil }
+        return furthest
+    }
 }
 
 public extension Array where Element == ResolvedAccount {

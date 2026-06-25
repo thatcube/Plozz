@@ -21,3 +21,17 @@ public protocol WatchStateProviding: Sendable {
     /// call where the provider supports it.
     func setPlayed(_ played: Bool, itemID: String) async throws
 }
+
+/// Optional capability a `MediaProvider` adopts to write a **resume position**
+/// (seconds) to the server **without an active playback session** — the seam the
+/// cross-server watch-state outbox uses to converge a server that the user did not
+/// launch from (e.g. the Jellyfin copy when the title was watched on Plex).
+///
+/// Detected at runtime via `provider as? ResumeStateWriting`, mirroring
+/// ``WatchStateProviding``. Jellyfin writes the position via its playback-progress
+/// (`/Sessions/Playing/Stopped`) endpoint; Plex via `/:/timeline`.
+public protocol ResumeStateWriting: Sendable {
+    /// Sets the saved resume position (seconds) for `itemID` on this server. A
+    /// position of `0` clears the resume point (title finished / start over).
+    func setResumePosition(_ seconds: TimeInterval, itemID: String) async throws
+}

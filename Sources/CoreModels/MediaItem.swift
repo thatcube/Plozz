@@ -459,6 +459,22 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         activeAccountID: String?,
         versionID: String?
     ) -> MediaItem {
+        let routed = routedForPlayback(item: item, sources: sources, activeAccountID: activeAccountID, versionID: versionID)
+        // Resume reconciliation: whichever server backs the chosen stream, seek to
+        // the cross-server FURTHEST progress so best-source routing can't rewind
+        // playback to 0 when the merged card shows progress made on another server.
+        return routed.reconcilingPlaybackResume(acrossSources: sources)
+    }
+
+    /// Picks the (item id, account, versions) the player should target — the pure
+    /// server/version routing, without resume reconciliation (applied by the
+    /// caller, ``retargetedForPlayback``).
+    private static func routedForPlayback(
+        item: MediaItem,
+        sources: [MediaSourceRef],
+        activeAccountID: String?,
+        versionID: String?
+    ) -> MediaItem {
         let version = versionID.flatMap { id in
             sources.flatMap(\.versions).first(where: { $0.id == id })
         }
@@ -480,6 +496,18 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
             return item.selectingSource(primary, versionID: versionID)
         }
         return item.selectingVersion(versionID)
+    }
+
+    /// Returns a copy whose `resumePosition` is the cross-server furthest-progress
+    /// resume for `sources` (see ``MediaItemMerger/playbackResumePosition(from:)``),
+    /// so the routed play item resumes at the unified position regardless of which
+    /// server backs it. A no-op when `sources` is empty (a single-server item that
+    /// was never merged keeps its own resume).
+    func reconcilingPlaybackResume(acrossSources sources: [MediaSourceRef]) -> MediaItem {
+        guard !sources.isEmpty else { return self }
+        var copy = self
+        copy.resumePosition = MediaItemMerger.playbackResumePosition(from: sources)
+        return copy
     }
 
     /// A human-friendly subtitle line, e.g. `S1 · E3` or the production year.

@@ -161,6 +161,55 @@ final class TraktScrobblerNetworkTests: XCTestCase {
     }
 }
 
+// MARK: - 409 = success
+
+/// A Trakt `/scrobble` 409 means "already scrobbled within the cooldown" — a
+/// duplicate, which is exactly the convergent outcome we want. It must be treated
+/// as confirmed success: no thrown error from the durable path, no retry, and the
+/// non-throwing path must stay silent too.
+final class TraktScrobble409SuccessTests: XCTestCase {
+    private func validTokens() -> TraktTokens {
+        TraktTokens(accessToken: "acc", refreshToken: "ref", expiresAt: .distantFuture)
+    }
+
+    func testDurableScrobbleResultTreats409AsSuccess() async throws {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/scrobble/stop", json: "{}", status: 409)
+        let store = InMemoryTraktTokenStore(tokens: validTokens())
+        let scrobbler = TraktScrobbler(config: configured(), http: http, tokenStore: store)
+
+        // Must NOT throw — 409 is success.
+        try await scrobbler.scrobbleResult(item: movie(), progress: 100, event: .stop)
+
+        XCTAssertEqual(http.sentPaths, ["/scrobble/stop"], "One scrobble attempt, no retry")
+    }
+
+    func testNonThrowingScrobbleSwallows409() async {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/scrobble/stop", json: "{}", status: 409)
+        let store = InMemoryTraktTokenStore(tokens: validTokens())
+        let scrobbler = TraktScrobbler(config: configured(), http: http, tokenStore: store)
+
+        await scrobbler.scrobble(item: movie(), progress: 100, event: .stop)
+
+        XCTAssertEqual(http.sentPaths, ["/scrobble/stop"])
+    }
+
+    func testGenuineFailureStillThrowsFromDurablePath() async {
+        let http = RecordingHTTPClient()
+        http.stub(pathSuffix: "/scrobble/stop", json: "{}", status: 500)
+        let store = InMemoryTraktTokenStore(tokens: validTokens())
+        let scrobbler = TraktScrobbler(config: configured(), http: http, tokenStore: store)
+
+        do {
+            try await scrobbler.scrobbleResult(item: movie(), progress: 100, event: .stop)
+            XCTFail("A 500 must surface so the outbox retries")
+        } catch {
+            // expected — a real failure is retryable.
+        }
+    }
+}
+
 // MARK: - Auth (device code poll)
 
 final class TraktAuthServiceTests: XCTestCase {

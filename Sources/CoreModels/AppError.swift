@@ -16,6 +16,11 @@ public enum AppError: Error, Equatable, Sendable {
     case invalidCredentials
     /// The requested resource does not exist (HTTP 404).
     case notFound
+    /// The request conflicts with the server's current state (HTTP 409). For
+    /// some endpoints — notably Trakt's `/scrobble` — a 409 means "already
+    /// recorded" and is a *success*, so it is surfaced as a distinct case
+    /// instead of the generic `.invalidResponse` so callers can treat it that way.
+    case conflict
     /// Quick Connect is disabled on the server.
     case quickConnectUnavailable
     /// The Quick Connect code expired before the user approved it.
@@ -40,6 +45,8 @@ public enum AppError: Error, Equatable, Sendable {
             return "Incorrect username or password. Please try again."
         case .notFound:
             return "We couldn’t find what you were looking for."
+        case .conflict:
+            return "The server already has a newer version of this."
         case .quickConnectUnavailable:
             return "Quick Connect is turned off on this server. Enable it in the Jellyfin dashboard."
         case .quickConnectExpired:

@@ -69,6 +69,8 @@ public struct URLSessionHTTPClient: HTTPClient {
             throw AppError.unauthorized
         case 404:
             throw AppError.notFound
+        case 409:
+            throw AppError.conflict
         default:
             throw AppError.invalidResponse
         }

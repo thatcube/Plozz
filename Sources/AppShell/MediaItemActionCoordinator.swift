@@ -58,36 +58,25 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         }
     }
 
-    /// Marks a whole title played/unplayed across **every** server that holds it.
-    ///
-    /// A merged card carries one ``MediaSourceRef`` per server (each with that
-    /// server's own item id), so a single "mark watched" lands on the title
-    /// wherever it is known — Jellyfin and Plex alike. The optimistic mutation
-    /// covers every per-server item id (plus the merged card's own id) so the
-    /// badge flips immediately on the merged card and on any per-server copy that
-    /// happens to be on screen. Reverts only if **every** source write fails.
+    /// Marks a whole title played/unplayed across **every** server that holds it,
+    /// durably. The optimistic `MediaItemMutation` flips the badge immediately; the
+    /// real fan-out is delegated to the ``WatchMutationOutbox`` so the write survives
+    /// an asleep server, an offline app, or a kill mid-write, and is mirrored to
+    /// Trakt (write-if-missing, never delete) when marking watched. No brittle
+    /// revert-on-all-fail: a queued write retries until it lands ("fail toward
+    /// writing").
     private func performPlayedToggle(played: Bool, on item: MediaItem, action: MediaItemAction) {
-        let targets = watchTargets(for: item)
-        guard !targets.isEmpty else { return }
+        guard let mutation = WatchMutationFactory.playedToggle(
+            item: item,
+            played: played,
+            primaryAccountID: appState.primaryActiveAccount?.id
+        ) else { return }
 
-        var ids = Set(targets.map(\.itemID))
+        var ids = Set(mutation.targets.map(\.itemID))
         ids.insert(item.id)
         MediaItemMutation(itemIDs: ids, played: played).post()
 
-        Task {
-            var anySucceeded = false
-            for target in targets {
-                do {
-                    try await target.provider.setPlayed(played, itemID: target.itemID)
-                    anySucceeded = true
-                } catch {
-                    PlozzLog.app.error("Mark \(action.rawValue) failed on a source")
-                }
-            }
-            if !anySucceeded {
-                MediaItemMutation(itemIDs: ids, played: !played).post()
-            }
-        }
+        appState.enqueueWatchMutation(mutation)
     }
 
     /// "Mark watched up to here" stays scoped to the primary server: the preceding
@@ -105,24 +94,6 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
                 try? await watch.setPlayed(true, itemID: id)
             }
         }
-    }
-
-    /// Every `(provider, itemID)` this title should be marked on: one per
-    /// cross-server source (each addressed by *that server's* own item id), or
-    /// just the primary owner for a single-source / untagged item.
-    private func watchTargets(for item: MediaItem) -> [(provider: any WatchStateProviding, itemID: String)] {
-        if !item.sources.isEmpty {
-            return item.sources.compactMap { source in
-                guard let provider = appState.provider(forAccountID: source.accountID) as? WatchStateProviding else {
-                    return nil
-                }
-                return (provider, source.itemID)
-            }
-        }
-        if let watch = provider(for: item) as? WatchStateProviding {
-            return [(watch, item.id)]
-        }
-        return []
     }
 
     // MARK: - Watchlist

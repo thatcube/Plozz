@@ -814,6 +814,20 @@ extension PlexProvider: WatchStateProviding {
     }
 }
 
+extension PlexProvider: ResumeStateWriting {
+    /// Writes a resume position session-lessly via `/:/timeline` (a `stopped`
+    /// report at the position). A position of `0` clears the resume point.
+    public func setResumePosition(_ seconds: TimeInterval, itemID: String) async throws {
+        let progress = PlaybackProgress(
+            itemID: itemID,
+            playSessionID: nil,
+            positionSeconds: max(seconds, 0),
+            isPaused: true
+        )
+        try await reportPlayback(progress, event: .stop)
+    }
+}
+
 // MARK: - Watchlist
 
 extension PlexProvider: WatchlistProviding {

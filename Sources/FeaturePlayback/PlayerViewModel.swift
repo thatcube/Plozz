@@ -148,6 +148,14 @@ public final class PlayerViewModel {
     /// regular library playback leaves this `false`.
     private let autoDismissOnEnd: Bool
 
+    /// Durable cross-server convergence hook, called once on `stop()` with the final
+    /// position and watched percentage. The AppShell wires this to enqueue a
+    /// ``WatchMutation`` so the watch fans out (resume / played+Trakt) to **every**
+    /// server holding the title and survives relaunch — independent of the live
+    /// per-report path, which only touches the launch server. Defaults to a no-op so
+    /// the player is usable standalone / in tests.
+    private let onPlaybackStopped: @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void
+
     /// Optional playback bring-up started eagerly in `init` so the (network-bound)
     /// `playbackInfo` resolution and engine warm-up overlap the SwiftUI fullscreen
     /// navigation transition instead of starting only once the view appears. The
@@ -166,7 +174,8 @@ public final class PlayerViewModel {
         engineFactory: EngineFactory = .native,
         capabilities: MediaCapabilities = .detected(),
         preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore(),
-        autoDismissOnEnd: Bool = false
+        autoDismissOnEnd: Bool = false,
+        onPlaybackStopped: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in }
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -178,6 +187,7 @@ public final class PlayerViewModel {
         self.capabilities = capabilities
         self.preferencesStore = preferencesStore
         self.autoDismissOnEnd = autoDismissOnEnd
+        self.onPlaybackStopped = onPlaybackStopped
         self.engine = engineFactory.makeNative(captionSettings)
         self.currentEngineKind = .native
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
@@ -392,7 +402,11 @@ public final class PlayerViewModel {
         // Publish diagnostics after the engine load attempt returns, so the
         // diagnostics sampler doesn't churn SwiftUI layout during mpv init.
         diagnosticsToken = UUID()
-        await report(event: .start, isPaused: false)
+        // Report the *resolved* start position explicitly (not engine.currentTime,
+        // which can still read 0 before the seek settles). When best-source routing
+        // resumed a position learned from another server, this converges the chosen
+        // server to that unified furthest-progress point on entry.
+        await report(event: .start, isPaused: false, positionOverride: startPosition > 0 ? startPosition : nil)
 
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
@@ -524,7 +538,14 @@ public final class PlayerViewModel {
     /// item's duration, preferring the engine's known duration and falling back
     /// to the item runtime. `0` when neither is known.
     private func watchedPercent() -> Double {
-        let position = engine.currentTime
+        watchedPercent(at: engine.currentTime)
+    }
+
+    /// Watched percentage (0...100) for an explicit `position` over the item's
+    /// duration, preferring the engine's known duration and falling back to the
+    /// item runtime. `0` when neither is known. Used at `stop()` so the percentage
+    /// is computed from the captured final position (the engine is torn down there).
+    private func watchedPercent(at position: TimeInterval) -> Double {
         guard position.isFinite, position >= 0 else { return 0 }
         let engineDuration = engine.duration
         let duration = (engineDuration.isFinite && engineDuration > 0)
@@ -651,8 +672,10 @@ public final class PlayerViewModel {
         // leaving the player never keeps playing audio while it completes. Grab
         // the resume position up front since the engine is torn down here.
         let finalPosition = max(engine.furthestObservedPosition, engine.currentTime)
+        let percent = watchedPercent(at: finalPosition)
         engine.stop()
         await report(event: .stop, isPaused: true, positionOverride: finalPosition)
+        onPlaybackStopped(finalPosition, percent)
     }
 
     // MARK: - View / diagnostics access

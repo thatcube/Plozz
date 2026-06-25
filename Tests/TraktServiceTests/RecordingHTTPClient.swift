@@ -63,6 +63,7 @@ final class RecordingHTTPClient: HTTPClient, @unchecked Sendable {
             return (stub.body, HTTPURLResponse(url: baseURL, statusCode: stub.status, httpVersion: nil, headerFields: nil)!)
         case 401, 403: throw AppError.unauthorized
         case 404: throw AppError.notFound
+        case 409: throw AppError.conflict
         default: throw AppError.invalidResponse
         }
     }

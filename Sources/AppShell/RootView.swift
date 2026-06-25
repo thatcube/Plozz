@@ -14,6 +14,7 @@ import FeaturePlayback
 public struct RootView: View {
     @State private var appState: AppState
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.scenePhase) private var scenePhase
     /// Window-level black veil that survives the player's dismiss into Home so it
     /// can cover the TV's *physical* HDR/DV → SDR panel switch (which on some TVs
     /// lags ~1s behind tvOS's `displayDidSettle`). Injected into the environment so
@@ -75,6 +76,7 @@ public struct RootView: View {
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,
                         mediaItemActionHandler: appState.mediaItemActionHandler,
+                        enqueueWatchMutation: { appState.enqueueWatchMutation($0) },
                         displayAccounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
                         profiles: appState.profilesModel.profiles,
@@ -125,7 +127,13 @@ public struct RootView: View {
                 onCancel: { appState.cancelPlexPIN() }
             )
         }
-        .onAppear { if case .launching = appState.state { appState.bootstrap() } }
+        .onAppear {
+            if case .launching = appState.state { appState.bootstrap() }
+            appState.drainWatchOutbox()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active { appState.drainWatchOutbox() }
+        }
         .onOpenURL { appState.handle(url: $0) }
         // Window-level HDR/DV exit veil: a black layer above Home that the player
         // raises (via the injected `DisplayVeilModel`) just before it dismisses, so

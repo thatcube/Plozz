@@ -588,6 +588,9 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(children.count, 1)
         XCTAssertEqual(children[0].kind, .season)
         XCTAssertEqual(children[0].id, "s1")
+        // A season item must carry its own ordinal so cross-server season matching
+        // (by NUMBER) works instead of collapsing to the first season.
+        XCTAssertEqual(children[0].seasonNumber, 1)
     }
 
     func testPlaybackInfoTranscodesUnsupportedContainer() async throws {

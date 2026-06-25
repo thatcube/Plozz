@@ -369,7 +369,11 @@ public struct PlexProvider: MediaProvider {
             kind: kind,
             overview: dto.summary,
             parentTitle: parentTitle,
-            seasonNumber: isEpisode ? dto.parentIndex : nil,
+            // A season's own ordinal lives in `index`; an episode's season number
+            // is its parent's index. Populating `seasonNumber` for season items lets
+            // SeriesDetailView match a target season by NUMBER across servers (per-
+            // server season ids differ) instead of collapsing to the first season.
+            seasonNumber: isEpisode ? dto.parentIndex : (kind == .season ? dto.index : nil),
             episodeNumber: isEpisode ? dto.index : nil,
             productionYear: dto.year,
             officialRating: dto.contentRating,

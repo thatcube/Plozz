@@ -523,7 +523,12 @@ public struct JellyfinProvider: MediaProvider {
             kind: Self.kind(forItemType: dto.`Type`),
             overview: dto.Overview,
             parentTitle: dto.SeriesName ?? dto.SeasonName,
-            seasonNumber: dto.ParentIndexNumber,
+            // A season's own ordinal is its `IndexNumber`; for an episode that field
+            // is the episode number and the season number is the parent's index.
+            // Populating `seasonNumber` for season items lets SeriesDetailView match a
+            // target season by NUMBER across servers (per-server season ids differ)
+            // instead of collapsing to the first season.
+            seasonNumber: Self.kind(forItemType: dto.`Type`) == .season ? dto.IndexNumber : dto.ParentIndexNumber,
             episodeNumber: dto.IndexNumber,
             productionYear: dto.ProductionYear,
             officialRating: dto.OfficialRating,

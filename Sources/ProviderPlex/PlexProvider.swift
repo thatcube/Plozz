@@ -532,7 +532,7 @@ public struct PlexProvider: MediaProvider {
     /// media part, so movie/episode detail heroes can show resolution/HDR/audio
     /// badges. Returns `nil` for containers (shows/seasons) that have no part.
     static func sourceMetadata(from dto: PlexMetadata) -> MediaSourceMetadata? {
-        guard let media = dto.Media?.first else { return nil }
+        guard let media = bestMedia(from: dto.Media) else { return nil }
         let part = media.Part?.first
         let streams = part?.Stream ?? []
         if !streams.isEmpty {
@@ -542,6 +542,55 @@ public struct PlexProvider: MediaProvider {
         // coarser Media-level facts so episode rails still earn resolution/audio
         // badges (HDR/Atmos need the stream detail and are simply absent here).
         return mediaLevelMetadata(from: media)
+    }
+
+    /// Picks the **highest-quality** Media element to badge the hero with, rather
+    /// than Plex's first. A title can carry several Media versions — e.g. a 4K
+    /// Dolby Vision original *and* a 1080p SDR companion/optimized copy — and Plex
+    /// does not guarantee the best one is first. Badging `.first` could therefore
+    /// advertise "1080p · SDR" while playback (which selects the recommended
+    /// version) actually plays the 4K Dolby Vision file. Rank by effective
+    /// resolution lines, then HDR/DoVi presence, so the headline badge reflects the
+    /// best available quality and matches what plays.
+    static func bestMedia(from medias: [PlexMedia]?) -> PlexMedia? {
+        guard let medias, !medias.isEmpty else { return nil }
+        return medias.max(by: { mediaQualityRank($0) < mediaQualityRank($1) })
+    }
+
+    private static func mediaQualityRank(_ m: PlexMedia) -> (Int, Int) {
+        let lines: Int
+        switch (m.videoResolution ?? "").lowercased() {
+        case "8k": lines = 4320
+        case "4k": lines = 2160
+        case "1080": lines = 1080
+        case "720": lines = 720
+        case "480", "576", "sd": lines = 480
+        default:
+            // Classify by effective lines (max of true height and the height the
+            // width implies at 16:9) so an ultrawide 2.35:1 4K file (e.g.
+            // 3840×1600) ranks by its width (4K), not its cropped height.
+            let widthLines = Int((Double(m.width ?? 0) * 9.0 / 16.0).rounded())
+            lines = max(m.height ?? 0, widthLines)
+        }
+        let hdr = mediaSignalsHDR(m) ? 1 : 0
+        return (lines, hdr)
+    }
+
+    /// A light HDR/DoVi hint for ranking same-resolution versions, drawn from the
+    /// Media-level display title and any video stream's DoVi flags / transfer.
+    private static func mediaSignalsHDR(_ m: PlexMedia) -> Bool {
+        let title = (m.videoStreamDisplayTitle ?? "").lowercased()
+        if title.contains("dovi") || title.contains("dolby vision")
+            || title.contains("hdr") || title.contains("hlg") {
+            return true
+        }
+        let videoStreams = (m.Part?.first?.Stream ?? []).filter { $0.streamType == 1 }
+        return videoStreams.contains { v in
+            v.DOVIPresent == true
+                || (v.colorTrc?.lowercased().contains("smpte2084") ?? false)
+                || (v.colorTrc?.lowercased().contains("arib-std-b67") ?? false)
+                || (v.colorTrc?.lowercased().contains("smpte2094") ?? false)
+        }
     }
 
     private static func isInterlacedVideo(_ stream: PlexStream) -> Bool? {

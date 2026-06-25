@@ -533,6 +533,39 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.mediaInfo?.dynamicRangeBadges.map(\.label), ["Dolby Vision", "HDR10"])
     }
 
+    func testHeroBadgesPickBestMediaOverFirstLowerQualityVersion() async throws {
+        // Mirrors a real title that carries a 1080p SDR companion listed FIRST and
+        // the 4K Dolby Vision Atmos original second (ultrawide 3840×1600). Badging
+        // Plex's `.first` would advertise "1080p · SDR" while playback selects the
+        // 4K DoVi version — so the hero must badge the best Media, not the first.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/91", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"91","type":"movie","title":"Dual Version",
+           "Media":[
+             {"id":10,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3","videoResolution":"1080",
+               "Part":[{"id":11,"key":"/p","container":"mkv","Stream":[
+                 {"streamType":1,"codec":"hevc","width":1920,"height":1080},
+                 {"streamType":2,"codec":"eac3","channels":6,"audioChannelLayout":"5.1","displayTitle":"Dolby Digital Plus 5.1"}
+               ]}]},
+             {"id":20,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3","videoResolution":"4k",
+               "Part":[{"id":21,"key":"/p","container":"mkv","Stream":[
+                 {"streamType":1,"codec":"hevc","width":3840,"height":1600,"DOVIPresent":true,"DOVIProfile":8},
+                 {"streamType":2,"codec":"eac3","channels":6,"audioChannelLayout":"5.1","extendedDisplayTitle":"Dolby Digital Plus + Dolby Atmos 5.1"}
+               ]}]}
+           ]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "91")
+        let labels = item.technicalBadges.map(\.label)
+        XCTAssertEqual(item.mediaInfo?.resolutionBadge?.label, "4K")
+        XCTAssertTrue(item.mediaInfo?.dynamicRangeBadges.map(\.label).contains("Dolby Vision") ?? false)
+        XCTAssertFalse(labels.contains("1080p"))
+        XCTAssertFalse(labels.contains("SDR"))
+    }
+
     func testItemFallsBackToMediaLevelFactsWithoutStreams() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/88", json: """

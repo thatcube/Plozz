@@ -488,6 +488,81 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertEqual(Set(vm.sources.map(\.itemID)), ["p1", "p2"])
     }
 
+    /// Disabling a server (its account is excluded from the active profile, so
+    /// `alternateProviderResolver` returns nil for it) must drop that server from
+    /// the picker even when it lingers in an on-disk snapshot persisted while the
+    /// server was still enabled. The same-account sibling is always kept, so once
+    /// the restore lands the picker settles to exactly the live entries.
+    func testSnapshotRestoreDropsDisabledServerSources() async {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-disabled-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let cache = DetailSnapshotCache(directory: tempDir)
+
+        let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021,
+                                providerIDs: ["Tmdb": "438631"],
+                                sourceAccountID: "jelly")
+        let primaryRef = MediaSourceRef(accountID: "jelly", itemID: "p1", providerKind: .jellyfin)
+        let sameAccountSibling = MediaSourceRef(accountID: "jelly", itemID: "p2", providerKind: .jellyfin)
+        let disabledServerSibling = MediaSourceRef(accountID: "plex", itemID: "p3", providerKind: .plex)
+        let snapshot = DetailSnapshotCache.Snapshot(
+            item: primary, children: [], seasonEpisodes: [:],
+            sources: [primaryRef, sameAccountSibling, disabledServerSibling]
+        )
+        await cache.store(snapshot, for: "jelly|p1")
+
+        let provider = FakeMediaProvider(allItems: [primary])
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "p1", sourceAccountID: "jelly",
+            initialSources: [primaryRef], // typical revisit: only the primary
+            // "plex" has been disabled in the active profile → no provider.
+            alternateProviderResolver: { $0 == "plex" ? nil : provider },
+            snapshotCache: cache
+        )
+        await vm.load()
+        // The same-account sibling survives, so the picker settles to exactly 2.
+        await waitUntil { vm.sources.count == 2 }
+
+        XCTAssertEqual(Set(vm.sources.map(\.itemID)), ["p1", "p2"],
+                       "Disabled server's source must be pruned from the restored picker")
+        XCTAssertFalse(vm.sources.contains { $0.accountID == "plex" },
+                       "No source from the disabled (plex) account should remain")
+    }
+
+    /// Control for the above: while the server is still enabled (its account
+    /// resolves a provider) the cross-server sibling stays in the restored picker,
+    /// proving the prune targets only disabled accounts and never over-prunes.
+    func testSnapshotRestoreKeepsEnabledCrossServerSources() async {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-enabled-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let cache = DetailSnapshotCache(directory: tempDir)
+
+        let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, sourceAccountID: "jelly")
+        let primaryRef = MediaSourceRef(accountID: "jelly", itemID: "p1", providerKind: .jellyfin)
+        let crossServerSibling = MediaSourceRef(accountID: "plex", itemID: "p3", providerKind: .plex)
+        let snapshot = DetailSnapshotCache.Snapshot(
+            item: primary, children: [], seasonEpisodes: [:],
+            sources: [primaryRef, crossServerSibling]
+        )
+        await cache.store(snapshot, for: "jelly|p1")
+
+        let provider = FakeMediaProvider(allItems: [primary])
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "p1", sourceAccountID: "jelly",
+            initialSources: [primaryRef],
+            alternateProviderResolver: { _ in provider }, // all accounts enabled
+            snapshotCache: cache
+        )
+        await vm.load()
+        await waitUntil { vm.sources.count == 2 }
+
+        XCTAssertEqual(Set(vm.sources.map(\.accountID)), ["jelly", "plex"],
+                       "Enabled cross-server source must remain in the restored picker")
+    }
+
     // MARK: - In-place cross-server switch (Problem 4)
 
     /// Switching a series to another server's copy in place re-points the page to

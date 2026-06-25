@@ -717,8 +717,11 @@ public final class ItemDetailViewModel {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
         }
         if snapshot.sources.count > 1 {
-            sources = snapshot.sources
-            applyUnifiedWatchState()
+            let restored = prunedToActiveAccounts(snapshot.sources)
+            if restored.count > 1 {
+                sources = restored
+                applyUnifiedWatchState()
+            }
         }
     }
 
@@ -746,8 +749,11 @@ public final class ItemDetailViewModel {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
         }
         if sources.count <= 1, snapshot.sources.count > 1 {
-            sources = snapshot.sources
-            applyUnifiedWatchState()
+            let restored = prunedToActiveAccounts(snapshot.sources)
+            if restored.count > 1 {
+                sources = restored
+                applyUnifiedWatchState()
+            }
         }
     }
 
@@ -816,8 +822,10 @@ public final class ItemDetailViewModel {
             } else {
                 // Re-stamp just the primary entry with the freshly-fetched
                 // watch-state and versions so the kept-from-snapshot picker
-                // still reflects the latest from this server.
-                sources = sources.map { stampedPrimarySource($0, from: primary) }
+                // still reflects the latest from this server. Prune first so a
+                // server disabled since the snapshot was written drops out.
+                sources = prunedToActiveAccounts(sources)
+                    .map { stampedPrimarySource($0, from: primary) }
                 applyUnifiedWatchState()
             }
             return
@@ -864,6 +872,20 @@ public final class ItemDetailViewModel {
 
     private func sourceKey(_ source: MediaSourceRef) -> String {
         "\(source.accountID)#\(source.itemID)"
+    }
+
+    /// Drops picker sources whose owning account is no longer active — signed
+    /// out, or excluded from the active profile via the "Use this server" toggle
+    /// (such an account resolves no provider through `alternateProviderResolver`).
+    /// The primary/active source is always retained so the page the user
+    /// navigated to never loses its own entry. This is what keeps a disabled
+    /// server from lingering in the picker when it's restored from a stale
+    /// on-disk snapshot persisted while the server was still enabled.
+    private func prunedToActiveAccounts(_ candidate: [MediaSourceRef]) -> [MediaSourceRef] {
+        candidate.filter { source in
+            source.accountID == activeSourceAccountID
+                || alternateProviderResolver(source.accountID) != nil
+        }
     }
 
     /// Stamps the primary source with the freshly-fetched detail so the picker and

@@ -213,6 +213,16 @@ struct SeriesDetailView: View {
                             heroItem = enriched
                         }
                     }
+                    // Proactively enrich the next-up / target episode as soon as it
+                    // is known (before the user reaches the rail) so the SERIES
+                    // headline badge — a representative max across loaded episodes —
+                    // reflects real HDR/DoVi/Atmos instead of the sparse listing,
+                    // and the episode is already cached when focus lands on it.
+                    .task(id: railTargetID) {
+                        guard let id = railTargetID,
+                              let target = currentEpisodes.first(where: { $0.id == id }) else { return }
+                        _ = await viewModel.enrichEpisodeBadgesIfNeeded(target)
+                    }
 
                     // Seasons and their episodes sit together as a tighter group,
                     // with the show-level extras kept at the wider page spacing.

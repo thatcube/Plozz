@@ -74,7 +74,7 @@ final class DetailSnapshotCacheTests: XCTestCase {
             await cache.store(snap, for: "key-\(index)")
         }
         let files = (try? FileManager.default.contentsOfDirectory(
-            at: dir.appendingPathComponent("plozz-detail-cache-v1"),
+            at: dir.appendingPathComponent("plozz-detail-cache-v2"),
             includingPropertiesForKeys: nil
         )) ?? []
         XCTAssertLessThanOrEqual(files.count, 2)

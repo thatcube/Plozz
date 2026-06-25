@@ -98,6 +98,21 @@ struct DetailHeroView: View {
     /// washes out — when focused we switch it to a darker green that stays legible.
     @FocusState private var refreshButtonHasFocus: Bool
 
+    /// Whether the trailing "…" (server/version) menu holds focus. After a
+    /// cross-server switch the page rebuilds the hero in place (same "…" menu is
+    /// still present), but the focus engine can otherwise drop focus to the
+    /// default Play button; re-asserting this on `selectedSourceAccountID` change
+    /// keeps the user parked on the "…" menu where they just made the switch. It
+    /// is *not* set on first appearance (only on change), so it never steals the
+    /// initial focus that Play should have when the page opens.
+    @FocusState private var moreMenuFocused: Bool
+
+    /// Drives the hero's first-appearance fade-in. Starts hidden and eases to
+    /// visible `.onAppear`, so the backdrop + title/metadata dissolve in rather
+    /// than hard-cutting when the page opens. Subsequent context swaps fade via
+    /// the value-keyed `.animation` on `item.id`/`backdrop.id`.
+    @State private var heroVisible = false
+
     /// The app-installed action handler (the SAME one the press-and-hold context
     /// menu reads). Drives the visible Watchlist / Watched / Refresh hero buttons
     /// so they are byte-for-byte consistent with the long-press menu — optimistic
@@ -241,6 +256,7 @@ struct DetailHeroView: View {
                     .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .contentTransition(.opacity)
             }
             let metadata = item.metadataComponents()
             if heroRatingBadge != nil || !metadata.isEmpty {
@@ -253,6 +269,7 @@ struct DetailHeroView: View {
                             .font(.system(size: 23, weight: .medium))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .contentTransition(.opacity)
                     }
                 }
             }
@@ -263,6 +280,7 @@ struct DetailHeroView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .frame(maxWidth: 960, alignment: .topLeading)
+                    .contentTransition(.opacity)
             }
             if !featureBadges.isEmpty {
                 MediaBadgeRow(badges: featureBadges)
@@ -285,6 +303,7 @@ struct DetailHeroView: View {
                     // controls below jump up and down.
                     .lineLimit(3, reservesSpace: true)
                     .frame(maxWidth: 960, alignment: .topLeading)
+                    .contentTransition(.opacity)
             }
             if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || showsMoreMenu || hasHeroActionButtons {
                 HStack(spacing: 24) {
@@ -344,10 +363,31 @@ struct DetailHeroView: View {
         // purely visually and the content column stays at the safe width.
         .background(alignment: backdropBottomExtensionFraction > 0 ? .top : .bottom) {
             heroBackdrop(hideThumbnail: hideThumbnail)
+                // Re-key on the backdrop identity so a server switch (the only
+                // thing that changes the backdrop — episode focus deliberately
+                // keeps the show-level backdrop) cross-fades the old artwork out
+                // and the new one in instead of hard-cutting.
+                .id(backdrop.id)
+                .transition(.opacity)
+        }
+        // Fade the whole hero (backdrop + text) in on first appearance rather
+        // than hard-cutting, for a more polished open.
+        .opacity(heroVisible ? 1 : 0)
+        .onAppear {
+            guard !heroVisible else { return }
+            withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
         }
         // Cross-fade the hero text as the focused context changes, while the
         // backdrop swaps underneath it.
         .animation(.easeInOut(duration: 0.2), value: item.id)
+        // Cross-fade the backdrop when the active server changes.
+        .animation(.easeInOut(duration: 0.3), value: backdrop.id)
+        // After an in-place cross-server switch the hero rebuilds but the "…"
+        // menu is still present; keep focus on it instead of letting the focus
+        // engine fall back to Play. Fires only on change, never on first appear.
+        .onChange(of: selectedSourceAccountID) { _, _ in
+            if showsMoreMenu { moreMenuFocused = true }
+        }
     }
 
     /// The full-bleed backdrop image with its legibility scrim and bottom
@@ -573,6 +613,7 @@ struct DetailHeroView: View {
                 .frame(width: heroIconSize, height: heroIconSize)
         }
         .modifier(HeroButtonStyle(prominent: false))
+        .focused($moreMenuFocused)
         .accessibilityLabel("Server and version options")
     }
 
@@ -733,6 +774,7 @@ struct DetailHeroView: View {
             .minimumScaleFactor(0.5)
             .multilineTextAlignment(.leading)
             .frame(maxWidth: 1200, alignment: .leading)
+            .contentTransition(.opacity)
     }
 
     /// Full screen height, the basis for the backdrop's height (scaled by

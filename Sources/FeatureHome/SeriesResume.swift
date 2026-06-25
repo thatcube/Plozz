@@ -40,6 +40,92 @@ public enum SeriesResume {
     }
 }
 
+/// A season+episode ordinal pair, used to re-locate "the same episode" on a
+/// different server (where per-server ids differ) — e.g. preserving the fronted
+/// episode across an in-place cross-server switch.
+public struct SeasonEpisodeRef: Equatable, Sendable {
+    public let season: Int
+    public let episode: Int
+    public init(season: Int, episode: Int) {
+        self.season = season
+        self.episode = episode
+    }
+}
+
+/// Pure, UI-independent derivation of the `S{n} · E{m}` numbering a TV-show hero
+/// must always show when an *episode* is fronted. Some list/search/seed episodes
+/// arrive missing their `seasonNumber`/`episodeNumber` (they know only their own
+/// id), so the badge would silently disappear. This fills the gap from the best
+/// available source, in priority order, and never invents a wrong number.
+public enum SeriesHeroNumbering {
+    /// Returns `hero` with its `seasonNumber`/`episodeNumber` filled in as
+    /// robustly as possible so `MediaItem.subtitle` emits the `S · E` badge.
+    ///
+    /// Non-episode heroes (the series or a season) are returned unchanged.
+    /// Derivation order for each missing field:
+    ///   1. the hero's own value (kept when present);
+    ///   2. its richer **loaded counterpart**, matched by id across every loaded
+    ///      season — the authoritative numbers the rail itself shows;
+    ///   3. `seasonNumber` from the owning/selected **season** item;
+    ///   4. `episodeNumber` from the episode's **position** within its season's
+    ///      loaded episode list (a correct ordinal fallback).
+    public static func numberedHero(
+        _ hero: MediaItem,
+        seasons: [MediaItem],
+        loadedEpisodesBySeason: [String: [MediaItem]],
+        selectedSeasonID: String?,
+        selectedSeasonPool: [MediaItem]
+    ) -> MediaItem {
+        guard hero.kind == .episode else { return hero }
+        var copy = hero
+        var owningSeasonID = copy.seasonID
+
+        // 2) Adopt the richer loaded counterpart's numbers (matched by id), and
+        //    learn which season it actually sits in.
+        if copy.seasonNumber == nil || copy.episodeNumber == nil || owningSeasonID == nil {
+            for (seasonID, episodes) in loadedEpisodesBySeason {
+                guard let index = episodes.firstIndex(where: { $0.id == hero.id }) else { continue }
+                let match = episodes[index]
+                if copy.seasonNumber == nil { copy.seasonNumber = match.seasonNumber }
+                if copy.episodeNumber == nil { copy.episodeNumber = match.episodeNumber ?? (index + 1) }
+                if owningSeasonID == nil { owningSeasonID = seasonID }
+                break
+            }
+        }
+
+        // 3) seasonNumber from the owning (or selected) season item.
+        if copy.seasonNumber == nil {
+            let seasonID = owningSeasonID ?? selectedSeasonID
+            if let number = seasons.first(where: { $0.id == seasonID })?.seasonNumber {
+                copy.seasonNumber = number
+            }
+        }
+
+        // 4) episodeNumber from the episode's position in its season's pool.
+        if copy.episodeNumber == nil {
+            let pool = (owningSeasonID ?? selectedSeasonID)
+                .flatMap { loadedEpisodesBySeason[$0] } ?? selectedSeasonPool
+            if let index = pool.firstIndex(where: { $0.id == hero.id }) {
+                copy.episodeNumber = index + 1
+            }
+        }
+
+        return copy
+    }
+
+    /// Finds the episode in `pool` matching a `SeasonEpisodeRef`, used to re-front
+    /// "the same episode" after an in-place cross-server switch (per-server ids
+    /// differ, so we match by season+episode NUMBER). Returns `nil` when absent.
+    public static func episode(
+        matching target: SeasonEpisodeRef,
+        in pool: [MediaItem]
+    ) -> MediaItem? {
+        pool.first {
+            $0.seasonNumber == target.season && $0.episodeNumber == target.episode
+        }
+    }
+}
+
 /// Formats playback positions/durations as a compact timecode.
 public enum PlaybackTimecode {
     /// Renders `seconds` as `m:ss` (under an hour) or `h:mm:ss` (an hour or

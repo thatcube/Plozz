@@ -41,6 +41,18 @@ public final class ItemDetailViewModel {
     private let provider: any MediaProvider
     private let itemID: String
     private let ratingsProvider: any ExternalRatingsProviding
+
+    /// The currently *active* source the page is showing. Defaults to the base
+    /// `provider`/`itemID`/`sourceAccountID` the page was opened with, but is
+    /// re-pointed by ``switchToSource(accountID:)`` so a **series** can switch to
+    /// another server's copy IN PLACE (reloading that server's seasons/episodes)
+    /// without pushing a new navigation entry. All loads/fetches/tagging/snapshot
+    /// keying go through these, never the immutable base, so an in-place switch
+    /// re-keys cleanly. The base lets are kept so the page's original identity is
+    /// recoverable and the documented immutability of the opened source holds.
+    private var activeProvider: any MediaProvider
+    private var activeItemID: String
+    private var activeSourceAccountID: String?
     /// Resolves a keyless online trailer (public YouTube front-ends), used only
     /// when the provider surfaces no local or server trailer. Injectable so tests
     /// can avoid the network.
@@ -148,7 +160,7 @@ public final class ItemDetailViewModel {
     /// Stable per-title key for ``snapshotCache``. Scoped by owning account so the
     /// same id on two servers caches independently. All routes to a series share a
     /// key (they're all built with the series id as `itemID`).
-    private var snapshotKey: String { "\(sourceAccountID ?? "_")|\(itemID)" }
+    private var snapshotKey: String { "\(activeSourceAccountID ?? "_")|\(activeItemID)" }
 
     public init(
         provider: any MediaProvider,
@@ -167,6 +179,9 @@ public final class ItemDetailViewModel {
     ) {
         self.provider = provider
         self.itemID = itemID
+        self.activeProvider = provider
+        self.activeItemID = itemID
+        self.activeSourceAccountID = sourceAccountID
         self.ratingsProvider = ratingsProvider
         self.sourceAccountID = sourceAccountID
         self.originSourceAccountID = originSourceAccountID
@@ -230,7 +245,7 @@ public final class ItemDetailViewModel {
         // Cold open (no seeded hero) shows a spinner immediately instead of blank.
         if state.value == nil { state = .loading }
         do {
-            var fetched = try await provider.item(id: itemID)
+            var fetched = try await activeProvider.item(id: activeItemID)
             try Task.checkCancellation()
             fetched = await redirectingSeasonToSeries(fetched)
             try Task.checkCancellation()
@@ -278,7 +293,7 @@ public final class ItemDetailViewModel {
                 startEnrichment(for: item)
                 // Children fill in off the critical path of first paint; merge them
                 // in (same item identity ⇒ no hero flicker) when they arrive.
-                let fetchedChildren = (try? await provider.children(of: item.id)) ?? []
+                let fetchedChildren = (try? await activeProvider.children(of: item.id)) ?? []
                 try Task.checkCancellation()
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
                 persistSnapshot()
@@ -318,7 +333,7 @@ public final class ItemDetailViewModel {
     private func redirectingSeasonToSeries(_ item: MediaItem) async -> MediaItem {
         guard item.kind == .season,
               let seriesID = item.seriesID,
-              let series = try? await provider.item(id: seriesID) else {
+              let series = try? await activeProvider.item(id: seriesID) else {
             preselectedSeasonID = nil
             return item
         }
@@ -425,7 +440,7 @@ public final class ItemDetailViewModel {
     /// self-heals at tap time rather than ever being a dead end.
     private func loadTrailers(for item: MediaItem) async {
         guard !Task.isCancelled else { return }
-        let provided = (try? await provider.trailers(for: item.id)) ?? []
+        let provided = (try? await activeProvider.trailers(for: item.id)) ?? []
         guard !Task.isCancelled else { return }
 
         // 1) A real local trailer file wins outright — no network verification.
@@ -567,8 +582,19 @@ public final class ItemDetailViewModel {
     /// and watched badges reflect the new server state in place.
     public func reload() async {
         guard case .loaded = state else { await load(); return }
+        // Capture the active source identity for this reload. An in-place
+        // ``switchToSource(accountID:)`` can re-point active* (and start its own
+        // reload) while this one is still awaiting the network; re-checking the
+        // identity before publishing makes a superseded reload bail instead of
+        // painting the previous server's detail/children over the newer one.
+        let provider = activeProvider
+        let itemID = activeItemID
+        let account = activeSourceAccountID
+        func isCurrent() -> Bool {
+            activeItemID == itemID && activeSourceAccountID == account
+        }
         guard var item = try? await provider.item(id: itemID) else { return }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, isCurrent() else { return }
         item = await redirectingSeasonToSeries(item)
         captureSeriesContext(from: item)
         let children: [MediaItem]
@@ -578,7 +604,7 @@ public final class ItemDetailViewModel {
         default:
             children = []
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, isCurrent() else { return }
         state = .loaded(Detail(item: tagged(item), children: children.map(tagged)))
         // Refresh the episode lists that were already loaded for visible seasons.
         let loadedSeasonIDs = Array(seasonEpisodes.keys)
@@ -591,6 +617,52 @@ public final class ItemDetailViewModel {
         await enrichRatings(for: item)
     }
 
+    /// Whether the page can switch to `accountID`'s copy of this title in place —
+    /// i.e. that server is one of the known cross-server `sources`, an alternate
+    /// provider resolves for it, and it isn't already the active server.
+    public func canSwitchToSource(accountID: String) -> Bool {
+        guard accountID != activeSourceAccountID,
+              sources.contains(where: { $0.accountID == accountID }),
+              alternateProviderResolver(accountID) != nil else { return false }
+        return true
+    }
+
+    /// Switches the page to another server's copy of this title IN PLACE — without
+    /// pushing a navigation entry — and reloads that server's children/episodes.
+    ///
+    /// This brings a **series** server-switch to parity with how movies already
+    /// switch source via a state override: the cross-server picker still shows
+    /// every server, episode preservation (same S·E) and origin-aware version
+    /// defaulting still work, but pressing Back returns to the origin rather than
+    /// walking back through each previously-selected server. The per-server item
+    /// ids differ, so `activeProvider`/`activeItemID`/`activeSourceAccountID` are
+    /// re-pointed (re-keying snapshot + episode caches) and the children reload
+    /// from the new server; `sources` itself is left intact so the picker keeps
+    /// every server. No-op for an unknown/already-active account.
+    public func switchToSource(accountID: String) async {
+        guard accountID != activeSourceAccountID,
+              let source = sources.first(where: { $0.accountID == accountID }),
+              let provider = alternateProviderResolver(accountID) else { return }
+
+        // Stop the old server's speculative enrichment so it can't clobber the new
+        // server's source list after the switch.
+        suspendEnrichment()
+
+        activeProvider = provider
+        activeItemID = source.itemID
+        activeSourceAccountID = accountID
+
+        // Drop the old server's per-season episode caches so the rail reloads from
+        // the new server (its ids differ); the season list reloads via reload().
+        seasonEpisodes = [:]
+        loadingSeasons = []
+        preselectedSeasonID = nil
+
+        // Reload the new server's detail + children in place over the existing
+        // hero (no spinner). reload() now reads activeProvider/activeItemID.
+        await reload()
+    }
+
     /// Lazily fetches and caches the episodes of one season. Idempotent: a season
     /// already loaded (or in flight) is a no-op, so callers may invoke it freely
     /// whenever a season tab gains focus. Fetch failures cache an empty list so a
@@ -600,7 +672,7 @@ public final class ItemDetailViewModel {
         if seasonEpisodes[seasonID] != nil || loadingSeasons.contains(seasonID) { return }
         loadingSeasons.insert(seasonID)
         defer { loadingSeasons.remove(seasonID) }
-        let episodes = (try? await provider.children(of: seasonID)) ?? []
+        let episodes = (try? await activeProvider.children(of: seasonID)) ?? []
         guard !Task.isCancelled else { return }
         seasonEpisodes[seasonID] = stampSeriesTMDb(into: episodes.map(tagged))
         persistSnapshot()
@@ -619,8 +691,8 @@ public final class ItemDetailViewModel {
     /// Stamps an item with this detail's owning account (if any) so navigation
     /// keeps routing to the right provider.
     private func tagged(_ item: MediaItem) -> MediaItem {
-        guard let sourceAccountID else { return item }
-        return item.taggingSource(sourceAccountID)
+        guard let activeSourceAccountID else { return item }
+        return item.taggingSource(activeSourceAccountID)
     }
 
     /// Captures the series-level context (TMDb id + anime ids/genre) used to stamp
@@ -776,7 +848,7 @@ public final class ItemDetailViewModel {
     /// Stamps the primary source with the freshly-fetched detail so the picker and
     /// version list are correct for the server the user is already looking at.
     private func stampedPrimarySource(_ source: MediaSourceRef, from primary: MediaItem) -> MediaSourceRef {
-        guard source.accountID == sourceAccountID, source.itemID == primary.id else { return source }
+        guard source.accountID == activeSourceAccountID, source.itemID == primary.id else { return source }
         var seeded = source
         seeded.versions = primary.versions
         seeded.resumePosition = primary.resumePosition

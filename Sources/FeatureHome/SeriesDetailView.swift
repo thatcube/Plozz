@@ -27,16 +27,13 @@ struct SeriesDetailView: View {
     let viewModel: ItemDetailViewModel
     let spoilerSettings: SpoilerSettings
     let onPlay: (MediaItem) -> Void
-    /// Opens another server's copy of this show when the user picks a different
-    /// server in the hero's "…" menu. The cross-server picker on a *series* can't
-    /// retarget in place the way a movie does (the whole page — seasons, episodes,
-    /// Play — belongs to one server), so selecting a server navigates to that
-    /// server's series detail, whose `load()` fetches its own seasons/episodes.
-    /// The second argument is the episode currently fronted in the hero (when the
-    /// user is looking at a specific episode), so the destination can land on the
-    /// SAME episode instead of resetting to the show's next-up. `nil` (e.g.
-    /// previews) hides the server picker.
-    let onSelectServer: ((MediaSourceRef, MediaItem?) -> Void)?
+    /// Switches this page to another server's copy of the show when the user picks
+    /// a different server in the hero's "…" menu. The switch happens IN PLACE
+    /// (the view model re-points to the other server and reloads its seasons/
+    /// episodes) so it does not grow the navigation back stack — pressing Back
+    /// still returns to wherever the user opened the show from. `nil` (e.g.
+    /// previews, or a single-server show) hides the server picker.
+    let onSelectServer: ((MediaSourceRef) -> Void)?
     /// When the page was opened targeting a specific season, that season's id.
     let initialSeasonID: String?
     /// When the page was opened by tapping a specific episode, that episode. The
@@ -74,6 +71,14 @@ struct SeriesDetailView: View {
     /// have different ids), so `effectivePlayVersionID` re-defaults to recommended.
     @State private var versionOverride: String?
 
+    /// The season+episode NUMBER to re-front after an IN-PLACE cross-server switch,
+    /// captured from the currently-fronted episode the instant the user picks a new
+    /// server. Once that server's episodes load, the page re-selects the matching
+    /// season and fronts the same S·E episode (per-server ids differ, so we match
+    /// by number) — keeping the user on the same episode across the switch. `nil`
+    /// when no episode was fronted or after it has been consumed.
+    @State private var pendingSwitchTargetSE: SeasonEpisodeRef?
+
     init(
         series: MediaItem,
         seasons: [MediaItem],
@@ -81,7 +86,7 @@ struct SeriesDetailView: View {
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings,
         onPlay: @escaping (MediaItem) -> Void,
-        onSelectServer: ((MediaSourceRef, MediaItem?) -> Void)? = nil,
+        onSelectServer: ((MediaSourceRef) -> Void)? = nil,
         initialSeasonID: String? = nil,
         initialEpisode: MediaItem? = nil
     ) {
@@ -125,6 +130,15 @@ struct SeriesDetailView: View {
             // arrive so a series/episode entry (selectedSeasonID still nil) picks
             // its first season and loads episodes instead of staying empty.
             .task(id: seasons.map(\.id)) { await prepareInitialSeason() }
+            // Keep the series-level hero in sync with the active server: when an
+            // in-place cross-server switch re-points `series` to the other server's
+            // copy while the hero is showing the show itself (no episode fronted),
+            // adopt the new series so the hero's title/overview match the active
+            // server. Skipped while an episode is fronted (the episode drives the
+            // hero, and `frontSwitchTarget` re-fronts the matching one).
+            .onChange(of: series.id) { _, _ in
+                if heroItem.kind == .series { heroItem = series }
+            }
             // Warm the current season's episode thumbnails as soon as they load, so
             // cards already have their thumbnail when scrolled to rather than
             // visibly fetching it on appear.
@@ -488,10 +502,12 @@ struct SeriesDetailView: View {
     /// The episode the hero's Play button acts on: the focused episode itself, or
     /// the "next up" episode of the current season. `nil` hides the button.
     /// The hero "…" menu's server-select handler for a series, or `nil` when the
-    /// show lives on a single server (no picker) or no navigation handler is wired.
-    /// Picking a *different* server navigates to that server's copy of the show
-    /// (its own seasons/episodes load there); re-picking the current server is a
-    /// no-op so it never pushes a duplicate page.
+    /// show lives on a single server (no picker) or no switch handler is wired.
+    /// Picking a *different* server switches the page to that server's copy IN
+    /// PLACE (reloading its seasons/episodes) without navigating, so the back stack
+    /// never grows; re-picking the current server is a no-op. Before switching it
+    /// captures the fronted episode's season+episode NUMBER so the new server lands
+    /// on the SAME episode rather than its own next-up.
     private var serverPickerAction: ((String) -> Void)? {
         guard let onSelectServer,
               Set(viewModel.sources.map(\.accountID)).count > 1 else { return nil }
@@ -499,10 +515,16 @@ struct SeriesDetailView: View {
             guard accountID != series.sourceAccountID,
                   let source = viewModel.sources.first(where: { $0.accountID == accountID })
             else { return }
-            // Carry the fronted episode (if any) so the other server's page opens
-            // on the SAME episode rather than its own next-up.
-            let frontedEpisode = heroItem.kind == .episode ? heroItem : nil
-            onSelectServer(source, frontedEpisode)
+            // Capture the fronted episode by NUMBER (the displayed hero, whose S/E
+            // is guaranteed) so the new server fronts the same one after reload.
+            let fronted = displayHeroItem
+            if fronted.kind == .episode,
+               let season = fronted.seasonNumber, let episode = fronted.episodeNumber {
+                pendingSwitchTargetSE = SeasonEpisodeRef(season: season, episode: episode)
+            } else {
+                pendingSwitchTargetSE = nil
+            }
+            onSelectServer(source)
         }
     }
 
@@ -531,25 +553,17 @@ struct SeriesDetailView: View {
 
     /// The hero item with its season/episode numbers guaranteed when an episode is
     /// fronted, so the hero ALWAYS shows "S{n} · E{m}" for a TV show. Some list/
-    /// search/seed episodes arrive without a `seasonNumber` (they know only their
-    /// own id) — fill it from the owning season; derive a missing `episodeNumber`
-    /// from the episode's position in its loaded season as a last resort.
+    /// search/seed episodes arrive without numbers (they know only their own id);
+    /// `SeriesHeroNumbering` backfills them from the loaded episode the rail shows,
+    /// the owning season, or the episode's position — never inventing a wrong value.
     private var displayHeroItem: MediaItem {
-        guard heroItem.kind == .episode else { return heroItem }
-        var copy = heroItem
-        if copy.seasonNumber == nil,
-           let seasonID = copy.seasonID ?? selectedSeasonID,
-           let number = seasons.first(where: { $0.id == seasonID })?.seasonNumber {
-            copy.seasonNumber = number
-        }
-        if copy.episodeNumber == nil {
-            let pool = (copy.seasonID ?? selectedSeasonID).flatMap { viewModel.episodes(for: $0) }
-                ?? currentEpisodes
-            if let index = pool.firstIndex(where: { $0.id == copy.id }) {
-                copy.episodeNumber = index + 1
-            }
-        }
-        return copy
+        SeriesHeroNumbering.numberedHero(
+            heroItem,
+            seasons: seasons,
+            loadedEpisodesBySeason: viewModel.seasonEpisodes,
+            selectedSeasonID: selectedSeasonID,
+            selectedSeasonPool: currentEpisodes
+        )
     }
 
     /// The series' trailer action, shown only while the hero is presenting the
@@ -565,6 +579,14 @@ struct SeriesDetailView: View {
     /// preloads it. When targeting a tapped episode, swaps the hero to the richer
     /// loaded copy of that episode once its season's episodes are available.
     private func prepareInitialSeason() async {
+        // After an in-place cross-server switch, re-front the same S·E episode on
+        // the new server (its seasons just loaded under us). Matched by NUMBER
+        // because per-server ids differ. Takes priority over the open-time target.
+        if let target = pendingSwitchTargetSE {
+            pendingSwitchTargetSE = nil
+            await frontSwitchTarget(target)
+            return
+        }
         if let id = resolvedInitialSeasonID() {
             selectedSeasonID = id
             await viewModel.loadEpisodes(for: id)
@@ -578,6 +600,35 @@ struct SeriesDetailView: View {
         selectedSeasonID = first.id
         await viewModel.loadEpisodes(for: first.id)
         await frontTargetEpisodeIfNeeded(in: first.id)
+    }
+
+    /// Re-selects the season with `target`'s number on the freshly-switched server
+    /// and fronts the matching episode, so an in-place server switch keeps the
+    /// user on the same episode. Matching is scoped to the resolved season and
+    /// done by `episodeNumber` (with a positional fallback) so it still works when
+    /// the new server's episodes don't all carry a `seasonNumber`. When the new
+    /// server lacks that episode entirely it falls back to the season's next-up,
+    /// and ultimately to the series hero — never leaving the *old* server's
+    /// episode fronted (which would mismatch the now-active server). Does not
+    /// touch `playFocused`, so focus stays on the "…" menu.
+    @MainActor
+    private func frontSwitchTarget(_ target: SeasonEpisodeRef) async {
+        guard let seasonID = seasons.first(where: { $0.seasonNumber == target.season })?.id
+            ?? seasons.first?.id else {
+            heroItem = series
+            return
+        }
+        selectedSeasonID = seasonID
+        await viewModel.loadEpisodes(for: seasonID)
+        let pool = viewModel.episodes(for: seasonID) ?? []
+        let positional = (target.episode >= 1 && target.episode <= pool.count) ? pool[target.episode - 1] : nil
+        if let match = pool.first(where: { $0.episodeNumber == target.episode }) ?? positional {
+            heroItem = match
+        } else if let next = SeriesResume.nextUp(in: pool) {
+            heroItem = next
+        } else {
+            heroItem = series
+        }
     }
 
     /// The season to open: an already-selected/explicit one, the target episode's

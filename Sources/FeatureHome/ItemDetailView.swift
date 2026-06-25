@@ -72,23 +72,15 @@ public struct ItemDetailView: View {
                     viewModel: viewModel,
                     spoilerSettings: spoilerSettings,
                     onPlay: onPlay,
-                    onSelectServer: { source, frontedEpisode in
-                        let series = detail.item.selectingSource(source)
-                        if let episode = frontedEpisode {
-                            // Preserve the episode the user was on: re-point it to
-                            // the new server's series and route it as an episode so
-                            // the destination fronts the SAME season/episode (matched
-                            // by number, since per-server ids differ) instead of
-                            // resetting to that server's next-up.
-                            var target = episode
-                            target.sourceAccountID = source.accountID
-                            target.selectedSourceAccountID = source.accountID
-                            target.seriesID = series.id
-                            target.seasonID = nil
-                            onSelectChild(target)
-                        } else {
-                            onSelectChild(series)
-                        }
+                    onSelectServer: { source in
+                        // Switch to the chosen server's copy of this show IN PLACE
+                        // (reload its seasons/episodes) rather than pushing a new
+                        // page — so the cross-server picker doesn't grow the back
+                        // stack. SeriesDetailView preserves the fronted episode by
+                        // its season+episode NUMBER across the switch (per-server
+                        // ids differ). Movies already switch in place via state
+                        // override; this brings series to parity.
+                        Task { await viewModel.switchToSource(accountID: source.accountID) }
                     },
                     initialSeasonID: initialSeasonID ?? viewModel.preselectedSeasonID ?? initialEpisode?.seasonID,
                     initialEpisode: initialEpisode

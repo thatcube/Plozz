@@ -440,7 +440,74 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertTrue(vm.trailers.isEmpty)
     }
 
-    /// Spins the cooperative runtime until `condition` holds (or a bounded number
+    // MARK: - In-place cross-server switch (Problem 4)
+
+    /// Switching a series to another server's copy in place re-points the page to
+    /// that server's item, reloads its seasons, keeps the cross-server picker
+    /// intact, and tags the hero with the new active account — all without any
+    /// navigation, so the back stack never grows.
+    func testSwitchToSourceRepointsSeriesInPlace() async {
+        let provider = FakeMediaProvider(allItems: [series("showA"), series("showB")])
+        provider.childrenByParent = [
+            "showA": [season("a-s1", "Season 1")],
+            "showB": [season("b-s1", "Season 1")],
+            "a-s1": [episode("a-e1", number: 1)],
+            "b-s1": [episode("b-e1", number: 1)],
+        ]
+        let sources = [
+            MediaSourceRef(accountID: "jelly", itemID: "showA"),
+            MediaSourceRef(accountID: "plex", itemID: "showB"),
+        ]
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "showA", sourceAccountID: "jelly",
+            initialSources: sources,
+            alternateProviderResolver: { _ in provider }
+        )
+
+        await vm.load()
+        XCTAssertEqual(vm.state.value?.item.id, "showA")
+        XCTAssertEqual(vm.state.value?.children.map(\.id), ["a-s1"])
+
+        await vm.switchToSource(accountID: "plex")
+
+        XCTAssertEqual(vm.state.value?.item.id, "showB", "Page re-points to the other server's series")
+        XCTAssertEqual(vm.state.value?.children.map(\.id), ["b-s1"], "Reloads the new server's seasons")
+        XCTAssertEqual(vm.state.value?.item.sourceAccountID, "plex", "Hero tagged with the new active account")
+        XCTAssertEqual(Set(vm.sources.map(\.accountID)), ["jelly", "plex"], "Cross-server picker stays intact")
+
+        await vm.loadEpisodes(for: "b-s1")
+        XCTAssertEqual(vm.episodes(for: "b-s1")?.map(\.id), ["b-e1"], "Episodes come from the new server")
+    }
+
+    /// Switching to the already-active server, an unknown account, or one with no
+    /// alternate provider is a no-op (so re-picking the current server can't
+    /// reload or disturb the page).
+    func testSwitchToSourceNoOps() async {
+        let provider = FakeMediaProvider(allItems: [series("showA"), series("showB")])
+        provider.childrenByParent = ["showA": [season("a-s1", "Season 1")], "showB": []]
+        let sources = [
+            MediaSourceRef(accountID: "jelly", itemID: "showA"),
+            MediaSourceRef(accountID: "plex", itemID: "showB"),
+        ]
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "showA", sourceAccountID: "jelly",
+            initialSources: sources,
+            alternateProviderResolver: { $0 == "plex" ? provider : nil }
+        )
+        await vm.load()
+
+        await vm.switchToSource(accountID: "jelly")
+        XCTAssertEqual(vm.state.value?.item.id, "showA", "Re-picking the active server is a no-op")
+
+        await vm.switchToSource(accountID: "unknown")
+        XCTAssertEqual(vm.state.value?.item.id, "showA", "Unknown account is a no-op")
+
+        XCTAssertTrue(vm.canSwitchToSource(accountID: "plex"))
+        XCTAssertFalse(vm.canSwitchToSource(accountID: "jelly"))
+        XCTAssertFalse(vm.canSwitchToSource(accountID: "unknown"))
+    }
+
+
     /// of yields elapse), so a test can observe an optimistic state set before a
     /// later `await` resumes.
     private func waitUntil(_ condition: @MainActor () -> Bool) async {

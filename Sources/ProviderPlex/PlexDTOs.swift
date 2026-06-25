@@ -122,6 +122,9 @@ struct PlexMedia: Decodable {
     let height: Int?
     let audioChannels: Int?
     let videoProfile: String?
+    /// Human-friendly video stream summary, e.g. `4K DoVi/HDR10 (HEVC Main 10)`.
+    /// Present even when the detailed `Part.Stream` array is omitted.
+    let videoStreamDisplayTitle: String?
     let Part: [PlexPart]?
 }
 
@@ -170,6 +173,8 @@ struct PlexStream: Decodable {
     /// `width`/`height`). Apple TV can decode only single-layer **Profile 5** and
     /// **Profile 8**; Profile 7 (and any unknown profile) must transcode.
     let DOVIProfile: Int?
+    let DOVILevel: Int?
+    let DOVIBLPresent: Bool?
     // Audio facts
     let channels: Int?
     let samplingRate: Int?

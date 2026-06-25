@@ -479,6 +479,60 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.ratings.first(where: { $0.source == .imdb })?.displayValue, "9")
     }
 
+    func testItemMapsDolbyVisionFromStreamDisplayTitleWhenFlagsMissing() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/78", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"78","type":"movie","title":"DoVi Title",
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
+               {"streamType":1,"codec":"hevc","width":3840,"height":2160,"displayTitle":"4K DoVi/HDR10 (HEVC Main 10)"},
+               {"streamType":2,"codec":"eac3","channels":6,"audioChannelLayout":"5.1"}
+             ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "78")
+        XCTAssertEqual(item.mediaInfo?.dynamicRangeBadges.map(\.label), ["Dolby Vision", "HDR10"])
+        XCTAssertFalse(item.technicalBadges.map(\.label).contains("SDR"))
+    }
+
+    func testItemMapsHDR10PlusFromTransferCharacteristics() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/79", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"79","type":"movie","title":"HDR10 Plus",
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
+               {"streamType":1,"codec":"hevc","width":3840,"height":2160,"colorTrc":"smpte2094-40"},
+               {"streamType":2,"codec":"eac3","channels":6,"audioChannelLayout":"5.1"}
+             ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "79")
+        XCTAssertEqual(item.mediaInfo?.dynamicRangeBadges.map(\.label), ["HDR10+"])
+    }
+
+    func testItemMapsDolbyVisionFromMediaLevelDisplayTitleWithoutStreams() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/80", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"80","type":"movie","title":"DoVi Media Level",
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "videoResolution":"4k","width":3840,"height":2160,"audioChannels":6,
+             "videoStreamDisplayTitle":"4K Dolby Vision/HDR10 (HEVC Main 10)",
+             "Part":[{"id":2,"key":"/p","container":"mkv"}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "80")
+        XCTAssertEqual(item.mediaInfo?.dynamicRangeBadges.map(\.label), ["Dolby Vision", "HDR10"])
+    }
+
     func testItemFallsBackToMediaLevelFactsWithoutStreams() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/88", json: """

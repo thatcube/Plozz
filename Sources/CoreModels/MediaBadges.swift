@@ -212,15 +212,28 @@ public extension MediaSourceMetadata {
         return []
     }
 
-    /// The full ordered technical badge set: resolution, dynamic range, audio —
-    /// mirroring how Plex composes "1080p · DoVi/HDR10". The video codec (HEVC /
-    /// H.264) is intentionally omitted from the headline badge row; the full codec
-    /// profile remains in the playback-diagnostics overlay.
+    /// The full ordered technical badge set: resolution, then the Dolby-family
+    /// badges grouped together (Dolby Vision before audio Dolby badges), then
+    /// the HDR10 / HDR / SDR pill, then any non-Dolby audio badges. The video
+    /// codec (HEVC / H.264) is intentionally omitted from the headline badge
+    /// row; the full codec profile remains in the playback-diagnostics overlay.
+    ///
+    /// Grouping keeps the two visually-similar Dolby logos (e.g. Dolby Vision +
+    /// Dolby Atmos) adjacent rather than separated by an `HDR10` pill, mirroring
+    /// how Apple TV composes "4K · Dolby Vision · Dolby Atmos · HDR10".
     var technicalBadges: [MediaBadge] {
         var badges: [MediaBadge] = []
         if let resolutionBadge { badges.append(resolutionBadge) }
-        badges.append(contentsOf: dynamicRangeBadges)
-        badges.append(contentsOf: audioBadges)
+        let range = dynamicRangeBadges
+        let audio = audioBadges
+        let dolbyRange = range.filter { $0.style == .dolby }
+        let otherRange = range.filter { $0.style != .dolby }
+        let dolbyAudio = audio.filter { $0.style == .dolby }
+        let otherAudio = audio.filter { $0.style != .dolby }
+        badges.append(contentsOf: dolbyRange)
+        badges.append(contentsOf: dolbyAudio)
+        badges.append(contentsOf: otherRange)
+        badges.append(contentsOf: otherAudio)
         return badges
     }    /// A surround-channel label (`7.1`, `5.1`) from a layout string or channel
     /// count. Returns `nil` for stereo/mono (not a highlight) or unknown.
@@ -357,21 +370,29 @@ public extension MediaSourceMetadata {
     /// The best-of-each-category technical badge set across many sources. Unlike
     /// a single item's `technicalBadges`, this maximises resolution, dynamic
     /// range and audio independently so the summary reflects the group's peak
-    /// capabilities rather than any one file's.
+    /// capabilities rather than any one file's. Output order matches
+    /// `MediaSourceMetadata.technicalBadges`: resolution → Dolby Vision → Dolby
+    /// audio → HDR10/HDR/SDR → non-Dolby audio, so the two Dolby logos stay
+    /// adjacent (e.g. "4K · Dolby Vision · Dolby Atmos · HDR10").
     static func representativeTechnicalBadges(from sources: [MediaSourceMetadata]) -> [MediaBadge] {
         guard !sources.isEmpty else { return [] }
-        var badges: [MediaBadge] = []
+        var resolution: MediaBadge?
+        var audioBadge: MediaBadge?
 
-        if let resolution = sources
+        if let r = sources
             .compactMap(\.resolutionBadge)
             .max(by: { resolutionRank($0.label) < resolutionRank($1.label) }) {
-            badges.append(resolution)
+            resolution = r
         }
 
-        if let range = sources
-            .flatMap(\.dynamicRangeBadges)
-            .max(by: { dynamicRangeRank($0.label) < dynamicRangeRank($1.label) }) {
-            badges.append(range)
+        // Pick the source whose dynamic-range set contains the best-ranked badge
+        // and adopt that source's FULL range list, so a DoVi/HDR10 source
+        // contributes both `Dolby Vision` AND `HDR10` rather than just the top
+        // rank. Falls back to flat-max when no source has a non-empty set.
+        let rangeArrays = sources.map(\.dynamicRangeBadges).filter { !$0.isEmpty }
+        var rangeBadges: [MediaBadge] = []
+        if let best = rangeArrays.max(by: { topRank(of: $0) < topRank(of: $1) }) {
+            rangeBadges = best
         }
 
         // Maximise the headline audio format and the surround layout separately,
@@ -392,12 +413,27 @@ public extension MediaSourceMetadata {
         let bestChannels = channelCandidates.max(by: { channelRank($0) < channelRank($1) })
         if var bestFormat {
             bestFormat.detail = formatImpliesSurround(bestFormat.label) ? nil : bestChannels
-            badges.append(bestFormat)
+            audioBadge = bestFormat
         } else if let bestChannels {
-            badges.append(MediaBadge(bestChannels, style: .spec))
+            audioBadge = MediaBadge(bestChannels, style: .spec)
         }
 
+        // Compose the same Dolby-grouped order as `technicalBadges`.
+        var badges: [MediaBadge] = []
+        if let resolution { badges.append(resolution) }
+        let dolbyRange = rangeBadges.filter { $0.style == .dolby }
+        let otherRange = rangeBadges.filter { $0.style != .dolby }
+        badges.append(contentsOf: dolbyRange)
+        if let audioBadge, audioBadge.style == .dolby { badges.append(audioBadge) }
+        badges.append(contentsOf: otherRange)
+        if let audioBadge, audioBadge.style != .dolby { badges.append(audioBadge) }
         return badges
+    }
+
+    /// Highest `dynamicRangeRank` across a badge array, used to pick the source
+    /// with the strongest dynamic-range set when summarising a series.
+    private static func topRank(of badges: [MediaBadge]) -> Int {
+        badges.map { dynamicRangeRank($0.label) }.max() ?? 0
     }
 
     private static func resolutionRank(_ label: String) -> Int {

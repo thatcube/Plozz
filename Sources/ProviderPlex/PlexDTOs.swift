@@ -122,6 +122,11 @@ struct PlexMedia: Decodable {
     let height: Int?
     let audioChannels: Int?
     let videoProfile: String?
+    /// Media-level audio profile summary, e.g. `dolby digital plus + dolby atmos`.
+    /// Plex signals Atmos here even when the per-audio-stream `profile`/`displayTitle`
+    /// don't mention it, so this is the canonical place to detect Atmos for many
+    /// PMS endpoints.
+    let audioProfile: String?
     /// Human-friendly video stream summary, e.g. `4K DoVi/HDR10 (HEVC Main 10)`.
     /// Present even when the detailed `Part.Stream` array is omitted.
     let videoStreamDisplayTitle: String?
@@ -139,13 +144,14 @@ struct PlexMedia: Decodable {
         height = c.flexibleInt(.height)
         audioChannels = c.flexibleInt(.audioChannels)
         videoProfile = c.flexibleString(.videoProfile)
+        audioProfile = c.flexibleString(.audioProfile)
         videoStreamDisplayTitle = c.flexibleString(.videoStreamDisplayTitle)
         Part = try c.decodeIfPresent([PlexPart].self, forKey: .Part)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, duration, container, videoCodec, audioCodec, videoResolution
-        case width, height, audioChannels, videoProfile, videoStreamDisplayTitle, Part
+        case width, height, audioChannels, videoProfile, audioProfile, videoStreamDisplayTitle, Part
     }
 }
 

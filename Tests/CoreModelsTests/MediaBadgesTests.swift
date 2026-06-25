@@ -73,7 +73,21 @@ final class MediaBadgesTests: XCTestCase {
         )
         // The video codec (HEVC) is intentionally excluded from the headline badge
         // row; it remains available via `videoCodecBadge` for the diagnostics overlay.
-        XCTAssertEqual(meta.technicalBadges.map(\.label), ["1080p", "HDR10", "Dolby Atmos"])
+        // Dolby badges group together: Dolby Atmos sits before the HDR10 pill so
+        // the two visually-similar Dolby logos aren't separated by HDR.
+        XCTAssertEqual(meta.technicalBadges.map(\.label), ["1080p", "Dolby Atmos", "HDR10"])
+    }
+
+    func testTechnicalBadgeOrderGroupsDolbyTogether() {
+        // The canonical Fallout-on-Plex shape: DoVi profile 8 + HDR10 base + Atmos.
+        // Desired order is resolution · Dolby Vision · Dolby Atmos · HDR10 — the
+        // two Dolby logos must be adjacent.
+        let meta = MediaSourceMetadata(
+            video: .init(width: 3840, height: 2160, videoRangeType: "DOVIWithHDR10"),
+            audio: .init(codec: "eac3", profile: "Dolby Digital+ Atmos", channels: 6, channelLayout: "5.1")
+        )
+        XCTAssertEqual(meta.technicalBadges.map(\.label),
+                       ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"])
     }
 
     // MARK: Dynamic range
@@ -213,10 +227,26 @@ final class MediaBadgesTests: XCTestCase {
         ]
         // Dolby Digital+ doesn't imply surround, so the best channel layout (7.1)
         // is attached to it as a trailing detail. E1 is SDR, so the range summary
-        // reads SDR.
+        // reads SDR. Dolby badges still group first: order is resolution → Dolby
+        // audio → SDR pill.
         let badges = episodes.representativeTechnicalBadges
-        XCTAssertEqual(badges.map(\.label), ["1080p", "SDR", "Dolby Digital+"])
-        XCTAssertEqual(badges.last?.detail, "7.1")
+        XCTAssertEqual(badges.map(\.label), ["1080p", "Dolby Digital+", "SDR"])
+        XCTAssertEqual(badges.first(where: { $0.label == "Dolby Digital+" })?.detail, "7.1")
+    }
+
+    func testRepresentativeBadgesGroupDolbyBeforeHDR() {
+        // Series with a 4K DoVi/HDR10 + Atmos episode should summarise as
+        // "4K · Dolby Vision · Dolby Atmos · HDR10" — Dolby logos adjacent.
+        let episodes = [
+            MediaItem(id: "1", title: "E1", kind: .episode,
+                      mediaInfo: .init(video: .init(width: 1920, height: 1080),
+                                       audio: .init(codec: "aac", channels: 2))),
+            MediaItem(id: "2", title: "E2", kind: .episode,
+                      mediaInfo: .init(video: .init(width: 3840, height: 2160, videoRangeType: "DOVIWithHDR10"),
+                                       audio: .init(codec: "eac3", profile: "Dolby Digital+ Atmos", channels: 6))),
+        ]
+        XCTAssertEqual(episodes.representativeTechnicalBadges.map(\.label),
+                       ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"])
     }
 
     func testRepresentativeBadgesEmptyWhenNoMediaInfo() {

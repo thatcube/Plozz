@@ -760,6 +760,124 @@ delay → one skippable screen.
 3. **Theme step:** keep a one-screen theme picker at step 0, or cut it from onboarding and just
    nudge in Settings?
 
+> **Brandon's decisions (2026-06-25):** (2) **always ask** the "Just me / Multiple people"
+> binary on first run. (3) **keep** the one-screen minimal theme picker (live re-themeable
+> mock-scene preview noted as a clean v2). (1) deferred — superseded by the §10 navigation
+> question below, which reframes where libraries live (so the reveal/opt-in choice now applies
+> to Home highlight rows, not to a library dump).
+
+---
+
+## 10. Navigation & sub-navigation architecture
+
+*Synthesized from four fresh blind branches (Opus 4.8 high, GPT-5.3-Codex xhigh, Gemini 3.1
+Pro high, Sonnet 4.6 max), each answering an identical unbiased brief in isolation. Brandon's
+prompt: keep core nav SIMPLE, define sub-navigation, ADAPT to 1-vs-N video AND music libraries
+without duplicating functionality, and resolve whether navigation "pinning" (Plex's
+customize-navigation) should exist at all — or whether Home is the single adaptable page.*
+
+### 10.1 The grounding insight: Music already solved this once
+
+Plozz's Music tab is the existing proof-of-concept every branch built on: it appears **only**
+when `MusicAvailabilityModel.hasMusic` is true and **collapses N music libraries (across all
+servers) into one adaptive tab**, leaving video-only users "byte-for-byte unchanged." The whole
+navigation answer is a generalization of this one pattern: *content drives the nav; the user
+does not assemble it.*
+
+### 10.2 Unanimous convergence (all four branches)
+
+These were not in the brief — all four arrived independently:
+
+1. **REJECT Plex-style navigation pinning.** Pinning is a workaround for a mis-shaped nav and a
+   burden pushed onto the user; it bloats the tvOS TabView and fights the fast brand. Fix the
+   nav shape instead. (Answers Brandon's core "should we pin at all?" → **no.**)
+2. **Evict the library rail from Home.** Home stops being the library surface and becomes a pure
+   **highlight reel** (Continue Watching / Watchlist / Recently Added / featured). This is the
+   real resolution of "maybe pinning lives within Home": there is nothing to pin because
+   libraries no longer live on Home — so Home can't get cluttered. Keeping *both* a library rail
+   on Home *and* a browse surface would be the duplication Brandon explicitly forbade.
+3. **The app ADAPTS automatically; onboarding asks nothing about navigation.** Destinations
+   appear/disappear from imported content exactly like the Music tab does today.
+4. **Server is never a navigation axis.** Same library TYPE across servers (Movies on Plex +
+   Jellyfin) collapses to ONE destination via `AggregatedLibrary` / `AggregatedLibraryProvider`.
+   The only "which library / which server" affordance is an in-context **filter**, never a tab,
+   page, or pin.
+5. **One paradigm for video and music** — whatever adaptive sub-nav video uses, music reuses,
+   so there aren't two different mental models.
+6. **Progressive disclosure: hide chrome when redundant at N=1.** A single library deep-links
+   straight to its grid (no hub, no picker); richer setups reveal more sub-nav. Degenerate cases
+   never get a redundant hub; rich cases never become row-soup or a server tree.
+
+### 10.3 The one real fork: where do content TYPES live?
+
+Everything above is agreed. The branches split on the *shape* of browse:
+
+| Branch | Top-level nav | Where content types live | N=1 / N rule |
+|---|---|---|---|
+| **r1 Opus 4.8** | Home · Search · Settings **+ auto per-TYPE "lens" tabs** (`Movies`, `Shows`, `Music`) | **Separate tab per canonical type** (capped to Movies/Shows/Music/Other), generalizing the Music tab to all types | tabs adapt to # of **types**; library chips inside a lens adapt to # of **libraries** |
+| **r3 Gemini** | Home · **Browse** · [Music] · Search | **One unified Browse tab**; types are a **left rail** inside it | Browse deep-links to grid at 1; left rail of types at N |
+| **r4 Sonnet 4.6** | Home · **Browse** · [Music] · Settings | **One unified Browse tab**; types are a **top segmented strip** inside it | Browse conditional on any video lib (parallel to `hasMusic`); type strip hidden at 1 type; music gets `All\|LibA\|LibB` filter at N |
+| **r2 Codex** | Home · Search · [Music] · Settings | **No new tab** — browse reached via **jump actions from Home**; adaptive sub-nav by count | 1→deep-link grid; 2–5→inline scope chips; >5→`All` + filter/search panel |
+
+So the spectrum on **"how do you reach a Movies grid"** is:
+
+- **r1:** a dedicated **Movies tab** (most prominent, most tabs — but capped & content-driven).
+- **r3/r4:** one **Browse tab**, type chosen inside (one fixed extra tab, types are sub-nav).
+- **r2:** **no browse tab at all** — you jump in from Home (fewest tabs, browse is a mode).
+
+### 10.4 Orchestrator recommendation
+
+**Adopt the r3/r4 "single Browse tab" core, with Sonnet's `hasVideo`-conditional appearance and
+the unanimous Home-cleanup.** Concretely:
+
+- **Core nav (fixed, ≤4 tabs):** `Home · Browse* · Music* · Settings` — where `Browse` appears
+  when any video library exists and `Music` appears when any music library exists (both mirror
+  today's `hasMusic` precedent). Search folds into Browse/Home as a function rather than eating a
+  permanent tab slot, or stays as a 5th only if Brandon prefers it surfaced. Tab count never
+  varies with *library* count — only with whether video/music exist at all.
+- **Inside Browse — adaptive sub-nav, one component:** an aggregated **type strip/rail**
+  (`Movies | TV | Kids | 4K…`) that is **hidden when only one type exists** (deep-link straight to
+  the grid). Use Codex's count thresholds for the *library* dimension within a type (1→direct,
+  2–5→inline chips, >5→`All` + filter panel). Stack depth: Browse → Grid → Detail. Same
+  `LibraryBrowseView` + `AggregatedLibraryProvider` that already exist.
+- **Music** reuses the identical filter paradigm (`All | LibA | LibB` when N>1, merged at 1).
+- **Home** becomes the highlight reel only (CW / Watchlist / Recent / §8 featured rows); the
+  library rail is removed.
+
+**Why this over r1's per-type tabs:** r1's lens-tabs are elegant and the purest generalization of
+Music, but variable *type* tabs (a Movies tab today, a Movies+Shows+Anime set tomorrow as content
+changes) trades muscle-memory stability for prominence — and on tvOS a fixed, predictable top bar
+is worth more than surfacing each type one level higher. r3/r4's single Browse keeps the bar
+stable while still letting content fully drive what's *inside* it. **Why not r2's no-browse-tab:**
+discoverability — a first-class Browse destination is the obvious home for catalog exploration once
+the library rail leaves Home; reaching browse only via Home jump-actions hides it.
+
+**This also reframes the §9.6 question 1** (reveal vs opt-in): with libraries living in Browse
+(always all present, server-merged) rather than as Home rows, the onboarding "curation" choice
+collapses to *which highlight rows seed Home* — a much smaller, lower-stakes decision that the
+opt-out **reveal** model handles cleanly.
+
+### 10.5 Migration & sequencing (converged value→risk order)
+
+1. **Add the Browse tab** (additive, conditional on `hasVideo`, zero risk) with the adaptive
+   type strip + `AggregatedLibraryProvider` grids.
+2. **Add the music library filter** at N>1 (additive, very low risk).
+3. **Remove the library rail from Home** → highlight reel (HIGH value, medium risk: users
+   retrain; mitigate with a one-time contextual hint).
+4. **Migrate `HomeLibraryVisibility`** (opt-out) → Browse type/library visibility + Home
+   highlight-row config (low-risk cleanup; preserve existing hidden keys).
+5. **Cross-type / cross-server merge polish** and per-type merge toggle in per-server setup.
+
+### 10.6 Open questions for Brandon (this section)
+
+1. **The core fork:** single **Browse tab** with types inside (r3/r4 — my rec) vs **per-type
+   "lens" tabs** (r1, Music generalized to Movies/Shows) vs **no browse tab, jump from Home**
+   (r2)?
+2. **Search:** keep Search as its own permanent tab, or fold it into Browse/Home to keep the bar
+   at ≤4 fixed tabs?
+3. **Home cleanup:** confirm you're OK **removing the library rail from Home** (the move all four
+   branches depend on) — Home becomes CW/Watchlist/Recent/featured only.
+
 ---
 
 *Full individual proposals (with code citations, trade-off tables, and per-branch
@@ -769,4 +887,5 @@ implementation sketches) are preserved in each research branch's `plan.md`. Bran
 `thatcube-strategy-research-r5`; §8 addendum: `thatcube-home-rows-strategy-research`,
 `thatcube-srvrows-r2-codex`, `thatcube-scaling-enigma`; §9 addendum:
 `thatcube-onboarding-research-opus48`, `thatcube-onboarding-r2-codex`,
-`thatcube-jubilant-couscous`.*
+`thatcube-jubilant-couscous`; §10 navigation: `thatcube-nav-arch-r1-opus48`,
+`thatcube-nav-arch-r2-codex`, `thatcube-animated-pancake`, `thatcube-nav-arch-r4-sonnet46`.*

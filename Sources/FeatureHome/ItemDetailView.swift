@@ -72,6 +72,7 @@ public struct ItemDetailView: View {
                     viewModel: viewModel,
                     spoilerSettings: spoilerSettings,
                     onPlay: onPlay,
+                    onSelectServer: { source in onSelectChild(detail.item.selectingSource(source)) },
                     initialSeasonID: initialSeasonID ?? viewModel.preselectedSeasonID ?? initialEpisode?.seasonID,
                     initialEpisode: initialEpisode
                 )

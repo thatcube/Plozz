@@ -280,16 +280,10 @@ struct DetailHeroView: View {
                     .lineLimit(3, reservesSpace: true)
                     .frame(maxWidth: 960, alignment: .topLeading)
             }
-            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || (versions.count > 1 && onSelectVersion != nil) || (serverChoices.count > 1 && onSelectSource != nil) || hasHeroActionButtons {
+            if (playTitle != nil && onPlay != nil) || onPlayTrailer != nil || showsMoreMenu || hasHeroActionButtons {
                 HStack(spacing: 24) {
                     if let playTitle, let onPlay {
                         playButton(title: playTitle, action: onPlay)
-                    }
-                    if serverChoices.count > 1, let onSelectSource {
-                        serverButton(onSelect: onSelectSource)
-                    }
-                    if versions.count > 1, let onSelectVersion {
-                        versionButton(onSelect: onSelectVersion)
                     }
                     if let onPlayTrailer {
                         Button(action: onPlayTrailer) {
@@ -305,6 +299,13 @@ struct DetailHeroView: View {
                     }
                     if heroOffersRefresh {
                         refreshButton()
+                    }
+                    // The server + version choices live together in one subtle
+                    // trailing "…" menu (not separate prominent buttons), so a
+                    // multi-server / multi-version title stays uncluttered: one
+                    // tap reveals which servers host it and which files each has.
+                    if showsMoreMenu {
+                        moreMenu(onSelectSource: onSelectSource, onSelectVersion: onSelectVersion)
                     }
                 }
                 .padding(.top, 8)
@@ -459,60 +460,67 @@ struct DetailHeroView: View {
         return result
     }
 
-    /// The server-picker button shown next to Play when a merged title lives on
-    /// more than one server. Mirrors the version picker's style: its label shows
-    /// the active server, and the menu lists every server (provider kind + name)
-    /// with a checkmark on the active one. Picking a server retargets `Play` and
-    /// repopulates the version picker with that server's files.
-    @ViewBuilder
-    private func serverButton(onSelect: @escaping (String) -> Void) -> some View {
-        let current = serverChoices.first { $0.accountID == selectedSourceAccountID } ?? serverChoices.first
-        Menu {
-            ForEach(serverChoices) { source in
-                Button {
-                    onSelect(source.accountID)
-                } label: {
-                    if source.accountID == current?.accountID {
-                        Label(source.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(source.displayName)
-                    }
-                }
-            }
-        } label: {
-            Label(current?.displayName ?? "Server", systemImage: "server.rack")
-                .frame(minWidth: 160)
-        }
-        .modifier(HeroButtonStyle(prominent: false))
+    /// Whether the trailing "…" menu has anything to offer: more than one server
+    /// hosting the title, or more than one playable version on the active server.
+    private var showsMoreMenu: Bool {
+        (serverChoices.count > 1 && onSelectSource != nil) || (versions.count > 1 && onSelectVersion != nil)
     }
 
-    /// The version-picker button shown next to Play when a title has more than
-    /// one source. Its label reflects the currently-selected version's quality
-    /// ("4K · Dolby Vision"); the menu lists every version with a visual quality
-    /// diff and a predicted Direct Play / Transcode badge for *this* device, with
-    /// a checkmark on the active one.
+    /// A single subtle trailing "…" menu that folds BOTH the cross-server picker
+    /// and the version picker into one place, so a multi-server / multi-version
+    /// title shows one unobtrusive ellipsis button instead of two prominent
+    /// pickers crowding the action row. The menu groups choices under a "Server"
+    /// section (which server hosts this title — primary first, one row per
+    /// account, active one checkmarked; picking one retargets Play and repopulates
+    /// the version list with that server's files) and a "Version" section (the
+    /// active server's editions/qualities with a predicted Direct Play / Transcode
+    /// badge for this device, active one checkmarked). Either section is omitted
+    /// when it has only one option.
     @ViewBuilder
-    private func versionButton(onSelect: @escaping (String) -> Void) -> some View {
-        let current = versions.first { $0.id == selectedVersionID } ?? versions.first
+    private func moreMenu(onSelectSource: ((String) -> Void)?, onSelectVersion: ((String) -> Void)?) -> some View {
         Menu {
-            ForEach(versions) { version in
-                Button {
-                    onSelect(version.id)
-                } label: {
-                    let badge = version.compatibility(with: capabilities).badge
-                    let suffix = badge.isEmpty ? "" : "  •  \(badge)"
-                    if version.id == current?.id {
-                        Label(version.displayLabel + suffix, systemImage: "checkmark")
-                    } else {
-                        Text(version.displayLabel + suffix)
+            if serverChoices.count > 1, let onSelectSource {
+                let currentServer = serverChoices.first { $0.accountID == selectedSourceAccountID } ?? serverChoices.first
+                Section("Server") {
+                    ForEach(serverChoices) { source in
+                        Button {
+                            onSelectSource(source.accountID)
+                        } label: {
+                            if source.accountID == currentServer?.accountID {
+                                Label(source.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(source.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+            if versions.count > 1, let onSelectVersion {
+                let currentVersion = versions.first { $0.id == selectedVersionID } ?? versions.first
+                Section("Version") {
+                    ForEach(versions) { version in
+                        Button {
+                            onSelectVersion(version.id)
+                        } label: {
+                            let badge = version.compatibility(with: capabilities).badge
+                            let suffix = badge.isEmpty ? "" : "  •  \(badge)"
+                            if version.id == currentVersion?.id {
+                                Label(version.displayLabel + suffix, systemImage: "checkmark")
+                            } else {
+                                Text(version.displayLabel + suffix)
+                            }
+                        }
                     }
                 }
             }
         } label: {
-            Label(current?.resolutionLabel ?? "Version", systemImage: "rectangle.stack.fill")
-                .frame(minWidth: 160)
+            Image(systemName: "ellipsis")
+                .font(.system(size: heroGlyphSize))
+                .foregroundStyle(Color.primary)
+                .frame(width: heroIconSize, height: heroIconSize)
         }
         .modifier(HeroButtonStyle(prominent: false))
+        .accessibilityLabel("Server and version options")
     }
 
     /// Visible Watchlist toggle, shown when the resolving provider conforms to

@@ -27,6 +27,13 @@ struct SeriesDetailView: View {
     let viewModel: ItemDetailViewModel
     let spoilerSettings: SpoilerSettings
     let onPlay: (MediaItem) -> Void
+    /// Opens another server's copy of this show when the user picks a different
+    /// server in the hero's "…" menu. The cross-server picker on a *series* can't
+    /// retarget in place the way a movie does (the whole page — seasons, episodes,
+    /// Play — belongs to one server), so selecting a server navigates to that
+    /// server's series detail, whose `load()` fetches its own seasons/episodes.
+    /// `nil` (e.g. previews) hides the server picker.
+    let onSelectServer: ((MediaSourceRef) -> Void)?
     /// When the page was opened targeting a specific season, that season's id.
     let initialSeasonID: String?
     /// When the page was opened by tapping a specific episode, that episode. The
@@ -66,6 +73,7 @@ struct SeriesDetailView: View {
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings,
         onPlay: @escaping (MediaItem) -> Void,
+        onSelectServer: ((MediaSourceRef) -> Void)? = nil,
         initialSeasonID: String? = nil,
         initialEpisode: MediaItem? = nil
     ) {
@@ -76,6 +84,7 @@ struct SeriesDetailView: View {
         self.viewModel = viewModel
         self.spoilerSettings = spoilerSettings
         self.onPlay = onPlay
+        self.onSelectServer = onSelectServer
         self.initialSeasonID = initialSeasonID
         self.initialEpisode = initialEpisode
         // When opened via "Go to Season", pre-select that season (and front it in
@@ -151,6 +160,9 @@ struct SeriesDetailView: View {
                         playProgress: playTarget?.resumeProgressFraction,
                         playRemainingText: playTarget?.resumeRemainingText,
                         onPlayTrailer: trailerButtonAction,
+                        sources: viewModel.sources,
+                        selectedSourceAccountID: series.sourceAccountID,
+                        onSelectSource: serverPickerAction,
                         fallbackTechnicalBadges: representativeTechnicalBadges,
                         playButtonFocus: $playFocused
                     )
@@ -464,6 +476,22 @@ struct SeriesDetailView: View {
 
     /// The episode the hero's Play button acts on: the focused episode itself, or
     /// the "next up" episode of the current season. `nil` hides the button.
+    /// The hero "…" menu's server-select handler for a series, or `nil` when the
+    /// show lives on a single server (no picker) or no navigation handler is wired.
+    /// Picking a *different* server navigates to that server's copy of the show
+    /// (its own seasons/episodes load there); re-picking the current server is a
+    /// no-op so it never pushes a duplicate page.
+    private var serverPickerAction: ((String) -> Void)? {
+        guard let onSelectServer,
+              Set(viewModel.sources.map(\.accountID)).count > 1 else { return nil }
+        return { accountID in
+            guard accountID != series.sourceAccountID,
+                  let source = viewModel.sources.first(where: { $0.accountID == accountID })
+            else { return }
+            onSelectServer(source)
+        }
+    }
+
     private var playTarget: MediaItem? {
         if heroItem.kind == .episode { return heroItem }
         return SeriesResume.nextUp(in: currentEpisodes)

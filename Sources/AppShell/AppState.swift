@@ -137,6 +137,9 @@ public final class AppState {
             },
             traktScrobbler: { [weak self] in
                 await MainActor.run { self?.traktService.scrobbler ?? DisabledTraktScrobbler() }
+            },
+            allAccountIDs: { [weak self] in
+                await MainActor.run { self?.accounts.map(\.id) ?? [] }
             }
         )
         return WatchStateReconciler(store: store, applier: applier)

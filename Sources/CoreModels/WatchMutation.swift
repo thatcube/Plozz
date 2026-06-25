@@ -24,6 +24,24 @@ public struct WatchMutationTarget: Codable, Hashable, Sendable {
     public var id: String { "\(accountID):\(itemID)" }
 }
 
+/// The origin server's address for an episode mutation — the seed a
+/// ``WatchStateReconciler`` uses to (re)discover the episode's series identity and
+/// fan the watch out to the **same** episode on every other server hosting the
+/// series. Persisted independently of ``WatchMutation/targets`` so a retry can
+/// still resolve twins *after* the origin target has already been written and
+/// removed from the queue.
+public struct EpisodeOrigin: Codable, Hashable, Sendable {
+    /// The origin `Account.id` the episode played from.
+    public var accountID: String
+    /// That server's own id for the played episode.
+    public var itemID: String
+
+    public init(accountID: String, itemID: String) {
+        self.accountID = accountID
+        self.itemID = itemID
+    }
+}
+
 /// A durable, self-contained description of a Trakt scrobble to perform — kept
 /// neutral (no `TraktService` types) so it can live in the outbox file and be
 /// replayed at launch by whatever scrobbler the app wires in.
@@ -96,6 +114,19 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     /// Retry counter for backoff / give-up diagnostics.
     public var attempts: Int
 
+    /// For an **episode** mutation, the origin server's episode address, used to
+    /// resolve the series identity and expand ``targets`` to the same episode on
+    /// every other server hosting the series. `nil` for movies and for episode
+    /// mutations enqueued before this capability existed.
+    public var episodeOrigin: EpisodeOrigin?
+    /// Whether cross-server **twin targets** still need resolving for this episode.
+    /// Set when an episode mutation is created; cleared once a drain conclusively
+    /// expands the targets (every other server probed, none left inconclusive).
+    /// While `true` the mutation is never considered fully applied, so a drain that
+    /// couldn't reach an asleep twin server retries later. Always `false` for
+    /// non-episode mutations, so movie / single-target convergence is unaffected.
+    public var expansionPending: Bool
+
     public init(
         id: UUID = UUID(),
         capturedAt: Date,
@@ -107,7 +138,9 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         clearResume: Bool = false,
         targets: [WatchMutationTarget],
         trakt: TraktScrobbleIntent? = nil,
-        attempts: Int = 0
+        attempts: Int = 0,
+        episodeOrigin: EpisodeOrigin? = nil,
+        expansionPending: Bool = false
     ) {
         self.id = id
         self.capturedAt = capturedAt
@@ -121,6 +154,37 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         self.trakt = trakt
         self.traktPending = trakt != nil
         self.attempts = attempts
+        self.episodeOrigin = episodeOrigin
+        self.expansionPending = expansionPending
+    }
+
+    // MARK: - Codable (back-compatible)
+
+    private enum CodingKeys: String, CodingKey {
+        case id, capturedAt, canonicalMediaID, seasonNumber, episodeNumber
+        case resumePosition, played, clearResume, targets, trakt, traktPending
+        case attempts, episodeOrigin, expansionPending
+    }
+
+    /// Decodes tolerating outbox files written before `episodeOrigin` /
+    /// `expansionPending` existed (they decode to `nil` / `false`), so an in-app
+    /// upgrade never drops a queued watch. `encode(to:)` is synthesized.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        capturedAt = try container.decode(Date.self, forKey: .capturedAt)
+        canonicalMediaID = try container.decode(String.self, forKey: .canonicalMediaID)
+        seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
+        episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
+        resumePosition = try container.decodeIfPresent(TimeInterval.self, forKey: .resumePosition)
+        played = try container.decodeIfPresent(Bool.self, forKey: .played)
+        clearResume = try container.decodeIfPresent(Bool.self, forKey: .clearResume) ?? false
+        targets = try container.decodeIfPresent([WatchMutationTarget].self, forKey: .targets) ?? []
+        trakt = try container.decodeIfPresent(TraktScrobbleIntent.self, forKey: .trakt)
+        traktPending = try container.decodeIfPresent(Bool.self, forKey: .traktPending) ?? (trakt != nil)
+        attempts = try container.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
+        episodeOrigin = try container.decodeIfPresent(EpisodeOrigin.self, forKey: .episodeOrigin)
+        expansionPending = try container.decodeIfPresent(Bool.self, forKey: .expansionPending) ?? false
     }
 
     /// Title-level key used to COALESCE queued mutations (latest wins, targets
@@ -138,9 +202,12 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         "\(coalesceKey)|\(dayBucket)"
     }
 
-    /// Whether every server target AND the Trakt mirror are done — safe to prune.
+    /// Whether every server target AND the Trakt mirror are done **and** no
+    /// cross-server twin expansion is still owed — safe to prune. Keeping a
+    /// mutation alive while `expansionPending` ensures an episode whose twin server
+    /// was asleep at the first drain still fans out on a later one.
     public var isFullyApplied: Bool {
-        targets.isEmpty && !traktPending
+        targets.isEmpty && !traktPending && !expansionPending
     }
 
     // MARK: - Canonical id

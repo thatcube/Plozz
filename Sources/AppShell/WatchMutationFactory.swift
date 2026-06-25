@@ -51,12 +51,28 @@ enum WatchMutationFactory {
         )
     }
 
+    /// The origin episode seed + expansion flag for an episode item, so the
+    /// reconciler can fan a watch out to the same episode on every other server
+    /// hosting the series. Movies (or items missing a season/episode) get no seed
+    /// and never trigger cross-server probing — single-target convergence is
+    /// unchanged.
+    private static func episodeExpansion(
+        for item: MediaItem,
+        primaryAccountID: String?
+    ) -> (origin: EpisodeOrigin?, pending: Bool) {
+        guard item.kind == .episode, item.seasonNumber != nil, item.episodeNumber != nil,
+              let accountID = item.sourceAccountID ?? primaryAccountID
+        else { return (nil, false) }
+        return (EpisodeOrigin(accountID: accountID, itemID: item.id), true)
+    }
+
     /// A mark-watched / mark-unwatched mutation. Marking watched clears resume
     /// everywhere and mirrors to Trakt (write-if-missing); unwatch never touches
     /// Trakt (no deletes) and leaves resume alone.
     static func playedToggle(item: MediaItem, played: Bool, primaryAccountID: String?, capturedAt: Date = Date()) -> WatchMutation? {
         let targets = targets(for: item, primaryAccountID: primaryAccountID)
         guard !targets.isEmpty else { return nil }
+        let expansion = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
         return WatchMutation(
             capturedAt: capturedAt,
             canonicalMediaID: canonicalID(for: item),
@@ -65,7 +81,9 @@ enum WatchMutationFactory {
             played: played,
             clearResume: played,
             targets: targets,
-            trakt: played ? traktIntent(for: item, progress: 100) : nil
+            trakt: played ? traktIntent(for: item, progress: 100) : nil,
+            episodeOrigin: expansion.origin,
+            expansionPending: expansion.pending
         )
     }
 
@@ -78,6 +96,7 @@ enum WatchMutationFactory {
     static func playbackStop(item: MediaItem, position: TimeInterval, watchedPercent: Double, primaryAccountID: String?, capturedAt: Date = Date()) -> WatchMutation? {
         let targets = targets(for: item, primaryAccountID: primaryAccountID)
         guard !targets.isEmpty else { return nil }
+        let expansion = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
 
         if watchedPercent >= finishedThreshold {
             return WatchMutation(
@@ -88,7 +107,9 @@ enum WatchMutationFactory {
                 played: true,
                 clearResume: true,
                 targets: targets,
-                trakt: traktIntent(for: item, progress: 100)
+                trakt: traktIntent(for: item, progress: 100),
+                episodeOrigin: expansion.origin,
+                expansionPending: expansion.pending
             )
         }
 
@@ -100,7 +121,9 @@ enum WatchMutationFactory {
             seasonNumber: item.seasonNumber,
             episodeNumber: item.episodeNumber,
             resumePosition: position,
-            targets: targets
+            targets: targets,
+            episodeOrigin: expansion.origin,
+            expansionPending: expansion.pending
         )
     }
 }

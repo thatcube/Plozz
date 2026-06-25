@@ -17,6 +17,20 @@ public protocol WatchMutationApplying: Sendable {
     /// Mirrors a finished watch to Trakt. Must treat "already scrobbled" (409) as
     /// success and return normally.
     func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws
+
+    /// Resolves the cross-server **twin targets** for an episode `mutation` — the
+    /// same episode on every other server hosting the series, addressed by that
+    /// server's own id. Best-effort and confidence-gated: returns only targets it
+    /// is sure of, plus any accounts that couldn't be confirmed (so the reconciler
+    /// retries them rather than dropping or guessing). The default returns
+    /// ``WatchTargetExpansion/none`` so non-episode flows and test doubles need no
+    /// expansion. Must never throw — a probe failure is expressed as an
+    /// inconclusive account, not an error.
+    func expandTargets(for mutation: WatchMutation) async -> WatchTargetExpansion
+}
+
+public extension WatchMutationApplying {
+    func expandTargets(for mutation: WatchMutation) async -> WatchTargetExpansion { .none }
 }
 
 /// Drains the durable ``WatchOutboxState``: applies each pending mutation to every
@@ -118,6 +132,11 @@ public actor WatchStateReconciler {
             merged.trakt = carried
             merged.traktPending = existing.traktPending
         }
+        // Either side still owing twin expansion keeps it owed; preserve the origin
+        // seed if the newer mutation lacked one (e.g. a mark-watched coalescing onto
+        // a queued playback-stop).
+        merged.expansionPending = incoming.expansionPending || existing.expansionPending
+        if merged.episodeOrigin == nil { merged.episodeOrigin = existing.episodeOrigin }
         merged.attempts = existing.attempts
         return merged
     }
@@ -170,6 +189,24 @@ public actor WatchStateReconciler {
     /// Trakt mirror. Successful writes are removed from the mutation so a partial
     /// fan-out resumes precisely.
     private func apply(_ mutation: inout WatchMutation) async {
+        // Expand cross-server episode twins before writing, so a watch played from
+        // one server fans out to the same episode on every server hosting the
+        // series. Confidence-gated and best-effort: confident twins are unioned in
+        // (deduped), and `expansionPending` is cleared only when the probe was
+        // conclusive — an asleep/timed-out twin server keeps it pending so a later
+        // drain retries. The origin target is already present and is written below
+        // regardless, so expansion never delays or risks the origin write.
+        if mutation.expansionPending {
+            let expansion = await applier.expandTargets(for: mutation)
+            var seen = Set(mutation.targets.map(\.id))
+            for target in expansion.targets where seen.insert(target.id).inserted {
+                mutation.targets.append(target)
+            }
+            if expansion.isConclusive {
+                mutation.expansionPending = false
+            }
+        }
+
         var remaining: [WatchMutationTarget] = []
         for target in mutation.targets {
             do {

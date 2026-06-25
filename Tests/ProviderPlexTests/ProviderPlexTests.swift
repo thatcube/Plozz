@@ -472,7 +472,7 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(item.officialRating, "PG-13")
         XCTAssertEqual(item.genres, ["Sci-Fi", "Adventure"])
         // 4K + HDR10 (from smpte2084 transfer) + HEVC codec + Dolby Atmos.
-        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10", "HEVC", "Dolby Atmos"])
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10", "Dolby Atmos"])
         XCTAssertEqual(item.mediaInfo?.video?.isInterlaced, true)
         // RT critic rendered as a percentage; IMDb audience stays 0–10.
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "83%")
@@ -616,7 +616,7 @@ final class PlexProviderMappingTests: XCTestCase {
         // No Stream array: resolution + codec + surround come from Media-level
         // facts; no HDR signal, so the range reads SDR. The 5.1 layout rides on
         // the Dolby Digital+ badge as a trailing detail.
-        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "SDR", "H.264", "Dolby Digital+"])
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "SDR", "Dolby Digital+"])
         XCTAssertEqual(item.technicalBadges.last?.detail, "5.1")
     }
 

@@ -66,12 +66,14 @@ final class MediaBadgesTests: XCTestCase {
         XCTAssertNil(meta.videoCodecBadge)
     }
 
-    func testTechnicalBadgesIncludeCodecAfterDynamicRange() {
+    func testTechnicalBadgesOmitCodec() {
         let meta = MediaSourceMetadata(
             video: .init(codec: "hevc", width: 1920, height: 1080, videoRange: "HDR", videoRangeType: "HDR10"),
             audio: .init(codec: "eac3", profile: "Dolby Atmos")
         )
-        XCTAssertEqual(meta.technicalBadges.map(\.label), ["1080p", "HDR10", "HEVC", "Dolby Atmos"])
+        // The video codec (HEVC) is intentionally excluded from the headline badge
+        // row; it remains available via `videoCodecBadge` for the diagnostics overlay.
+        XCTAssertEqual(meta.technicalBadges.map(\.label), ["1080p", "HDR10", "Dolby Atmos"])
     }
 
     // MARK: Dynamic range
@@ -114,7 +116,7 @@ final class MediaBadgesTests: XCTestCase {
         // Jellyfin reports an explicit SDR range token.
         let meta = MediaSourceMetadata(video: .init(videoRange: "SDR"))
         XCTAssertEqual(meta.dynamicRangeBadges.map(\.label), ["SDR"])
-        XCTAssertEqual(meta.dynamicRangeBadges.first?.style, .spec)
+        XCTAssertEqual(meta.dynamicRangeBadges.first?.style, .sdr)
     }
 
     func testSDRBadgeInferredWhenNoRangeButDimensionsKnown() {

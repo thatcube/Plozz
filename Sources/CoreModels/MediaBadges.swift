@@ -212,13 +212,14 @@ public extension MediaSourceMetadata {
         return []
     }
 
-    /// The full ordered technical badge set: resolution, dynamic range, codec,
-    /// audio — mirroring how Plex composes "1080p · DoVi/HDR10 · HEVC".
+    /// The full ordered technical badge set: resolution, dynamic range, audio —
+    /// mirroring how Plex composes "1080p · DoVi/HDR10". The video codec (HEVC /
+    /// H.264) is intentionally omitted from the headline badge row; the full codec
+    /// profile remains in the playback-diagnostics overlay.
     var technicalBadges: [MediaBadge] {
         var badges: [MediaBadge] = []
         if let resolutionBadge { badges.append(resolutionBadge) }
         badges.append(contentsOf: dynamicRangeBadges)
-        if let videoCodecBadge { badges.append(videoCodecBadge) }
         badges.append(contentsOf: audioBadges)
         return badges
     }    /// A surround-channel label (`7.1`, `5.1`) from a layout string or channel

@@ -240,6 +240,58 @@ public struct PlexProvider: MediaProvider {
         return kbps * 1000
     }
 
+    /// Derives the provider-agnostic HDR token from Plex's stream/media hints.
+    /// Plex can signal range via explicit DoVi fields, transfer characteristics,
+    /// and display-title strings such as `DoVi/HDR10` or `HDR10+`.
+    private static func dynamicRangeType(
+        colorTransfer: String?,
+        doviPresent: Bool?,
+        doviProfile: Int?,
+        doviLevel: Int?,
+        doviBLPresent: Bool?,
+        displayTitles: [String?]
+    ) -> String? {
+        let transfer = (colorTransfer ?? "").lowercased()
+        let titleHint = displayTitles
+            .compactMap { $0?.uppercased() }
+            .joined(separator: " ")
+
+        let hasDovi = (doviPresent ?? false)
+            || doviProfile != nil
+            || doviLevel != nil
+            || doviBLPresent != nil
+            || titleHint.contains("DOVI")
+            || titleHint.contains("DOLBY VISION")
+        let hasHDR10Plus = transfer.contains("2094")
+            || titleHint.contains("HDR10+")
+            || titleHint.contains("HDR10PLUS")
+            || titleHint.contains("HDR10 PLUS")
+        let hasHDR10 = transfer.contains("2084")
+            || transfer == "pq"
+            || transfer.contains("pq")
+            || titleHint.contains("HDR10")
+        let hasHLG = transfer.contains("b67")
+            || transfer.contains("hlg")
+            || titleHint.contains("HLG")
+
+        if hasDovi {
+            if hasHDR10Plus { return "DOVIWithHDR10PLUS" }
+            if hasHDR10 || doviBLPresent == true { return "DOVIWithHDR10" }
+            if hasHLG { return "DOVIWithHLG" }
+            return "DOVI"
+        }
+        if hasHDR10Plus { return "HDR10+" }
+        if hasHDR10 { return "HDR10" }
+        if hasHLG { return "HLG" }
+        if titleHint.contains("HDR") { return "HDR" }
+        return nil
+    }
+
+    private static func videoRangeToken(for rangeType: String?) -> String? {
+        guard let rangeType, !rangeType.isEmpty else { return nil }
+        return rangeType.uppercased().hasPrefix("DOVI") ? "DOVI" : "HDR"
+    }
+
     /// Builds provider-agnostic source facts from a Plex part's streams so the
     /// diagnostics overlay matches what a direct-play client (e.g. Infuse) shows.
     static func sourceMetadata(container: String?, streams: [PlexStream]) -> MediaSourceMetadata? {
@@ -250,22 +302,14 @@ public struct PlexProvider: MediaProvider {
             ?? streams.first { $0.streamType == 3 }
 
         let videoStream = video.map { v in
-            // Plex only surfaces Dolby Vision explicitly (`DOVIPresent`); infer
-            // HDR10/HLG from the transfer characteristics so non-DV HDR still
-            // earns a badge. `smpte2084` is the PQ (HDR10) curve; `arib-std-b67`
-            // is HLG.
-            let dovi = v.DOVIPresent ?? false
-            let trc = (v.colorTrc ?? "").lowercased()
-            let rangeType: String?
-            if dovi {
-                rangeType = "DOVI"
-            } else if trc.contains("2084") || trc.contains("pq") {
-                rangeType = "HDR10"
-            } else if trc.contains("b67") || trc.contains("hlg") {
-                rangeType = "HLG"
-            } else {
-                rangeType = nil
-            }
+            let rangeType = Self.dynamicRangeType(
+                colorTransfer: v.colorTrc,
+                doviPresent: v.DOVIPresent,
+                doviProfile: v.DOVIProfile,
+                doviLevel: v.DOVILevel,
+                doviBLPresent: v.DOVIBLPresent,
+                displayTitles: [v.displayTitle, v.extendedDisplayTitle]
+            )
             return MediaSourceMetadata.VideoStream(
                 codec: v.codec,
                 profile: v.profile,
@@ -274,7 +318,7 @@ public struct PlexProvider: MediaProvider {
                 height: v.height,
                 bitrate: bps(fromKbps: v.bitrate),
                 frameRate: v.frameRate,
-                videoRange: rangeType == nil ? nil : (dovi ? "DOVI" : "HDR"),
+                videoRange: videoRangeToken(for: rangeType),
                 videoRangeType: rangeType,
                 colorTransfer: v.colorTrc
             )
@@ -518,13 +562,23 @@ public struct PlexProvider: MediaProvider {
         case "480", "576", "sd": lines = 480
         default: lines = media.height
         }
+        let rangeType = dynamicRangeType(
+            colorTransfer: nil,
+            doviPresent: nil,
+            doviProfile: nil,
+            doviLevel: nil,
+            doviBLPresent: nil,
+            displayTitles: [media.videoStreamDisplayTitle]
+        )
         let video: MediaSourceMetadata.VideoStream?
         if media.width != nil || lines != nil || media.videoCodec != nil {
             video = MediaSourceMetadata.VideoStream(
                 codec: media.videoCodec,
                 profile: media.videoProfile,
                 width: media.width,
-                height: lines
+                height: lines,
+                videoRange: videoRangeToken(for: rangeType),
+                videoRangeType: rangeType
             )
         } else {
             video = nil

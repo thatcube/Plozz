@@ -25,14 +25,19 @@ public struct JellyfinClient: Sendable {
         deviceProfile: JellyfinDeviceProfile,
         token: String? = nil,
         http: HTTPClient = URLSessionHTTPClient(),
-        interactiveHTTP: HTTPClient = URLSessionHTTPClient(session: .plozzInteractive),
+        interactiveHTTP: HTTPClient? = nil,
         capabilityProfile: JellyfinCapabilityProfile = .detected()
     ) {
         self.baseURL = baseURL
         self.deviceProfile = deviceProfile
         self.token = token
         self.http = http
-        self.interactiveHTTP = interactiveHTTP
+        // Falls back to `http` when no dedicated foreground client is supplied, so
+        // a test (or any caller) that injects a single stub for `http` routes the
+        // `item()` fetch through it too instead of silently hitting a live session.
+        // The production foreground-pool isolation is opted into explicitly by the
+        // provider (see AppState), which passes a real `plozzInteractive` client.
+        self.interactiveHTTP = interactiveHTTP ?? http
         self.capabilityProfile = capabilityProfile
     }
 

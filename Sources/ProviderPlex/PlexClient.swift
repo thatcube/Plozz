@@ -48,7 +48,7 @@ public struct PlexClient: Sendable {
         deviceProfile: PlexDeviceProfile,
         token: String,
         http: HTTPClient = URLSessionHTTPClient(),
-        interactiveHTTP: HTTPClient = URLSessionHTTPClient(session: .plozzInteractive),
+        interactiveHTTP: HTTPClient? = nil,
         capabilities: MediaCapabilities = .detected(),
         hybridEngineEnabled: Bool = false
     ) {
@@ -70,7 +70,7 @@ public struct PlexClient: Sendable {
         deviceProfile: PlexDeviceProfile,
         token: String,
         http: HTTPClient = URLSessionHTTPClient(),
-        interactiveHTTP: HTTPClient = URLSessionHTTPClient(session: .plozzInteractive),
+        interactiveHTTP: HTTPClient? = nil,
         capabilities: MediaCapabilities = .detected(),
         hybridEngineEnabled: Bool = false
     ) {
@@ -78,7 +78,12 @@ public struct PlexClient: Sendable {
         self.deviceProfile = deviceProfile
         self.token = token
         self.http = http
-        self.interactiveHTTP = interactiveHTTP
+        // Falls back to `http` when no dedicated foreground client is supplied, so
+        // a test injecting a single stub for `http` routes the user-blocking
+        // `metadata()` fetch through it too instead of hitting a live session. The
+        // production foreground-pool isolation is opted into explicitly by the
+        // provider (see AppState), which passes a real `plozzInteractive` client.
+        self.interactiveHTTP = interactiveHTTP ?? http
         self.capabilities = capabilities
         self.hybridEngineEnabled = hybridEngineEnabled
     }

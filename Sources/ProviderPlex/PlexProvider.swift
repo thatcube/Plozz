@@ -15,6 +15,7 @@ public struct PlexProvider: MediaProvider {
     public init(
         session: UserSession,
         http: HTTPClient = URLSessionHTTPClient(),
+        interactiveHTTP: HTTPClient? = nil,
         hybridEngineEnabled: Bool = false,
         connectionRefresh: PlexConnectionResolver.Refresh? = nil,
         probe: HTTPClient = URLSessionHTTPClient(session: .plozzDiscovery)
@@ -48,6 +49,7 @@ public struct PlexProvider: MediaProvider {
             deviceProfile: deviceProfile,
             token: session.accessToken,
             http: http,
+            interactiveHTTP: interactiveHTTP,
             hybridEngineEnabled: hybridEngineEnabled
         )
     }

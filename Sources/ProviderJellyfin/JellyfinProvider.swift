@@ -15,6 +15,7 @@ public struct JellyfinProvider: MediaProvider {
     public init(
         session: UserSession,
         http: HTTPClient = URLSessionHTTPClient(),
+        interactiveHTTP: HTTPClient? = nil,
         hybridEngineEnabled: Bool = false
     ) {
         self.session = session
@@ -23,6 +24,7 @@ public struct JellyfinProvider: MediaProvider {
             deviceProfile: JellyfinDeviceProfile(deviceID: session.deviceID),
             token: session.accessToken,
             http: http,
+            interactiveHTTP: interactiveHTTP,
             capabilityProfile: .detected(hybridEngineEnabled: hybridEngineEnabled)
         )
     }

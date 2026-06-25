@@ -243,6 +243,92 @@ final class PlexConnectionResolverTests: XCTestCase {
         let retry = await resolver.resolved()
         XCTAssertEqual(retry.absoluteString, "https://other.host:32400")
     }
+
+    func testReturnsImmediatelyOnFirstSuccessWithoutWaitingForDeadProbes() async throws {
+        // One reachable LAN address plus several candidates that "hang" until
+        // cancelled. The resolver must return as soon as the LAN host answers,
+        // never blocking on the slow ones.
+        let probe = SlowProbe(fastReachable: "lan.host", slowHosts: ["dead-a.host", "dead-b.host", "dead-c.host"])
+        let resolver = PlexConnectionResolver(
+            candidates: [
+                url("https://dead-a.host:32400"),
+                url("https://lan.host:32400"),
+                url("https://dead-b.host:32400"),
+                url("https://dead-c.host:32400")
+            ],
+            deviceProfile: profile, token: "T", probe: probe, refresh: nil
+        )
+        let start = Date()
+        let resolved = await resolver.resolved()
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertEqual(resolved.absoluteString, "https://lan.host:32400")
+        XCTAssertLessThan(elapsed, 1.0, "Resolution must not wait on the slow/dead probes")
+    }
+
+    func testPrivateLANProbedAndPreferredOverDockerBridge() async {
+        // Both reachable; the resolver must prefer the 192.168 LAN address over
+        // the 172.x Docker-bridge candidate listed first.
+        let probe = MutableProbe(reachable: ["192-168-68-71.h", "172-18-0-1.h"])
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://172-18-0-1.h:32400"), url("https://192-168-68-71.h:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: nil
+        )
+        let resolved = await resolver.resolved()
+        XCTAssertEqual(resolved.absoluteString, "https://192-168-68-71.h:32400")
+    }
+
+    func testReachableSeedAndCallbackPersistChosenConnection() async {
+        let probe = MutableProbe(reachable: ["good.host", "seed.host"])
+        var persisted: String?
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://good.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: nil,
+            reachableSeed: url("https://seed.host:32400"),
+            onReachable: { persisted = $0.absoluteString }
+        )
+        // Seed is prepended, so it becomes a candidate and (being reachable) wins.
+        let resolved = await resolver.resolved()
+        XCTAssertEqual(resolved.absoluteString, "https://seed.host:32400")
+        XCTAssertEqual(persisted, "https://seed.host:32400", "Resolved connection must be persisted via onReachable")
+    }
+
+    func testPrioritizedDedupesAndOrdersLANFirst() {
+        let ordered = PlexConnectionResolver.prioritized([
+            url("https://45-56-108-77.h:32400"),   // public
+            url("https://172-18-0-1.h:32400"),     // docker bridge
+            url("https://192-168-68-71.h:32400"),  // LAN
+            url("https://192-168-68-71.h:32400"),  // duplicate LAN
+            url("https://relay.plex.direct:443")   // hostname
+        ]).map(\.absoluteString)
+        XCTAssertEqual(ordered, [
+            "https://192-168-68-71.h:32400",
+            "https://relay.plex.direct:443",
+            "https://172-18-0-1.h:32400",
+            "https://45-56-108-77.h:32400"
+        ])
+    }
+
+    /// Probe where some hosts answer instantly and others suspend until the
+    /// task is cancelled (simulating a dead address stuck in connect).
+    private final class SlowProbe: HTTPClient, @unchecked Sendable {
+        let fastReachable: String
+        let slowHosts: Set<String>
+        init(fastReachable: String, slowHosts: Set<String>) {
+            self.fastReachable = fastReachable
+            self.slowHosts = slowHosts
+        }
+        func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+            let host = baseURL.host ?? ""
+            if host == fastReachable {
+                return (Data("{}".utf8), HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }
+            if slowHosts.contains(host) {
+                try await Task.sleep(nanoseconds: 30 * 1_000_000_000) // 30s unless cancelled
+                throw AppError.serverUnreachable
+            }
+            throw AppError.serverUnreachable
+        }
+    }
 }
 
 // MARK: - Provider mapping

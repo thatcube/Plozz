@@ -14,6 +14,13 @@ import CoreNetworking
 /// plex.tv for a fresh connection list. Callers never see the churn: browsing
 /// "just works" against whatever path is currently reachable.
 ///
+/// Candidates are probed **in parallel and the first to answer wins** — the
+/// resolution returns the instant a reachable address replies, without waiting
+/// for the slow/dead candidates (unreachable LAN, Docker bridges, dead relay IPs)
+/// to time out. Candidates are also probed in a sensible order (LAN before
+/// container-bridge/public addresses), and the last-known-good connection is
+/// persisted across launches so a warm server resolves immediately.
+///
 /// A resolver with a single candidate and no refresh has nothing to choose
 /// between, so it returns that URL immediately without any network probe — this
 /// keeps the fixed-URL path (and unit tests) zero-cost and offline-safe.
@@ -26,6 +33,7 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     private let deviceProfile: PlexDeviceProfile
     private let token: String
     private let refresh: Refresh?
+    private let onReachable: (@Sendable (URL) -> Void)?
 
     private let lock = NSLock()
     private var candidates: [URL]
@@ -37,14 +45,21 @@ public final class PlexConnectionResolver: @unchecked Sendable {
         deviceProfile: PlexDeviceProfile,
         token: String,
         probe: HTTPClient = URLSessionHTTPClient(session: .plozzDiscovery),
-        refresh: Refresh? = nil
+        refresh: Refresh? = nil,
+        reachableSeed: URL? = nil,
+        onReachable: (@Sendable (URL) -> Void)? = nil
     ) {
         precondition(!candidates.isEmpty, "PlexConnectionResolver requires at least one candidate URL")
-        self.candidates = candidates
         self.deviceProfile = deviceProfile
         self.token = token
         self.probe = probe
         self.refresh = refresh
+        self.onReachable = onReachable
+        // Seed with the last-known-good connection (persisted across launches) so
+        // a previously-reachable server resolves on the first probe instead of
+        // re-discovering through dead/stale addresses.
+        let seeded = reachableSeed.map { [$0] + candidates } ?? candidates
+        self.candidates = Self.prioritized(seeded)
     }
 
     /// Best-known base URL available synchronously: the cached reachable URL, or
@@ -106,8 +121,9 @@ public final class PlexConnectionResolver: @unchecked Sendable {
         if let refresh {
             let fresh = await refresh()
             if !fresh.isEmpty {
-                replaceCandidates(fresh)
-                if let reachable = await firstReachable(among: fresh) {
+                let ordered = Self.prioritized(fresh)
+                replaceCandidates(ordered)
+                if let reachable = await firstReachable(among: ordered) {
                     store(reachable)
                     return reachable
                 }
@@ -119,30 +135,35 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     }
 
     /// The first candidate that answers a lightweight `/identity` probe, or `nil`
-    /// if none respond within the probe window. Candidates are probed in
-    /// parallel and the **first to answer wins** — the remaining probes are
-    /// cancelled immediately so a dead candidate (e.g. an unreachable LAN/Docker
-    /// address that only fails after a connect timeout) never stalls resolution.
+    /// if none respond. All candidates are probed concurrently; the **first to
+    /// answer wins** and resolution returns immediately — losing probes are
+    /// cancelled and left to unwind on their own, so a dead candidate (an
+    /// unreachable LAN/Docker/relay address that only fails after a connect
+    /// timeout) never stalls resolution behind its timeout.
     private func firstReachable(among urls: [URL]) async -> URL? {
-        await withTaskGroup(of: URL?.self) { group in
+        guard !urls.isEmpty else { return nil }
+        guard urls.count > 1 else {
+            return await probeReachable(urls[0]) ? urls[0] : nil
+        }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<URL?, Never>) in
+            let race = ProbeRace(remaining: urls.count, continuation: continuation)
             for url in urls {
-                group.addTask {
-                    let endpoint = Endpoint(path: "/identity", headers: self.deviceProfile.headers(token: self.token))
-                    do {
-                        _ = try await self.probe.send(endpoint, baseURL: url)
-                        return url
-                    } catch {
-                        return nil
-                    }
+                let task = Task { [weak self] in
+                    let reachable = await self?.probeReachable(url) ?? false
+                    race.report(reachable ? url : nil)
                 }
+                race.track(task)
             }
-            for await result in group {
-                if let result {
-                    group.cancelAll()
-                    return result
-                }
-            }
-            return nil
+        }
+    }
+
+    private func probeReachable(_ url: URL) async -> Bool {
+        let endpoint = Endpoint(path: "/identity", headers: deviceProfile.headers(token: token))
+        do {
+            _ = try await probe.send(endpoint, baseURL: url)
+            return true
+        } catch {
+            return false
         }
     }
 
@@ -157,7 +178,111 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     }
 
     private func store(_ url: URL) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         cached = url
+        lock.unlock()
+        onReachable?(url)
+    }
+
+    // MARK: Candidate ordering
+
+    /// De-duplicates and orders candidates so the most-likely-reachable address
+    /// is probed first: private LAN (192.168/10) before "other" hosts (relay
+    /// hostnames, Tailscale), before container-bridge ranges (172.16–31) and bare
+    /// public IPs. Ordering only — every candidate is still probed, so a server
+    /// reachable only via an unusual path is still found.
+    static func prioritized(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        let unique = urls.filter { seen.insert($0.absoluteString).inserted }
+        return unique.enumerated()
+            .sorted { lhs, rhs in
+                let rl = rank(lhs.element), rr = rank(rhs.element)
+                if rl != rr { return rl < rr }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
+
+    private static func rank(_ url: URL) -> Int {
+        guard let octets = leadingIPv4(url.host) else {
+            return 2 // hostname (relay / Tailscale / manually-entered) — medium priority
+        }
+        switch (octets[0], octets[1]) {
+        case (192, 168), (10, _):
+            return 0 // home LAN — try first
+        case (172, 16...31):
+            return 3 // 172.16/12 — almost always a Docker bridge on a home network
+        default:
+            return 4 // public / relay address
+        }
+    }
+
+    /// Extracts the leading IPv4 address from either a bare-IP host
+    /// (`192.168.68.71`) or a plex.direct host (`192-168-68-71.<hash>.plex.direct`).
+    private static func leadingIPv4(_ host: String?) -> [Int]? {
+        guard let host else { return nil }
+        let firstLabel = host.split(separator: ".").first.map(String.init) ?? host
+        for separator in [".", "-"] as [Character] {
+            let parts = (separator == "." ? host : firstLabel).split(separator: separator).map(String.init)
+            if parts.count == 4, let octets = octetsIfValid(parts) { return octets }
+        }
+        return nil
+    }
+
+    private static func octetsIfValid(_ parts: [String]) -> [Int]? {
+        let octets = parts.compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return nil }
+        return octets
+    }
+}
+
+/// Coordinates a set of concurrent reachability probes, resuming its continuation
+/// the instant the first probe succeeds (cancelling the rest) or once every probe
+/// has failed. Thread-safe; resumes its continuation exactly once.
+private final class ProbeRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var remaining: Int
+    private var finished = false
+    private var continuation: CheckedContinuation<URL?, Never>?
+    private var tasks: [Task<Void, Never>] = []
+
+    init(remaining: Int, continuation: CheckedContinuation<URL?, Never>) {
+        self.remaining = remaining
+        self.continuation = continuation
+    }
+
+    func track(_ task: Task<Void, Never>) {
+        lock.lock()
+        if finished {
+            lock.unlock()
+            task.cancel()
+        } else {
+            tasks.append(task)
+            lock.unlock()
+        }
+    }
+
+    func report(_ url: URL?) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        if let url {
+            finished = true
+            let cont = continuation; continuation = nil
+            let losers = tasks; tasks = []
+            lock.unlock()
+            losers.forEach { $0.cancel() }
+            cont?.resume(returning: url)
+            return
+        }
+        remaining -= 1
+        if remaining <= 0 {
+            finished = true
+            let cont = continuation; continuation = nil
+            tasks = []
+            lock.unlock()
+            cont?.resume(returning: nil)
+            return
+        }
+        lock.unlock()
     }
 }

@@ -27,12 +27,21 @@ public struct PlexProvider: MediaProvider {
         let candidates = session.server.connectionURLs?.isEmpty == false
             ? session.server.connectionURLs!
             : [session.server.baseURL]
+        // Persist whichever connection last answered, keyed by server, so a warm
+        // server resolves on the first probe next launch instead of re-discovering
+        // through stale/dead addresses (Docker bridges, old relay IPs).
+        let reachableKey = "plex.reachable.\(session.server.id)"
+        let reachableSeed = UserDefaults.standard.string(forKey: reachableKey).flatMap(URL.init(string:))
         let resolver = PlexConnectionResolver(
             candidates: candidates,
             deviceProfile: deviceProfile,
             token: session.accessToken,
             probe: probe,
-            refresh: connectionRefresh
+            refresh: connectionRefresh,
+            reachableSeed: reachableSeed,
+            onReachable: { url in
+                UserDefaults.standard.set(url.absoluteString, forKey: reachableKey)
+            }
         )
         self.client = PlexClient(
             resolver: resolver,

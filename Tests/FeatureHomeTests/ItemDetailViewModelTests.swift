@@ -563,6 +563,76 @@ final class ItemDetailViewModelTests: XCTestCase {
                        "Enabled cross-server source must remain in the restored picker")
     }
 
+    /// The Plex episode-badge bug: a season's `/children` listing can return a
+    /// trimmed, SDR-looking episode (no per-stream DoVi/HDR, no Media-level Atmos
+    /// hint), while the full per-item fetch carries the real 4K Dolby Vision /
+    /// HDR10 / Atmos facts. The focused-episode hero must enrich from the full
+    /// fetch and update the cached rail entry in place.
+    func testFocusedEpisodeBadgesEnrichFromFullItemFetch() async {
+        let sparse = MediaItem(
+            id: "e1", title: "The End", kind: .episode, episodeNumber: 1,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                video: .init(codec: "hevc", width: 3840, height: 2160, videoRangeType: "SDR"),
+                audio: .init(codec: "eac3", profile: "Dolby Digital+", channels: 6, channelLayout: "5.1")
+            )
+        )
+        let rich = MediaItem(
+            id: "e1", title: "The End", kind: .episode, episodeNumber: 1,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                video: .init(codec: "hevc", width: 3840, height: 2160, videoRangeType: "DOVIWithHDR10"),
+                audio: .init(codec: "eac3", profile: "Dolby Atmos", channels: 6, channelLayout: "5.1")
+            )
+        )
+        let provider = FakeMediaProvider(allItems: [series("show"), rich])
+        provider.childrenByParent = ["show": [season("s1", "Season 1")], "s1": [sparse]]
+
+        let vm = ItemDetailViewModel(provider: provider, itemID: "show")
+        await vm.load()
+        await vm.loadEpisodes(for: "s1")
+
+        // Pre-enrichment the rail entry badges from the sparse listing: SDR, no DoVi/Atmos.
+        let before = vm.seasonEpisodes["s1"]?.first?.technicalBadges.map(\.label) ?? []
+        XCTAssertFalse(before.contains("Dolby Vision"))
+        XCTAssertFalse(before.contains("Dolby Atmos"))
+
+        let enriched = await vm.enrichEpisodeBadgesIfNeeded(sparse)
+        XCTAssertEqual(enriched?.technicalBadges.map(\.label),
+                       ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"],
+                       "Focused episode must badge from the full fetch's real metadata")
+        // The cached rail entry is updated in place so the rail re-renders too.
+        XCTAssertEqual(vm.seasonEpisodes["s1"]?.first?.technicalBadges.map(\.label),
+                       ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"])
+    }
+
+    /// Enrichment is idempotent: a second focus of the same episode returns the
+    /// already-rich cached copy without a second provider fetch.
+    func testEpisodeBadgeEnrichmentIsCachedPerEpisode() async {
+        let rich = MediaItem(
+            id: "e1", title: "The End", kind: .episode, episodeNumber: 1,
+            mediaInfo: MediaSourceMetadata(
+                container: "mkv",
+                video: .init(codec: "hevc", width: 3840, height: 2160, videoRangeType: "DOVIWithHDR10"),
+                audio: .init(codec: "eac3", profile: "Dolby Atmos", channels: 6)
+            )
+        )
+        let sparse = MediaItem(id: "e1", title: "The End", kind: .episode, episodeNumber: 1)
+        let provider = FakeMediaProvider(allItems: [series("show"), rich])
+        provider.childrenByParent = ["show": [season("s1", "Season 1")], "s1": [sparse]]
+
+        let vm = ItemDetailViewModel(provider: provider, itemID: "show")
+        await vm.load()
+        await vm.loadEpisodes(for: "s1")
+
+        _ = await vm.enrichEpisodeBadgesIfNeeded(sparse)
+        let firstCount = provider.itemCallCount(for: "e1")
+        let second = await vm.enrichEpisodeBadgesIfNeeded(sparse)
+        XCTAssertEqual(provider.itemCallCount(for: "e1"), firstCount,
+                       "A re-focus must not trigger a second item fetch")
+        XCTAssertTrue(second?.technicalBadges.map(\.label).contains("Dolby Vision") ?? false)
+    }
+
     // MARK: - In-place cross-server switch (Problem 4)
 
     /// Switching a series to another server's copy in place re-points the page to

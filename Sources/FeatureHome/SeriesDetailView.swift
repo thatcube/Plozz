@@ -201,6 +201,18 @@ struct SeriesDetailView: View {
                         playButtonFocus: $playFocused
                     )
                     .id(Self.topAnchorID)
+                    // Episodes are seeded from the season's `/children` listing,
+                    // which on Plex can omit the per-stream DoVi/HDR facts and the
+                    // Media-level Atmos hint. Enrich whichever episode the hero is
+                    // showing from a full per-item fetch so its badges are accurate
+                    // (cached per id; cancels automatically as focus moves on).
+                    .task(id: heroItem.id) {
+                        guard heroItem.kind == .episode else { return }
+                        if let enriched = await viewModel.enrichEpisodeBadgesIfNeeded(heroItem),
+                           enriched.id == heroItem.id {
+                            heroItem = enriched
+                        }
+                    }
 
                     // Seasons and their episodes sit together as a tighter group,
                     // with the show-level extras kept at the wider page spacing.

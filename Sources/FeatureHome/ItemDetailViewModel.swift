@@ -28,6 +28,10 @@ public final class ItemDetailViewModel {
     /// by season id. Observed by `SeriesDetailView` to populate its episode rail.
     public private(set) var seasonEpisodes: [String: [MediaItem]] = [:]
     private var loadingSeasons: Set<String> = []
+    /// Episode ids whose badges have already been enriched from a full per-item
+    /// fetch (see ``enrichEpisodeBadgesIfNeeded(_:)``) so the focused-episode hero
+    /// never re-fetches the same episode while the user browses a rail.
+    private var enrichedEpisodeIDs: Set<String> = []
     /// When this detail is a series, context propagated onto its episodes so each
     /// episode resolves fallback artwork/routing with full series metadata.
     private var seriesEpisodeContext: SeriesEpisodeContext?
@@ -686,6 +690,61 @@ public final class ItemDetailViewModel {
     public func setEpisodes(_ episodes: [MediaItem], for seasonID: String) {
         guard seasonEpisodes[seasonID] != nil else { return }
         seasonEpisodes[seasonID] = episodes
+    }
+
+    /// Refreshes a focused episode's capability badges from a full per-item fetch.
+    ///
+    /// Episode rails are seeded from the season's `/children` listing. On Plex that
+    /// payload can come back with a TRIMMED `<Stream>` (no `DOVIPresent`/`colorTrc`)
+    /// and without the Media-level `audioProfile`, so the parser asserts `SDR` and
+    /// drops Atmos — an episode that is really 4K Dolby Vision / HDR10 / Atmos then
+    /// badges as "SDR · Dolby Digital+ 5.1". (Jellyfin's children payload carries
+    /// the full stream facts, which is why the same title badges correctly there.)
+    /// The full `/library/metadata/{id}` fetch always carries the real stream
+    /// facts, so when an episode is shown in the hero we fetch it once and merge its
+    /// `mediaInfo`/`versions` back into the cached rail entry.
+    ///
+    /// Idempotent per episode id (only the first focus pays a fetch). Returns the
+    /// enriched episode (or the already-rich cached copy) so the caller can refresh
+    /// the hero in place, or `nil` when there is nothing to update.
+    public func enrichEpisodeBadgesIfNeeded(_ episode: MediaItem) async -> MediaItem? {
+        guard episode.kind == .episode else { return nil }
+        if enrichedEpisodeIDs.contains(episode.id) {
+            return storedEpisode(id: episode.id)
+        }
+        guard let full = try? await activeProvider.item(id: episode.id),
+              !Task.isCancelled else { return nil }
+        enrichedEpisodeIDs.insert(episode.id)
+        var enriched = episode
+        enriched.mediaInfo = full.mediaInfo ?? enriched.mediaInfo
+        if !full.versions.isEmpty { enriched.versions = full.versions }
+        mergeEnrichedEpisodeIntoRail(enriched)
+        return enriched
+    }
+
+    /// The currently-cached rail copy of an episode, scanning every loaded season.
+    private func storedEpisode(id: String) -> MediaItem? {
+        for episodes in seasonEpisodes.values {
+            if let match = episodes.first(where: { $0.id == id }) { return match }
+        }
+        return nil
+    }
+
+    /// Folds an enriched episode's badge facts back into its season's rail entry,
+    /// preserving every other field already on the cached item (e.g. a
+    /// view-injected still URL) so the rail re-renders artwork in place.
+    private func mergeEnrichedEpisodeIntoRail(_ episode: MediaItem) {
+        for (seasonID, episodes) in seasonEpisodes {
+            guard let index = episodes.firstIndex(where: { $0.id == episode.id }) else { continue }
+            var updated = episodes
+            var merged = updated[index]
+            merged.mediaInfo = episode.mediaInfo
+            merged.versions = episode.versions
+            updated[index] = merged
+            seasonEpisodes[seasonID] = updated
+            persistSnapshot()
+            return
+        }
     }
 
     /// Stamps an item with this detail's owning account (if any) so navigation

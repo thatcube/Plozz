@@ -14,6 +14,9 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     var childrenByParent: [String: [MediaItem]]?
     /// How many times `children(of:)` was called for each parent id.
     private(set) var childrenCallCount: [String: Int] = [:]
+    /// How many times `item(id:)` was called for each item id.
+    private(set) var itemCallCounts: [String: Int] = [:]
+    func itemCallCount(for id: String) -> Int { itemCallCounts[id, default: 0] }
     /// Optional per-item trailers for `trailers(of:)`. Inherits the protocol's
     /// empty default when `nil`.
     var trailersByItem: [String: [MediaItem]]?
@@ -45,6 +48,7 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
     func continueWatching(limit: Int) async throws -> [MediaItem] { [] }
     func latest(limit: Int) async throws -> [MediaItem] { [] }
     func item(id: String) async throws -> MediaItem {
+        itemCallCounts[id, default: 0] += 1
         if let gate = itemGate?[id] {
             await gate()
         }

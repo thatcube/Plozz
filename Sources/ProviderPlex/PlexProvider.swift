@@ -290,7 +290,10 @@ public struct PlexProvider: MediaProvider {
 
     private static func videoRangeToken(for rangeType: String?) -> String? {
         guard let rangeType, !rangeType.isEmpty else { return nil }
-        return rangeType.uppercased().hasPrefix("DOVI") ? "DOVI" : "HDR"
+        let upper = rangeType.uppercased()
+        if upper.hasPrefix("DOVI") { return "DOVI" }
+        if upper == "SDR" { return "SDR" }
+        return "HDR"
     }
 
     /// Builds provider-agnostic source facts from a Plex part's streams so the
@@ -313,7 +316,13 @@ public struct PlexProvider: MediaProvider {
             ?? streams.first { $0.streamType == 3 }
 
         let videoStream = video.map { v in
-            let rangeType = Self.dynamicRangeType(
+            // Stream-level path: when a video Stream is present and shows no
+            // HDR/DoVi hints we can confidently assert SDR. The coarse media-
+            // level fallback (no Stream array) deliberately does NOT assert
+            // SDR — see `mediaLevelMetadata` — because the trimmed children
+            // response can strip the HDR hint without meaning the content is
+            // SDR.
+            let detectedRange = Self.dynamicRangeType(
                 colorTransfer: v.colorTrc,
                 doviPresent: v.DOVIPresent,
                 doviProfile: v.DOVIProfile,
@@ -321,6 +330,7 @@ public struct PlexProvider: MediaProvider {
                 doviBLPresent: v.DOVIBLPresent,
                 displayTitles: [v.displayTitle, v.extendedDisplayTitle]
             )
+            let rangeType = detectedRange ?? "SDR"
             return MediaSourceMetadata.VideoStream(
                 codec: v.codec,
                 profile: v.profile,

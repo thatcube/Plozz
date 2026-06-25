@@ -138,14 +138,15 @@ public extension MediaSourceMetadata {
         if rangeType.hasPrefix("HDR") || range == "HDR" {
             return [MediaBadge("HDR", style: .hdr)]
         }
-        // No HDR signal → standard dynamic range. Providers either emit an
-        // explicit `SDR` token (Jellyfin) or omit range info entirely (Plex), so
-        // label SDR whenever we have something concrete to classify — real
-        // dimensions or an explicit range token — and stay silent on an empty
-        // stream so we never assert SDR with nothing to back it.
-        let hasDimensions = (video.width ?? 0) > 0 || (video.height ?? 0) > 0
+        // No HDR signal → standard dynamic range. Only assert SDR when we have
+        // an explicit range token to back it up. Providers like Jellyfin emit a
+        // literal `SDR` token; Plex's coarse media-level fallback emits nothing,
+        // and in that case dimensions alone don't prove SDR — a 4K HEVC episode
+        // may still be DoVi/HDR even when the trimmed children response strips
+        // the HDR display-title hint. Staying silent then lets us show
+        // "4K · Dolby Atmos" rather than a misleading "4K · SDR" pill.
         let hasRangeToken = !range.isEmpty || !rangeType.isEmpty
-        if hasDimensions || hasRangeToken {
+        if hasRangeToken {
             return [MediaBadge("SDR", style: .sdr)]
         }
         return []

@@ -679,11 +679,43 @@ final class PlexProviderMappingTests: XCTestCase {
 
         let item = try await provider.item(id: "88")
         // No Stream array: resolution + codec + surround come from Media-level
-        // facts; no HDR signal, so the range reads SDR. Dolby badges group first,
-        // so Dolby Digital+ sits before SDR; the 5.1 layout rides on the
-        // Dolby Digital+ badge as a trailing detail.
-        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "Dolby Digital+", "SDR"])
+        // facts. We deliberately do NOT assert SDR from the coarse fallback
+        // because Plex's trimmed children responses often strip HDR display-
+        // title hints — a wrong "SDR" pill on a real DoVi episode is worse
+        // than no range pill at all. Dolby Digital+ rides the 5.1 layout as
+        // its trailing detail.
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "Dolby Digital+"])
         XCTAssertEqual(item.technicalBadges.first(where: { $0.label == "Dolby Digital+" })?.detail, "5.1")
+        XCTAssertFalse(item.technicalBadges.map(\.label).contains("SDR"))
+    }
+
+    func testMediaLevelFallbackOmitsSDRWhenHDRSignalAbsent() async throws {
+        // The user-reported Fallout-on-Plex shape from a listing endpoint that
+        // omits BOTH the per-Stream array AND `videoStreamDisplayTitle` — Plex
+        // only emits the coarse `videoProfile="main 10"` plus the Media-level
+        // `audioProfile`. We can't prove HDR from "main 10" alone, but we also
+        // must not lie and say SDR; Atmos must still come through. Result:
+        // "4K · Dolby Atmos" with no range pill at all.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/95", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"95","type":"episode","title":"Ep","index":1,"parentIndex":1,
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "videoResolution":"4k","width":3840,"height":2160,"audioChannels":6,
+             "videoProfile":"main 10",
+             "audioProfile":"dolby digital plus + dolby atmos",
+             "Part":[{"id":2,"key":"/p","container":"mkv"}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "95")
+        let labels = item.technicalBadges.map(\.label)
+        XCTAssertTrue(labels.contains("Dolby Atmos"),
+                      "Atmos must come through media-level audioProfile, got \(labels)")
+        XCTAssertFalse(labels.contains("SDR"),
+                       "Coarse fallback must not assert SDR with no HDR evidence, got \(labels)")
+        XCTAssertEqual(labels, ["4K", "Dolby Atmos"])
     }
 
     func testItemsPagePassesContainerParamsAndType() async throws {

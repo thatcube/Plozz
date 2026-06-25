@@ -42,8 +42,34 @@ public struct JellyfinProvider: MediaProvider {
         }
     }
 
+    /// Continue Watching = in-progress items (`/Items/Resume`) followed by the
+    /// next unwatched episode of series the user has progressed through
+    /// (`/Shows/NextUp`). Jellyfin splits these across two endpoints, whereas
+    /// Plex's `/library/onDeck` returns both in one feed — fetching both here
+    /// restores parity so a series doesn't vanish from Continue Watching the
+    /// moment you finish an episode.
+    ///
+    /// NextUp is best-effort: it runs concurrently with Resume and a failure
+    /// (older server, transient error) silently degrades to resume-only rather
+    /// than breaking Continue Watching. In-progress items are ordered first
+    /// (you're actively watching them), then next-up suggestions; both preserve
+    /// the server's recency order. Results are deduped by id and capped to
+    /// `limit`.
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
-        try await client.resumeItems(userID: session.userID, limit: limit).map(map(item:))
+        async let resumeTask = client.resumeItems(userID: session.userID, limit: limit)
+        async let nextUpTask = nextUpItemsBestEffort(limit: limit)
+        let resume = try await resumeTask
+        let nextUp = await nextUpTask
+
+        var seen = Set<String>()
+        let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
+        return merged.prefix(limit).map(map(item:))
+    }
+
+    /// Wraps `/Shows/NextUp` so a failure never propagates into Continue
+    /// Watching, which is anchored by the in-progress Resume items.
+    private func nextUpItemsBestEffort(limit: Int) async -> [BaseItemDto] {
+        (try? await client.nextUpItems(userID: session.userID, limit: limit)) ?? []
     }
 
     public func latest(limit: Int) async throws -> [MediaItem] {

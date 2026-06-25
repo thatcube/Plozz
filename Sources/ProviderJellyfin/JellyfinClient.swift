@@ -151,6 +151,33 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
+    /// `GET /Shows/NextUp` — the next unwatched episode for each series the user
+    /// has progressed through. `/Items/Resume` only returns *in-progress* items,
+    /// so on its own it misses the "you finished an episode, here's the next one"
+    /// case that Plex's `/library/onDeck` already includes. Fetching NextUp lets
+    /// the provider fold both classes into one Continue Watching feed, matching
+    /// Plex parity.
+    ///
+    /// `EnableResumable=false` keeps NextUp complementary rather than overlapping:
+    /// in-progress episodes already come back from `/Items/Resume`, so NextUp is
+    /// scoped to the next-after-completed episode. `EnableRewatching=false` avoids
+    /// resurfacing fully-watched series.
+    func nextUpItems(userID: String, limit: Int) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Shows/NextUp",
+            queryItems: [
+                URLQueryItem(name: "UserId", value: userID),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "MediaTypes", value: "Video"),
+                URLQueryItem(name: "EnableResumable", value: "false"),
+                URLQueryItem(name: "EnableRewatching", value: "false"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,ProviderIds")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
     func latestItems(userID: String, limit: Int) async throws -> [BaseItemDto] {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/Latest",

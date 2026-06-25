@@ -66,6 +66,58 @@ final class JellyfinProviderMappingTests: XCTestCase {
         )
     }
 
+    func testContinueWatchingFoldsInNextUpEpisode() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"resume1","Name":"In Progress","Type":"Movie",
+        "UserData":{"PlaybackPositionTicks":18000000000,"Played":false}}],"TotalRecordCount":1}
+        """)
+        stub.stub(pathSuffix: "/Shows/NextUp", json: """
+        {"Items":[{"Id":"next1","Name":"Episode 6","Type":"Episode","SeriesName":"My Show",
+        "IndexNumber":6,"UserData":{"Played":false}}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 10)
+        XCTAssertEqual(items.map(\.id), ["resume1", "next1"],
+                       "Continue Watching must fold NextUp after the in-progress Resume items (Plex On Deck parity)")
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Shows/NextUp"))
+        XCTAssertEqual(query.first(where: { $0.name == "EnableResumable" })?.value, "false",
+                       "NextUp must exclude resumable items so it complements, not duplicates, Resume")
+    }
+
+    func testContinueWatchingDedupesItemPresentInBothResumeAndNextUp() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"dup","Name":"Episode 5","Type":"Episode",
+        "UserData":{"PlaybackPositionTicks":18000000000,"Played":false}}],"TotalRecordCount":1}
+        """)
+        stub.stub(pathSuffix: "/Shows/NextUp", json: """
+        {"Items":[{"Id":"dup","Name":"Episode 5","Type":"Episode","UserData":{"Played":false}}],
+        "TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 10)
+        XCTAssertEqual(items.map(\.id), ["dup"], "An item in both feeds must appear once")
+        XCTAssertEqual(items.first?.resumePosition, 1800, "Dedup must keep the Resume copy that carries resume position")
+    }
+
+    func testContinueWatchingDegradesToResumeWhenNextUpFails() async throws {
+        // /Shows/NextUp is intentionally not stubbed -> StubHTTPClient throws notFound.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"resume1","Name":"In Progress","Type":"Movie",
+        "UserData":{"PlaybackPositionTicks":18000000000,"Played":false}}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 10)
+        XCTAssertEqual(items.map(\.id), ["resume1"],
+                       "A NextUp failure must silently degrade to resume-only, never break Continue Watching")
+    }
+
     func testLatestIncludesProviderIDsForHomeDedup() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/Latest", json: """

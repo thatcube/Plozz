@@ -79,6 +79,16 @@ struct SeriesDetailView: View {
     /// when no episode was fronted or after it has been consumed.
     @State private var pendingSwitchTargetSE: SeasonEpisodeRef?
 
+    /// The episode the rail should land on when focus enters it (its
+    /// `defaultFocusID`): the came-in/tapped episode on open, the preserved episode
+    /// after a cross-server switch, or the selected season's next-up. It is updated
+    /// ONLY at those discrete moments — never from the live `heroItem` as the user
+    /// browses cards. Deriving the rail's default focus from `heroItem`/`playTarget`
+    /// (which change on every card focus) re-armed `MediaRowView`'s entry gate on
+    /// each card and made scrolling the rail snap back; a stable target keeps it
+    /// silky smooth while still re-pointing on open/season-change/switch.
+    @State private var railTargetID: String?
+
     init(
         series: MediaItem,
         seasons: [MediaItem],
@@ -108,6 +118,7 @@ struct SeriesDetailView: View {
         let initialSeason = seasonID.flatMap { id in seasons.first { $0.id == id } }
         _selectedSeasonID = State(initialValue: initialSeason?.id)
         _heroItem = State(initialValue: initialEpisode ?? initialSeason ?? series)
+        _railTargetID = State(initialValue: initialEpisode?.id)
     }
 
     /// Scroll anchor for the hero, used to keep the page pinned to the top while
@@ -306,24 +317,42 @@ struct SeriesDetailView: View {
     /// so the rail and Play target are ready as focus settles on the tab.
     private func select(_ season: MediaItem) {
         selectedSeasonID = season.id
-        Task { await viewModel.loadEpisodes(for: season.id) }
+        Task {
+            await viewModel.loadEpisodes(for: season.id)
+            updateRailTarget()
+        }
+    }
+
+    /// Re-points the rail's stable entry target (`railTargetID`) at a discrete
+    /// moment — open, season change, or a cross-server switch. Prefers the fronted
+    /// episode when it lives in the current season pool (a tapped/switched-to
+    /// episode), else the season's next-up. Deliberately NOT called as focus moves
+    /// through the rail, so browsing never changes `defaultFocusID` (which would
+    /// re-arm the rail gate and make scrolling janky).
+    @MainActor
+    private func updateRailTarget() {
+        let pool = currentEpisodes
+        if heroItem.kind == .episode, pool.contains(where: { $0.id == heroItem.id }) {
+            railTargetID = heroItem.id
+        } else {
+            railTargetID = SeriesResume.nextUp(in: pool)?.id
+        }
     }
 
     // MARK: Episode rail
 
     private var episodeRail: some View {
         let episodes = currentEpisodes
-        // The episode the hero's Play button acts on — what focus should land on
-        // when moving down into the rail, and where the rail is pre-scrolled. We
-        // derive it from `playTarget` (the fronted episode, else the season's
-        // next-up) rather than the immutable opened `initialEpisode`, so that an
-        // IN-PLACE cross-server switch re-points the rail to the *preserved*
-        // episode on the NEW server — matched by number, with a new per-server id
-        // — instead of the old server's id (which isn't in this pool). On a normal
-        // open this still resolves to the originally-targeted episode / next-up, so
-        // behaviour is unchanged. MediaRowView re-scrolls via .onChange(of:
-        // defaultFocusID) once that id appears in the loaded pool.
-        let target = playTarget?.id
+        // The episode focus should land on when entering the rail / where it
+        // pre-scrolls. We use the STABLE `railTargetID` (updated only on open,
+        // season change, or a cross-server switch) rather than the live
+        // `heroItem`/`playTarget`, which change as the user browses cards — keying
+        // the rail's default focus on that re-armed its entry gate every card and
+        // made scrolling snap back. On a normal open this still resolves to the
+        // originally-targeted episode / next-up; after an in-place switch it is
+        // re-pointed to the preserved episode on the new server (new per-server id).
+        // MediaRowView re-scrolls via .onChange(of: defaultFocusID) when it changes.
+        let target = railTargetID
         return MediaRowView(
             title: railTitle,
             items: episodes,
@@ -634,6 +663,7 @@ struct SeriesDetailView: View {
         } else {
             heroItem = series
         }
+        updateRailTarget()
     }
 
     /// The season to open: an already-selected/explicit one, the target episode's
@@ -676,6 +706,7 @@ struct SeriesDetailView: View {
                 heroItem = target
             }
         }
+        updateRailTarget()
     }
 
 }

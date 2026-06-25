@@ -11,6 +11,7 @@ struct PlozzApp: App {
         #endif
         DLog.installCrashHandler()
         DLog.startMainPing()
+        DLog.startWatchdog()
         // Give artwork a real on-disk cache so backdrops, posters and logos load
         // instantly on revisit instead of being re-fetched every time (the
         // default shared URLCache is only a few MB — far too small for 4K

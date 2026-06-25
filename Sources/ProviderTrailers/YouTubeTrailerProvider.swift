@@ -34,6 +34,20 @@ public struct YouTubeTrailerProvider: MediaProvider {
     /// resolved stream URLs stay valid for playback here.
     private let methods: [YouTube.ExtractionMethod]
 
+    /// Process-wide serial gate for YouTubeKit's local (JavaScriptCore) stream
+    /// extraction. Each extraction spins up a JSContext that runs YouTube's large
+    /// obfuscated player JS to decipher stream signatures; running several at once
+    /// stacks multiple multi-hundred-MB JS heaps and pins JavaScriptCore's garbage
+    /// collector at ~300% CPU — the navigation-churn freeze (memory ballooning to
+    /// ~1.7 GB) and the jetsam crashes that follow it. Tap-through of several
+    /// titles, each verifying multiple candidate trailer ids concurrently, is what
+    /// stacks them. Capping to ONE in-flight extraction bounds the live JS heap to
+    /// a single context, so the GC never thrashes. This costs nothing real:
+    /// trailer extraction is off the first-paint path and most titles resolve one
+    /// or two ids, so serializing keeps verification fast while making the memory
+    /// footprint flat instead of explosive.
+    static let extractionGate = ConcurrencyLimiter(limit: 1)
+
     /// Process-wide, time-bounded cache of in-flight and recently-resolved
     /// YouTube stream extractions, keyed by video id. Two callers race for the
     /// same id during trailer fast-start: the detail screen verifies which
@@ -67,7 +81,9 @@ public struct YouTubeTrailerProvider: MediaProvider {
                 }
             }
             let task = Task { () throws -> [YouTubeKit.Stream] in
-                try await YouTube(videoID: id, methods: methods).streams
+                try await YouTubeTrailerProvider.extractionGate.run {
+                    try await YouTube(videoID: id, methods: methods).streams
+                }
             }
             entries[id] = Entry(task: task, createdAt: Date())
             do {
@@ -307,7 +323,10 @@ public struct YouTubeTrailerProvider: MediaProvider {
         // 4) HLS manifest — fallback for livestreams and the rare VOD without a
         //    usable progressive/adaptive stream. May fail on PO-token-gated
         //    segments, so it's the last resort.
-        if let hls = (try? await YouTube(videoID: id, methods: methods).livestreams)?.first?.url {
+        let livestreamURL = await extractionGate.run {
+            (try? await YouTube(videoID: id, methods: methods).livestreams)?.first?.url
+        }
+        if let hls = livestreamURL {
             plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: no progressive/adaptive; using HLS manifest")
             return TrailerStream(videoURL: hls)
         }

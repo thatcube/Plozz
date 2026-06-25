@@ -116,4 +116,121 @@ public enum DLog {
         }
         mark("MAIN PING started")
     }
+
+    // MARK: - Dedicated-thread watchdog (cannot be starved by main OR pool)
+
+    nonisolated(unsafe) private static var mainAlive: Int = 0
+    private static let aliveLock = NSLock()
+    nonisolated(unsafe) private static var watchdogStarted = false
+
+    /// Current resident memory footprint (what Xcode's gauge shows), in MB.
+    /// A steadily climbing value across navigation churn indicates a leak /
+    /// unbounded retention.
+    public static func memoryFootprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) { ptr in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard kr == KERN_SUCCESS else { return -1 }
+        return Double(info.phys_footprint) / (1024 * 1024)
+    }
+
+    /// Live thread count for the process. A number that grows without bound under
+    /// repeated navigation points to rogue tasks/threads being spawned and never
+    /// finishing.
+    public static func liveThreadCount() -> Int {
+        var threadList: thread_act_array_t?
+        var threadCount = mach_msg_type_number_t(0)
+        guard task_threads(mach_task_self_, &threadList, &threadCount) == KERN_SUCCESS,
+              let threadList else { return -1 }
+        defer {
+            let size = vm_size_t(Int(threadCount) * MemoryLayout<thread_t>.stride)
+            vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: OpaquePointer(threadList))), size)
+        }
+        return Int(threadCount)
+    }
+
+    /// Total process CPU usage (% across all cores; 100 == one core saturated).
+    public static func cpuUsagePercent() -> Double {
+        var threadList: thread_act_array_t?
+        var threadCount = mach_msg_type_number_t(0)
+        guard task_threads(mach_task_self_, &threadList, &threadCount) == KERN_SUCCESS,
+              let threadList else { return -1 }
+        defer {
+            let size = vm_size_t(Int(threadCount) * MemoryLayout<thread_t>.stride)
+            vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: OpaquePointer(threadList))), size)
+        }
+        var total = 0.0
+        for i in 0..<Int(threadCount) {
+            var info = thread_basic_info()
+            var infoCount = mach_msg_type_number_t(MemoryLayout<thread_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
+            let kr = withUnsafeMutablePointer(to: &info) { ptr in
+                ptr.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) {
+                    thread_info(threadList[i], thread_flavor_t(THREAD_BASIC_INFO), $0, &infoCount)
+                }
+            }
+            if kr == KERN_SUCCESS, (info.flags & TH_FLAGS_IDLE) == 0 {
+                total += Double(info.cpu_usage) / Double(TH_USAGE_SCALE) * 100.0
+            }
+        }
+        return total
+    }
+
+    private static func vitals() -> String {
+        String(format: "mem=%.0fMB threads=%d cpu=%.0f%%",
+               memoryFootprintMB(), liveThreadCount(), cpuUsagePercent())
+    }
+
+    /// Starts a real OS-thread watchdog (`userInteractive` QoS) that ticks every
+    /// 500ms regardless of main-thread or cooperative-pool saturation, plus a
+    /// main-runloop timer that bumps a liveness counter every 200ms. If the
+    /// counter stops advancing the main thread is genuinely blocked, and the
+    /// watchdog logs the stall together with memory / thread / CPU vitals — the
+    /// one probe that stays alive when everything else (heartbeat, main-ping)
+    /// goes dark, and the one that reveals a leak or rogue-thread storm. Call
+    /// once at launch.
+    public static func startWatchdog() {
+        lock.lock()
+        if watchdogStarted { lock.unlock(); return }
+        watchdogStarted = true
+        lock.unlock()
+
+        let timer = Timer(timeInterval: 0.2, repeats: true) { _ in
+            aliveLock.lock(); mainAlive &+= 1; aliveLock.unlock()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+
+        let thread = Thread {
+            var last = -1
+            var blockedSince: Date?
+            var tick = 0
+            while true {
+                Thread.sleep(forTimeInterval: 0.5)
+                tick += 1
+                aliveLock.lock(); let cur = mainAlive; aliveLock.unlock()
+                if cur == last {
+                    if blockedSince == nil { blockedSince = Date() }
+                    let ms = Date().timeIntervalSince(blockedSince!) * 1000
+                    mark(String(format: "🛑 MAIN BLOCKED %.0fms  %@", ms, vitals()))
+                } else {
+                    if let since = blockedSince {
+                        let ms = Date().timeIntervalSince(since) * 1000
+                        mark(String(format: "✅ MAIN RESUMED after %.0fms  %@", ms, vitals()))
+                        blockedSince = nil
+                    }
+                    // Periodic vitals (~every 2s) so a leak / thread storm shows as
+                    // a trend even when the main thread is never blocked.
+                    if tick % 4 == 0 { mark("📊 \(vitals())") }
+                }
+                last = cur
+            }
+        }
+        thread.name = "plz-watchdog"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        mark("WATCHDOG started")
+    }
 }

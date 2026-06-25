@@ -346,6 +346,16 @@ public final class ItemDetailViewModel {
         alternateSourceEnrichmentTask?.cancel()
         let taggedItem = tagged(item)
         enrichmentTask = Task(priority: .utility) { [weak self] in
+            // Umbrella dwell gate: opening a page and immediately leaving (the
+            // navigation-churn pattern) must fire ZERO speculative enrichment —
+            // no cross-server search fan-out, no alternate-source fetch, no
+            // JavaScriptCore trailer extraction. All of that is work for a page the
+            // user is actually looking at, not one they're tapping through. A short
+            // cancellable wait here means a sub-second open→back does nothing at
+            // all; the first-paint detail (driven by load(), not this task) has
+            // already shown. Cancelled by suspendEnrichment on navigate-away.
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
             // Bump the GLOBAL enrichment generation: opening this page makes every
             // older page's still-in-flight discovery/alternate work stale, so the
             // scheduler drops it BEFORE it touches the network. This is what stops
@@ -446,6 +456,18 @@ public final class ItemDetailViewModel {
         if let optimistic = serverIDs.first {
             surfaceTrailer(videoID: optimistic, for: item)
         }
+
+        // Dwell gate: the authoritative verify/replace pass below runs YouTubeKit's
+        // JavaScriptCore stream extraction, which is heavy (a JSContext executing
+        // YouTube's player JS) and the single biggest CPU consumer during browsing.
+        // Stacked on the umbrella enrichment dwell, this means roughly two and a
+        // half seconds of continuous dwell on ONE page before any trailer JS runs —
+        // so even "pause to look at it load" browsing never triggers speculative
+        // extraction, only a page the user has genuinely settled on. The optimistic
+        // button above has already appeared, so this never delays what the user
+        // sees. Cancelled with the enrichment task on navigate-away.
+        try? await Task.sleep(nanoseconds: 1_700_000_000)
+        guard !Task.isCancelled, isStillLoaded(item) else { return }
 
         // Verify (authoritative): refine to the first server id that actually
         // plays, else search for a replacement, then cache the outcome.

@@ -423,31 +423,35 @@ public final class AudioPlaybackController {
         center.nextTrackCommand.isEnabled = true
         center.previousTrackCommand.isEnabled = true
         center.changePlaybackPositionCommand.isEnabled = true
+        // tvOS delivers remote-command handlers on a background queue, but these
+        // actions mutate main-actor `@Observable` state and the player, so hop
+        // to the main actor instead of touching it off-thread.
         center.playCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.resume(); return .success
+            Task { @MainActor in self?.resume() }
+            return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.pause(); return .success
+            Task { @MainActor in self?.pause() }
+            return .success
         }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.togglePlayPause(); return .success
+            Task { @MainActor in self?.togglePlayPause() }
+            return .success
         }
         center.nextTrackCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.next(); return .success
+            Task { @MainActor in self?.next() }
+            return .success
         }
         center.previousTrackCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.previous(); return .success
+            Task { @MainActor in self?.previous() }
+            return .success
         }
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let self, let event = event as? MPChangePlaybackPositionCommandEvent else {
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else {
                 return .commandFailed
             }
-            Task { await self.seek(to: event.positionTime) }
+            let position = event.positionTime
+            Task { @MainActor in await self?.seek(to: position) }
             return .success
         }
         #endif

@@ -72,7 +72,24 @@ public struct ItemDetailView: View {
                     viewModel: viewModel,
                     spoilerSettings: spoilerSettings,
                     onPlay: onPlay,
-                    onSelectServer: { source in onSelectChild(detail.item.selectingSource(source)) },
+                    onSelectServer: { source, frontedEpisode in
+                        let series = detail.item.selectingSource(source)
+                        if let episode = frontedEpisode {
+                            // Preserve the episode the user was on: re-point it to
+                            // the new server's series and route it as an episode so
+                            // the destination fronts the SAME season/episode (matched
+                            // by number, since per-server ids differ) instead of
+                            // resetting to that server's next-up.
+                            var target = episode
+                            target.sourceAccountID = source.accountID
+                            target.selectedSourceAccountID = source.accountID
+                            target.seriesID = series.id
+                            target.seasonID = nil
+                            onSelectChild(target)
+                        } else {
+                            onSelectChild(series)
+                        }
+                    },
                     initialSeasonID: initialSeasonID ?? viewModel.preselectedSeasonID ?? initialEpisode?.seasonID,
                     initialEpisode: initialEpisode
                 )

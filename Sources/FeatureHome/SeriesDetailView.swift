@@ -32,8 +32,11 @@ struct SeriesDetailView: View {
     /// retarget in place the way a movie does (the whole page — seasons, episodes,
     /// Play — belongs to one server), so selecting a server navigates to that
     /// server's series detail, whose `load()` fetches its own seasons/episodes.
-    /// `nil` (e.g. previews) hides the server picker.
-    let onSelectServer: ((MediaSourceRef) -> Void)?
+    /// The second argument is the episode currently fronted in the hero (when the
+    /// user is looking at a specific episode), so the destination can land on the
+    /// SAME episode instead of resetting to the show's next-up. `nil` (e.g.
+    /// previews) hides the server picker.
+    let onSelectServer: ((MediaSourceRef, MediaItem?) -> Void)?
     /// When the page was opened targeting a specific season, that season's id.
     let initialSeasonID: String?
     /// When the page was opened by tapping a specific episode, that episode. The
@@ -78,7 +81,7 @@ struct SeriesDetailView: View {
         viewModel: ItemDetailViewModel,
         spoilerSettings: SpoilerSettings,
         onPlay: @escaping (MediaItem) -> Void,
-        onSelectServer: ((MediaSourceRef) -> Void)? = nil,
+        onSelectServer: ((MediaSourceRef, MediaItem?) -> Void)? = nil,
         initialSeasonID: String? = nil,
         initialEpisode: MediaItem? = nil
     ) {
@@ -155,7 +158,7 @@ struct SeriesDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 32) {
                     DetailHeroView(
-                        item: heroItem,
+                        item: displayHeroItem,
                         backdropItem: series,
                         heroHeightFraction: 0.8,
                         backdropBottomExtensionFraction: 0.1,
@@ -496,7 +499,10 @@ struct SeriesDetailView: View {
             guard accountID != series.sourceAccountID,
                   let source = viewModel.sources.first(where: { $0.accountID == accountID })
             else { return }
-            onSelectServer(source)
+            // Carry the fronted episode (if any) so the other server's page opens
+            // on the SAME episode rather than its own next-up.
+            let frontedEpisode = heroItem.kind == .episode ? heroItem : nil
+            onSelectServer(source, frontedEpisode)
         }
     }
 
@@ -523,6 +529,29 @@ struct SeriesDetailView: View {
         return SeriesResume.nextUp(in: currentEpisodes)
     }
 
+    /// The hero item with its season/episode numbers guaranteed when an episode is
+    /// fronted, so the hero ALWAYS shows "S{n} · E{m}" for a TV show. Some list/
+    /// search/seed episodes arrive without a `seasonNumber` (they know only their
+    /// own id) — fill it from the owning season; derive a missing `episodeNumber`
+    /// from the episode's position in its loaded season as a last resort.
+    private var displayHeroItem: MediaItem {
+        guard heroItem.kind == .episode else { return heroItem }
+        var copy = heroItem
+        if copy.seasonNumber == nil,
+           let seasonID = copy.seasonID ?? selectedSeasonID,
+           let number = seasons.first(where: { $0.id == seasonID })?.seasonNumber {
+            copy.seasonNumber = number
+        }
+        if copy.episodeNumber == nil {
+            let pool = (copy.seasonID ?? selectedSeasonID).flatMap { viewModel.episodes(for: $0) }
+                ?? currentEpisodes
+            if let index = pool.firstIndex(where: { $0.id == copy.id }) {
+                copy.episodeNumber = index + 1
+            }
+        }
+        return copy
+    }
+
     /// The series' trailer action, shown only while the hero is presenting the
     /// series itself (not a focused season/episode), so the Trailer button reads
     /// as belonging to the show. `nil` hides the button.
@@ -536,7 +565,8 @@ struct SeriesDetailView: View {
     /// preloads it. When targeting a tapped episode, swaps the hero to the richer
     /// loaded copy of that episode once its season's episodes are available.
     private func prepareInitialSeason() async {
-        if let id = selectedSeasonID {
+        if let id = resolvedInitialSeasonID() {
+            selectedSeasonID = id
             await viewModel.loadEpisodes(for: id)
             await frontTargetEpisodeIfNeeded(in: id)
             return
@@ -550,6 +580,21 @@ struct SeriesDetailView: View {
         await frontTargetEpisodeIfNeeded(in: first.id)
     }
 
+    /// The season to open: an already-selected/explicit one, the target episode's
+    /// own season, or — when that episode arrived from a *different server* (a
+    /// cross-server switch, so its season id won't match these seasons) — the
+    /// season with the same NUMBER. `nil` falls through to the first season.
+    private func resolvedInitialSeasonID() -> String? {
+        if let id = selectedSeasonID, seasons.contains(where: { $0.id == id }) { return id }
+        if let id = initialSeasonID, seasons.contains(where: { $0.id == id }) { return id }
+        if let id = initialEpisode?.seasonID, seasons.contains(where: { $0.id == id }) { return id }
+        if let number = initialEpisode?.seasonNumber,
+           let match = seasons.first(where: { $0.seasonNumber == number }) {
+            return match.id
+        }
+        return nil
+    }
+
     /// After episodes load, replace the hero's tapped-episode placeholder with the
     /// fully-loaded episode (richer overview/badges) so the hero and Play target
     /// reflect complete metadata. No-op unless the page is targeting an episode —
@@ -561,6 +606,13 @@ struct SeriesDetailView: View {
         
         if let target = initialEpisode {
             if let loaded = pool.first(where: { $0.id == target.id }) {
+                heroItem = loaded
+            } else if let season = target.seasonNumber, let episode = target.episodeNumber,
+                      let loaded = pool.first(where: {
+                          $0.seasonNumber == season && $0.episodeNumber == episode
+                      }) {
+                // Cross-server switch: per-server episode ids differ, so match the
+                // same episode by its season/episode NUMBER on the new server.
                 heroItem = loaded
             }
         } else if initialSeasonID != nil {

@@ -77,6 +77,16 @@ struct PlexMetadata: Decodable {
     let art: String?
     let grandparentThumb: String?
     let parentThumb: String?
+    /// Album/playlist track count (`leafCount`) and artist album count
+    /// (`childCount`) — used to populate music nodes' counts.
+    let leafCount: Int?
+    let childCount: Int?
+    /// Composite mosaic art for a playlist (`/playlists/{id}/composite/...`),
+    /// used as the playlist's artwork when it has no single cover.
+    let composite: String?
+    /// Release year of an album reached via a track (`parentYear`), used as a
+    /// fallback when the album node itself omits `year`.
+    let parentYear: Int?
     /// Content certificate, e.g. `TV-14`, `PG-13`, `R`.
     let contentRating: String?
     /// Critic score (0–10 on Plex's normalised scale); `ratingImage` names the

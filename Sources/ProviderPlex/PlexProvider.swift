@@ -10,7 +10,7 @@ import CoreNetworking
 public struct PlexProvider: MediaProvider {
     public let kind: ProviderKind = .plex
     public let session: UserSession
-    private let client: PlexClient
+    let client: PlexClient
 
     public init(
         session: UserSession,

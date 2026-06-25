@@ -219,6 +219,112 @@ public struct PlexClient: Sendable {
             .MediaContainer.Metadata ?? []
     }
 
+    // MARK: Music browsing
+
+    /// One page of a music library section, filtered to a Plex content `type`
+    /// (8 = artist, 9 = album, 10 = track). Unlike the video `sectionItems`,
+    /// music browsing doesn't need the per-`Stream`/`Guid` inlining, so this uses
+    /// a lean container query (just start/size + sort) to keep large artist/album
+    /// pages light.
+    func musicSectionItems(
+        sectionID: String,
+        type: Int,
+        start: Int,
+        size: Int,
+        sort: CoreModels.SortDescriptor
+    ) async throws -> PlexMediaContainer {
+        let query = [
+            URLQueryItem(name: "type", value: String(type)),
+            URLQueryItem(name: "X-Plex-Container-Start", value: String(start)),
+            URLQueryItem(name: "X-Plex-Container-Size", value: String(size)),
+            URLQueryItem(name: "sort", value: Self.sortQuery(for: sort))
+        ]
+        let endpoint = Endpoint(path: "/library/sections/\(sectionID)/all", queryItems: query, headers: headers)
+        return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
+    }
+
+    /// `GET /library/sections/{id}/genre` — the genres present in a music
+    /// section, returned as `Directory` entries (`key` = genre id, `title` =
+    /// name).
+    func musicGenres(sectionID: String) async throws -> [PlexDirectory] {
+        let endpoint = Endpoint(path: "/library/sections/\(sectionID)/genre", headers: headers)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
+            .MediaContainer.Directory ?? []
+    }
+
+    /// `GET /playlists?playlistType=audio` — the user's audio playlists.
+    func audioPlaylists() async throws -> [PlexMetadata] {
+        let endpoint = Endpoint(
+            path: "/playlists",
+            queryItems: [URLQueryItem(name: "playlistType", value: "audio")],
+            headers: headers
+        )
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
+            .MediaContainer.Metadata ?? []
+    }
+
+    /// `GET /playlists/{id}/items` — a playlist's tracks, in playlist order.
+    func playlistItems(ratingKey: String) async throws -> [PlexMetadata] {
+        let endpoint = Endpoint(path: "/playlists/\(ratingKey)/items", headers: headers)
+        return try await decode(PlexMediaContainerResponse.self, endpoint)
+            .MediaContainer.Metadata ?? []
+    }
+
+    /// Resolves a playable audio URL for a track's chosen media/part: **direct
+    /// play** when AVPlayer can demux the container/codec natively (the common
+    /// case for mp4/m4a/mp3/flac/wav), otherwise Plex's universal **music**
+    /// transcoder (a progressive MP3 stream AVPlayer plays directly). Mirrors the
+    /// video `playbackURL` decision, scoped to audio.
+    func audioPlaybackURL(ratingKey: String, media: PlexMedia, part: PlexPart, sessionID: String) -> (url: URL, isTranscoding: Bool)? {
+        if Self.canDirectPlayAudioFile(media: media, part: part), let key = part.key, let direct = streamURL(forPartKey: key) {
+            return (direct, false)
+        }
+        if let transcode = audioTranscodeURL(ratingKey: ratingKey, sessionID: sessionID) {
+            return (transcode, true)
+        }
+        // Last-resort: attempt direct play rather than failing outright.
+        if let key = part.key, let direct = streamURL(forPartKey: key) {
+            return (direct, false)
+        }
+        return nil
+    }
+
+    /// Containers + codecs AVFoundation demuxes/decodes natively from a plain
+    /// audio file URL on tvOS. Anything outside this set (e.g. `opus`/`ogg`,
+    /// `dsf`, `wma`) is routed through the server's music transcoder instead.
+    private static let directPlayAudioContainers: Set<String> = ["mp4", "m4a", "m4b", "mp3", "flac", "wav", "aac", "aiff", "aif"]
+    private static let directPlayAudioCodecs: Set<String> = ["aac", "mp3", "alac", "flac", "pcm", "lpcm"]
+
+    static func canDirectPlayAudioFile(media: PlexMedia, part: PlexPart) -> Bool {
+        let container = (media.container ?? part.container ?? containerExtension(fromKey: part.key))?.lowercased()
+        guard let container, directPlayAudioContainers.contains(container) else { return false }
+        // When Plex reports the codec, gate on it too; if it's absent, trust the
+        // container (these audio containers carry only the listed codecs).
+        if let codec = media.audioCodec?.lowercased() {
+            return directPlayAudioCodecs.contains(codec)
+        }
+        return true
+    }
+
+    /// Builds Plex's universal **music** transcoder URL — a progressive MP3
+    /// stream (`start.mp3`) that AVPlayer streams directly. Identity + token + a
+    /// stable session id travel as query params, matching the video transcoder.
+    func audioTranscodeURL(ratingKey: String, sessionID: String) -> URL? {
+        var query: [URLQueryItem] = [
+            URLQueryItem(name: "path", value: "/library/metadata/\(ratingKey)"),
+            URLQueryItem(name: "mediaIndex", value: "0"),
+            URLQueryItem(name: "partIndex", value: "0"),
+            URLQueryItem(name: "musicBitrate", value: "320"),
+            URLQueryItem(name: "protocol", value: "http"),
+            URLQueryItem(name: "session", value: sessionID),
+            URLQueryItem(name: "X-Plex-Session-Identifier", value: sessionID)
+        ]
+        for (name, value) in deviceProfile.headers(token: token) where name.hasPrefix("X-Plex-") {
+            query.append(URLQueryItem(name: name, value: value))
+        }
+        return absoluteURL(serverPath: "/music/:/transcode/universal/start.mp3", extraQuery: query)
+    }
+
     // MARK: Playback
 
     /// `GET /:/timeline` — report progress so Plex keeps resume points in sync.

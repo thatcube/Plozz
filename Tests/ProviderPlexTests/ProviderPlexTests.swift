@@ -742,8 +742,9 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
         // List endpoints must inline streams so movie rail cards can badge
         // DoVi/HDR/Atmos from real stream facts; the bare media-level fallback
-        // can't recover HDR signal on its own.
-        XCTAssertEqual(query.first(where: { $0.name == "includeStreams" })?.value, "1")
+        // can't recover HDR signal on its own. `includeElements=Stream` is the
+        // verified-correct flag (`includeStreams=1` is a Plex no-op).
+        XCTAssertEqual(query.first(where: { $0.name == "includeElements" })?.value, "Stream")
     }
 
     func testSeriesLibraryUsesShowType() async throws {
@@ -814,11 +815,13 @@ final class PlexProviderMappingTests: XCTestCase {
         // A season item must carry its own ordinal so cross-server season matching
         // (by NUMBER) works instead of collapsing to the first season.
         XCTAssertEqual(children[0].seasonNumber, 1)
-        // The /children endpoint must ask for the per-Stream array; without
-        // `includeStreams=1` Plex strips DOVI* / colorTrc fields and DoVi/HDR
-        // badges silently disappear from season/episode rails.
+        // The /children endpoint must ask Plex to inline the per-Stream array;
+        // without `includeElements=Stream` Plex returns zero <Stream> elements
+        // and DoVi/HDR badges silently disappear from season/episode rails.
+        // (`includeStreams=1` is the common-but-wrong incantation — verified
+        // no-op against a live PMS.)
         let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/library/metadata/9/children"))
-        XCTAssertEqual(query.first(where: { $0.name == "includeStreams" })?.value, "1")
+        XCTAssertEqual(query.first(where: { $0.name == "includeElements" })?.value, "Stream")
     }
 
     func testChildrenStreamsYieldFullDoViBadges() async throws {

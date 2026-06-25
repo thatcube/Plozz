@@ -271,6 +271,107 @@ public extension MediaSourceMetadata {
     }
 }
 
+// MARK: - Per-version badges
+
+public extension MediaVersion {
+    /// Technical badges built from THIS version's own facts (resolution from
+    /// width/height, HDR/DoVi from `videoRange`, audio from
+    /// `audioProfile`/`audioCodec`/`audioChannels`), composed via the same
+    /// Dolby-grouped ordering helper used by `MediaSourceMetadata` so a per-
+    /// version row reads identically to the per-item one.
+    ///
+    /// The hero's badge row uses this when the user picks a non-default version
+    /// from the picker, so switching from a 4K HDR Atmos Remux to a 720p SDR
+    /// WEB-DL flips the badges to match the *selected* file rather than the
+    /// default's media-info snapshot.
+    var technicalBadges: [MediaBadge] {
+        let resolution: MediaBadge? = {
+            // Reuse the effective-lines classifier so a 1920×804 cinematic
+            // version still reads 1080p rather than 720p — matching how the
+            // per-item resolutionBadge categorises the same file.
+            guard let lines = PlaybackDiagnostics.effectiveResolutionLines(
+                width: width,
+                height: height
+            ) else {
+                if let label = resolutionLabel { return MediaBadge(label, style: .prominent) }
+                return nil
+            }
+            let label: String
+            switch lines {
+            case 2000...: label = "4K"
+            case 1400..<2000: label = "1440p"
+            case 1000..<1400: label = "1080p"
+            case 700..<1000: label = "720p"
+            default: label = "SD"
+            }
+            return MediaBadge(label, style: .prominent)
+        }()
+
+        let range: [MediaBadge] = {
+            guard let token = videoRange, let hdr = HDRRange(rawValue: token) else { return [] }
+            switch hdr {
+            case .sdr: return [MediaBadge("SDR", style: .sdr)]
+            case .hlg: return [MediaBadge("HLG", style: .hdr)]
+            case .hdr10: return [MediaBadge("HDR10", style: .hdr)]
+            case .dolbyVision, .dolbyVisionWithSDR:
+                return [MediaBadge("Dolby Vision", style: .dolby)]
+            case .dolbyVisionWithHDR10:
+                return [MediaBadge("Dolby Vision", style: .dolby),
+                        MediaBadge("HDR10", style: .hdr)]
+            case .dolbyVisionWithHLG:
+                return [MediaBadge("Dolby Vision", style: .dolby),
+                        MediaBadge("HLG", style: .hdr)]
+            }
+        }()
+
+        let audio: [MediaBadge] = {
+            let profile = (audioProfile ?? "").lowercased()
+            let codec = (audioCodec ?? "").lowercased()
+            var format: MediaBadge?
+            var formatImpliesSurround = false
+            if profile.contains("atmos") {
+                format = MediaBadge("Dolby Atmos", style: .dolby)
+                formatImpliesSurround = true
+            } else if profile.contains("dts:x") || profile.contains("dtsx") || profile.contains("dts x") {
+                format = MediaBadge("DTS:X", style: .dts)
+                formatImpliesSurround = true
+            } else if codec == "truehd" {
+                format = MediaBadge("Dolby TrueHD", style: .dolby)
+                formatImpliesSurround = true
+            } else if codec == "dts" && (profile.contains("hd") || profile.contains("ma")) {
+                format = MediaBadge("DTS-HD", style: .dts)
+            } else if codec == "eac3" {
+                format = MediaBadge("Dolby Digital+", style: .dolby)
+            } else if codec == "ac3" {
+                format = MediaBadge("Dolby Digital", style: .dolby)
+            }
+
+            let channels: String? = {
+                if formatImpliesSurround { return nil }
+                switch audioChannels {
+                case .some(let c) where c >= 8: return "7.1"
+                case .some(let c) where c >= 6: return "5.1"
+                default: return nil
+                }
+            }()
+
+            if var format {
+                format.detail = channels
+                return [format]
+            } else if let channels {
+                return [MediaBadge(channels, style: .spec)]
+            }
+            return []
+        }()
+
+        return MediaSourceMetadata.dolbyGroupedTechnicalBadges(
+            resolution: resolution,
+            range: range,
+            audio: audio
+        )
+    }
+}
+
 // MARK: - Item-level badges & metadata line
 
 public extension MediaItem {

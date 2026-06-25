@@ -215,9 +215,18 @@ struct DetailHeroView: View {
     /// content-rating certificate is rendered separately, inline with the
     /// year/runtime/genre metadata line.
     private var featureBadges: [MediaBadge] {
-        // Prefer the focused item's own tech badges; fall back to the derived
-        // series-level set for a series/season hero (or an episode whose stream
-        // info hasn't loaded), so tech badges are present on every kind.
+        // When the user has picked a non-default version from the picker,
+        // prefer that version's own resolution/HDR/audio badges so the hero
+        // row reflects what Play will actually target (e.g. switching from a
+        // 4K HDR Atmos remux to a 720p SDR WEB-DL flips Dolby Vision / HDR10
+        // / 7.1 off and shows the 720p file's facts). Falls through to the
+        // focused item's own tech badges, then to the series-derived fallback
+        // for a series/season hero whose episode mediaInfo hasn't loaded.
+        if versions.count > 1,
+           let selected = versions.first(where: { $0.id == selectedVersionID }) ?? versions.first {
+            let versionBadges = selected.technicalBadges
+            if !versionBadges.isEmpty { return versionBadges }
+        }
         let ownTech = item.technicalBadges
         return ownTech.isEmpty ? fallbackTechnicalBadges : ownTech
     }

@@ -614,9 +614,159 @@ Next-Up fold-in as an independent quick win.
 
 ---
 
+## 9. Addendum — First-time setup & onboarding
+
+> **Third research pass** answering Brandon's onboarding question: *first-time setup needs
+> love — a first-run APP flow (fresh install) that bundles a per-server flow (runs on every
+> server add), better profile opt-in/out, maybe a theme step. KEY PRINCIPLE he set: adding a
+> server ALWAYS imports the whole server; onboarding choices are purely about Home-page
+> PRESENTATION, never data availability — so "pre-check vs opt-in" is a presentation-default
+> question, not a data question.* Run the same way — **3 independent blind branches:**
+>
+> | # | Model | Branch | One-line thesis | Stance on the core question |
+> |---|---|---|---|---|
+> | O1 | Opus 4.8 high | `thatcube-onboarding-research-opus48` | "Onboarding picks an **identity, not a layout** — ship a great Home, don't make users assemble one" | **Reject the checklist**; keep opt-**out**, 1-tap subtractive "Trim" reveal |
+> | O2 | GPT-5.3-Codex xhigh | `thatcube-onboarding-r2-codex` | "A fast **Home-presentation seed**, not a content gate" | **Smart server-count-adaptive** defaults + one-tap "Use recommended" |
+> | O3 | Gemini 3.1 high | `thatcube-jubilant-couscous` | "Onboarding is a **Curation Wizard**, not a settings menu" | **Strict opt-in** (none checked); migrate store to default-invisible |
+
+### 9.1 What all three independently agreed on
+
+1. **One reusable per-server component, two contexts.** Whatever the per-server step is, it's
+   *the same view* in first-run and in later "add 2nd/3rd server" (from Settings) — O1
+   `ServerHomeReveal`, O2 `HomePresentationSetupFlow`, O3 `ServerCurationView(mode:)`. Inputs:
+   active profile + all resolved accounts + the newly-added account IDs; output: a layout
+   patch into `HomeLayoutStore`.
+2. **Cross-server choices are presented DE-SERVERED and deduped.** The step lists content
+   families ("Movies · 3 sources", "Dad's Playlist"), server shown only as a metadata chip —
+   **never** server sections/tabs. A library/playlist on 3 servers is chosen **once** (reuse
+   AggregatedLibrary same-name merge + §8 row-identity). This keeps §1/§8's "server is never a
+   browsing axis" intact *inside onboarding*.
+3. **Don't gate first playback behind a wizard.** All three protect the "fast" brand: a 1-tap
+   "recommended/looks-good" path; advanced curation deferred to Settings.
+4. **Profiles = a single binary, never a forced wizard.** "Just me" (default → profiles off,
+   no startup picker) vs "Multiple people" (→ profiles on + ask-on-startup). Home layout is a
+   **per-profile** namespace; a new profile seeds from a **copy of the default layout**, not
+   blank. (O1 goes furthest: don't even ask — surface profiles *only* when Plex auth detects a
+   multi-user Plex Home.)
+5. **Theme = lightweight, skippable, editable later.** All three would surface the existing
+   `ThemeSettingsStore` as a one-screen onboarding card; none lets it add real friction.
+6. **Persist Plozz-side with a first-run-complete flag + resume.** Add `firstRunCompleted` and
+   make the flow resumable if the user backs out mid-setup; Home choices live in the per-profile
+   `HomeLayoutStore`, theme in `ThemeSettingsStore`, flags in `UserDefaults`.
+
+### 9.2 The core disagreement — pre-check vs opt-in vs reveal (a clean spectrum)
+
+This maps directly onto the existing §4 control-vs-opinionation tension:
+
+| | **O3 (Gemini) — opt-in** | **O2 (Codex) — smart middle** | **O1 (Opus) — opt-out / reveal** |
+|---|---|---|---|
+| Default check state | **Nothing checked**; user adds rows | **Server-count-adaptive**: N=1 pre-select libraries + capped playlists; N>1 only net-new families, opt-in | **Everything ON**; optional **subtractive "Trim"** |
+| Is it a gate? | Yes — a required curation step | Soft — "Use recommended" 1-tap | **No — a 1-tap reveal, never a gate** |
+| `HomeLayoutStore` default | **Invisible** (migrate to opt-in) | **Explicit** row configs (migrate legacy excluded-keys → explicit visible/order) | **Visible** (keep opt-out; store hidden ids; new libs auto-appear) |
+| Risk it accepts | Empty-Home if users skip (mitigates w/ "Select All" + empty-state CTA) | Migration complexity; "recommended" must be good | Less user control up front (relies on Settings → Edit Home later) |
+| Brand fit | Most "intentional", most friction | Balanced | Fastest, most "it just works" |
+
+**My recommendation (synthesis):** lean **O1's "reveal, not gate" UX** wrapped around **O2's
+server-count-adaptive defaults** — and **reject O3's strict global opt-in.** Rationale:
+- The KEY PRINCIPLE (full server always imported) makes **default-ON the honest default** —
+  hiding is the exception, so the UI should be **subtractive** (O1), not a checklist that makes
+  you approve N rows before seeing a poster.
+- O3 itself flags the **empty-Home risk** of strict opt-in; that directly fights the "fast,
+  great out-of-box Home" brand and the App-Store first-impression.
+- But O1's pure default-everything is improved by O2's **N>1 restraint**: when you add a 2nd/3rd
+  server, *don't* re-flood a Home the user already arranged — surface only **new, deduped**
+  families (default-on for N=1; opt-in for the N>1 add). This is exactly §8's
+  server-count-adaptive principle applied to onboarding.
+- Net: **N=1 → everything on, 1-tap into Home, trim later; N>1 add → only net-new deduped rows
+  offered.** Opt-out semantics preserved; row-soup prevented by §8 tiers (T2 default-on, T3
+  deferred), not by forcing opt-in.
+
+### 9.3 Answers to Brandon's 7 questions
+
+1. **First-run sequence:** `welcome (skip) → theme (1 screen, skippable, pre-auth) → add+auth
+   first server (the only required step) → per-server reveal (1-tap "Looks good" / "Trim") →
+   Home`. Profiles are **not** a forced step (ask only on multi-user detection, or as O2's single
+   binary if you prefer an explicit prompt). Time-to-first-playback stays well under ~30s.
+2. **Per-server flow:** a **reveal**, not a checklist — default-ON + subtractive trim for N=1;
+   net-new deduped families for N>1 adds. (See §9.2.)
+3. **Nesting / reusable component:** one component, three chromes — full-screen (first run),
+   non-modal Home banner/sheet (later add, never gates the app), and Settings → Edit Home. It
+   degrades to **libraries-only** until §8's `CuratedRowsProviding` lands (so onboarding does
+   **not** block on the §8 rows work).
+4. **Profiles:** single binary, no wizard before playback; per-profile Home; new profile seeds
+   from a copy of the default layout. O1's "detect Plex Home multi-user → one dismissible prompt"
+   is the lightest-touch option; O2/O3's explicit "Just me vs Multiple" is the more discoverable
+   one — a Brandon call (see §9.6).
+5. **Theme:** yes as **step 0**, pre-auth, one screen, skippable; demote to a Settings nudge if
+   it ever feels like delay.
+6. **State/persistence:** prefer **not** to bloat `SessionState` with a fragile step cursor.
+   Two viable shapes: O1's **fact-derived** `FirstRunCoordinator` (derive stage from
+   `themeChosen` + persisted `accounts` + `revealedAccountIDs` + `firstRunCompleted`; naturally
+   idempotent on resume) vs O2/O3's **explicit phase enum** extension
+   (`welcome/theme/profile/…/homeSetup` + resumable `inProgressPhase`). Recommendation: the
+   **fact-derived** approach — it makes back-out/resume free and avoids new state-machine edge
+   cases. Persist Home per-profile in `HomeLayoutStore`.
+7. **§8 reconciliation:** the reveal groups by **content type**, strips server names, dedups
+   per-server copies, and only ever toggles a **de-servered identity** — never "all of Server X
+   as a row." Hubs (T3) are deferred, so onboarding stays opt-out/default-on without
+   re-introducing server-as-layout.
+
+### 9.4 Resolving the opt-out↔opt-in conflict (the migration all three had to face)
+
+Today `HomeLibraryVisibility` is **opt-out** (libraries default-visible, store the *excluded*
+ids). The three split exactly on whether to keep that:
+- **O1 keeps opt-out:** `HomeLayoutStore` stores *hidden* ids; unknown/new rows default visible.
+- **O3 flips to opt-in:** migrate the store to **default-invisible**; only explicitly-added rows
+  show. (Required by its strict-opt-in thesis.)
+- **O2 makes it explicit:** absorb legacy excluded-keys into **explicit `HomeRowConfig
+  {rowID, visible, order}`**, translating current users' exclusions into explicit visibility and
+  seeding new installs from onboarding defaults.
+
+**Recommendation:** **O2's explicit-config store, seeded to preserve opt-out behavior** (new/
+unknown rows default **visible**). This is the safe superset: it keeps today's behavior for
+existing users (no surprise-hidden libraries on upgrade), supports O1's reveal (defaults on,
+trim writes explicit `visible:false`), *and* can express O3's opt-in for anyone who wants a
+minimal Home — without forcing the empty-Home default on everyone.
+
+### 9.5 Top risks & recommended sequencing
+
+**Risks:** (1) the reveal scope-creeps into a wizard → enforce 1-tap, full-screen only on first
+run; (2) onboarding blocks on §8 → the component must degrade to libraries-only; (3) store
+**migration regressions** (don't hide libraries users currently see) → migrate to a
+behavior-preserving explicit store with tests; (4) strict opt-in → empty Home (the reason to
+avoid O3's default); (5) profile prompt misfire → offer, never auto-create; (6) theme-before-auth
+delay → one skippable screen.
+
+**Sequencing (value → risk):**
+1. **`HomeLayoutStore` = explicit, behavior-preserving migration** of `HomeLibraryVisibility`
+   (default-visible), with tests. *Foundation; also unblocks §8.*
+2. **Theme step 0** (no deps — existing `ThemeSettingsStore`).
+3. **First-run scaffolding** — fact-derived `FirstRunCoordinator` + welcome, wrapping the
+   existing `SessionState` (don't rewrite it).
+4. **Per-server reveal, libraries-only**, 1-tap, full-screen + later-add banner — one reusable
+   component shared with `ServersAndLibrariesDetailView`.
+5. **Profiles** — single binary (or multi-user detection prompt) + per-profile seed-from-default.
+6. **Extend the reveal to playlists/collections + cross-server dedup** — gated on §8's
+   `CuratedRowsProviding`.
+
+### 9.6 Open questions for Brandon (this section)
+
+1. **The core call:** opt-out **reveal** (everything on, trim later — fastest, my rec) vs
+   **smart adaptive** (N=1 pre-selected, N>1 opt-in) vs **strict opt-in** (curate from empty)?
+   My rec is *reveal + N>1 restraint*.
+2. **Profiles prompt:** **auto-detect** a multi-user Plex Home and offer profiles only then (O1,
+   lightest) — or always ask the **"Just me / Multiple people"** binary on first run (O2/O3, more
+   discoverable)?
+3. **Theme step:** keep a one-screen theme picker at step 0, or cut it from onboarding and just
+   nudge in Settings?
+
+---
+
 *Full individual proposals (with code citations, trade-off tables, and per-branch
 implementation sketches) are preserved in each research branch's `plan.md`. Branches:
 `thatcube-strategy-research-opus48`, `thatcube-strategy-r2-codex-5-3-xhigh`,
 `thatcube-didactic-dollop`, `thatcube-strategy-r4-opus-xhigh`,
 `thatcube-strategy-research-r5`; §8 addendum: `thatcube-home-rows-strategy-research`,
-`thatcube-srvrows-r2-codex`, `thatcube-scaling-enigma`.*
+`thatcube-srvrows-r2-codex`, `thatcube-scaling-enigma`; §9 addendum:
+`thatcube-onboarding-research-opus48`, `thatcube-onboarding-r2-codex`,
+`thatcube-jubilant-couscous`.*

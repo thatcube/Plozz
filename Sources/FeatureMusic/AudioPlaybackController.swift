@@ -74,6 +74,14 @@ public final class AudioPlaybackController {
     private var endObserver: NSObjectProtocol?
     private var sessionConfigured = false
     private var remoteCommandsActive = false
+    #if canImport(MediaPlayer)
+    /// Registers this app as the system Now Playing app. On tvOS, populating
+    /// `MPNowPlayingInfoCenter` alone does NOT surface the Control Center Now
+    /// Playing card — the app must own an *active* `MPNowPlayingSession` bound to
+    /// the `AVPlayer`. Created lazily so we only claim Now Playing once music
+    /// actually starts (see `enableRemoteCommands`).
+    private var nowPlayingSession: MPNowPlayingSession?
+    #endif
     private var artworkLoadTask: Task<Void, Never>?
 
     public init() {
@@ -341,11 +349,32 @@ public final class AudioPlaybackController {
 
     // MARK: Now Playing + remote commands
 
+    #if canImport(MediaPlayer)
+    /// Creates the Now Playing session on first use. Routing info/commands
+    /// through the session (instead of the `MPNowPlayingInfoCenter.default()` /
+    /// `MPRemoteCommandCenter.shared()` singletons) is what actually registers us
+    /// as the active Now Playing app on tvOS, so the Control Center card appears.
+    @discardableResult
+    private func ensureNowPlayingSession() -> MPNowPlayingSession {
+        if let nowPlayingSession { return nowPlayingSession }
+        let session = MPNowPlayingSession(players: [player])
+        // We publish provider-supplied title/artist/artwork ourselves, so keep
+        // automatic publishing off and drive the session's info center directly.
+        session.automaticallyPublishesNowPlayingInfo = false
+        nowPlayingSession = session
+        return session
+    }
+    #endif
+
     private func enableRemoteCommands() {
         #if canImport(MediaPlayer)
+        let session = ensureNowPlayingSession()
+        // (Re)assert ourselves as the active Now Playing app whenever playback
+        // (re)starts — idempotent if we're already active.
+        session.becomeActiveIfPossible(completion: nil)
         guard !remoteCommandsActive else { return }
         remoteCommandsActive = true
-        let center = MPRemoteCommandCenter.shared()
+        let center = session.remoteCommandCenter
         center.playCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
             self.resume(); return .success
@@ -376,19 +405,22 @@ public final class AudioPlaybackController {
         #endif
     }
 
-    /// Removes our handlers so the system no longer routes the Siri Remote's
-    /// Play/Pause button to music — letting the video player receive it again.
+    /// Removes our handlers and tears down the Now Playing session so the system
+    /// no longer routes the Siri Remote's Play/Pause button to music — letting
+    /// the video player receive it again.
     private func disableRemoteCommands() {
         #if canImport(MediaPlayer)
         guard remoteCommandsActive else { return }
         remoteCommandsActive = false
-        let center = MPRemoteCommandCenter.shared()
-        center.playCommand.removeTarget(nil)
-        center.pauseCommand.removeTarget(nil)
-        center.togglePlayPauseCommand.removeTarget(nil)
-        center.nextTrackCommand.removeTarget(nil)
-        center.previousTrackCommand.removeTarget(nil)
-        center.changePlaybackPositionCommand.removeTarget(nil)
+        if let center = nowPlayingSession?.remoteCommandCenter {
+            center.playCommand.removeTarget(nil)
+            center.pauseCommand.removeTarget(nil)
+            center.togglePlayPauseCommand.removeTarget(nil)
+            center.nextTrackCommand.removeTarget(nil)
+            center.previousTrackCommand.removeTarget(nil)
+            center.changePlaybackPositionCommand.removeTarget(nil)
+        }
+        nowPlayingSession = nil
         #endif
     }
 
@@ -404,46 +436,44 @@ public final class AudioPlaybackController {
         if let duration = track.duration, duration > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = duration
         }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        updateNowPlayingPlaybackState()
+        let center = ensureNowPlayingSession().nowPlayingInfoCenter
+        center.nowPlayingInfo = info
+        center.playbackState = isPlaying ? .playing : .paused
         loadArtwork(for: track)
         #endif
     }
 
     private func updateNowPlayingElapsed() {
         #if canImport(MediaPlayer)
-        guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
+        guard let center = nowPlayingSession?.nowPlayingInfoCenter,
+              var info = center.nowPlayingInfo else { return }
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         if duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = duration }
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        center.nowPlayingInfo = info
         #endif
     }
 
+    /// On tvOS (and macOS) the Now Playing surface only appears when the app
+    /// reports its `playbackState`; unlike iOS, tvOS does NOT infer it from the
+    /// audio session. Drive it on the session's info center on every play/pause.
     private func updateNowPlayingPlaybackRate() {
         #if canImport(MediaPlayer)
-        guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
+        guard let center = nowPlayingSession?.nowPlayingInfoCenter,
+              var info = center.nowPlayingInfo else { return }
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        updateNowPlayingPlaybackState()
-        #endif
-    }
-
-    /// On tvOS (and macOS) the system Now Playing surface only appears when the
-    /// app explicitly reports its `playbackState`. Unlike iOS, tvOS does NOT
-    /// infer it from the audio session, so without this the Control Center Now
-    /// Playing card never shows even though `nowPlayingInfo` is populated.
-    private func updateNowPlayingPlaybackState() {
-        #if canImport(MediaPlayer)
-        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
+        center.nowPlayingInfo = info
+        center.playbackState = isPlaying ? .playing : .paused
         #endif
     }
 
     private func clearNowPlaying() {
         #if canImport(MediaPlayer)
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-        MPNowPlayingInfoCenter.default().playbackState = .stopped
+        if let center = nowPlayingSession?.nowPlayingInfoCenter {
+            center.nowPlayingInfo = nil
+            center.playbackState = .stopped
+        }
         #endif
     }
 
@@ -456,11 +486,12 @@ public final class AudioPlaybackController {
             guard let (data, _) = try? await URLSession.shared.data(from: url),
                   let image = UIImage(data: data) else { return }
             await MainActor.run {
-                guard let self, self.currentTrack?.id == trackID else { return }
+                guard let self, self.currentTrack?.id == trackID,
+                      let center = self.nowPlayingSession?.nowPlayingInfoCenter else { return }
                 let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-                var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+                var info = center.nowPlayingInfo ?? [:]
                 info[MPMediaItemPropertyArtwork] = artwork
-                MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+                center.nowPlayingInfo = info
             }
         }
         #endif

@@ -171,9 +171,7 @@ public struct JellyfinClient: Sendable {
             queryItems: [URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,MediaStreams,MediaSources,ProviderIds,Trickplay,Genres,People,Studios,Tags,Taglines")],
             headers: authHeaders
         )
-        DLog.mark("JFclient.item PRE-decode id=\(id)")
         let result = try await interactiveHTTP.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)
-        DLog.mark("JFclient.item POST-decode id=\(id)")
         return result
     }
 

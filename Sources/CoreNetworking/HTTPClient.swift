@@ -46,20 +46,13 @@ public struct URLSessionHTTPClient: HTTPClient {
 
         let data: Data
         let response: URLResponse
-        let _dlogStart = Date()
-        let _dlogURL = request.url?.absoluteString ?? baseURL.absoluteString
-        DLog.mark("HTTP → \(endpoint.method.rawValue) \(_dlogURL)")
         do {
             (data, response) = try await session.data(for: request)
-            DLog.mark(String(format: "HTTP ✓ %.0fms %@", Date().timeIntervalSince(_dlogStart) * 1000, _dlogURL))
         } catch let urlError as URLError {
-            DLog.mark(String(format: "HTTP ✗ %.0fms %@ err=%@", Date().timeIntervalSince(_dlogStart) * 1000, _dlogURL, "\(urlError.code.rawValue)"))
             throw Self.map(urlError)
         } catch is CancellationError {
-            DLog.mark(String(format: "HTTP ⊘cancel %.0fms %@", Date().timeIntervalSince(_dlogStart) * 1000, _dlogURL))
             throw AppError.cancelled
         } catch {
-            DLog.mark(String(format: "HTTP ✗ %.0fms %@ err=%@", Date().timeIntervalSince(_dlogStart) * 1000, _dlogURL, "\(error)"))
             throw AppError.serverUnreachable
         }
 

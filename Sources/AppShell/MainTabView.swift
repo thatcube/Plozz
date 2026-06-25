@@ -267,12 +267,10 @@ private func makePlayerViewModel(
     captionSettings: CaptionSettings,
     scrobbler: any TraktScrobbling
 ) -> PlayerViewModel {
-    plozzTrace("makePlayerViewModel: id=\(request.item.id) title=\(request.item.title) kind=\(request.item.kind) ytTrailerID=\(request.item.youTubeTrailerVideoID ?? "nil") sourceAccountID=\(request.item.sourceAccountID ?? "nil")")
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
         let onlineTrailerResolver = ItemDetailViewModel.defaultOnlineTrailerResolver
         let engineFactory = HybridPlayback.engineFactory()
-        plozzTrace("makePlayerViewModel: routing to YouTubeTrailerProvider videoID=\(videoID)")
         return PlayerViewModel(
             provider: YouTubeTrailerProvider(
                 item: trailerItem,
@@ -355,7 +353,6 @@ private struct HomeTab: View {
                 )
             }
             .navigationDestination(for: MediaItem.self) { item in
-                let _ = DLog.mark("navDest MediaItem(A) id=\(item.id) acct=\(item.sourceAccountID ?? "nil")")
                 ItemDetailView(
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(item.sourceAccountID, in: accounts),
@@ -561,7 +558,6 @@ private struct SearchTab: View {
                 onSelect: { open($0) }
             )
             .navigationDestination(for: MediaItem.self) { item in
-                let _ = DLog.mark("navDest MediaItem(B) id=\(item.id) acct=\(item.sourceAccountID ?? "nil")")
                 ItemDetailView(
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(item.sourceAccountID, in: accounts),

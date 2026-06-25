@@ -174,7 +174,6 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     }
 
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {
-        plozzTrace("MPV.load: start (startPosition=\(startPosition))")
         status = .loading
         teardownClient()
 
@@ -192,7 +191,6 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             fail(.unknown("mpv: failed to create player context"))
             return
         }
-        plozzTrace("MPV.load: client.create OK")
 
         client.requestLogMessages("no")
         let hdrMode = MPVHDR.mode(from: request.sourceMetadata?.video)
@@ -209,9 +207,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         client.setOptionString("video-rotate", "no")
 
         // Pick surface colorimetry from source metadata.
-        plozzTrace("MPV.load: hdrMode=\(hdrMode); configuring metalLayer")
         metalLayer.configure(for: hdrMode)
-        plozzTrace("MPV.load: metalLayer.configure done")
         client.setOptionString("target-colorspace-hint", "yes")
         if let trc = MPVHDR.mpvTargetTRC(for: hdrMode) {
             client.setOptionString("target-trc", trc)
@@ -259,19 +255,13 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         // Instead we attach the audio with the `audio-add` command once the video
         // file has loaded (see `attachExternalAudioIfNeeded`), where the URL is
         // passed as a single atomic argv entry with no separator parsing.
-        if request.externalAudioURL != nil {
-            plozzTrace("MPV.load: external audio present; will attach via audio-add on fileLoaded")
-        }
 
-        plozzTrace("MPV.load: waiting for render surface readiness")
         guard await waitForRenderableSurface() else {
             teardownClient()
             fail(.unknown("mpv: render surface was not ready in time"))
             return
         }
-        plozzTrace("MPV.load: render surface ready (window + drawable + device)")
 
-        plozzTrace("MPV.load: calling client.initialize() NOW")
 
         guard client.initialize() >= 0 else {
             teardownClient()
@@ -287,14 +277,11 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         client.observeDouble(MPVProperty.duration)
         client.observeFlag(MPVProperty.pause)
         client.observeFlag(MPVProperty.eofReached)
-        plozzTrace("MPV.load: client.initialize OK; callbacks+observers set; applying display criteria")
 
         // Apply the HDR display switch now (the view is usually already in a
         // window during playback); otherwise it lands via `onWindowChange`.
         applyDisplayCriteriaIfPossible()
-        plozzTrace("MPV.load: applyDisplayCriteriaIfPossible done; updateHDRStatus")
         updateHDRStatus(mode: hdrMode)
-        plozzTrace("MPV.load: updateHDRStatus done; issuing loadfile")
 
         // Resume via a per-file `start=` option so playback opens at the right
         // spot without a separate post-load seek.
@@ -304,7 +291,6 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             args.append("start=\(Int(startPosition))")
         }
         client.command(args)
-        plozzTrace("MPV.load: loadfile command issued; load() returning")
     }
 
     public func play() {
@@ -519,10 +505,8 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
     public func makeVideoOutputView() -> UIView {
         if let outputView {
-            plozzTrace("MPV.makeVideoOutputView: returning CACHED view")
             return outputView
         }
-        plozzTrace("MPV.makeVideoOutputView: creating NEW MPVRenderView")
         let view = MPVRenderView(metalLayer: metalLayer)
         view.onWindowChange = { [weak self] window in
             guard let self else { return }
@@ -574,11 +558,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     private func attachExternalAudioIfNeeded() {
         guard !didAttachExternalAudio, let audioURL = request?.externalAudioURL else { return }
         didAttachExternalAudio = true
-        plozzTrace("MPV.fileLoaded: attaching external audio via audio-add")
-        let rc = client.command(["audio-add", audioURL.absoluteString, "select"])
-        if rc < 0 {
-            plozzTrace("MPV.fileLoaded: audio-add FAILED rc=\(rc)")
-        }
+        _ = client.command(["audio-add", audioURL.absoluteString, "select"])
     }
 
     private func handleProperty(_ name: String) {

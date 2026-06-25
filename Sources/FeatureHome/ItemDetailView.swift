@@ -87,7 +87,7 @@ public struct ItemDetailView: View {
         // still fetch the full detail AND its children (seasons/episodes). Skipping
         // it for seeded opens stranded series pages with no seasons/episodes/Play
         // button. load() guards against flashing `.loading` over a seeded hero.
-        .task { DLog.mark("ItemDetailView .task fired"); await viewModel.load() }
+        .task { await viewModel.load() }
         .onDisappear { viewModel.suspendEnrichment() }
         .onAppear { viewModel.resumeEnrichmentIfNeeded() }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in

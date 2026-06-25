@@ -190,9 +190,6 @@ public final class ItemDetailViewModel {
     }
 
     public func load() async {
-        let _dlogHB = DLog.startHeartbeat()
-        DLog.mark("LOAD enter id=\(itemID) acct=\(sourceAccountID ?? "nil") seeded=\(state.value != nil)")
-        defer { _dlogHB.cancel(); DLog.setPhase("idle"); DLog.mark("LOAD exit id=\(itemID)") }
         alternateSourceEnrichmentTask?.cancel()
         alternateSourceEnrichmentTask = nil
         enrichmentTask?.cancel()
@@ -215,20 +212,15 @@ public final class ItemDetailViewModel {
         snapshotRestoreTask = Task { [weak self] in
             guard let snapshot = await restoreCache.snapshot(for: restoreKey) else { return }
             guard let self, !Task.isCancelled else { return }
-            DLog.mark("snapshot restore landed seeded=\(self.state.value != nil) fresh=\(self.hasPaintedFreshDetail)")
             self.applySnapshotIfNotStale(snapshot)
         }
 
         // Cold open (no seeded hero) shows a spinner immediately instead of blank.
         if state.value == nil { state = .loading }
         do {
-            DLog.setPhase("provider.item")
             var fetched = try await provider.item(id: itemID)
-            DLog.mark("provider.item done kind=\(fetched.kind)")
             try Task.checkCancellation()
-            DLog.setPhase("redirectSeasonToSeries")
             fetched = await redirectingSeasonToSeries(fetched)
-            DLog.mark("redirect done")
             try Task.checkCancellation()
             captureSeriesContext(from: fetched)
             // Immutable snapshot so the concurrent async-lets below capture a
@@ -265,7 +257,6 @@ public final class ItemDetailViewModel {
                 let seededChildren = state.value?.children ?? []
                 state = .loaded(Detail(item: taggedItem, children: seededChildren))
                 hasPaintedFreshDetail = true
-                DLog.mark("FIRST PAINT (container) id=\(item.id)")
                 seedSources(from: taggedItem)
                 // Off-critical-path enrichment (trailers, ratings, cross-server
                 // discovery, alternate sources) runs as a CANCELLABLE unit that
@@ -275,9 +266,7 @@ public final class ItemDetailViewModel {
                 startEnrichment(for: item)
                 // Children fill in off the critical path of first paint; merge them
                 // in (same item identity ⇒ no hero flicker) when they arrive.
-                DLog.setPhase("provider.children")
                 let fetchedChildren = (try? await provider.children(of: item.id)) ?? []
-                DLog.mark("provider.children done count=\(fetchedChildren.count)")
                 try Task.checkCancellation()
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
                 persistSnapshot()
@@ -287,7 +276,6 @@ public final class ItemDetailViewModel {
                 // critical path of first paint.
                 state = .loaded(Detail(item: taggedItem, children: []))
                 hasPaintedFreshDetail = true
-                DLog.mark("FIRST PAINT (leaf) id=\(item.id)")
                 seedSources(from: taggedItem)
                 persistSnapshot()
                 // See container branch: cancellable, non-awaited enrichment so a
@@ -366,7 +354,6 @@ public final class ItemDetailViewModel {
             let token = await EnrichmentScheduler.shared.bumpGeneration()
             guard let self, !Task.isCancelled else { return }
             self.enrichmentGeneration = token
-            DLog.mark("ENRICH start gen=\(token) id=\(item.id)")
             self.startAlternateSourceEnrichment(primaryID: item.id)
             self.startCrossServerDiscovery(for: taggedItem)
             await self.runTrailersAndRatings(for: item)
@@ -383,7 +370,6 @@ public final class ItemDetailViewModel {
         _ = await ratingsDone
         guard !Task.isCancelled else { return }
         enrichmentComplete = true
-        DLog.mark("trailers+ratings done id=\(item.id)")
     }
 
     /// Cancels ALL off-critical-path enrichment (trailers, ratings, cross-server
@@ -392,7 +378,6 @@ public final class ItemDetailViewModel {
     /// it cannot keep occupying the cooperative thread pool and starve the NEXT
     /// page's `provider.item` (the multi-second blank-detail hang).
     public func suspendEnrichment() {
-        DLog.mark("SUSPEND enrichment gen=\(enrichmentGeneration)")
         enrichmentTask?.cancel(); enrichmentTask = nil
         crossServerDiscoveryTask?.cancel(); crossServerDiscoveryTask = nil
         alternateSourceEnrichmentTask?.cancel(); alternateSourceEnrichmentTask = nil

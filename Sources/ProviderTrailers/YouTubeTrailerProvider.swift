@@ -157,16 +157,13 @@ public struct YouTubeTrailerProvider: MediaProvider {
     /// replacement videos when the primary is unavailable. `allowAdaptive` gates
     /// the higher-resolution separate-track path (off for the safe/recovery pass).
     private func resolvePlayback(allowAdaptive: Bool) async throws -> PlaybackRequest {
-        plozzTrace("YTTrailer.playbackInfo: primary videoID=\(videoID) methods=\(methods) adaptive=\(allowAdaptive)")
         // Try the primary (server- or search-resolved) video first.
         let primaryError: Error
         do {
             let stream = try await resolveTrailerStream(forVideoID: videoID, allowAdaptive: allowAdaptive)
-            plozzTrace("YTTrailer.playbackInfo: primary RESOLVED res=\(stream.resolution ?? -1) adaptive=\(stream.isAdaptive)")
             return makeRequest(from: stream)
         } catch {
             primaryError = error
-            plozzTrace("YTTrailer.playbackInfo: primary FAILED error=\(String(reflecting: error))")
         }
 
         // The primary video couldn't be played — most often a stale server
@@ -174,9 +171,7 @@ public struct YouTubeTrailerProvider: MediaProvider {
         // private/removed. Best-effort: search for a replacement trailer for the
         // same title and play the first one that resolves.
         for altID in await alternatives?() ?? [] where altID != videoID {
-            plozzTrace("YTTrailer.playbackInfo: trying alternative videoID=\(altID)")
             if let stream = try? await resolveTrailerStream(forVideoID: altID, allowAdaptive: allowAdaptive) {
-                plozzTrace("YTTrailer.playbackInfo: alternative RESOLVED \(altID) res=\(stream.resolution ?? -1)")
                 return makeRequest(from: stream)
             }
         }
@@ -185,14 +180,11 @@ public struct YouTubeTrailerProvider: MediaProvider {
         // "something went wrong, try again": an unavailable video won't recover on
         // retry.
         if primaryError is TrailerVideoUnavailable {
-            plozzTrace("YTTrailer.playbackInfo: no playable trailer -> throwing AppError.notFound (primary unavailable)")
             throw AppError.notFound
         }
         if let appError = primaryError as? AppError {
-            plozzTrace("YTTrailer.playbackInfo: no playable trailer -> rethrowing primary AppError=\(appError)")
             throw appError
         }
-        plozzTrace("YTTrailer.playbackInfo: no playable trailer -> throwing AppError.unknown(trailer-extract)")
         throw AppError.unknown("trailer-extract")
     }
 
@@ -251,14 +243,12 @@ public struct YouTubeTrailerProvider: MediaProvider {
     /// shares the same video) and self-heals to this stream if it ever fails.
     private static func isPlayable(videoID id: String, methods: [YouTube.ExtractionMethod]) async -> Bool {
         guard let stream = try? await resolveTrailerStream(forVideoID: id, methods: methods, allowAdaptive: false) else {
-            plozzTrace("YTTrailer.isPlayable: \(id) did not resolve")
             return false
         }
         // Extraction succeeding isn't enough — the resolved URL must actually
         // serve media bytes. A YouTube HLS manifest can load (HTTP 200) while its
         // segments 403, so confirm the chosen stream is reachable.
         let reachable = await isStreamReachable(stream.videoURL)
-        plozzTrace("YTTrailer.isPlayable: \(id) reachable=\(reachable)")
         return reachable
     }
 
@@ -304,19 +294,15 @@ public struct YouTubeTrailerProvider: MediaProvider {
         let streams: [YouTubeKit.Stream]
         do {
             streams = try await StreamCache.shared.streams(for: id, methods: methods)
-            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: streams count=\(streams.count)")
         } catch let ytError as YouTubeKitError where Self.isUnavailable(ytError) {
-            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: UNAVAILABLE ytError=\(ytError)")
             throw TrailerVideoUnavailable()
         } catch {
-            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: streams threw non-availability error=\(String(reflecting: error)); trying HLS")
             streams = []
         }
 
         // 1-3) Adaptive hi-res pair / progressive muxed / any native single.
         let candidates = streams.map(TrailerStreamCandidate.init)
         if let chosen = TrailerStreamSelector.selectTrailerStream(from: candidates, allowAdaptive: allowAdaptive) {
-            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: selected res=\(chosen.resolution ?? -1) adaptive=\(chosen.isAdaptive)")
             return chosen
         }
 
@@ -327,11 +313,9 @@ public struct YouTubeTrailerProvider: MediaProvider {
             (try? await YouTube(videoID: id, methods: methods).livestreams)?.first?.url
         }
         if let hls = livestreamURL {
-            plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: no progressive/adaptive; using HLS manifest")
             return TrailerStream(videoURL: hls)
         }
 
-        plozzTrace("YTTrailer.resolveTrailerStream[\(id)]: no playable stream -> notFound")
         throw AppError.notFound
     }
 

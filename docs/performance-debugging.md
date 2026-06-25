@@ -53,18 +53,17 @@ Notes:
 
 ---
 
-## 2. On-device instrumentation: `DLog` (temporary, by design)
+## 2. On-device instrumentation (temporary, by design)
 
-`Sources/CoreModels/DLog.swift` is a **temporary** file-logger used only while
-chasing a perf bug. It writes to the app container so you can pull it over USB/Wi-Fi
-with `devicectl`. **It must be stripped before merging to `main`** — it is a
-diagnostic scaffold, not a feature. (Search for `DLog.` and `startWatchdog` and
-remove them; keep only the real fixes.)
+While chasing a perf bug it is worth adding a **temporary** file-logger that
+writes to the app container so you can pull it over USB/Wi-Fi with `devicectl`.
+Any such scaffold **must be stripped before merging to `main`** — it is a
+diagnostic aid, not a feature. Keep only the real fixes it helped you find.
 
-What it provides:
-- `DLog.mark("...")` — timestamped event marks (e.g. `LOAD exit`, `ENRICH start`).
-- `DLog.installCrashHandler()` — catches signals so a jetsam/crash leaves a trail.
-- `DLog.startWatchdog()` — the heavy hitter (see below).
+What such a logger should provide:
+- Timestamped event marks (e.g. `LOAD exit`, `ENRICH start`).
+- A crash/signal handler so a jetsam/crash leaves a trail.
+- A watchdog + vitals sampler (see below) — the heavy hitter.
 
 ### The watchdog + vitals are the single most useful tool
 

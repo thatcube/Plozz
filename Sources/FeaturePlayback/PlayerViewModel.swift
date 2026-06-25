@@ -235,10 +235,8 @@ public final class PlayerViewModel {
     /// tearing the old engine down and re-pointing the UI at the new surface.
     private func switchEngine(to kind: PlaybackEngineKind) {
         guard kind != currentEngineKind else {
-            plozzTrace("switchEngine: no-op, already \(kind)")
             return
         }
-        plozzTrace("switchEngine: \(currentEngineKind) -> \(kind); bumping engineToken (forces host rebuild)")
         engine.stop()
         engine = makeEngine(kind)
         currentEngineKind = kind
@@ -252,10 +250,8 @@ public final class PlayerViewModel {
         guard hasCommittedInitialEngine else {
             hasCommittedInitialEngine = true
             guard kind != currentEngineKind else {
-                plozzTrace("initial engine commit: already \(kind); no host rebuild")
                 return
             }
-            plozzTrace("initial engine commit: \(currentEngineKind) -> \(kind); no token bump")
             engine.stop()
             engine = makeEngine(kind)
             currentEngineKind = kind
@@ -329,7 +325,6 @@ public final class PlayerViewModel {
             // can mux two bare URLs, so force it there — AVPlayer would otherwise
             // play the video-only stream silently.
             if request.externalAudioURL != nil, engineFactory.hybridAvailable {
-                plozzTrace("startPlayback: request has external audio; forcing hybrid engine")
                 kind = .hybrid
             }
 
@@ -350,21 +345,17 @@ public final class PlayerViewModel {
                     preferredLanguage: captionSettings.resolvedPreferredLanguage)?.id
             }
 
-            plozzTrace("startPlayback: routed initial engineKind=\(kind) (transcoding=\(request.isTranscoding))")
             try Task.checkCancellation()
             await playResolved(request, engineKind: kind, startPosition: startPosition)
 
             // Best-effort, never blocking play(): (if enabled) fetch a missing
             // subtitle in the preferred language.
             startAutoSubtitleDownloadIfNeeded(request: request)        } catch is CancellationError {
-            plozzTrace("startPlayback: cancelled before engine bring-up (itemID=\(itemID))")
             // Leave `phase` as `.loading`; the view is dismissing.
             return
         } catch let error as AppError {
-            plozzTrace("startPlayback: playbackInfo threw AppError=\(error) (itemID=\(itemID))")
             phase = .failed(error)
         } catch {
-            plozzTrace("startPlayback: playbackInfo threw NON-AppError=\(String(reflecting: error)) (itemID=\(itemID))")
             phase = .failed(.unknown(""))
         }
     }
@@ -378,7 +369,6 @@ public final class PlayerViewModel {
         engineKind: PlaybackEngineKind,
         startPosition: TimeInterval
     ) async {
-        plozzTrace("playResolved: engineKind=\(engineKind) start=\(startPosition) (current=\(currentEngineKind))")
         commitEngineForPlayback(engineKind)
         // Publish the dynamic range the display is being driven to *before*
         // engine.load() requests the actual HDMI mode switch, so the view can
@@ -397,16 +387,12 @@ public final class PlayerViewModel {
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)
         await Self.yieldToRunLoop()
-        plozzTrace("playResolved: post-swap runloop turn reached; calling engine.load()")
         await engine.load(request: request, startPosition: startPosition)
-        plozzTrace("playResolved: engine.load() RETURNED; setting phase=.ready")
         phase = .ready
         // Publish diagnostics after the engine load attempt returns, so the
         // diagnostics sampler doesn't churn SwiftUI layout during mpv init.
         diagnosticsToken = UUID()
-        plozzTrace("playResolved: phase=.ready set; about to report(.start)")
         await report(event: .start, isPaused: false)
-        plozzTrace("playResolved: report(.start) done")
 
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
@@ -479,7 +465,6 @@ public final class PlayerViewModel {
     /// a server transcode (once); if even that fails, surface the error. Each step
     /// fires at most once so the chain can never loop.
     private func handleEngineFailure(_ error: AppError) async {
-        plozzTrace("handleEngineFailure: \(error) (current=\(currentEngineKind), triedAlternate=\(hasTriedAlternateEngine))")
         guard let request else {
             phase = .failed(error)
             return

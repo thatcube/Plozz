@@ -37,12 +37,10 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
     let themePalette: ThemePaletteBox
 
     func makeUIViewController(context: Context) -> PlayerInputViewController {
-        plozzTrace("CustomPlayerContainer.makeUIViewController: ENTER (engine=\(type(of: engine)))")
         let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
         controller.configureScrubPreview(scrubPreview)
         controller.attachVideoSurface()
         controller.attachControls(themePalette: themePalette)
-        plozzTrace("CustomPlayerContainer.makeUIViewController: EXIT")
         return controller
     }
 
@@ -219,14 +217,11 @@ final class PlayerInputViewController: UIViewController {
     /// Hosts the engine's bare video surface as the backmost, non-interactive
     /// layer. The engine keeps it fed across reloads, so we add it once.
     func attachVideoSurface() {
-        plozzTrace("attachVideoSurface: requesting engine.makeVideoOutputView()")
         let surface = engine.makeVideoOutputView()
-        plozzTrace("attachVideoSurface: inserting surface \(type(of: surface)) at index 0")
         surface.frame = view.bounds
         surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         surface.isUserInteractionEnabled = false
         view.insertSubview(surface, at: 0)
-        plozzTrace("attachVideoSurface: done")
     }
 
     /// Hosts the combined transport + focusable control bar. It stays attached

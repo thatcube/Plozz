@@ -168,14 +168,9 @@ public final class ArtworkImageCache: @unchecked Sendable {
     }
 
     private static func downloadData(_ url: URL) async -> Data? {
-        let t0 = Date()
         guard let (data, response) = try? await ArtworkSession.shared.data(from: url) else {
-            let ms = Int(Date().timeIntervalSince(t0) * 1000)
-            if ms > 1500 { DLog.mark("ART ✗ \(ms)ms \(url.host ?? "?")\(url.path)") }
             return nil
         }
-        let ms = Int(Date().timeIntervalSince(t0) * 1000)
-        if ms > 1500 { DLog.mark("ART ✓ \(ms)ms \(url.host ?? "?")\(url.path)") }
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return nil }
         return data
     }
@@ -187,18 +182,9 @@ public final class ArtworkImageCache: @unchecked Sendable {
     /// cooperative pool so it can't starve unrelated `async` continuations.
     private static func decodeImageOffPool(from data: Data, variant: ArtworkImageVariant, background: Bool) async -> UIImage? {
         let queue = background ? decodeQueueBG : decodeQueueFG
-        let enqueuedAt = Date()
         return await withCheckedContinuation { continuation in
             queue.addOperation {
-                let waited = Int(Date().timeIntervalSince(enqueuedAt) * 1000)
-                let t0 = Date()
                 let img = decodeImage(from: data, variant: variant)
-                if !background {
-                    let dec = Int(Date().timeIntervalSince(t0) * 1000)
-                    if waited > 300 || dec > 300 {
-                        DLog.mark("DECODE fg wait=\(waited)ms decode=\(dec)ms \(variant)")
-                    }
-                }
                 continuation.resume(returning: img)
             }
         }

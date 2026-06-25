@@ -85,14 +85,8 @@ public actor TMDbArtworkResolver {
     /// lookup. Foreground lookups deliberately bypass this limiter.
     private static let backgroundLimiter = ConcurrencyLimiter(limit: 2)
 
-    /// Timed wrapper around the dedicated metadata session. Logs any lookup that
-    /// exceeds 1s so a slow TMDb resolution shows up in the on-device trace.
+    /// Wrapper around the dedicated metadata session for TMDb lookups.
     private static func tmdbData(_ request: URLRequest) async -> (Data, URLResponse)? {
-        let t0 = Date()
-        defer {
-            let ms = Int(Date().timeIntervalSince(t0) * 1000)
-            if ms > 1000 { DLog.mark("TMDB \(ms)ms \(request.url?.path ?? "?")") }
-        }
         return try? await metadataSession.data(for: request)
     }
 

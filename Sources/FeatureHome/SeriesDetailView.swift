@@ -110,9 +110,6 @@ struct SeriesDetailView: View {
         _heroItem = State(initialValue: initialEpisode ?? initialSeason ?? series)
     }
 
-    /// Whether the page was opened targeting a specific episode.
-    private var isTargetingEpisode: Bool { initialEpisode != nil }
-
     /// Scroll anchor for the hero, used to keep the page pinned to the top while
     /// initial focus lands on the bottom-anchored Play button.
     private static let topAnchorID = "series-hero-top"
@@ -317,8 +314,16 @@ struct SeriesDetailView: View {
     private var episodeRail: some View {
         let episodes = currentEpisodes
         // The episode the hero's Play button acts on — what focus should land on
-        // when moving down into the rail, and where the rail is pre-scrolled.
-        let target = isTargetingEpisode ? initialEpisode?.id : SeriesResume.nextUp(in: episodes)?.id
+        // when moving down into the rail, and where the rail is pre-scrolled. We
+        // derive it from `playTarget` (the fronted episode, else the season's
+        // next-up) rather than the immutable opened `initialEpisode`, so that an
+        // IN-PLACE cross-server switch re-points the rail to the *preserved*
+        // episode on the NEW server — matched by number, with a new per-server id
+        // — instead of the old server's id (which isn't in this pool). On a normal
+        // open this still resolves to the originally-targeted episode / next-up, so
+        // behaviour is unchanged. MediaRowView re-scrolls via .onChange(of:
+        // defaultFocusID) once that id appears in the loaded pool.
+        let target = playTarget?.id
         return MediaRowView(
             title: railTitle,
             items: episodes,

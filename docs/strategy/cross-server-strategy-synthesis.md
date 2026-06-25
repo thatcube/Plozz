@@ -1140,6 +1140,48 @@ boundary Discover exists to draw. So Seerr is a **peer subsystem** (Trakt-shaped
    later phase)?
 
 
+## 13. Decisions LOCKED by Brandon (2026-06-25)
+
+*These are committed product decisions — implementation branches build to these, not to the
+open-question menus above.*
+
+### 13.1 Watch-tracking
+- **Read-authority = servers (Option A).** Servers remain the single read-truth for what the UI
+  shows; external trackers (Trakt/AniList/MAL/Simkl) are **write-only mirrors**. Per-field:
+  resume/scrubber = servers only; binary watched = servers primary, trackers **not read back**.
+  Ship an **optional, default-off** "trust external watched" union for power users.
+- **Build order = OUTBOX FIRST.** Land the durable offline `WatchMutationOutbox` +
+  stale-write suppression + reconciliation **before** adding any new tracker — it fixes silent
+  cross-server drift with zero new integrations. Then registry refactor → Simkl → AniList (+offline
+  anime ID/episode mapper) → MAL.
+- **Double-scrobble (Trakt vs a server-side Trakt plugin) = UNDER RESEARCH.** Brandon's hard
+  constraint: **never silently drop a watch**; a harmless duplicate is tolerable. We are explicitly
+  *not* defaulting app-side Trakt OFF on unreliable plugin detection. A focused 3-branch pass is
+  evaluating "write-then-verify-then-dedupe" vs "detect-then-suppress" and which way to fail when
+  uncertain (fail toward writing). Decision pending that synthesis.
+
+### 13.2 Search & Discover
+- **One unified global Search.** A single app-wide Search is the only true search surface ("find
+  anything" across all servers, and — when a Seerr is configured — requestable titles too).
+- **Browse/libraries use FILTERS, not a second search.** No redundant search box inside Browse;
+  in-library narrowing is filter chips (Genre / 4K / A–Z jump). This resolves the "two searches"
+  confusion — there is exactly one search in the app.
+- **Owned-vs-requestable = Apple-TV-style GROUPING, no badge.** Search results split into labeled
+  sections **"In your library"** (Play) and **"Available to request"** (Request). Ownership is
+  signalled purely by which section a poster sits in — artwork stays clean, **no per-poster badge,
+  no dimming**. The focused action button reads **Play** vs **Request** consistently from grid →
+  detail. (Mirrors the tvOS Apple TV app's "in your library / available" pattern.)
+- **Discover surfaces requestable rows** (Trending/Popular/Upcoming/Genres), conditional on a Seerr
+  being configured (appears like the Music tab). Finding a *specific* thing to request uses the one
+  global Search, not a separate Discover search box.
+- **Tab bar stays small (target 3–4):** Home · Browse · Search · Settings, with **Music** and
+  **Discover** appearing only when relevant. Server is never a tab/axis.
+- Unchanged from §12: local `MediaItemIdentity` (TMDB/IMDb) is the sole arbiter of
+  owned-vs-requestable; Seerr is a **peer subsystem, not a `MediaProvider`**; requests close their
+  loop as an **owned** item in Home's "Recently Added"; config is Day-2 in Settings; multi-instance
+  merges by TMDB id with routing only at request time.
+
+
 ---
 
 *Full individual proposals (with code citations, trade-off tables, and per-branch

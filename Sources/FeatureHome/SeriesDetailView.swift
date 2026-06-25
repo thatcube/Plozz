@@ -556,16 +556,16 @@ struct SeriesDetailView: View {
         return SeriesResume.nextUp(in: currentEpisodes)
     }
 
-    /// The Play button label for the series hero. The hero itself shows the SERIES
-    /// (its backdrop/overview) on a plain open, so without this the user is never
-    /// told which episode Play actually starts. When the fronted hero is the
-    /// series (not an episode) and the target episode carries numbers, append its
-    /// "S{n} E{m}" so the button reads e.g. "Play · S1 E1" / "Play · S3 E4". An
-    /// episode hero already shows "S{n} · E{m}" in its own subtitle, so there the
-    /// button stays the plain verb to avoid repeating it.
+    /// The Play button label. The button always targets `playTarget` (the focused
+    /// episode, else the season's next-up), so its label surfaces that episode's
+    /// "S{n} E{m}" — both on a plain series open (hero shows the SERIES, so the
+    /// button is the only place the target episode is named) AND as the user
+    /// focuses through the episode rail (so the button tracks the focused card,
+    /// e.g. "Play · S2 E5"). Falls back to the plain verb only when the target
+    /// genuinely lacks numbers or isn't an episode (e.g. a movie).
     private func heroPlayTitle(for target: MediaItem) -> String {
         let base = viewModel.playButtonTitle(for: target)
-        guard heroItem.kind != .episode, target.kind == .episode,
+        guard target.kind == .episode,
               let season = target.seasonNumber, let episode = target.episodeNumber
         else { return base }
         return "\(base) · S\(season) E\(episode)"

@@ -185,6 +185,7 @@ struct SeriesDetailView: View {
                         heroHeightFraction: 0.8,
                         backdropBottomExtensionFraction: 0.1,
                         spoilerSettings: spoilerSettings,
+                        subtitleOverride: heroSubtitleOverride,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
                         onPlay: playTarget.map { target in { onPlay(target.selectingVersion(effectivePlayVersionID)) } },
                         playProgress: playTarget?.resumeProgressFraction,
@@ -598,6 +599,28 @@ struct SeriesDetailView: View {
             selectedSeasonID: selectedSeasonID,
             selectedSeasonPool: currentEpisodes
         )
+    }
+
+    /// When the hero is presenting the *series itself* (a plain open, before any
+    /// episode is fronted), surface the next-up episode's "S{n} · E{m}" as the
+    /// hero subtitle so the season/episode is shown on arrival — matching the
+    /// episode-fronted entry paths (search / season / focused card), which already
+    /// show it via the episode's own subtitle. `nil` once an episode is fronted
+    /// (its subtitle then carries the numbers) or when no next-up is resolvable.
+    private var heroSubtitleOverride: String? {
+        guard heroItem.kind != .episode else { return nil }
+        guard let next = SeriesResume.nextUp(in: currentEpisodes) else { return nil }
+        let numbered = SeriesHeroNumbering.numberedHero(
+            next,
+            seasons: seasons,
+            loadedEpisodesBySeason: viewModel.seasonEpisodes,
+            selectedSeasonID: selectedSeasonID,
+            selectedSeasonPool: currentEpisodes
+        )
+        guard let season = numbered.seasonNumber, let episode = numbered.episodeNumber else {
+            return nil
+        }
+        return "S\(season) · E\(episode)"
     }
 
     /// The series' trailer action, shown only while the hero is presenting the

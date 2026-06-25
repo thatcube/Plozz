@@ -37,6 +37,12 @@ struct DetailHeroView: View {
     /// rail instead of completing high up the page.
     var backdropBottomExtensionFraction: CGFloat = 0
     let spoilerSettings: SpoilerSettings
+    /// Replaces the hero's own subtitle when set. Used by a TV-show hero that is
+    /// presenting the *series* (not a focused episode) to still surface the
+    /// next-up episode's "S{n} · E{m}" — so the season/episode is shown on every
+    /// entry path, including a plain series open, without swapping the series hero
+    /// out for an episode (which would drop the series art / Trailer button).
+    var subtitleOverride: String? = nil
     /// Title for the Play/Resume button, or `nil` to omit the button entirely
     /// (e.g. a season with no resolved episodes yet).
     let playTitle: String?
@@ -259,7 +265,7 @@ struct DetailHeroView: View {
             ) {
                 titleText(hideText: hideText)
             }
-            if let subtitle = item.subtitle, !isYearOnlySubtitle(subtitle) {
+            if let subtitle = subtitleOverride ?? item.subtitle, !isYearOnlySubtitle(subtitle) {
                 Text(subtitle)
                     .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(.secondary)

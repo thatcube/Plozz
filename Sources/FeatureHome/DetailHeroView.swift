@@ -87,6 +87,12 @@ struct DetailHeroView: View {
     /// can flip its colours to stay visible against the button's focused (white)
     /// vs unfocused (dark) background.
     @FocusState private var playButtonHasFocus: Bool
+    /// The last non-nil resume "… left" text seen for the current play target. The
+    /// Play button reserves the width of the resume form (▶ bar … left) using this
+    /// even after the item is marked Watched (which clears the live resume text),
+    /// so the button — and every button beside it — never shrinks/shifts on that
+    /// transition. Resets naturally when a new target supplies fresh resume text.
+    @State private var reservedResumeText: String?
     /// Whether the Refresh Metadata button currently holds focus. On tvOS 26 the
     /// focused glass button turns near-white, so the standard green success check
     /// washes out — when focused we switch it to a darker green that stays legible.
@@ -424,31 +430,46 @@ struct DetailHeroView: View {
     /// height; otherwise it's the plain `▶  Play/Resume`.
     @ViewBuilder
     private func playButton(title: String, action: @escaping () -> Void) -> some View {
-        // Whether a resume target with real progress exists. When it does, the
-        // button can flip between the wide "▶ [bar] … left" form and the plain
-        // "▶ Play" form (e.g. when the user marks the item Watched). Reserve the
-        // wider progress-form width in both states so that flip — and the whole
-        // action row beside it — never jumps. Width is otherwise natural (the
-        // remaining-time text varies, "5m" vs "2h 33m"), trimmed to the button's
-        // default padding rather than a fixed, over-wide frame.
-        let hasResume = (playProgress ?? 0) > 0 && (playProgress ?? 0) < 1 && playRemainingText != nil
-        let showProgress = hasResume && !item.isPlayed
+        // The plain "▶ Play" form must occupy the SAME width as the wider resume
+        // form ("▶ [bar] … left") so that flipping between them — e.g. when the
+        // user marks the item Watched, which clears the live resume text — never
+        // resizes Play or shifts the action row beside it. We size to a *latched*
+        // resume text (`reservedResumeText`) that survives the watched transition,
+        // rather than a fixed over-wide frame. With no resume target ever (a plain
+        // unwatched title) there's nothing to reserve and Play takes its natural,
+        // tight default width.
+        let liveResumeText = resumeText
+        let showProgress = liveResumeText != nil && !item.isPlayed
+        let sizingText = reservedResumeText ?? liveResumeText
         let button = Button(action: action) {
             ZStack {
-                if hasResume {
-                    playButtonLabel(showProgress: true, title: title).hidden()
+                if let sizingText {
+                    playResumeSizer(remaining: sizingText).hidden()
                 }
                 playButtonLabel(showProgress: showProgress, title: title)
             }
         }
         .modifier(HeroButtonStyle(prominent: true))
         .focused($playButtonHasFocus)
+        .onChange(of: liveResumeText) { _, new in
+            if let new { reservedResumeText = new }
+        }
+        .onAppear {
+            if let liveResumeText { reservedResumeText = liveResumeText }
+        }
 
         if let playButtonFocus {
             button.focused(playButtonFocus, equals: true)
         } else {
             button
         }
+    }
+
+    /// The live resume "… left" text when the item has a real partial position
+    /// (0 < progress < 1), else `nil`.
+    private var resumeText: String? {
+        guard let playRemainingText, let playProgress, playProgress > 0, playProgress < 1 else { return nil }
+        return playRemainingText
     }
 
     /// The Play button's inner label: either `▶  [progress bar]  … left` (resume
@@ -465,6 +486,18 @@ struct DetailHeroView: View {
                 Text(title)
                     .lineLimit(1)
             }
+        }
+    }
+
+    /// An invisible copy of the resume form used purely to reserve the Play
+    /// button's width. The progress capsule is a fixed width, so any progress
+    /// value sizes identically; only the variable "… left" text matters.
+    private func playResumeSizer(remaining: String) -> some View {
+        HStack(spacing: 16) {
+            Image(systemName: "play.fill")
+            resumeProgressCapsule(progress: 1)
+            Text(remaining)
+                .lineLimit(1)
         }
     }
 

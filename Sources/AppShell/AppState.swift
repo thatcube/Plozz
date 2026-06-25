@@ -703,6 +703,7 @@ public final class AppState {
     // MARK: Internals
 
     private func reloadAccounts() {
+        registry.invalidateCache()
         accounts = accountStore.loadAccounts()
         let known = Set(accounts.map(\.id))
         // The active set is the active profile's chosen subset, falling back to

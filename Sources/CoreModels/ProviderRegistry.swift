@@ -21,25 +21,62 @@ public final class ProviderRegistry: ProviderResolving, @unchecked Sendable {
     public typealias Factory = @Sendable (UserSession) -> any MediaProvider
 
     private var factories: [ProviderKind: Factory] = [:]
+    /// Memoized providers keyed by `server.id|userID|token`. Vending the *same*
+    /// provider instance for a session is essential, not just an optimization:
+    /// a provider owns long-lived connection state (e.g. Plex's resolved/cached
+    /// base URL). Rebuilding it on every `provider(for:)` call — which happens
+    /// constantly as SwiftUI reads `AppState`'s computed provider properties —
+    /// would re-run connection discovery (a burst of reachability probes) on
+    /// every screen open, accumulating sockets until the connection pool chokes.
+    private var cache: [String: any MediaProvider] = [:]
     private let lock = NSLock()
 
     public init() {}
 
-    /// Registers (or replaces) the factory for `kind`.
+    /// Registers (or replaces) the factory for `kind`. Clears any cached
+    /// providers of that kind so the new factory takes effect.
     public func register(_ kind: ProviderKind, factory: @escaping Factory) {
         lock.lock(); defer { lock.unlock() }
         factories[kind] = factory
+        cache.removeAll()
     }
 
     public func provider(for session: UserSession) throws -> any MediaProvider {
         let kind = session.server.provider
+        let identity = "\(session.server.id)|\(session.userID)"
+        let key = "\(identity)|\(session.accessToken)"
         lock.lock()
+        if let cached = cache[key] {
+            lock.unlock()
+            return cached
+        }
         let factory = factories[kind]
         lock.unlock()
         guard let factory else {
             throw AppError.unknown("No provider registered for \(kind.displayName)")
         }
-        return factory(session)
+        let provider = factory(session)
+        lock.lock()
+        // Another thread may have built it while we were unlocked.
+        if let existing = cache[key] {
+            lock.unlock()
+            return existing
+        }
+        // Evict any prior entry for the same server+user (e.g. a refreshed token)
+        // so the cache holds exactly one live provider per account.
+        for staleKey in cache.keys where staleKey.hasPrefix("\(identity)|") {
+            cache.removeValue(forKey: staleKey)
+        }
+        cache[key] = provider
+        lock.unlock()
+        return provider
+    }
+
+    /// Drops all memoized providers. Call when the signed-in account set changes
+    /// so removed accounts don't retain provider/connection state.
+    public func invalidateCache() {
+        lock.lock(); defer { lock.unlock() }
+        cache.removeAll()
     }
 }
 

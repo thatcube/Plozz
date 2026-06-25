@@ -194,7 +194,7 @@ struct SeriesDetailView: View {
                         versions: playVersions,
                         selectedVersionID: effectivePlayVersionID,
                         onSelectVersion: playVersions.count > 1 ? { versionOverride = $0 } : nil,
-                        sources: viewModel.sources,
+                        sources: distinctServerChoices,
                         selectedSourceAccountID: series.sourceAccountID,
                         onSelectSource: serverPickerAction,
                         fallbackTechnicalBadges: representativeTechnicalBadges,
@@ -569,6 +569,19 @@ struct SeriesDetailView: View {
     /// movie behaviour.
     private var playVersions: [MediaVersion] {
         playTarget?.versions ?? []
+    }
+
+    /// The server-picker list with same-account duplicates collapsed (one entry
+    /// per distinct account). Matches the movie/`ItemDetailView` behaviour so a
+    /// rare same-server duplicate series doesn't render two identical "Server"
+    /// rows in the picker.
+    private var distinctServerChoices: [MediaSourceRef] {
+        var seen = Set<String>()
+        var result: [MediaSourceRef] = []
+        for source in viewModel.sources where seen.insert(source.accountID).inserted {
+            result.append(source)
+        }
+        return result
     }
 
     /// The effective version id the Version section checkmarks and `Play` targets:

@@ -440,6 +440,48 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         return copy
     }
 
+    /// Builds the retargeted item the player should launch for the supplied
+    /// version pick. Centralised here (instead of being private to the view)
+    /// so the routing logic is unit-testable without dragging in SwiftUI.
+    ///
+    /// Routing rules (in priority order):
+    ///  1. **Version names its own backing item** (`sourceItemID` +
+    ///     `sourceAccountID`): always repoint to that item. If the matching
+    ///     `MediaSourceRef` is missing from `sources` (race / snapshot lag),
+    ///     synthesise a one-shot ref from the version itself — without this
+    ///     fallback the wrong file would silently play.
+    ///  2. **Active account has a source ref**: repoint to that server's ref,
+    ///     threading the version id through for true multi-version sources.
+    ///  3. **Otherwise** just record the version override on the existing item.
+    public static func retargetedForPlayback(
+        item: MediaItem,
+        sources: [MediaSourceRef],
+        activeAccountID: String?,
+        versionID: String?
+    ) -> MediaItem {
+        let version = versionID.flatMap { id in
+            sources.flatMap(\.versions).first(where: { $0.id == id })
+        }
+        if let version,
+           let backingID = version.sourceItemID,
+           let backingAccountID = version.sourceAccountID {
+            if let backingSource = sources.first(where: { $0.accountID == backingAccountID && $0.itemID == backingID }) {
+                return item.selectingSource(backingSource, versionID: nil)
+            }
+            let fallback = MediaSourceRef(
+                accountID: backingAccountID,
+                itemID: backingID,
+                versions: [version]
+            )
+            return item.selectingSource(fallback, versionID: nil)
+        }
+        if let activeAccountID,
+           let primary = sources.first(where: { $0.accountID == activeAccountID }) {
+            return item.selectingSource(primary, versionID: versionID)
+        }
+        return item.selectingVersion(versionID)
+    }
+
     /// A human-friendly subtitle line, e.g. `S1 · E3` or the production year.
     public var subtitle: String? {
         if let season = seasonNumber, let episode = episodeNumber {

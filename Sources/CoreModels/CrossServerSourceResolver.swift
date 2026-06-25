@@ -72,8 +72,12 @@ public enum CrossServerSourceResolver {
     /// - Parameters:
     ///   - primary: the loaded item the user is looking at; its `providerIDs`
     ///     drive the cross-server match and its `sourceAccountID` leads the picker.
-    ///   - otherAccountIDs: the *other* signed-in accounts to probe (the caller
-    ///     already excludes `primary.sourceAccountID`).
+    ///   - otherAccountIDs: every signed-in account to probe. **May include the
+    ///     primary's own account** — that's how same-server duplicate movie
+    ///     items (two Jellyfin items, one film) get grouped into one detail
+    ///     with a multi-entry version picker. Search hits that re-surface the
+    ///     primary's own `id` are filtered so the merger only sees genuine
+    ///     duplicates.
     ///   - search: issues one free-text search against a given account, returning
     ///     that server's (untagged) hits. The resolver tags them with the account.
     ///   - serverInfo: resolves an account id to its backend kind / friendly names
@@ -89,11 +93,20 @@ public enum CrossServerSourceResolver {
     ) async -> [MediaSourceRef] {
         let queries = searchQueries(for: primary)
         guard !queries.isEmpty, !otherAccountIDs.isEmpty else { return [] }
+        let primaryAccountID = primary.sourceAccountID
+        let primaryItemID = primary.id
 
         let hits: [MediaItem] = await withTaskGroup(of: [MediaItem].self) { group in
             for accountID in otherAccountIDs {
                 group.addTask {
                     var seenItemIDs = Set<String>()
+                    // The primary's own id is never a duplicate of itself —
+                    // filtering it out is what stops same-account discovery
+                    // from re-pulling in the very item the detail was loaded
+                    // from when probing the primary's own account.
+                    if accountID == primaryAccountID {
+                        seenItemIDs.insert(primaryItemID)
+                    }
                     var accountHits: [MediaItem] = []
                     // Each query widens recall; dedupe within the account so the
                     // raw and normalized passes don't double-count the same hit.

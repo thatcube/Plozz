@@ -180,8 +180,12 @@ schemes:
       config: Debug
     test:
       config: Debug
-      # Unit tests live in the Swift package; run them via the package scheme
-      # (`swift test` / `xcodebuild test -scheme Plozz-Package`).
+      # Unit tests live in the Swift package. Run them via the auto-generated
+      # per-module *Tests schemes that Xcode publishes for the local package
+      # (e.g. CoreModelsTests, ProviderJellyfinTests). `tools/run-tests.sh`
+      # wraps `xcodebuild test ... -destination 'platform=tvOS Simulator,...'`
+      # for the full set. `swift test` is unusable on macOS because the mpv
+      # xcframeworks are tvOS-only.
 
   # Compile-only gate for the otherwise-unlinked EngineMPV module.
   EngineMPVProbe:

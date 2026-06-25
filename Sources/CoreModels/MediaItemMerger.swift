@@ -187,19 +187,26 @@ public enum MediaItemMerger {
     /// Builds a ``MediaSourceRef`` describing the server a single (un-merged) item
     /// came from, used when an input item doesn't already carry its own
     /// `sources`. Returns `nil` when the item isn't tagged with an account.
+    ///
+    /// When the item has no intrinsic ``MediaItem/versions`` (the common
+    /// single-file case), the ref is seeded with **one synthesised** version so
+    /// that grouped same-account duplicates still produce a combinable version
+    /// list — without this the picker would see two `versions: []` entries and
+    /// silently show nothing.
     private static func selfSource(
         for item: MediaItem,
         serverInfo: (String) -> SourceServerInfo?
     ) -> MediaSourceRef? {
         guard let accountID = item.sourceAccountID else { return nil }
         let info = serverInfo(accountID)
+        let versions = item.versions.isEmpty ? [MediaVersion.synthesized(from: item)] : item.versions
         return MediaSourceRef(
             accountID: accountID,
             itemID: item.id,
             providerKind: info?.providerKind,
             serverName: info?.serverName,
             accountName: info?.accountName,
-            versions: item.versions,
+            versions: versions,
             resumePosition: item.resumePosition,
             playedPercentage: item.playedPercentage,
             isPlayed: item.isPlayed,

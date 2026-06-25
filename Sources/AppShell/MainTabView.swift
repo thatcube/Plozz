@@ -202,17 +202,22 @@ private func searchWithDeadline(
 private func crossServerSourceResolver(
     in accounts: [ResolvedAccount]
 ) -> (@Sendable (MediaItem) async -> [MediaSourceRef])? {
-    guard accounts.count > 1 else { return nil }
+    guard !accounts.isEmpty else { return nil }
     let serverInfo = accounts.sourceServerInfo()
     let providersByAccountID: [String: any MediaProvider] = Dictionary(
         accounts.map { ($0.account.id, $0.provider) },
         uniquingKeysWith: { first, _ in first }
     )
     return { primary in
-        let others = providersByAccountID.keys.filter { $0 != primary.sourceAccountID }
+        // Probe EVERY signed-in account, including the primary's own. The
+        // primary's own item id is filtered inside the resolver so same-server
+        // duplicate movie items (two Jellyfin items, one film) group into one
+        // detail with a multi-entry version picker — without this only OTHER
+        // servers' twins were discovered and a same-server duplicate was invisible.
+        let everyAccount = Array(providersByAccountID.keys)
         return await CrossServerSourceResolver.resolve(
             primary: primary,
-            otherAccountIDs: others,
+            otherAccountIDs: everyAccount,
             search: { accountID, query in
                 guard let provider = providersByAccountID[accountID] else { return [] }
                 return await searchWithDeadline(provider, query: query, limit: 25, seconds: 4)

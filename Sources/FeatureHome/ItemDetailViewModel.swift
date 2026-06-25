@@ -805,11 +805,32 @@ public final class ItemDetailViewModel {
     /// correct the instant the hero renders — before any alternate server is hit.
     /// Leaves `sources` empty for a single-server title (no picker shown).
     private func seedSources(from primary: MediaItem) {
-        guard initialSources.count > 1 else { sources = []; return }
+        guard initialSources.count > 1 else {
+            // Single-server card: nothing to seed from initialSources. But if a
+            // snapshot restore (or earlier discovery) already populated a richer
+            // sources list with same-account siblings or cross-server twins, do
+            // NOT clobber it back to empty — that's how the version picker
+            // disappeared on revisit until async discovery re-ran ~1s later.
+            if sources.count <= 1 {
+                sources = []
+            } else {
+                // Re-stamp just the primary entry with the freshly-fetched
+                // watch-state and versions so the kept-from-snapshot picker
+                // still reflects the latest from this server.
+                sources = sources.map { stampedPrimarySource($0, from: primary) }
+                applyUnifiedWatchState()
+            }
+            return
+        }
         sources = initialSources.map { source in
             guard source.itemID == primary.id else { return source }
             var seeded = source
-            seeded.versions = primary.versions
+            // Single-file primary items report no intrinsic versions; synthesise
+            // one so the combined version picker (across same-account siblings)
+            // has a distinguishable entry for the primary's own file.
+            seeded.versions = primary.versions.isEmpty
+                ? [MediaVersion.synthesized(from: primary)]
+                : primary.versions
             seeded.resumePosition = primary.resumePosition
             seeded.playedPercentage = primary.playedPercentage
             seeded.isPlayed = primary.isPlayed
@@ -850,7 +871,9 @@ public final class ItemDetailViewModel {
     private func stampedPrimarySource(_ source: MediaSourceRef, from primary: MediaItem) -> MediaSourceRef {
         guard source.accountID == activeSourceAccountID, source.itemID == primary.id else { return source }
         var seeded = source
-        seeded.versions = primary.versions
+        seeded.versions = primary.versions.isEmpty
+            ? [MediaVersion.synthesized(from: primary)]
+            : primary.versions
         seeded.resumePosition = primary.resumePosition
         seeded.playedPercentage = primary.playedPercentage
         seeded.isPlayed = primary.isPlayed
@@ -886,6 +909,7 @@ public final class ItemDetailViewModel {
     private struct AlternateSourceRequest: Sendable {
         var sourceID: String
         var itemID: String
+        var accountID: String
         var provider: any MediaProvider
     }
 
@@ -907,7 +931,12 @@ public final class ItemDetailViewModel {
         let requests: [AlternateSourceRequest] = sources.compactMap { source in
             guard source.itemID != primaryID,
                   let provider = alternateProviderResolver(source.accountID) else { return nil }
-            return AlternateSourceRequest(sourceID: source.id, itemID: source.itemID, provider: provider)
+            return AlternateSourceRequest(
+                sourceID: source.id,
+                itemID: source.itemID,
+                accountID: source.accountID,
+                provider: provider
+            )
         }
         guard !requests.isEmpty else { return }
 
@@ -926,7 +955,11 @@ public final class ItemDetailViewModel {
     }
 
     /// Fetches alternate-server copies concurrently (bounded), preserving
-    /// first-seen source order in the resulting updates.
+    /// first-seen source order in the resulting updates. When an alternate item
+    /// has no intrinsic ``MediaItem/versions`` (a single-file item, which is the
+    /// common case for same-account duplicate movies), one is **synthesised**
+    /// from its `mediaInfo` so the version picker has a distinguishable entry
+    /// for it carrying the backing item id.
     private nonisolated static func fetchAlternateSourceUpdates(
         _ requests: [AlternateSourceRequest],
         maxConcurrent: Int
@@ -935,24 +968,30 @@ public final class ItemDetailViewModel {
         let concurrency = max(1, min(maxConcurrent, requests.count))
         return await withTaskGroup(of: (Int, AlternateSourceUpdate?).self) { group in
             var nextIndex = 0
-            for _ in 0..<concurrency {
-                let index = nextIndex
-                nextIndex += 1
-                let request = requests[index]
+            func makeTask(index: Int, request: AlternateSourceRequest) {
                 group.addTask {
                     guard let alt = try? await request.provider.item(id: request.itemID) else {
                         return (index, nil)
                     }
+                    let tagged = alt.taggingSource(request.accountID)
+                    let versions = tagged.versions.isEmpty
+                        ? [MediaVersion.synthesized(from: tagged)]
+                        : tagged.versions
                     return (index, AlternateSourceUpdate(
                         sourceID: request.sourceID,
-                        versions: alt.versions,
-                        resumePosition: alt.resumePosition,
-                        playedPercentage: alt.playedPercentage,
-                        isPlayed: alt.isPlayed,
-                        isFavorite: alt.isFavorite,
-                        lastPlayedAt: alt.lastPlayedAt
+                        versions: versions,
+                        resumePosition: tagged.resumePosition,
+                        playedPercentage: tagged.playedPercentage,
+                        isPlayed: tagged.isPlayed,
+                        isFavorite: tagged.isFavorite,
+                        lastPlayedAt: tagged.lastPlayedAt
                     ))
                 }
+            }
+            for _ in 0..<concurrency {
+                let index = nextIndex
+                nextIndex += 1
+                makeTask(index: index, request: requests[index])
             }
 
             var byIndex: [Int: AlternateSourceUpdate] = [:]
@@ -961,21 +1000,7 @@ public final class ItemDetailViewModel {
                 if nextIndex < requests.count {
                     let queuedIndex = nextIndex
                     nextIndex += 1
-                    let request = requests[queuedIndex]
-                    group.addTask {
-                        guard let alt = try? await request.provider.item(id: request.itemID) else {
-                            return (queuedIndex, nil)
-                        }
-                        return (queuedIndex, AlternateSourceUpdate(
-                            sourceID: request.sourceID,
-                            versions: alt.versions,
-                            resumePosition: alt.resumePosition,
-                            playedPercentage: alt.playedPercentage,
-                            isPlayed: alt.isPlayed,
-                            isFavorite: alt.isFavorite,
-                            lastPlayedAt: alt.lastPlayedAt
-                        ))
-                    }
+                    makeTask(index: queuedIndex, request: requests[queuedIndex])
                 }
             }
             return requests.indices.compactMap { byIndex[$0] }

@@ -114,8 +114,9 @@ public struct ItemDetailView: View {
 
     private func container(_ detail: ItemDetailViewModel.Detail) -> some View {
         let sources = viewModel.sources
-        let effectiveSource = effectiveSource(for: detail.item, sources: sources)
-        let effectiveVersions = effectiveVersions(for: detail.item, source: effectiveSource)
+        let serverChoices = serverChoices(from: sources)
+        let effectiveSource = effectiveSource(for: detail.item, sources: sources, serverChoices: serverChoices)
+        let effectiveVersions = effectiveVersions(for: detail.item, sources: sources, activeAccountID: effectiveSource?.accountID)
         let effectiveVersionID = effectiveVersionID(for: detail.item, in: effectiveVersions)
         return ScrollViewReader { proxy in
             ScrollView {
@@ -125,7 +126,25 @@ public struct ItemDetailView: View {
                         heroHeightFraction: detail.children.isEmpty ? 1.0 : 0.8,
                         spoilerSettings: spoilerSettings,
                         playTitle: isPlayable(detail.item) ? viewModel.playButtonTitle(for: detail.item) : nil,
-                        onPlay: isPlayable(detail.item) ? { onPlay(playItem(for: detail.item, source: effectiveSource, versionID: effectiveVersionID)) } : nil,
+                        onPlay: isPlayable(detail.item) ? {
+                            // CRITICAL: re-resolve sources/versions from the
+                            // view model at FIRE time, not from the body-eval
+                            // capture. Without this, a tap that races a
+                            // discovery/snapshot update can fire the old
+                            // closure where the picker had already moved on
+                            // to a richer version set — picker highlights
+                            // 4K, play target still points at the originally-
+                            // opened 720p item. Reading viewModel.sources
+                            // here guarantees the play target derives from
+                            // the SAME source of truth the UI most recently
+                            // showed.
+                            let liveSources = viewModel.sources
+                            let liveServerChoices = self.serverChoices(from: liveSources)
+                            let liveSource = self.effectiveSource(for: detail.item, sources: liveSources, serverChoices: liveServerChoices)
+                            let liveVersions = self.effectiveVersions(for: detail.item, sources: liveSources, activeAccountID: liveSource?.accountID)
+                            let liveVersionID = self.effectiveVersionID(for: detail.item, in: liveVersions)
+                            onPlay(self.playItem(for: detail.item, sources: liveSources, activeAccountID: liveSource?.accountID, versionID: liveVersionID))
+                        } : nil,
                         playProgress: isPlayable(detail.item) ? detail.item.resumeProgressFraction : nil,
                         playRemainingText: isPlayable(detail.item) ? detail.item.resumeRemainingText : nil,
                         onPlayTrailer: viewModel.trailers.first.map { trailer in { onPlay(trailer) } },
@@ -133,9 +152,9 @@ public struct ItemDetailView: View {
                         selectedVersionID: effectiveVersionID,
                         capabilities: capabilities,
                         onSelectVersion: { id in selectVersion(id, for: detail.item) },
-                        sources: sources,
+                        sources: serverChoices,
                         selectedSourceAccountID: effectiveSource?.accountID,
-                        onSelectSource: sources.count > 1 ? { id in selectSource(id) } : nil,
+                        onSelectSource: serverChoices.count > 1 ? { id in selectSource(id) } : nil,
                         fallbackTechnicalBadges: detail.children.representativeTechnicalBadges,
                         playButtonFocus: $playFocused
                     )
@@ -220,37 +239,75 @@ public struct ItemDetailView: View {
     /// the cross-server best-source default (highest-quality Direct-Play option
     /// this device can play) — else the primary. `nil` for a single-server title
     /// (no server picker; legacy version-only flow).
-    private func effectiveSource(for item: MediaItem, sources: [MediaSourceRef]) -> MediaSourceRef? {
-        guard sources.count > 1 else { return nil }
-        if let sourceOverride, let match = sources.first(where: { $0.accountID == sourceOverride }) {
+    ///
+    /// Same-account duplicates (two Jellyfin items for the same film on one
+    /// server) collapse into one server-picker entry: this returns whichever
+    /// source ref backs the **active account**, and the version picker takes
+    /// over disambiguating the two files.
+    private func effectiveSource(
+        for item: MediaItem,
+        sources: [MediaSourceRef],
+        serverChoices: [MediaSourceRef]
+    ) -> MediaSourceRef? {
+        guard serverChoices.count > 1 || sources.count > 1 else { return nil }
+        if let sourceOverride, let match = serverChoices.first(where: { $0.accountID == sourceOverride }) {
             return match
         }
         if let selection = CrossSourceSelector.selection(
-            from: sources,
+            from: serverChoices,
             capabilities: capabilities,
             preferredAccountID: viewModel.originSourceAccountID
         ) {
             return selection.source
         }
-        return sources.first
+        return serverChoices.first ?? sources.first
     }
 
-    /// The versions to offer in the version picker: the chosen server's files when
-    /// a source is selected (empty until that server's detail resolves → server
-    /// default plays), else the loaded item's own versions (single-server flow).
-    private func effectiveVersions(for item: MediaItem, source: MediaSourceRef?) -> [MediaVersion] {
-        guard let source else { return item.versions }
-        return source.versions
-    }
-
-    /// Builds the retargeted item `Play` should launch: when a cross-server source
-    /// is chosen, the item is repointed to that server's id/versions/watch-state
-    /// (and version, if any); otherwise the legacy single-server version select.
-    private func playItem(for item: MediaItem, source: MediaSourceRef?, versionID: String?) -> MediaItem {
-        if let source {
-            return item.selectingSource(source, versionID: versionID)
+    /// The list of server-picker entries: ``viewModel/sources`` deduped by
+    /// account id so two same-account duplicate items don't render as two
+    /// identical "Server" rows. Same-account siblings are surfaced in the
+    /// VERSION picker instead.
+    private func serverChoices(from sources: [MediaSourceRef]) -> [MediaSourceRef] {
+        var seen = Set<String>()
+        var result: [MediaSourceRef] = []
+        for source in sources where seen.insert(source.accountID).inserted {
+            result.append(source)
         }
-        return item.selectingVersion(versionID)
+        return result
+    }
+
+    /// The versions to offer in the version picker: every source that belongs to
+    /// the active account contributes its files, concatenated in source order.
+    /// For the common single-server / single-file case this is just the loaded
+    /// item's own versions; for same-account duplicates (one Jellyfin movie
+    /// existing as two items on one server) this is the combined list, each
+    /// entry carrying its backing item id so playback repoints correctly.
+    private func effectiveVersions(
+        for item: MediaItem,
+        sources: [MediaSourceRef],
+        activeAccountID: String?
+    ) -> [MediaVersion] {
+        guard let activeAccountID else { return item.versions.sortedForPicker() }
+        let active = sources.filter { $0.accountID == activeAccountID }
+        guard !active.isEmpty else { return item.versions.sortedForPicker() }
+        return active.flatMap(\.versions).sortedForPicker()
+    }
+
+    /// Builds the retargeted item `Play` should launch — see
+    /// `MediaItem.retargetedForPlayback` for the actual routing rules. Kept as
+    /// a thin wrapper so callers in this view can use familiar argument names.
+    private func playItem(
+        for item: MediaItem,
+        sources: [MediaSourceRef],
+        activeAccountID: String?,
+        versionID: String?
+    ) -> MediaItem {
+        MediaItem.retargetedForPlayback(
+            item: item,
+            sources: sources,
+            activeAccountID: activeAccountID,
+            versionID: versionID
+        )
     }
 
     /// Records the user's server choice for this visit and clears the version

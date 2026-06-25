@@ -274,17 +274,28 @@ public extension MediaSourceMetadata {
 // MARK: - Per-version badges
 
 public extension MediaVersion {
-    /// Technical badges built from THIS version's own facts (resolution from
-    /// width/height, HDR/DoVi from `videoRange`, audio from
-    /// `audioProfile`/`audioCodec`/`audioChannels`), composed via the same
-    /// Dolby-grouped ordering helper used by `MediaSourceMetadata` so a per-
-    /// version row reads identically to the per-item one.
+    /// Technical badges for this version. When the version carries the backing
+    /// file's real ``MediaVersion/sourceMetadata`` (the same-account-duplicate
+    /// case), they come straight from `MediaSourceMetadata.technicalBadges` —
+    /// the authoritative path that correctly renders HDR10+, DoVi-with-HDR10 and
+    /// channel-layout audio. Otherwise they're composed from this version's own
+    /// flattened facts (resolution from width/height, HDR/DoVi from `videoRange`,
+    /// audio from `audioProfile`/`audioCodec`/`audioChannels`), via the same
+    /// Dolby-grouped ordering helper so a per-version row reads identically to
+    /// the per-item one.
     ///
     /// The hero's badge row uses this when the user picks a non-default version
     /// from the picker, so switching from a 4K HDR Atmos Remux to a 720p SDR
     /// WEB-DL flips the badges to match the *selected* file rather than the
     /// default's media-info snapshot.
     var technicalBadges: [MediaBadge] {
+        // A version synthesised from a whole backing item carries that file's
+        // real stream metadata — render through the authoritative path so the
+        // badges match exactly what the file's own hero would show (no HDR10+
+        // → SDR downgrade, no resolution loss from sparse flattened fields).
+        if let sourceMetadata {
+            return sourceMetadata.technicalBadges
+        }
         let resolution: MediaBadge? = {
             // Reuse the effective-lines classifier so a 1920×804 cinematic
             // version still reads 1080p rather than 720p — matching how the

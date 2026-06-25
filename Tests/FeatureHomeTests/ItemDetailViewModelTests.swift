@@ -1,5 +1,6 @@
 import XCTest
 import CoreModels
+import MetadataKit
 @testable import FeatureHome
 
 @MainActor
@@ -438,6 +439,53 @@ final class ItemDetailViewModelTests: XCTestCase {
         // "no playable trailer" is memoized so a revisit hides the button instantly.
         XCTAssertEqual(cache.outcome(for: "m1"), .some(.none))
         XCTAssertTrue(vm.trailers.isEmpty)
+    }
+
+    /// BUG B reproducer: on a return visit the snapshot restore briefly
+    /// populated the multi-source picker (primary + sibling), then the live
+    /// `seedSources` clobbered it back to a single entry because
+    /// `initialSources.count <= 1`. After the fix `seedSources` must NOT
+    /// downgrade a richer set already on the model; it should re-stamp the
+    /// primary entry and leave the sibling alone.
+    func testSeedSourcesDoesNotClobberSnapshotRestoredSiblings() async {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plozz-bugb-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let cache = DetailSnapshotCache(directory: tempDir)
+
+        let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021,
+                                providerIDs: ["Tmdb": "438631"],
+                                sourceAccountID: "jelly")
+        let siblingRef = MediaSourceRef(accountID: "jelly", itemID: "p2",
+                                        providerKind: .jellyfin,
+                                        versions: [MediaVersion(id: "synth:p2", height: 2160,
+                                                                sourceItemID: "p2",
+                                                                sourceAccountID: "jelly")])
+        let primaryRef = MediaSourceRef(accountID: "jelly", itemID: "p1",
+                                        providerKind: .jellyfin,
+                                        versions: [MediaVersion(id: "synth:p1", height: 720,
+                                                                sourceItemID: "p1",
+                                                                sourceAccountID: "jelly")])
+        let snapshot = DetailSnapshotCache.Snapshot(
+            item: primary, children: [], seasonEpisodes: [:],
+            sources: [primaryRef, siblingRef]
+        )
+        await cache.store(snapshot, for: "jelly|p1")
+
+        let provider = FakeMediaProvider(allItems: [primary])
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "p1", sourceAccountID: "jelly",
+            initialSources: [primaryRef], // only one — same as a typical revisit
+            snapshotCache: cache
+        )
+        await vm.load()
+        // Allow the snapshot restore task to land if it hasn't already.
+        await waitUntil { vm.sources.count == 2 }
+
+        XCTAssertEqual(vm.sources.count, 2,
+                       "Snapshot-restored siblings must NOT be clobbered by seedSources")
+        XCTAssertEqual(Set(vm.sources.map(\.itemID)), ["p1", "p2"])
     }
 
     // MARK: - In-place cross-server switch (Problem 4)

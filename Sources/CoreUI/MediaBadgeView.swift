@@ -114,6 +114,9 @@ public struct MediaBadgeChip: View {
         case .hdr:
             hdrLabel(badge.label)
                 .accessibilityLabel(badge.label)
+        case .sdr:
+            sdrBrushedLabel(badge.label)
+                .accessibilityLabel(badge.label)
         case .dts:
             HStack(alignment: .center, spacing: 6) {
                 dtsLabel(badge.label)
@@ -195,6 +198,49 @@ public struct MediaBadgeChip: View {
         .minimumScaleFactor(0.75)
         .padding(.horizontal, Self.hdrHPadding)
         .frame(height: Self.pillHeight)
+    }
+
+    /// The SDR counterpart to ``hdrLabel``: the same borderless heavy wordmark
+    /// (no pill), but filled with a muted, theme-aware brushed-metal sheen instead
+    /// of HDR's vibrant luminance gradient — a matte logo that reads as the
+    /// deliberate opposite of the shiny HDR mark while still sitting in the badge
+    /// row as a peer.
+    private func sdrBrushedLabel(_ text: String) -> some View {
+        Text(text)
+            .font(Self.hdrHeadFont)
+            .textCase(.uppercase)
+            .foregroundStyle(sdrBrushedGradient)
+            .tracking(0.5)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, Self.hdrHPadding)
+            .frame(height: Self.pillHeight)
+    }
+
+    /// Diagonal satin sheen for the brushed-metal SDR wordmark: a mid-neutral base
+    /// with a single brighter band crossing on the diagonal, theme-aware so it
+    /// stays a muted silver in dark/OLED and a muted graphite in light.
+    private var sdrBrushedGradient: LinearGradient {
+        let stops: [Gradient.Stop] = colorScheme == .light
+            ? [
+                .init(color: Color(white: 0.34), location: 0.0),
+                .init(color: Color(white: 0.30), location: 0.40),
+                .init(color: Color(white: 0.58), location: 0.50),
+                .init(color: Color(white: 0.32), location: 0.60),
+                .init(color: Color(white: 0.34), location: 1.0)
+            ]
+            : [
+                .init(color: Color(white: 0.62), location: 0.0),
+                .init(color: Color(white: 0.66), location: 0.40),
+                .init(color: Color(white: 0.96), location: 0.50),
+                .init(color: Color(white: 0.64), location: 0.60),
+                .init(color: Color(white: 0.62), location: 1.0)
+            ]
+        return LinearGradient(
+            gradient: Gradient(stops: stops),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     /// Muted gray for the `-HD` portion of the dts-HD mark: the theme's secondary

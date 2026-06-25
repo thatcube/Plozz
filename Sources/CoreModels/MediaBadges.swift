@@ -23,6 +23,12 @@ public struct MediaBadge: Hashable, Sendable, Identifiable {
         /// painted with a gradient border so it reads like the HDR logo rather
         /// than a plain spec pill.
         case hdr
+        /// The standard-dynamic-range counterpart to `.hdr`: the same borderless
+        /// heavy wordmark treatment, but filled with a muted, theme-aware
+        /// brushed-metal sheen (a faint diagonal satin streak across neutral
+        /// grays) instead of HDR's vibrant luminance gradient — a matte logo that
+        /// reads as the deliberate "opposite of shiny".
+        case sdr
         /// A Dolby badge rendered as the double-D logo with a stacked wordmark
         /// (`Dolby` over the format, e.g. Dolby Vision / Atmos / Digital+). No
         /// pill.
@@ -140,7 +146,7 @@ public extension MediaSourceMetadata {
         let hasDimensions = (video.width ?? 0) > 0 || (video.height ?? 0) > 0
         let hasRangeToken = !range.isEmpty || !rangeType.isEmpty
         if hasDimensions || hasRangeToken {
-            return [MediaBadge("SDR", style: .spec)]
+            return [MediaBadge("SDR", style: .sdr)]
         }
         return []
     }

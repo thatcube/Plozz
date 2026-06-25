@@ -374,6 +374,12 @@ private struct HomeTab: View {
                         initialItem: route.episode,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: route.sourceAccountID,
+                        // The fronted page IS the series, so it gets the same
+                        // cross-server "…" picker a directly-opened series does —
+                        // discovery matches the series by provider IDs and fills
+                        // the server list once the page settles.
+                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
                         snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
@@ -393,6 +399,10 @@ private struct HomeTab: View {
                         initialItem: route.season,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: route.sourceAccountID,
+                        // The fronted page IS the series, so it gets the same
+                        // cross-server "…" picker a directly-opened series does.
+                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
                         snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
@@ -625,6 +635,10 @@ private struct SearchTab: View {
                         initialItem: route.episode,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: route.sourceAccountID,
+                        // The fronted page IS the series, so it gets the same
+                        // cross-server "…" picker a directly-opened series does.
+                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
                         snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
@@ -644,6 +658,10 @@ private struct SearchTab: View {
                         initialItem: route.season,
                         ratingsProvider: ratingsProvider,
                         sourceAccountID: route.sourceAccountID,
+                        // The fronted page IS the series, so it gets the same
+                        // cross-server "…" picker a directly-opened series does.
+                        alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
                         snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,

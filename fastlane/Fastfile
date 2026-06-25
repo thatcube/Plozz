@@ -67,19 +67,24 @@ end
 
 desc "Regenerate the Xcode project from project.yml via XcodeGen"
 lane :generate_project do
-  sh("cd .. && xcodegen generate")
+  # generate-project.sh runs xcodegen and bakes the build number (PLOZZ_BUILD_NUMBER
+  # override, else git commit count) into CFBundleVersion so it's never missed.
+  sh("cd .. && ./tools/generate-project.sh")
 end
 
 desc "Archive and export a signed App Store .ipa (no upload)"
 lane :build do |options|
-  generate_project
-  # Build number must strictly increase per upload for a given marketing
-  # version. TestFlight is the source of truth, so derive the next build from
-  # (latest TestFlight build + 1). Robust across machines/worktrees, nothing
-  # committed. Marketing version (CFBundleShortVersionString) stays manual in
-  # project.yml — bump it by hand for real releases.
+  # Build number must strictly increase per upload for a given marketing version.
+  # TestFlight is the source of truth, so derive the next build from (latest
+  # TestFlight build + 1). Set it BEFORE generating the project so generate-project.sh
+  # bakes it into CFBundleVersion for both the app and the Top Shelf extension.
+  # Marketing version (CFBundleShortVersionString) stays manual in project.yml —
+  # bump it by hand for real releases.
   build_number = next_build_number
+  ENV["PLOZZ_BUILD_NUMBER"] = build_number.to_s
   UI.message("Using build number #{build_number} (CFBundleVersion)")
+
+  generate_project
 
   # Let Xcode create/download the distribution certificate and provisioning
   # profile on first run, authenticating with the same App Store Connect API key.
@@ -89,9 +94,6 @@ lane :build do |options|
                  " -authenticationKeyID #{ENV['ASC_KEY_ID'].shellescape}" \
                  " -authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID'].shellescape}"
   end
-  # Inject the computed build number into the archive (CFBundleVersion in the
-  # generated Info.plist resolves $(CURRENT_PROJECT_VERSION)).
-  prov_args += " CURRENT_PROJECT_VERSION=#{build_number}"
   build_app(
     project: XCODEPROJ,
     scheme: SCHEME,

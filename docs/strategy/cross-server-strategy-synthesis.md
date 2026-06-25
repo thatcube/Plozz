@@ -553,6 +553,23 @@ Curation is an axis; the server is not. This *sharpens* §1 rather than contradi
    (`NSUbiquitousKeyValueStore`); the majority say device/profile-local first, CloudKit
    later. *Recommendation: ship local, design the store so iCloud KV is a drop-in later.*
 
+6. **Split row *membership* from row *state* (R5 — connects this to §2).** A server row
+   carries two separable things: **(a) membership/order-intent** (which items the
+   user/server curated — trust the server) and **(b) per-item state baked in** (progress,
+   watched, unwatched-count). §2 proved per-server state is stale/divergent. **Rule:
+   ingest a row's membership from the server, but re-project every item's state through
+   Plozz's unified fold before display** — never let a server row's embedded state win.
+   This is *why* the T1 guardrail matters: ingesting Plex's "Continue Watching" hub
+   verbatim would show 4 min next to our synthesized CW showing finished — the row-level
+   form of §2's "illusion breaks" bug. Two refresh clocks follow: **membership** changes
+   rarely → cache aggressively, persisted snapshot for zero-spinner first paint, lazy
+   background refresh (reuse HomeAggregator's offline-source-drop resilience); **state/
+   order** is volatile → recompute on every appearance and subscribe rows to the existing
+   `MediaItemMutation` optimistic bus so marking watched / reporting progress instantly
+   re-projects them with no refetch. (This also gives the row-merge a **freshness
+   tiebreaker**: when merging T2 rows, order by playlist `updatedAt` most-recent-wins
+   where available, else union.)
+
 **Where they genuinely diverge — the two decisions for Brandon:**
 
 | Decision | Aggressive ⟵ | | ⟶ Conservative |

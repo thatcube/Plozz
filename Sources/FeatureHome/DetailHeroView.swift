@@ -107,6 +107,14 @@ struct DetailHeroView: View {
     /// initial focus that Play should have when the page opens.
     @FocusState private var moreMenuFocused: Bool
 
+    /// Set the instant the user taps a server row in the "…" menu, and consumed by
+    /// the `selectedSourceAccountID` `onChange` below. It gates the focus re-assert
+    /// so we only park focus back on "…" after a *user-initiated* server switch —
+    /// never when late cross-server discovery first populates the menu (which would
+    /// otherwise yank focus off Play the moment the page finishes loading, on both
+    /// movies and series).
+    @State private var userInitiatedSourceSwitch = false
+
     /// Drives the hero's first-appearance fade-in. Starts hidden and eases to
     /// visible `.onAppear`, so the backdrop + title/metadata dissolve in rather
     /// than hard-cutting when the page opens. Subsequent context swaps fade via
@@ -384,8 +392,13 @@ struct DetailHeroView: View {
         .animation(.easeInOut(duration: 0.3), value: backdrop.id)
         // After an in-place cross-server switch the hero rebuilds but the "…"
         // menu is still present; keep focus on it instead of letting the focus
-        // engine fall back to Play. Fires only on change, never on first appear.
+        // engine fall back to Play. Gated on `userInitiatedSourceSwitch` so it
+        // fires ONLY for a real user switch — never when late cross-server
+        // discovery first populates the menu (which would steal focus from Play
+        // on arrival, the bug seen on movies and series-from-search).
         .onChange(of: selectedSourceAccountID) { _, _ in
+            guard userInitiatedSourceSwitch else { return }
+            userInitiatedSourceSwitch = false
             if showsMoreMenu { moreMenuFocused = true }
         }
     }
@@ -577,6 +590,7 @@ struct DetailHeroView: View {
                 Section("Server") {
                     ForEach(serverChoices) { source in
                         Button {
+                            userInitiatedSourceSwitch = true
                             onSelectSource(source.accountID)
                         } label: {
                             if source.accountID == currentServer?.accountID {

@@ -174,7 +174,7 @@ struct SeriesDetailView: View {
                         heroHeightFraction: 0.8,
                         backdropBottomExtensionFraction: 0.1,
                         spoilerSettings: spoilerSettings,
-                        playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
+                        playTitle: playTarget.map { heroPlayTitle(for: $0) },
                         onPlay: playTarget.map { target in { onPlay(target.selectingVersion(effectivePlayVersionID)) } },
                         playProgress: playTarget?.resumeProgressFraction,
                         playRemainingText: playTarget?.resumeRemainingText,
@@ -554,6 +554,21 @@ struct SeriesDetailView: View {
     private var playTarget: MediaItem? {
         if heroItem.kind == .episode { return heroItem }
         return SeriesResume.nextUp(in: currentEpisodes)
+    }
+
+    /// The Play button label for the series hero. The hero itself shows the SERIES
+    /// (its backdrop/overview) on a plain open, so without this the user is never
+    /// told which episode Play actually starts. When the fronted hero is the
+    /// series (not an episode) and the target episode carries numbers, append its
+    /// "S{n} E{m}" so the button reads e.g. "Play · S1 E1" / "Play · S3 E4". An
+    /// episode hero already shows "S{n} · E{m}" in its own subtitle, so there the
+    /// button stays the plain verb to avoid repeating it.
+    private func heroPlayTitle(for target: MediaItem) -> String {
+        let base = viewModel.playButtonTitle(for: target)
+        guard heroItem.kind != .episode, target.kind == .episode,
+              let season = target.seasonNumber, let episode = target.episodeNumber
+        else { return base }
+        return "\(base) · S\(season) E\(episode)"
     }
 
     /// The hero item with its season/episode numbers guaranteed when an episode is

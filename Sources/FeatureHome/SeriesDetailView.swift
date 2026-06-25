@@ -65,6 +65,11 @@ struct SeriesDetailView: View {
     /// targeting a specific episode, so focus lands at the top rather than down
     /// in the episode row.
     @FocusState private var playFocused: Bool
+    /// The user's in-session quality choice for the current play-target episode,
+    /// chosen from the hero "…" menu's Version section. Cleared implicitly when it
+    /// no longer matches the target episode's versions (a different episode's files
+    /// have different ids), so `effectivePlayVersionID` re-defaults to recommended.
+    @State private var versionOverride: String?
 
     init(
         series: MediaItem,
@@ -156,10 +161,13 @@ struct SeriesDetailView: View {
                         backdropBottomExtensionFraction: 0.1,
                         spoilerSettings: spoilerSettings,
                         playTitle: playTarget.map { viewModel.playButtonTitle(for: $0) },
-                        onPlay: playTarget.map { target in { onPlay(target) } },
+                        onPlay: playTarget.map { target in { onPlay(target.selectingVersion(effectivePlayVersionID)) } },
                         playProgress: playTarget?.resumeProgressFraction,
                         playRemainingText: playTarget?.resumeRemainingText,
                         onPlayTrailer: trailerButtonAction,
+                        versions: playVersions,
+                        selectedVersionID: effectivePlayVersionID,
+                        onSelectVersion: playVersions.count > 1 ? { versionOverride = $0 } : nil,
                         sources: viewModel.sources,
                         selectedSourceAccountID: series.sourceAccountID,
                         onSelectSource: serverPickerAction,
@@ -490,6 +498,24 @@ struct SeriesDetailView: View {
             else { return }
             onSelectServer(source)
         }
+    }
+
+    /// The play-target episode's selectable versions (qualities/editions on the
+    /// current server). Empty or single-entry hides the "…" Version section, so it
+    /// only appears when an episode genuinely has more than one file — matching the
+    /// movie behaviour.
+    private var playVersions: [MediaVersion] {
+        playTarget?.versions ?? []
+    }
+
+    /// The effective version id the Version section checkmarks and `Play` targets:
+    /// the in-session override when it's still valid for this episode, else the
+    /// device-recommended pick.
+    private var effectivePlayVersionID: String? {
+        if let versionOverride, playVersions.contains(where: { $0.id == versionOverride }) {
+            return versionOverride
+        }
+        return playVersions.recommendedSelection(for: .detected())?.id
     }
 
     private var playTarget: MediaItem? {

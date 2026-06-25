@@ -424,19 +424,22 @@ struct DetailHeroView: View {
     /// height; otherwise it's the plain `▶  Play/Resume`.
     @ViewBuilder
     private func playButton(title: String, action: @escaping () -> Void) -> some View {
+        // Whether a resume target with real progress exists. When it does, the
+        // button can flip between the wide "▶ [bar] … left" form and the plain
+        // "▶ Play" form (e.g. when the user marks the item Watched). Reserve the
+        // wider progress-form width in both states so that flip — and the whole
+        // action row beside it — never jumps. Width is otherwise natural (the
+        // remaining-time text varies, "5m" vs "2h 33m"), trimmed to the button's
+        // default padding rather than a fixed, over-wide frame.
+        let hasResume = (playProgress ?? 0) > 0 && (playProgress ?? 0) < 1 && playRemainingText != nil
+        let showProgress = hasResume && !item.isPlayed
         let button = Button(action: action) {
-            HStack(spacing: 16) {
-                Image(systemName: "play.fill")
-                if let playRemainingText, let playProgress, playProgress > 0, playProgress < 1, !item.isPlayed {
-                    resumeProgressCapsule(progress: playProgress)
-                    Text(playRemainingText)
-                        .lineLimit(1)
-                } else {
-                    Text(title)
-                        .lineLimit(1)
+            ZStack {
+                if hasResume {
+                    playButtonLabel(showProgress: true, title: title).hidden()
                 }
+                playButtonLabel(showProgress: showProgress, title: title)
             }
-            .frame(width: 340)
         }
         .modifier(HeroButtonStyle(prominent: true))
         .focused($playButtonHasFocus)
@@ -445,6 +448,23 @@ struct DetailHeroView: View {
             button.focused(playButtonFocus, equals: true)
         } else {
             button
+        }
+    }
+
+    /// The Play button's inner label: either `▶  [progress bar]  … left` (resume
+    /// form) or the plain `▶  Play/Resume` title.
+    @ViewBuilder
+    private func playButtonLabel(showProgress: Bool, title: String) -> some View {
+        HStack(spacing: 16) {
+            Image(systemName: "play.fill")
+            if showProgress, let playRemainingText, let playProgress {
+                resumeProgressCapsule(progress: playProgress)
+                Text(playRemainingText)
+                    .lineLimit(1)
+            } else {
+                Text(title)
+                    .lineLimit(1)
+            }
         }
     }
 

@@ -496,6 +496,89 @@ merger. **The server hands us a list of IDs, not a playback silo.**
 3. **Row merge:** when the same-named collection exists on two servers, default to
    **two distinct rows** (safe) or **one merged row** with a split affordance?
 
+### 8.9 Originals' reactions — the deep-context theses weigh in
+
+After the 3 fresh branches above, the **5 original strategy-doc authors** reacted to the
+same question *through their own theses* (kept distinct, not consensus-merged). They
+**ratify §8.1's consensus** and add real refinements:
+
+| # | Model | Thesis lens | Distinct contribution here |
+|---|---|---|---|
+| R1 | Opus 4.8 high | truth layer / own the seam | **"Curation is an axis, server is not"**; *curation-resurrection* is the N=1 headline; conservative confirm-only row merge |
+| R2 | Codex xhigh | unified-by-default | **"Ingest many, render few"** budgeted pipeline; richest row schema; keep human-curated rows distinct |
+| R3 | Gemini 3.1 | smart client, dumb pipes | **"Data vs Dictate"** (respect user data, reject server layout dictate); aggressive row merge; **iCloud KV sync** of layout |
+| R4 | Opus 4.7 xhigh | Title OS | **First-run import policy should differ by server count** (N=1 aggressive, N>1 curated) + one "Mirror vs Curated" toggle |
+| R5 | Opus 4.8 max | control plane | **T1/T2/T3 tiering** + anti-duplication guardrail; the **de-servered row litmus test**; found a real CW bug |
+
+**The reconciliation is now unanimous across all 8** and stated most crisply by R5's
+**"de-servered row test":** strip the server's name off a row — if it still means
+something ("Noir Classics", "Dad's Playlist") it's **curation** → ingest it de-servered
+into one Home; if it only means "Everything on Plex" it's a **browsing axis** → reject.
+Curation is an axis; the server is not. This *sharpens* §1 rather than contradicting it.
+
+**Refinements that materially improve §8 (adopted into the recommendation):**
+
+1. **Tier the rows (R5) — and a hard guardrail.** Three tiers, treated differently:
+   - **T1 algorithmic/temporal** (Continue Watching, Recently Added): Plozz already
+     synthesizes these cross-server + deduped. **GUARDRAIL: never ingest a server row
+     whose kind Plozz already synthesizes** — otherwise a Plex "On Deck" row sits next
+     to our synthesized Continue Watching (duplicate-row trap). Suppress temporal/
+     algorithmic hub kinds; ingest only *editorial* kinds.
+   - **T2 user-authored** (the user's own playlists + collections): highest signal,
+     explicit intent → **surface by default**.
+   - **T3 admin/server-promoted hubs** ("Oscar Winners", "Trending"): medium value,
+     admin's voice → **opt-in, capped.**
+   This dissolves the "row-soup vs ignore" binary and gives a principled default.
+
+2. **A real bug R5 found while grounding (independent quick win):** our Continue
+   Watching is *already* asymmetric — Jellyfin uses `/Users/{id}/Items/Resume`
+   (in-progress only) and **omits Next Up** (`/Shows/NextUp`), whereas Plex
+   `/library/onDeck` *does* surface the next unwatched episode. Fix: fold Jellyfin Next
+   Up into the **synthesized** Continue Watching as an input (render once, no separate
+   "Next Up" row). This is shippable *before* any rows work and immediately improves
+   N=1 Jellyfin users. *(Logged for the backlog regardless of the rows decision.)*
+
+3. **Use an optional capability protocol (R5/R1):** `CuratedRowsProviding` detected via
+   `as?`, exactly like the existing `WatchStateProviding` / `WatchlistProviding` /
+   music-provider pattern. Plex implements hubs+playlists+collections; Jellyfin
+   implements playlists+collections(+NextUp). Idiomatic to the codebase, keeps the
+   asymmetry inside capability detection instead of the Home model.
+
+4. **"New rows available" tray (R1), not auto-injection:** server rows discovered after
+   the user has arranged their Home appear in a tray to add — never silently injected
+   into a layout they curated.
+
+5. **Layout storage:** all 8 agree it's **Plozz-side per-profile** (generalize
+   `HomeLibraryVisibilityStore` → `HomeLayoutStore`). R3 wants it **iCloud-synced now**
+   (`NSUbiquitousKeyValueStore`); the majority say device/profile-local first, CloudKit
+   later. *Recommendation: ship local, design the store so iCloud KV is a drop-in later.*
+
+**Where they genuinely diverge — the two decisions for Brandon:**
+
+| Decision | Aggressive ⟵ | | ⟶ Conservative |
+|---|---|---|---|
+| **Cross-server ROW merge** (same-named playlist/collection on 2 servers) | R3: merge aggressively by name | R1/R5: merge **T2 only**, conservative, **confirm-only** (title+kind, like series identity) | R2/R4: **keep distinct** by default + one-tap "merge these rows" |
+| **Default density / promoted hubs** | R4(N=1): aggressively auto-import playlists+collections+hubs so it "feels complete minute one" | R1/R5: default-on **user-authored only**; promoted hubs **opt-in, capped** | R4(N>1): only synthesized rows by default, everything else behind "Discover more rows" |
+
+On **row-merge**, 4 of 5 originals (R1, R2, R4, R5) land at **distinct-by-default**
+(merge only conservatively, user-confirmable, T2-only) — only R3 wants aggressive merge.
+**Updated §8.3(c) recommendation: keep rows distinct by default; offer conservative,
+confirm-only merge of user-authored rows; never auto-merge T1/T3.**
+
+On **density**, the synthesis is **R4's server-count-adaptive defaults**, scoped by R5's
+tiers: **T2 user-authored rows default-on** (this is the N=1 "curation-resurrection"
+that every Opus branch calls the headline win); **T3 promoted hubs opt-in**; for N>1,
+tighten the default budget and lean on Plozz's cross-server synthesis. A single
+"Mirror my server's home ⟷ Curated" toggle (R4) exposes the spectrum without forking
+the model.
+
+**Net updated recommendation (all 8):** ship the unanimous, symmetric core first —
+**T2 user-authored playlists + collections as de-servered rows in a Plozz-owned,
+per-profile, customizable Home**, with the T1 anti-duplication guardrail, cards always
+merged but **rows distinct by default**, and **server-count-adaptive defaults**. Defer
+T3 promoted hubs (opt-in, later) and any aggressive row-merge. Land R5's Jellyfin
+Next-Up fold-in as an independent quick win.
+
 ---
 
 *Full individual proposals (with code citations, trade-off tables, and per-branch

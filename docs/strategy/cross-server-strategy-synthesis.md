@@ -1154,11 +1154,28 @@ open-question menus above.*
   stale-write suppression + reconciliation **before** adding any new tracker — it fixes silent
   cross-server drift with zero new integrations. Then registry refactor → Simkl → AniList (+offline
   anime ID/episode mapper) → MAL.
-- **Double-scrobble (Trakt vs a server-side Trakt plugin) = UNDER RESEARCH.** Brandon's hard
-  constraint: **never silently drop a watch**; a harmless duplicate is tolerable. We are explicitly
-  *not* defaulting app-side Trakt OFF on unreliable plugin detection. A focused 3-branch pass is
-  evaluating "write-then-verify-then-dedupe" vs "detect-then-suppress" and which way to fail when
-  uncertain (fail toward writing). Decision pending that synthesis.
+- **Double-scrobble (Trakt vs a server-side Trakt plugin) = RESOLVED (unanimous 3/3 branches).**
+  Brandon's hard constraint — **never silently drop a watch**; a harmless duplicate is tolerable —
+  is honored as follows:
+  - **App-side Trakt writes default ON; never gate on plugin detection.** Detection is unviable:
+    Jellyfin's plugin list requires an *admin* token (Plozz holds a normal-user token and usually
+    can't even enumerate plugins), "installed" ≠ "linked to this user" ≠ "working"; Plex has no
+    first-party Trakt and no client-visible signal for out-of-band relays (PlexTraktSync / Tautulli
+    / Kometa). A false-positive detection would **suppress = drop a watch = forbidden**.
+  - **Dedupe after the fact, never before.** Trakt's own `/scrobble` endpoint self-dedupes
+    (account+item scoped, client-agnostic, ~8h cooldown), so an app+plugin pair on the same session
+    collapses automatically. A durable outbox idempotency key
+    (`account | canonicalMediaId(trakt→imdb→tmdb/tvdb) | episode | day_bucket`, TTL ≥ ~24h) prevents
+    our *own* duplicates across relaunch. Reconcile unresolved intents via
+    `/sync/last_activities` → `/sync/history` and **write-if-missing, never delete**.
+  - **`/scrobble` 409 is SUCCESS, not failure.** Actionable bug: current code logs Trakt's `409`
+    (duplicate) as failed — it means "already scrobbled" and must be treated as confirmed. Fix this
+    first (it likely causes phantom retries today). Keep using `/scrobble`; never live-write
+    `/sync/history` (the only real source of visible duplicates).
+  - **Explicit per-server opt-OUT** ("my server already scrobbles Trakt — let it"), **off by
+    default**; tri-state hint `unknown / serverHandlesIt / appHandlesIt` where **unknown → WRITE**.
+  - **Governing rule: fail toward writing.** Even in "server handles it," reconcile still
+    writes-if-missing, so the worst case is a tolerable duplicate, never a drop.
 
 ### 13.2 Search & Discover
 - **One unified global Search.** A single app-wide Search is the only true search surface ("find

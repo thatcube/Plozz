@@ -494,20 +494,10 @@ struct DetailHeroView: View {
         let liveResumeText = resumeText
         let showProgress = liveResumeText != nil && !item.isPlayed
         let sizingText = reservedResumeText ?? liveResumeText
-        // In a TV context the Play label tracks the focused episode ("Play · S2 E5"),
-        // so its width would otherwise change on every rail focus tick — and resizing
-        // a *focusable* button mid-navigation makes the tvOS focus engine snap back.
-        // Reserve a stable width for the widest 1–2 digit episode label (digits are
-        // monospaced so any value fits) so the button frame never moves as focus
-        // travels the rail. Movies (no episode label) keep their natural width.
-        let reservesEpisodeWidth = item.kind == .episode || item.kind == .series
         let button = Button(action: action) {
             ZStack {
                 if let sizingText {
                     playResumeSizer(remaining: sizingText).hidden()
-                }
-                if reservesEpisodeWidth {
-                    playTitleSizer(template: "Play · S99 E99").hidden()
                 }
                 playButtonLabel(showProgress: showProgress, title: title)
             }
@@ -547,23 +537,8 @@ struct DetailHeroView: View {
                     .lineLimit(1)
             } else {
                 Text(title)
-                    .monospacedDigit()
                     .lineLimit(1)
             }
-        }
-    }
-
-    /// An invisible copy of the title form ("▶  Play · S99 E99") used to reserve a
-    /// stable Play-button width in a TV context. Digits are monospaced and two wide,
-    /// so any real 1–2 digit season/episode label fits inside this reserved width —
-    /// the button frame stays put as focus moves across the episode rail, which is
-    /// what kept the tvOS focus engine from snapping back.
-    private func playTitleSizer(template: String) -> some View {
-        HStack(spacing: 16) {
-            Image(systemName: "play.fill")
-            Text(template)
-                .monospacedDigit()
-                .lineLimit(1)
         }
     }
 

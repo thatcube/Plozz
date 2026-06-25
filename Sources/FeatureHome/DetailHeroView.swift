@@ -504,6 +504,12 @@ struct DetailHeroView: View {
         }
         .modifier(HeroButtonStyle(prominent: true))
         .focused($playButtonHasFocus)
+        // Opt the Play button out of the hero's `item.id` cross-fade animation.
+        // Its label (and therefore width) now changes on every episode-rail focus
+        // tick ("Play · S2 E5" → "Play · S2 E3"); animating that width change made
+        // the focus engine snap back while scrolling the rail. The button resizes
+        // instantly while the rest of the hero (title/backdrop) still cross-fades.
+        .transaction { $0.animation = nil }
         .onChange(of: liveResumeText) { _, new in
             if let new { reservedResumeText = new }
         }

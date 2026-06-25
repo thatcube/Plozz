@@ -163,8 +163,20 @@ public struct PlexClient: Sendable {
 
     /// `GET /library/metadata/{ratingKey}/children` — seasons of a show,
     /// episodes of a season, …
+    ///
+    /// **`includeElements=Stream` is REQUIRED** for episode rails / season
+    /// views. By default Plex's /children response returns ZERO `<Stream>`
+    /// elements — only the parent `<Media>` — so DOVI* / colorTrc fields never
+    /// reach the parser and DoVi/HDR badges silently disappear. (Atmos still
+    /// works without it because it's a Media attribute, not a Stream field.)
+    /// The commonly-suggested `includeStreams=1` is a no-op here; the correct
+    /// flag is `includeElements=Stream`, verified against a live PMS.
     func children(ratingKey: String) async throws -> [PlexMetadata] {
-        let endpoint = Endpoint(path: "/library/metadata/\(ratingKey)/children", headers: headers)
+        let endpoint = Endpoint(
+            path: "/library/metadata/\(ratingKey)/children",
+            queryItems: [URLQueryItem(name: "includeElements", value: "Stream")],
+            headers: headers
+        )
         return try await decode(PlexMediaContainerResponse.self, endpoint)
             .MediaContainer.Metadata ?? []
     }
@@ -637,7 +649,13 @@ public struct PlexClient: Sendable {
             // tmdb://, anidb://, …) on list responses too — without this flag
             // list endpoints omit it, so rail/grid items would reach the
             // metadata router with no external ids to match (or detect anime) by.
-            URLQueryItem(name: "includeGuids", value: "1")
+            URLQueryItem(name: "includeGuids", value: "1"),
+            // List endpoints (section /all, onDeck, recentlyAdded) strip the
+            // per-Stream array by default, so rail cards lose DOVI/HDR signal.
+            // `includeStreams=1` is a well-known no-op on Plex; the verified
+            // correct flag is `includeElements=Stream` (asks Plex to inline the
+            // named child elements, here the `<Stream>` array under each Part).
+            URLQueryItem(name: "includeElements", value: "Stream")
         ]
     }
 

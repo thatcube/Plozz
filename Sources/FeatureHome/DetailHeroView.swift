@@ -215,9 +215,18 @@ struct DetailHeroView: View {
     /// content-rating certificate is rendered separately, inline with the
     /// year/runtime/genre metadata line.
     private var featureBadges: [MediaBadge] {
-        // Prefer the focused item's own tech badges; fall back to the derived
-        // series-level set for a series/season hero (or an episode whose stream
-        // info hasn't loaded), so tech badges are present on every kind.
+        // When the user has picked a non-default version from the picker,
+        // prefer that version's own resolution/HDR/audio badges so the hero
+        // row reflects what Play will actually target (e.g. switching from a
+        // 4K HDR Atmos remux to a 720p SDR WEB-DL flips Dolby Vision / HDR10
+        // / 7.1 off and shows the 720p file's facts). Falls through to the
+        // focused item's own tech badges, then to the series-derived fallback
+        // for a series/season hero whose episode mediaInfo hasn't loaded.
+        if versions.count > 1,
+           let selected = versions.first(where: { $0.id == selectedVersionID }) ?? versions.first {
+            let versionBadges = selected.technicalBadges
+            if !versionBadges.isEmpty { return versionBadges }
+        }
         let ownTech = item.technicalBadges
         return ownTech.isEmpty ? fallbackTechnicalBadges : ownTech
     }
@@ -588,50 +597,29 @@ struct DetailHeroView: View {
     /// active server's editions/qualities with a predicted Direct Play / Transcode
     /// badge for this device, active one checkmarked). Either section is omitted
     /// when it has only one option.
+    ///
+    /// The menu is extracted into a dedicated `Equatable` child view so that
+    /// re-renders of the surrounding hero (e.g. from `@FocusState` toggles when
+    /// the picker takes focus, from async cross-server discovery completing
+    /// after the page has settled, or from optimistic watched-state updates)
+    /// don't tear down the already-presented native Menu. Without this, every
+    /// hero re-render rebuilds the Menu's content closure, which can produce a
+    /// visible single-frame flash right after the user opens it.
     @ViewBuilder
     private func moreMenu(onSelectSource: ((String) -> Void)?, onSelectVersion: ((String) -> Void)?) -> some View {
-        Menu {
-            if serverChoices.count > 1, let onSelectSource {
-                let currentServer = serverChoices.first { $0.accountID == selectedSourceAccountID } ?? serverChoices.first
-                Section("Server") {
-                    ForEach(serverChoices) { source in
-                        Button {
-                            userInitiatedSourceSwitch = true
-                            onSelectSource(source.accountID)
-                        } label: {
-                            if source.accountID == currentServer?.accountID {
-                                Label(source.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(source.displayName)
-                            }
-                        }
-                    }
-                }
-            }
-            if versions.count > 1, let onSelectVersion {
-                let currentVersion = versions.first { $0.id == selectedVersionID } ?? versions.first
-                Section("Version") {
-                    ForEach(versions) { version in
-                        Button {
-                            onSelectVersion(version.id)
-                        } label: {
-                            let badge = version.compatibility(with: capabilities).badge
-                            let suffix = badge.isEmpty ? "" : "  •  \(badge)"
-                            if version.id == currentVersion?.id {
-                                Label(version.displayLabel + suffix, systemImage: "checkmark")
-                            } else {
-                                Text(version.displayLabel + suffix)
-                            }
-                        }
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: heroGlyphSize))
-                .foregroundStyle(Color.primary)
-                .frame(width: heroIconSize, height: heroIconSize)
-        }
+        HeroMoreMenu(
+            serverChoices: serverChoices,
+            versions: versions,
+            selectedSourceAccountID: selectedSourceAccountID,
+            selectedVersionID: selectedVersionID,
+            capabilities: capabilities,
+            glyphSize: heroGlyphSize,
+            iconSize: heroIconSize,
+            onSelectSource: onSelectSource,
+            onSelectVersion: onSelectVersion,
+            onUserInitiatedSourceSwitch: { userInitiatedSourceSwitch = true }
+        )
+        .equatable()
         .modifier(HeroButtonStyle(prominent: false))
         .focused($moreMenuFocused)
         .accessibilityLabel("Server and version options")
@@ -958,6 +946,87 @@ private struct CheckmarkShape: Shape {
                                      y: mid.y + t * (end.y - mid.y)))
         }
         return path
+    }
+}
+
+/// Equatable wrapper around the hero's "…" overflow Menu. Sits in its own view
+/// so that re-renders of `DetailHeroView` (e.g. when `@FocusState
+/// moreMenuFocused` flips as the picker opens, when async cross-server
+/// discovery / alternate-source enrichment in `ItemDetailViewModel` updates
+/// `sources` after the page has settled, or when an optimistic watched-state
+/// notification arrives) don't rebuild the Menu while it's already open — that
+/// rebuild is what produces the single-frame flash users see right after
+/// opening the menu. Closures are intentionally excluded from `==`: they're
+/// recreated on every parent render but invoke stable view-model methods, so
+/// comparing the data inputs is sufficient to decide whether the menu needs
+/// to redraw.
+private struct HeroMoreMenu: View, Equatable {
+    let serverChoices: [MediaSourceRef]
+    let versions: [MediaVersion]
+    let selectedSourceAccountID: String?
+    let selectedVersionID: String?
+    let capabilities: MediaCapabilities
+    let glyphSize: CGFloat
+    let iconSize: CGFloat
+    let onSelectSource: ((String) -> Void)?
+    let onSelectVersion: ((String) -> Void)?
+    let onUserInitiatedSourceSwitch: () -> Void
+
+    static func == (lhs: HeroMoreMenu, rhs: HeroMoreMenu) -> Bool {
+        lhs.serverChoices == rhs.serverChoices
+            && lhs.versions == rhs.versions
+            && lhs.selectedSourceAccountID == rhs.selectedSourceAccountID
+            && lhs.selectedVersionID == rhs.selectedVersionID
+            && lhs.capabilities == rhs.capabilities
+            && lhs.glyphSize == rhs.glyphSize
+            && lhs.iconSize == rhs.iconSize
+            && (lhs.onSelectSource == nil) == (rhs.onSelectSource == nil)
+            && (lhs.onSelectVersion == nil) == (rhs.onSelectVersion == nil)
+    }
+
+    var body: some View {
+        Menu {
+            if serverChoices.count > 1, let onSelectSource {
+                let currentServer = serverChoices.first { $0.accountID == selectedSourceAccountID } ?? serverChoices.first
+                Section("Server") {
+                    ForEach(serverChoices) { source in
+                        Button {
+                            onUserInitiatedSourceSwitch()
+                            onSelectSource(source.accountID)
+                        } label: {
+                            if source.accountID == currentServer?.accountID {
+                                Label(source.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(source.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+            if versions.count > 1, let onSelectVersion {
+                let currentVersion = versions.first { $0.id == selectedVersionID } ?? versions.first
+                Section("Version") {
+                    ForEach(versions) { version in
+                        Button {
+                            onSelectVersion(version.id)
+                        } label: {
+                            let badge = version.compatibility(with: capabilities).badge
+                            let suffix = badge.isEmpty ? "" : "  •  \(badge)"
+                            if version.id == currentVersion?.id {
+                                Label(version.displayLabel + suffix, systemImage: "checkmark")
+                            } else {
+                                Text(version.displayLabel + suffix)
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: glyphSize))
+                .foregroundStyle(Color.primary)
+                .frame(width: iconSize, height: iconSize)
+        }
     }
 }
 

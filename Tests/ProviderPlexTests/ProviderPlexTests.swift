@@ -471,8 +471,9 @@ final class PlexProviderMappingTests: XCTestCase {
         let item = try await provider.item(id: "77")
         XCTAssertEqual(item.officialRating, "PG-13")
         XCTAssertEqual(item.genres, ["Sci-Fi", "Adventure"])
-        // 4K + HDR10 (from smpte2084 transfer) + HEVC codec + Dolby Atmos.
-        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "HDR10", "Dolby Atmos"])
+        // 4K + HDR10 (from smpte2084 transfer) + Dolby Atmos. Dolby badges group
+        // first, so Atmos sits before the HDR10 pill.
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "Dolby Atmos", "HDR10"])
         XCTAssertEqual(item.mediaInfo?.video?.isInterlaced, true)
         // RT critic rendered as a percentage; IMDb audience stays 0–10.
         XCTAssertEqual(item.ratings.first(where: { $0.source == .rottenTomatoes })?.displayValue, "83%")
@@ -600,6 +601,70 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertFalse(labels.contains("SDR"))
     }
 
+    func testEpisodeAtmosDetectedFromMediaLevelAudioProfile() async throws {
+        // Real-world Plex Fallout-episode shape: Atmos is signalled ONLY at the
+        // Media level (`audioProfile="dolby digital plus + dolby atmos"`). The
+        // per-stream audio profile/displayTitle are absent, so the previous
+        // mapping dropped Atmos and badged "Dolby Digital+ 5.1". Threading the
+        // Media-level audioProfile into the stream mapping must restore the
+        // Dolby Atmos badge, and DoVi/HDR10 should still come from the video
+        // stream's DOVI flags + smpte2084 transfer.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/93", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"93","type":"episode","title":"The End","index":1,"parentIndex":1,
+           "Media":[{"id":60393,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "videoResolution":"4k","audioChannels":6,
+             "audioProfile":"dolby digital plus + dolby atmos","videoProfile":"main 10",
+             "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
+               {"id":1,"streamType":1,"codec":"hevc","width":3840,"height":2160,
+                "DOVIBLCompatID":1,"DOVIBLPresent":1,"DOVILevel":6,"DOVIPresent":1,
+                "DOVIProfile":8,"DOVIRPUPresent":1,"bitDepth":10,
+                "colorPrimaries":"bt2020","colorSpace":"bt2020nc","colorTrc":"smpte2084",
+                "profile":"main 10","displayTitle":"4K DoVi/HDR10",
+                "extendedDisplayTitle":"4K DoVi/HDR10 (HEVC Main 10)"},
+               {"id":2,"streamType":2,"codec":"eac3","channels":6,"audioChannelLayout":"5.1"}
+             ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "93")
+        let labels = item.technicalBadges.map(\.label)
+        XCTAssertEqual(item.mediaInfo?.dynamicRangeBadges.map(\.label), ["Dolby Vision", "HDR10"])
+        XCTAssertTrue(labels.contains("Dolby Atmos"),
+                      "Atmos must be picked up from Media-level audioProfile, got \(labels)")
+        XCTAssertFalse(labels.contains("Dolby Digital+"),
+                       "Atmos supersedes Dolby Digital+ when both apply, got \(labels)")
+        // Final ordering: 4K · Dolby Vision · Dolby Atmos · HDR10 (Dolby logos
+        // adjacent, HDR pill after).
+        XCTAssertEqual(labels, ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"])
+    }
+
+    func testMediaLevelFallbackDetectsAtmosFromAudioProfile() async throws {
+        // When the per-stream array is omitted (list/children endpoints), Atmos
+        // must still be recovered from the Media-level audioProfile and DoVi/HDR
+        // from videoStreamDisplayTitle so episode rails badge correctly.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/94", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"94","type":"episode","title":"Ep","index":1,"parentIndex":1,
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "videoResolution":"4k","width":3840,"height":2160,"audioChannels":6,
+             "audioProfile":"dolby digital plus + dolby atmos",
+             "videoStreamDisplayTitle":"4K Dolby Vision/HDR10 (HEVC Main 10)",
+             "Part":[{"id":2,"key":"/p","container":"mkv"}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "94")
+        let labels = item.technicalBadges.map(\.label)
+        XCTAssertEqual(item.mediaInfo?.dynamicRangeBadges.map(\.label), ["Dolby Vision", "HDR10"])
+        XCTAssertTrue(labels.contains("Dolby Atmos"))
+        XCTAssertEqual(labels, ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"])
+    }
+
     func testItemFallsBackToMediaLevelFactsWithoutStreams() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/library/metadata/88", json: """
@@ -614,10 +679,43 @@ final class PlexProviderMappingTests: XCTestCase {
 
         let item = try await provider.item(id: "88")
         // No Stream array: resolution + codec + surround come from Media-level
-        // facts; no HDR signal, so the range reads SDR. The 5.1 layout rides on
-        // the Dolby Digital+ badge as a trailing detail.
-        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "SDR", "Dolby Digital+"])
-        XCTAssertEqual(item.technicalBadges.last?.detail, "5.1")
+        // facts. We deliberately do NOT assert SDR from the coarse fallback
+        // because Plex's trimmed children responses often strip HDR display-
+        // title hints — a wrong "SDR" pill on a real DoVi episode is worse
+        // than no range pill at all. Dolby Digital+ rides the 5.1 layout as
+        // its trailing detail.
+        XCTAssertEqual(item.technicalBadges.map(\.label), ["4K", "Dolby Digital+"])
+        XCTAssertEqual(item.technicalBadges.first(where: { $0.label == "Dolby Digital+" })?.detail, "5.1")
+        XCTAssertFalse(item.technicalBadges.map(\.label).contains("SDR"))
+    }
+
+    func testMediaLevelFallbackOmitsSDRWhenHDRSignalAbsent() async throws {
+        // The user-reported Fallout-on-Plex shape from a listing endpoint that
+        // omits BOTH the per-Stream array AND `videoStreamDisplayTitle` — Plex
+        // only emits the coarse `videoProfile="main 10"` plus the Media-level
+        // `audioProfile`. We can't prove HDR from "main 10" alone, but we also
+        // must not lie and say SDR; Atmos must still come through. Result:
+        // "4K · Dolby Atmos" with no range pill at all.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/95", json: """
+        {"MediaContainer":{"Metadata":[
+          {"ratingKey":"95","type":"episode","title":"Ep","index":1,"parentIndex":1,
+           "Media":[{"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "videoResolution":"4k","width":3840,"height":2160,"audioChannels":6,
+             "videoProfile":"main 10",
+             "audioProfile":"dolby digital plus + dolby atmos",
+             "Part":[{"id":2,"key":"/p","container":"mkv"}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "95")
+        let labels = item.technicalBadges.map(\.label)
+        XCTAssertTrue(labels.contains("Dolby Atmos"),
+                      "Atmos must come through media-level audioProfile, got \(labels)")
+        XCTAssertFalse(labels.contains("SDR"),
+                       "Coarse fallback must not assert SDR with no HDR evidence, got \(labels)")
+        XCTAssertEqual(labels, ["4K", "Dolby Atmos"])
     }
 
     func testItemsPagePassesContainerParamsAndType() async throws {
@@ -642,6 +740,11 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "X-Plex-Container-Size" })?.value, "60")
         XCTAssertEqual(query.first(where: { $0.name == "type" })?.value, "1")
         XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
+        // List endpoints must inline streams so movie rail cards can badge
+        // DoVi/HDR/Atmos from real stream facts; the bare media-level fallback
+        // can't recover HDR signal on its own. `includeElements=Stream` is the
+        // verified-correct flag (`includeStreams=1` is a Plex no-op).
+        XCTAssertEqual(query.first(where: { $0.name == "includeElements" })?.value, "Stream")
     }
 
     func testSeriesLibraryUsesShowType() async throws {
@@ -712,6 +815,45 @@ final class PlexProviderMappingTests: XCTestCase {
         // A season item must carry its own ordinal so cross-server season matching
         // (by NUMBER) works instead of collapsing to the first season.
         XCTAssertEqual(children[0].seasonNumber, 1)
+        // The /children endpoint must ask Plex to inline the per-Stream array;
+        // without `includeElements=Stream` Plex returns zero <Stream> elements
+        // and DoVi/HDR badges silently disappear from season/episode rails.
+        // (`includeStreams=1` is the common-but-wrong incantation — verified
+        // no-op against a live PMS.)
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/library/metadata/9/children"))
+        XCTAssertEqual(query.first(where: { $0.name == "includeElements" })?.value, "Stream")
+    }
+
+    func testChildrenStreamsYieldFullDoViBadges() async throws {
+        // Regression: the Fallout-on-Plex episode badge bug. Even when an
+        // episode is fetched via /library/metadata/{key}/children, Plex returns
+        // the per-Stream array (because we send `includeStreams=1`) so DoVi +
+        // HDR10 + Atmos must all render — not just "4K · Dolby Atmos".
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/library/metadata/s1/children", json: """
+        {"MediaContainer":{"size":1,"Metadata":[
+          {"ratingKey":"e1","type":"episode","title":"The End","index":1,"parentIndex":1,
+           "Media":[{"id":60393,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+             "videoResolution":"4k","audioChannels":6,
+             "audioProfile":"dolby digital plus + dolby atmos","videoProfile":"main 10",
+             "Part":[{"id":2,"key":"/p","container":"mkv","Stream":[
+               {"id":1,"streamType":1,"codec":"hevc","width":3840,"height":2160,
+                "DOVIBLCompatID":1,"DOVIBLPresent":1,"DOVILevel":6,"DOVIPresent":1,
+                "DOVIProfile":8,"DOVIRPUPresent":1,"bitDepth":10,
+                "colorPrimaries":"bt2020","colorSpace":"bt2020nc","colorTrc":"smpte2084",
+                "profile":"main 10","displayTitle":"4K DoVi/HDR10",
+                "extendedDisplayTitle":"4K DoVi/HDR10 (HEVC Main 10)"},
+               {"id":2,"streamType":2,"codec":"eac3","channels":6,"audioChannelLayout":"5.1"}
+             ]}]}]}
+        ]}}
+        """)
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        let children = try await provider.children(of: "s1")
+        XCTAssertEqual(children.count, 1)
+        let labels = children[0].technicalBadges.map(\.label)
+        XCTAssertEqual(labels, ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"],
+                       "DoVi/HDR10/Atmos must all survive the /children path; got \(labels)")
     }
 
     func testPlaybackInfoTranscodesUnsupportedContainer() async throws {

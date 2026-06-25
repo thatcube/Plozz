@@ -194,7 +194,9 @@ public struct PlexProvider: MediaProvider {
             isTranscoding: resolved.isTranscoding,
             sourceMetadata: Self.sourceMetadata(
                 container: media.container ?? part.container,
-                streams: streams
+                streams: streams,
+                mediaAudioProfile: media.audioProfile,
+                mediaVideoDisplayTitle: media.videoStreamDisplayTitle
             ),
             scrubPreview: scrubPreview(for: part)
         )
@@ -289,12 +291,26 @@ public struct PlexProvider: MediaProvider {
 
     private static func videoRangeToken(for rangeType: String?) -> String? {
         guard let rangeType, !rangeType.isEmpty else { return nil }
-        return rangeType.uppercased().hasPrefix("DOVI") ? "DOVI" : "HDR"
+        let upper = rangeType.uppercased()
+        if upper.hasPrefix("DOVI") { return "DOVI" }
+        if upper == "SDR" { return "SDR" }
+        return "HDR"
     }
 
     /// Builds provider-agnostic source facts from a Plex part's streams so the
     /// diagnostics overlay matches what a direct-play client (e.g. Infuse) shows.
-    static func sourceMetadata(container: String?, streams: [PlexStream]) -> MediaSourceMetadata? {
+    ///
+    /// `mediaAudioProfile` is the parent `<Media audioProfile=…>` summary
+    /// (e.g. `"dolby digital plus + dolby atmos"`). Plex frequently signals
+    /// Atmos *only* there — the audio Stream's own `profile`/`displayTitle`
+    /// often don't mention it — so threading it in is what lets us surface a
+    /// Dolby Atmos badge for those servers.
+    static func sourceMetadata(
+        container: String?,
+        streams: [PlexStream],
+        mediaAudioProfile: String? = nil,
+        mediaVideoDisplayTitle: String? = nil
+    ) -> MediaSourceMetadata? {
         let video = streams.first { $0.streamType == 1 }
         let audio = streams.first { ($0.streamType == 2) && ($0.selected ?? $0.default ?? false) }
             ?? streams.first { $0.streamType == 2 }
@@ -302,14 +318,30 @@ public struct PlexProvider: MediaProvider {
             ?? streams.first { $0.streamType == 3 }
 
         let videoStream = video.map { v in
-            let rangeType = Self.dynamicRangeType(
+            // Stream-level path: when a video Stream is present and shows no
+            // HDR/DoVi hints we can confidently assert SDR. The coarse media-
+            // level fallback (no Stream array) deliberately does NOT assert
+            // SDR — see `mediaLevelMetadata` — because the trimmed children
+            // response can strip the HDR hint without meaning the content is
+            // SDR.
+            //
+            // We also fold the parent `<Media>`'s `videoStreamDisplayTitle`
+            // (e.g. "4K DoVi/HDR10") into the title-hint list alongside the
+            // stream's own titles. Some Plex servers / agents emit a present
+            // `<Stream>` with a sparse `displayTitle` (just a profile, no
+            // HDR/DoVi tag) while the media-level summary carries the full
+            // marketing label — so this is a belt-and-braces hint that lets
+            // DoVi/HDR survive even when DOVI*/colorTrc happen to be missing
+            // from the stream itself.
+            let detectedRange = Self.dynamicRangeType(
                 colorTransfer: v.colorTrc,
                 doviPresent: v.DOVIPresent,
                 doviProfile: v.DOVIProfile,
                 doviLevel: v.DOVILevel,
                 doviBLPresent: v.DOVIBLPresent,
-                displayTitles: [v.displayTitle, v.extendedDisplayTitle]
+                displayTitles: [v.displayTitle, v.extendedDisplayTitle, mediaVideoDisplayTitle]
             )
+            let rangeType = detectedRange ?? "SDR"
             return MediaSourceMetadata.VideoStream(
                 codec: v.codec,
                 profile: v.profile,
@@ -324,21 +356,13 @@ public struct PlexProvider: MediaProvider {
             )
         }
         let audioStream = audio.map { a in
-            // Plex doesn't expose an explicit object-based-audio flag on basic
-            // metadata; Atmos/DTS:X only appear in the (extended) display title,
-            // e.g. "Dolby TrueHD Atmos 7.1" or "DTS-HD MA → DTS:X 7.1". Fold that
-            // hint into the profile so the shared badge logic can surface the
-            // Dolby Atmos / DTS:X headline badge.
-            let title = (a.extendedDisplayTitle ?? a.displayTitle ?? "").lowercased()
-            var profileParts = [a.profile].compactMap { $0 }
-            if title.contains("atmos") { profileParts.append("Atmos") }
-            if title.contains("dts:x") || title.contains("dts-x") || title.contains("dtsx") {
-                profileParts.append("DTS:X")
-            }
-            let profile = profileParts.isEmpty ? nil : profileParts.joined(separator: " ")
             return MediaSourceMetadata.AudioStream(
                 codec: a.codec,
-                profile: profile,
+                profile: Self.audioProfile(
+                    streamProfile: a.profile,
+                    streamDisplayTitles: [a.displayTitle, a.extendedDisplayTitle],
+                    mediaAudioProfile: mediaAudioProfile
+                ),
                 channels: a.channels,
                 channelLayout: a.audioChannelLayout,
                 sampleRate: a.samplingRate,
@@ -536,11 +560,16 @@ public struct PlexProvider: MediaProvider {
         let part = media.Part?.first
         let streams = part?.Stream ?? []
         if !streams.isEmpty {
-            return sourceMetadata(container: part?.container ?? media.container, streams: streams)
+            return sourceMetadata(
+                container: part?.container ?? media.container,
+                streams: streams,
+                mediaAudioProfile: media.audioProfile,
+                mediaVideoDisplayTitle: media.videoStreamDisplayTitle
+            )
         }
         // List/children responses can omit the per-stream array; fall back to the
-        // coarser Media-level facts so episode rails still earn resolution/audio
-        // badges (HDR/Atmos need the stream detail and are simply absent here).
+        // coarser Media-level facts so episode rails still earn resolution / HDR /
+        // Atmos badges from the summary fields Plex always emits.
         return mediaLevelMetadata(from: media)
     }
 
@@ -601,7 +630,9 @@ public struct PlexProvider: MediaProvider {
     }
 
     /// A coarse `MediaSourceMetadata` from Plex's Media-element attributes, used
-    /// when the richer per-stream data isn't present in a listing.
+    /// when the richer per-stream data isn't present in a listing. Pulls HDR /
+    /// DoVi out of `videoStreamDisplayTitle` and Atmos / DTS:X out of `audioProfile`
+    /// so episode rails still earn the right badges without a per-item fetch.
     static func mediaLevelMetadata(from media: PlexMedia) -> MediaSourceMetadata? {
         let lines: Int?
         switch (media.videoResolution ?? "").lowercased() {
@@ -617,7 +648,7 @@ public struct PlexProvider: MediaProvider {
             doviProfile: nil,
             doviLevel: nil,
             doviBLPresent: nil,
-            displayTitles: [media.videoStreamDisplayTitle]
+            displayTitles: [media.videoStreamDisplayTitle, media.videoProfile]
         )
         let video: MediaSourceMetadata.VideoStream?
         if media.width != nil || lines != nil || media.videoCodec != nil {
@@ -633,9 +664,14 @@ public struct PlexProvider: MediaProvider {
             video = nil
         }
         let audio: MediaSourceMetadata.AudioStream?
-        if media.audioCodec != nil || media.audioChannels != nil {
+        if media.audioCodec != nil || media.audioChannels != nil || media.audioProfile != nil {
             audio = MediaSourceMetadata.AudioStream(
                 codec: media.audioCodec,
+                profile: Self.audioProfile(
+                    streamProfile: nil,
+                    streamDisplayTitles: [],
+                    mediaAudioProfile: media.audioProfile
+                ),
                 channels: media.audioChannels
             )
         } else {
@@ -643,6 +679,43 @@ public struct PlexProvider: MediaProvider {
         }
         let metadata = MediaSourceMetadata(container: media.container, video: video, audio: audio)
         return metadata.isEmpty ? nil : metadata
+    }
+
+    /// Folds Plex's various Atmos / DTS:X hints into a single audio profile string
+    /// the shared badge logic can read. Plex spreads object-based-audio markers
+    /// across three places — none of them universally populated:
+    ///   1. the audio Stream's own `profile` (rarely says "atmos");
+    ///   2. the audio Stream's `(extended)displayTitle`
+    ///      (e.g. `"Dolby TrueHD Atmos 7.1"`);
+    ///   3. the parent Media-level `audioProfile`
+    ///      (e.g. `"dolby digital plus + dolby atmos"`) — frequently the **only**
+    ///      place Atmos is mentioned for an Atmos-carrying EAC3 episode.
+    /// We treat all three as evidence and append a normalized `Atmos` / `DTS:X`
+    /// token to the stream profile so `MediaBadges.audioBadges` can surface the
+    /// correct headline format regardless of which signal the server emits.
+    static func audioProfile(
+        streamProfile: String?,
+        streamDisplayTitles: [String?],
+        mediaAudioProfile: String?
+    ) -> String? {
+        let hintBlob = (streamDisplayTitles + [mediaAudioProfile])
+            .compactMap { $0?.lowercased() }
+            .joined(separator: " ")
+        let hasAtmos = hintBlob.contains("atmos")
+        let hasDTSX = hintBlob.contains("dts:x")
+            || hintBlob.contains("dts-x")
+            || hintBlob.contains("dtsx")
+            || hintBlob.contains("dts x")
+
+        var parts: [String] = []
+        if let streamProfile, !streamProfile.isEmpty { parts.append(streamProfile) }
+        if hasAtmos, !parts.contains(where: { $0.lowercased().contains("atmos") }) {
+            parts.append("Atmos")
+        }
+        if hasDTSX, !parts.contains(where: { $0.lowercased().contains("dts:x") }) {
+            parts.append("DTS:X")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     /// Maps Plex's native rating fields onto provider-agnostic ratings. Plex

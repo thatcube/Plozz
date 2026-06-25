@@ -63,7 +63,7 @@ public final class DetailSnapshotCache: Sendable {
     /// instead of failing to decode (decode failures are treated as a cache miss,
     /// so a stale schema just silently falls back to the network — but a bump also
     /// reclaims the orphaned files).
-    private static let schemaDirName = "plozz-detail-cache-v1"
+    private static let schemaDirName = "plozz-detail-cache-v2"
     private static let schemaDirPrefix = "plozz-detail-cache"
 
     private let directory: URL?

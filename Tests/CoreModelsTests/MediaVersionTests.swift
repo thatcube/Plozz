@@ -31,6 +31,54 @@ final class MediaVersionTests: XCTestCase {
         XCTAssertEqual(sdr51.audioLabel, "5.1")
     }
 
+    func testTechnicalBadgesUseDolbyGroupedOrder() {
+        // A 4K DoVi+HDR10 Atmos version should emit
+        // 4K · Dolby Vision · Dolby Atmos · HDR10 — Dolby logos grouped.
+        let dovi = MediaVersion(
+            id: "1",
+            width: 3840,
+            height: 2160,
+            videoCodec: "hevc",
+            videoRange: "DOVIWithHDR10",
+            audioCodec: "eac3",
+            audioChannels: 8,
+            audioProfile: "Dolby Atmos"
+        )
+        XCTAssertEqual(dovi.technicalBadges.map(\.label),
+                       ["4K", "Dolby Vision", "Dolby Atmos", "HDR10"])
+
+        // A 720p SDR stereo version should emit just 720p · SDR — no audio
+        // headline, no HDR badges, and channels < 6 are not surfaced.
+        let sd = MediaVersion(
+            id: "2",
+            width: 1280,
+            height: 720,
+            videoCodec: "h264",
+            videoRange: "SDR",
+            audioCodec: "aac",
+            audioChannels: 2
+        )
+        XCTAssertEqual(sd.technicalBadges.map(\.label), ["720p", "SDR"])
+
+        // A 1080p HDR10 5.1 Dolby Digital+ version: resolution, HDR10 (not
+        // Dolby-styled), then Dolby Digital+ (Dolby-styled) — verifying the
+        // Dolby-grouping helper picks the audio-Dolby out of the trailing
+        // group when there's no Dolby-styled range.
+        let dd = MediaVersion(
+            id: "3",
+            width: 1920,
+            height: 1080,
+            videoCodec: "hevc",
+            videoRange: "HDR10",
+            audioCodec: "eac3",
+            audioChannels: 6
+        )
+        let labels = dd.technicalBadges.map(\.label)
+        XCTAssertEqual(labels.first, "1080p")
+        // Dolby Digital+ (Dolby-styled audio) comes before HDR10 (non-Dolby range).
+        XCTAssertEqual(labels.dropFirst().prefix(2), ArraySlice(["Dolby Digital+", "HDR10"]))
+    }
+
     func testDisplayLabelPrefersDerivedFactsThenName() {
         let derived = MediaVersion(id: "1", height: 2160, sizeBytes: 12_000_000_000, videoRange: "HDR10")
         XCTAssertTrue(derived.displayLabel.contains("4K"))

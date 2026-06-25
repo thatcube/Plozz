@@ -954,6 +954,251 @@ discoverability/peek fan-out (lazy-load + jump-search); shelf cold-start (seed b
 3. **Home:** OK to remove library **content** rails but **keep a capped library access shelf**
    (the revised answer to §10.6 Q3 — this is what keeps your sister's Anime one tap away)?
 
+## 11. Multi-tracker watch sync (Trakt · AniList · MyAnimeList · Simkl)
+
+*Synthesis of three blind branches (Opus 4.8 · Codex xhigh · Gemini 3.1). Grounds: today
+main already (a) folds cross-server watch-state most-recent-wins (`UnifiedWatchState`), (b) fans
+`setPlayed` to every source (`MediaItemActionCoordinator`), (c) ships Trakt fully wired
+(`Sources/TraktService/*`), with AniList ratings/artwork-only. The ask: generalize the lone Trakt
+scrobbler into a registry covering Trakt + AniList + MAL + Simkl.*
+
+### 11.1 Where all three converge (treat as decided)
+- **A registry over a protocol, not a hardcoded Trakt path.** Generalize the single
+  `any TraktScrobbling` in `PlayerViewModel` into a `TrackerRegistry` that fans to all enabled
+  trackers, runtime-detected exactly like `WatchStateProviding`/`MusicProvider`. Per-profile
+  opt-in, surfaced in the existing `IntegrationsDetailView` (one panel per tracker).
+- **Reuse the anime substrate that already exists.** Gate anime trackers on the existing
+  `ContentClassifier` / `AnimeIDs(from:)` / `ProviderIDNamespace`; do **not** invent a parallel
+  identity system. Artwork, ratings, and tracking should share one anime-identity base.
+- **Offline drift is fixed with a durable OUTBOX, not retries-in-place.** Record each mutation's
+  *intent* on disk **before** the network call; a reconciliation coordinator drains it on
+  foreground / reachability / timer. This **replaces** today's brittle "revert if all sources
+  fail." All three branches independently proposed this; two of them rank it the **#1 thing to
+  ship first** because it fixes silent drift with *zero* new trackers.
+- **Stale-write suppression.** Mutations carry a `capturedAt` (action time, not send time); a
+  queued write is dropped if it is older than the item's current server `lastPlayedAt`
+  (Lamport-ish). Prevents a late offline write from resurrecting old state.
+- **Single-writer to avoid double-scrobble.** If a server-side Trakt plugin is active, app-side
+  Trakt defaults **off**; otherwise app-side writes. Enforced with an **idempotency key**
+  (`tracker|profile|canonicalId|episode|timeBucket`); "already watched" counts as success.
+- **Offline anime ID-mapping DB, never live per-play search.** Ship/cache a bundled mapping
+  (anime-offline-database / Fribb anime-lists) to resolve TMDB/TVDB→AniList/MAL; resolving by a
+  live search on every play is rejected by all three.
+- **Confidence-gated writes.** Only high-confidence anime matches may write (Codex: **≥0.90**);
+  ambiguous → **hold pending, do not write**. "Prefer a missing sync over a wrong-title
+  pollution" is unanimous.
+- **Credentials in per-(profile,tracker) Keychain**, namespaced exactly like the existing
+  `KeychainTraktTokenStore` (`AfterFirstUnlockThisDeviceOnly`, never iCloud/UserDefaults/logs).
+
+### 11.2 The decisive divergence — is an external tracker a READ authority?
+This is the one real fork and it changes the data model:
+
+- **Opus + Codex (server stays the read-truth; trackers are write-mirrors).** The audited
+  cross-server `MediaSourceRef` fold remains the *only* source for resume position and watched
+  state shown in the UI; trackers are **append-only sinks**. Authority is decided **per field**:
+  resume/scrubber = servers only (trackers don't store a position); binary watched = servers
+  primary, Trakt is **not read back** by default. Rationale: a real resume point on a playable
+  server beats a remote "watched" flag; never regress the fold that already works.
+- **Gemini (external tracker = authoritative *logical* state).** Treats a tracker as a logical
+  peer that **overrides** server physical state when its timestamp is newer (e.g. forces
+  start-from-0 if Trakt says watched even though a server has a resume point).
+
+**My recommendation: take the Opus/Codex stance** — server stays read-truth, trackers are
+write-mirrors, with an **optional, default-off** "trust external watched" union for power users.
+It's the lower-risk path, it cannot regress the cross-server fold you already rely on, and it
+matches how scrobbling actually works (you watch *on a server*, the tracker is the logbook).
+
+### 11.3 The insight that shapes the protocol (Opus, worth calling out)
+**AniList and MAL are NOT scrobblers.** They have no start/pause/stop lifecycle — you mutate a
+list entry's *status* + an *integer episode progress*. Cramming them into a Trakt-style
+`scrobble(start/pause/stop)` is a category error. So the registry needs **two capability seams**:
+- `ScrobbleTracking` — live playback lifecycle (Trakt, Simkl).
+- `ListSyncTracking` — OAuth list-entry status + episode count (AniList, MAL).
+A title can be eligible for one, the other, or both. Codex frames the same split as a per-tracker
+**write-mode enum** (`appDirect` / `serverRelay` / `readOnly` / `disabled`).
+
+### 11.4 The anime hazard nobody should skip: episode numbering
+The #1 corruption risk isn't the *series* id — it's **episode numbering**. AniList/MAL list a
+show as per-cour entries (each season = its own entry numbered 1..n), while servers often use
+continuous/absolute seasons. Writing "S2E3 = episode 15" to an AniList entry that only has 12
+episodes corrupts the list. Resolve to `(seriesId, episodeOffset)` and **skip on ambiguity**.
+Codex's deterministic resolver graph: direct IDs → series→episode inheritance → MAL↔AniList
+crosswalk → constrained fuzzy fallback, cached in a profile-scoped `TrackerIdentityMap`
+(id+confidence+provenance+fingerprint), invalidated on metadata fingerprint drift.
+
+### 11.5 Recommended build order (value→risk, converged)
+1. **Outbox + stale-write suppression + reconciliation** — fixes silent offline drift with **zero
+   new trackers**. Lowest risk, highest immediate value.
+2. **Two-seam registry refactor of the existing Trakt path** — no behavior change, just structure.
+3. **Simkl** — closest to Trakt's shape, broadest coverage, no anime-numbering trap.
+4. **AniList list-sync + the offline anime ID/episode mapper** — the hard part, gated by confidence.
+5. **MyAnimeList** (PKCE auth) — last; same list-sync seam as AniList.
+
+### 11.6 Open questions for Brandon (watch-tracking)
+1. **Read-authority:** confirm **server stays read-truth, trackers are write-mirrors** (my rec,
+   Opus/Codex) — with an optional default-off "trust external watched"? Or do you want a tracker
+   like Trakt to be able to **override** server state (Gemini)?
+2. **Double-scrobble default:** when a server already syncs Trakt, app-side Trakt **off by
+   default** (you toggle it on) — agreed? (Alternative: app-side on, rely on idempotency.)
+3. **Ship order:** OK to land the **offline outbox first** (fixes drift, no new trackers) before
+   adding Simkl/AniList/MAL?
+
+---
+
+## 12. Discover & media requests (Seerr / Overseerr / Jellyseerr)
+
+*Synthesis of three blind branches (Opus 4.8 · Codex xhigh · Gemini 3.1). Grounds: main has **no**
+Seerr/Overseerr today; it does have the `MediaItemIdentity` (TMDB/IMDb) graph that already merges
+owned content, a conditional Music tab pattern (`hasMusic`), and a Trakt-style integration UX in
+`IntegrationsDetailView`. The ask: add a place to discover and **request** media you don't own
+yet, single-config-but-scalable.*
+
+### 12.1 Where all three converge (treat as decided)
+- **A conditional `Discover` tab, gated on a Seerr being configured** — mirroring exactly how the
+  Music tab appears only when `hasMusic`. Typical users stay at ≤3 tabs.
+- **Local identity is the sole arbiter of owned-vs-requestable.** Pass Seerr's TMDB ids through
+  the existing `MediaItemIdentity` graph: a hit = **In Library → Play** (route to normal detail);
+  a miss = **Requestable → request flow**. Two branches explicitly say **ignore Seerr's own
+  "available" flag** for the Play decision and trust Plozz's graph (Opus uses it only as a free
+  first-paint hint, then verifies).
+- **One-tap request on the happy path.** Movies: single Request CTA, quality/profile only behind
+  an "advanced" sheet. TV: default "all seasons" with a D-pad season picker (All / Future / pick),
+  already-owned seasons disabled. A **"My Requests"** status area lives in Discover.
+- **The arrival loop closes on Home, not as a Discover ping.** When a request finishes and becomes
+  playable, it surfaces as an **owned** item in Home's existing "Recently Added"/"Arrived" rail —
+  no push-notification infrastructure. The thing you requested comes back as something you press
+  **Play** on.
+- **Seerr is its own protocol family, runtime-detected like Trakt/Music — NOT a `MediaProvider`.**
+  (See divergence note; this is effectively unanimous once examined.) A normalized
+  `RequestBackend` / `DiscoveryProviding` + `MediaRequesting` pair hides the Overseerr /
+  Jellyseerr / fork dialects, auto-detected from `/api/v1/status`.
+- **Config is Day-2 in Settings, never onboarding, never gates playback.** Sits beside Trakt in
+  `IntegrationsDetailView`; the Discover tab simply appears once connected.
+- **No server axis in the UI.** Default 1 instance; for N>1, merge into **one** Discover catalog
+  keyed by **TMDB id** (cleaner than library merge — TMDB is canonical/server-agnostic). The
+  instance matters **only at request time** for routing (which Radarr/Sonarr→Plex/JF backend),
+  disambiguated only when genuinely ambiguous.
+- **Discover content** = Trending / Popular / Upcoming / Genres (recommendations later), **data-
+  driven** via a `DiscoverLayoutStore` per the flexibility mandate.
+
+### 12.2 The sharpest divergence — what is Discover the twin of?
+- **Opus: Discover is the symmetric twin of BROWSE, not Search.** Browse = the catalog you **own**;
+  Discover = the catalog you **don't own yet**. Same poster-grid paradigm, opposite ownership
+  side. Search stays its own thing; the only bridge is a **zero-result handoff** ("not in your
+  library — look in Discover"). Strongest framing for keeping the owned/unowned boundary crisp.
+- **Codex: separate Discover tab, Search stays separate too** — agrees Discover is its own tab and
+  must not be folded into Search.
+- **Gemini: replace the Search tab with Discover** — put a global search bar at the top of Discover
+  that queries local + Seerr simultaneously, Trending/Popular below.
+
+**My recommendation: Opus's "Discover = twin of Browse" model.** It keeps the owned/unowned line
+unambiguous (the one invariant all three care about), reuses the Browse grid paradigm from §10,
+and avoids overloading Search. Adopt Gemini's good idea as a **bridge, not a merge**: a
+zero-result Search offers "Search Discover instead," and Discover has its own search field — but
+the two corpora only touch at clearly **labelled** points (an "In your library" chip inside
+Discover; the owned "Arrived" row on Home).
+
+### 12.3 Dedupe without a full local index (converged mechanism)
+No exhaustive owned-index. Two cheap tiers:
+- **Tier A (free, first paint):** Seerr's own `mediaInfo.status` for an instant label.
+- **Tier B (authoritative for "Play"):** a lazily-harvested `Set<String>` of owned external-id
+  keys (`"tmdb:278"`) gathered from items **already in memory** (Home rails + visited grids),
+  giving O(1) membership; the cold case resolves lazily on detail via one targeted call.
+- **Net-new capability:** an optional `ExternalIDResolving` on `MediaProvider` (Jellyfin
+  `AnyProviderIdEquals` / Plex GUID lookup) for the authoritative cold-case check.
+
+### 12.4 Why Seerr must NOT be a `MediaProvider` (Opus, important)
+`MediaProvider.swift` / `ProviderKind.swift` literally invite it ("e.g. Overseerr") — but that's a
+trap. Seerr can't satisfy `libraries()` / `playbackInfo()` / watch-state, and because the app fans
+out `[ResolvedAccount]` and **merges everything into Home/Search/Browse via `MediaItemMerger`**, a
+Seerr-as-provider would **leak unowned TMDB titles into owned surfaces** — destroying the very
+boundary Discover exists to draw. So Seerr is a **peer subsystem** (Trakt-shaped), detected like
+`as? MusicProvider`, never merged into the owned fold.
+
+**Naming heads-up for implementers:** `Sources/FeatureDiscovery/` **already exists** and means
+*server network discovery*, not media discovery. The new module must be `FeatureDiscover` /
+`FeatureRequests` / `SeerrKit` — do **not** overload `FeatureDiscovery`.
+
+### 12.5 Recommended build order (value→risk, converged)
+1. **Seerr subsystem skeleton + Settings/Integrations connect** (no tab yet).
+2. **Read-only Discover tab** with Tier-A status labels.
+3. **Tier-B owned-set + `ExternalIDResolving`** (crisp Play-vs-Request).
+4. **Movie requests + "My Requests".**
+5. **Series season-scope UX.**
+6. **Arrival loop → owned Home "Arrived" row.**
+7. **N>1 TMDB-merged catalog + request-time routing.**
+8. **Flavour adapters (Jellyseerr/forks) + recommendations.**
+
+### 12.6 Open questions for Brandon (discover/requests)
+1. **Discover's identity:** **twin of Browse** (owned vs not-owned; Search stays separate, my rec)
+   — or **replace Search** with a Discover tab that has search on top (Gemini)?
+2. **Surface:** a **dedicated conditional tab** (all three) — confirm you don't want it as a Home
+   section instead?
+3. **Arrival feedback:** organic — requested items just **appear in "Recently Added" on Home** when
+   ready (no push) — good enough for v1?
+4. **Scope check:** is **single-instance Seerr** the right v1 (multi-instance routing deferred to a
+   later phase)?
+
+
+## 13. Decisions LOCKED by Brandon (2026-06-25)
+
+*These are committed product decisions — implementation branches build to these, not to the
+open-question menus above.*
+
+### 13.1 Watch-tracking
+- **Read-authority = servers (Option A).** Servers remain the single read-truth for what the UI
+  shows; external trackers (Trakt/AniList/MAL/Simkl) are **write-only mirrors**. Per-field:
+  resume/scrubber = servers only; binary watched = servers primary, trackers **not read back**.
+  Ship an **optional, default-off** "trust external watched" union for power users.
+- **Build order = OUTBOX FIRST.** Land the durable offline `WatchMutationOutbox` +
+  stale-write suppression + reconciliation **before** adding any new tracker — it fixes silent
+  cross-server drift with zero new integrations. Then registry refactor → Simkl → AniList (+offline
+  anime ID/episode mapper) → MAL.
+- **Double-scrobble (Trakt vs a server-side Trakt plugin) = RESOLVED (unanimous 3/3 branches).**
+  Brandon's hard constraint — **never silently drop a watch**; a harmless duplicate is tolerable —
+  is honored as follows:
+  - **App-side Trakt writes default ON; never gate on plugin detection.** Detection is unviable:
+    Jellyfin's plugin list requires an *admin* token (Plozz holds a normal-user token and usually
+    can't even enumerate plugins), "installed" ≠ "linked to this user" ≠ "working"; Plex has no
+    first-party Trakt and no client-visible signal for out-of-band relays (PlexTraktSync / Tautulli
+    / Kometa). A false-positive detection would **suppress = drop a watch = forbidden**.
+  - **Dedupe after the fact, never before.** Trakt's own `/scrobble` endpoint self-dedupes
+    (account+item scoped, client-agnostic, ~8h cooldown), so an app+plugin pair on the same session
+    collapses automatically. A durable outbox idempotency key
+    (`account | canonicalMediaId(trakt→imdb→tmdb/tvdb) | episode | day_bucket`, TTL ≥ ~24h) prevents
+    our *own* duplicates across relaunch. Reconcile unresolved intents via
+    `/sync/last_activities` → `/sync/history` and **write-if-missing, never delete**.
+  - **`/scrobble` 409 is SUCCESS, not failure.** Actionable bug: current code logs Trakt's `409`
+    (duplicate) as failed — it means "already scrobbled" and must be treated as confirmed. Fix this
+    first (it likely causes phantom retries today). Keep using `/scrobble`; never live-write
+    `/sync/history` (the only real source of visible duplicates).
+  - **Explicit per-server opt-OUT** ("my server already scrobbles Trakt — let it"), **off by
+    default**; tri-state hint `unknown / serverHandlesIt / appHandlesIt` where **unknown → WRITE**.
+  - **Governing rule: fail toward writing.** Even in "server handles it," reconcile still
+    writes-if-missing, so the worst case is a tolerable duplicate, never a drop.
+
+### 13.2 Search & Discover
+- **One unified global Search.** A single app-wide Search is the only true search surface ("find
+  anything" across all servers, and — when a Seerr is configured — requestable titles too).
+- **Browse/libraries use FILTERS, not a second search.** No redundant search box inside Browse;
+  in-library narrowing is filter chips (Genre / 4K / A–Z jump). This resolves the "two searches"
+  confusion — there is exactly one search in the app.
+- **Owned-vs-requestable = Apple-TV-style GROUPING, no badge.** Search results split into labeled
+  sections **"In your library"** (Play) and **"Available to request"** (Request). Ownership is
+  signalled purely by which section a poster sits in — artwork stays clean, **no per-poster badge,
+  no dimming**. The focused action button reads **Play** vs **Request** consistently from grid →
+  detail. (Mirrors the tvOS Apple TV app's "in your library / available" pattern.)
+- **Discover surfaces requestable rows** (Trending/Popular/Upcoming/Genres), conditional on a Seerr
+  being configured (appears like the Music tab). Finding a *specific* thing to request uses the one
+  global Search, not a separate Discover search box.
+- **Tab bar stays small (target 3–4):** Home · Browse · Search · Settings, with **Music** and
+  **Discover** appearing only when relevant. Server is never a tab/axis.
+- Unchanged from §12: local `MediaItemIdentity` (TMDB/IMDb) is the sole arbiter of
+  owned-vs-requestable; Seerr is a **peer subsystem, not a `MediaProvider`**; requests close their
+  loop as an **owned** item in Home's "Recently Added"; config is Day-2 in Settings; multi-instance
+  merges by TMDB id with routing only at request time.
+
+
 ---
 
 *Full individual proposals (with code citations, trade-off tables, and per-branch
@@ -966,4 +1211,5 @@ implementation sketches) are preserved in each research branch's `plan.md`. Bran
 `thatcube-jubilant-couscous`; §10 navigation: `thatcube-nav-arch-r1-opus48`,
 `thatcube-nav-arch-r2-codex`, `thatcube-animated-pancake`, `thatcube-nav-arch-r4-sonnet46`;
 §10.7 curated-libraries refinement: `thatcube-curated-libraries-research`,
-`thatcube-curated-libraries-pressure-test`, `thatcube-special-couscous`.*
+`thatcube-curated-libraries-pressure-test`, `thatcube-special-couscous`;
+§11 watch-tracking: `thatcube-research-multi-tracker-registry`, `thatcube-watch-tracking-research`, `thatcube-upgraded-pancake`; §12 discover/requests: `thatcube-discover-requests-seerr`, `thatcube-discover-r2-codex`, `thatcube-verbose-chainsaw`.*

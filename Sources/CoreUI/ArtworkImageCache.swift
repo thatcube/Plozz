@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import UIKit
 import ImageIO
+import CoreModels
 
 /// Process-wide, in-memory cache of *decoded* artwork images, keyed by source URL
 /// and target variant.
@@ -29,39 +30,46 @@ public final class ArtworkImageCache: @unchecked Sendable {
 
     private let cache = NSCache<NSString, UIImage>()
     private let lock = NSLock()
-    /// Dedicated session for artwork byte fetches. `URLSession.shared` uses a 60s
-    /// default request timeout, so a poster/logo download to a slow or unreachable
-    /// host (a sleeping server, a dead external-metadata CDN URL) holds one of the
-    /// ~6 per-host HTTP/1.1 connections for up to a full minute. On a long-running
-    /// session those hung transfers accumulate and starve the pool, so fresh art
-    /// "takes ages or never loads" — and it gets worse the longer the app is open.
-    /// Short, explicit timeouts free the connection quickly so a stuck URL can't
-    /// poison subsequent loads (mirrors MetadataHTTP / CoreNetworking timeouts).
-    private static let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
-        config.httpMaximumConnectionsPerHost = 6
-        // A generous, dedicated *byte* cache. The decoded NSCache above is capped
-        // (and evicts under memory pressure), so during fast horizontal scroll on a
-        // large multi-server Home a card's decoded image can be evicted; when the
-        // card scrolls back its art would otherwise re-fetch over the network and
-        // flash a gray placeholder ("art goes away on scroll"). URLSession.shared's
-        // tiny default URLCache (~512KB on tvOS) made that re-fetch hit the network
-        // almost every time. A large disk-backed byte cache lets the evicted image
-        // re-decode from cached bytes instantly instead — no network, no gray flash.
-        config.urlCache = URLCache(memoryCapacity: 64 * 1024 * 1024,
-                                   diskCapacity: 512 * 1024 * 1024,
-                                   diskPath: "plozz-artwork")
-        config.requestCachePolicy = .returnCacheDataElseLoad
-        return URLSession(configuration: config)
+    /// Dedicated, bounded queue for the *synchronous* image decode
+    /// (`CGImageSourceCreateThumbnailAtIndex` / `preparingForDisplay`). This work
+    /// is CPU-bound, and running it inside `Task.detached` executes it directly on
+    /// Swift's small cooperative thread pool (only ~2-3 threads on tvOS). A scroll
+    /// burst through a library — especially thumbnail-less cells that try several
+    /// candidate URLs — would then fire many concurrent decodes that occupy every
+    /// cooperative thread, starving unrelated `async` continuations (a foreground
+    /// `provider.item`/cross-server `search`, even `Task.sleep` timeouts) for
+    /// seconds. Moving decode onto its own bounded `OperationQueue` keeps that CPU
+    /// off the cooperative pool entirely, so artwork can never freeze the app.
+    /// Foreground decode lane for artwork the user is actually looking at (a
+    /// visible card or the detail hero awaiting `image(for:)`). Runs at
+    /// `.userInitiated` so it is scheduled ahead of background warming.
+    private static let decodeQueueFG: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 2
+        queue.qualityOfService = .userInitiated
+        return queue
     }()
+    /// Background decode lane for prefetch/warm work (rail prewarm, season
+    /// still prefetch). Kept fully separate from the foreground lane so a
+    /// prewarm storm can never make a visible card's decode wait behind it.
+    private static let decodeQueueBG: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 2
+        queue.qualityOfService = .utility
+        return queue
+    }()
+    /// One coalesced, cancellable load of a single URL+variant. `waiters` counts
+    /// the live `image(for:)` callers awaiting it; when the last waiter's task is
+    /// cancelled (e.g. its card scrolled off-screen) the underlying download +
+    /// decode is cancelled too, freeing the artwork connection it was holding for
+    /// whatever the user is actually looking at now.
+    private final class ImageLoad {
+        var task: Task<UIImage?, Never>!
+        var waiters: Int = 0
+    }
     /// In-flight image loads keyed by URL+variant so a card's own load and the
     /// rail's prefetch never decode the same target twice.
-    private var inFlight: [CacheKey: Task<UIImage?, Never>] = [:]
-    /// In-flight byte fetches keyed by URL so poster/landscape/hero requests for
-    /// the same source coalesce onto one network transfer.
-    private var dataInFlight: [URL: Task<Data?, Never>] = [:]
+    private var inFlight: [CacheKey: ImageLoad] = [:]
 
     private init() {
         // Decoded landscape/poster thumbnails are small; cap retained pixels so the
@@ -81,52 +89,68 @@ public final class ArtworkImageCache: @unchecked Sendable {
     /// (coalescing concurrent callers). Result is stored for synchronous reuse via
     /// `cachedImage(for:variant:)`.
     @discardableResult
-    public func image(for url: URL, variant: ArtworkImageVariant = .original) async -> UIImage? {
+    public func image(for url: URL, variant: ArtworkImageVariant = .original, background: Bool = false) async -> UIImage? {
         if let cached = cachedImage(for: url, variant: variant) { return cached }
         let key = CacheKey(url: url, variant: variant)
-        let task = loadTask(for: key)
-        return await task.value
+        let load = registerWaiter(for: key, background: background)
+        return await withTaskCancellationHandler {
+            await load.task.value
+        } onCancel: {
+            unregisterWaiter(load, for: key)
+        }
     }
 
     /// Warms the cache for `url`+`variant` without awaiting the result —
     /// fire-and-forget prefetch used by rails to decode upcoming cards ahead of
-    /// scroll.
+    /// scroll. Bounded by the shared background-warm limiter so a prewarm/scroll
+    /// burst can't flood the artwork connection pool and starve foreground art.
     public func prefetch(_ url: URL, variant: ArtworkImageVariant = .original) {
         guard cachedImage(for: url, variant: variant) == nil else { return }
-        _ = loadTask(for: CacheKey(url: url, variant: variant))
+        Task.detached(priority: .utility) {
+            await ArtworkSession.warmLimiter.run {
+                _ = await ArtworkImageCache.shared.image(for: url, variant: variant, background: true)
+            }
+        }
     }
 
-    private func loadTask(for key: CacheKey) -> Task<UIImage?, Never> {
+    private func registerWaiter(for key: CacheKey, background: Bool) -> ImageLoad {
         lock.lock()
         defer { lock.unlock() }
-        if let existing = inFlight[key] { return existing }
+        if let existing = inFlight[key] {
+            existing.waiters += 1
+            return existing
+        }
+        let load = ImageLoad()
+        load.waiters = 1
         // Detached so the download + decode never inherit (and block) the MainActor
-        // when kicked off from a card's `onAppear`/prefetch — decoding stays off the
-        // main thread so the rail keeps scrolling smoothly.
-        let task = Task<UIImage?, Never>.detached(priority: .utility) { [weak self] in
+        // when kicked off from a card's `onAppear`/prefetch. The download is a
+        // cancellable URLSession call and the decode runs off the cooperative pool,
+        // so cancelling this task (last waiter gone) both stops the in-flight
+        // transfer — freeing its connection — and skips the decode.
+        load.task = Task<UIImage?, Never>.detached(priority: .utility) { [weak self, weak load] in
             guard let self else { return nil }
-            defer { self.clearInFlight(key) }
-            guard let data = await self.dataTask(for: key.url).value,
-                  let image = Self.decodeImage(from: data, variant: key.variant) else {
+            defer { self.clearInFlight(key, ifMatches: load) }
+            if Task.isCancelled { return nil }
+            guard let data = await Self.downloadData(key.url) else { return nil }
+            if Task.isCancelled { return nil }
+            guard let image = await Self.decodeImageOffPool(from: data, variant: key.variant, background: background) else {
                 return nil
             }
             self.store(image, for: key)
             return image
         }
-        inFlight[key] = task
-        return task
+        inFlight[key] = load
+        return load
     }
 
-    private func dataTask(for url: URL) -> Task<Data?, Never> {
+    private func unregisterWaiter(_ load: ImageLoad, for key: CacheKey) {
         lock.lock()
         defer { lock.unlock() }
-        if let existing = dataInFlight[url] { return existing }
-        let task = Task<Data?, Never>.detached(priority: .utility) { [weak self] in
-            defer { self?.clearDataInFlight(url) }
-            return await Self.downloadData(url)
+        load.waiters -= 1
+        if load.waiters <= 0 {
+            load.task.cancel()
+            if inFlight[key] === load { inFlight[key] = nil }
         }
-        dataInFlight[url] = task
-        return task
     }
 
     private func store(_ image: UIImage, for key: CacheKey) {
@@ -135,22 +159,49 @@ public final class ArtworkImageCache: @unchecked Sendable {
         cache.setObject(image, forKey: key.cacheKey, cost: max(cost, 1))
     }
 
-    private func clearInFlight(_ key: CacheKey) {
+    private func clearInFlight(_ key: CacheKey, ifMatches load: ImageLoad?) {
         lock.lock()
-        inFlight[key] = nil
-        lock.unlock()
-    }
-
-    private func clearDataInFlight(_ url: URL) {
-        lock.lock()
-        dataInFlight[url] = nil
+        if let load, inFlight[key] === load {
+            inFlight[key] = nil
+        }
         lock.unlock()
     }
 
     private static func downloadData(_ url: URL) async -> Data? {
-        guard let (data, response) = try? await session.data(from: url) else { return nil }
+        let t0 = Date()
+        guard let (data, response) = try? await ArtworkSession.shared.data(from: url) else {
+            let ms = Int(Date().timeIntervalSince(t0) * 1000)
+            if ms > 1500 { DLog.mark("ART ✗ \(ms)ms \(url.host ?? "?")\(url.path)") }
+            return nil
+        }
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        if ms > 1500 { DLog.mark("ART ✓ \(ms)ms \(url.host ?? "?")\(url.path)") }
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return nil }
         return data
+    }
+
+    /// Runs the synchronous decode on a dedicated bounded queue instead of the
+    /// Swift cooperative pool, bridging back via a continuation. Foreground
+    /// decodes (visible card / detail hero) use the higher-priority lane so they
+    /// never wait behind a background prewarm storm. Keeps artwork CPU off the
+    /// cooperative pool so it can't starve unrelated `async` continuations.
+    private static func decodeImageOffPool(from data: Data, variant: ArtworkImageVariant, background: Bool) async -> UIImage? {
+        let queue = background ? decodeQueueBG : decodeQueueFG
+        let enqueuedAt = Date()
+        return await withCheckedContinuation { continuation in
+            queue.addOperation {
+                let waited = Int(Date().timeIntervalSince(enqueuedAt) * 1000)
+                let t0 = Date()
+                let img = decodeImage(from: data, variant: variant)
+                if !background {
+                    let dec = Int(Date().timeIntervalSince(t0) * 1000)
+                    if waited > 300 || dec > 300 {
+                        DLog.mark("DECODE fg wait=\(waited)ms decode=\(dec)ms \(variant)")
+                    }
+                }
+                continuation.resume(returning: img)
+            }
+        }
     }
 
     private static func decodeImage(from data: Data, variant: ArtworkImageVariant) -> UIImage? {

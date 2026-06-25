@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import CoreModels
+import CoreNetworking
 import MetadataKit
 import RatingsService
 import ProviderTrailers
@@ -89,9 +90,45 @@ public final class ItemDetailViewModel {
     /// In-flight cross-server discovery pass (search other accounts for this
     /// title). Cancellable so a reload/navigation change drops stale work.
     private var crossServerDiscoveryTask: Task<Void, Never>?
+    /// Off-critical-path restore of the persisted snapshot. Raced against the live
+    /// `provider.item(id:)` fetch so first paint is NEVER gated on a (possibly
+    /// disk-contended) snapshot read — it only paints/enriches if it wins and
+    /// never downgrades a fresher render. Cancelled on each new load.
+    private var snapshotRestoreTask: Task<Void, Never>?
+    /// Set once the live fetch publishes fresh detail, so a late snapshot restore
+    /// never clobbers a fresher hero.
+    private var hasPaintedFreshDetail = false
+    /// Coalesces snapshot writes to AT MOST one in flight per view model: a burst
+    /// of state changes (children arrive, episodes prewarm, cross-server discovery,
+    /// alternate-source updates) used to each fire a full-snapshot encode+write,
+    /// flooding the cache's I/O queue and starving the NEXT page's snapshot read
+    /// for many seconds. Cancel-and-replace + a short debounce collapses the burst
+    /// into a single write of the latest snapshot.
+    private var pendingSnapshotWrite: Task<Void, Never>?
     /// Bound concurrent alternate-server detail fetches to keep Home-opened
     /// details responsive and avoid saturating startup/network image traffic.
     private static let alternateSourceFanoutLimit = 3
+
+    /// In-flight trailers+ratings enrichment, owned as a cancellable task that
+    /// `load()` does NOT await. Decoupling it from `load()` means a navigate-away
+    /// (which cancels via ``suspendEnrichment()``) stops YouTube trailer
+    /// extraction + external-ratings work from running to completion on the next
+    /// page's back — the cooperative-pool starvation that left a freshly-opened
+    /// detail's `provider.item` unscheduled for 15–20s after tapping through
+    /// several titles.
+    private var enrichmentTask: Task<Void, Never>?
+    /// The fully-loaded item enrichment is keyed to, so a page returned to (popped
+    /// back onto) can resume the enrichment that was suspended on disappear.
+    private var enrichmentItem: MediaItem?
+    /// Set once trailers+ratings enrichment ran to completion, so resuming on
+    /// reappear doesn't redo finished work.
+    private var enrichmentComplete = false
+    /// This page's ``EnrichmentScheduler`` generation token. Stamped when the page
+    /// becomes the active detail; the scheduler drops any background work tagged
+    /// with an older token before it hits the network, so tapping quickly through
+    /// titles collapses to just the page landed on instead of piling a dozen
+    /// cross-server search fan-outs onto the cooperative pool.
+    private var enrichmentGeneration: UInt64 = 0
 
     /// Persistent stale-while-revalidate store of this title's resolved detail
     /// (item + children + episodes + cross-server sources). On a revisit `load()`
@@ -153,24 +190,45 @@ public final class ItemDetailViewModel {
     }
 
     public func load() async {
+        let _dlogHB = DLog.startHeartbeat()
+        DLog.mark("LOAD enter id=\(itemID) acct=\(sourceAccountID ?? "nil") seeded=\(state.value != nil)")
+        defer { _dlogHB.cancel(); DLog.setPhase("idle"); DLog.mark("LOAD exit id=\(itemID)") }
         alternateSourceEnrichmentTask?.cancel()
         alternateSourceEnrichmentTask = nil
+        enrichmentTask?.cancel()
+        enrichmentTask = nil
         crossServerDiscoveryTask?.cancel()
         crossServerDiscoveryTask = nil
-        // Stale-while-revalidate: paint the last-known snapshot (hero, seasons/
-        // episodes and server picker) INSTANTLY on a revisit so an already-seen
-        // title never shows a cold spinner, then refresh from the network below.
-        if let snapshot = await snapshotCache.snapshot(for: snapshotKey) {
-            applySnapshot(snapshot)
+        hasPaintedFreshDetail = false
+
+        // Stale-while-revalidate restore, RACED OFF THE CRITICAL PATH. The snapshot
+        // read used to be the FIRST await in load() — so a disk-contended read (the
+        // cache I/O queue saturated by other pages' snapshot writes) blocked the
+        // live `provider.item(id:)` fetch from even starting, leaving the page blank
+        // for as long as the read was starved. Now the read runs in its own task: it
+        // paints the cached hero/seasons/picker only if it arrives before fresh
+        // detail and never downgrades a fresher render, while the live fetch below
+        // proceeds immediately and drives first paint regardless of the cache.
+        snapshotRestoreTask?.cancel()
+        let restoreKey = snapshotKey
+        let restoreCache = snapshotCache
+        snapshotRestoreTask = Task { [weak self] in
+            guard let snapshot = await restoreCache.snapshot(for: restoreKey) else { return }
+            guard let self, !Task.isCancelled else { return }
+            DLog.mark("snapshot restore landed seeded=\(self.state.value != nil) fresh=\(self.hasPaintedFreshDetail)")
+            self.applySnapshotIfNotStale(snapshot)
         }
-        // Don't flash a loading/skeleton state over a hero we already seeded from
-        // the tapped list item (or a restored snapshot); only show `.loading` for
-        // a cold (unseeded) open.
+
+        // Cold open (no seeded hero) shows a spinner immediately instead of blank.
         if state.value == nil { state = .loading }
         do {
+            DLog.setPhase("provider.item")
             var fetched = try await provider.item(id: itemID)
+            DLog.mark("provider.item done kind=\(fetched.kind)")
             try Task.checkCancellation()
+            DLog.setPhase("redirectSeasonToSeries")
             fetched = await redirectingSeasonToSeries(fetched)
+            DLog.mark("redirect done")
             try Task.checkCancellation()
             captureSeriesContext(from: fetched)
             // Immutable snapshot so the concurrent async-lets below capture a
@@ -206,32 +264,35 @@ public final class ItemDetailViewModel {
                 // first paint is safe and never strands the season picker.
                 let seededChildren = state.value?.children ?? []
                 state = .loaded(Detail(item: taggedItem, children: seededChildren))
+                hasPaintedFreshDetail = true
+                DLog.mark("FIRST PAINT (container) id=\(item.id)")
                 seedSources(from: taggedItem)
-                startAlternateSourceEnrichment(primaryID: item.id)
-                startCrossServerDiscovery(for: taggedItem)
-                async let trailersDone: Void = loadTrailers(for: item)
-                async let ratingsDone: Void = enrichRatings(for: item)
+                // Off-critical-path enrichment (trailers, ratings, cross-server
+                // discovery, alternate sources) runs as a CANCELLABLE unit that
+                // `load()` does NOT await — so navigating away cancels it instead of
+                // letting it run to completion and starve the next page's
+                // `provider.item` for the cooperative thread pool.
+                startEnrichment(for: item)
                 // Children fill in off the critical path of first paint; merge them
                 // in (same item identity ⇒ no hero flicker) when they arrive.
+                DLog.setPhase("provider.children")
                 let fetchedChildren = (try? await provider.children(of: item.id)) ?? []
+                DLog.mark("provider.children done count=\(fetchedChildren.count)")
                 try Task.checkCancellation()
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
                 persistSnapshot()
-                _ = await trailersDone
-                _ = await ratingsDone
             } else {
                 // Leaf kinds (movie/episode/video): the hero IS the content, so
                 // publish it immediately, then load trailers/ratings off the
                 // critical path of first paint.
                 state = .loaded(Detail(item: taggedItem, children: []))
+                hasPaintedFreshDetail = true
+                DLog.mark("FIRST PAINT (leaf) id=\(item.id)")
                 seedSources(from: taggedItem)
-                startAlternateSourceEnrichment(primaryID: item.id)
-                startCrossServerDiscovery(for: taggedItem)
                 persistSnapshot()
-                async let trailersDone: Void = loadTrailers(for: item)
-                async let ratingsDone: Void = enrichRatings(for: item)
-                _ = await trailersDone
-                _ = await ratingsDone
+                // See container branch: cancellable, non-awaited enrichment so a
+                // navigate-away cancels it rather than starving the next page.
+                startEnrichment(for: item)
             }
         } catch is CancellationError {
             // Back-button during load: leave whatever state we already published
@@ -268,6 +329,73 @@ public final class ItemDetailViewModel {
     /// Already-loaded episodes for `seasonID`, or `nil` if not yet fetched.
     public func episodes(for seasonID: String) -> [MediaItem]? {
         seasonEpisodes[seasonID]
+    }
+
+    /// Starts all off-critical-path enrichment for `item` as cancellable work:
+    /// cross-server server-picker discovery, alternate-source watch-state, and
+    /// trailers+ratings. Crucially `load()` does NOT await this — so the page
+    /// paints and `load()` returns immediately, and ``suspendEnrichment()`` can
+    /// drop every piece the instant the user navigates away. This is what stops a
+    /// tapped-through page's YouTube extraction / multi-server search from holding
+    /// cooperative-pool threads and starving the next page's `provider.item`.
+    private func startEnrichment(for item: MediaItem) {
+        enrichmentItem = item
+        enrichmentComplete = false
+        enrichmentTask?.cancel()
+        crossServerDiscoveryTask?.cancel()
+        alternateSourceEnrichmentTask?.cancel()
+        let taggedItem = tagged(item)
+        enrichmentTask = Task(priority: .utility) { [weak self] in
+            // Bump the GLOBAL enrichment generation: opening this page makes every
+            // older page's still-in-flight discovery/alternate work stale, so the
+            // scheduler drops it BEFORE it touches the network. This is what stops
+            // rapid tap-through from piling a dozen cross-server search fan-outs
+            // onto the small cooperative pool and freezing it (timeouts and
+            // cancellation stop firing once the pool is saturated, so the flood
+            // must be prevented at the source, not bounded after the fact).
+            let token = await EnrichmentScheduler.shared.bumpGeneration()
+            guard let self, !Task.isCancelled else { return }
+            self.enrichmentGeneration = token
+            DLog.mark("ENRICH start gen=\(token) id=\(item.id)")
+            self.startAlternateSourceEnrichment(primaryID: item.id)
+            self.startCrossServerDiscovery(for: taggedItem)
+            await self.runTrailersAndRatings(for: item)
+        }
+    }
+
+    /// Resolves trailers and external ratings concurrently, off the first-paint
+    /// path. Runs inside the cancellable ``enrichmentTask`` so a navigate-away
+    /// cancels both mid-flight instead of letting them run to completion.
+    private func runTrailersAndRatings(for item: MediaItem) async {
+        async let trailersDone: Void = loadTrailers(for: item)
+        async let ratingsDone: Void = enrichRatings(for: item)
+        _ = await trailersDone
+        _ = await ratingsDone
+        guard !Task.isCancelled else { return }
+        enrichmentComplete = true
+        DLog.mark("trailers+ratings done id=\(item.id)")
+    }
+
+    /// Cancels ALL off-critical-path enrichment (trailers, ratings, cross-server
+    /// discovery, alternate-source fetches) for this page. Called from the detail
+    /// view's `onDisappear` — when the user navigates away the work must stop so
+    /// it cannot keep occupying the cooperative thread pool and starve the NEXT
+    /// page's `provider.item` (the multi-second blank-detail hang).
+    public func suspendEnrichment() {
+        DLog.mark("SUSPEND enrichment gen=\(enrichmentGeneration)")
+        enrichmentTask?.cancel(); enrichmentTask = nil
+        crossServerDiscoveryTask?.cancel(); crossServerDiscoveryTask = nil
+        alternateSourceEnrichmentTask?.cancel(); alternateSourceEnrichmentTask = nil
+    }
+
+    /// Resumes enrichment for a page returned to (popped back onto) whose work was
+    /// suspended on disappear. No-op during the initial load (which `load()`
+    /// drives), for a page still loading, or once enrichment finished — so it
+    /// never double-starts or races `load()`.
+    public func resumeEnrichmentIfNeeded() {
+        guard hasPaintedFreshDetail, !enrichmentComplete, enrichmentTask == nil,
+              let item = enrichmentItem else { return }
+        startEnrichment(for: item)
     }
 
     /// Fetches the item's trailers off the critical path. The Trailer button is
@@ -503,10 +631,42 @@ public final class ItemDetailViewModel {
         }
     }
 
+    /// Applies a snapshot that lost the race to the live fetch. On a genuinely cold
+    /// open (no hero painted yet) it restores the full snapshot; otherwise it keeps
+    /// whatever hero is showing and only ADOPTS enrichments the current state still
+    /// lacks — so a revisit still gets its season picker / episode rails / server
+    /// picker instantly from disk without ever downgrading a fresher render.
+    private func applySnapshotIfNotStale(_ snapshot: DetailSnapshotCache.Snapshot) {
+        if state.value == nil && !hasPaintedFreshDetail {
+            applySnapshot(snapshot)
+        } else {
+            adoptSnapshotEnrichments(snapshot)
+        }
+    }
+
+    /// Merges cached children/episodes/sources into the current state WITHOUT
+    /// downgrading anything the live fetch already produced (each merge is guarded
+    /// on the current value being empty/thinner).
+    private func adoptSnapshotEnrichments(_ snapshot: DetailSnapshotCache.Snapshot) {
+        if let detail = state.value, detail.children.isEmpty, !snapshot.children.isEmpty {
+            state = .loaded(Detail(item: detail.item, children: snapshot.children.map(tagged)))
+        }
+        if seasonEpisodes.isEmpty, !snapshot.seasonEpisodes.isEmpty {
+            seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
+        }
+        if sources.count <= 1, snapshot.sources.count > 1 {
+            sources = snapshot.sources
+            applyUnifiedWatchState()
+        }
+    }
+
     /// Writes the current resolved detail (item + children + episodes + sources) to
-    /// the persistent cache for instant restore next time. Cheap and fire-and-forget
-    /// (the actor coalesces/serializes writes); only persists once a full detail has
-    /// been published so a half-loaded page never overwrites a richer snapshot.
+    /// the persistent cache for instant restore next time. Coalesced to at most one
+    /// in-flight write per view model (cancel-and-replace + short debounce): a burst
+    /// of state changes during a single open would otherwise fire many full-snapshot
+    /// encodes, saturating the cache I/O queue and starving the next page's read.
+    /// Only persists once a full detail has been published so a half-loaded page
+    /// never overwrites a richer snapshot.
     private func persistSnapshot() {
         guard let detail = state.value, !detail.item.id.isEmpty else { return }
         let snapshot = DetailSnapshotCache.Snapshot(
@@ -517,7 +677,12 @@ public final class ItemDetailViewModel {
         )
         let key = snapshotKey
         let cache = snapshotCache
-        Task.detached(priority: .utility) { await cache.store(snapshot, for: key) }
+        pendingSnapshotWrite?.cancel()
+        pendingSnapshotWrite = Task.detached(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            if Task.isCancelled { return }
+            await cache.store(snapshot, for: key)
+        }
     }
 
     /// Ensures every episode carries the parent series' TMDb id under `SeriesTmdb`,
@@ -571,10 +736,16 @@ public final class ItemDetailViewModel {
     /// regresses a richer picker already seeded from a merged Search/Home card.
     private func startCrossServerDiscovery(for primary: MediaItem) {
         guard let resolver = crossServerSourceResolver else { return }
+        let token = enrichmentGeneration
         crossServerDiscoveryTask?.cancel()
         crossServerDiscoveryTask = Task(priority: .utility) { [weak self] in
-            let discovered = await resolver(primary)
-            guard !Task.isCancelled, discovered.count > 1 else { return }
+            // Gate the multi-server search fan-out behind the shared scheduler:
+            // skipped entirely if a newer page has superseded this one, and capped
+            // so at most a couple run app-wide.
+            let discovered = await EnrichmentScheduler.shared.run(token: token) {
+                await resolver(primary)
+            }
+            guard let discovered, !Task.isCancelled, discovered.count > 1 else { return }
             await self?.applyDiscoveredSources(discovered, primary: primary)
         }
     }
@@ -641,6 +812,7 @@ public final class ItemDetailViewModel {
     /// bounded concurrent fan-out, then applies all resolved updates in one batch.
     private func startAlternateSourceEnrichment(primaryID: String) {
         guard sources.count > 1 else { return }
+        let token = enrichmentGeneration
         let requests: [AlternateSourceRequest] = sources.compactMap { source in
             guard source.itemID != primaryID,
                   let provider = alternateProviderResolver(source.accountID) else { return nil }
@@ -649,11 +821,15 @@ public final class ItemDetailViewModel {
         guard !requests.isEmpty else { return }
 
         alternateSourceEnrichmentTask = Task(priority: .utility) { [weak self] in
-            let updates = await Self.fetchAlternateSourceUpdates(
-                requests,
-                maxConcurrent: Self.alternateSourceFanoutLimit
-            )
-            guard !Task.isCancelled, !updates.isEmpty else { return }
+            // Gate behind the shared scheduler so a superseded page's alternate
+            // fetches are skipped and total background concurrency stays bounded.
+            let updates = await EnrichmentScheduler.shared.run(token: token) {
+                await Self.fetchAlternateSourceUpdates(
+                    requests,
+                    maxConcurrent: Self.alternateSourceFanoutLimit
+                )
+            }
+            guard let updates, !Task.isCancelled, !updates.isEmpty else { return }
             await self?.applyAlternateSourceUpdates(updates, primaryID: primaryID)
         }
     }

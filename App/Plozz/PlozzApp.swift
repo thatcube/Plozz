@@ -1,5 +1,6 @@
 import SwiftUI
 import AppShell
+import CoreModels
 
 /// Plozz — an open-source tvOS Jellyfin client.
 @main
@@ -8,6 +9,8 @@ struct PlozzApp: App {
         #if DEBUG
         Self.redirectStandardError()
         #endif
+        DLog.installCrashHandler()
+        DLog.startMainPing()
         // Give artwork a real on-disk cache so backdrops, posters and logos load
         // instantly on revisit instead of being re-fetched every time (the
         // default shared URLCache is only a few MB — far too small for 4K

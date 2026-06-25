@@ -390,7 +390,9 @@ struct SeriesDetailView: View {
             let episode = resolved[index]
             if let url = episode.artworkCandidates(for: .landscape).first {
                 #if canImport(UIKit)
-                await ArtworkImageCache.shared.image(for: url, variant: .landscapeCard)
+                await ArtworkSession.warmLimiter.run {
+                    _ = await ArtworkImageCache.shared.image(for: url, variant: .landscapeCard, background: true)
+                }
                 #endif
                 continue
             }
@@ -407,7 +409,9 @@ struct SeriesDetailView: View {
             }
             guard let still else { continue }
             #if canImport(UIKit)
-            await ArtworkImageCache.shared.image(for: still, variant: .landscapeCard)
+            await ArtworkSession.warmLimiter.run {
+                _ = await ArtworkImageCache.shared.image(for: still, variant: .landscapeCard, background: true)
+            }
             #endif
             resolved[index].posterURL = still
             changed = true

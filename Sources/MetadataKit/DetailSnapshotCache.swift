@@ -17,7 +17,17 @@ import CoreModels
 ///
 /// One small JSON file per title keeps writes cheap and atomic and lets the store
 /// self-bound by pruning the least-recently-used files once a cap is reached.
-public actor DetailSnapshotCache {
+///
+/// Concurrency: this type holds **no mutable state** — every method only reads the
+/// immutable configuration (`directory`/`maxEntries`/`maxAge`) and touches the
+/// filesystem, which is already its own synchronization domain (atomic writes).
+/// It is therefore a plain `Sendable` class, NOT an `actor`: making it an actor
+/// would force every concurrent detail load (and every background `store`) to
+/// serialize on a single executor, so one title's slow encode/prune could starve
+/// another title's snapshot read for many seconds. Instead, the blocking file I/O
+/// runs on a concurrent background queue so independent titles never block each
+/// other, and the periodic LRU prune runs off the write path entirely.
+public final class DetailSnapshotCache: Sendable {
     public static let shared = DetailSnapshotCache()
 
     /// A no-op cache (no directory ⇒ never reads or writes). The default for the
@@ -60,6 +70,22 @@ public actor DetailSnapshotCache {
     private let maxEntries: Int
     private let maxAge: TimeInterval
 
+    /// Concurrent queue for snapshot reads/writes: independent titles run in
+    /// parallel, so a slow encode/write for one never blocks a read for another.
+    /// `.userInitiated` because a snapshot read backs a user-visible revisit paint;
+    /// writes are coalesced by the caller so this queue stays light.
+    private let ioQueue = DispatchQueue(
+        label: "com.thatcube.Plozz.DetailSnapshotCache.io",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
+    /// Serial low-priority queue for the LRU prune so directory scans stay off the
+    /// critical write path (and never pile up concurrently).
+    private let pruneQueue = DispatchQueue(
+        label: "com.thatcube.Plozz.DetailSnapshotCache.prune",
+        qos: .background
+    )
+
     public init(
         directory: URL? = DetailSnapshotCache.defaultDirectory(),
         maxEntries: Int = 800,
@@ -73,8 +99,17 @@ public actor DetailSnapshotCache {
 
     /// The cached snapshot for `key`, or `nil` when there is no fresh entry (the
     /// caller should fetch from the network). A hit "touches" the file so the LRU
-    /// prune keeps frequently-opened titles.
-    public func snapshot(for key: String) -> Snapshot? {
+    /// prune keeps frequently-opened titles. Runs off the calling actor on the
+    /// concurrent I/O queue.
+    public func snapshot(for key: String) async -> Snapshot? {
+        await withCheckedContinuation { continuation in
+            ioQueue.async {
+                continuation.resume(returning: self.readSnapshot(for: key))
+            }
+        }
+    }
+
+    private func readSnapshot(for key: String) -> Snapshot? {
         guard let url = fileURL(for: key),
               let data = try? Data(contentsOf: url),
               let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else {
@@ -89,19 +124,36 @@ public actor DetailSnapshotCache {
     }
 
     /// Persists `snapshot` for `key`, then prunes the least-recently-used files if
-    /// the store has grown past `maxEntries`.
-    public func store(_ snapshot: Snapshot, for key: String) {
+    /// the store has grown past `maxEntries`. The write runs on the concurrent I/O
+    /// queue; the prune is dispatched onto a separate background queue so it never
+    /// blocks the write (or any concurrent read).
+    public func store(_ snapshot: Snapshot, for key: String) async {
+        await withCheckedContinuation { continuation in
+            ioQueue.async {
+                self.writeSnapshot(snapshot, for: key)
+                continuation.resume()
+            }
+        }
+    }
+
+    private func writeSnapshot(_ snapshot: Snapshot, for key: String) {
         guard let directory, let url = fileURL(for: key),
               let data = try? JSONEncoder().encode(snapshot) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard (try? data.write(to: url, options: .atomic)) != nil else { return }
-        pruneIfNeeded()
+        pruneQueue.async { self.pruneIfNeeded() }
     }
 
     /// Drops the snapshot for `key` (used by tests / explicit invalidation).
-    public func remove(for key: String) {
-        guard let url = fileURL(for: key) else { return }
-        try? FileManager.default.removeItem(at: url)
+    public func remove(for key: String) async {
+        await withCheckedContinuation { continuation in
+            ioQueue.async {
+                if let url = self.fileURL(for: key) {
+                    try? FileManager.default.removeItem(at: url)
+                }
+                continuation.resume()
+            }
+        }
     }
 
     private func fileURL(for key: String) -> URL? {

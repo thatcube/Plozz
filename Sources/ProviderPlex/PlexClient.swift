@@ -15,6 +15,11 @@ public struct PlexClient: Sendable {
     private let deviceProfile: PlexDeviceProfile
     private let token: String
     private let http: HTTPClient
+    /// Foreground/critical-path client with its own connection pool (see
+    /// ``URLSession/plozzInteractive``) used only for the user-blocking `metadata()`
+    /// fetch, so opening a detail page is never starved behind background
+    /// enrichment traffic on the shared default pool.
+    private let interactiveHTTP: HTTPClient
     /// What the running Apple TV + connected display/audio gear can actually
     /// decode and present. Drives `canDirectPlay` so the direct-play vs. Plex
     /// universal-transcode decision tracks the real hardware instead of fixed
@@ -43,6 +48,7 @@ public struct PlexClient: Sendable {
         deviceProfile: PlexDeviceProfile,
         token: String,
         http: HTTPClient = URLSessionHTTPClient(),
+        interactiveHTTP: HTTPClient = URLSessionHTTPClient(session: .plozzInteractive),
         capabilities: MediaCapabilities = .detected(),
         hybridEngineEnabled: Bool = false
     ) {
@@ -51,6 +57,7 @@ public struct PlexClient: Sendable {
             deviceProfile: deviceProfile,
             token: token,
             http: http,
+            interactiveHTTP: interactiveHTTP,
             capabilities: capabilities,
             hybridEngineEnabled: hybridEngineEnabled
         )
@@ -63,6 +70,7 @@ public struct PlexClient: Sendable {
         deviceProfile: PlexDeviceProfile,
         token: String,
         http: HTTPClient = URLSessionHTTPClient(),
+        interactiveHTTP: HTTPClient = URLSessionHTTPClient(session: .plozzInteractive),
         capabilities: MediaCapabilities = .detected(),
         hybridEngineEnabled: Bool = false
     ) {
@@ -70,6 +78,7 @@ public struct PlexClient: Sendable {
         self.deviceProfile = deviceProfile
         self.token = token
         self.http = http
+        self.interactiveHTTP = interactiveHTTP
         self.capabilities = capabilities
         self.hybridEngineEnabled = hybridEngineEnabled
     }
@@ -80,21 +89,22 @@ public struct PlexClient: Sendable {
 
     /// Sends `endpoint` against the resolved base URL, transparently re-resolving
     /// and retrying once if the chosen connection is unreachable (self-heal).
-    private func send(_ endpoint: Endpoint) async throws -> (Data, HTTPURLResponse) {
+    private func send(_ endpoint: Endpoint, using client: HTTPClient? = nil) async throws -> (Data, HTTPURLResponse) {
+        let client = client ?? http
         let base = await resolver.resolved()
         do {
-            return try await http.send(endpoint, baseURL: base)
+            return try await client.send(endpoint, baseURL: base)
         } catch AppError.serverUnreachable {
             resolver.reportFailure(base)
             let retry = await resolver.resolved()
             guard retry != base else { throw AppError.serverUnreachable }
-            return try await http.send(endpoint, baseURL: retry)
+            return try await client.send(endpoint, baseURL: retry)
         }
     }
 
     /// Sends and decodes JSON, with the same self-healing retry as `send`.
-    private func decode<T: Decodable>(_ type: T.Type, _ endpoint: Endpoint) async throws -> T {
-        let (data, _) = try await send(endpoint)
+    private func decode<T: Decodable>(_ type: T.Type, _ endpoint: Endpoint, using client: HTTPClient? = nil) async throws -> T {
+        let (data, _) = try await send(endpoint, using: client)
         do {
             return try JSONDecoder.plozz.decode(T.self, from: data)
         } catch {
@@ -141,7 +151,7 @@ public struct PlexClient: Sendable {
             queryItems: [URLQueryItem(name: "includeGuids", value: "1")],
             headers: headers
         )
-        let container = try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
+        let container = try await decode(PlexMediaContainerResponse.self, endpoint, using: interactiveHTTP).MediaContainer
         guard let item = container.Metadata?.first else { throw AppError.notFound }
         return item
     }

@@ -167,6 +167,34 @@ private func resolveOptionalProvider(_ accountID: String, in accounts: [Resolved
 /// both servers because it queries them all, and now the detail page does the
 /// same discovery on open. Returns `nil` for a single-account setup (nothing to
 /// discover), which keeps the resolver entirely off the path for solo servers.
+/// Runs a provider search but gives up after `seconds`, returning whatever it
+/// has (empty on timeout). A cold/slow/unreachable server otherwise makes the
+/// whole cross-server discovery fan-out wait for its full request timeout — that
+/// straggler keeps the discovery task (and its cooperative-pool work) alive long
+/// after the user has moved on, contributing to next-page starvation.
+///
+/// The deadline is driven by a **libdispatch timer**, not `Task.sleep`. Under the
+/// very pool saturation this guard exists to relieve, a `Task.sleep`-based
+/// timeout cannot fire — its continuation needs a cooperative-pool thread that
+/// the backlog is holding — so the race silently waits the full server timeout
+/// (observed: a 33s Plex search that should have been cut at 4s). A
+/// `DispatchQueue.asyncAfter` fires on its own dispatch thread regardless of
+/// pool state and cancels the search task, which aborts the in-flight URLSession
+/// request and frees its connection on schedule.
+private func searchWithDeadline(
+    _ provider: any MediaProvider,
+    query: String,
+    limit: Int,
+    seconds: Double
+) async -> [MediaItem] {
+    let searchTask = Task { (try? await provider.search(query: query, limit: limit)) ?? [] }
+    let timeout = DispatchWorkItem { searchTask.cancel() }
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + seconds, execute: timeout)
+    let result = await searchTask.value
+    timeout.cancel()
+    return result
+}
+
 private func crossServerSourceResolver(
     in accounts: [ResolvedAccount]
 ) -> (@Sendable (MediaItem) async -> [MediaSourceRef])? {
@@ -181,7 +209,9 @@ private func crossServerSourceResolver(
             for resolved in others {
                 let accountID = resolved.account.id
                 group.addTask {
-                    guard let found = try? await resolved.provider.search(query: query, limit: 25) else { return [] }
+                    let found = await searchWithDeadline(
+                        resolved.provider, query: query, limit: 25, seconds: 4
+                    )
                     return found.map { $0.taggingSource(accountID) }
                 }
             }
@@ -328,6 +358,7 @@ private struct HomeTab: View {
                 )
             }
             .navigationDestination(for: MediaItem.self) { item in
+                let _ = DLog.mark("navDest MediaItem(A) id=\(item.id) acct=\(item.sourceAccountID ?? "nil")")
                 ItemDetailView(
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(item.sourceAccountID, in: accounts),
@@ -533,6 +564,7 @@ private struct SearchTab: View {
                 onSelect: { open($0) }
             )
             .navigationDestination(for: MediaItem.self) { item in
+                let _ = DLog.mark("navDest MediaItem(B) id=\(item.id) acct=\(item.sourceAccountID ?? "nil")")
                 ItemDetailView(
                     viewModel: ItemDetailViewModel(
                         provider: resolveProvider(item.sourceAccountID, in: accounts),

@@ -49,7 +49,10 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     public func item(id: String) async throws -> MediaItem {
-        map(item: try await client.item(userID: session.userID, id: id))
+        DLog.mark("JFprovider.item ENTER id=\(id)")
+        let dto = try await client.item(userID: session.userID, id: id)
+        DLog.mark("JFprovider.item GOT dto id=\(id)")
+        return map(item: dto)
     }
 
     public func trailers(for itemID: String) async throws -> [MediaItem] {

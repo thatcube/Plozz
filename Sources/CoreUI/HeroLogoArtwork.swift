@@ -338,7 +338,7 @@ private actor HeroLogoPipeline {
     }
 
     private static func fetchAndPrepare(_ url: URL) async -> PreparedLogo? {
-        guard let (data, response) = try? await URLSession.shared.data(from: url) else {
+        guard let (data, response) = try? await ArtworkSession.shared.data(from: url) else {
             return nil
         }
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {

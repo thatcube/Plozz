@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import Foundation
+import CoreModels
 
 /// Resolves a canonical TMDb poster for items whose provider artwork is missing
 /// or "junk" (rejected by the poster aspect-ratio guard). Used as a last-resort
@@ -61,6 +62,38 @@ public actor TMDbArtworkResolver {
 
     public init(token: String? = TMDbArtworkResolver.tokenFromBundle()) {
         self.token = token
+    }
+
+    /// Dedicated networking lane for TMDb *metadata* (JSON) lookups, separate from
+    /// `URLSession.shared`. A season's `prefetchEpisodeStills` storm and the
+    /// foreground hero's backdrop/poster lookup all hit `api.themoviedb.org` over
+    /// the WAN; sharing one pool let the background still-storm fill every
+    /// connection, leaving a thumbnail-less item's hero artwork queued for many
+    /// seconds. Its own pool (plus a low cap on background warms below) keeps the
+    /// foreground lookup responsive. Explicit short timeouts so a slow/unreachable
+    /// TMDb can't pin a connection for a full minute.
+    private static let metadataSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 12
+        config.timeoutIntervalForResource = 20
+        config.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: config)
+    }()
+
+    /// Caps *background* TMDb warming (season episode-still prefetch) so it can
+    /// never consume every metadata connection and starve a foreground hero/poster
+    /// lookup. Foreground lookups deliberately bypass this limiter.
+    private static let backgroundLimiter = ConcurrencyLimiter(limit: 2)
+
+    /// Timed wrapper around the dedicated metadata session. Logs any lookup that
+    /// exceeds 1s so a slow TMDb resolution shows up in the on-device trace.
+    private static func tmdbData(_ request: URLRequest) async -> (Data, URLResponse)? {
+        let t0 = Date()
+        defer {
+            let ms = Int(Date().timeIntervalSince(t0) * 1000)
+            if ms > 1000 { DLog.mark("TMDB \(ms)ms \(request.url?.path ?? "?")") }
+        }
+        return try? await metadataSession.data(for: request)
     }
 
     /// `true` when a usable token is configured.
@@ -184,25 +217,30 @@ public actor TMDbArtworkResolver {
     /// concurrency keeps it polite to TMDb while staying well under its rate limit.
     public func prefetchEpisodeStills(_ requests: [EpisodeStillRequest]) async {
         guard token != nil, !requests.isEmpty else { return }
-        let maxConcurrent = 6
+        let maxConcurrent = 4
         await withTaskGroup(of: Void.self) { group in
             var next = 0
             func schedule(_ request: EpisodeStillRequest) {
                 group.addTask {
-                    if let url = await self.episodeStillURL(
-                        seriesTitle: request.seriesTitle,
-                        seriesTmdbID: request.seriesTmdbID,
-                        season: request.season,
-                        episode: request.episode
-                    ) {
-                        // Download *and decode* into the shared image cache so the
-                        // card seeds its still synchronously on appear (no gray
-                        // flash) rather than re-decoding from URLCache bytes.
-                        #if canImport(UIKit)
-                        await ArtworkImageCache.shared.image(for: url, variant: .landscapeCard)
-                        #else
-                        _ = try? await URLSession.shared.data(from: url)
-                        #endif
+                    // Gate the whole resolve+warm through the global background
+                    // limiter so a multi-season prewarm can't collectively saturate
+                    // the metadata pool the foreground hero lookup needs.
+                    await Self.backgroundLimiter.run {
+                        if let url = await self.episodeStillURL(
+                            seriesTitle: request.seriesTitle,
+                            seriesTmdbID: request.seriesTmdbID,
+                            season: request.season,
+                            episode: request.episode
+                        ) {
+                            // Download *and decode* into the shared image cache so the
+                            // card seeds its still synchronously on appear (no gray
+                            // flash) rather than re-decoding from URLCache bytes.
+                            #if canImport(UIKit)
+                            await ArtworkImageCache.shared.image(for: url, variant: .landscapeCard, background: true)
+                            #else
+                            _ = try? await URLSession.shared.data(from: url)
+                            #endif
+                        }
                     }
                 }
             }
@@ -233,7 +271,7 @@ public actor TMDbArtworkResolver {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "accept")
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = await Self.tmdbData(request),
               let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
               let decoded = try? JSONDecoder().decode(StillsResponse.self, from: data)
@@ -259,7 +297,7 @@ public actor TMDbArtworkResolver {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "accept")
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = await Self.tmdbData(request),
               let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
               let decoded = try? JSONDecoder().decode(ImagesResponse.self, from: data)
@@ -320,7 +358,7 @@ public actor TMDbArtworkResolver {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "accept")
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = await Self.tmdbData(request),
               let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
               let decoded = try? JSONDecoder().decode(CompanySearchResponse.self, from: data)
@@ -363,7 +401,7 @@ public actor TMDbArtworkResolver {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "accept")
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = await Self.tmdbData(request),
               let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
               let decoded = try? JSONDecoder().decode(ImagesResponse.self, from: data)
@@ -415,7 +453,7 @@ public actor TMDbArtworkResolver {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "accept")
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = await Self.tmdbData(request),
               let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
               let decoded = try? JSONDecoder().decode(IDSearchResponse.self, from: data),
@@ -444,7 +482,7 @@ public actor TMDbArtworkResolver {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "accept")
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = await Self.tmdbData(request),
               let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
               let decoded = try? JSONDecoder().decode(SearchResponse.self, from: data),

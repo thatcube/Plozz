@@ -46,13 +46,20 @@ public struct URLSessionHTTPClient: HTTPClient {
 
         let data: Data
         let response: URLResponse
+        let _dlogStart = Date()
+        let _dlogURL = request.url?.absoluteString ?? baseURL.absoluteString
+        DLog.mark("HTTP → \(endpoint.method.rawValue) \(_dlogURL)")
         do {
             (data, response) = try await session.data(for: request)
+            DLog.mark(String(format: "HTTP ✓ %.0fms %@", Date().timeIntervalSince(_dlogStart) * 1000, _dlogURL))
         } catch let urlError as URLError {
+            DLog.mark(String(format: "HTTP ✗ %.0fms %@ err=%@", Date().timeIntervalSince(_dlogStart) * 1000, _dlogURL, "\(urlError.code.rawValue)"))
             throw Self.map(urlError)
         } catch is CancellationError {
+            DLog.mark(String(format: "HTTP ⊘cancel %.0fms %@", Date().timeIntervalSince(_dlogStart) * 1000, _dlogURL))
             throw AppError.cancelled
         } catch {
+            DLog.mark(String(format: "HTTP ✗ %.0fms %@ err=%@", Date().timeIntervalSince(_dlogStart) * 1000, _dlogURL, "\(error)"))
             throw AppError.serverUnreachable
         }
 
@@ -114,8 +121,34 @@ public extension URLSession {
     static var plozzDefault: URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForResource = 20
+        // A detail open fans out a burst of enrichment requests (season prewarm,
+        // trailers, ratings, cross-server discovery) to the SAME server host. With
+        // the system default per-host cap (~6) those background requests can occupy
+        // every socket and starve the next page's foreground fetch. A higher cap
+        // keeps the pool from becoming the bottleneck on a fast LAN.
+        config.httpMaximumConnectionsPerHost = 8
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }
+
+    /// Dedicated lane for FOREGROUND, user-blocking fetches — specifically opening
+    /// a detail page (`item`/`metadata`). It has its OWN connection pool, so a
+    /// critical-path fetch can NEVER be starved waiting for a free socket behind
+    /// the background enrichment storm running on ``plozzDefault`` (season prewarm,
+    /// trailers, ratings, cross-server discovery). `timeoutIntervalForRequest`
+    /// does not count time spent queued for a connection, so a shared pool let a
+    /// foreground fetch sit ~18s behind background work before `timeoutInterval-
+    /// ForResource` (30s) would even fire — this isolated pool removes that queue
+    /// entirely. Short timeouts so a genuinely slow server fails fast into a
+    /// graceful error instead of a long blank hang.
+    static var plozzInteractive: URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForResource = 12
+        config.httpMaximumConnectionsPerHost = 6
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }
 

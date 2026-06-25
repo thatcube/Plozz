@@ -13,6 +13,11 @@ public struct JellyfinClient: Sendable {
     public let deviceProfile: JellyfinDeviceProfile
     private let token: String?
     private let http: HTTPClient
+    /// Foreground/critical-path client with its own connection pool (see
+    /// ``URLSession/plozzInteractive``) used only for the user-blocking `item()`
+    /// fetch, so opening a detail page is never starved behind background
+    /// enrichment traffic on the shared default pool.
+    private let interactiveHTTP: HTTPClient
     private let capabilityProfile: JellyfinCapabilityProfile
 
     public init(
@@ -20,18 +25,20 @@ public struct JellyfinClient: Sendable {
         deviceProfile: JellyfinDeviceProfile,
         token: String? = nil,
         http: HTTPClient = URLSessionHTTPClient(),
+        interactiveHTTP: HTTPClient = URLSessionHTTPClient(session: .plozzInteractive),
         capabilityProfile: JellyfinCapabilityProfile = .detected()
     ) {
         self.baseURL = baseURL
         self.deviceProfile = deviceProfile
         self.token = token
         self.http = http
+        self.interactiveHTTP = interactiveHTTP
         self.capabilityProfile = capabilityProfile
     }
 
     /// Returns a copy of this client carrying an auth token.
     public func authenticated(token: String) -> JellyfinClient {
-        JellyfinClient(baseURL: baseURL, deviceProfile: deviceProfile, token: token, http: http, capabilityProfile: capabilityProfile)
+        JellyfinClient(baseURL: baseURL, deviceProfile: deviceProfile, token: token, http: http, interactiveHTTP: interactiveHTTP, capabilityProfile: capabilityProfile)
     }
 
     // MARK: Header
@@ -159,7 +166,10 @@ public struct JellyfinClient: Sendable {
             queryItems: [URLQueryItem(name: "Fields", value: "Overview,MediaStreams,MediaSources,ProviderIds,Trickplay,Genres,People,Studios,Tags,Taglines")],
             headers: authHeaders
         )
-        return try await http.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)
+        DLog.mark("JFclient.item PRE-decode id=\(id)")
+        let result = try await interactiveHTTP.decode(BaseItemDto.self, from: endpoint, baseURL: baseURL)
+        DLog.mark("JFclient.item POST-decode id=\(id)")
+        return result
     }
 
     func children(userID: String, parentID: String) async throws -> [BaseItemDto] {

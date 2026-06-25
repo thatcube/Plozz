@@ -192,7 +192,7 @@ private struct StudioLogoChip: View {
     private func load() async {
         guard !resolved else { return }
         guard
-            let (data, response) = try? await URLSession.shared.data(from: url),
+            let (data, response) = try? await ArtworkSession.shared.data(from: url),
             (response as? HTTPURLResponse).map({ (200...299).contains($0.statusCode) }) ?? true,
             let loaded = UIImage(data: data)
         else {

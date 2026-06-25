@@ -405,6 +405,7 @@ public final class AudioPlaybackController {
             info[MPMediaItemPropertyPlaybackDuration] = duration
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        updateNowPlayingPlaybackState()
         loadArtwork(for: track)
         #endif
     }
@@ -425,12 +426,24 @@ public final class AudioPlaybackController {
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        updateNowPlayingPlaybackState()
+        #endif
+    }
+
+    /// On tvOS (and macOS) the system Now Playing surface only appears when the
+    /// app explicitly reports its `playbackState`. Unlike iOS, tvOS does NOT
+    /// infer it from the audio session, so without this the Control Center Now
+    /// Playing card never shows even though `nowPlayingInfo` is populated.
+    private func updateNowPlayingPlaybackState() {
+        #if canImport(MediaPlayer)
+        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
         #endif
     }
 
     private func clearNowPlaying() {
         #if canImport(MediaPlayer)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        MPNowPlayingInfoCenter.default().playbackState = .stopped
         #endif
     }
 

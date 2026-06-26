@@ -251,6 +251,10 @@ let package = Package(
             dependencies: ["CoreModels", "CoreUI"]
         ),
         .testTarget(
+            name: "AppShellTests",
+            dependencies: ["AppShell", "CoreModels"]
+        ),
+        .testTarget(
             name: "CoreUITests",
             dependencies: ["CoreUI", "CoreModels"]
         ),
@@ -305,10 +309,6 @@ let package = Package(
         .testTarget(
             name: "FeatureMusicTests",
             dependencies: ["FeatureMusic", "CoreModels"]
-        ),
-        .testTarget(
-            name: "AppShellTests",
-            dependencies: ["AppShell", "CoreModels"]
         ),
         .testTarget(
             name: "FeaturePlaybackTests",

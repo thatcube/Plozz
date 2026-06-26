@@ -190,6 +190,7 @@ public final class AppState {
     /// is optional so a barely-started/untargeted stop still flushes deferred work.
     public func finishLiveWatchSession(accountID: String?, itemID: String, mutation: WatchMutation?) {
         let reconciler = watchReconciler
+        publishOptimisticWatchedFlip(itemID: itemID, mutation: mutation)
         Task {
             if let accountID {
                 await reconciler.endLiveSession(accountID: accountID, itemID: itemID)
@@ -199,6 +200,24 @@ public final class AppState {
                 await reconciler.drain()
             }
         }
+    }
+
+    /// On a real *finish* — the convergence `mutation` marks the title played —
+    /// optimistically flip its watched badge across every visible surface the
+    /// instant the player dismisses, fixing the "tile still reads unwatched after
+    /// Back" bug that previously required a full reload. The id set is every
+    /// server's own item id in the shared source of truth (the mutation's
+    /// `targets`, already unioned from the eager identity index when the stop
+    /// mutation was built) plus the played item id itself. Routed through the same
+    /// optimistic ``MediaItemMutation`` path press-and-hold "Mark watched" uses, so
+    /// Home/Detail/Search all flip immediately. Purely additive: it never blocks or
+    /// replaces the durable fan-out enqueued above. A mid-watch resume (no `played`)
+    /// leaves the badge alone — resume tiles refresh on the next Home load.
+    private func publishOptimisticWatchedFlip(itemID: String, mutation: WatchMutation?) {
+        guard let mutation, mutation.played == true else { return }
+        var ids = Set(mutation.targets.map(\.itemID))
+        ids.insert(itemID)
+        MediaItemMutation(itemIDs: ids, played: true).post()
     }
 
     // MARK: - Eager identity index (single source of truth for cross-server sources)

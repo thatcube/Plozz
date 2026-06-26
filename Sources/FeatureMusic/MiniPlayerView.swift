@@ -127,9 +127,9 @@ private struct NowPlayingCardContent: View {
                 }
             }
         }
-        .padding(.leading, 12)
-        .padding(.trailing, 22)
-        .padding(.vertical, 10)
+        .padding(.leading, 18)
+        .padding(.trailing, 28)
+        .padding(.vertical, 16)
     }
 }
 
@@ -147,7 +147,11 @@ private struct NowPlayingCardButtonStyle: ButtonStyle {
         @Environment(\.isFocused) private var isFocused
         @Environment(\.colorScheme) private var colorScheme
 
-        private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        // Match the browsing tiles below: same rounded glass corner radius.
+        private let shape = RoundedRectangle(
+            cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius,
+            style: .continuous
+        )
 
         // Focused fill is the contrast flip: black card on a light theme, white
         // card on a dark/OLED theme. Idle uses liquid glass instead.
@@ -157,11 +161,15 @@ private struct NowPlayingCardButtonStyle: ButtonStyle {
             configuration.label
                 .environment(\.nowPlayingCardFocused, isFocused)
                 .contentShape(shape)
-                // Idle = liquid glass; on focus a solid contrast fill cross-fades
-                // in on top so the playing item flips to a high-contrast block.
+                // Idle = the same Liquid Glass surface as the cards below; on focus
+                // a solid contrast fill cross-fades in so the playing item flips to
+                // a high-contrast block.
                 .background {
                     Color.clear
-                        .plozzGlassPanel(cornerRadius: 14)
+                        .plozzGlassCard(
+                            cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius,
+                            isFocused: false
+                        )
                         .overlay { shape.fill(focusFill).opacity(isFocused ? 1 : 0) }
                 }
                 .clipShape(shape)

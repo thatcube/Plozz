@@ -173,6 +173,24 @@ extension PlexProvider: MusicProvider {
         )
     }
 
+    // MARK: Lyrics
+
+    public func lyrics(for trackID: String) async throws -> Lyrics? {
+        // A Plex track exposes lyrics as a `streamType == 4` stream on its media
+        // part; its `key` fetches the (usually `.lrc`) file. Any failure along the
+        // way is treated as "no lyrics" so the UI shows its empty state.
+        guard let detail = try? await client.metadata(ratingKey: trackID),
+              let streams = detail.Media?.first?.Part?.first?.Stream,
+              let lyricStream = streams.first(where: { $0.streamType == 4 }),
+              let key = lyricStream.key,
+              let text = try? await client.lyricsText(forStreamKey: key) else {
+            return nil
+        }
+        // LRC parses to synced lines; plain text falls back to unsynced.
+        let lyrics = Lyrics(lrc: text) ?? Lyrics(plainText: text)
+        return lyrics.isEmpty ? nil : lyrics
+    }
+
     /// Builds a `PlaybackQuality` from Plex media facts. Direct play reflects the
     /// source audio stream; a transcode is always Plex's progressive MP3 320 kbps
     /// music target (see `audioTranscodeURL`).

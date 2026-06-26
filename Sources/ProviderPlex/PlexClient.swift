@@ -442,6 +442,20 @@ public struct PlexClient: Sendable {
 
     // MARK: URLs
 
+    /// Fetches the raw text of a lyrics (or other sidecar) stream by its
+    /// server-relative `key` (e.g. `/library/streams/5555`). Plex serves an
+    /// `.lrc` or plain-text body; `download=1` asks for the file itself rather
+    /// than a transcoded view. Returns `nil` when the body isn't decodable text.
+    func lyricsText(forStreamKey key: String) async throws -> String? {
+        let endpoint = Endpoint(
+            path: key,
+            queryItems: [URLQueryItem(name: "download", value: "1")],
+            headers: headers
+        )
+        let (data, _) = try await send(endpoint)
+        return String(data: data, encoding: .utf8)
+    }
+
     /// Builds an absolute, token-bearing stream URL for a part `key` (which is
     /// already a server-relative `/library/parts/…/file.…` path). Used for
     /// direct play of a container/codec tvOS can demux natively.

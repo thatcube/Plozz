@@ -53,6 +53,13 @@ public protocol MusicProvider: Sendable {
     /// queue. Pass `nil` to play the single track on its own.
     func audioPlaybackInfo(for trackID: String, queueContext: [String]?) async throws -> AudioPlaybackRequest
 
+    // MARK: Lyrics
+
+    /// Lyrics for a track, synced (timestamped) or plain, or `nil` when the
+    /// backend has none for this track. Optional capability — providers without
+    /// lyrics support inherit the no-op default below.
+    func lyrics(for trackID: String) async throws -> Lyrics?
+
     // MARK: Images
 
     /// Absolute URL for a music node's artwork, or `nil` if unavailable.
@@ -74,6 +81,8 @@ public extension MusicProvider {
     }
 
     func tracks(in containerID: String) async throws -> [MusicTrack] { [] }
+
+    func lyrics(for trackID: String) async throws -> Lyrics? { nil }
 
     func musicImageURL(id: String, maxWidth: Int?) -> URL? { nil }
 }

@@ -308,13 +308,18 @@ struct AlbumDetailView: View {
         controller.play(
             tracks: viewModel.tracks,
             startIndex: start,
-            resolveStreamURL: streamURLResolver(for: provider)
+            resolveStreamURL: streamURLResolver(for: provider),
+            resolveLyrics: lyricsResolver(for: provider)
         )
     }
 
     private func shuffle() {
         guard let provider = viewModel.provider, !viewModel.tracks.isEmpty else { return }
-        controller.playShuffled(tracks: viewModel.tracks, resolveStreamURL: streamURLResolver(for: provider))
+        controller.playShuffled(
+            tracks: viewModel.tracks,
+            resolveStreamURL: streamURLResolver(for: provider),
+            resolveLyrics: lyricsResolver(for: provider)
+        )
     }
 }
 
@@ -356,12 +361,21 @@ struct PlaylistDetailView: View {
     private func play(from track: MusicTrack?) {
         guard let provider = viewModel.provider, !viewModel.tracks.isEmpty else { return }
         let start = track.flatMap { t in viewModel.tracks.firstIndex(where: { $0.id == t.id }) } ?? 0
-        controller.play(tracks: viewModel.tracks, startIndex: start, resolveStreamURL: streamURLResolver(for: provider))
+        controller.play(
+            tracks: viewModel.tracks,
+            startIndex: start,
+            resolveStreamURL: streamURLResolver(for: provider),
+            resolveLyrics: lyricsResolver(for: provider)
+        )
     }
 
     private func shuffle() {
         guard let provider = viewModel.provider, !viewModel.tracks.isEmpty else { return }
-        controller.playShuffled(tracks: viewModel.tracks, resolveStreamURL: streamURLResolver(for: provider))
+        controller.playShuffled(
+            tracks: viewModel.tracks,
+            resolveStreamURL: streamURLResolver(for: provider),
+            resolveLyrics: lyricsResolver(for: provider)
+        )
     }
 }
 

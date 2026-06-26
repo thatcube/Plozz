@@ -196,6 +196,25 @@ extension JellyfinProvider: MusicProvider {
         )
     }
 
+    // MARK: Lyrics
+
+    public func lyrics(for trackID: String) async throws -> Lyrics? {
+        // The server answers 404 when a track has no lyrics; treat any failure as
+        // "no lyrics" so the UI shows its empty state rather than an error.
+        guard let dto = try? await client.lyrics(itemID: trackID),
+              let rawLines = dto.Lyrics, !rawLines.isEmpty else {
+            return nil
+        }
+        let lines = rawLines.map { line in
+            LyricLine(
+                text: line.Text ?? "",
+                start: JellyfinTicks.seconds(fromTicks: line.Start)
+            )
+        }
+        let lyrics = Lyrics(lines: lines)
+        return lyrics.isEmpty ? nil : lyrics
+    }
+
     /// Containers AVPlayer direct-plays on tvOS — must match the `Container`
     /// allow-list `audioStreamURL` sends to Jellyfin's `/universal` endpoint.
     /// When the source container is in this set the server streams the original

@@ -108,4 +108,14 @@ func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackControll
         return AudioPlaybackController.ResolvedStream(url: info.streamURL, quality: info.quality)
     }
 }
+
+/// Builds a lyrics resolver bound to a music provider, mirroring
+/// `streamURLResolver`, so the Now Playing lyrics panel works for whichever
+/// backend owns the track.
+@MainActor
+func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
+    { track in
+        try? await provider.lyrics(for: track.id)
+    }
+}
 #endif

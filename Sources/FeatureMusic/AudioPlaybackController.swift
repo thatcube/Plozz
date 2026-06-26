@@ -43,6 +43,30 @@ public final class AudioPlaybackController {
     /// provider.
     public typealias StreamURLResolver = @MainActor (MusicTrack) async -> ResolvedStream?
 
+    /// Resolves a track's lyrics (provider-backed), or `nil` when the backend has
+    /// none. Kept as a closure for the same reason as `StreamURLResolver`: the
+    /// engine stays decoupled from any concrete provider.
+    public typealias LyricsResolver = @MainActor (MusicTrack) async -> Lyrics?
+
+    /// Loading state of the current track's lyrics, observed by the Now Playing
+    /// lyrics panel.
+    public enum LyricsState: Sendable, Equatable {
+        /// No lyrics requested yet (nothing playing, or no resolver wired).
+        case idle
+        /// A fetch is in flight for the current track.
+        case loading
+        /// Lyrics were found.
+        case loaded(Lyrics)
+        /// The fetch completed but the track has no lyrics.
+        case unavailable
+
+        /// Whether usable lyrics are available (drives the toggle's enabled state).
+        public var hasLyrics: Bool {
+            if case .loaded = self { return true }
+            return false
+        }
+    }
+
     /// The result of resolving a track: a playable URL plus the fidelity the
     /// stream delivers, so the UI can show a quality badge.
     public struct ResolvedStream: Sendable {
@@ -71,6 +95,10 @@ public final class AudioPlaybackController {
     /// transcode), surfaced in the Now Playing UI. `nil` until resolved or when
     /// the provider doesn't report it.
     public private(set) var currentQuality: PlaybackQuality?
+    /// Loading state of the current track's lyrics. `.loaded` when found,
+    /// `.unavailable` when the track has none, driving the Now Playing lyrics
+    /// panel and the lyrics toggle's enabled state.
+    public private(set) var lyricsState: LyricsState = .idle
     /// Increments every time a *new* playback session begins (a `play` /
     /// `playShuffled` call). The Music tab observes this to auto-present the
     /// full-screen Now Playing player when the user starts a song.
@@ -92,6 +120,8 @@ public final class AudioPlaybackController {
 
     private let player = AVQueuePlayer()
     private var resolver: StreamURLResolver?
+    private var lyricsResolver: LyricsResolver?
+    private var lyricsLoadTask: Task<Void, Never>?
     /// The unshuffled queue, so toggling shuffle off restores original order.
     private var orderedQueue: [MusicTrack] = []
     private var playSessionID: String?
@@ -120,7 +150,8 @@ public final class AudioPlaybackController {
         tracks: [MusicTrack],
         startIndex: Int,
         playSessionID: String? = nil,
-        resolveStreamURL: @escaping StreamURLResolver
+        resolveStreamURL: @escaping StreamURLResolver,
+        resolveLyrics: LyricsResolver? = nil
     ) {
         guard !tracks.isEmpty else { return }
         let clampedStart = min(max(startIndex, 0), tracks.count - 1)
@@ -131,6 +162,7 @@ public final class AudioPlaybackController {
             return
         }
         self.resolver = resolveStreamURL
+        self.lyricsResolver = resolveLyrics
         self.playSessionID = playSessionID
         self.orderedQueue = tracks
         self.isShuffled = false
@@ -145,10 +177,12 @@ public final class AudioPlaybackController {
     public func playShuffled(
         tracks: [MusicTrack],
         playSessionID: String? = nil,
-        resolveStreamURL: @escaping StreamURLResolver
+        resolveStreamURL: @escaping StreamURLResolver,
+        resolveLyrics: LyricsResolver? = nil
     ) {
         guard !tracks.isEmpty else { return }
         self.resolver = resolveStreamURL
+        self.lyricsResolver = resolveLyrics
         self.playSessionID = playSessionID
         self.orderedQueue = tracks
         self.isShuffled = true
@@ -237,6 +271,8 @@ public final class AudioPlaybackController {
         currentTime = 0
         duration = 0
         currentQuality = nil
+        lyricsLoadTask?.cancel()
+        lyricsState = .idle
         // Relinquish the system Play/Pause button so the video player can
         // receive it again once music is no longer playing.
         disableRemoteCommands()
@@ -302,6 +338,7 @@ public final class AudioPlaybackController {
     private func startCurrent() async {
         guard let track = currentTrack, let resolver else { return }
         currentQuality = nil
+        loadLyrics(for: track)
         guard let resolved = await resolver(track) else { return }
         let url = resolved.url
         currentQuality = resolved.quality
@@ -339,6 +376,30 @@ public final class AudioPlaybackController {
         #if canImport(MediaPlayer)
         updateNowPlayingInfo()
         #endif
+    }
+
+    /// Fetches lyrics for `track` off the critical path, publishing `lyricsState`
+    /// as it resolves. Cancels any in-flight load so a fast next/previous never
+    /// shows a stale track's lyrics. With no resolver wired, stays `.unavailable`.
+    private func loadLyrics(for track: MusicTrack) {
+        lyricsLoadTask?.cancel()
+        guard let lyricsResolver else {
+            lyricsState = .unavailable
+            return
+        }
+        lyricsState = .loading
+        let trackID = track.id
+        lyricsLoadTask = Task { [weak self] in
+            let result = await lyricsResolver(track)
+            guard !Task.isCancelled, let self else { return }
+            // Ignore a result that arrived after the user moved on.
+            guard self.currentTrack?.id == trackID else { return }
+            if let result, !result.isEmpty {
+                self.lyricsState = .loaded(result)
+            } else {
+                self.lyricsState = .unavailable
+            }
+        }
     }
 
     private func refreshDuration() async {

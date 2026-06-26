@@ -13,42 +13,39 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scrubModel = MusicScrubModel()
 
+    /// Whether the user wants the lyrics panel shown. Persisted (default on) so
+    /// the choice is remembered across sessions. The toggle is disabled — and so
+    /// can't be changed — when the current track has no lyrics.
+    @AppStorage("musicLyricsEnabled") private var lyricsEnabled = true
+
     /// Uniform size for every transport control so the row reads evenly.
     private let controlSize: CGFloat = 64
+
+    /// The lyrics panel is shown next to the player whenever the user has lyrics
+    /// enabled and something is playing. It renders its own loading / found /
+    /// "No lyrics found" states, so even an empty result is visible (debug-friendly).
+    private var showsLyricsPanel: Bool {
+        lyricsEnabled && controller.currentTrack != nil && controller.lyricsState != .idle
+    }
 
     var body: some View {
         ZStack {
             background
-            VStack(spacing: 36) {
-                MusicArtworkImage(
-                    url: controller.currentTrack?.artworkURL,
-                    systemPlaceholder: "music.note",
-                    asyncFallbackURL: trackFallback(controller.currentTrack)
-                )
-                    .frame(width: 420, height: 420)
-                    .shadow(radius: 30)
-
-                VStack(spacing: 8) {
-                    Text(controller.currentTrack?.title ?? "Not Playing")
-                        .font(.system(size: 46, weight: .bold))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
-                    if let subtitle = controller.currentTrack?.subtitle {
-                        Text(subtitle)
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
-                    }
-                    qualityBadge
+            HStack(alignment: .center, spacing: 56) {
+                playerColumn
+                    .frame(maxWidth: showsLyricsPanel ? 760 : 960)
+                if showsLyricsPanel {
+                    NowPlayingLyricsView(
+                        state: controller.lyricsState,
+                        currentTime: controller.currentTime
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
-
-                scrubRow
-                transportRow
             }
-            .frame(maxWidth: 960)
             .padding(.horizontal, 80)
+            .padding(.vertical, 60)
+            .animation(.easeInOut(duration: 0.25), value: showsLyricsPanel)
         }
         .overlay(alignment: .topTrailing) {
             Button { dismiss() } label: {
@@ -62,6 +59,39 @@ struct NowPlayingView: View {
         .onAppear { syncScrubModel() }
         .onChange(of: controller.currentTime) { _, _ in syncScrubModel() }
         .onChange(of: controller.duration) { _, _ in syncScrubModel() }
+    }
+
+    /// The left-hand player column: artwork, track/artist/album, quality badge,
+    /// scrub bar with play/pause, and the transport + lyrics-toggle row.
+    private var playerColumn: some View {
+        VStack(spacing: 36) {
+            MusicArtworkImage(
+                url: controller.currentTrack?.artworkURL,
+                systemPlaceholder: "music.note",
+                asyncFallbackURL: trackFallback(controller.currentTrack)
+            )
+                .frame(width: 420, height: 420)
+                .shadow(radius: 30)
+
+            VStack(spacing: 8) {
+                Text(controller.currentTrack?.title ?? "Not Playing")
+                    .font(.system(size: 46, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
+                if let subtitle = controller.currentTrack?.subtitle {
+                    Text(subtitle)
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+                }
+                qualityBadge
+            }
+
+            scrubRow
+            transportRow
+        }
     }
 
     private func syncScrubModel() {
@@ -140,7 +170,8 @@ struct NowPlayingView: View {
         }
     }
 
-    /// Every other control, evenly sized, on the row below.
+    /// Every other control, evenly sized, on the row below. Includes the lyrics
+    /// toggle, which is disabled when the current track has no lyrics.
     private var transportRow: some View {
         HStack(spacing: 28) {
             transportButton(
@@ -157,7 +188,24 @@ struct NowPlayingView: View {
                 prominent: controller.repeatMode != .off,
                 tint: controller.repeatMode == .off ? .primary : Color.accentColor
             ) { controller.cycleRepeatMode() }
+
+            lyricsToggleButton
         }
+    }
+
+    /// Toggles the lyrics panel. Highlighted when on; disabled (and dimmed) while
+    /// the current track has no lyrics, so it can't be turned on for nothing.
+    private var lyricsToggleButton: some View {
+        let hasLyrics = controller.lyricsState.hasLyrics
+        return transportButton(
+            icon: lyricsEnabled ? "quote.bubble.fill" : "quote.bubble",
+            prominent: lyricsEnabled && hasLyrics,
+            tint: (lyricsEnabled && hasLyrics) ? Color.accentColor : .primary
+        ) {
+            lyricsEnabled.toggle()
+        }
+        .disabled(!hasLyrics)
+        .opacity(hasLyrics ? 1 : 0.4)
     }
 
     private func transportButton(
@@ -191,6 +239,96 @@ struct NowPlayingView: View {
             album: track.albumTitle,
             artist: track.artistName
         )
+    }
+}
+
+// MARK: - Lyrics panel
+
+/// The right-hand lyrics column on the Now Playing screen. Renders the loading
+/// state, the lyrics themselves (synced lyrics highlight + auto-scroll the active
+/// line; plain lyrics just scroll), or a debug "No lyrics found" placeholder when
+/// the track has none.
+struct NowPlayingLyricsView: View {
+    let state: AudioPlaybackController.LyricsState
+    let currentTime: TimeInterval
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Lyrics")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            content
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(40)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch state {
+        case .idle, .loading:
+            VStack {
+                Spacer()
+                ProgressView()
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        case .unavailable:
+            VStack(alignment: .leading) {
+                Spacer()
+                Text("No lyrics found")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+        case let .loaded(lyrics):
+            lyricsScroll(lyrics)
+        }
+    }
+
+    private func lyricsScroll(_ lyrics: Lyrics) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { index, line in
+                        let active = isActive(index: index, in: lyrics)
+                        Text(line.text.isEmpty ? " " : line.text)
+                            .font(.system(size: 30, weight: active ? .bold : .regular))
+                            .foregroundStyle(active ? .primary : .secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(index)
+                            .animation(.easeInOut(duration: 0.2), value: active)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            .onChange(of: activeIndex(in: lyrics)) { _, newIndex in
+                guard lyrics.isSynced, let newIndex else { return }
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo(newIndex, anchor: .center)
+                }
+            }
+        }
+    }
+
+    /// The index of the line currently being sung, for synced lyrics.
+    private func activeIndex(in lyrics: Lyrics) -> Int? {
+        guard lyrics.isSynced else { return nil }
+        var match: Int?
+        for (index, line) in lyrics.lines.enumerated() {
+            guard let start = line.start else { continue }
+            if start <= currentTime { match = index } else { break }
+        }
+        return match
+    }
+
+    private func isActive(index: Int, in lyrics: Lyrics) -> Bool {
+        activeIndex(in: lyrics) == index
     }
 }
 

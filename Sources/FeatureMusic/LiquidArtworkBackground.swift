@@ -150,22 +150,23 @@ private struct MeshLiquidLayer: View {
     /// The 3×3 control points. The four corners are pinned so the gradient always
     /// fills the rect; the edge midpoints slide along their edges and the center
     /// roams freely, each on its own slow period for an organic, non-repeating
-    /// drift. Amplitudes are deliberately small so the motion stays subtle.
+    /// drift. Amplitudes stay clear of the pinned corners so the mesh never folds,
+    /// but are large enough to give the field visible, lively motion.
     private func points(at t: TimeInterval) -> [SIMD2<Float>] {
         func osc(_ period: Double, _ phase: Double) -> Float {
             Float(sin(t / period + phase))
         }
         return [
             SIMD2(0, 0),
-            SIMD2(0.5 + 0.14 * osc(11, 0.0), 0.0),
+            SIMD2(0.5 + 0.20 * osc(9, 0.0), 0.0),
             SIMD2(1, 0),
 
-            SIMD2(0.0, 0.5 + 0.14 * osc(13, 1.3)),
-            SIMD2(0.5 + 0.16 * osc(9, 0.7), 0.5 + 0.16 * osc(12, 2.1)),
-            SIMD2(1.0, 0.5 + 0.14 * osc(10, 3.4)),
+            SIMD2(0.0, 0.5 + 0.20 * osc(10.5, 1.3)),
+            SIMD2(0.5 + 0.26 * osc(7.5, 0.7), 0.5 + 0.26 * osc(9.5, 2.1)),
+            SIMD2(1.0, 0.5 + 0.20 * osc(8, 3.4)),
 
             SIMD2(0, 1),
-            SIMD2(0.5 + 0.14 * osc(14, 4.2), 1.0),
+            SIMD2(0.5 + 0.20 * osc(11, 4.2), 1.0),
             SIMD2(1, 1)
         ]
     }

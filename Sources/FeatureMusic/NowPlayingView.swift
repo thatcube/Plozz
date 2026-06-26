@@ -24,11 +24,13 @@ struct NowPlayingView: View {
     /// Uniform size for every transport control so the row reads evenly.
     private let controlSize: CGFloat = 64
 
-    /// The lyrics panel is shown next to the player whenever the user has lyrics
-    /// enabled and something is playing. It renders its own loading / found /
-    /// "No lyrics found" states, so even an empty result is visible (debug-friendly).
+    /// The lyrics panel is shown next to the player **only once lyrics are
+    /// actually found**. While the background lookup is in flight (or if the track
+    /// has none) the player stays centered full-width — we never give up half the
+    /// screen for a spinner or an empty state. When lyrics arrive the player
+    /// slides left to make room.
     private var showsLyricsPanel: Bool {
-        lyricsEnabled && controller.currentTrack != nil && controller.lyricsState != .idle
+        lyricsEnabled && controller.lyricsState.hasLyrics
     }
 
     var body: some View {
@@ -344,20 +346,18 @@ struct NowPlayingLyricsView: View {
         }
     }
 
-    /// Vertical edge fade that makes the lyrics physically dissolve toward the
-    /// top and bottom — a near-continuous gradient that's only fully solid in a
-    /// thin central band, so lines melt into the background as they move away
-    /// from the active line (Apple Music / Plex feel).
+    /// Vertical edge fade that makes lyrics fully dissolve **well before** the
+    /// top and bottom edges: the outer ~quarter on each side is completely
+    /// transparent, then it ramps up to solid only in a thin central band. Lines
+    /// vanish into the background instead of reaching the panel edges.
     private var edgeFade: some View {
         LinearGradient(
             stops: [
                 .init(color: .clear, location: 0.0),
-                .init(color: .black.opacity(0.15), location: 0.18),
-                .init(color: .black.opacity(0.6), location: 0.36),
-                .init(color: .black, location: 0.48),
-                .init(color: .black, location: 0.52),
-                .init(color: .black.opacity(0.6), location: 0.64),
-                .init(color: .black.opacity(0.15), location: 0.82),
+                .init(color: .clear, location: 0.26),
+                .init(color: .black, location: 0.46),
+                .init(color: .black, location: 0.54),
+                .init(color: .clear, location: 0.74),
                 .init(color: .clear, location: 1.0)
             ],
             startPoint: .top,

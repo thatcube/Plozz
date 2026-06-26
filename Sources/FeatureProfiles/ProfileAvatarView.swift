@@ -1,14 +1,19 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreUI
 
 /// Renders a profile's avatar at `size` pt. Prefers the opt-in real photo
 /// (`Profile.avatarImageURL`) when present and reachable; otherwise falls
 /// back to the SF Symbol on the colored tile (`avatarSymbol` + `colorIndex`).
 ///
-/// A stale or broken URL never yields an empty circle — `AsyncImage`'s
-/// failure phase reuses the symbol fallback so the picker tile and Settings
-/// hero always show *something* recognizable.
+/// Photos load through the shared `ArtworkImageCache` (via `FallbackAsyncImage`),
+/// so an already-decoded avatar renders on the first frame with no flash, the
+/// raw download is shared with the picker's background-color extraction, and a
+/// re-opened picker shows photos instantly. While a photo is still loading it
+/// shows a quiet neutral placeholder (not the colored symbol), so a photo
+/// profile never briefly flashes a stand-in icon behind the photo. The symbol
+/// fallback is reserved for symbol-only profiles and genuine load failures.
 public struct ProfileAvatarView: View {
     public let profile: Profile
     public let size: CGFloat
@@ -23,15 +28,10 @@ public struct ProfileAvatarView: View {
             if let urlString = profile.avatarImageURL?.trimmingCharacters(in: .whitespaces),
                !urlString.isEmpty,
                let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image.resizable().scaledToFill()
-                    case .empty, .failure:
-                        symbolFallback
-                    @unknown default:
-                        symbolFallback
-                    }
+                FallbackAsyncImage(urls: [url], variant: Self.variant(for: size)) {
+                    // Shown only when the photo genuinely fails to load — keeps the
+                    // tile recognizable instead of an empty circle.
+                    symbolFallback
                 }
             } else {
                 symbolFallback
@@ -39,6 +39,12 @@ public struct ProfileAvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+    }
+
+    /// Picks a cache variant sized to the avatar: a crisp source for the large
+    /// picker tiles, a cheap thumbnail for the small Settings rows.
+    private static func variant(for size: CGFloat) -> ArtworkImageVariant {
+        size >= 160 ? .posterCard : .musicThumbnail
     }
 
     /// Symbol on colored tile — the original avatar style. Also used as the

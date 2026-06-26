@@ -15,27 +15,43 @@ import SwiftUI
 /// A dark scrim and gentle vignette are layered on top so foreground text and
 /// lyrics keep their contrast regardless of how bright the artwork is. When
 /// `palette` is empty (no artwork yet) it shows a calm neutral dark field.
-struct LiquidArtworkBackground: View {
+public struct LiquidArtworkBackground: View {
     /// Prominent colors, most significant first. May be empty.
-    var palette: [Color]
+    public var palette: [Color]
     /// When false (Reduce Motion) the gradient is rendered statically.
-    var animate: Bool = true
+    public var animate: Bool = true
     /// How the scrim over the morphing colors is painted.
-    var style: Style = .dark
+    public var style: Style = .dark
+    /// How long the crossfade takes when `palette` changes. Longer values let
+    /// the field drift gently behind a fast-moving selection.
+    public var paletteCrossfade: Double = 1.2
+    /// When true (default) the view paints its own opaque floor + legibility
+    /// scrim, fully owning the screen. When false it renders *only* the morphing
+    /// color mesh with a transparent surround, so callers can composite it as a
+    /// localized tint over their own background (e.g. a glow around one element).
+    public var showsBackdrop: Bool = true
 
     /// The three background treatments the player offers.
-    enum Style { case dark, light, oled }
+    public enum Style { case dark, light, oled }
 
-    var body: some View {
+    public init(palette: [Color], animate: Bool = true, style: Style = .dark, paletteCrossfade: Double = 1.2, showsBackdrop: Bool = true) {
+        self.palette = palette
+        self.animate = animate
+        self.style = style
+        self.paletteCrossfade = paletteCrossfade
+        self.showsBackdrop = showsBackdrop
+    }
+
+    public var body: some View {
         ZStack {
-            base
+            if showsBackdrop { base }
             gradientLayer
                 .ignoresSafeArea()
                 .opacity(gradientOpacity)
-            scrim
+            if showsBackdrop { scrim }
         }
         .ignoresSafeArea()
-        .animation(.easeInOut(duration: 1.2), value: palette)
+        .animation(.easeInOut(duration: paletteCrossfade), value: palette)
     }
 
     /// The solid floor under the morphing colors.

@@ -141,6 +141,14 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         // track title/artist to a third party (lrclib.net) just to populate a
         // panel they've hidden. Read defensively so the on-by-default applies
         // when the key was never written.
+        //
+        // NOTE: this reads the *global* lyrics-enabled key, which is correct
+        // today because the toggle is global. If the "show lyrics" toggle is
+        // ever made per-profile (it lives as @AppStorage in NowPlayingView while
+        // appearance/showTrackDetails went per-profile in MusicPlayerSettingsStore),
+        // this read MUST become profile-namespace-scoped (SettingsKey.scoped) at
+        // the same time — otherwise the resolver reads the global key while the UI
+        // writes a scoped one and this gating silently desyncs.
         let lyricsEnabled = UserDefaults.standard.object(forKey: MusicLyricsPreference.storageKey) as? Bool
             ?? MusicLyricsPreference.defaultEnabled
         if lyricsEnabled,

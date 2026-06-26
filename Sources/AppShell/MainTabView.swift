@@ -93,6 +93,7 @@ struct MainTabView: View {
             if musicAvailability.hasMusic {
                 MusicTabView(
                     accounts: musicAvailability.detectedAccounts,
+                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
                     controller: audioController
                 )
                 .tabItem { Label("Music", systemImage: "music.note") }
@@ -131,10 +132,37 @@ struct MainTabView: View {
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
-        .task(id: accounts.map(\.account.id)) {
-            await musicAvailability.probe(accounts: accounts)
+        .task(id: musicProbeKey) {
+            // Paint the Music tab on the first frame from the last persisted
+            // result (synchronous, no network), then refresh in the background.
+            // Re-runs when accounts or the per-profile library toggles change, so
+            // hiding/showing a music library live re-evaluates the tab + content.
+            musicAvailability.seedFromCache(accounts: accounts, visibility: homeVisibility.visibility)
+            if musicAvailability.hasMusic {
+                // Warm the landing cache immediately from the seeded set so the
+                // page is ready before the user ever taps the tab.
+                MusicLandingPrefetch.warm(
+                    accounts: musicAvailability.detectedAccounts,
+                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs
+                )
+            }
+            await musicAvailability.probe(accounts: accounts, visibility: homeVisibility.visibility)
+            if musicAvailability.hasMusic {
+                MusicLandingPrefetch.warm(
+                    accounts: musicAvailability.detectedAccounts,
+                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs
+                )
+            }
         }
         .mediaItemActionHandler(mediaItemActionHandler)
+    }
+
+    /// Restarts the music probe whenever the signed-in accounts or the per-profile
+    /// library-visibility toggles change.
+    private var musicProbeKey: String {
+        let ids = accounts.map(\.account.id).sorted()
+        let excluded = homeVisibility.visibility.excludedKeys.sorted()
+        return (ids + ["|"] + excluded).joined(separator: ",")
     }
 }
 

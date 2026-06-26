@@ -25,17 +25,22 @@ public struct MusicTabView: View {
 
     @State private var path = NavigationPath()
     @State private var showNowPlaying = false
+    @State private var layoutModel = MusicLandingLayoutModel()
 
-    public init(accounts: [ResolvedAccount], controller: AudioPlaybackController) {
-        self.context = MusicContext(accounts: accounts)
+    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController) {
+        self.context = MusicContext(
+            accounts: accounts,
+            visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
+        )
         self.controller = controller
     }
 
     public var body: some View {
         NavigationStack(path: $path) {
             MusicLandingView(
-                viewModel: MusicLandingViewModel(context: context),
-                onSelectRoute: { path.append($0) }
+                viewModel: MusicLandingViewModel(context: context, cache: .shared),
+                onSelectRoute: { path.append($0) },
+                layout: layoutModel.layout
             )
             .navigationDestination(for: MusicRoute.self) { route in
                 destination(for: route)

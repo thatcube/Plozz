@@ -518,7 +518,8 @@ public struct JellyfinClient: Sendable {
         limit: Int,
         sortBy: String,
         sortOrder: String,
-        albumArtistID: String? = nil
+        albumArtistID: String? = nil,
+        filters: [String] = []
     ) async throws -> ItemsResponse {
         var queryItems = [
             URLQueryItem(name: "StartIndex", value: String(startIndex)),
@@ -534,6 +535,9 @@ public struct JellyfinClient: Sendable {
         }
         if let albumArtistID, !albumArtistID.isEmpty {
             queryItems.append(URLQueryItem(name: "AlbumArtistIds", value: albumArtistID))
+        }
+        if !filters.isEmpty {
+            queryItems.append(URLQueryItem(name: "Filters", value: filters.joined(separator: ",")))
         }
         if recursive {
             queryItems.append(URLQueryItem(name: "Recursive", value: "true"))

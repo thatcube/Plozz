@@ -6,6 +6,10 @@ import CoreModels
 #if canImport(MediaPlayer)
 import MediaPlayer
 #endif
+#if canImport(UIKit)
+import UIKit
+import CoreUI
+#endif
 
 // `MediaPlayer` transitively imports AudioToolbox, which declares a C `MusicTrack`
 // type. Disambiguate so `MusicTrack` here always means our domain model.
@@ -20,10 +24,11 @@ public typealias MusicTrack = CoreModels.MusicTrack
 /// mini-player and the Now Playing screen observe the *same* instance.
 ///
 /// tvOS background audio (the part the video flow never does):
-///  * configures `AVAudioSession` `.playback` + `setActive(true)` so audio keeps
-///    playing while the user browses other screens or the screensaver starts;
+///  * configures `AVAudioSession` `.playback` (with the `.longFormAudio`
+///    route-sharing policy) + `setActive(true)` so audio keeps playing while the
+///    user browses other screens or the screensaver starts;
 ///  * publishes `MPNowPlayingInfoCenter` (title/artist/album, artwork, duration,
-///    elapsed) for the system Now Playing surface;
+///    elapsed, playback rate) for the system Now Playing card in Control Center;
 ///  * wires `MPRemoteCommandCenter` (play/pause/toggle/next/previous/seek) so the
 ///    Siri Remote transport controls drive the queue.
 @MainActor
@@ -74,6 +79,11 @@ public final class AudioPlaybackController {
     private var endObserver: NSObjectProtocol?
     private var sessionConfigured = false
     private var remoteCommandsActive = false
+    #if canImport(MediaPlayer)
+    /// Current track artwork, retained so each `nowPlayingInfo` rebuild can
+    /// re-attach it (assigning `nowPlayingInfo` replaces the whole dictionary).
+    private var currentArtwork: MPMediaItemArtwork?
+    #endif
     private var artworkLoadTask: Task<Void, Never>?
 
     public init() {
@@ -128,13 +138,17 @@ public final class AudioPlaybackController {
         guard hasActivePlayback else { return }
         player.play()
         isPlaying = true
-        updateNowPlayingPlaybackRate()
+        #if canImport(MediaPlayer)
+        updateNowPlayingInfo()
+        #endif
     }
 
     public func pause() {
         player.pause()
         isPlaying = false
-        updateNowPlayingPlaybackRate()
+        #if canImport(MediaPlayer)
+        updateNowPlayingInfo()
+        #endif
     }
 
     public func next() {
@@ -166,7 +180,9 @@ public final class AudioPlaybackController {
             toleranceAfter: .zero
         )
         currentTime = target
-        updateNowPlayingElapsed()
+        #if canImport(MediaPlayer)
+        updateNowPlayingInfo()
+        #endif
     }
 
     public func toggleShuffle() {
@@ -191,7 +207,6 @@ public final class AudioPlaybackController {
         index = 0
         currentTime = 0
         duration = 0
-        clearNowPlaying()
         // Relinquish the system Play/Pause button so the video player can
         // receive it again once music is no longer playing.
         disableRemoteCommands()
@@ -271,8 +286,26 @@ public final class AudioPlaybackController {
         isPlaying = true
         currentTime = 0
         duration = track.duration ?? 0
-        updateNowPlaying(for: track)
+        #if canImport(MediaPlayer)
+        currentArtwork = nil
+        // Try to have artwork ready BEFORE the first publish so tvOS's transient
+        // top-corner Now Playing banner (a one-shot snapshot taken when audio
+        // starts) shows the album art, like Apple Music/Spotify. Bounded so a
+        // slow artwork download never holds up the Now Playing card itself.
+        #if canImport(UIKit)
+        if let artURL = track.artworkURL,
+           let image = await bannerArtworkImage(artURL),
+           currentTrack?.id == track.id {
+            currentArtwork = Self.makeArtwork(from: image)
+        }
+        #endif
+        updateNowPlayingInfo()
+        #endif
+        loadArtwork(for: track)
         await refreshDuration()
+        #if canImport(MediaPlayer)
+        updateNowPlayingInfo()
+        #endif
     }
 
     private func refreshDuration() async {
@@ -285,7 +318,6 @@ public final class AudioPlaybackController {
         let seconds = item.duration.seconds
         if seconds.isFinite, seconds > 0 {
             duration = seconds
-            updateNowPlayingElapsed()
         }
     }
 
@@ -303,7 +335,6 @@ public final class AudioPlaybackController {
                 if self.duration == 0, let d = self.player.currentItem?.duration.seconds, d.isFinite, d > 0 {
                     self.duration = d
                 }
-                self.updateNowPlayingElapsed()
             }
         }
     }
@@ -331,7 +362,16 @@ public final class AudioPlaybackController {
         #if canImport(AVFoundation) && !os(macOS)
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default)
+            // `.longFormAudio` route-sharing policy marks this as a music/
+            // long-form audio app, giving it the same Now Playing treatment as
+            // Apple Music/Podcasts. Without it tvOS treats the audio as generic
+            // and may not surface the Control Center Now Playing card.
+            do {
+                try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
+            } catch {
+                // Fall back to plain `.playback` if the policy variant is rejected.
+                try session.setCategory(.playback, mode: .default)
+            }
             try session.setActive(true)
         } catch {
             // Non-fatal: audio still plays in the foreground without the session.
@@ -339,45 +379,87 @@ public final class AudioPlaybackController {
         #endif
     }
 
+
     // MARK: Now Playing + remote commands
+
+    #if canImport(MediaPlayer)
+    /// Publishes the current track to `MPNowPlayingInfoCenter`, which drives the
+    /// tvOS Control Center Now Playing card (and the screensaver/remote). The
+    /// app becomes the system Now Playing app by having an active `.playback`
+    /// audio session, registered `MPRemoteCommandCenter` handlers, and a
+    /// non-nil `nowPlayingInfo` while audio plays. Assigning `nowPlayingInfo`
+    /// replaces the whole dictionary, so we rebuild it (re-attaching artwork)
+    /// on every state change.
+    private func updateNowPlayingInfo() {
+        let center = MPNowPlayingInfoCenter.default()
+        guard let track = currentTrack else {
+            center.nowPlayingInfo = nil
+            center.playbackState = .stopped
+            return
+        }
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: track.title,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
+            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
+        ]
+        if let artist = track.artistName { info[MPMediaItemPropertyArtist] = artist }
+        if let album = track.albumTitle { info[MPMediaItemPropertyAlbumTitle] = album }
+        if duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = duration }
+        if let currentArtwork { info[MPMediaItemPropertyArtwork] = currentArtwork }
+        center.nowPlayingInfo = info
+        center.playbackState = isPlaying ? .playing : .paused
+    }
+    #endif
 
     private func enableRemoteCommands() {
         #if canImport(MediaPlayer)
         guard !remoteCommandsActive else { return }
         remoteCommandsActive = true
         let center = MPRemoteCommandCenter.shared()
+        center.playCommand.isEnabled = true
+        center.pauseCommand.isEnabled = true
+        center.togglePlayPauseCommand.isEnabled = true
+        center.nextTrackCommand.isEnabled = true
+        center.previousTrackCommand.isEnabled = true
+        center.changePlaybackPositionCommand.isEnabled = true
+        // tvOS delivers remote-command handlers on a background queue, but these
+        // actions mutate main-actor `@Observable` state and the player, so hop
+        // to the main actor instead of touching it off-thread.
         center.playCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.resume(); return .success
+            Task { @MainActor in self?.resume() }
+            return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.pause(); return .success
+            Task { @MainActor in self?.pause() }
+            return .success
         }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.togglePlayPause(); return .success
+            Task { @MainActor in self?.togglePlayPause() }
+            return .success
         }
         center.nextTrackCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.next(); return .success
+            Task { @MainActor in self?.next() }
+            return .success
         }
         center.previousTrackCommand.addTarget { [weak self] _ in
-            guard let self else { return .commandFailed }
-            self.previous(); return .success
+            Task { @MainActor in self?.previous() }
+            return .success
         }
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let self, let event = event as? MPChangePlaybackPositionCommandEvent else {
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else {
                 return .commandFailed
             }
-            Task { await self.seek(to: event.positionTime) }
+            let position = event.positionTime
+            Task { @MainActor in await self?.seek(to: position) }
             return .success
         }
         #endif
     }
 
-    /// Removes our handlers so the system no longer routes the Siri Remote's
-    /// Play/Pause button to music — letting the video player receive it again.
+    /// Removes our handlers and clears Now Playing so the system no longer
+    /// routes the Siri Remote's Play/Pause button to music — letting the video
+    /// player receive it again.
     private func disableRemoteCommands() {
         #if canImport(MediaPlayer)
         guard remoteCommandsActive else { return }
@@ -389,48 +471,10 @@ public final class AudioPlaybackController {
         center.nextTrackCommand.removeTarget(nil)
         center.previousTrackCommand.removeTarget(nil)
         center.changePlaybackPositionCommand.removeTarget(nil)
-        #endif
-    }
-
-    private func updateNowPlaying(for track: MusicTrack) {
-        #if canImport(MediaPlayer)
-        var info: [String: Any] = [
-            MPMediaItemPropertyTitle: track.title,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
-            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0
-        ]
-        if let artist = track.artistName { info[MPMediaItemPropertyArtist] = artist }
-        if let album = track.albumTitle { info[MPMediaItemPropertyAlbumTitle] = album }
-        if let duration = track.duration, duration > 0 {
-            info[MPMediaItemPropertyPlaybackDuration] = duration
-        }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        loadArtwork(for: track)
-        #endif
-    }
-
-    private func updateNowPlayingElapsed() {
-        #if canImport(MediaPlayer)
-        guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        if duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = duration }
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        #endif
-    }
-
-    private func updateNowPlayingPlaybackRate() {
-        #if canImport(MediaPlayer)
-        guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        #endif
-    }
-
-    private func clearNowPlaying() {
-        #if canImport(MediaPlayer)
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        currentArtwork = nil
+        let info = MPNowPlayingInfoCenter.default()
+        info.nowPlayingInfo = nil
+        info.playbackState = .stopped
         #endif
     }
 
@@ -438,19 +482,51 @@ public final class AudioPlaybackController {
         #if canImport(MediaPlayer) && canImport(UIKit)
         artworkLoadTask?.cancel()
         guard let url = track.artworkURL else { return }
+        if let cached = ArtworkImageCache.shared.cachedImage(for: url) {
+            currentArtwork = Self.makeArtwork(from: cached)
+            updateNowPlayingInfo()
+            return
+        }
         let trackID = track.id
         artworkLoadTask = Task { [weak self] in
-            guard let (data, _) = try? await URLSession.shared.data(from: url),
-                  let image = UIImage(data: data) else { return }
+            guard let image = await ArtworkImageCache.shared.image(for: url) else { return }
+            let artwork = Self.makeArtwork(from: image)
             await MainActor.run {
                 guard let self, self.currentTrack?.id == trackID else { return }
-                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-                var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-                info[MPMediaItemPropertyArtwork] = artwork
-                MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+                self.currentArtwork = artwork
+                self.updateNowPlayingInfo()
             }
         }
         #endif
     }
+
+    #if canImport(MediaPlayer) && canImport(UIKit)
+    /// Returns the track's artwork for the initial Now Playing publish, serving a
+    /// cached copy instantly and otherwise waiting only briefly for the download
+    /// so the system banner can include it without stalling the card.
+    private func bannerArtworkImage(_ url: URL) async -> UIImage? {
+        if let cached = ArtworkImageCache.shared.cachedImage(for: url) { return cached }
+        return await withTaskGroup(of: UIImage?.self) { group in
+            group.addTask { await ArtworkImageCache.shared.image(for: url) }
+            group.addTask { try? await Task.sleep(nanoseconds: 700_000_000); return nil }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+    }
+
+    /// Wraps a decoded image as `MPMediaItemArtwork`, rendering to whatever size
+    /// the system requests (returning a mismatched/original-size image makes the
+    /// Now Playing surfaces silently drop the artwork).
+    private nonisolated static func makeArtwork(from image: UIImage) -> MPMediaItemArtwork {
+        MPMediaItemArtwork(boundsSize: image.size) { size in
+            let format = UIGraphicsImageRendererFormat.default()
+            format.opaque = true
+            return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: size))
+            }
+        }
+    }
+    #endif
 }
 #endif

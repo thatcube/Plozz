@@ -12,11 +12,17 @@ settings:
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "3" # Apple TV
     SWIFT_STRICT_CONCURRENCY: complete
-    # Build number (CFBundleVersion). The fastlane `build` lane overrides this
-    # project-wide with (latest TestFlight build + 1) at archive time, which
-    # keeps the app and the Top Shelf extension in lockstep; this default keeps
-    # plain xcodebuild / local device installs working.
+    # Build number (CFBundleVersion) fallback. tools/generate-project.sh bakes the
+    # real value into the generated project on every regenerate — from the git
+    # commit count (local/device/simulator builds) or PLOZZ_BUILD_NUMBER (the
+    # fastlane `build` lane passes latest TestFlight build + 1). This literal only
+    # survives if the project is generated with a bare `xcodegen generate`.
     CURRENT_PROJECT_VERSION: 1
+    # Marketing version (CFBundleShortVersionString). Defined once here so the app
+    # and the Top Shelf extension share the same value (the extension's
+    # CFBundleShortVersionString must match the parent app's). Bump by hand for a
+    # real release.
+    MARKETING_VERSION: "0.1"
 
 # Local Swift package providing all modular feature/code libraries.
 packages:
@@ -35,9 +41,9 @@ targets:
     info:
       path: App/Resources/Info.plist
       properties:
-        # Marketing version (CFBundleShortVersionString) stays manual; bump by
-        # hand for a release.
-        CFBundleShortVersionString: "0.1"
+        # Marketing version (CFBundleShortVersionString) comes from the shared
+        # MARKETING_VERSION build setting so the app and Top Shelf extension match.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Background audio keeps music playing while the user browses other
         # screens or the tvOS screensaver starts. Required for the music MVP's

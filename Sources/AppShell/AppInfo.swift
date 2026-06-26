@@ -8,8 +8,11 @@ public enum AppInfo {
         return short ?? "1.0"
     }
 
-    /// Build number from the app bundle (CFBundleVersion). Stamped from the git
-    /// commit count at build time, so it auto-increments on every commit.
+    /// Build number from the app bundle (CFBundleVersion). Baked into the
+    /// generated project at project-generation time (see tools/generate-project.sh)
+    /// from the git commit count, so it auto-increments on every commit; the
+    /// fastlane `build` lane overrides it with (latest TestFlight build + 1) for
+    /// App Store / TestFlight uploads.
     public static var build: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         return build ?? "1"

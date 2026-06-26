@@ -22,27 +22,6 @@ final class JellyfinHybridProfileTests: XCTestCase {
 
     // MARK: Off (default) — byte-for-byte today
 
-    func testHybridOnDoesNotAdvertisePlainHEVCMatroskaWithMainstreamAudio() throws {
-        // FIX A: the hevc/h264 MKV DirectPlayProfile must be gated to hybrid-only
-        // audio (DTS/TrueHD/Opus/Vorbis). Plain AAC/AC-3/E-AC-3 HEVC MKV must NOT
-        // be advertised, so the server remuxes it to HLS for AVPlayer (the lag fix).
-        let json = try encoded(.appleTV(capabilities: MediaCapabilities(supportsHEVC: true),
-                                         hybridEngineEnabled: true))
-        let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
-        let hevcMKV = try XCTUnwrap(direct.first {
-            ($0["Type"] as? String) == "Video"
-                && (($0["Container"] as? String) ?? "").contains("mkv")
-                && (($0["VideoCodec"] as? String) ?? "").contains("hevc")
-        })
-        let audio = try XCTUnwrap(hevcMKV["AudioCodec"] as? String)
-        XCTAssertFalse(audio.contains("aac"),
-                       "Plain HEVC+AAC MKV must not be advertised (must transcode)")
-        XCTAssertFalse(audio.contains("ac3"),
-                       "Plain HEVC+AC3 MKV must not be advertised (must transcode)")
-        XCTAssertTrue(audio.contains("dts") && audio.contains("truehd"),
-                      "HEVC MKV must still direct-play with lossless/hybrid-only audio")
-    }
-
     func testHybridOffDoesNotAdvertiseMatroska() throws {
         let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: false))
         let containers = try videoContainers(json)
@@ -139,9 +118,7 @@ final class JellyfinHybridProfileTests: XCTestCase {
 
         let direct = try XCTUnwrap(json["DirectPlayProfiles"] as? [[String: Any]])
         let mkv = try XCTUnwrap(direct.first {
-            ($0["Type"] as? String) == "Video"
-                && (($0["Container"] as? String) ?? "").contains("mkv")
-                && (($0["VideoCodec"] as? String) ?? "").contains("hevc")
+            ($0["Type"] as? String) == "Video" && (($0["Container"] as? String) ?? "").contains("mkv")
         })
         XCTAssertTrue(try XCTUnwrap(mkv["VideoCodec"] as? String).contains("hevc"))
 

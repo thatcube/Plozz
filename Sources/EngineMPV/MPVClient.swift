@@ -214,25 +214,10 @@ final class MPVClient: @unchecked Sendable {
     private static func parse(_ event: mpv_event) -> MPVEvent? {
         switch event.event_id {
         case MPV_EVENT_PROPERTY_CHANGE:
-            guard let prop = UnsafePointer<mpv_event_property>(OpaquePointer(event.data))?.pointee else {
-                return nil
+            if let prop = UnsafePointer<mpv_event_property>(OpaquePointer(event.data))?.pointee {
+                return .propertyChanged(String(cString: prop.name))
             }
-            let name = String(cString: prop.name)
-            // Project the observed value out of the mpv-owned `data` pointer now,
-            // while the lock is held, so the main actor can consume it without a
-            // fresh `mpv_get_property` (which would re-acquire the core lock and
-            // can stall behind a busy render thread). `.none` when mpv didn't
-            // attach data for this change — the consumer then falls back to a get.
-            let value: MPVPropertyValue
-            switch prop.format {
-            case MPV_FORMAT_DOUBLE:
-                value = prop.data.map { .double($0.load(as: Double.self)) } ?? .none
-            case MPV_FORMAT_FLAG:
-                value = prop.data.map { .flag($0.load(as: Int32.self) != 0) } ?? .none
-            default:
-                value = .none
-            }
-            return .propertyChanged(name: name, value: value)
+            return nil
         case MPV_EVENT_FILE_LOADED:
             return .fileLoaded
         case MPV_EVENT_END_FILE:
@@ -256,27 +241,9 @@ final class MPVClient: @unchecked Sendable {
 
 /// A minimal, `Sendable` projection of the mpv events the engine cares about.
 enum MPVEvent: Sendable {
-    case propertyChanged(name: String, value: MPVPropertyValue)
+    case propertyChanged(String)
     case fileLoaded
     case endFile(isError: Bool, isEOF: Bool)
     case shutdown
-}
-
-/// The value carried by an observed `property-change` event, projected off the
-/// mpv-owned pointer at parse time so the main actor never has to re-`get` it.
-enum MPVPropertyValue: Sendable {
-    case double(Double)
-    case flag(Bool)
-    case none
-
-    var doubleValue: Double? {
-        if case let .double(value) = self { return value }
-        return nil
-    }
-
-    var flagValue: Bool? {
-        if case let .flag(value) = self { return value }
-        return nil
-    }
 }
 #endif

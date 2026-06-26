@@ -3,11 +3,9 @@ import CoreModels
 @testable import ProviderPlex
 
 /// Verifies the Plex capability-expansion policy: the `hybridEngineEnabled` flag
-/// advertises raw hybrid containers (Matroska + transport-stream) as direct-play
-/// **only** for formats that genuinely need on-device decode (Dolby Vision,
-/// hybrid-only video codecs, DTS/DTS-HD/TrueHD/Opus/Vorbis audio, interlaced).
-/// Plain SDR/HDR10/HLG H.264/HEVC with mainstream audio transcodes (server remux
-/// → AVPlayer), keeping advertise ⇔ route in lockstep with `EngineRouter`.
+/// flips exactly the extra direct-play formats the on-device hybrid engine can
+/// handle (Matroska + transport-stream containers; DTS/DTS-HD/TrueHD/Opus/Vorbis
+/// audio), while keeping range decisions display-aware.
 final class PlexHybridDirectPlayTests: XCTestCase {
 
     private func makeClient(_ caps: MediaCapabilities, hybrid: Bool) -> PlexClient {
@@ -49,16 +47,12 @@ final class PlexHybridDirectPlayTests: XCTestCase {
         XCTAssertFalse(try canDirectPlay(sdrMKV, caps: caps, hybrid: false))
     }
 
-    func testPlainSDRMatroskaTranscodesEvenWhenHybridOn() throws {
-        // FIX A: plain SDR HEVC + mainstream audio in an MKV is no longer
-        // direct-played to mpv — the server remuxes it to HLS for AVPlayer.
+    func testSDRMatroskaDirectPlaysWhenHybridOn() throws {
         let caps = MediaCapabilities(supportsHEVC: true)
-        XCTAssertFalse(try canDirectPlay(sdrMKV, caps: caps, hybrid: true),
-                       "Plain SDR MKV must transcode (server remux), not direct-play to mpv")
+        XCTAssertTrue(try canDirectPlay(sdrMKV, caps: caps, hybrid: true))
     }
 
-    func testPlainMPEGTSTranscodesWhenHybridOn() throws {
-        // Plain H.264 + AC-3 transport stream → server remuxes to seekable HLS.
+    func testMPEGTSDirectPlaysWhenHybridOn() throws {
         let json = """
         {"id":1,"container":"mpegts","videoCodec":"h264","audioCodec":"ac3",
          "Part":[{"id":2,"key":"/library/parts/2/16000/file.ts","container":"mpegts","Stream":[
@@ -67,46 +61,7 @@ final class PlexHybridDirectPlayTests: XCTestCase {
          ]}]}
         """
         XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false))
-        XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: true))
-    }
-
-    // MARK: Hybrid-only video codecs in a hybrid container → direct-play to mpv
-
-    func testAV1MatroskaDirectPlaysWhenHybridOn() throws {
-        let json = """
-        {"id":1,"container":"mkv","videoCodec":"av1","audioCodec":"aac",
-         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
-           {"id":10,"streamType":1,"index":0,"codec":"av1"},
-           {"id":11,"streamType":2,"index":1,"codec":"aac"}
-         ]}]}
-        """
-        XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false))
-        XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true),
-                      "AV1-in-MKV must direct-play to the on-device engine")
-    }
-
-    func testVP9WebMDirectPlaysWhenHybridOn() throws {
-        let json = """
-        {"id":1,"container":"webm","videoCodec":"vp9","audioCodec":"aac",
-         "Part":[{"id":2,"key":"/library/parts/2/16000/file.webm","container":"webm","Stream":[
-           {"id":10,"streamType":1,"index":0,"codec":"vp9"},
-           {"id":11,"streamType":2,"index":1,"codec":"aac"}
-         ]}]}
-        """
         XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true))
-    }
-
-    func testDTSMatroskaDirectPlaysWhenHybridOn() throws {
-        // DTS audio forces on-device decode regardless of the (plain) video.
-        let json = """
-        {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"dts",
-         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
-           {"id":10,"streamType":1,"index":0,"codec":"hevc"},
-           {"id":11,"streamType":2,"index":1,"codec":"dts"}
-         ]}]}
-        """
-        let caps = MediaCapabilities(supportsHEVC: true)
-        XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: true))
     }
 
     // MARK: DoVi-in-MKV is decoded on-device when the device supports Dolby Vision
@@ -141,9 +96,9 @@ final class PlexHybridDirectPlayTests: XCTestCase {
         XCTAssertFalse(try canDirectPlay(json, caps: caps, hybrid: true))
     }
 
-    func testHDR10MatroskaWithDTSDirectPlaysWhenHybridOn() throws {
-        // The DTS audio (not the HDR10 range) is what forces on-device decode here;
-        // mpv tone-maps HDR as needed.
+    func testHDR10MatroskaDirectPlaysOnHDRDisplayWithHybridOn() throws {
+        // Plain HDR10 (not DoVi) in an MKV is decoded on-device and presented on an
+        // HDR10-capable display — no needless server transcode (matches Infuse).
         let json = """
         {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"dts",
          "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
@@ -155,20 +110,18 @@ final class PlexHybridDirectPlayTests: XCTestCase {
         XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: true))
     }
 
-    func testPlainHDR10MatroskaTranscodesWhenHybridOn() throws {
-        // FIX A: plain HDR10 HEVC + mainstream audio in an MKV transcodes (server
-        // remux/tonemap) rather than direct-playing to mpv — on any display.
+    func testHDR10MatroskaTranscodesOnSDRDisplay() throws {
+        // On a display that can't present HDR10, the HDR10 MKV transcodes (the
+        // server tonemaps) rather than direct-playing into an SDR panel.
         let json = """
-        {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"eac3",
+        {"id":1,"container":"mkv","videoCodec":"hevc","audioCodec":"dts",
          "Part":[{"id":2,"key":"/library/parts/2/16000/file.mkv","container":"mkv","Stream":[
            {"id":10,"streamType":1,"index":0,"codec":"hevc","colorTrc":"smpte2084"},
-           {"id":11,"streamType":2,"index":1,"codec":"eac3"}
+           {"id":11,"streamType":2,"index":1,"codec":"dts"}
          ]}]}
         """
-        let hdrCaps = MediaCapabilities(supportsHEVC: true, supportsHDR10: true)
-        let sdrCaps = MediaCapabilities(supportsHEVC: true, supportsHDR10: false, supportsHLG: false)
-        XCTAssertFalse(try canDirectPlay(json, caps: hdrCaps, hybrid: true))
-        XCTAssertFalse(try canDirectPlay(json, caps: sdrCaps, hybrid: true))
+        let caps = MediaCapabilities(supportsHEVC: true, supportsHDR10: false, supportsHLG: false)
+        XCTAssertFalse(try canDirectPlay(json, caps: caps, hybrid: true))
     }
 
     // MARK: DTS / TrueHD audio in an Apple container gated on the flag
@@ -290,7 +243,7 @@ final class PlexHybridDirectPlayTests: XCTestCase {
         XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true))
     }
 
-    // MARK: M2TS / TS transport-stream containers — plain content transcodes
+    // MARK: M2TS / TS transport-stream containers — hybrid only
 
     private let sdrM2TS = """
     {"id":1,"container":"m2ts","videoCodec":"h264","audioCodec":"ac3",
@@ -301,30 +254,28 @@ final class PlexHybridDirectPlayTests: XCTestCase {
     """
 
     func testM2TSTranscodesWhenHybridOff() throws {
+        // AVPlayer's file-based TS demux has broken seeking; must transcode.
         XCTAssertFalse(try canDirectPlay(sdrM2TS, caps: .default, hybrid: false))
     }
 
-    func testPlainM2TSTranscodesWhenHybridOn() throws {
-        // FIX A: a plain H.264 + AC-3 transport stream is remuxed to seekable HLS
-        // by the server (no broken AVPlayer file seeking) rather than sent to mpv.
-        XCTAssertFalse(try canDirectPlay(sdrM2TS, caps: .default, hybrid: true))
+    func testM2TSDirectPlaysWhenHybridOn() throws {
+        // mpv handles M2TS with correct seeking.
+        XCTAssertTrue(try canDirectPlay(sdrM2TS, caps: .default, hybrid: true))
     }
 
-    func testDTSM2TSDirectPlaysWhenHybridOn() throws {
-        // DTS audio the server may not remux losslessly → on-device decode.
+    func testMTSDirectPlaysWhenHybridOn() throws {
         let json = """
-        {"id":1,"container":"m2ts","videoCodec":"h264","audioCodec":"dts",
-         "Part":[{"id":2,"key":"/library/parts/2/16000/file.m2ts","container":"m2ts","Stream":[
+        {"id":1,"container":"mts","videoCodec":"h264","audioCodec":"aac",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.mts","container":"mts","Stream":[
            {"id":10,"streamType":1,"index":0,"codec":"h264"},
-           {"id":11,"streamType":2,"index":1,"codec":"dts"}
+           {"id":11,"streamType":2,"index":1,"codec":"aac"}
          ]}]}
         """
         XCTAssertFalse(try canDirectPlay(json, caps: .default, hybrid: false))
         XCTAssertTrue(try canDirectPlay(json, caps: .default, hybrid: true))
     }
 
-    func testPlainHEVCM2TSWithHDR10TranscodesWhenHybridOn() throws {
-        // Plain HDR10 HEVC + E-AC-3 transport stream → server remux, not mpv.
+    func testHEVCM2TSWithHDR10DirectPlaysOnHDRDisplayWithHybridOn() throws {
         let json = """
         {"id":1,"container":"m2ts","videoCodec":"hevc","audioCodec":"eac3",
          "Part":[{"id":2,"key":"/library/parts/2/16000/file.m2ts","container":"m2ts","Stream":[
@@ -333,6 +284,18 @@ final class PlexHybridDirectPlayTests: XCTestCase {
          ]}]}
         """
         let caps = MediaCapabilities(supportsHEVC: true, supportsHDR10: true)
+        XCTAssertTrue(try canDirectPlay(json, caps: caps, hybrid: true))
+    }
+
+    func testHEVCM2TSWithHDR10TranscodesOnSDRDisplay() throws {
+        let json = """
+        {"id":1,"container":"m2ts","videoCodec":"hevc","audioCodec":"eac3",
+         "Part":[{"id":2,"key":"/library/parts/2/16000/file.m2ts","container":"m2ts","Stream":[
+           {"id":10,"streamType":1,"index":0,"codec":"hevc","colorTrc":"smpte2084"},
+           {"id":11,"streamType":2,"index":1,"codec":"eac3"}
+         ]}]}
+        """
+        let caps = MediaCapabilities(supportsHEVC: true, supportsHDR10: false, supportsHLG: false)
         XCTAssertFalse(try canDirectPlay(json, caps: caps, hybrid: true))
     }
 }

@@ -46,17 +46,13 @@ extension JellyfinCapabilityProfile {
     /// mirroring Swiftfin's `.native` profile, from the shared
     /// ``CoreModels/MediaCapabilities`` source of truth.
     ///
-    /// - Parameter hybridEngineEnabled: when `true`, the dual-engine (mpv) build is
-    ///   active, so the profile additionally advertises the **extra** direct-play
-    ///   formats the on-device hybrid engine must handle — but only those the
-    ///   ``CoreModels/EngineRouter`` routes to it. In hybrid-only containers
-    ///   (Matroska/WebM/TS-family) that means hybrid-only video codecs (AV1/VP8/
-    ///   VP9/VC-1/MPEG-1/2 with any audio) and H.264/HEVC paired with
-    ///   AVPlayer-incompatible audio (DTS/DTS-HD/TrueHD/Opus/Vorbis); in Apple
-    ///   containers it adds that same audio plus AV1. Plain SDR/HDR10/HLG H.264/
-    ///   HEVC with mainstream audio is **not** advertised as direct-play in a
-    ///   hybrid container — the server remuxes it to HLS for AVPlayer (battery +
-    ///   frame-rate matching). Defaults to `false`, which emits **byte-for-byte**
+    /// - Parameter hybridEngineEnabled: when `true`, the dual-engine (VLCKit)
+    ///   build is active, so the profile additionally advertises the **extra**
+    ///   direct-play formats the on-device hybrid engine can handle — the MKV /
+    ///   WebM container (every display-supported range, including Dolby Vision,
+    ///   decoded on-device), AV1, and DTS / DTS-HD / TrueHD
+    ///   audio (decoded on-device, no
+    ///   passthrough required). Defaults to `false`, which emits **byte-for-byte**
     ///   the current native-only profile (non-regression). This must stay in
     ///   lockstep with `EngineRouter`: every extra format advertised here is one
     ///   the router sends to the hybrid engine.
@@ -165,24 +161,14 @@ extension JellyfinCapabilityProfile {
             )
         }
 
-        // Hybrid engine: advertise raw hybrid-only containers (Matroska/WebM +
-        // transport-stream variants) as direct-play ONLY for the formats the
-        // on-device mpv engine must handle — never plain SDR/HDR10/HLG H.264/HEVC
-        // with mainstream audio, which the server remuxes to HLS for AVPlayer. This
-        // is split into two profiles to stay in lockstep with `EngineRouter`:
-        //   1. Hybrid-only VIDEO codecs (AV1/VP8/VP9/VC-1/MPEG-1/2) — AVPlayer can't
-        //      decode these at all, so any audio is fine; decoded on-device.
-        //   2. H.264 / HEVC — direct-played ONLY with audio AVPlayer can't handle
-        //      (DTS/DTS-HD/TrueHD/Opus/Vorbis). Plain H.264/HEVC with mainstream
-        //      audio is deliberately omitted so it transcodes (the lag fix). DoVi
-        //      with lossless audio still lands here (→ on-device); DoVi with purely
-        //      lossy mainstream audio transcodes (a server DoVi transcode is the
-        //      declarative-profile limit — Plex handles that case on-device).
+        // Hybrid engine: advertise the extra containers the on-device mpv engine
+        // demuxes directly (Matroska/WebM + transport-stream variants). HEVC and
+        // AV1 are listed unconditionally here (not gated on hardware decode)
+        // because the on-device engine software-decodes them regardless of
+        // VideoToolbox AV1 support, exactly as the router expects.
         if hybrid {
-            let hybridContainers = "mkv,webm,ts,m2ts,mts,m2t,mpegts,bdav,bdmv"
-
-            let hybridOnlyVideo = ["av1", "vp8", "vp9", "vc1", "mpeg2video", "mpeg1video"]
-            let anyAudio = [
+            let mkvVideo = ["h264", "hevc", "mpeg4", "vc1", "mpeg2video", "vp8", "vp9", "av1"]
+            let mkvAudio = [
                 "aac", "ac3", "eac3", "dts", "dca", "truehd", "mlp",
                 "flac", "alac", "mp3", "opus", "vorbis",
                 "pcm_s16le", "pcm_s24le"
@@ -190,19 +176,9 @@ extension JellyfinCapabilityProfile {
             profiles.append(
                 DirectPlayProfile(
                     type: "Video",
-                    container: hybridContainers,
-                    videoCodec: hybridOnlyVideo.joined(separator: ","),
-                    audioCodec: anyAudio.joined(separator: ",")
-                )
-            )
-
-            let hybridOnlyAudio = ["dts", "dca", "truehd", "mlp", "opus", "vorbis"]
-            profiles.append(
-                DirectPlayProfile(
-                    type: "Video",
-                    container: hybridContainers,
-                    videoCodec: "h264,hevc",
-                    audioCodec: hybridOnlyAudio.joined(separator: ",")
+                    container: "mkv,webm,ts,m2ts,mts,m2t,mpegts,bdav,bdmv",
+                    videoCodec: mkvVideo.joined(separator: ","),
+                    audioCodec: mkvAudio.joined(separator: ",")
                 )
             )
         }

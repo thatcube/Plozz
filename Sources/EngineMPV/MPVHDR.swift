@@ -140,38 +140,6 @@ enum MPVHDR {
         return status == noErr ? desc : nil
     }
 
-    /// A BT.709 **SDR** `CMVideoFormatDescription`, used to build the
-    /// `AVDisplayCriteria` for a *refresh-rate-only* display match on SDR content.
-    ///
-    /// AVPlayer frame-rate-matches the panel for SDR automatically; the mpv path
-    /// must drive `AVDisplayManager` itself, and the criteria needs a format
-    /// description to carry the (SDR) dynamic range alongside the requested
-    /// refresh rate. The colour extensions advertise plain BT.709 so tvOS picks
-    /// an **SDR** mode at the matched rate — it never pushes the panel into HDR
-    /// (that stays gated to the `mode.isHDR` path above). The codec FourCC tracks
-    /// the source so tvOS negotiates a sensible mode; it carries no HDR/DoVi
-    /// signalling. Returns `nil` if the description can't be created.
-    static func sdrFormatDescription(video: MediaSourceMetadata.VideoStream?) -> CMVideoFormatDescription? {
-        let extensions: [CFString: Any] = [
-            kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
-            kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2,
-            kCVImageBufferYCbCrMatrixKey: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
-        ]
-
-        let width = Int32(video?.width ?? 1920)
-        let height = Int32(video?.height ?? 1080)
-
-        var desc: CMVideoFormatDescription?
-        let status = CMVideoFormatDescriptionCreate(
-            allocator: kCFAllocatorDefault,
-            codecType: codecType(for: .sdr, codec: video?.codec),
-            width: width,
-            height: height,
-            extensions: extensions as CFDictionary,
-            formatDescriptionOut: &desc)
-        return status == noErr ? desc : nil
-    }
-
     /// HDR10 (`'hvc1'` + PQ) safe-fallback format description, used by the
     /// engine when the `'dvh1'` Dolby Vision criteria can't be constructed or
     /// accepted by tvOS — better to negotiate HDR10 than to drop to SDR.

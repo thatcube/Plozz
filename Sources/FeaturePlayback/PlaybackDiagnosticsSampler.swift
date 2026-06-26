@@ -25,16 +25,6 @@ public final class PlaybackDiagnosticsSampler {
     public private(set) var latest: PlaybackDiagnostics?
 
     private weak var player: AVPlayer?
-    /// Pulls a fresh engine-health snapshot for non-AVFoundation engines (mpv).
-    /// `nil` for engines that don't report stats (the native engine surfaces drops
-    /// through `AVPlayerItem.accessLog()` instead).
-    private var engineStatsProvider: (@MainActor () -> PlaybackEngineStats?)?
-    /// Last measured main-thread scheduling slip (ms), applied to each snapshot so
-    /// the overlay can flag a blocked main actor.
-    private var lastHitchMillis: Double?
-    /// Sliding-window estimator for the engine's late-frame rate, surfaced in the
-    /// overlay so the render-health threshold can be tuned on-device.
-    private var lateFrameRate = LateFrameRateTracker()
     /// Immutable per-stream facts (codec/HDR/fps/mode/container/device) merged
     /// into every dynamic sample.
     private var staticDiagnostics = PlaybackDiagnostics()
@@ -53,56 +43,31 @@ public final class PlaybackDiagnosticsSampler {
     ///     so this is what makes the overlay match a direct-play client.
     ///   - engineName: the engine decoding the stream (e.g. `AVPlayer`, `VLCKit`),
     ///     shown in the overlay so the user can see which engine is active.
-    ///   - engineStats: an optional pull for the active engine's live runtime
-    ///     health (decode path, frame drops, rendered fps). Supplied for engines
-    ///     that conform to `PlaybackStatsProviding` (mpv); `nil` for AVPlayer-based
-    ///     playback, which reports drops through its own access log.
     ///
     /// `player` is optional: a non-AVFoundation engine (VLCKit/mpv) has no
-    /// `AVPlayer`, so the live per-tick AVFoundation metrics (observed bitrate,
-    /// dropped frames, presentation size) are skipped — but if `engineStats` is
-    /// supplied, the engine's own decode/drop/fps health is sampled on the same
-    /// cadence so the overlay still shows whether the device is keeping up. The
-    /// authoritative baseline from `metadata` — container, codecs, HDR, mode, and
-    /// the engine name — is always published so the overlay works on every engine.
-    public func start(
-        player: AVPlayer?,
-        mode: PlaybackDiagnostics.PlaybackMode,
-        metadata: MediaSourceMetadata? = nil,
-        engineName: String? = nil,
-        engineStats: (@MainActor () -> PlaybackEngineStats?)? = nil
-    ) {
+    /// `AVPlayer`, so the live per-tick metrics (observed bitrate, dropped frames,
+    /// presentation size) are skipped, but the authoritative baseline from
+    /// `metadata` — container, codecs, HDR, mode, and the engine name — is still
+    /// published so the overlay works on every engine.
+    public func start(player: AVPlayer?, mode: PlaybackDiagnostics.PlaybackMode, metadata: MediaSourceMetadata? = nil, engineName: String? = nil) {
         stop()
         self.player = player
-        self.engineStatsProvider = engineStats
-        self.lastHitchMillis = nil
-        self.lateFrameRate.reset()
         var base = PlaybackDiagnostics.base(from: metadata, mode: mode)
         base.engineName = engineName
         Self.fillDeviceInfo(into: &base)
         staticDiagnostics = base
         latest = staticDiagnostics
 
-        // Run the live timer when there's anything to sample each tick: an
-        // AVPlayer (AVFoundation metrics), an engine-stats pull (mpv health), or
-        // both. With neither, the metadata-only baseline above is the whole
-        // snapshot and no timer is needed.
-        guard player != nil || engineStats != nil else { return }
+        // No AVPlayer (VLCKit/mpv): the baseline above is the whole snapshot —
+        // there's no AVFoundation item to sample, so skip the live timer.
+        guard player != nil else { return }
 
-        if player != nil {
-            Task { await loadStaticInfo() }
-        }
+        Task { await loadStaticInfo() }
 
         timerTask = Task { [weak self] in
-            // Measure how late each tick lands vs its 1s schedule — a blocked main
-            // actor delays the post-sleep resume, which is our coarse hang hint.
             while !Task.isCancelled {
-                self?.tick()
-                let scheduledAt = Date()
+                self?.sampleDynamic()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                if Task.isCancelled { break }
-                let slip = Date().timeIntervalSince(scheduledAt) - 1.0
-                self?.lastHitchMillis = max(0, slip * 1000)
             }
         }
     }
@@ -111,33 +76,14 @@ public final class PlaybackDiagnosticsSampler {
         timerTask?.cancel()
         timerTask = nil
         player = nil
-        engineStatsProvider = nil
-        lastHitchMillis = nil
     }
 
-    // MARK: Per-tick sampling
+    // MARK: Dynamic (per-tick) sampling
 
-    /// One sampling pass: AVFoundation metrics (when there's an `AVPlayer`),
-    /// engine-reported health (when an engine-stats pull is wired), and the
-    /// main-thread hitch hint — merged onto the static baseline.
-    private func tick() {
+    private func sampleDynamic() {
+        guard let item = player?.currentItem else { return }
         var diagnostics = staticDiagnostics
 
-        if let item = player?.currentItem {
-            mergeAVPlayerMetrics(into: &diagnostics, item: item)
-        }
-        if let stats = engineStatsProvider?() {
-            diagnostics.apply(engineStats: stats)
-            if let late = stats.lateFrames {
-                lateFrameRate.record(cumulativeLateFrames: late, at: ProcessInfo.processInfo.systemUptime)
-                diagnostics.engineLateFramesPerSecond = lateFrameRate.ratePerSecond
-            }
-        }
-        diagnostics.mainThreadHitchMillis = lastHitchMillis
-        latest = diagnostics
-    }
-
-    private func mergeAVPlayerMetrics(into diagnostics: inout PlaybackDiagnostics, item: AVPlayerItem) {
         // Source metadata resolution wins; only fall back to the rendered
         // presentation size when the provider didn't report dimensions.
         if diagnostics.resolution == nil {
@@ -156,6 +102,7 @@ public final class PlaybackDiagnosticsSampler {
         }
 
         diagnostics.bufferedSecondsAhead = bufferedSecondsAhead(in: item)
+        latest = diagnostics
     }
 
     /// Seconds of contiguous media buffered ahead of the current position.

@@ -134,27 +134,6 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var droppedVideoFrames: Int?
     /// Nominal frame rate of the video track, in frames/sec.
     public var frameRate: Double?
-    /// Where the engine is decoding video (hardware / software / unknown). The
-    /// key "is the CPU struggling?" signal: a fallback to software decode is the
-    /// usual cause of stutter on otherwise-trivial streams.
-    public var decodePath: PlaybackEngineStats.DecodePath = .unknown
-    /// Raw engine decoder name (e.g. libmpv's `hwdec-current`), shown verbatim.
-    public var hwdecName: String?
-    /// Frames the decoder dropped because it couldn't keep up (decode bottleneck).
-    public var engineDecoderDropFrames: Int?
-    /// Frames dropped/mistimed at the output stage (render/display-timing).
-    public var engineLateFrames: Int?
-    /// Live late-frame **rate** (frames/sec) over the sampler's trailing window —
-    /// the render-health watchdog's actual trip signal, surfaced so the threshold
-    /// can be tuned empirically on-device. `nil` until enough samples land or for
-    /// engines that don't report late frames.
-    public var engineLateFramesPerSecond: Double?
-    /// Frame rate actually rendered right now (engine-reported), vs the target
-    /// `frameRate`; a rendered rate well below target means dropped frames.
-    public var renderedFrameRate: Double?
-    /// Coarse main-thread responsiveness hint: how many ms the sampler's 1s tick
-    /// slipped past schedule (a blocked main actor delays it). `nil` until measured.
-    public var mainThreadHitchMillis: Double?
     /// Friendly device model, e.g. `Apple TV 4K (3rd gen)`.
     public var deviceModel: String?
     /// Physical memory, in bytes.

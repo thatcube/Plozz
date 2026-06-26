@@ -80,11 +80,6 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
     // MARK: Configuration
 
-    /// Data-driven decode/render/cache tuning. Defaults mirror the previous
-    /// hardcoded behaviour plus smoother direct-play caching; a field flip (or a
-    /// future settings toggle) re-tunes playback without touching `load()`.
-    private let tuning: MPVPlaybackTuning
-
     /// Extra `mpv_set_option_string` pairs applied before `mpv_initialize`
     /// (e.g. cache tuning). Empty by default; a later phase can tune these.
     private let extraOptions: [String: String]
@@ -136,8 +131,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     /// Background queue that drains the mpv event loop (kept off the main actor).
     private let eventQueue = DispatchQueue(label: "com.thatcube.Plozz.mpv.events", qos: .userInitiated)
 
-    public init(tuning: MPVPlaybackTuning = .default, extraOptions: [String: String] = [:]) {
-        self.tuning = tuning
+    public init(extraOptions: [String: String] = [:]) {
         self.extraOptions = extraOptions
         super.init()
     }
@@ -205,30 +199,12 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         let layerPointer = Int64(Int(bitPattern: Unmanaged.passUnretained(metalLayer).toOpaque()))
         client.setWindowID(layerPointer)
 
-        // Render + decode configuration (mirrors MPVKit's reference tvOS player),
-        // driven by `tuning` so the decode path / renderer are a value flip. SDR
-        // uses the lighter `gpu` vo; HDR/Dolby Vision keeps libplacebo `gpu-next`
-        // (the only renderer that can reshape the DV RPU), so HDR is unchanged.
-        client.setOptionString("vo", tuning.videoOutput(isHDR: hdrMode.isHDR))
+        // Render + decode configuration (mirrors MPVKit's reference tvOS player).
+        client.setOptionString("vo", "gpu-next")
         client.setOptionString("gpu-api", "vulkan")
         client.setOptionString("gpu-context", "moltenvk")
-        client.setOptionString("hwdec", tuning.hwdec)
+        client.setOptionString("hwdec", "videotoolbox")
         client.setOptionString("video-rotate", "no")
-
-        // Apply mpv video-sync / interpolation tuning (data-driven; defaults to
-        // mpv's behaviour so SDR frame-rate matching below is what fixes cadence,
-        // and these stay available to A/B on-device via `MPVPlaybackTuning`).
-        if let videoSync = tuning.videoSync {
-            client.setOptionString("video-sync", videoSync)
-        }
-        if tuning.interpolation {
-            client.setOptionString("interpolation", "yes")
-        }
-
-        // Cache / demuxer tuning for smoother network direct play.
-        for (key, value) in tuning.cacheOptionPairs() {
-            client.setOptionString(key, value)
-        }
 
         // Pick surface colorimetry from source metadata.
         metalLayer.configure(for: hdrMode)
@@ -237,8 +213,9 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             client.setOptionString("target-trc", trc)
             client.setOptionString("target-prim", "bt.2020")
         }
-        // Prepare (but don't yet apply) the tvOS display-mode switch; it needs a
-        // live UIWindow and is applied after init / once the view is in a window.
+        // Prepare (but don't yet apply) the tvOS display-mode switch for HDR; it
+        // needs a live UIWindow and is gated to HDR content so SDR never yanks the
+        // TV into HDR. Applied after init / once the view is in a window.
         //
         // For Dolby Vision we build the criteria with the 'dvh1' codec FourCC so
         // tvOS negotiates a true DoVi HDMI signal (and the TV lights its "Dolby
@@ -247,11 +224,6 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         // codec tag changes. If the 'dvh1' description can't be built for any
         // reason, fall back to the HDR10 ('hvc1'+PQ) switch rather than failing,
         // so we never drop to SDR for a DoVi source.
-        //
-        // For SDR we still build a criteria — but a *refresh-rate-only* one with
-        // BT.709 colorimetry — so the panel frame-rate-matches the source (like
-        // AVPlayer does) without ever switching into HDR. It degrades to no switch
-        // when the source frame rate is unknown.
         let frameRate = Float(request.sourceMetadata?.video?.frameRate ?? 0)
         if let desc = MPVHDR.formatDescription(for: hdrMode, video: request.sourceMetadata?.video) {
             pendingDisplayCriteria = AVDisplayCriteria(refreshRate: frameRate, formatDescription: desc)
@@ -260,20 +232,6 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
                   let fallback = MPVHDR.hdr10FallbackFormatDescription(video: request.sourceMetadata?.video) {
             log.error("HDR: dvh1 Dolby Vision criteria unavailable; falling back to HDR10 (hvc1+PQ) display switch")
             pendingDisplayCriteria = AVDisplayCriteria(refreshRate: frameRate, formatDescription: fallback)
-            requestedDolbyVisionSwitch = false
-        } else if hdrMode == .sdr,
-                  let sdrRefreshRate = FrameRateMatching.refreshRate(
-                      forSourceFrameRate: request.sourceMetadata?.video?.frameRate),
-                  let sdrDesc = MPVHDR.sdrFormatDescription(video: request.sourceMetadata?.video) {
-            // SDR refresh-rate (frame-rate) match: drive the panel to a mode that
-            // matches the source frame rate (e.g. 23.976fps → a 24Hz-family mode)
-            // so mpv presents one source frame per refresh instead of cadencing
-            // 23.98→60 — the late-frame cause AVPlayer avoids by matching natively.
-            // BT.709 SDR criteria, so this never pushes the panel into HDR. tvOS
-            // ignores it when the user's "Match Frame Rate" setting is off, and the
-            // helper returns nil for unknown/implausible rates, so it's a silent
-            // no-op that degrades gracefully and never makes SDR playback worse.
-            pendingDisplayCriteria = AVDisplayCriteria(refreshRate: sdrRefreshRate, formatDescription: sdrDesc)
             requestedDolbyVisionSwitch = false
         } else {
             pendingDisplayCriteria = nil
@@ -576,8 +534,8 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             duration = client.getDouble(MPVProperty.duration)
             status = .ready
             attachExternalAudioIfNeeded()
-        case .propertyChanged(let name, let value):
-            handleProperty(name, value: value)
+        case .propertyChanged(let name):
+            handleProperty(name)
         case .endFile(let isError, let isEOF):
             if isError {
                 fail(.invalidResponse)
@@ -603,31 +561,25 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         _ = client.command(["audio-add", audioURL.absoluteString, "select"])
     }
 
-    /// Applies an observed property change. The new value rides along in `value`
-    /// (read off the mpv event at parse time), so the hot per-frame `time-pos`
-    /// path no longer calls `mpv_get_property` on the main actor — which would
-    /// re-acquire the mpv core lock and stall behind a busy render thread,
-    /// producing main-thread hitches during heavy playback. Falls back to a
-    /// synchronous get only if mpv didn't attach a value.
-    private func handleProperty(_ name: String, value: MPVPropertyValue) {
+    private func handleProperty(_ name: String) {
         switch name {
         case MPVProperty.timePos:
-            let seconds = value.doubleValue ?? client.getDouble(MPVProperty.timePos)
+            let seconds = client.getDouble(MPVProperty.timePos)
             guard seconds.isFinite else { return }
             currentTime = max(0, seconds)
             furthestObservedPosition = max(furthestObservedPosition, currentTime)
             reportProgressIfNeeded(at: currentTime)
         case MPVProperty.duration:
-            let durationValue = value.doubleValue ?? client.getDouble(MPVProperty.duration)
-            if durationValue.isFinite { duration = max(0, durationValue) }
+            let value = client.getDouble(MPVProperty.duration)
+            if value.isFinite { duration = max(0, value) }
         case MPVProperty.pause:
-            isPaused = value.flagValue ?? client.getFlag(MPVProperty.pause)
+            isPaused = client.getFlag(MPVProperty.pause)
         case MPVProperty.eofReached:
             // `eof-reached` flips true at a clean end-of-stream; treated as a
             // benign stop (the owner reads `currentTime`/`duration`), not a fail.
             // Tracked so the display wake lock is released at end-of-file even
             // while `pause` still reads false.
-            hasReachedEnd = value.flagValue ?? client.getFlag(MPVProperty.eofReached)
+            hasReachedEnd = client.getFlag(MPVProperty.eofReached)
         default:
             break
         }
@@ -651,21 +603,13 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
     /// Schedules a drain of the mpv event queue on the background queue. Safe to
     /// call from any thread — that's why it's `nonisolated`.
-    ///
-    /// All events drained in one pass are marshalled to the main actor in a
-    /// **single** hop (preserving FIFO order), rather than one `DispatchQueue.main`
-    /// dispatch per event. libmpv fires a wakeup per `time-pos` change — i.e. once
-    /// per displayed frame — so coalescing cuts the steady main-thread scheduling
-    /// churn during playback (fewer dispatches/sec for the same work).
     nonisolated fileprivate func scheduleEventDrain() {
         eventQueue.async { [weak self] in
             guard let self else { return }
-            var batch: [MPVEvent] = []
-            self.client.drainEvents { batch.append($0) }
-            guard !batch.isEmpty else { return }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    for event in batch { self.apply(event) }
+            self.client.drainEvents { event in
+                // Hop to the main actor in FIFO order before touching state.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self.apply(event) }
                 }
             }
         }
@@ -679,43 +623,6 @@ private enum MPVProperty {
     static let duration = "duration"
     static let pause = "pause"
     static let eofReached = "eof-reached"
-    /// Active hardware decoder name, or `no`/empty when decoding on the CPU.
-    static let hwdecCurrent = "hwdec-current"
-    /// Frames the decoder dropped because it couldn't keep up (decode bottleneck).
-    static let decoderFrameDropCount = "decoder-frame-drop-count"
-    /// Frames dropped at the output stage (render / display-timing bottleneck).
-    static let frameDropCount = "frame-drop-count"
-    /// Frame rate actually being rendered right now.
-    static let estimatedVFFPS = "estimated-vf-fps"
-    /// The container's declared frame rate (the target to keep up with).
-    static let containerFPS = "container-fps"
-}
-
-// MARK: - Live engine stats (diagnostics overlay)
-
-extension MPVVideoEngine: PlaybackStatsProviding {
-    /// Reads libmpv's own runtime-health properties so the diagnostics overlay can
-    /// answer "is the device keeping up?" for the mpv engine — which has no
-    /// `AVPlayer` for the platform sampler to read. All reads are cheap synchronous
-    /// property gets funnelled through the thread-safe ``MPVClient``; called ~1s.
-    public func sampleEngineStats() -> PlaybackEngineStats? {
-        guard client.isAlive else { return nil }
-        let hwdec = client.getString(MPVProperty.hwdecCurrent)
-        return PlaybackEngineStats(
-            decodePath: PlaybackEngineStats.decodePath(fromHWDecCurrent: hwdec),
-            hwdecName: hwdec,
-            decoderDroppedFrames: client.getInt(MPVProperty.decoderFrameDropCount).map(Int.init),
-            lateFrames: client.getInt(MPVProperty.frameDropCount).map(Int.init),
-            renderedFrameRate: nonNegative(client.getDouble(MPVProperty.estimatedVFFPS)),
-            containerFrameRate: nonNegative(client.getDouble(MPVProperty.containerFPS))
-        )
-    }
-
-    /// `getDouble` returns `0` for an unavailable property; treat that as "no
-    /// reading" so the overlay hides the row rather than showing a bogus `0 fps`.
-    private func nonNegative(_ value: Double) -> Double? {
-        value.isFinite && value > 0 ? value : nil
-    }
 }
 
 // MARK: - C wakeup callback

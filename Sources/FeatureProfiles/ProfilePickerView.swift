@@ -38,6 +38,23 @@ public struct ProfilePickerView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 260, maximum: 320), spacing: 56)]
 
+    /// Which profile tile currently holds focus. Drives the background gradient
+    /// so the wash tracks the profile you're hovering. `nil` before focus settles.
+    @FocusState private var focusedProfileID: String?
+    /// The last profile that held focus, so focusing the non-profile "Add" tile
+    /// (or losing focus briefly) keeps the most recent profile's wash instead of
+    /// snapping the background away.
+    @State private var lastFocusedProfileID: String?
+    /// Per-profile resolved colors (instant base + progressive photo extraction).
+    @State private var palettes = ProfileBackgroundPalettes()
+
+    /// The profile whose colors the background should currently show: the
+    /// focused one, else the last focused, else the active, else the first.
+    private var backgroundProfile: Profile? {
+        let id = focusedProfileID ?? lastFocusedProfileID ?? activeProfileID
+        return profiles.first { $0.id == id } ?? profiles.first
+    }
+
     public var body: some View {
         VStack(spacing: 48) {
             Text(title)
@@ -52,6 +69,7 @@ public struct ProfilePickerView: View {
                     ) {
                         onSelect(profile)
                     }
+                    .focused($focusedProfileID, equals: profile.id)
                 }
                 if let onAddProfile {
                     AddProfileTile(action: onAddProfile)
@@ -68,6 +86,13 @@ public struct ProfilePickerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 80)
+        .background(alignment: .top) {
+            ProfileBackgroundGradient(profile: backgroundProfile)
+        }
+        .environment(palettes)
+        .onChange(of: focusedProfileID) { _, newValue in
+            if let newValue { lastFocusedProfileID = newValue }
+        }
     }
 }
 

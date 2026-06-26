@@ -297,6 +297,10 @@ public final class AppState {
         guard let libraries = try? await provider.libraries() else { return }
 
         await index.beginRebuild(for: accountID)
+        // `true` if any page needed an enrichment fetch that failed, so we leave
+        // the account un-finished (cold) and a later warm retries it — the index
+        // grows toward completeness and never drops a server permanently.
+        var inconclusive = false
         for library in libraries where library.kind == .movie || library.kind == .series {
             if Task.isCancelled { return }
             var offset = 0
@@ -308,12 +312,25 @@ public final class AppState {
                     page: PageRequest(startIndex: offset, limit: chunkSize, sort: .default)
                 ) else { break }
                 if page.items.isEmpty { break }
-                await index.ingest(page.items, accountID: accountID, serverInfo: serverInfo)
+                // Enrich any guid-less movie/series (e.g. a Plex series whose list
+                // response omitted its Guid array) via its fuller per-item record,
+                // so the store is keyed on real strong ids — origin-agnostic and
+                // complete with Plex as a destination, not just a source.
+                let prepared = await IdentityEnrichment.prepare(page.items) { item in
+                    try? await provider.item(id: item.id)
+                }
+                inconclusive = inconclusive || prepared.inconclusive
+                await index.ingest(prepared.indexable, accountID: accountID, serverInfo: serverInfo)
                 offset += page.items.count
                 if offset >= page.totalCount { break }
             }
         }
-        await index.finishRebuild(for: accountID)
+        // Only mark conclusively built when every guid-less item was resolved; an
+        // inconclusive scan stays cold so the next warm retries it (never warm-and-
+        // forget with a missing Plex copy).
+        if !inconclusive {
+            await index.finishRebuild(for: accountID)
+        }
     }
 
     /// Flushes the identity index when the active profile changes so the next warm

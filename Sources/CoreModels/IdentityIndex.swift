@@ -244,6 +244,78 @@ public actor IdentityIndex {
     }
 }
 
+/// Population-time **identity enrichment** so the index is genuinely complete,
+/// not just a re-host of whatever ids a list endpoint happened to return.
+///
+/// Motivating bug: Plex's catalogue list/search responses can omit a title's
+/// external `Guid` array, so a Plex **series** can arrive with *no strong id*.
+/// Series match by strong external id only (never title — reboot/anime safety),
+/// so such a series would key under **no** identity and silently fall out of the
+/// store — making the cross-server set incomplete and breaking convergence with
+/// Plex as the *destination* (the observed Plex→Jellyfin / Jellyfin→Plex
+/// asymmetry).
+///
+/// The fix is to enrich **once, at population time**: for any movie/series that
+/// resolves to no identity, fetch its fuller per-item record (e.g. Plex
+/// `/library/metadata/{ratingKey}`, which *does* carry the `Guid` array) and
+/// re-derive its identity before indexing. Enrichment only *fills in* ids — it
+/// never loosens series matching to title — so it can't introduce a false-merge.
+///
+/// Failure handling (never a silent drop):
+///  - fetch **failed** (network/asleep) ⇒ the item is left out *this* pass and
+///    the account is reported **inconclusive** so a later warm retries it;
+///  - fetch **succeeded but still no strong id** ⇒ conclusive: the title
+///    genuinely has nothing to match on, so it's skipped without forcing endless
+///    re-scans.
+public enum IdentityEnrichment {
+    public struct Result: Sendable, Equatable {
+        /// Items ready to ingest (originals that already had ids + successfully
+        /// enriched ones). Items still without an identity are omitted.
+        public var indexable: [MediaItem]
+        /// `true` when at least one enrichment fetch failed, so the caller should
+        /// retry the account on a later warm rather than mark it conclusively built.
+        public var inconclusive: Bool
+
+        public init(indexable: [MediaItem], inconclusive: Bool) {
+            self.indexable = indexable
+            self.inconclusive = inconclusive
+        }
+    }
+
+    /// Prepares a page of catalogue `items` for indexing, enriching any movie or
+    /// series that resolves to no ``MediaIdentity``.
+    ///
+    /// - Parameters:
+    ///   - items: a freshly fetched catalogue page (any kinds; only movies/series
+    ///     are considered — others are dropped, mirroring the index's own rule).
+    ///   - fetchFull: fetches the fuller per-item record for an item that lacks a
+    ///     strong id. Return `nil` to signal the fetch **failed** (inconclusive);
+    ///     return the enriched item (ideally now carrying external ids) on success.
+    public static func prepare(
+        _ items: [MediaItem],
+        fetchFull: @Sendable (MediaItem) async -> MediaItem?
+    ) async -> Result {
+        var indexable: [MediaItem] = []
+        var inconclusive = false
+        for item in items where item.kind == .movie || item.kind == .series {
+            if !MediaItemIdentity.identities(for: item).isEmpty {
+                indexable.append(item)
+                continue
+            }
+            guard let full = await fetchFull(item) else {
+                inconclusive = true
+                continue
+            }
+            if !MediaItemIdentity.identities(for: full).isEmpty {
+                indexable.append(full)
+            }
+            // Fetched fine but still no strong id ⇒ genuinely unmatchable: skip
+            // conclusively (don't set inconclusive, so we don't re-scan forever).
+        }
+        return Result(indexable: indexable, inconclusive: inconclusive)
+    }
+}
+
 /// A small, thread-safe holder for the latest ``IdentityIndexSnapshot`` so a
 /// `@Sendable` lookup closure can read the current source-of-truth from any actor
 /// or detached task (Home aggregation, search dedupe and the off-main player stop

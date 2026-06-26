@@ -227,6 +227,105 @@ final class IdentityIndexTests: XCTestCase {
         XCTAssertEqual(stale, ["jf"])
     }
 
+    // MARK: Population-time enrichment (Plex guid-less completeness)
+
+    /// Build a Plex series hit as it arrives from a list endpoint that OMITTED the
+    /// Guid array — i.e. no strong id, so it resolves to no identity.
+    private func guidlessPlexSeries(_ id: String, account: String) -> MediaItem {
+        var item = MediaItem(id: id, title: "Strange Show", kind: .series, productionYear: 2016)
+        item.sourceAccountID = account
+        return item
+    }
+
+    func testEnrichmentFillsGuidlessPlexSeries() async {
+        // A guid-less Plex series enriched via its fuller metadata record (which
+        // carries the tvdb guid) is keyed on the real id, so the store contains it.
+        let listHit = guidlessPlexSeries("p100", account: "plex")
+        XCTAssertTrue(MediaItemIdentity.identities(for: listHit).isEmpty, "precondition: no strong id")
+
+        let result = await IdentityEnrichment.prepare([listHit]) { item in
+            var full = item
+            full.providerIDs = ["Tvdb": "555"]   // metadata endpoint supplies the Guid
+            return full
+        }
+        XCTAssertFalse(result.inconclusive)
+        XCTAssertEqual(result.indexable.count, 1)
+        XCTAssertEqual(
+            MediaItemIdentity.identities(for: result.indexable[0]),
+            [.external(source: "tvdb", value: "555")]
+        )
+    }
+
+    func testEnrichmentFetchFailureIsInconclusiveNotDropped() async {
+        let listHit = guidlessPlexSeries("p100", account: "plex")
+        let result = await IdentityEnrichment.prepare([listHit]) { _ in nil } // fetch failed
+        XCTAssertTrue(result.inconclusive, "A failed enrichment must force a retry, never a silent drop")
+        XCTAssertTrue(result.indexable.isEmpty)
+    }
+
+    func testEnrichmentGenuinelyUnmatchableIsConclusive() async {
+        // Fetched fine but the series truly has no external id ⇒ skip conclusively
+        // (don't force endless re-scans), and never fall back to a title match.
+        let listHit = guidlessPlexSeries("p100", account: "plex")
+        let result = await IdentityEnrichment.prepare([listHit]) { $0 } // returns it unchanged, still id-less
+        XCTAssertFalse(result.inconclusive)
+        XCTAssertTrue(result.indexable.isEmpty)
+    }
+
+    func testEnrichmentLeavesAlreadyIdentifiedItemsUntouched() async {
+        // Items that already resolve to an identity must NOT trigger a fetch.
+        let withID = series("p1", account: "plex", tvdb: "7")
+        var fetched = false
+        let result = await IdentityEnrichment.prepare([withID]) { item in fetched = true; return item }
+        XCTAssertFalse(fetched, "No enrichment fetch for an item that already has a strong id")
+        XCTAssertEqual(result.indexable.map(\.id), ["p1"])
+    }
+
+    func testEnrichmentNeverLoosensSeriesToTitle() async {
+        // Even after a failed enrichment, a series must never resolve by title —
+        // so two same-titled, differently-keyed shows can't false-merge.
+        let listHit = guidlessPlexSeries("p100", account: "plex")
+        let result = await IdentityEnrichment.prepare([listHit]) { _ in nil }
+        XCTAssertTrue(result.indexable.isEmpty)
+        // And a separately-enriched series with a real id keys only on that id.
+        let enriched = await IdentityEnrichment.prepare([listHit]) { item in
+            var full = item; full.providerIDs = ["Tvdb": "999"]; return full
+        }
+        XCTAssertEqual(
+            MediaItemIdentity.identities(for: enriched.indexable[0]),
+            [.external(source: "tvdb", value: "999")]
+        )
+    }
+
+    /// After enrichment populates BOTH servers' series under the same strong id,
+    /// the fan-out must be symmetric: a watch originating on Jellyfin reaches the
+    /// (formerly guid-less) Plex copy, AND a watch originating on Plex reaches the
+    /// Jellyfin copy. This is the both-directions guard for the observed
+    /// Plex-as-destination gap.
+    func testSymmetricFanOutToFormerlyGuidlessPlexSeries() async {
+        let index = IdentityIndex()
+        // Jellyfin series already carries the tvdb id.
+        await index.ingest([series("j1", account: "jf", tvdb: "555")], accountID: "jf",
+                           serverInfo: SourceServerInfo(providerKind: .jellyfin))
+        // Plex series arrived guid-less; enrich before ingest (as indexAccount does).
+        let plexListHit = guidlessPlexSeries("p1", account: "plex")
+        let prepared = await IdentityEnrichment.prepare([plexListHit]) { item in
+            var full = item; full.providerIDs = ["Tvdb": "555"]; return full
+        }
+        await index.ingest(prepared.indexable, accountID: "plex",
+                          serverInfo: SourceServerInfo(providerKind: .plex))
+        let snapshot = await index.snapshot()
+
+        // Origin = Jellyfin → must include the Plex destination.
+        let fromJF = series("j1", account: "jf", tvdb: "555")
+        XCTAssertEqual(Set(snapshot.targets(for: fromJF).map(\.id)), ["jf:j1", "plex:p1"])
+        // Origin = Plex → must include the Jellyfin destination (same set).
+        let fromPlex = series("p1", account: "plex", tvdb: "555")
+        XCTAssertEqual(Set(snapshot.targets(for: fromPlex).map(\.id)), ["jf:j1", "plex:p1"])
+        // The series sources carry the kind so episode expansion can use them.
+        XCTAssertTrue(snapshot.sources(for: fromPlex).allSatisfy { $0.kind == .series })
+    }
+
     // MARK: Snapshot store (the @Sendable bridge)
 
     func testSnapshotStoreProviderReflectsUpdates() {

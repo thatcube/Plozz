@@ -14,16 +14,24 @@ import Foundation
 /// On-device triage flow: turn on the Diagnostics overlay and read the **Decode**
 /// row. If it shows `Software (CPU)`, decode never reached VideoToolbox — try a
 /// different `hwdec`. If it shows `Hardware` but Render fps sits below target with
-/// "late" drops, the bottleneck is the renderer — try `videoOutput = "gpu"`
-/// (the lighter classic GPU vo) for non-Dolby-Vision content.
+/// "late" drops, the renderer is the bottleneck: SDR already uses the lighter
+/// `gpu` vo here; for HDR/Dolby-Vision (which needs `gpu-next`) the lever is the
+/// `videoOutput` field.
 public struct MPVPlaybackTuning: Sendable, Equatable {
     /// libmpv `--hwdec`. `videotoolbox` uses the Apple hardware decoder; `no`
     /// forces CPU decode (useful only to confirm a hardware-decode bug).
     public var hwdec: String
-    /// libmpv `--vo`. `gpu-next` is libplacebo (best quality, needed for Dolby
-    /// Vision RPU reshaping) but the heavier renderer; `gpu` is the lighter
-    /// classic GPU output for when the device is render-bound on SDR/HDR10.
+    /// libmpv `--vo` for HDR/Dolby Vision. `gpu-next` is libplacebo — the best
+    /// quality and the only renderer that can reshape the Dolby Vision RPU to PQ —
+    /// but it's the heavier path (per-frame libplacebo shaders on the
+    /// Vulkan→MoltenVK→Metal present chain). Required for HDR; do not change.
     public var videoOutput: String
+    /// libmpv `--vo` for SDR content. Defaults to the lighter classic `gpu`
+    /// renderer: SDR never needs libplacebo's tone-mapping / RPU reshaping, and on
+    /// Apple TV the gpu-next present path was missing frame deadlines (showing as
+    /// "late" drops in the diagnostics overlay) even on trivial 1080p direct play.
+    /// `gpu` removes that per-frame libplacebo cost while leaving HDR/DV untouched.
+    public var sdrVideoOutput: String
     /// Whether to enable libmpv's stream cache (`--cache`). On for smooth
     /// network direct play.
     public var cacheEnabled: Bool
@@ -39,6 +47,7 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
     public init(
         hwdec: String = "videotoolbox",
         videoOutput: String = "gpu-next",
+        sdrVideoOutput: String = "gpu",
         cacheEnabled: Bool = true,
         demuxerReadaheadSecs: Int = 20,
         demuxerMaxBytes: String = "256MiB",
@@ -46,10 +55,17 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
     ) {
         self.hwdec = hwdec
         self.videoOutput = videoOutput
+        self.sdrVideoOutput = sdrVideoOutput
         self.cacheEnabled = cacheEnabled
         self.demuxerReadaheadSecs = demuxerReadaheadSecs
         self.demuxerMaxBytes = demuxerMaxBytes
         self.demuxerMaxBackBytes = demuxerMaxBackBytes
+    }
+
+    /// The renderer to use for a stream: the heavier libplacebo `gpu-next` only
+    /// when HDR/Dolby Vision actually needs it, otherwise the lighter `gpu`.
+    func videoOutput(isHDR: Bool) -> String {
+        isHDR ? videoOutput : sdrVideoOutput
     }
 
     /// The shipped default: previous decode/render behaviour plus smoother

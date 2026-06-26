@@ -206,8 +206,10 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         client.setWindowID(layerPointer)
 
         // Render + decode configuration (mirrors MPVKit's reference tvOS player),
-        // driven by `tuning` so the decode path / renderer are a value flip.
-        client.setOptionString("vo", tuning.videoOutput)
+        // driven by `tuning` so the decode path / renderer are a value flip. SDR
+        // uses the lighter `gpu` vo; HDR/Dolby Vision keeps libplacebo `gpu-next`
+        // (the only renderer that can reshape the DV RPU), so HDR is unchanged.
+        client.setOptionString("vo", tuning.videoOutput(isHDR: hdrMode.isHDR))
         client.setOptionString("gpu-api", "vulkan")
         client.setOptionString("gpu-context", "moltenvk")
         client.setOptionString("hwdec", tuning.hwdec)
@@ -546,8 +548,8 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             duration = client.getDouble(MPVProperty.duration)
             status = .ready
             attachExternalAudioIfNeeded()
-        case .propertyChanged(let name):
-            handleProperty(name)
+        case .propertyChanged(let name, let value):
+            handleProperty(name, value: value)
         case .endFile(let isError, let isEOF):
             if isError {
                 fail(.invalidResponse)
@@ -573,25 +575,31 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         _ = client.command(["audio-add", audioURL.absoluteString, "select"])
     }
 
-    private func handleProperty(_ name: String) {
+    /// Applies an observed property change. The new value rides along in `value`
+    /// (read off the mpv event at parse time), so the hot per-frame `time-pos`
+    /// path no longer calls `mpv_get_property` on the main actor — which would
+    /// re-acquire the mpv core lock and stall behind a busy render thread,
+    /// producing main-thread hitches during heavy playback. Falls back to a
+    /// synchronous get only if mpv didn't attach a value.
+    private func handleProperty(_ name: String, value: MPVPropertyValue) {
         switch name {
         case MPVProperty.timePos:
-            let seconds = client.getDouble(MPVProperty.timePos)
+            let seconds = value.doubleValue ?? client.getDouble(MPVProperty.timePos)
             guard seconds.isFinite else { return }
             currentTime = max(0, seconds)
             furthestObservedPosition = max(furthestObservedPosition, currentTime)
             reportProgressIfNeeded(at: currentTime)
         case MPVProperty.duration:
-            let value = client.getDouble(MPVProperty.duration)
-            if value.isFinite { duration = max(0, value) }
+            let durationValue = value.doubleValue ?? client.getDouble(MPVProperty.duration)
+            if durationValue.isFinite { duration = max(0, durationValue) }
         case MPVProperty.pause:
-            isPaused = client.getFlag(MPVProperty.pause)
+            isPaused = value.flagValue ?? client.getFlag(MPVProperty.pause)
         case MPVProperty.eofReached:
             // `eof-reached` flips true at a clean end-of-stream; treated as a
             // benign stop (the owner reads `currentTime`/`duration`), not a fail.
             // Tracked so the display wake lock is released at end-of-file even
             // while `pause` still reads false.
-            hasReachedEnd = client.getFlag(MPVProperty.eofReached)
+            hasReachedEnd = value.flagValue ?? client.getFlag(MPVProperty.eofReached)
         default:
             break
         }

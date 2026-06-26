@@ -303,30 +303,50 @@ struct NowPlayingView: View {
                 .frame(width: 420, height: 420)
                 .shadow(radius: 30)
 
-            VStack(spacing: 10) {
-                Text(controller.currentTrack?.title ?? "Not Playing")
-                    .font(.system(size: 46, weight: .bold))
+            trackTextBlock
+                // Reserve a constant height for the text so the artwork above it
+                // never shifts when the next track's text differs — a 1- vs 2-line
+                // title, a missing album, or no quality badge. Top aligned, so any
+                // slack falls *below* the text and the artwork stays put; that's
+                // what makes switching tracks seamless. The height depends only on
+                // whether the extra-info rows are shown (album + quality badge),
+                // never on the individual track, so within a setting it's stable.
+                // The constants below assume the explicit font sizes in
+                // `trackTextBlock`/`qualityBadge` — update them together.
+                .frame(height: showTrackDetails ? 236 : 156, alignment: .top)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// The title/artist (+ album & quality badge when "show track details" is on)
+    /// stack rendered inside `metaColumn`'s reserved-height slot. The album row is
+    /// always rendered (transparent when empty) and the quality badge reserves a
+    /// constant height, so a track that lacks either doesn't change the layout —
+    /// only its visibility changes.
+    private var trackTextBlock: some View {
+        VStack(spacing: 10) {
+            Text(controller.currentTrack?.title ?? "Not Playing")
+                .font(.system(size: 46, weight: .bold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
+            if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
+                Text(artist)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
-                if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
-                    Text(artist)
-                        .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
-                        .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.35), radius: 6, y: 2)
-                }
-                if showTrackDetails {
-                    if let album = controller.currentTrack?.albumTitle, !album.isEmpty {
-                        Text(album)
-                            .font(.system(size: 18))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.3), radius: 5, y: 2)
-                    }
-                    qualityBadge
-                }
+                    .lineLimit(1)
+                    .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.35), radius: 6, y: 2)
+            }
+            if showTrackDetails {
+                let album = controller.currentTrack?.albumTitle ?? ""
+                Text(album.isEmpty ? " " : album)
+                    .font(.system(size: 18))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .opacity(album.isEmpty ? 0 : 1)
+                    .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.3), radius: 5, y: 2)
+                qualityBadge
             }
         }
     }
@@ -386,25 +406,31 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private var qualityBadge: some View {
-        if let quality = controller.currentQuality {
-            HStack(spacing: 5) {
-                Image(systemName: quality.isDirectPlay ? "waveform" : "arrow.triangle.2.circlepath")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(quality.headline)
-                    .font(.system(size: 11, weight: .semibold))
-                if let detail = quality.detail {
-                    Text(detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+        Group {
+            if let quality = controller.currentQuality {
+                HStack(spacing: 5) {
+                    Image(systemName: quality.isDirectPlay ? "waveform" : "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(quality.headline)
+                        .font(.system(size: 11, weight: .semibold))
+                    if let detail = quality.detail {
+                        Text(detail)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(qualityTint.opacity(0.6), lineWidth: 1))
+                .foregroundStyle(qualityTint)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().stroke(qualityTint.opacity(0.6), lineWidth: 1))
-            .foregroundStyle(qualityTint)
-            .padding(.top, 4)
         }
+        // Reserve a constant height even when there's no quality info, so a track
+        // that lacks a badge keeps the same layout as one that has it — see the
+        // reserved text slot in `metaColumn`.
+        .frame(height: 26)
+        .padding(.top, 4)
     }
 
     private var qualityTint: Color {

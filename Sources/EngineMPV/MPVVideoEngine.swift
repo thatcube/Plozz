@@ -80,6 +80,11 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
     // MARK: Configuration
 
+    /// Data-driven decode/render/cache tuning. Defaults mirror the previous
+    /// hardcoded behaviour plus smoother direct-play caching; a field flip (or a
+    /// future settings toggle) re-tunes playback without touching `load()`.
+    private let tuning: MPVPlaybackTuning
+
     /// Extra `mpv_set_option_string` pairs applied before `mpv_initialize`
     /// (e.g. cache tuning). Empty by default; a later phase can tune these.
     private let extraOptions: [String: String]
@@ -131,7 +136,8 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     /// Background queue that drains the mpv event loop (kept off the main actor).
     private let eventQueue = DispatchQueue(label: "com.thatcube.Plozz.mpv.events", qos: .userInitiated)
 
-    public init(extraOptions: [String: String] = [:]) {
+    public init(tuning: MPVPlaybackTuning = .default, extraOptions: [String: String] = [:]) {
+        self.tuning = tuning
         self.extraOptions = extraOptions
         super.init()
     }
@@ -199,12 +205,18 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         let layerPointer = Int64(Int(bitPattern: Unmanaged.passUnretained(metalLayer).toOpaque()))
         client.setWindowID(layerPointer)
 
-        // Render + decode configuration (mirrors MPVKit's reference tvOS player).
-        client.setOptionString("vo", "gpu-next")
+        // Render + decode configuration (mirrors MPVKit's reference tvOS player),
+        // driven by `tuning` so the decode path / renderer are a value flip.
+        client.setOptionString("vo", tuning.videoOutput)
         client.setOptionString("gpu-api", "vulkan")
         client.setOptionString("gpu-context", "moltenvk")
-        client.setOptionString("hwdec", "videotoolbox")
+        client.setOptionString("hwdec", tuning.hwdec)
         client.setOptionString("video-rotate", "no")
+
+        // Cache / demuxer tuning for smoother network direct play.
+        for (key, value) in tuning.cacheOptionPairs() {
+            client.setOptionString(key, value)
+        }
 
         // Pick surface colorimetry from source metadata.
         metalLayer.configure(for: hdrMode)
@@ -603,13 +615,21 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
 
     /// Schedules a drain of the mpv event queue on the background queue. Safe to
     /// call from any thread — that's why it's `nonisolated`.
+    ///
+    /// All events drained in one pass are marshalled to the main actor in a
+    /// **single** hop (preserving FIFO order), rather than one `DispatchQueue.main`
+    /// dispatch per event. libmpv fires a wakeup per `time-pos` change — i.e. once
+    /// per displayed frame — so coalescing cuts the steady main-thread scheduling
+    /// churn during playback (fewer dispatches/sec for the same work).
     nonisolated fileprivate func scheduleEventDrain() {
         eventQueue.async { [weak self] in
             guard let self else { return }
-            self.client.drainEvents { event in
-                // Hop to the main actor in FIFO order before touching state.
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated { self.apply(event) }
+            var batch: [MPVEvent] = []
+            self.client.drainEvents { batch.append($0) }
+            guard !batch.isEmpty else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    for event in batch { self.apply(event) }
                 }
             }
         }

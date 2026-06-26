@@ -13,6 +13,10 @@ import UIKit
 /// `AudioPlaybackController`.
 struct NowPlayingView: View {
     @Bindable var controller: AudioPlaybackController
+    /// The app's currently selected theme, passed in from the host so the
+    /// player's "Match Theme" appearance can distinguish OLED from plain Dark
+    /// (the system color scheme alone can't tell them apart).
+    var appTheme: AppTheme = .system
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var scrubModel = MusicScrubModel()
@@ -143,13 +147,25 @@ struct NowPlayingView: View {
     }
 
     /// The resolved background treatment, collapsing `.matchTheme` against the
-    /// app's current light/dark appearance.
+    /// app's selected theme (so OLED → true black, Light → frosted, etc.).
     private var playerStyle: LiquidArtworkBackground.Style {
         switch playerAppearance {
-        case .matchTheme: return systemColorScheme == .light ? .light : .dark
+        case .matchTheme: return matchedThemeStyle
         case .dark: return .dark
         case .light: return .light
         case .oled: return .oled
+        }
+    }
+
+    /// Maps the app's `AppTheme` onto a player look for the "Match Theme" option.
+    /// `.system` has no explicit light/dark, so it follows the resolved system
+    /// color scheme.
+    private var matchedThemeStyle: LiquidArtworkBackground.Style {
+        switch appTheme {
+        case .light: return .light
+        case .dark: return .dark
+        case .oled: return .oled
+        case .system: return systemColorScheme == .light ? .light : .dark
         }
     }
 
@@ -246,14 +262,14 @@ struct NowPlayingView: View {
                     .font(.system(size: 46, weight: .bold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
+                    .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
                 if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
                     Text(artist)
                         .font(.system(size: 26, weight: .medium))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .lineLimit(1)
-                        .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+                        .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.35), radius: 6, y: 2)
                 }
                 if showTrackDetails {
                     if let album = controller.currentTrack?.albumTitle, !album.isEmpty {
@@ -261,7 +277,7 @@ struct NowPlayingView: View {
                             .font(.system(size: 18))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
-                            .shadow(color: .black.opacity(0.3), radius: 5, y: 2)
+                            .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.3), radius: 5, y: 2)
                     }
                     qualityBadge
                 }

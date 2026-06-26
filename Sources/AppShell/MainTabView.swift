@@ -94,7 +94,8 @@ struct MainTabView: View {
                 MusicTabView(
                     accounts: musicAvailability.detectedAccounts,
                     visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
-                    controller: audioController
+                    controller: audioController,
+                    appTheme: themeModel.theme
                 )
                 .tabItem { Label("Music", systemImage: "music.note") }
             }

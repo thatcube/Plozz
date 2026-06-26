@@ -47,7 +47,7 @@ struct LiquidArtworkBackground: View {
     private var gradientOpacity: Double {
         switch style {
         case .dark: return 1.0
-        case .light: return 0.85
+        case .light: return 0.95
         case .oled: return 0.5
         }
     }
@@ -73,12 +73,12 @@ struct LiquidArtworkBackground: View {
             LinearGradient(colors: [.clear, .clear, Color.black.opacity(0.55)],
                            startPoint: .top, endPoint: .bottom)
         case .light:
-            // A frosted near-white veil mutes the colors and lifts the field so
-            // dark text stays legible while keeping the artwork tint.
-            Color.white.opacity(0.55)
-            RadialGradient(colors: [.clear, Color.white.opacity(0.3)],
-                           center: .center, startRadius: 220, endRadius: 1400)
-            LinearGradient(colors: [.clear, .clear, Color.white.opacity(0.28)],
+            // A light frosted veil lifts the field just enough for dark text
+            // while letting the artwork color read clearly through it.
+            Color.white.opacity(0.32)
+            RadialGradient(colors: [.clear, Color.white.opacity(0.18)],
+                           center: .center, startRadius: 240, endRadius: 1400)
+            LinearGradient(colors: [.clear, .clear, Color.white.opacity(0.2)],
                            startPoint: .top, endPoint: .bottom)
         }
     }

@@ -6,6 +6,9 @@ import CoreUI
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
     @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
+    /// App-wide (global) — persists across all profiles. Same un-namespaced
+    /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
+    /// See AGENTS.local.md ("Per-profile vs app-wide settings").
     @AppStorage("reduceTransparencyOverride") private var reduceTransparency = false
 
     var body: some View {
@@ -71,7 +74,7 @@ struct AppearanceDetailView: View {
                         }
                         .scrollClipDisabled()
 
-                        Toggle("Show album, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
+                        Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
                     }
                 }
 

@@ -19,6 +19,12 @@ public struct RootView: View {
     /// app-wide `\.plozzReduceTransparency` so the liquid-glass surfaces switch
     /// to solid when *either* is on (the app override never weakens the OS one).
     @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+    /// Deliberately an APP-WIDE (global) setting: a plain `@AppStorage` key with no
+    /// profile namespace, so it persists across every profile and is intentionally
+    /// NOT part of `AppState.rebuildSettingsModels()` (the per-profile store set).
+    /// Do not scope this per profile — accessibility/visual-comfort preferences
+    /// belong to the household, not an individual profile. See AGENTS.local.md
+    /// ("Per-profile vs app-wide settings").
     @AppStorage("reduceTransparencyOverride") private var reduceTransparencyOverride = false
     /// Window-level black veil that survives the player's dismiss into Home so it
     /// can cover the TV's *physical* HDR/DV → SDR panel switch (which on some TVs

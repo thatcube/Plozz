@@ -545,11 +545,12 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             let infoWidth = max(480, geo.size.width * 0.33)
             HStack(alignment: .top, spacing: 56) {
                 info
-                    // Center the info column vertically, and make the whole column
-                    // one focus section so pressing Left from any track row lands
-                    // on the transport controls (the controls are equal width, so
-                    // the engine picks the vertically-nearest — Play/Shuffle).
-                    .frame(width: infoWidth, height: geo.size.height, alignment: .leading)
+                    .frame(width: infoWidth, alignment: .leading)
+                    // Center the info column within the available (padded) height
+                    // so the top and bottom gaps stay even — including when the
+                    // Now Playing card makes the column taller. One focus section
+                    // so Left from any track row reaches the transport controls.
+                    .frame(maxHeight: .infinity, alignment: .center)
                     .focusSection()
                 ScrollView {
                     TrackListView(

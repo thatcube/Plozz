@@ -70,12 +70,12 @@ struct NowPlayingView: View {
             }
 
             // While the bar is hidden, a transparent full-screen catcher takes
-            // focus so a Select/click brings the controls back. Its focus effect
-            // is disabled so it never flashes a highlight plate over the screen.
+            // focus so a Select/click brings the controls back. It uses a fully
+            // custom button style that renders *only* its (clear) label, so tvOS
+            // never draws a focus highlight plate over the screen.
             if !controlsVisible {
                 Button { showControls() } label: { Color.clear }
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
+                    .buttonStyle(InvisibleButtonStyle())
                     .focused($focus, equals: .revealCatcher)
                     .onMoveCommand { _ in showControls() }
             }
@@ -104,6 +104,15 @@ struct NowPlayingView: View {
         .onPlayPauseCommand {
             controller.togglePlayPause()
             showControls()
+        }
+    }
+
+    /// A button style that renders only its label with no platform focus
+    /// decoration. Used for the full-screen reveal catcher so taking focus while
+    /// the controls are hidden never paints a white highlight plate.
+    private struct InvisibleButtonStyle: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
         }
     }
 

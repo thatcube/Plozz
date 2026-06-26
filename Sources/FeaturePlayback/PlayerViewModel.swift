@@ -110,9 +110,12 @@ public final class PlayerViewModel {
     /// into an engine failure so the cross-engine / transcode fallback chain runs.
     private var watchdogTask: Task<Void, Never>?
 
-    /// How long the watchdog waits for the first real progress before declaring a
-    /// stall. Generous enough for legitimate 4K start-up buffering.
-    private let watchdogTimeout: TimeInterval = 30
+    /// The data-driven render-health policy: when the active on-device engine
+    /// fails to make progress (startup stall) or sheds late frames faster than a
+    /// tunable rate (can't keep up on this hardware), the watchdog degrades to the
+    /// server fallback chain. A value (not magic numbers) so the trip points can
+    /// be A/B-tested on-device by flipping a field.
+    private let healthPolicy: PlaybackHealthPolicy = .default
 
     private var request: PlaybackRequest?
     private var subtitleDownloadTask: Task<Void, Never>?
@@ -417,37 +420,107 @@ public final class PlayerViewModel {
         engine.setDialogEnhanceEnabled(false)
     }
 
-    // MARK: - Stall watchdog
+    // MARK: - Render-health watchdog
 
     /// Starts (or restarts) the playback watchdog for the current engine. Polls
-    /// the engine's `currentTime`; if it never advances past `startPosition`
-    /// within ``watchdogTimeout``, the engine is treated as stalled and the
-    /// failure chain runs. Cancelled/replaced on every `playResolved`, on pause,
-    /// and on `stop()`. The once-only fallback guards keep this from looping.
+    /// the engine ~1s and drives ``healthPolicy`` over two failure shapes:
+    ///
+    ///  * **Startup stall** — `currentTime` never advances past `startPosition`
+    ///    within `startupStallTimeout`, converting a silent "loads forever" hang
+    ///    into the fallback chain.
+    ///  * **Can't keep up** — playback *is* progressing but the engine's late-frame
+    ///    *rate* (sampled via `PlaybackStatsProviding`, the same counter the
+    ///    overlay shows) stays above a tunable fraction of the source frame rate
+    ///    for a sustained dwell. This is the lag Brandon sees (mpv advancing yet
+    ///    dropping frames on weak hardware); the old zero-progress watchdog missed
+    ///    it because the clock *was* moving. On this trip we prefer the server
+    ///    fallback directly — the alternate on-device engine generally can't do
+    ///    better with the same stream (and for an MKV the native engine can't
+    ///    demux it at all), so a struggling device degrades straight to a server
+    ///    stream instead of bouncing through a second on-device attempt.
+    ///
+    /// Cancelled/replaced on every `playResolved`, on pause, and on `stop()`. The
+    /// once-only fallback guards keep this from looping.
     private func armPlaybackWatchdog(startPosition: TimeInterval) {
         watchdogTask?.cancel()
-        let timeout = watchdogTimeout
-        let threshold = startPosition + 0.5
+        let policy = healthPolicy
+        let progressThreshold = startPosition + 0.5
         watchdogTask = Task { [weak self] in
-            let pollNanos: UInt64 = 2_000_000_000
-            var waited: TimeInterval = 0
-            while waited < timeout {
+            let pollNanos: UInt64 = 1_000_000_000
+            let clock = { ProcessInfo.processInfo.systemUptime }
+            let armedAt = clock()
+            var firstProgressAt: TimeInterval?
+            var rateTracker = LateFrameRateTracker(window: policy.rateWindow)
+            var aboveThresholdSince: TimeInterval?
+            var lastPosition = startPosition
+
+            while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: pollNanos)
                 if Task.isCancelled { return }
                 guard let self else { return }
-                // Real progress → healthy, stop watching.
-                if self.engine.currentTime > threshold { return }
-                // User paused (or playback hasn't been asked to play) → not a
-                // stall; stop watching rather than fire a false positive.
-                if self.engine.isPaused { return }
-                waited += 2
-            }
-            if Task.isCancelled { return }
-            guard let self else { return }
-            // Still no progress after the deadline → treat as a stalled stream.
-            if self.engine.currentTime <= threshold, !self.engine.isPaused {
-                PlozzLog.playback.info("Playback watchdog: no progress before deadline; triggering fallback")
-                await self.handleEngineFailure(.invalidResponse)
+
+                let now = clock()
+                let position = self.engine.currentTime
+                let isPaused = self.engine.isPaused
+                let isProgressing = position > lastPosition + 0.05
+                let hasMadeProgress = position > progressThreshold
+
+                // Phase 1 — startup stall: no real progress yet.
+                if firstProgressAt == nil {
+                    if hasMadeProgress {
+                        firstProgressAt = now
+                    } else {
+                        if policy.isStartupStalled(
+                            secondsSinceArmed: now - armedAt,
+                            hasMadeProgress: false,
+                            isPaused: isPaused
+                        ) {
+                            PlozzLog.playback.info("Playback watchdog: no progress before deadline; triggering fallback")
+                            await self.handleEngineFailure(.invalidResponse)
+                            return
+                        }
+                        lastPosition = position
+                        continue
+                    }
+                }
+
+                // Phase 2 — render health: progressing, watch the late-frame rate.
+                let secondsSinceFirstProgress = now - (firstProgressAt ?? now)
+                var lateRate: Double?
+                var sourceFPS: Double?
+                if let stats = (self.engine as? PlaybackStatsProviding)?.sampleEngineStats() {
+                    sourceFPS = stats.containerFrameRate ?? stats.renderedFrameRate
+                    if let late = stats.lateFrames {
+                        rateTracker.record(cumulativeLateFrames: late, at: now)
+                        lateRate = rateTracker.ratePerSecond
+                    }
+                }
+
+                // Maintain the dwell timer: the rate must stay above threshold
+                // continuously (while actually advancing) to count toward a trip.
+                let excessive = !isPaused && isProgressing
+                    && (lateRate.map { policy.isExcessiveLateFrameRate($0, sourceFrameRate: sourceFPS) } ?? false)
+                if excessive {
+                    if aboveThresholdSince == nil { aboveThresholdSince = now }
+                } else {
+                    aboveThresholdSince = nil
+                }
+                let sustained = aboveThresholdSince.map { now - $0 } ?? 0
+
+                if policy.isFailingToKeepUp(
+                    secondsSinceFirstProgress: secondsSinceFirstProgress,
+                    isPaused: isPaused,
+                    isProgressing: isProgressing,
+                    lateFrameRate: lateRate,
+                    sourceFrameRate: sourceFPS,
+                    secondsSustainedAboveThreshold: sustained
+                ) {
+                    PlozzLog.playback.info("Playback watchdog: late-frame rate sustained above threshold; degrading to server fallback")
+                    await self.handleEngineFailure(.invalidResponse, preferServerFallback: true)
+                    return
+                }
+
+                lastPosition = position
             }
         }
     }
@@ -464,7 +537,7 @@ public final class PlayerViewModel {
     /// *other* engine (once) at the last known position; if that also fails, force
     /// a server transcode (once); if even that fails, surface the error. Each step
     /// fires at most once so the chain can never loop.
-    private func handleEngineFailure(_ error: AppError) async {
+    private func handleEngineFailure(_ error: AppError, preferServerFallback: Bool = false) async {
         guard let request else {
             phase = .failed(error)
             return
@@ -476,8 +549,13 @@ public final class PlayerViewModel {
         //    re-using the same raw stream (no re-resolve needed). Skipped for an
         //    adaptive source (separate audio track): only the hybrid engine can
         //    mux it, so swapping to native would play silent video — go straight
-        //    to the re-resolved safe (muxed) fallback below instead.
-        if !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
+        //    to the re-resolved safe (muxed) fallback below instead. Also skipped
+        //    when the caller prefers the server (a render-health "can't keep up"
+        //    trip): a device that can't keep up on this engine won't fare better
+        //    on the alternate, and for an MKV the native engine can't demux it —
+        //    so degrade straight to a server stream rather than waste a hop.
+        if !preferServerFallback,
+           !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
            let alternate = alternateEngineKind {
             hasTriedAlternateEngine = true
             PlozzLog.playback.info("Engine failed; swapping to the alternate engine")

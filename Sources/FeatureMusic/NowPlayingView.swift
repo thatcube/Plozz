@@ -55,24 +55,29 @@ struct NowPlayingView: View {
         ZStack {
             background
 
-            mainContent
-                .padding(.horizontal, 80)
-                .padding(.top, 60)
-                .padding(.bottom, 140)
+            // Main content + bottom bar share a vertical stack so the artwork
+            // and lyrics center in the space *above* the controls, then settle
+            // down and re-center on the full screen once the bar slides away.
+            VStack(spacing: 0) {
+                mainContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 80)
+                    .padding(.top, 60)
+                if controlsVisible {
+                    bottomControls
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
 
             // While the bar is hidden, a transparent full-screen catcher takes
-            // focus so a Select/click brings the controls back.
+            // focus so a Select/click brings the controls back. Its focus effect
+            // is disabled so it never flashes a highlight plate over the screen.
             if !controlsVisible {
                 Button { showControls() } label: { Color.clear }
                     .buttonStyle(.plain)
+                    .focusEffectDisabled()
                     .focused($focus, equals: .revealCatcher)
                     .onMoveCommand { _ in showControls() }
-            }
-        }
-        .overlay(alignment: .bottom) {
-            if controlsVisible {
-                bottomControls
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.spring(response: 0.5, dampingFraction: 0.86), value: controlsVisible)

@@ -385,40 +385,49 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// The transport row: the big round play/pause sits dead-centre with
-    /// previous/next flanking it, shuffle pinned left and repeat + lyrics pinned
-    /// right. Every button carries a Focus case so moving between them keeps the
-    /// bar awake.
+    /// The transport row: the big round play/pause sits dead-centre (aligned with
+    /// the album art above it) with previous/next flanking it. Shuffle is pinned
+    /// left and repeat + lyrics pinned right via equal-width side containers, so
+    /// the asymmetric side clusters never pull the centre group off-centre. Every
+    /// button carries a Focus case so moving between them keeps the bar awake.
     private var transportRow: some View {
-        HStack(spacing: 28) {
-            transportButton(
-                icon: "shuffle",
-                prominent: controller.isShuffled,
-                tint: controller.isShuffled ? Color.accentColor : .primary
-            ) { controller.toggleShuffle() }
-                .focused($focus, equals: .shuffle)
+        HStack(spacing: 0) {
+            // Left cluster, pinned leading in a flexible container.
+            HStack(spacing: 28) {
+                transportButton(
+                    icon: "shuffle",
+                    prominent: controller.isShuffled,
+                    tint: controller.isShuffled ? Color.accentColor : .primary
+                ) { controller.toggleShuffle() }
+                    .focused($focus, equals: .shuffle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 24)
+            // Centre group — symmetric, so play/pause lands on the screen centre.
+            HStack(spacing: 28) {
+                transportButton(icon: "backward.end.fill") { controller.previous() }
+                    .focused($focus, equals: .previous)
 
-            transportButton(icon: "backward.end.fill") { controller.previous() }
-                .focused($focus, equals: .previous)
+                playPauseButton
 
-            playPauseButton
+                transportButton(icon: "forward.end.fill") { controller.next() }
+                    .focused($focus, equals: .next)
+            }
 
-            transportButton(icon: "forward.end.fill") { controller.next() }
-                .focused($focus, equals: .next)
+            // Right cluster, pinned trailing in a flexible container of equal
+            // width to the left one, keeping the centre group centred.
+            HStack(spacing: 28) {
+                transportButton(
+                    icon: repeatIcon,
+                    prominent: controller.repeatMode != .off,
+                    tint: controller.repeatMode == .off ? .primary : Color.accentColor
+                ) { controller.cycleRepeatMode() }
+                    .focused($focus, equals: .repeatMode)
 
-            Spacer(minLength: 24)
-
-            transportButton(
-                icon: repeatIcon,
-                prominent: controller.repeatMode != .off,
-                tint: controller.repeatMode == .off ? .primary : Color.accentColor
-            ) { controller.cycleRepeatMode() }
-                .focused($focus, equals: .repeatMode)
-
-            lyricsToggleButton
-                .focused($focus, equals: .lyrics)
+                lyricsToggleButton
+                    .focused($focus, equals: .lyrics)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 

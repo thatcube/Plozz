@@ -42,6 +42,18 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
 ///     in → ``PlaybackEngineKind/native`` (the server-transcode safety net carries
 ///     anything AVPlayer can't direct-play).
 ///
+/// ## Direct play is king; the server is a runtime last resort
+/// This router only ever picks between the two **on-device** engines — it never
+/// routes to the server. Reducing what plain content advertises as direct-play
+/// (so the server *remuxes* a Matroska/TS file to an HLS stream AVPlayer decodes
+/// on the efficient hardware path) is a stream-copy **remux**, not a re-encode:
+/// lossless, light server CPU, and — confirmed on-device — dramatically smoother
+/// than pushing the same plain file through mpv's gpu→Vulkan→Metal present chain.
+/// A *transcode* (re-encode) is still only ever reached at **runtime**, as a
+/// fallback, when an on-device engine measurably fails or can't keep up — see the
+/// ``PlaybackHealthPolicy`` render-health watchdog in `FeaturePlayback`. Nothing
+/// here is pre-emptively pushed to the server because of the device or format.
+///
 /// ## Lockstep with the capability layer
 /// The router and the provider capability profiles must advertise the *same* set
 /// of formats as direct-play: never advertise something the router can't route to

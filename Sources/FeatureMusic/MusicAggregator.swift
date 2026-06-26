@@ -57,21 +57,60 @@ public final class MusicAvailabilityModel {
     /// `true` once a probe has completed, so the UI can avoid flicker on launch.
     public private(set) var didProbe = false
 
-    public init() {}
+    private let store: MusicAvailabilityStoring
 
-    /// Probes every account's `musicLibraries()` and records which have music.
-    /// Cheap (one `/Users/{id}/Views` call per account) and resilient — an
-    /// account that errors is simply treated as having no music.
+    public init(store: MusicAvailabilityStoring = MusicAvailabilityStore()) {
+        self.store = store
+    }
+
+    /// Synchronously shows the Music tab on the first frame using the last
+    /// persisted result, with **no network**. Only accounts that are both cached
+    /// *and* currently signed-in and music-capable are seeded, so a removed
+    /// account never resurrects a phantom tab. The subsequent `probe` refreshes
+    /// and corrects this.
+    public func seedFromCache(accounts: [ResolvedAccount]) {
+        guard !didProbe else { return }
+        let cachedIDs = store.load()
+        guard !cachedIDs.isEmpty else { return }
+        let seeded = accounts.filter { cachedIDs.contains($0.account.id) && $0.provider is MusicProvider }
+        guard !seeded.isEmpty else { return }
+        detectedAccounts = seeded
+        hasMusic = true
+    }
+
+    /// Probes every account's `musicLibraries()` **in parallel** and records which
+    /// have music. Cheap (one `/Users/{id}/Views` call per account) and resilient
+    /// — an account that errors is treated as having no music. The refreshed set
+    /// is persisted for the next launch's instant seed, and the published state is
+    /// only reassigned when the detected set actually changes, so a relaunch that
+    /// confirms the cache causes no tab flicker. Scales to ~10 accounts without
+    /// summing per-account latency.
     public func probe(accounts: [ResolvedAccount]) async {
-        var detected: [ResolvedAccount] = []
-        for account in accounts {
-            guard let music = account.provider as? MusicProvider else { continue }
-            if let libraries = try? await music.musicLibraries(), !libraries.isEmpty {
-                detected.append(account)
+        let results = await withTaskGroup(of: (index: Int, hasMusic: Bool).self) { group -> [(index: Int, hasMusic: Bool)] in
+            for (index, account) in accounts.enumerated() {
+                guard let music = account.provider as? MusicProvider else { continue }
+                group.addTask {
+                    let hasMusic = ((try? await music.musicLibraries())?.isEmpty == false)
+                    return (index, hasMusic)
+                }
             }
+            var out: [(index: Int, hasMusic: Bool)] = []
+            for await result in group { out.append(result) }
+            return out
         }
-        detectedAccounts = detected
-        hasMusic = !detected.isEmpty
+
+        let hasMusicByIndex = Dictionary(results.map { ($0.index, $0.hasMusic) }, uniquingKeysWith: { $1 })
+        var detected: [ResolvedAccount] = []
+        for (index, account) in accounts.enumerated() where hasMusicByIndex[index] == true {
+            detected.append(account)
+        }
+
+        let detectedIDs = Set(detected.map { $0.account.id })
+        store.save(detectedIDs)
         didProbe = true
+        if detectedIDs != Set(detectedAccounts.map { $0.account.id }) {
+            detectedAccounts = detected
+            hasMusic = !detected.isEmpty
+        }
     }
 }

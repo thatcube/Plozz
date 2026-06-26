@@ -132,6 +132,9 @@ struct MainTabView: View {
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .task(id: accounts.map(\.account.id)) {
+            // Paint the Music tab on the first frame from the last persisted
+            // result (synchronous, no network), then refresh in the background.
+            musicAvailability.seedFromCache(accounts: accounts)
             await musicAvailability.probe(accounts: accounts)
         }
         .mediaItemActionHandler(mediaItemActionHandler)

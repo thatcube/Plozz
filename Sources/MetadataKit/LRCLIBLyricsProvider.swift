@@ -15,33 +15,62 @@ public struct LRCLIBLyricsProvider: Sendable {
 
     public init() {}
 
-    /// Looks up lyrics for a track. Tries the exact signature endpoint first
-    /// (artist + title + album + duration), then a fuzzy search, preferring
-    /// synced lyrics and — when a duration is known — the closest match.
+    /// Looks up lyrics for a track, **preferring a synced version**. Tries the
+    /// track's title as-is and a cleaned variant (parentheticals like
+    /// `(from the Short Film …)` / `(feat. …)` stripped), since LRCLIB uploads
+    /// are usually filed under the plain song title. For each candidate it tries
+    /// the exact `/get` endpoint then `/search`, returning the first synced hit
+    /// and falling back to plain text only if nothing synced is found anywhere.
     public func lyrics(
         title: String,
         artist: String,
         album: String?,
         duration: TimeInterval?
     ) async -> Lyrics? {
-        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTitle.isEmpty, !trimmedArtist.isEmpty else { return nil }
+        guard !trimmedArtist.isEmpty else { return nil }
+        let candidates = titleCandidates(from: title)
+        guard !candidates.isEmpty else { return nil }
 
-        // Prefer a synced result. The exact `/get` match is best when it's
-        // synced; otherwise keep it as a plain fallback and try `/search`, which
-        // can surface a synced copy from another upload.
-        let exact = await exactMatch(title: trimmedTitle, artist: trimmedArtist, album: album, duration: duration)
-        if let exactLyrics = exact?.lyrics(), exactLyrics.isSynced {
-            return exactLyrics
+        var plainFallback: Lyrics?
+        for candidate in candidates {
+            if let exact = await exactMatch(title: candidate, artist: trimmedArtist, album: album, duration: duration),
+               let lyrics = exact.lyrics() {
+                if lyrics.isSynced { return lyrics }
+                if plainFallback == nil { plainFallback = lyrics }
+            }
+            if let searched = await search(title: candidate, artist: trimmedArtist, duration: duration),
+               let lyrics = searched.lyrics() {
+                if lyrics.isSynced { return lyrics }
+                if plainFallback == nil { plainFallback = lyrics }
+            }
         }
-        if let searched = await search(title: trimmedTitle, artist: trimmedArtist, duration: duration),
-           let searchedLyrics = searched.lyrics() {
-            if searchedLyrics.isSynced { return searchedLyrics }
-            // Neither is synced: keep the exact match if it had anything.
-            return exact?.lyrics() ?? searchedLyrics
+        return plainFallback
+    }
+
+    /// The ordered, de-duplicated title queries to try: the original first, then
+    /// a cleaned variant with parentheticals / `feat.` segments removed.
+    private func titleCandidates(from rawTitle: String) -> [String] {
+        let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        var candidates = [trimmed]
+        let cleaned = Self.cleanedTitle(trimmed)
+        if !cleaned.isEmpty, cleaned.caseInsensitiveCompare(trimmed) != .orderedSame {
+            candidates.append(cleaned)
         }
-        return exact?.lyrics()
+        return candidates
+    }
+
+    /// Strips trailing/embedded `(...)` and `[...]` groups and `feat.`/`ft.`
+    /// segments so a verbose store title collapses to the core song name.
+    static func cleanedTitle(_ title: String) -> String {
+        var result = title
+        result = result.replacingOccurrences(of: "\\([^)]*\\)", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "\\[[^\\]]*\\]", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "(?i)\\s*[-–—]?\\s*feat\\.?\\s.*$", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "(?i)\\s*[-–—]?\\s*ft\\.?\\s.*$", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func exactMatch(

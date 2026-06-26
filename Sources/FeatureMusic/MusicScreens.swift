@@ -417,23 +417,28 @@ struct MusicDetailLayout<InfoColumn: View>: View {
     @ViewBuilder var info: InfoColumn
 
     var body: some View {
-        HStack(alignment: .top, spacing: 56) {
-            info
-                .frame(width: 380, alignment: .leading)
-            ScrollView {
-                TrackListView(
-                    tracks: tracks,
-                    artworkFallback: artworkFallback,
-                    showArtist: showArtist,
-                    nowPlayingTrackID: nowPlayingTrackID,
-                    isPlaying: isPlaying,
-                    onPlayTrack: onPlayTrack
-                )
-                .padding(.bottom, 40)
+        GeometryReader { geo in
+            // Give the album/playlist info column ~a third of the screen so the
+            // Play and Shuffle buttons fit comfortably side by side.
+            let infoWidth = max(380, geo.size.width * 0.33)
+            HStack(alignment: .top, spacing: 56) {
+                info
+                    .frame(width: infoWidth, alignment: .leading)
+                ScrollView {
+                    TrackListView(
+                        tracks: tracks,
+                        artworkFallback: artworkFallback,
+                        showArtist: showArtist,
+                        nowPlayingTrackID: nowPlayingTrackID,
+                        isPlaying: isPlaying,
+                        onPlayTrack: onPlayTrack
+                    )
+                    .padding(.bottom, 40)
+                }
+                .scrollClipDisabled()
             }
-            .scrollClipDisabled()
+            .padding(PlozzTheme.Metrics.screenPadding)
         }
-        .padding(PlozzTheme.Metrics.screenPadding)
     }
 }
 

@@ -530,7 +530,7 @@ struct TrackListView: View {
                 systemPlaceholder: "music.note",
                 cornerRadius: 8
             )
-            .frame(width: 56, height: 56)
+            .frame(width: 72, height: 72)
             .overlay {
                 if isCurrent {
                     ZStack {

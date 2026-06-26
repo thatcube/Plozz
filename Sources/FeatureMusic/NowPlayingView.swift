@@ -355,12 +355,12 @@ struct NowPlayingView: View {
 
             Spacer(minLength: 24)
 
-            transportButton(icon: "backward.fill") { controller.previous() }
+            transportButton(icon: "backward.end.fill") { controller.previous() }
                 .focused($focus, equals: .previous)
 
             playPauseButton
 
-            transportButton(icon: "forward.fill") { controller.next() }
+            transportButton(icon: "forward.end.fill") { controller.next() }
                 .focused($focus, equals: .next)
 
             Spacer(minLength: 24)

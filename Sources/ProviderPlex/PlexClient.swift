@@ -243,6 +243,21 @@ public struct PlexClient: Sendable {
         return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
     }
 
+    /// Albums in a music section ordered by most-recently-played first. Uses the
+    /// raw Plex `sort=lastViewedAt:desc` key, which the shared `SortDescriptor`
+    /// can't express. Never-played albums sort last (Plex reports them with no
+    /// `lastViewedAt`), so callers filter to `viewCount >= 1` and take the head.
+    func recentlyViewedAlbums(sectionID: String, type: Int, limit: Int) async throws -> [PlexMetadata] {
+        let query = [
+            URLQueryItem(name: "type", value: String(type)),
+            URLQueryItem(name: "X-Plex-Container-Start", value: "0"),
+            URLQueryItem(name: "X-Plex-Container-Size", value: String(max(0, limit))),
+            URLQueryItem(name: "sort", value: "lastViewedAt:desc")
+        ]
+        let endpoint = Endpoint(path: "/library/sections/\(sectionID)/all", queryItems: query, headers: headers)
+        return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer.Metadata ?? []
+    }
+
     /// `GET /library/sections/{id}/genre` — the genres present in a music
     /// section, returned as `Directory` entries (`key` = genre id, `title` =
     /// name).

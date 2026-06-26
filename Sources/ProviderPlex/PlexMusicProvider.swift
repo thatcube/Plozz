@@ -117,11 +117,35 @@ extension PlexProvider: MusicProvider {
         }
     }
 
-    // MARK: Detail
+    // MARK: Recently played
 
-    public func artist(id: String) async throws -> MusicArtist {
-        mapArtist(try await client.metadata(ratingKey: id))
+    public func recentlyPlayed(limit: Int) async throws -> [MusicAlbum] {
+        guard limit > 0 else { return [] }
+        let sections = try await musicSectionDirectories().compactMap(\.key)
+        guard !sections.isEmpty else { return [] }
+
+        // Pull each section's most-recent albums, then merge-sort by real play
+        // recency and take the head. Never-played albums (no `lastViewedAt`) are
+        // dropped — Plex sorts them last but still returns them.
+        var albums: [MusicAlbum] = []
+        for sectionID in sections {
+            let metas = (try? await client.recentlyViewedAlbums(
+                sectionID: sectionID,
+                type: PlexMusicType.album,
+                limit: limit
+            )) ?? []
+            albums += metas
+                .filter { ($0.viewCount ?? 0) >= 1 && ($0.lastViewedAt ?? 0) > 0 }
+                .map(mapAlbum(_:))
+        }
+        return Array(
+            albums
+                .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .prefix(limit)
+        )
     }
+
+    // MARK: Detail
 
     public func album(id: String) async throws -> MusicAlbum {
         mapAlbum(try await client.metadata(ratingKey: id))
@@ -281,7 +305,8 @@ extension PlexProvider: MusicProvider {
             artworkURL: artwork(dto.thumb ?? dto.parentThumb),
             trackCount: dto.leafCount,
             totalDuration: PlexTime.seconds(fromMilliseconds: dto.duration),
-            genres: (dto.Genre ?? []).compactMap(\.tag)
+            genres: (dto.Genre ?? []).compactMap(\.tag),
+            lastPlayedAt: dto.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
     }
 

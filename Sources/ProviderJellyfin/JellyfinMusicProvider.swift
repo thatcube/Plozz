@@ -137,6 +137,25 @@ extension JellyfinProvider: MusicProvider {
         }
     }
 
+    // MARK: Recently played
+
+    public func recentlyPlayed(limit: Int) async throws -> [MusicAlbum] {
+        guard limit > 0 else { return [] }
+        // Recursive across all music libraries, newest play first, played-only.
+        let response = try await client.musicItems(
+            userID: session.userID,
+            parentID: nil,
+            includeItemTypes: ["MusicAlbum"],
+            recursive: true,
+            startIndex: 0,
+            limit: limit,
+            sortBy: "DatePlayed",
+            sortOrder: "Descending",
+            filters: ["IsPlayed"]
+        )
+        return response.Items.map(mapAlbum(_:))
+    }
+
     // MARK: Detail
 
     public func artist(id: String) async throws -> MusicArtist {
@@ -262,7 +281,8 @@ extension JellyfinProvider: MusicProvider {
             artworkURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 500),
             trackCount: dto.ChildCount,
             totalDuration: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
-            genres: dto.Genres ?? []
+            genres: dto.Genres ?? [],
+            lastPlayedAt: JellyfinProvider.parseDate(dto.UserData?.LastPlayedDate)
         )
     }
 

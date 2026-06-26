@@ -14,7 +14,12 @@ import UIKit
 struct NowPlayingView: View {
     @Bindable var controller: AudioPlaybackController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var scrubModel = MusicScrubModel()
+
+    /// Prominent colors of the current track's artwork, driving the morphing
+    /// liquid background. Recomputed whenever the track changes.
+    @State private var artworkPalette: [Color] = []
 
     /// Whether the user wants the lyrics panel shown. Persisted (default on) so
     /// the choice is remembered across sessions. The toggle is disabled — and so
@@ -65,6 +70,7 @@ struct NowPlayingView: View {
         .onDisappear { setIdleTimerDisabled(false) }
         .onChange(of: controller.currentTime) { _, _ in syncScrubModel() }
         .onChange(of: controller.duration) { _, _ in syncScrubModel() }
+        .task(id: controller.currentTrack?.id) { await loadArtworkPalette() }
         // In the foreground the Siri Remote's play/pause press is delivered
         // through the focus/responder chain, not MPRemoteCommandCenter — so the
         // command center alone resumes inconsistently. Handle it here so the
@@ -123,19 +129,25 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private var background: some View {
-        if let track = controller.currentTrack {
-            FallbackAsyncImage(
-                urls: [track.artworkURL].compactMap { $0 },
-                asyncFallbackURL: MusicArtworkFallback.artistImage(name: track.artistName ?? "")
-            ) {
-                Color.black
-            }
-            .ignoresSafeArea()
-            .overlay(.ultraThinMaterial)
-            .overlay(Color.black.opacity(0.35))
-        } else {
-            Color.black.ignoresSafeArea()
+        LiquidArtworkBackground(palette: artworkPalette, animate: !reduceMotion)
+    }
+
+    /// Loads the current track's artwork (reusing the shared decoded-image cache)
+    /// and extracts its prominent colors off the main thread to feed the morphing
+    /// background. Clears to the neutral field when there's no artwork.
+    private func loadArtworkPalette() async {
+        #if canImport(UIKit)
+        guard let url = controller.currentTrack?.artworkURL else {
+            artworkPalette = []
+            return
         }
+        guard let image = await ArtworkImageCache.shared.image(for: url) else { return }
+        let colors = await Task.detached(priority: .utility) {
+            ArtworkColorExtractor.palette(from: image, maxColors: 5)
+        }.value
+        guard controller.currentTrack?.artworkURL == url else { return }
+        artworkPalette = colors
+        #endif
     }
 
     @ViewBuilder

@@ -93,6 +93,23 @@ public struct ProfilePickerView: View {
         .onChange(of: focusedProfileID) { _, newValue in
             if let newValue { lastFocusedProfileID = newValue }
         }
+        .onAppear { prefetchAvatars() }
+    }
+
+    /// Warm the decoded-image cache for every profile photo as soon as the picker
+    /// appears, so the tiles' `FallbackAsyncImage` seeds synchronously and the
+    /// photos pop in with no neutral-placeholder gap. Cheap and fire-and-forget.
+    private func prefetchAvatars() {
+        #if canImport(UIKit)
+        for profile in profiles {
+            guard
+                let raw = profile.avatarImageURL?.trimmingCharacters(in: .whitespaces),
+                !raw.isEmpty,
+                let url = URL(string: raw)
+            else { continue }
+            ArtworkImageCache.shared.prefetch(url, variant: .posterCard)
+        }
+        #endif
     }
 }
 
@@ -113,7 +130,10 @@ private struct ProfileTile: View {
         Button(action: action) {
             ProfileTileLabel(profile: profile, isActive: isActive)
         }
-        .plozzCardButton(cornerRadius: ProfilePickerLayout.tileCornerRadius)
+        .plozzCardButton(
+            cornerRadius: ProfilePickerLayout.tileCornerRadius,
+            topCornerRadius: ProfilePickerLayout.tileTopCornerRadius
+        )
     }
 }
 
@@ -200,5 +220,8 @@ private enum ProfilePickerLayout {
     static let avatarSize: CGFloat = 200
     static let tilePadding: CGFloat = 24
     static let tileCornerRadius: CGFloat = PlozzTheme.Metrics.mediumCardCornerRadius
+    /// Rounder top corners so the card's top echoes the circular avatar sitting
+    /// just inside it, while the bottom keeps the standard card radius.
+    static let tileTopCornerRadius: CGFloat = 48
 }
 #endif

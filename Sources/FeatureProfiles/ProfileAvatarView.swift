@@ -1,16 +1,19 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreUI
 
 /// Renders a profile's avatar at `size` pt. Prefers the opt-in real photo
 /// (`Profile.avatarImageURL`) when present and reachable; otherwise falls
 /// back to the SF Symbol on the colored tile (`avatarSymbol` + `colorIndex`).
 ///
-/// While a photo is loading it shows a quiet neutral placeholder (not the
-/// colored symbol), so a photo profile never briefly flashes a stand-in icon
-/// behind the photo. The symbol fallback is reserved for symbol-only profiles
-/// and genuine load failures, so a stale or broken URL still yields something
-/// recognizable rather than an empty circle.
+/// Photos load through the shared `ArtworkImageCache` (via `FallbackAsyncImage`),
+/// so an already-decoded avatar renders on the first frame with no flash, the
+/// raw download is shared with the picker's background-color extraction, and a
+/// re-opened picker shows photos instantly. While a photo is still loading it
+/// shows a quiet neutral placeholder (not the colored symbol), so a photo
+/// profile never briefly flashes a stand-in icon behind the photo. The symbol
+/// fallback is reserved for symbol-only profiles and genuine load failures.
 public struct ProfileAvatarView: View {
     public let profile: Profile
     public let size: CGFloat
@@ -25,26 +28,10 @@ public struct ProfileAvatarView: View {
             if let urlString = profile.avatarImageURL?.trimmingCharacters(in: .whitespaces),
                !urlString.isEmpty,
                let url = URL(string: urlString) {
-                // Animate phase changes so the photo gently crossfades in over a
-                // neutral placeholder — never flashing the colored symbol tile
-                // underneath while the photo is still downloading.
-                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.35))) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image.resizable().scaledToFill()
-                            .transition(.opacity)
-                    case .empty:
-                        // Still loading: a quiet, adaptive placeholder — NOT the
-                        // colored symbol — so a photo profile never momentarily
-                        // shows a stand-in icon.
-                        loadingPlaceholder
-                    case .failure:
-                        // The photo genuinely failed: fall back to the symbol so
-                        // the tile still shows something recognizable.
-                        symbolFallback
-                    @unknown default:
-                        symbolFallback
-                    }
+                FallbackAsyncImage(urls: [url], variant: Self.variant(for: size)) {
+                    // Shown only when the photo genuinely fails to load — keeps the
+                    // tile recognizable instead of an empty circle.
+                    symbolFallback
                 }
             } else {
                 symbolFallback
@@ -54,10 +41,10 @@ public struct ProfileAvatarView: View {
         .clipShape(Circle())
     }
 
-    /// A neutral, theme-adaptive circle shown while a photo is loading. Keeps the
-    /// avatar slot calm and consistent instead of flashing the colored symbol.
-    private var loadingPlaceholder: some View {
-        Circle().fill(.quaternary)
+    /// Picks a cache variant sized to the avatar: a crisp source for the large
+    /// picker tiles, a cheap thumbnail for the small Settings rows.
+    private static func variant(for size: CGFloat) -> ArtworkImageVariant {
+        size >= 160 ? .posterCard : .musicThumbnail
     }
 
     /// Symbol on colored tile — the original avatar style. Also used as the

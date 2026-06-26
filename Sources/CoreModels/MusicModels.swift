@@ -11,6 +11,21 @@ import Foundation
 //
 // See `docs/music-library-proposal.md` and `MusicProvider.swift`.
 
+/// A reference to one backend's copy of a music item: which account hosts it and
+/// that backend's own item id. The unified library groups duplicate releases
+/// across servers (Plex + Jellyfin, up to many libraries) and keeps **every**
+/// contributing source here, so a future "play the best of N servers" selection
+/// is a value read off this set — not a re-architecture.
+public struct MusicSourceRef: Codable, Hashable, Sendable {
+    public var accountID: String
+    public var itemID: String
+
+    public init(accountID: String, itemID: String) {
+        self.accountID = accountID
+        self.itemID = itemID
+    }
+}
+
 /// The kind of a music-library node. Deliberately distinct from `MediaItemKind`
 /// so the video model never has to learn about audio.
 public enum MusicItemKind: String, Codable, Sendable, CaseIterable {
@@ -32,6 +47,10 @@ public struct MusicArtist: Codable, Hashable, Identifiable, Sendable {
     /// The owning `Account.id`, stamped by the aggregator when music from several
     /// providers is merged. `nil` for items returned directly by one provider.
     public var sourceAccountID: String?
+    /// Every backend copy of this artist after a cross-server de-dup merge.
+    /// Empty until merged; the merge fills it with one ref per contributing
+    /// library so the combined library knows where else this artist lives.
+    public var sources: [MusicSourceRef]
 
     public init(
         id: String,
@@ -39,7 +58,8 @@ public struct MusicArtist: Codable, Hashable, Identifiable, Sendable {
         artworkURL: URL? = nil,
         albumCount: Int? = nil,
         genres: [String] = [],
-        sourceAccountID: String? = nil
+        sourceAccountID: String? = nil,
+        sources: [MusicSourceRef] = []
     ) {
         self.id = id
         self.name = name
@@ -47,6 +67,7 @@ public struct MusicArtist: Codable, Hashable, Identifiable, Sendable {
         self.albumCount = albumCount
         self.genres = genres
         self.sourceAccountID = sourceAccountID
+        self.sources = sources
     }
 
     /// Returns a copy tagged as belonging to `accountID`.
@@ -70,6 +91,12 @@ public struct MusicAlbum: Codable, Hashable, Identifiable, Sendable {
     public var totalDuration: TimeInterval?
     public var genres: [String]
     public var sourceAccountID: String?
+    /// When the user last played this album, if the backend reports it. Powers a
+    /// provider-agnostic "Recently Played" ordering that merge-sorts correctly
+    /// across many libraries instead of trusting any one server's local order.
+    public var lastPlayedAt: Date?
+    /// Every backend copy of this album after a cross-server de-dup merge.
+    public var sources: [MusicSourceRef]
 
     public init(
         id: String,
@@ -81,7 +108,9 @@ public struct MusicAlbum: Codable, Hashable, Identifiable, Sendable {
         trackCount: Int? = nil,
         totalDuration: TimeInterval? = nil,
         genres: [String] = [],
-        sourceAccountID: String? = nil
+        sourceAccountID: String? = nil,
+        lastPlayedAt: Date? = nil,
+        sources: [MusicSourceRef] = []
     ) {
         self.id = id
         self.title = title
@@ -93,6 +122,8 @@ public struct MusicAlbum: Codable, Hashable, Identifiable, Sendable {
         self.totalDuration = totalDuration
         self.genres = genres
         self.sourceAccountID = sourceAccountID
+        self.lastPlayedAt = lastPlayedAt
+        self.sources = sources
     }
 
     public func taggingSource(_ accountID: String) -> MusicAlbum {
@@ -115,6 +146,10 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
     public var duration: TimeInterval?
     public var artworkURL: URL?
     public var sourceAccountID: String?
+    /// When the user last played this track, if the backend reports it. Powers
+    /// the unified "Recently Played" rail that merge-sorts songs and albums by
+    /// real play recency across every library, instead of any one server's order.
+    public var lastPlayedAt: Date?
 
     public init(
         id: String,
@@ -126,7 +161,8 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
         discNumber: Int? = nil,
         duration: TimeInterval? = nil,
         artworkURL: URL? = nil,
-        sourceAccountID: String? = nil
+        sourceAccountID: String? = nil,
+        lastPlayedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -138,6 +174,7 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
         self.duration = duration
         self.artworkURL = artworkURL
         self.sourceAccountID = sourceAccountID
+        self.lastPlayedAt = lastPlayedAt
     }
 
     public func taggingSource(_ accountID: String) -> MusicTrack {
@@ -157,6 +194,31 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// One entry in the unified "Recently Played" rail: either a whole album or a
+/// single song. Lets the rail interleave songs and albums ordered by real play
+/// recency. Codable so it persists in the landing cache snapshot.
+public enum RecentlyPlayedItem: Codable, Hashable, Identifiable, Sendable {
+    case album(MusicAlbum)
+    case track(MusicTrack)
+
+    /// Stable, type-prefixed identity for `ForEach` (an album and a track can
+    /// never collide even if their backend ids coincide).
+    public var id: String {
+        switch self {
+        case let .album(album): return "album:\(album.id)"
+        case let .track(track): return "track:\(track.id)"
+        }
+    }
+
+    /// Real last-played timestamp used to merge-sort the mixed rail.
+    public var lastPlayedAt: Date? {
+        switch self {
+        case let .album(album): return album.lastPlayedAt
+        case let .track(track): return track.lastPlayedAt
+        }
+    }
+}
+
 /// A user playlist of tracks.
 public struct MusicPlaylist: Codable, Hashable, Identifiable, Sendable {
     public var id: String
@@ -165,6 +227,8 @@ public struct MusicPlaylist: Codable, Hashable, Identifiable, Sendable {
     public var trackCount: Int?
     public var totalDuration: TimeInterval?
     public var sourceAccountID: String?
+    /// Every backend copy of this playlist after a cross-server de-dup merge.
+    public var sources: [MusicSourceRef]
 
     public init(
         id: String,
@@ -172,7 +236,8 @@ public struct MusicPlaylist: Codable, Hashable, Identifiable, Sendable {
         artworkURL: URL? = nil,
         trackCount: Int? = nil,
         totalDuration: TimeInterval? = nil,
-        sourceAccountID: String? = nil
+        sourceAccountID: String? = nil,
+        sources: [MusicSourceRef] = []
     ) {
         self.id = id
         self.title = title
@@ -180,6 +245,7 @@ public struct MusicPlaylist: Codable, Hashable, Identifiable, Sendable {
         self.trackCount = trackCount
         self.totalDuration = totalDuration
         self.sourceAccountID = sourceAccountID
+        self.sources = sources
     }
 
     public func taggingSource(_ accountID: String) -> MusicPlaylist {
@@ -194,11 +260,14 @@ public struct MusicGenre: Codable, Hashable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var sourceAccountID: String?
+    /// Every backend copy of this genre after a cross-server de-dup merge.
+    public var sources: [MusicSourceRef]
 
-    public init(id: String, name: String, sourceAccountID: String? = nil) {
+    public init(id: String, name: String, sourceAccountID: String? = nil, sources: [MusicSourceRef] = []) {
         self.id = id
         self.name = name
         self.sourceAccountID = sourceAccountID
+        self.sources = sources
     }
 
     public func taggingSource(_ accountID: String) -> MusicGenre {

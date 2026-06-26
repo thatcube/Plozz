@@ -22,7 +22,7 @@ public struct PosterCardView: View {
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
 
     public init(
@@ -425,7 +425,7 @@ public struct PosterCardView: View {
     }
 }
 
-private extension View {
+public extension View {
     /// Makes a card a focusable, tappable surface **without** wrapping it in a
     /// `Button`. On tvOS a `Button` (even `.buttonStyle(.plain)`) paints the
     /// system focus *platter* — a stark white plate behind the focused card that

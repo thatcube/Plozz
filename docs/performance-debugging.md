@@ -1,15 +1,36 @@
 # Performance Debugging Playbook (tvOS)
 
-A field guide for diagnosing **slowness, freezes, blank/no-artwork hangs, and
-memory crashes** in Plozz on a real Apple TV. Written so any agent or contributor
-can re-run the same process from scratch. It captures the methodology, the
-on-device tooling, how to read an Instruments trace without the GUI, and a
-worked case study (the navigation-churn freeze) that this process actually solved.
+A field guide for diagnosing **slowness, freezes, blank/no-artwork hangs, memory
+crashes, UI jank, and focus-navigation lag** in Plozz on a real Apple TV. Written
+so any agent or contributor can re-run the same process from scratch. It captures
+the methodology, the on-device tooling, how to read an Instruments trace without
+the GUI, and two worked case studies (a memory/CPU storm and a SwiftUI re-render
+storm) that this process actually solved.
 
 > Golden rule: **get ground truth before changing code.** tvOS performance bugs
 > are almost always the opposite of what they look like. "No artwork" was never an
-> artwork bug; it was JavaScriptCore garbage collection pinning every core. Measure
+> artwork bug; it was JavaScriptCore garbage collection pinning every core. "The
+> whole app is laggy" was a single SwiftUI view re-rendering 4×/second. Measure
 > first, theorise second.
+
+## When to use this playbook (invocation)
+
+Reach for this document the moment anyone reports — or you observe — any of:
+**"laggy", "janky", "stutters", "slow", "freezes", "hangs", "navigation lag",
+"focus feels heavy", "blank/no artwork", "memory crash", "gets killed", "fan
+spins", "drops frames".** The drill is always the same: **reproduce on the
+device → measure with the watchdog and/or `xctrace` → aggregate the trace →
+name the subsystem → fix at the source → re-measure.** Do not change code on a
+hunch before a measurement names the culprit.
+
+There are two dominant bug **classes** in this app; identify which one you're in
+early (the decision tree in §4 routes you):
+1. **Resource storm** — memory climbs and/or CPU pegs across cores; often a
+   background subsystem (JSC GC, decode, network fan-out). See §2, §6 (Case 1).
+2. **SwiftUI re-render storm** — the *main thread* is busy with the SwiftUI
+   attribute graph (`AG::Graph::*`, `Attribute.init`, `*.body.getter`) and/or
+   Liquid Glass (`SDFLayer`, `GlassContainer`), memory flat, no single heavy
+   binary. This is what makes navigation/focus "laggy". See §7, §8 (Case 2).
 
 ---
 
@@ -128,11 +149,23 @@ binary** (see `scripts`/the case study below for a ~30-line Python aggregator).
 Key reading tips:
 - Each `<row>` is one ~1 ms sample with a `<weight>` and a `<tagged-backtrace>`; the
   **first** `<frame>` is the innermost (leaf) — where the CPU actually was.
-- Frames are **not symbolicated** by default (`name` == address). You don't need
-  symbols to win: the **thread name** and **leaf binary** are usually enough.
+- Frames are **not symbolicated** by default in a *release* trace (`name` ==
+  address). You don't need symbols to win: the **thread name** and **leaf
+  binary** are usually enough. **But a Debug build (what you deploy with
+  `xcodebuild build` here) *does* ship symbols**, so an attached Debug trace
+  gives you real Swift symbol names like `NowPlayingView.body.getter`,
+  `MusicCard.body.getter`, `SDFLayer.updateSDFEffects`, and the
+  `Attribute.init<A>` closures. For a SwiftUI re-render storm those symbol names
+  *are* the decisive signal — aggregate by symbol, not just by binary (see §7).
 - Leaf binary `UNKNOWN` with no named binary often means **JIT code in anonymous
   memory** (i.e. JavaScriptCore executing). Treat a large UNKNOWN bucket as a clue,
   not noise — correlate it with JSC threads.
+- **Attach vs launch.** `--attach Plozz` (by name) profiles the *live* app
+  without relaunching — use it when the user is already in the laggy state and
+  you don't want to lose it. `--attach <pid>` is flaky between repeated runs;
+  prefer the name. `--launch com.thatcube.Plozz` relaunches the app (fresh home
+  screen) and is the most reliable when you control the repro from zero. Find the
+  live pid with `xcrun devicectl device info processes --device <devicectl-id> | grep -i plozz`.
 
 ---
 
@@ -146,6 +179,10 @@ Key reading tips:
    - Pegged CPU, modest memory → record **Time Profiler**, aggregate by thread.
    - `MAIN BLOCKED` but CPU idle → main actor is `await`-blocked → look for a
      synchronous wait / a `Task {}` that inherited `@MainActor`.
+   - **Main thread busy but memory flat, no single heavy binary, and the hot
+     symbols are `AG::Graph::*` / `Attribute.init` / `*.body.getter` /
+     `SDFLayer` / `GlassContainer`** → **SwiftUI re-render storm**, not a resource
+     storm. Jump to §7.
 3. **Aggregate the trace by thread, then by leaf binary.** Name the subsystem.
 4. **Find the trigger in code**, not just the symbol. Ask: *what user action
    speculatively starts this work, and is it cancelled when the user leaves?*
@@ -226,3 +263,145 @@ memory-pressure jetsam. The "no artwork" was collateral: every core was doing GC
 subsystem. Thread-level CPU aggregation named the real culprit (JSC GC) in one step,
 and the fix was about *when/how much* speculative work runs, not about artwork at
 all.
+
+---
+
+## 7. SwiftUI re-render storms (the second big class)
+
+The storm in §6 was about *resources* (memory/CPU across cores). The other
+recurring class is **the main thread doing too much SwiftUI work** — the app feels
+laggy/janky during navigation or playback even though memory is flat and no single
+binary dominates. The cause is almost always **a view body that re-evaluates far
+more often, or far more widely, than it needs to.**
+
+### How to recognise it in a Time Profiler trace
+
+Attach to the live app (`--attach Plozz`) while reproducing, export the
+`time-profile` table, then aggregate **by symbol** (Debug builds are
+symbolicated, so this works):
+
+```bash
+# rank every frame's symbol across all samples
+grep -oE '<frame [^>]*name="[^"]*"' /tmp/samples.xml \
+  | sed -E 's/.*name="([^"]*)".*/\1/' | sort | uniq -c | sort -rn | head -40
+```
+
+It's a re-render storm (not a resource storm) when the top of that list is
+SwiftUI machinery rather than your logic or a decoder:
+
+- `specialized ... closure ... in Attribute.init<A>(_:)` — the attribute graph
+  rebuilding nodes (a very common #1).
+- `AG::Graph::UpdateStack::update()`, `AG::Subgraph::update`,
+  `AG::Graph::propagate_dirty`, `AGGraphGetValue/SetOutputValue` — graph churn.
+- `SDFLayer.updateSDFEffects`, `GlassContainer.*.shapeBounds`,
+  `GlassEffectAnimatedPathSet.updateValue` — **Liquid Glass** recomputing its
+  signed-distance-field per element (it does this whenever a glass view is laid
+  out / focus-scaled).
+- One of your own views as the top *app* symbol: `SomeView.body.getter`.
+
+Three aggregations turn the raw samples into a diagnosis (≈20-line Python each;
+all parse the same exported XML — resolve `<thread id=.. fmt=..>`/`<thread ref=..>`
+to a name, the first `<frame>` is the innermost):
+
+1. **Main vs background split.** A re-render storm is overwhelmingly on
+   `Main Thread`. If 85–95 % of samples are main-thread, that's the smoking gun.
+2. **Per-time-bin distribution** (bucket sample-times into 5 s bins). A steady
+   non-zero floor when you *aren't* interacting means something animates/ticks
+   continuously (a `TimelineView`, a 4×/sec clock); spikes only during focus
+   moves mean it's focus-driven recompute.
+3. **Render-path bucketing** — count samples whose stack matches `AG::Graph|
+   Attribute.init` (swiftui-graph), `SDFLayer|GlassContainer|GlassEffect`
+   (liquid-glass), `ShadowEffect|_shadow` (shadow), `resample|_decodeImage|
+   rawPalette` (artwork decode), `commit_transaction|_copyRenderLayer`
+   (CA-commit). This tells you *which* cost to attack and, just as importantly,
+   **rules out** suspects (e.g. animated card shadows measured at 0.0 % here, so
+   don't waste time "optimising" them).
+
+Always also export `potential-hangs` (threshold 250 ms). Zero hangs + high main
+utilisation = "death by a thousand re-renders", not one big stall.
+
+### The fix patterns (in priority order)
+
+1. **Scope an `@Observable` dependency to the smallest view that needs it.**
+   With the Observation framework, SwiftUI tracks property reads **per view
+   body**. If `BigView.body` reads a property that changes often
+   (`controller.currentTime` ticks 4×/sec), the **entire** `BigView` re-evaluates
+   on every change — rebuilding everything downstream (artwork, buttons, their
+   `.glassEffect()` SDFs, backgrounds), none of which care about that property.
+   **Fix:** move the hot read into a tiny dedicated child view so only it
+   re-renders. A zero-size "sink" view that reads the value and forwards it into
+   an `@Observable`/`@State` model is a clean way to confine a high-frequency
+   clock (see `PlaybackClock` in `NowPlayingView.swift`).
+2. **Make off-screen content lazy so Liquid Glass doesn't stay live.** A
+   `.glassEffect()`/`plozzGlassCard` keeps recomputing its SDF as long as the
+   view exists. Eager `HStack`/`VStack` rails inside a `ScrollView` keep *every*
+   card (even off-screen) mounted and live. Use `LazyHStack`/`LazyVStack`/
+   `LazyVGrid` so only visible cards pay. (This was the home nav-lag fix; the
+   rest of the app already used lazy stacks.) Do **not** reach for
+   `GlassEffectContainer` to "fix" it — Home/Search prove it's unnecessary and it
+   can alter glass blending.
+3. **Throttle continuous animators.** A `TimelineView(.animation(minimumInterval:
+   …))` re-renders its subtree at that rate forever while visible. Keep the
+   interval as coarse as the effect allows and the animated subtree tiny (the
+   now-playing equaliser is 4 capsules at 12.5 Hz → measured ~0.5 %, fine; a
+   larger subtree at that rate would not be).
+4. **Mind the `GeometryReader` + `.transition` gotcha.** Children of a
+   `GeometryReader` do **not** inherit a `.move` transition — they snap to their
+   final position while siblings slide. To animate such a subtree as one unit,
+   keep it mounted and animate `.offset`/`.opacity` instead of insert/remove.
+
+### Profiling that ends in "no change" is a valid, valuable result
+
+Sometimes the measurement exonerates the code: the decode pipeline is already
+off-main, shadows are free, the hot path is intrinsic Liquid Glass that the lazy
+fix already minimised, and there's no rogue loop left. **Reporting "measured, it's
+clean, here's the breakdown" is a real outcome** — it stops you from cargo-culting
+"optimisations" that cost readability and fix nothing. Record the numbers so the
+next agent doesn't re-chase a ghost.
+
+---
+
+## 8. Case study: the "whole app is laggy" player re-render (June 2026)
+
+**Symptom.** Two reports: (a) the full-screen music player felt heavy, and (b)
+home-screen focus felt laggy when sweeping left↔right across Recently Played /
+Albums / Artists. "Everything is laggy" — sounds global.
+
+**What the tools said.**
+- Attached Time Profiler to the *live* app (`--attach Plozz`) during each repro.
+  No hangs ≥250 ms in either; memory flat. So: re-render storm, not a resource
+  storm.
+- **Player trace:** ~11 k samples in 30 s, ~3× the player's earlier baseline. Top
+  app symbol `NowPlayingView.body.getter`, with the whole player subtree
+  (artwork, meta, transport buttons, equaliser, lyrics) and a lot of
+  `Attribute.init`/`AnimatorState`/`FluidSpringAnimation` underneath. The body
+  read `controller.currentTime` (which ticks **4×/sec**, `CMTime(timescale: 4)`)
+  in three places, so the *entire* player re-evaluated four times a second.
+- **Home trace:** ~17 k samples in 60 s, **90 % on the main thread**. Render-path
+  bucketing: swiftui-graph 3.5 %, **liquid-glass SDF 3.4 %**, CA-commit 0.5 %,
+  blit/mask 0.4 %, **animated shadows 0.0 % (ruled out)**. Artwork
+  decode/resample/palette was **100 % off-main** (healthy). The now-playing pill
+  did **not** read `currentTime` (no 4×/sec pill re-render). The equaliser's
+  12.5 Hz `TimelineView` was only ~0.5 %.
+
+**Root cause & fix.**
+- *Player:* `NowPlayingView.body` depended on the 4×/sec clock. Moved the
+  `currentTime` reads into two tiny child views — `LyricsPanel` (the lyrics column
+  legitimately needs the position to highlight/scroll, so only it re-renders) and
+  `PlaybackClock` (a zero-size sink that forwards `currentTime`/`duration` into
+  the scrub model). The rest of the player stopped re-rendering during playback.
+  (commit `be020b3`.)
+- *Home:* the dominant cost was Liquid Glass SDF recompute on focus. The big
+  multiplier — **eager** music-landing rails keeping every off-screen card's glass
+  live — was converted to `LazyHStack` (matching the rest of the app), which
+  removed the off-screen glass cost with zero visual change. (commit `6d008de`.)
+  After that, the remaining glass cost is intrinsic per-focused-card recompute;
+  a 60 s re-profile found no rogue hot spot left — a legitimate "it's clean now"
+  result.
+
+**Lesson.** "Everything is laggy" was two *different*, local re-render problems,
+not one global one. Symbol-level aggregation (not just thread/binary) named both
+in one step each: a single high-frequency property read fanning out across a big
+body, and eager containers keeping Liquid Glass alive off-screen. The fixes were
+about **scoping dependencies and laziness**, and the render-path bucketing was as
+useful for *ruling out* the wrong suspect (shadows) as for finding the right one.

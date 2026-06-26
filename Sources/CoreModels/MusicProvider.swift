@@ -35,6 +35,35 @@ public protocol MusicProvider: Sendable {
     /// libraries don't over-fetch, mirroring `MediaProvider.items(in:kind:page:)`.
     func musicItems(in containerID: String, kind: MusicItemKind, page: PageRequest) async throws -> MusicPage
 
+    /// Library-scoped variant of the global browse: restricts an *empty-container*
+    /// (whole-library) query to `libraryIDs` — the user's currently **visible**
+    /// music libraries. `nil` (or a non-empty container) means "all libraries",
+    /// so existing behavior is unchanged. The default delegates to the unscoped
+    /// method; providers override to actually honor the scope.
+    func musicItems(in containerID: String, kind: MusicItemKind, page: PageRequest, libraryIDs: [String]?) async throws -> MusicPage
+
+    /// Recently played albums across the user's music libraries, most-recent
+    /// first, excluding never-played albums. Each returned album carries a
+    /// `lastPlayedAt` timestamp so callers can merge-sort recency *across* many
+    /// libraries/servers rather than trusting any single server's local order.
+    func recentlyPlayed(limit: Int) async throws -> [MusicAlbum]
+
+    /// Library-scoped variant of `recentlyPlayed`, restricted to the visible
+    /// `libraryIDs` (`nil` = all). The default delegates to the unscoped method.
+    func recentlyPlayed(limit: Int, libraryIDs: [String]?) async throws -> [MusicAlbum]
+
+    /// Recently played **tracks** (songs) across the user's music libraries,
+    /// most-recent first, excluding never-played tracks. Each returned track
+    /// carries a `lastPlayedAt` timestamp so callers can merge-sort recency
+    /// across libraries/servers and interleave songs with recently-played albums.
+    /// Optional capability — providers without it inherit the empty default.
+    func recentlyPlayedTracks(limit: Int) async throws -> [MusicTrack]
+
+    /// Library-scoped variant of `recentlyPlayedTracks`, restricted to the
+    /// visible `libraryIDs` (`nil` = all). The default delegates to the unscoped
+    /// method.
+    func recentlyPlayedTracks(limit: Int, libraryIDs: [String]?) async throws -> [MusicTrack]
+
     /// Full detail for a single artist.
     func artist(id: String) async throws -> MusicArtist
 
@@ -52,6 +81,13 @@ public protocol MusicProvider: Sendable {
     /// (its album or playlist), so the audio engine can build a next/previous
     /// queue. Pass `nil` to play the single track on its own.
     func audioPlaybackInfo(for trackID: String, queueContext: [String]?) async throws -> AudioPlaybackRequest
+
+    // MARK: Lyrics
+
+    /// Lyrics for a track, synced (timestamped) or plain, or `nil` when the
+    /// backend has none for this track. Optional capability — providers without
+    /// lyrics support inherit the no-op default below.
+    func lyrics(for trackID: String) async throws -> Lyrics?
 
     // MARK: Images
 
@@ -74,6 +110,24 @@ public extension MusicProvider {
     }
 
     func tracks(in containerID: String) async throws -> [MusicTrack] { [] }
+
+    func lyrics(for trackID: String) async throws -> Lyrics? { nil }
+
+    func recentlyPlayed(limit: Int) async throws -> [MusicAlbum] { [] }
+
+    func musicItems(in containerID: String, kind: MusicItemKind, page: PageRequest, libraryIDs: [String]?) async throws -> MusicPage {
+        try await musicItems(in: containerID, kind: kind, page: page)
+    }
+
+    func recentlyPlayed(limit: Int, libraryIDs: [String]?) async throws -> [MusicAlbum] {
+        try await recentlyPlayed(limit: limit)
+    }
+
+    func recentlyPlayedTracks(limit: Int) async throws -> [MusicTrack] { [] }
+
+    func recentlyPlayedTracks(limit: Int, libraryIDs: [String]?) async throws -> [MusicTrack] {
+        try await recentlyPlayedTracks(limit: limit)
+    }
 
     func musicImageURL(id: String, maxWidth: Int?) -> URL? { nil }
 }

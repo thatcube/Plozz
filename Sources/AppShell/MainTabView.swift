@@ -27,6 +27,10 @@ struct MainTabView: View {
     let spoilerModel: SpoilerSettingsModel
     let themeModel: ThemeSettingsModel
     let diagnosticsModel: DiagnosticsSettingsModel
+    let musicPlayerModel: MusicPlayerSettingsModel
+    /// App-scoped audio engine, owned by `AppState` so it survives the per-profile
+    /// subtree rebuild (this view is re-created with a new `.id` on profile switch).
+    let audioController: AudioPlaybackController
     let homeVisibility: HomeLibraryVisibilityModel
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
@@ -53,7 +57,6 @@ struct MainTabView: View {
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 
     @State private var discovery = LibraryDiscoveryModel()
-    @State private var audioController = AudioPlaybackController()
     @State private var musicAvailability = MusicAvailabilityModel()
     @Environment(\.colorScheme) private var systemColorScheme
 
@@ -93,7 +96,10 @@ struct MainTabView: View {
             if musicAvailability.hasMusic {
                 MusicTabView(
                     accounts: musicAvailability.detectedAccounts,
-                    controller: audioController
+                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
+                    controller: audioController,
+                    appTheme: themeModel.theme,
+                    musicPlayer: musicPlayerModel
                 )
                 .tabItem { Label("Music", systemImage: "music.note") }
             }
@@ -131,10 +137,42 @@ struct MainTabView: View {
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
-        .task(id: accounts.map(\.account.id)) {
-            await musicAvailability.probe(accounts: accounts)
+        .environment(musicPlayerModel)
+        .task(id: musicProbeKey) {
+            // Paint the Music tab on the first frame from the last persisted
+            // result (synchronous, no network) so tab visibility never waits on
+            // a probe. Re-runs when accounts or the per-profile library toggles
+            // change, so hiding/showing a music library live re-evaluates the tab.
+            musicAvailability.seedFromCache(accounts: accounts, visibility: homeVisibility.visibility)
+        }
+        .task(id: musicProbeKey, priority: .utility) {
+            // Everything network-bound runs at LOW priority and out of the
+            // critical launch window so the Home page (movies/TV) — the first
+            // thing the user sees — always wins the launch network/CPU. The
+            // synchronous seed above already shows the tab; the probe only
+            // refreshes its presence, so it can afford to yield.
+            await musicAvailability.probe(accounts: accounts, visibility: homeVisibility.visibility)
+            guard musicAvailability.hasMusic else { return }
+            // Defer the heavy multi-account landing prefetch until after Home has
+            // had the launch window. The Music tab still opens instantly from this
+            // warm cache once the user gets there; if they open it sooner,
+            // MusicLandingView's own load() fetches on demand (and caches) anyway.
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, musicAvailability.hasMusic else { return }
+            await MusicLandingPrefetch.warm(
+                accounts: musicAvailability.detectedAccounts,
+                visibleLibraryIDs: musicAvailability.visibleLibraryIDs
+            )
         }
         .mediaItemActionHandler(mediaItemActionHandler)
+    }
+
+    /// Restarts the music probe whenever the signed-in accounts or the per-profile
+    /// library-visibility toggles change.
+    private var musicProbeKey: String {
+        let ids = accounts.map(\.account.id).sorted()
+        let excluded = homeVisibility.visibility.excludedKeys.sorted()
+        return (ids + ["|"] + excluded).joined(separator: ",")
     }
 }
 

@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import FeatureAuth
 import FeatureDiscovery
+import FeatureMusic
 import FeatureProfiles
 import ProviderJellyfin
 import ProviderPlex
@@ -45,6 +46,9 @@ public final class AppState {
     public private(set) var spoilerModel: SpoilerSettingsModel
     public private(set) var themeModel: ThemeSettingsModel
     public private(set) var diagnosticsModel: DiagnosticsSettingsModel
+    /// The full-screen music player's per-profile look + "show extra info"
+    /// preference. Scoped per profile (rebuilt on profile switch) like the theme.
+    public private(set) var musicPlayerModel: MusicPlayerSettingsModel
     /// Which discovered libraries appear on the unified Home (opt-out). Shared
     /// live between the Settings checklist and Home so toggles take effect
     /// without a reload, and scoped per profile (rebuilt on profile switch) so
@@ -54,6 +58,13 @@ public final class AppState {
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
     public let profilesModel: ProfilesModel
+
+    /// The app-scoped audio playback engine. Created **once** and shared across
+    /// profile switches so there's only ever a single `AVQueuePlayer` — otherwise
+    /// switching profiles (which rebuilds the tab subtree) would spin up a second
+    /// controller and leave the previous profile's track audibly playing. Stopped
+    /// on profile switch so a new profile starts silent.
+    public let audioController = AudioPlaybackController()
     /// When `true`, `RootView` shows the profile picker instead of the signed-in
     /// UI (shown at launch with >1 profile, and from "Switch Profile").
     public private(set) var isChoosingProfile = false
@@ -159,6 +170,7 @@ public final class AppState {
         spoilerModel: SpoilerSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
+        musicPlayerModel: MusicPlayerSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
         ratingsProvider: (any ExternalRatingsProviding)? = nil,
         traktService: TraktService? = nil
@@ -174,7 +186,7 @@ public final class AppState {
         // them scoped to the active profile's namespace.
         let injected = captionModel != nil || spoilerModel != nil
             || themeModel != nil || diagnosticsModel != nil
-            || homeLibraryVisibilityModel != nil
+            || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
         self.usesInjectedModels = injected
         let ns = (profilesModel ?? self.profilesModel).activeNamespace
         // Seed Trakt with the active profile's namespace so its scrobbler and the
@@ -184,6 +196,7 @@ public final class AppState {
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         self.themeModel = themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
+        self.musicPlayerModel = musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         self.homeLibraryVisibilityModel = homeLibraryVisibilityModel
             ?? HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
     }
@@ -589,6 +602,7 @@ public final class AppState {
     /// dismisses the picker. Fast: a few `UserDefaults` reads plus an in-memory
     /// account recompute; content reloads async via the rebuilt view subtree.
     public func switchProfile(to id: String) {
+        audioController.stop()
         profilesModel.select(id)
         rebuildSettingsModels()
         updateTraktForActiveProfile()
@@ -733,6 +747,7 @@ public final class AppState {
         spoilerModel = SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         themeModel = ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
+        musicPlayerModel = MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
     }
 

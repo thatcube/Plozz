@@ -137,6 +137,164 @@ extension JellyfinProvider: MusicProvider {
         }
     }
 
+    // MARK: Recently played
+
+    public func recentlyPlayed(limit: Int) async throws -> [MusicAlbum] {
+        try await recentlyPlayed(limit: limit, parentIDs: nil)
+    }
+
+    public func recentlyPlayed(limit: Int, libraryIDs: [String]?) async throws -> [MusicAlbum] {
+        try await recentlyPlayed(limit: limit, parentIDs: libraryIDs)
+    }
+
+    private func recentlyPlayed(limit: Int, parentIDs: [String]?) async throws -> [MusicAlbum] {
+        guard limit > 0 else { return [] }
+
+        func query(parentID: String?) async -> [MusicAlbum] {
+            let response = try? await client.musicItems(
+                userID: session.userID,
+                parentID: parentID,
+                includeItemTypes: ["MusicAlbum"],
+                recursive: true,
+                startIndex: 0,
+                limit: limit,
+                sortBy: "DatePlayed",
+                sortOrder: "Descending",
+                filters: ["IsPlayed"]
+            )
+            return (response?.Items ?? []).map(mapAlbum(_:))
+        }
+
+        // Unscoped: one recursive query across every library. Scoped: query each
+        // visible view, then merge-sort by real recency across them.
+        guard let parentIDs, !parentIDs.isEmpty else {
+            return await query(parentID: nil)
+        }
+        var albums: [MusicAlbum] = []
+        for parentID in parentIDs {
+            albums += await query(parentID: parentID)
+        }
+        return Array(
+            albums
+                .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .prefix(limit)
+        )
+    }
+
+    public func recentlyPlayedTracks(limit: Int) async throws -> [MusicTrack] {
+        try await recentlyPlayedTracks(limit: limit, parentIDs: nil)
+    }
+
+    public func recentlyPlayedTracks(limit: Int, libraryIDs: [String]?) async throws -> [MusicTrack] {
+        try await recentlyPlayedTracks(limit: limit, parentIDs: libraryIDs)
+    }
+
+    private func recentlyPlayedTracks(limit: Int, parentIDs: [String]?) async throws -> [MusicTrack] {
+        guard limit > 0 else { return [] }
+
+        func query(parentID: String?) async -> [MusicTrack] {
+            let response = try? await client.musicItems(
+                userID: session.userID,
+                parentID: parentID,
+                includeItemTypes: ["Audio"],
+                recursive: true,
+                startIndex: 0,
+                limit: limit,
+                sortBy: "DatePlayed",
+                sortOrder: "Descending",
+                filters: ["IsPlayed"]
+            )
+            return (response?.Items ?? []).map(mapTrack(_:))
+        }
+
+        guard let parentIDs, !parentIDs.isEmpty else {
+            return await query(parentID: nil)
+        }
+        var tracks: [MusicTrack] = []
+        for parentID in parentIDs {
+            tracks += await query(parentID: parentID)
+        }
+        return Array(
+            tracks
+                .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .prefix(limit)
+        )
+    }
+
+    // MARK: Library-scoped browse
+
+    public func musicItems(in containerID: String, kind: MusicItemKind, page: PageRequest, libraryIDs: [String]?) async throws -> MusicPage {
+        // Scope only applies to the whole-library (empty container) query; a
+        // non-empty container is already an artist/album scope. Playlists are
+        // account-global in Jellyfin (not under a music view), so they ignore the
+        // library scope too.
+        guard containerID.isEmpty, kind != .playlist, let libraryIDs, !libraryIDs.isEmpty else {
+            return try await musicItems(in: containerID, kind: kind, page: page)
+        }
+        if libraryIDs.count == 1 {
+            return try await libraryPage(kind: kind, parentID: libraryIDs[0], startIndex: page.startIndex, limit: page.limit, sort: page.sort)
+        }
+        return try await pagedAcrossLibraries(kind: kind, page: page, parentIDs: libraryIDs)
+    }
+
+    /// One page of a single music *view* (library), scoped via `ParentId`.
+    private func libraryPage(kind: MusicItemKind, parentID: String, startIndex: Int, limit: Int, sort: CoreModels.SortDescriptor) async throws -> MusicPage {
+        let sortOrder = JellyfinClient.sortOrder(for: sort.direction)
+        switch kind {
+        case .artist:
+            let response = try await client.artists(userID: session.userID, parentID: parentID, startIndex: startIndex, limit: limit, sortOrder: sortOrder)
+            return MusicPage(artists: response.Items.map(mapArtist(_:)), startIndex: startIndex, totalCount: response.TotalRecordCount ?? (startIndex + response.Items.count))
+        case .album:
+            let response = try await client.musicItems(userID: session.userID, parentID: parentID, includeItemTypes: ["MusicAlbum"], recursive: true, startIndex: startIndex, limit: limit, sortBy: "SortName", sortOrder: sortOrder)
+            return MusicPage(albums: response.Items.map(mapAlbum(_:)), startIndex: startIndex, totalCount: response.TotalRecordCount ?? (startIndex + response.Items.count))
+        case .track:
+            let response = try await client.musicItems(userID: session.userID, parentID: parentID, includeItemTypes: ["Audio"], recursive: true, startIndex: startIndex, limit: limit, sortBy: "ParentIndexNumber,IndexNumber,SortName", sortOrder: sortOrder)
+            return MusicPage(tracks: response.Items.map(mapTrack(_:)), startIndex: startIndex, totalCount: response.TotalRecordCount ?? (startIndex + response.Items.count))
+        case .genre:
+            let response = try await client.musicGenres(userID: session.userID, parentID: parentID, startIndex: startIndex, limit: limit)
+            return MusicPage(genres: response.Items.map { MusicGenre(id: $0.Id, name: $0.Name ?? "Genre") }, startIndex: startIndex, totalCount: response.TotalRecordCount ?? (startIndex + response.Items.count))
+        case .playlist:
+            return MusicPage(startIndex: startIndex, totalCount: 0)
+        }
+    }
+
+    /// Pages a music kind across several visible views as one virtual list,
+    /// probing each view's total then fetching only the overlapping slice — the
+    /// Jellyfin analogue of the Plex multi-section walk. Rare (most Jellyfin
+    /// servers have a single music view), so correctness over micro-optimisation.
+    private func pagedAcrossLibraries(kind: MusicItemKind, page: PageRequest, parentIDs: [String]) async throws -> MusicPage {
+        var totals: [Int] = []
+        for parentID in parentIDs {
+            let probe = try await libraryPage(kind: kind, parentID: parentID, startIndex: 0, limit: 0, sort: page.sort)
+            totals.append(probe.totalCount)
+        }
+        let grandTotal = totals.reduce(0, +)
+
+        var result = MusicPage(startIndex: page.startIndex, totalCount: grandTotal)
+        var remaining = page.limit
+        var globalStart = page.startIndex
+        var offset = 0
+        for (i, parentID) in parentIDs.enumerated() {
+            if remaining <= 0 { break }
+            let count = totals[i]
+            if globalStart >= offset + count { offset += count; continue }
+            let localStart = max(0, globalStart - offset)
+            let take = min(remaining, count - localStart)
+            if take > 0 {
+                let slice = try await libraryPage(kind: kind, parentID: parentID, startIndex: localStart, limit: take, sort: page.sort)
+                result.artists += slice.artists
+                result.albums += slice.albums
+                result.tracks += slice.tracks
+                result.playlists += slice.playlists
+                result.genres += slice.genres
+                remaining -= take
+                globalStart += take
+            }
+            offset += count
+        }
+        return result
+    }
+
     // MARK: Detail
 
     public func artist(id: String) async throws -> MusicArtist {
@@ -194,6 +352,33 @@ extension JellyfinProvider: MusicProvider {
             isTranscoding: quality.map { !$0.isDirectPlay } ?? false,
             quality: quality
         )
+    }
+
+    // MARK: Lyrics
+
+    public func lyrics(for trackID: String) async throws -> Lyrics? {
+        // The server answers 404 when a track has no lyrics; treat any failure as
+        // "no lyrics" so the UI shows its empty state rather than an error.
+        guard let dto = try? await client.lyrics(itemID: trackID),
+              let rawLines = dto.Lyrics, !rawLines.isEmpty else {
+            return nil
+        }
+        var lines = rawLines.map { line in
+            LyricLine(
+                text: line.Text ?? "",
+                start: JellyfinTicks.seconds(fromTicks: line.Start)
+            )
+        }
+        // Sort synced lines by timestamp (parity with the LRC and Plex-JSON
+        // parsers). The active-line scan in the player relies on ascending order,
+        // so guard against a server that returns timed lines out of order. Only
+        // sort when there are timestamps — reordering plain (unsynced) lines
+        // would scramble their intended reading order.
+        if lines.contains(where: { $0.start != nil }) {
+            lines.sort { ($0.start ?? 0) < ($1.start ?? 0) }
+        }
+        let lyrics = Lyrics(lines: lines)
+        return lyrics.isEmpty ? nil : lyrics.taggingSource(.jellyfin)
     }
 
     /// Containers AVPlayer direct-plays on tvOS — must match the `Container`
@@ -262,7 +447,8 @@ extension JellyfinProvider: MusicProvider {
             artworkURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 500),
             trackCount: dto.ChildCount,
             totalDuration: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
-            genres: dto.Genres ?? []
+            genres: dto.Genres ?? [],
+            lastPlayedAt: JellyfinProvider.parseDate(dto.UserData?.LastPlayedDate)
         )
     }
 
@@ -279,7 +465,8 @@ extension JellyfinProvider: MusicProvider {
             trackNumber: dto.IndexNumber,
             discNumber: dto.ParentIndexNumber,
             duration: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
-            artworkURL: artwork
+            artworkURL: artwork,
+            lastPlayedAt: JellyfinProvider.parseDate(dto.UserData?.LastPlayedDate)
         )
     }
 

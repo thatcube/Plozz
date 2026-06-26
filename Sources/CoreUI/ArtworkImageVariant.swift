@@ -33,6 +33,11 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
     /// Full-bleed detail-hero backdrops and ambient samplers. High fidelity but
     /// bounded below 4K so a single backdrop never retains a multi-megabyte bitmap.
     case heroBackdrop
+    /// Small square track thumbnails in album/playlist track lists. A 72pt row
+    /// thumbnail at 2x is ~144px; cap at 256 for crispness while keeping the
+    /// decoded bitmap tiny, so a long playlist (thousands of rows) can prefetch
+    /// upcoming art ahead of scroll without retaining large bitmaps.
+    case musicThumbnail
 
     /// Longest-edge cap (in pixels) applied when decoding, or `nil` to decode at the
     /// source's native size. The cap never *upscales*: a source smaller than the cap
@@ -40,6 +45,7 @@ public enum ArtworkImageVariant: String, Sendable, CaseIterable {
     public var maxPixelSize: Int? {
         switch self {
         case .original: return nil
+        case .musicThumbnail: return 256
         case .posterCard: return 960
         case .landscapeCard: return 1_200
         case .heroBackdrop: return 2_000

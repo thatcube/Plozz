@@ -360,6 +360,7 @@ struct AlbumDetailView: View {
             artworkFallback: viewModel.album.artworkURL,
             nowPlayingTrackID: controller.currentTrack?.id,
             isPlaying: controller.isPlaying,
+            hasNowPlaying: controller.hasActivePlayback,
             onPlayTrack: { play(from: $0) }
         ) {
             infoColumn
@@ -440,6 +441,7 @@ struct PlaylistDetailView: View {
             showArtwork: true,
             nowPlayingTrackID: controller.currentTrack?.id,
             isPlaying: controller.isPlaying,
+            hasNowPlaying: controller.hasActivePlayback,
             onPlayTrack: { play(from: $0) }
         ) {
             infoColumn
@@ -535,8 +537,21 @@ struct MusicDetailLayout<InfoColumn: View>: View {
     var showArtwork: Bool = false
     var nowPlayingTrackID: String? = nil
     var isPlaying: Bool = false
+    /// Whether the Now Playing card is currently shown in the info column. When
+    /// it isn't, the (shorter) column is nudged down so it reads as more
+    /// vertically centred, while both column tops stay aligned.
+    var hasNowPlaying: Bool = false
     let onPlayTrack: (MusicTrack) -> Void
     @ViewBuilder var info: InfoColumn
+
+    // Pull the whole detail up under tvOS's reserved top safe-area inset so the
+    // artwork + track list don't sit too low. With the Now Playing card present
+    // this yields even top/bottom padding; without it the column is ~one card
+    // shorter, so add roughly half a card's height back to re-centre it.
+    private var topPadding: CGFloat {
+        let base = PlozzTheme.Metrics.screenPadding - 80
+        return hasNowPlaying ? base : base + 54
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -571,10 +586,9 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.bottom, PlozzTheme.Metrics.screenPadding)
-            // Pull the whole detail (both columns) up toward the top of the page;
-            // tvOS reserves a sizable top safe-area inset that otherwise leaves
-            // the artwork and track list sitting too low.
-            .padding(.top, PlozzTheme.Metrics.screenPadding - 80)
+            // Both columns share this top padding, so their tops always align;
+            // it shrinks when the Now Playing card is present (taller column).
+            .padding(.top, topPadding)
         }
     }
 }

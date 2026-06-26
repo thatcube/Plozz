@@ -197,11 +197,31 @@ struct AlbumCard: View {
     }
 }
 
+/// A recently-played **song** card for the unified Recently Played rail. Square
+/// artwork with a music-note placeholder; tapping plays the track immediately
+/// (it routes to playback, not to a detail page like albums/artists do).
+struct RecentTrackCard: View {
+    let track: MusicTrack
+    var width: CGFloat = 260
+    let action: () -> Void
+
+    var body: some View {
+        MusicCard(
+            artworkURL: track.artworkURL,
+            systemPlaceholder: "music.note",
+            width: width,
+            title: track.title,
+            subtitle: track.artistName,
+            asyncFallbackURL: MusicArtworkFallback.albumCover(title: track.albumTitle ?? track.title, artist: track.artistName),
+            action: action
+        )
+    }
+}
+
 struct ArtistCard: View {
     let artist: MusicArtist
     var width: CGFloat = 240
     let action: () -> Void
-
     var body: some View {
         MusicCard(
             artworkURL: artist.artworkURL,

@@ -9,6 +9,7 @@ struct MusicLandingView: View {
     @State var viewModel: MusicLandingViewModel
     let controller: AudioPlaybackController
     let onSelectRoute: (MusicRoute) -> Void
+    let onPlayTrack: (MusicTrack) -> Void
     var layout: MusicLandingLayout = .default
 
     var body: some View {
@@ -59,8 +60,13 @@ struct MusicLandingView: View {
         case .recentlyPlayed:
             if !content.recentlyPlayed.isEmpty {
                 MusicRow(title: "Recently Played", trailing: trailing) {
-                    ForEach(content.recentlyPlayed) { album in
-                        AlbumCard(album: album) { onSelectRoute(.album(album)) }
+                    ForEach(content.recentlyPlayed) { item in
+                        switch item {
+                        case let .album(album):
+                            AlbumCard(album: album) { onSelectRoute(.album(album)) }
+                        case let .track(track):
+                            RecentTrackCard(track: track) { onPlayTrack(track) }
+                        }
                     }
                 }
             }

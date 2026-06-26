@@ -162,6 +162,37 @@ extension PlexProvider: MusicProvider {
         )
     }
 
+    public func recentlyPlayedTracks(limit: Int) async throws -> [MusicTrack] {
+        try await recentlyPlayedTracks(limit: limit, sectionFilter: nil)
+    }
+
+    public func recentlyPlayedTracks(limit: Int, libraryIDs: [String]?) async throws -> [MusicTrack] {
+        try await recentlyPlayedTracks(limit: limit, sectionFilter: libraryIDs)
+    }
+
+    private func recentlyPlayedTracks(limit: Int, sectionFilter: [String]?) async throws -> [MusicTrack] {
+        guard limit > 0 else { return [] }
+        let sections = try await musicSectionDirectories(sectionFilter: sectionFilter).compactMap(\.key)
+        guard !sections.isEmpty else { return [] }
+
+        var tracks: [MusicTrack] = []
+        for sectionID in sections {
+            let metas = (try? await client.recentlyViewedAlbums(
+                sectionID: sectionID,
+                type: PlexMusicType.track,
+                limit: limit
+            )) ?? []
+            tracks += metas
+                .filter { ($0.viewCount ?? 0) >= 1 && ($0.lastViewedAt ?? 0) > 0 }
+                .map(mapTrack(_:))
+        }
+        return Array(
+            tracks
+                .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .prefix(limit)
+        )
+    }
+
     // MARK: Detail
 
     public func album(id: String) async throws -> MusicAlbum {
@@ -368,7 +399,8 @@ extension PlexProvider: MusicProvider {
             trackNumber: dto.index,
             discNumber: dto.parentIndex,
             duration: PlexTime.seconds(fromMilliseconds: dto.duration),
-            artworkURL: artwork(dto.thumb ?? dto.parentThumb ?? dto.grandparentThumb)
+            artworkURL: artwork(dto.thumb ?? dto.parentThumb ?? dto.grandparentThumb),
+            lastPlayedAt: dto.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
     }
 

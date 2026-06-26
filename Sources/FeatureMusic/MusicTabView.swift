@@ -45,6 +45,7 @@ public struct MusicTabView: View {
                 viewModel: MusicLandingViewModel(context: context, cache: .shared),
                 controller: controller,
                 onSelectRoute: { path.append($0) },
+                onPlayTrack: { playTrack($0) },
                 layout: layoutModel.layout
             )
             .navigationDestination(for: MusicRoute.self) { route in
@@ -67,9 +68,23 @@ public struct MusicTabView: View {
         }
     }
 
+    /// Plays a single recently-played song from the landing rail. Resolves the
+    /// owning provider from the track's source account so the same engine (stream
+    /// + lyrics resolvers) used by album/playlist playback drives it, then starts
+    /// a one-track queue — which also flips into the full-screen player via the
+    /// playbackStartToken observer above.
+    private func playTrack(_ track: MusicTrack) {
+        guard let provider = context.provider(for: track.sourceAccountID) else { return }
+        controller.play(
+            tracks: [track],
+            startIndex: 0,
+            resolveStreamURL: streamURLResolver(for: provider),
+            resolveLyrics: lyricsResolver(for: provider)
+        )
+    }
+
     @ViewBuilder
-    private func destination(for route: MusicRoute) -> some View {
-        // Hide the top tab bar once the user drills one level in (grid, artist,
+    private func destination(for route: MusicRoute) -> some View {        // Hide the top tab bar once the user drills one level in (grid, artist,
         // album, playlist, etc.) so detail screens get the full height; it
         // reappears automatically when they pop back to the landing screen.
         Group {

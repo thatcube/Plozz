@@ -146,6 +146,10 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
     public var duration: TimeInterval?
     public var artworkURL: URL?
     public var sourceAccountID: String?
+    /// When the user last played this track, if the backend reports it. Powers
+    /// the unified "Recently Played" rail that merge-sorts songs and albums by
+    /// real play recency across every library, instead of any one server's order.
+    public var lastPlayedAt: Date?
 
     public init(
         id: String,
@@ -157,7 +161,8 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
         discNumber: Int? = nil,
         duration: TimeInterval? = nil,
         artworkURL: URL? = nil,
-        sourceAccountID: String? = nil
+        sourceAccountID: String? = nil,
+        lastPlayedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -169,6 +174,7 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
         self.duration = duration
         self.artworkURL = artworkURL
         self.sourceAccountID = sourceAccountID
+        self.lastPlayedAt = lastPlayedAt
     }
 
     public func taggingSource(_ accountID: String) -> MusicTrack {
@@ -184,6 +190,31 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
         case let (artist?, nil): return artist
         case let (nil, album?): return album
         default: return nil
+        }
+    }
+}
+
+/// One entry in the unified "Recently Played" rail: either a whole album or a
+/// single song. Lets the rail interleave songs and albums ordered by real play
+/// recency. Codable so it persists in the landing cache snapshot.
+public enum RecentlyPlayedItem: Codable, Hashable, Identifiable, Sendable {
+    case album(MusicAlbum)
+    case track(MusicTrack)
+
+    /// Stable, type-prefixed identity for `ForEach` (an album and a track can
+    /// never collide even if their backend ids coincide).
+    public var id: String {
+        switch self {
+        case let .album(album): return "album:\(album.id)"
+        case let .track(track): return "track:\(track.id)"
+        }
+    }
+
+    /// Real last-played timestamp used to merge-sort the mixed rail.
+    public var lastPlayedAt: Date? {
+        switch self {
+        case let .album(album): return album.lastPlayedAt
+        case let .track(track): return track.lastPlayedAt
         }
     }
 }

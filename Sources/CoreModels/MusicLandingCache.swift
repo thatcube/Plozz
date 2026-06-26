@@ -25,14 +25,14 @@ public final class MusicLandingCache: Sendable {
 
     /// A point-in-time snapshot of the merged landing content.
     public struct Snapshot: Codable, Sendable, Equatable {
-        public var recentlyPlayed: [MusicAlbum]
+        public var recentlyPlayed: [RecentlyPlayedItem]
         public var albums: [MusicAlbum]
         public var artists: [MusicArtist]
         public var playlists: [MusicPlaylist]
         public var savedAt: Date
 
         public init(
-            recentlyPlayed: [MusicAlbum] = [],
+            recentlyPlayed: [RecentlyPlayedItem] = [],
             albums: [MusicAlbum] = [],
             artists: [MusicArtist] = [],
             playlists: [MusicPlaylist] = [],
@@ -53,7 +53,7 @@ public final class MusicLandingCache: Sendable {
     /// Schema-versioned directory. **Bump when the music models' coding changes**
     /// so a device with snapshots from an older shape starts fresh (decode
     /// failures are treated as a miss; a bump also reclaims orphaned files).
-    private static let schemaDirName = "plozz-music-landing-cache-v1"
+    private static let schemaDirName = "plozz-music-landing-cache-v2"
     private static let schemaDirPrefix = "plozz-music-landing-cache"
 
     private let directory: URL?

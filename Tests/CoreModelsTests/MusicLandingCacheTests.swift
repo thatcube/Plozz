@@ -21,7 +21,7 @@ final class MusicLandingCacheTests: XCTestCase {
         defer { cleanup(dir) }
 
         let snapshot = MusicLandingCache.Snapshot(
-            recentlyPlayed: [MusicAlbum(id: "1", title: "Rumours", artistName: "Fleetwood Mac")],
+            recentlyPlayed: [.album(MusicAlbum(id: "1", title: "Rumours", artistName: "Fleetwood Mac"))],
             albums: [MusicAlbum(id: "2", title: "Blue", artistName: "Joni Mitchell")],
             artists: [MusicArtist(id: "a1", name: "Queen")],
             playlists: [MusicPlaylist(id: "p1", title: "Roadtrip")]
@@ -30,7 +30,7 @@ final class MusicLandingCacheTests: XCTestCase {
 
         let read = await cache.snapshot(for: "key")
         XCTAssertEqual(read?.albums.first?.title, "Blue")
-        XCTAssertEqual(read?.recentlyPlayed.first?.title, "Rumours")
+        XCTAssertEqual(read?.recentlyPlayed.first?.id, "album:1")
         XCTAssertEqual(read?.artists.first?.name, "Queen")
         XCTAssertEqual(read?.playlists.first?.title, "Roadtrip")
     }

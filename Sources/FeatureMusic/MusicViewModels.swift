@@ -11,13 +11,13 @@ import CoreModels
 @Observable
 public final class MusicLandingViewModel {
     public struct Content: Equatable, Sendable {
-        public var recentlyPlayed: [MusicAlbum]
+        public var recentlyPlayed: [RecentlyPlayedItem]
         public var albums: [MusicAlbum]
         public var artists: [MusicArtist]
         public var playlists: [MusicPlaylist]
 
         public init(
-            recentlyPlayed: [MusicAlbum] = [],
+            recentlyPlayed: [RecentlyPlayedItem] = [],
             albums: [MusicAlbum] = [],
             artists: [MusicArtist] = [],
             playlists: [MusicPlaylist] = []
@@ -134,6 +134,10 @@ public final class MusicLandingViewModel {
                     let albums = (try? await account.provider.recentlyPlayed(limit: sampleSize, libraryIDs: account.libraryIDs)) ?? []
                     return .recent(account: index, albums: albums)
                 }
+                group.addTask {
+                    let tracks = (try? await account.provider.recentlyPlayedTracks(limit: sampleSize, libraryIDs: account.libraryIDs)) ?? []
+                    return .recentTracks(account: index, tracks: tracks)
+                }
             }
             var results: [Partial] = []
             for await result in group { results.append(result) }
@@ -147,6 +151,7 @@ public final class MusicLandingViewModel {
         var artists: [MusicArtist] = []
         var playlists: [MusicPlaylist] = []
         var recents: [MusicAlbum] = []
+        var recentTracks: [MusicTrack] = []
         for (index, account) in accounts.enumerated() {
             for entry in fetched {
                 switch entry {
@@ -160,17 +165,20 @@ public final class MusicLandingViewModel {
                     }
                 case let .recent(acc, recentAlbums) where acc == index:
                     recents += recentAlbums.map { $0.taggingSource(account.accountID) }
+                case let .recentTracks(acc, tracks) where acc == index:
+                    recentTracks += tracks.map { $0.taggingSource(account.accountID) }
                 default:
                     break
                 }
             }
         }
 
-        // Collapse cross-server duplicates through the single identity/merge seam
-        // (recents merge-sorted by real play recency first), so Plex + Jellyfin
-        // read as one combined, de-duplicated library.
+        // Collapse cross-server duplicates through the single identity/merge seam.
+        // The Recently Played rail interleaves recently-played songs *and* albums
+        // ordered by real play recency, so Plex + Jellyfin read as one combined,
+        // de-duplicated library.
         return Content(
-            recentlyPlayed: MusicMerge.recentlyPlayedAlbums(recents, limit: sampleSize),
+            recentlyPlayed: MusicMerge.recentlyPlayedItems(albums: recents, tracks: recentTracks, limit: sampleSize),
             albums: Array(MusicMerge.albums(albums).prefix(sampleSize)),
             artists: Array(MusicMerge.artists(artists).prefix(sampleSize)),
             playlists: Array(MusicMerge.playlists(playlists).prefix(sampleSize))
@@ -181,6 +189,7 @@ public final class MusicLandingViewModel {
     private enum Partial: Sendable {
         case items(account: Int, kind: MusicItemKind, page: MusicPage?)
         case recent(account: Int, albums: [MusicAlbum])
+        case recentTracks(account: Int, tracks: [MusicTrack])
     }
 }
 

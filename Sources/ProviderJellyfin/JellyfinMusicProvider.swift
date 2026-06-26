@@ -181,6 +181,46 @@ extension JellyfinProvider: MusicProvider {
         )
     }
 
+    public func recentlyPlayedTracks(limit: Int) async throws -> [MusicTrack] {
+        try await recentlyPlayedTracks(limit: limit, parentIDs: nil)
+    }
+
+    public func recentlyPlayedTracks(limit: Int, libraryIDs: [String]?) async throws -> [MusicTrack] {
+        try await recentlyPlayedTracks(limit: limit, parentIDs: libraryIDs)
+    }
+
+    private func recentlyPlayedTracks(limit: Int, parentIDs: [String]?) async throws -> [MusicTrack] {
+        guard limit > 0 else { return [] }
+
+        func query(parentID: String?) async -> [MusicTrack] {
+            let response = try? await client.musicItems(
+                userID: session.userID,
+                parentID: parentID,
+                includeItemTypes: ["Audio"],
+                recursive: true,
+                startIndex: 0,
+                limit: limit,
+                sortBy: "DatePlayed",
+                sortOrder: "Descending",
+                filters: ["IsPlayed"]
+            )
+            return (response?.Items ?? []).map(mapTrack(_:))
+        }
+
+        guard let parentIDs, !parentIDs.isEmpty else {
+            return await query(parentID: nil)
+        }
+        var tracks: [MusicTrack] = []
+        for parentID in parentIDs {
+            tracks += await query(parentID: parentID)
+        }
+        return Array(
+            tracks
+                .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .prefix(limit)
+        )
+    }
+
     // MARK: Library-scoped browse
 
     public func musicItems(in containerID: String, kind: MusicItemKind, page: PageRequest, libraryIDs: [String]?) async throws -> MusicPage {
@@ -425,7 +465,8 @@ extension JellyfinProvider: MusicProvider {
             trackNumber: dto.IndexNumber,
             discNumber: dto.ParentIndexNumber,
             duration: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
-            artworkURL: artwork
+            artworkURL: artwork,
+            lastPlayedAt: JellyfinProvider.parseDate(dto.UserData?.LastPlayedDate)
         )
     }
 

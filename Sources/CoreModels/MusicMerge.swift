@@ -64,6 +64,13 @@ public enum MusicIdentity {
     public static func key(for genre: MusicGenre) -> String {
         "genre|\(normalize(genre.name))"
     }
+
+    /// A track is "the same song" when its title, primary artist **and** album
+    /// normalize equally — enough to collapse the same song surfaced by two
+    /// servers without merging distinct songs that merely share a title.
+    public static func key(for track: MusicTrack) -> String {
+        "track|\(normalize(track.title))|\(normalize(track.artistName ?? ""))|\(normalize(track.albumTitle ?? ""))"
+    }
 }
 
 /// Merges music items gathered from several libraries into one combined,
@@ -140,6 +147,51 @@ public enum MusicMerge {
             }
         }
         return Array(albums(sorted).prefix(max(0, limit)))
+    }
+
+    /// De-duplicates recently-played tracks across servers, keeping the first
+    /// (most-recent, since callers pre-sort) occurrence of each song. `MusicTrack`
+    /// has no `sources` accounting, so this is a plain first-wins de-dup.
+    public static func tracks(_ input: [MusicTrack]) -> [MusicTrack] {
+        var seen = Set<String>()
+        var out: [MusicTrack] = []
+        for track in input where seen.insert(MusicIdentity.key(for: track)).inserted {
+            out.append(track)
+        }
+        return out
+    }
+
+    /// Builds the recently-played **tracks** rail: order by real last-played
+    /// time (most recent first), de-dup the same song across servers, then trim.
+    public static func recentlyPlayedTracks(_ input: [MusicTrack], limit: Int) -> [MusicTrack] {
+        let sorted = input.sorted { lhs, rhs in
+            switch (lhs.lastPlayedAt, rhs.lastPlayedAt) {
+            case let (l?, r?): return l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return false
+            }
+        }
+        return Array(tracks(sorted).prefix(max(0, limit)))
+    }
+
+    /// Builds the unified "Recently Played" rail by interleaving recently-played
+    /// **songs and albums** ordered by real play recency (most recent first).
+    /// Each side is de-duplicated first, then the two are merged and trimmed so
+    /// the rail stays at most `limit` cards regardless of the songs/albums split.
+    public static func recentlyPlayedItems(albums: [MusicAlbum], tracks: [MusicTrack], limit: Int) -> [RecentlyPlayedItem] {
+        let trimmedAlbums = recentlyPlayedAlbums(albums, limit: max(0, limit))
+        let trimmedTracks = recentlyPlayedTracks(tracks, limit: max(0, limit))
+        let items = trimmedAlbums.map(RecentlyPlayedItem.album) + trimmedTracks.map(RecentlyPlayedItem.track)
+        let sorted = items.sorted { lhs, rhs in
+            switch (lhs.lastPlayedAt, rhs.lastPlayedAt) {
+            case let (l?, r?): return l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return false
+            }
+        }
+        return Array(sorted.prefix(max(0, limit)))
     }
 
     private static func ref(for album: MusicAlbum) -> MusicSourceRef {

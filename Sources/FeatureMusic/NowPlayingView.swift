@@ -137,19 +137,19 @@ struct NowPlayingView: View {
     @ViewBuilder
     private var qualityBadge: some View {
         if let quality = controller.currentQuality {
-            HStack(spacing: 10) {
+            HStack(spacing: 5) {
                 Image(systemName: quality.isDirectPlay ? "waveform" : "arrow.triangle.2.circlepath")
-                    .font(.headline)
+                    .font(.system(size: 11, weight: .semibold))
                 Text(quality.headline)
-                    .font(.headline)
+                    .font(.system(size: 11, weight: .semibold))
                 if let detail = quality.detail {
                     Text(detail)
-                        .font(.subheadline)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().stroke(qualityTint.opacity(0.6), lineWidth: 1))
             .foregroundStyle(qualityTint)
@@ -344,14 +344,15 @@ struct NowPlayingLyricsView: View {
         }
     }
 
-    /// Vertical edge fade so lines dissolve in/out at the top and bottom rather
-    /// than hard-clipping, matching the Apple Music / Plex lyric feel.
+    /// Vertical edge fade so lines dissolve in/out across the top and bottom
+    /// thirds of the panel — only the middle third is fully solid — matching the
+    /// Apple Music / Plex lyric feel.
     private var edgeFade: some View {
         LinearGradient(
             stops: [
                 .init(color: .clear, location: 0),
-                .init(color: .black, location: 0.22),
-                .init(color: .black, location: 0.78),
+                .init(color: .black, location: 0.34),
+                .init(color: .black, location: 0.66),
                 .init(color: .clear, location: 1)
             ],
             startPoint: .top,

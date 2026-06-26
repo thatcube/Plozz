@@ -53,7 +53,7 @@ struct PlaybackDiagnosticsOverlay: View {
             optionalRow("Disk", d.diskText)
             optionalRow("Memory", d.memoryText)
             optionalRow("Thermal", d.thermalText)
-            optionalRow("Live", d.liveInstancesText)
+            optionalRow("Instances", d.liveInstancesText)
         }
     }
 

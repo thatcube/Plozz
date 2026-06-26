@@ -600,14 +600,19 @@ public extension PlaybackDiagnostics {
         thermalState?.displayName ?? Self.placeholder
     }
 
-    /// Live-instance line, e.g. `VM 1 · Native 1 · MPV 0`. Outside the player all
-    /// three should read 0; during playback exactly one engine + one VM. Values
-    /// that climb and never fall as you leave/re-enter the player name the leak.
+    /// Live-instance line, e.g. `Players 1 · AVPlayer 0 · mpv 1`. Outside the
+    /// player all three should read 0; during playback exactly one player session
+    /// + one engine (the engine kind matching the file — AVPlayer or mpv). Values
+    /// that climb and never fall as you leave/re-enter the player name a leak; a
+    /// count that climbs then "corrects down" names over-construction (throwaway
+    /// instances built on the render path). `Players` counts live
+    /// `PlayerViewModel`s; `AVPlayer` counts `NativeVideoEngine`s; `mpv` counts
+    /// `MPVVideoEngine`s.
     var liveInstancesText: String {
         guard liveViewModels != nil || liveNativeEngines != nil || liveMPVEngines != nil else {
             return Self.placeholder
         }
-        return "VM \(liveViewModels ?? 0) · Native \(liveNativeEngines ?? 0) · MPV \(liveMPVEngines ?? 0)"
+        return "Players \(liveViewModels ?? 0) · AVPlayer \(liveNativeEngines ?? 0) · mpv \(liveMPVEngines ?? 0)"
     }
 }
 

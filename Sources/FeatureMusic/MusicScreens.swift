@@ -546,11 +546,11 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             HStack(alignment: .top, spacing: 56) {
                 info
                     .frame(width: infoWidth, alignment: .leading)
-                    // Center the info column within the available (padded) height
-                    // so the top and bottom gaps stay even — including when the
-                    // Now Playing card makes the column taller. One focus section
-                    // so Left from any track row reaches the transport controls.
-                    .frame(maxHeight: .infinity, alignment: .center)
+                    // Pin the info column to the top of the page (matching the
+                    // track list), but keep the focus section spanning the full
+                    // height so Left from any track row still reaches the
+                    // transport controls.
+                    .frame(maxHeight: .infinity, alignment: .top)
                     .focusSection()
                 ScrollView {
                     TrackListView(

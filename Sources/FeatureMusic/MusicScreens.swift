@@ -367,7 +367,7 @@ struct AlbumDetailView: View {
         .task { await viewModel.load() }
     }
 
-    private let columnWidth: CGFloat = 360
+    private let columnWidth: CGFloat = 440
 
     private var infoColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -451,7 +451,7 @@ struct PlaylistDetailView: View {
         .task { await viewModel.load() }
     }
 
-    private let columnWidth: CGFloat = 360
+    private let columnWidth: CGFloat = 440
 
     private var infoColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -550,7 +550,7 @@ struct MusicDetailLayout<InfoColumn: View>: View {
         GeometryReader { geo in
             // Give the album/playlist info column ~a third of the screen so the
             // Play and Shuffle buttons fit comfortably side by side.
-            let infoWidth = max(380, geo.size.width * 0.33)
+            let infoWidth = max(440, geo.size.width * 0.33)
             HStack(alignment: .top, spacing: 56) {
                 info
                     .frame(width: infoWidth, alignment: .leading)

@@ -11,35 +11,18 @@ import SwiftUI
 /// the lift stays legible without relying on translucency.
 public struct PlozzGlassCardModifier: ViewModifier {
     private let cornerRadius: CGFloat
-    private let topCornerRadius: CGFloat?
     private let isFocused: Bool
 
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
 
-    public init(cornerRadius: CGFloat, topCornerRadius: CGFloat? = nil, isFocused: Bool) {
+    public init(cornerRadius: CGFloat, isFocused: Bool) {
         self.cornerRadius = cornerRadius
-        self.topCornerRadius = topCornerRadius
         self.isFocused = isFocused
     }
 
-    /// The card outline. Uniform by default; when `topCornerRadius` is set the top
-    /// corners round more than the bottom (used by the profile tiles so the card's
-    /// top echoes the circular avatar). Equal radii render identically to a plain
-    /// `RoundedRectangle`, so every existing card is unaffected.
-    private var shape: UnevenRoundedRectangle {
-        let top = topCornerRadius ?? cornerRadius
-        return UnevenRoundedRectangle(
-            topLeadingRadius: top,
-            bottomLeadingRadius: cornerRadius,
-            bottomTrailingRadius: cornerRadius,
-            topTrailingRadius: top,
-            style: .continuous
-        )
-    }
-
     public func body(content: Content) -> some View {
-        let shape = self.shape
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
         if reduceTransparency {
             // Reduce Transparency on: never lean on translucency. Paint an opaque
@@ -63,7 +46,7 @@ public struct PlozzGlassCardModifier: ViewModifier {
             content
                 .glassEffect(
                     isFocused ? .regular.tint(palette.focusedCardGlassTint) : .regular,
-                    in: shape
+                    in: .rect(cornerRadius: cornerRadius)
                 )
                 .background {
                     // A focused card casts a drop shadow. In Light mode the
@@ -121,29 +104,26 @@ public struct PlozzMediaEdgeModifier: ViewModifier {
 /// disables the system focus effect so no white halo bleeds through.
 public struct PlozzCardButtonStyle: ButtonStyle {
     private let cornerRadius: CGFloat
-    private let topCornerRadius: CGFloat?
     private let focusedScale: CGFloat
 
-    public init(cornerRadius: CGFloat, topCornerRadius: CGFloat? = nil, focusedScale: CGFloat = PlozzTheme.Metrics.mediumFocusedCardScale) {
+    public init(cornerRadius: CGFloat, focusedScale: CGFloat = PlozzTheme.Metrics.mediumFocusedCardScale) {
         self.cornerRadius = cornerRadius
-        self.topCornerRadius = topCornerRadius
         self.focusedScale = focusedScale
     }
 
     public func makeBody(configuration: Configuration) -> some View {
-        CardBody(configuration: configuration, cornerRadius: cornerRadius, topCornerRadius: topCornerRadius, focusedScale: focusedScale)
+        CardBody(configuration: configuration, cornerRadius: cornerRadius, focusedScale: focusedScale)
     }
 
     private struct CardBody: View {
         let configuration: ButtonStyle.Configuration
         let cornerRadius: CGFloat
-        let topCornerRadius: CGFloat?
         let focusedScale: CGFloat
         @Environment(\.isFocused) private var isFocused
 
         var body: some View {
             configuration.label
-                .plozzGlassCard(cornerRadius: cornerRadius, topCornerRadius: topCornerRadius, isFocused: isFocused)
+                .plozzGlassCard(cornerRadius: cornerRadius, isFocused: isFocused)
                 .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
                 .scaleEffect(isFocused ? (configuration.isPressed ? focusedScale * 0.97 : focusedScale) : 1)
                 .animation(.easeOut(duration: 0.18), value: isFocused)
@@ -154,9 +134,8 @@ public struct PlozzCardButtonStyle: ButtonStyle {
 
 public extension View {
     /// Wraps the view in the shared Plozz liquid-glass browsing-card surface.
-    /// Pass `topCornerRadius` to round the top corners more than the bottom.
-    func plozzGlassCard(cornerRadius: CGFloat, topCornerRadius: CGFloat? = nil, isFocused: Bool) -> some View {
-        modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, topCornerRadius: topCornerRadius, isFocused: isFocused))
+    func plozzGlassCard(cornerRadius: CGFloat, isFocused: Bool) -> some View {
+        modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, isFocused: isFocused))
     }
 
     /// Draws Twozz's hairline "inner glass" rim around a clipped media thumbnail:
@@ -173,10 +152,9 @@ public extension View {
     /// system focus effect disabled so no white halo remains.
     func plozzCardButton(
         cornerRadius: CGFloat = PlozzTheme.Metrics.cornerRadius,
-        topCornerRadius: CGFloat? = nil,
         focusedScale: CGFloat = PlozzTheme.Metrics.mediumFocusedCardScale
     ) -> some View {
-        buttonStyle(PlozzCardButtonStyle(cornerRadius: cornerRadius, topCornerRadius: topCornerRadius, focusedScale: focusedScale))
+        buttonStyle(PlozzCardButtonStyle(cornerRadius: cornerRadius, focusedScale: focusedScale))
             .focusEffectDisabled()
     }
 

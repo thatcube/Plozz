@@ -113,14 +113,15 @@ public struct ProfilePickerView: View {
     }
 }
 
-/// A single selectable profile tile: avatar on a colored disc plus the name.
+/// A single selectable profile tile: a circular avatar with the name beneath it.
 ///
-/// Focus reuses the **same liquid-glass card surface as the Home page tiles**
-/// (`plozzCardButton` → `PlozzCardButtonStyle`): a subtle theme-aware glass
-/// wash at rest that lifts into a brighter tinted glass on focus, with a gentle
-/// scale + soft shadow. The shared style also disables tvOS's default white
-/// focus plate, so there's exactly one focus indicator. The active profile
-/// carries a small, quiet accent dot under its name.
+/// At rest the tile has **no background** — just the avatar and name. On focus a
+/// circular liquid-glass surface (the same focused "card" treatment used across
+/// the app, reused via `plozzGlassCard`) blooms behind the avatar with 24pt of
+/// clearance so it reads as a round halo, and the whole tile lifts with a gentle
+/// scale + shadow. The name sits *below* the glass, never inside it. A custom
+/// `ButtonStyle` owns focus (with the system focus effect disabled) so there's
+/// exactly one focus indicator. The active profile carries a small accent dot.
 private struct ProfileTile: View {
     let profile: Profile
     let isActive: Bool
@@ -130,16 +131,62 @@ private struct ProfileTile: View {
         Button(action: action) {
             ProfileTileLabel(profile: profile, isActive: isActive)
         }
-        .plozzCardButton(
-            cornerRadius: ProfilePickerLayout.tileCornerRadius,
-            topCornerRadius: ProfilePickerLayout.tileTopCornerRadius
-        )
+        .buttonStyle(ProfileTileButtonStyle())
+        .focusEffectDisabled()
     }
 }
 
-/// The label content for a profile tile. Reads `\.isFocused` (the picker tile's
-/// focusable button propagates it) so the name and active dot gently emphasise
-/// on the focused glass card.
+/// Focus treatment shared by the profile and "Add" tiles: a subtle scale + the
+/// circular focus glass live here (the glass itself is drawn by `FocusGlassAvatar`
+/// inside the label). Owning focus in a `ButtonStyle` — rather than a `.plain`
+/// button with a manual overlay — keeps tvOS from also painting its own focus
+/// plate, so the tile shows a single, fully custom indicator.
+private struct ProfileTileButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        FocusBody(configuration: configuration)
+    }
+
+    private struct FocusBody: View {
+        let configuration: ButtonStyle.Configuration
+        @Environment(\.isFocused) private var isFocused
+
+        private var scale: CGFloat { PlozzTheme.Metrics.mediumFocusedCardScale }
+
+        var body: some View {
+            configuration.label
+                .scaleEffect(isFocused ? (configuration.isPressed ? scale * 0.97 : scale) : 1)
+                .animation(.easeOut(duration: 0.22), value: isFocused)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+        }
+    }
+}
+
+/// A fixed-size avatar slot that shows the shared liquid-glass focus surface as a
+/// **circle** around its content (with `focusPadding` of clearance) only when
+/// focused — no background at rest. The focused size is always reserved, so
+/// focusing never nudges the grid; the glass simply fades in with a soft lift.
+private struct FocusGlassAvatar<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        ZStack {
+            Color.clear
+                .frame(width: ProfilePickerLayout.slot, height: ProfilePickerLayout.slot)
+                .plozzGlassCard(cornerRadius: ProfilePickerLayout.slot / 2, isFocused: true)
+                .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
+                .opacity(isFocused ? 1 : 0)
+
+            content()
+                .frame(width: ProfilePickerLayout.avatarSize, height: ProfilePickerLayout.avatarSize)
+        }
+        .frame(width: ProfilePickerLayout.slot, height: ProfilePickerLayout.slot)
+        .animation(.easeOut(duration: 0.22), value: isFocused)
+    }
+}
+
+/// The label content for a profile tile. Reads `\.isFocused` (the focusable
+/// button propagates it) so the name gently emphasises on focus.
 private struct ProfileTileLabel: View {
     let profile: Profile
     let isActive: Bool
@@ -148,8 +195,10 @@ private struct ProfileTileLabel: View {
     @Environment(\.themePalette) private var palette
 
     var body: some View {
-        VStack(spacing: 16) {
-            ProfileAvatarView(profile: profile, size: ProfilePickerLayout.avatarSize)
+        VStack(spacing: 12) {
+            FocusGlassAvatar {
+                ProfileAvatarView(profile: profile, size: ProfilePickerLayout.avatarSize)
+            }
 
             VStack(spacing: 8) {
                 Text(profile.name)
@@ -165,7 +214,6 @@ private struct ProfileTileLabel: View {
                     .opacity(isActive ? 1 : 0)
             }
         }
-        .padding(ProfilePickerLayout.tilePadding)
     }
 }
 
@@ -179,7 +227,8 @@ private struct AddProfileTile: View {
         Button(action: action) {
             AddProfileTileLabel()
         }
-        .plozzCardButton(cornerRadius: ProfilePickerLayout.tileCornerRadius)
+        .buttonStyle(ProfileTileButtonStyle())
+        .focusEffectDisabled()
     }
 }
 
@@ -188,18 +237,19 @@ private struct AddProfileTileLabel: View {
     @Environment(\.themePalette) private var palette
 
     var body: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .strokeBorder(
-                        palette.secondaryText.opacity(isFocused ? 0.9 : 0.5),
-                        style: StrokeStyle(lineWidth: 4, dash: [12, 10])
-                    )
-                Image(systemName: "plus")
-                    .font(.system(size: 80, weight: .semibold))
-                    .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+        VStack(spacing: 12) {
+            FocusGlassAvatar {
+                ZStack {
+                    Circle()
+                        .strokeBorder(
+                            palette.secondaryText.opacity(isFocused ? 0.9 : 0.5),
+                            style: StrokeStyle(lineWidth: 4, dash: [12, 10])
+                        )
+                    Image(systemName: "plus")
+                        .font(.system(size: 80, weight: .semibold))
+                        .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+                }
             }
-            .frame(width: ProfilePickerLayout.avatarSize, height: ProfilePickerLayout.avatarSize)
 
             VStack(spacing: 8) {
                 Text("Add Profile")
@@ -210,7 +260,6 @@ private struct AddProfileTileLabel: View {
                 Circle().fill(.clear).frame(width: 10, height: 10)
             }
         }
-        .padding(ProfilePickerLayout.tilePadding)
     }
 }
 
@@ -218,10 +267,10 @@ private struct AddProfileTileLabel: View {
 /// identically.
 private enum ProfilePickerLayout {
     static let avatarSize: CGFloat = 200
-    static let tilePadding: CGFloat = 24
-    static let tileCornerRadius: CGFloat = PlozzTheme.Metrics.mediumCardCornerRadius
-    /// Rounder top corners so the card's top echoes the circular avatar sitting
-    /// just inside it, while the bottom keeps the standard card radius.
-    static let tileTopCornerRadius: CGFloat = 48
+    /// Clearance between the avatar and the circular focus glass — the visible
+    /// "padding" the focus halo adds around the avatar when selected.
+    static let focusPadding: CGFloat = 24
+    /// The reserved avatar-slot size (avatar + focus clearance on each side).
+    static let slot: CGFloat = avatarSize + focusPadding * 2
 }
 #endif

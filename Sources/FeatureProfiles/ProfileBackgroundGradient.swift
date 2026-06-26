@@ -31,15 +31,31 @@ final class ProfileBackgroundPalettes {
     private var inFlight: Set<String> = []
 
     /// The best palette known *right now* for `profile`, always ≥ 4 colors so the
-    /// mesh has plenty to morph between. Returns the cached extracted colors when
-    /// available; otherwise a harmonised spread of the instant `colorIndex` base
-    /// (and, for photo profiles, schedules a one-time extraction to upgrade it).
+    /// mesh has plenty to morph between — *unless* the profile uses a photo whose
+    /// colors haven't been extracted yet, in which case it returns an empty
+    /// palette (a calm neutral field) and schedules extraction. That avoids
+    /// flashing the profile's unrelated assigned `colorIndex` tint (e.g. purple)
+    /// for a beat before the real photo colors crossfade in. Symbol-only profiles
+    /// have no photo, so their `colorIndex` *is* their identity and is used
+    /// instantly.
     func palette(for profile: Profile) -> [Color] {
         if let cached = cache[profile.id] { return cached }
 
-        scheduleExtractionIfNeeded(for: profile)
-        let base = ProfileTileColor.color(forIndex: profile.clampedColorIndex)
-        return Self.harmonized(base)
+        if hasPhoto(profile) {
+            // Photo profile, colors not extracted yet: stay neutral and let the
+            // real photo colors fade in, rather than showing the assigned tint.
+            scheduleExtractionIfNeeded(for: profile)
+            return []
+        }
+
+        // Symbol-only profile: the tile color is the identity — show it at once.
+        return Self.harmonized(ProfileTileColor.color(forIndex: profile.clampedColorIndex))
+    }
+
+    /// Whether a profile has a usable avatar photo URL.
+    private func hasPhoto(_ profile: Profile) -> Bool {
+        guard let raw = profile.avatarImageURL?.trimmingCharacters(in: .whitespaces) else { return false }
+        return !raw.isEmpty
     }
 
     /// Expands a single base color into a small set of analogous tones (hue

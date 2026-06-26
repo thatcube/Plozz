@@ -74,7 +74,10 @@ struct MusicLandingView: View {
                 .font(.system(size: 32, weight: .bold))
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 28) {
+                // Lazy so only on-screen tiles build their Liquid Glass surface —
+                // eager rails kept every card's glass effect live, which made
+                // focus navigation recompute every tile's SDF and lag the UI.
+                LazyHStack(spacing: 28) {
                     EntryTile(title: "Artists", icon: "music.mic") { onSelectRoute(.grid(.artist)) }
                     EntryTile(title: "Albums", icon: "opticaldisc") { onSelectRoute(.grid(.album)) }
                     EntryTile(title: "Playlists", icon: "music.note.list") { onSelectRoute(.grid(.playlist)) }
@@ -128,7 +131,11 @@ private struct MusicRow<Content: View>: View {
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: PlozzTheme.Metrics.cardSpacing) {
+                // Lazy so only on-screen cards build their Liquid Glass surface.
+                // The eager HStack kept every card's glass effect live, so fast
+                // focus moves recomputed every card's SDF and lagged navigation.
+                // Matches the lazy rails used elsewhere (MediaRowView/HomeView).
+                LazyHStack(alignment: .top, spacing: PlozzTheme.Metrics.cardSpacing) {
                     content()
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

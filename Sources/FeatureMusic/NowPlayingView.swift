@@ -317,12 +317,10 @@ struct NowPlayingLyricsView: View {
                         // can scroll all the way to the vertical center.
                         Color.clear.frame(height: geo.size.height * 0.45)
                         ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { index, line in
-                            let isActive = (index == active)
                             Text(line.text.isEmpty ? " " : line.text)
-                                .font(.system(size: 46, weight: isActive ? .bold : .semibold))
+                                .font(.system(size: 46, weight: .semibold))
                                 .foregroundStyle(.primary)
                                 .opacity(opacity(forIndex: index, active: active))
-                                .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .id(index)
                                 .animation(.easeInOut(duration: 0.3), value: active)

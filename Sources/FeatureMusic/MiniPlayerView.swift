@@ -79,14 +79,11 @@ private struct NowPlayingCardContent: View {
     @Environment(\.nowPlayingCardFocused) private var isFocused
     @Environment(\.colorScheme) private var colorScheme
 
-    // The card is ALWAYS contrast-inverted vs the theme so the playing item
-    // stands out; focusing flips it to the theme's normal contrast.
-    //   Light theme: idle = black card / white text, focused = white card / black text.
-    //   Dark / OLED: idle = white card / black text, focused = black card / white text.
-    private var foreground: Color {
-        if colorScheme == .dark { return isFocused ? .white : .black }
-        return isFocused ? .black : .white
-    }
+    // Idle: liquid glass with normal theme content colors.
+    // Focused: solid contrast-flip fill, so content inverts to stay legible.
+    //   Light theme focus → black card, white content.
+    //   Dark / OLED focus → white card, black content.
+    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -107,26 +104,26 @@ private struct NowPlayingCardContent: View {
                 Text(track.title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                    .foregroundStyle(foreground)
+                    .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
                 if let subtitle = track.subtitle {
                     Text(subtitle)
                         .font(.caption2)
                         .lineLimit(1)
-                        .foregroundStyle(foreground.opacity(0.72))
+                        .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
                 }
             }
             .frame(maxWidth: textWidth, alignment: .leading)
 
             Group {
                 if isPlaying {
-                    // Match the equalizer bars to the inverted foreground so they
-                    // stay legible on the card's solid fill in either state.
-                    NowPlayingEqualizer(isAnimating: true, tint: foreground)
+                    // Flip the equalizer bars to the inverted foreground on focus
+                    // so they stay legible on the solid contrast fill.
+                    NowPlayingEqualizer(isAnimating: true, tint: isFocused ? focusForeground : nil)
                         .frame(width: 22)
                 } else {
                     Image(systemName: "pause.fill")
                         .font(.subheadline)
-                        .foregroundStyle(foreground.opacity(0.85))
+                        .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.85)) : AnyShapeStyle(.secondary))
                 }
             }
         }
@@ -152,22 +149,24 @@ private struct NowPlayingCardButtonStyle: ButtonStyle {
 
         private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
-        // Solid fill that's inverted vs the theme by default and flips on focus.
-        //   Light theme: idle = black, focused = white.
-        //   Dark / OLED: idle = white, focused = black.
-        private var fill: Color {
-            if colorScheme == .dark { return isFocused ? .black : .white }
-            return isFocused ? .white : .black
-        }
+        // Focused fill is the contrast flip: black card on a light theme, white
+        // card on a dark/OLED theme. Idle uses liquid glass instead.
+        private var focusFill: Color { colorScheme == .dark ? .white : .black }
 
         var body: some View {
             configuration.label
                 .environment(\.nowPlayingCardFocused, isFocused)
                 .contentShape(shape)
-                .background { shape.fill(fill) }
+                // Idle = liquid glass; on focus a solid contrast fill cross-fades
+                // in on top so the playing item flips to a high-contrast block.
+                .background {
+                    Color.clear
+                        .plozzGlassPanel(cornerRadius: 14)
+                        .overlay { shape.fill(focusFill).opacity(isFocused ? 1 : 0) }
+                }
                 .clipShape(shape)
                 .scaleEffect(isFocused ? (configuration.isPressed ? 1.03 : 1.06) : 1)
-                .shadow(color: .black.opacity(isFocused ? 0.35 : 0.2), radius: isFocused ? 18 : 10, y: isFocused ? 8 : 4)
+                .shadow(color: .black.opacity(isFocused ? 0.35 : 0.18), radius: isFocused ? 18 : 8, y: isFocused ? 8 : 4)
                 .animation(.easeOut(duration: 0.16), value: isFocused)
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }

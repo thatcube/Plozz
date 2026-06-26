@@ -6,6 +6,8 @@ import CoreUI
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
     @AppStorage("reduceTransparencyOverride") private var reduceTransparency = false
+    @AppStorage(MusicPlayerAppearance.storageKey) private var playerAppearance: MusicPlayerAppearance = .matchTheme
+    @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
 
     var body: some View {
         ScrollView {
@@ -41,12 +43,47 @@ struct AppearanceDetailView: View {
                 }
 
                 SettingsPanel(
+                    title: "Music Player",
+                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme — frosted light in a light theme, vibrant dark otherwise. Or pick a fixed look."
+                ) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(MusicPlayerAppearance.allCases) { option in
+                                Button {
+                                    playerAppearance = option
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: option.symbolName)
+                                        Text(option.displayName)
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .opacity(playerAppearance == option ? 1 : 0)
+                                    }
+                                    .font(.headline)
+                                    .padding(.horizontal, 4)
+                                }
+                                .buttonStyle(PlozzSeasonTabStyle(isSelected: playerAppearance == option))
+                                .accessibilityValue(playerAppearance == option ? "Selected" : "")
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 6)
+                    }
+                    .scrollClipDisabled()
+                }
+
+                SettingsPanel(
                     title: "Transparency",
                     footer: "Replaces the translucent “liquid glass” blur on cards, menus and overlays with solid surfaces. Turns on automatically when Reduce Transparency is enabled in tvOS Accessibility settings."
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
                         Toggle("Reduce transparency", isOn: $reduceTransparency)
                     }
+                }
+
+                SettingsPanel(
+                    footer: "Adds the album name, the audio quality and format (e.g. \"Original AAC 44.1 kHz 320 kbps\"), and the lyrics source to the full-screen player. Off by default so the player stays focused on the artwork, song and artist."
+                ) {
+                    Toggle("Show track details", isOn: $showTrackDetails)
                 }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
@@ -117,34 +154,6 @@ struct SpoilersDetailView: View {
                         Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
 
                         Text("Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
-        }
-        .scrollClipDisabled()
-    }
-}
-
-/// Now Playing preferences. Currently a single switch for the optional,
-/// audiophile-leaning "track details" surface on the full-screen music player.
-/// Reads/writes the same `@AppStorage` key the player observes, so the player
-/// updates live without any extra plumbing.
-struct NowPlayingDetailView: View {
-    @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Now Playing").font(.largeTitle.bold())
-                SettingsPanel {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Toggle("Show track details", isOn: $showTrackDetails)
-
-                        Text("Adds the album name, the audio quality and format (e.g. \"Original AAC 44.1 kHz 320 kbps\"), and the lyrics source to the full-screen player. Off by default so the player stays focused on the artwork, song and artist.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

@@ -47,7 +47,6 @@ enum SettingsRoute: Hashable {
     case appearance
     case captions
     case spoilers
-    case nowPlaying
     case integrations
     case attributions
     case plexUser(accountID: String)

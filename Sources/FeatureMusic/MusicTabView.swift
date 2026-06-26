@@ -22,17 +22,19 @@ enum MusicRoute: Hashable {
 public struct MusicTabView: View {
     private let context: MusicContext
     private let controller: AudioPlaybackController
+    private let appTheme: AppTheme
 
     @State private var path = NavigationPath()
     @State private var showNowPlaying = false
     @State private var layoutModel = MusicLandingLayoutModel()
 
-    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController) {
+    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController, appTheme: AppTheme = .system) {
         self.context = MusicContext(
             accounts: accounts,
             visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
         )
         self.controller = controller
+        self.appTheme = appTheme
     }
 
     public var body: some View {
@@ -58,7 +60,7 @@ public struct MusicTabView: View {
             }
         }
         .fullScreenCover(isPresented: $showNowPlaying) {
-            NowPlayingView(controller: controller)
+            NowPlayingView(controller: controller, appTheme: appTheme)
         }
         // Starting a song jumps straight into the full-screen player, like
         // Apple Music. The pill remains for re-opening it after dismissal.

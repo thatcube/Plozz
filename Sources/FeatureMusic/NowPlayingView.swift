@@ -13,6 +13,10 @@ import UIKit
 /// `AudioPlaybackController`.
 struct NowPlayingView: View {
     @Bindable var controller: AudioPlaybackController
+    /// The app's currently selected theme, passed in from the host so the
+    /// player's "Match Theme" appearance can distinguish OLED from plain Dark
+    /// (the system color scheme alone can't tell them apart).
+    var appTheme: AppTheme = .system
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var scrubModel = MusicScrubModel()
@@ -48,9 +52,16 @@ struct NowPlayingView: View {
 
     /// Whether the player shows extra track detail — album name, audio
     /// quality/format, and the lyrics source. Off by default to keep the screen
-    /// clean (it's a niche audiophile detail); toggled from Settings ▸ Now
-    /// Playing and remembered across sessions.
+    /// clean (it's a niche audiophile detail); toggled from Settings ▸ Appearance
+    /// and remembered across sessions.
     @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
+
+    /// The player's chosen background look (Settings ▸ Appearance ▸ Music
+    /// Player). Defaults to following the app theme.
+    @AppStorage(MusicPlayerAppearance.storageKey) private var playerAppearance: MusicPlayerAppearance = .matchTheme
+    /// The app's current light/dark resolution, read from the environment the
+    /// player is presented in — used only when `playerAppearance` is `.matchTheme`.
+    @Environment(\.colorScheme) private var systemColorScheme
 
     /// The lyrics panel is shown next to the player **only once lyrics are
     /// actually found**. While the background lookup is in flight (or if the track
@@ -128,12 +139,38 @@ struct NowPlayingView: View {
             controller.togglePlayPause()
             showControls()
         }
-        // The player always sits on its own dark, artwork-tinted background, so
-        // it must never follow the app's light/dark theme — force the whole
-        // subtree to resolve as dark so text and glass stay light-on-dark even
-        // when the rest of the app is in a light theme.
-        .environment(\.colorScheme, .dark)
+        // The player paints its own background, so it never blindly inherits the
+        // app theme. It resolves its own look (see `playerStyle`) and forces the
+        // subtree's color scheme to match so text and glass read correctly —
+        // light-on-dark for Vibrant Dark / OLED, dark-on-light for Frosted Light.
+        .environment(\.colorScheme, isLightPlayer ? .light : .dark)
     }
+
+    /// The resolved background treatment, collapsing `.matchTheme` against the
+    /// app's selected theme (so OLED → true black, Light → frosted, etc.).
+    private var playerStyle: LiquidArtworkBackground.Style {
+        switch playerAppearance {
+        case .matchTheme: return matchedThemeStyle
+        case .dark: return .dark
+        case .light: return .light
+        case .oled: return .oled
+        }
+    }
+
+    /// Maps the app's `AppTheme` onto a player look for the "Match Theme" option.
+    /// `.system` has no explicit light/dark, so it follows the resolved system
+    /// color scheme.
+    private var matchedThemeStyle: LiquidArtworkBackground.Style {
+        switch appTheme {
+        case .light: return .light
+        case .dark: return .dark
+        case .oled: return .oled
+        case .system: return systemColorScheme == .light ? .light : .dark
+        }
+    }
+
+    /// Whether the resolved player look is the light one (drives text color).
+    private var isLightPlayer: Bool { playerStyle == .light }
 
     /// A button style that renders only its label with no platform focus
     /// decoration. Used for the full-screen reveal catcher so taking focus while
@@ -213,6 +250,8 @@ struct NowPlayingView: View {
             MusicArtworkImage(
                 url: controller.currentTrack?.artworkURL,
                 systemPlaceholder: "music.note",
+                cornerRadius: 16,
+                showsMediaEdge: false,
                 asyncFallbackURL: trackFallback(controller.currentTrack)
             )
                 .frame(width: 420, height: 420)
@@ -223,14 +262,14 @@ struct NowPlayingView: View {
                     .font(.system(size: 46, weight: .bold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
+                    .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
                 if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
                     Text(artist)
                         .font(.system(size: 26, weight: .medium))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .lineLimit(1)
-                        .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+                        .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.35), radius: 6, y: 2)
                 }
                 if showTrackDetails {
                     if let album = controller.currentTrack?.albumTitle, !album.isEmpty {
@@ -238,7 +277,7 @@ struct NowPlayingView: View {
                             .font(.system(size: 18))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
-                            .shadow(color: .black.opacity(0.3), radius: 5, y: 2)
+                            .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.3), radius: 5, y: 2)
                     }
                     qualityBadge
                 }
@@ -246,8 +285,9 @@ struct NowPlayingView: View {
         }
     }
 
-    /// The full-width transport bar across the bottom: scrub row + button row,
-    /// over a soft dark scrim so it stays legible against the artwork colors.
+    /// The full-width transport bar across the bottom, over a soft scrim so it
+    /// stays legible against the artwork colors. The scrim flips to white for the
+    /// frosted-light look so it lightens rather than darkens the controls area.
     private var bottomControls: some View {
         VStack(spacing: 24) {
             scrubRow
@@ -259,7 +299,7 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity)
         .background(
             LinearGradient(
-                colors: [.clear, .black.opacity(0.55)],
+                colors: [.clear, (isLightPlayer ? Color.white : Color.black).opacity(0.55)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -277,7 +317,7 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private var background: some View {
-        LiquidArtworkBackground(palette: artworkPalette, animate: !reduceMotion)
+        LiquidArtworkBackground(palette: artworkPalette, animate: !reduceMotion, style: playerStyle)
     }
 
     /// Loads the current track's artwork (reusing the shared decoded-image cache)
@@ -345,40 +385,49 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// The transport row: the big round play/pause sits dead-centre with
-    /// previous/next flanking it, shuffle pinned left and repeat + lyrics pinned
-    /// right. Every button carries a Focus case so moving between them keeps the
-    /// bar awake.
+    /// The transport row: the big round play/pause sits dead-centre (aligned with
+    /// the album art above it) with previous/next flanking it. Shuffle is pinned
+    /// left and repeat + lyrics pinned right via equal-width side containers, so
+    /// the asymmetric side clusters never pull the centre group off-centre. Every
+    /// button carries a Focus case so moving between them keeps the bar awake.
     private var transportRow: some View {
-        HStack(spacing: 28) {
-            transportButton(
-                icon: "shuffle",
-                prominent: controller.isShuffled,
-                tint: controller.isShuffled ? Color.accentColor : .primary
-            ) { controller.toggleShuffle() }
-                .focused($focus, equals: .shuffle)
+        HStack(spacing: 0) {
+            // Left cluster, pinned leading in a flexible container.
+            HStack(spacing: 28) {
+                transportButton(
+                    icon: "shuffle",
+                    prominent: controller.isShuffled,
+                    tint: controller.isShuffled ? Color.accentColor : .primary
+                ) { controller.toggleShuffle() }
+                    .focused($focus, equals: .shuffle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 24)
+            // Centre group — symmetric, so play/pause lands on the screen centre.
+            HStack(spacing: 28) {
+                transportButton(icon: "backward.end.fill") { controller.previous() }
+                    .focused($focus, equals: .previous)
 
-            transportButton(icon: "backward.end.fill") { controller.previous() }
-                .focused($focus, equals: .previous)
+                playPauseButton
 
-            playPauseButton
+                transportButton(icon: "forward.end.fill") { controller.next() }
+                    .focused($focus, equals: .next)
+            }
 
-            transportButton(icon: "forward.end.fill") { controller.next() }
-                .focused($focus, equals: .next)
+            // Right cluster, pinned trailing in a flexible container of equal
+            // width to the left one, keeping the centre group centred.
+            HStack(spacing: 28) {
+                transportButton(
+                    icon: repeatIcon,
+                    prominent: controller.repeatMode != .off,
+                    tint: controller.repeatMode == .off ? .primary : Color.accentColor
+                ) { controller.cycleRepeatMode() }
+                    .focused($focus, equals: .repeatMode)
 
-            Spacer(minLength: 24)
-
-            transportButton(
-                icon: repeatIcon,
-                prominent: controller.repeatMode != .off,
-                tint: controller.repeatMode == .off ? .primary : Color.accentColor
-            ) { controller.cycleRepeatMode() }
-                .focused($focus, equals: .repeatMode)
-
-            lyricsToggleButton
-                .focused($focus, equals: .lyrics)
+                lyricsToggleButton
+                    .focused($focus, equals: .lyrics)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 

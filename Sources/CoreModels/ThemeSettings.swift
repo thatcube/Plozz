@@ -40,3 +40,45 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
 
     public static let `default`: AppTheme = .system
 }
+
+/// How the full-screen music player paints its background and text. Independent
+/// of `AppTheme`: the player can follow the app theme or be pinned to one of its
+/// own looks, because its immersive, artwork-tinted background reads differently
+/// from the browsing chrome. Persisted locally via `@AppStorage`.
+public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, Sendable {
+    /// Follow the app theme: a light theme gives the frosted-light player, any
+    /// dark theme gives the vibrant-dark player.
+    case matchTheme
+    /// Always the vibrant, artwork-tinted dark look.
+    case dark
+    /// Always a frosted, lightly artwork-tinted light look.
+    case light
+    /// Always true black, with the artwork colors as subtle accents (OLED).
+    case oled
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .matchTheme: return "Match Theme"
+        case .dark: return "Vibrant Dark"
+        case .light: return "Frosted Light"
+        case .oled: return "OLED Black"
+        }
+    }
+
+    /// SF Symbol shown next to the option in Settings.
+    public var symbolName: String {
+        switch self {
+        case .matchTheme: return "circle.lefthalf.filled"
+        case .dark: return "moon.fill"
+        case .light: return "sun.max.fill"
+        case .oled: return "moon.stars.fill"
+        }
+    }
+
+    public static let `default`: MusicPlayerAppearance = .matchTheme
+
+    /// AppStorage key shared by the player (reads it) and Settings (writes it).
+    public static let storageKey = "musicPlayerAppearance"
+}

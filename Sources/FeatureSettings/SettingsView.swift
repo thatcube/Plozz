@@ -266,9 +266,6 @@ public struct SettingsView: View {
             navRow("Spoilers", icon: "eye.slash",
                    value: spoilers.settings.isEnabled ? "On" : "Off",
                    route: .spoilers)
-            navRow("Now Playing", icon: "music.note",
-                   value: nil,
-                   route: .nowPlaying)
             navRow("Integrations", icon: "link",
                    value: traktSummary,
                    route: .integrations)
@@ -346,8 +343,6 @@ public struct SettingsView: View {
             CaptionsDetailView(captions: captions)
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
-        case .nowPlaying:
-            NowPlayingDetailView()
         case .integrations:
             IntegrationsDetailView(trakt: trakt)
         case .attributions:

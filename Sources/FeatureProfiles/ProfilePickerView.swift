@@ -53,13 +53,21 @@ public struct ProfilePickerView: View {
     private let backgroundSettleDelay: Duration = .milliseconds(300)
 
     /// The profile whose colors the background should currently show. Before
-    /// focus settles (i.e. at startup) it is pinned to the **first** profile, so
-    /// the background only ever opens on the first tile's image/color — never the
-    /// last-active profile's, which would otherwise flash in for a beat before
-    /// focus settles. Once focus rests on a tile, that tile drives the wash.
+    /// focus settles (i.e. at startup) it is pinned to the **default-focused**
+    /// profile — the last-active one if there is one, else the first tile — which
+    /// is exactly the tile tvOS opens focus on. Because the opening focus and the
+    /// opening wash agree, the background never flashes a different profile's
+    /// color before settling. Once focus rests on a tile, that tile drives it.
     private var backgroundProfile: Profile? {
-        let id = settledProfileID ?? profiles.first?.id
+        let id = settledProfileID ?? defaultFocusID
         return profiles.first { $0.id == id } ?? profiles.first
+    }
+
+    /// The tile that should hold focus when the picker first appears: the
+    /// last-active profile (so resuming is a single click), falling back to the
+    /// first profile on a first-ever launch with no active profile.
+    private var defaultFocusID: String? {
+        activeProfileID ?? profiles.first?.id
     }
 
     public var body: some View {
@@ -84,6 +92,7 @@ public struct ProfilePickerView: View {
             }
             .padding(.horizontal, 80)
             .focusSection()
+            .defaultFocus($focusedProfileID, defaultFocusID)
 
             if let onCancel {
                 Button("Cancel", action: onCancel)

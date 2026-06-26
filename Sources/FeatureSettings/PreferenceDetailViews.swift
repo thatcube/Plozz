@@ -118,4 +118,32 @@ struct SpoilersDetailView: View {
         .scrollClipDisabled()
     }
 }
+
+/// Now Playing preferences. Currently a single switch for the optional,
+/// audiophile-leaning "track details" surface on the full-screen music player.
+/// Reads/writes the same `@AppStorage` key the player observes, so the player
+/// updates live without any extra plumbing.
+struct NowPlayingDetailView: View {
+    @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                Text("Now Playing").font(.largeTitle.bold())
+                SettingsPanel {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Toggle("Show track details", isOn: $showTrackDetails)
+
+                        Text("Adds the album name, the audio quality and format (e.g. \"Original AAC 44.1 kHz 320 kbps\"), and the lyrics source to the full-screen player. Off by default so the player stays focused on the artwork, song and artist.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(.vertical, 24)
+        }
+        .scrollClipDisabled()
+    }
+}
 #endif

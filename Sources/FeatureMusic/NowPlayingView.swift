@@ -30,8 +30,12 @@ struct NowPlayingView: View {
 
     /// Focus targets on the player. Play/pause is the anchor the bar always
     /// comes back focused on; the reveal catcher holds focus while the bar is
-    /// hidden so tvOS focus never lands on an invisible control.
-    private enum Focus: Hashable { case playPause, revealCatcher }
+    /// hidden so tvOS focus never lands on an invisible control. Every visible
+    /// control has its own case so *any* focus movement between them resets the
+    /// auto-hide timer (the bar only fades after a true idle spell).
+    private enum Focus: Hashable {
+        case playPause, shuffle, previous, next, repeatMode, lyrics, revealCatcher
+    }
     @FocusState private var focus: Focus?
 
     /// Seconds of inactivity before the control bar fades away.
@@ -41,6 +45,12 @@ struct NowPlayingView: View {
     /// the choice is remembered across sessions. The toggle is disabled — and so
     /// can't be changed — when the current track has no lyrics.
     @AppStorage("musicLyricsEnabled") private var lyricsEnabled = true
+
+    /// Whether the player shows extra track detail — album name, audio
+    /// quality/format, and the lyrics source. Off by default to keep the screen
+    /// clean (it's a niche audiophile detail); toggled from Settings ▸ Now
+    /// Playing and remembered across sessions.
+    @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
 
     /// The lyrics panel is shown next to the player **only once lyrics are
     /// actually found**. While the background lookup is in flight (or if the track
@@ -93,6 +103,12 @@ struct NowPlayingView: View {
         .onChange(of: controller.currentTime) { _, _ in syncScrubModel() }
         .onChange(of: controller.duration) { _, _ in syncScrubModel() }
         .onChange(of: scrubModel.isScrubbing) { _, _ in scheduleHide() }
+        // Any focus movement among the controls (or onto the scrub bar, which
+        // clears `focus`) is a live interaction, so restart the idle countdown —
+        // the bar only fades 5s after the *last* thing the user did.
+        .onChange(of: focus) { _, _ in
+            if controlsVisible { scheduleHide() }
+        }
         .task(id: controller.currentTrack?.id) { await loadArtworkPalette() }
         // Back/Menu first dismisses the controls if they're showing; pressing it
         // again (with the controls already hidden) closes the player.
@@ -183,8 +199,10 @@ struct NowPlayingView: View {
         #endif
     }
 
-    /// The artwork + title/artist/album/quality block. Stays on screen after the
-    /// controls auto-hide.
+    /// The artwork + title/artist block. By default it shows only the title and
+    /// artist (the clean, Apple Music-style minimum); album and the audio
+    /// quality badge appear only when "Show track details" is enabled in
+    /// Settings. Stays on screen after the controls auto-hide.
     private var metaColumn: some View {
         VStack(spacing: 32) {
             MusicArtworkImage(
@@ -195,20 +213,30 @@ struct NowPlayingView: View {
                 .frame(width: 420, height: 420)
                 .shadow(radius: 30)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 Text(controller.currentTrack?.title ?? "Not Playing")
                     .font(.system(size: 46, weight: .bold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
-                if let subtitle = controller.currentTrack?.subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 18))
+                if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
+                    Text(artist)
+                        .font(.system(size: 26, weight: .medium))
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                         .lineLimit(1)
                         .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
                 }
-                qualityBadge
+                if showTrackDetails {
+                    if let album = controller.currentTrack?.albumTitle, !album.isEmpty {
+                        Text(album)
+                            .font(.system(size: 18))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .shadow(color: .black.opacity(0.3), radius: 5, y: 2)
+                    }
+                    qualityBadge
+                }
             }
         }
     }
@@ -294,32 +322,28 @@ struct NowPlayingView: View {
         return quality.isLossless ? .green : .primary
     }
 
-    /// Play/pause beside a full-width analog scrub bar (+ elapsed/remaining times).
+    /// The full-width analog scrub bar with elapsed / remaining times. Play/pause
+    /// no longer sits beside it — it's the big round button centered in the
+    /// transport row below.
     private var scrubRow: some View {
-        HStack(spacing: 28) {
-            transportButton(
-                icon: controller.isPlaying ? "pause.fill" : "play.fill",
-                prominent: true
-            ) { controller.togglePlayPause() }
-                .focused($focus, equals: .playPause)
-
-            VStack(spacing: 10) {
-                MusicScrubBar(model: scrubModel)
-                    .frame(height: 44)
-                HStack {
-                    Text(MusicFormat.duration(scrubModel.displaySeconds))
-                    Spacer()
-                    Text(MusicFormat.duration(controller.duration))
-                }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+        VStack(spacing: 10) {
+            MusicScrubBar(model: scrubModel)
+                .frame(height: 44)
+            HStack {
+                Text(MusicFormat.duration(scrubModel.displaySeconds))
+                Spacer()
+                Text(MusicFormat.duration(controller.duration))
             }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
     }
 
-    /// Every other control, evenly sized, on the row below. Includes the lyrics
-    /// toggle, which is disabled when the current track has no lyrics.
+    /// The transport row: the big round play/pause sits dead-centre with
+    /// previous/next flanking it, shuffle pinned left and repeat + lyrics pinned
+    /// right. Every button carries a Focus case so moving between them keeps the
+    /// bar awake.
     private var transportRow: some View {
         HStack(spacing: 28) {
             transportButton(
@@ -327,18 +351,47 @@ struct NowPlayingView: View {
                 prominent: controller.isShuffled,
                 tint: controller.isShuffled ? Color.accentColor : .primary
             ) { controller.toggleShuffle() }
+                .focused($focus, equals: .shuffle)
+
+            Spacer(minLength: 24)
 
             transportButton(icon: "backward.fill") { controller.previous() }
+                .focused($focus, equals: .previous)
+
+            playPauseButton
+
             transportButton(icon: "forward.fill") { controller.next() }
+                .focused($focus, equals: .next)
+
+            Spacer(minLength: 24)
 
             transportButton(
                 icon: repeatIcon,
                 prominent: controller.repeatMode != .off,
                 tint: controller.repeatMode == .off ? .primary : Color.accentColor
             ) { controller.cycleRepeatMode() }
+                .focused($focus, equals: .repeatMode)
 
             lyricsToggleButton
+                .focused($focus, equals: .lyrics)
         }
+    }
+
+    /// The big, round, centred play/pause button — about twice the size of the
+    /// other transport controls so it reads as the primary action.
+    private var playPauseButton: some View {
+        Button {
+            controller.togglePlayPause()
+            scheduleHide()
+        } label: {
+            Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 46, weight: .semibold))
+                .frame(width: 104, height: 104)
+                .contentShape(Circle())
+        }
+        .musicGlassButton(prominent: true)
+        .clipShape(Circle())
+        .focused($focus, equals: .playPause)
     }
 
     /// Toggles the lyrics panel. Highlighted when on; disabled (and dimmed) while
@@ -402,12 +455,16 @@ struct NowPlayingLyricsView: View {
     let currentTime: TimeInterval
     /// Eases the lines in on first appearance instead of letting them pop.
     @State private var appeared = false
+    /// The lyrics source attribution is part of the optional "track details"
+    /// surface, so it only shows when that setting is on.
+    @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
 
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottomTrailing) {
-                if case let .loaded(lyrics) = state, let source = lyrics.source {
+                if showTrackDetails,
+                   case let .loaded(lyrics) = state, let source = lyrics.source {
                     LyricsSourceBadge(source: source)
                         .padding(.trailing, 4)
                         .padding(.bottom, 4)
@@ -469,6 +526,11 @@ struct NowPlayingLyricsView: View {
                         Color.clear.frame(height: geo.size.height * 0.45)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // The active line scales up from its leading edge, so reserve
+                    // a little room on the right; without it long lines render
+                    // right up to the panel edge and the scaled-up current line
+                    // gets clipped (and cut by the edge-fade mask).
+                    .padding(.trailing, max(40, geo.size.width * 0.08))
                 }
                 .scrollDisabled(true)
                 .mask(edgeFade)

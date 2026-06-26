@@ -386,13 +386,19 @@ struct NowPlayingLyricsView: View {
         return index == active ? 1.0 : 0.25
     }
 
+    /// A small anticipation lead (seconds) so a line highlights right as it's
+    /// sung rather than a beat late. Compensates for residual sampling latency
+    /// and matches how lyric apps nudge the active line slightly early.
+    private static let lyricsLeadTime: TimeInterval = 0.3
+
     /// The index of the line currently being sung, for synced lyrics.
     private func activeIndex(in lyrics: Lyrics) -> Int? {
         guard lyrics.isSynced else { return nil }
+        let cue = currentTime + Self.lyricsLeadTime
         var match: Int?
         for (index, line) in lyrics.lines.enumerated() {
             guard let start = line.start else { continue }
-            if start <= currentTime { match = index } else { break }
+            if start <= cue { match = index } else { break }
         }
         return match
     }

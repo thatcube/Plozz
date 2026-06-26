@@ -418,7 +418,9 @@ public final class AudioPlaybackController {
     // MARK: Observers
 
     private func installTimeObserver() {
-        let interval = CMTime(seconds: 1, preferredTimescale: 2)
+        // Sample 4×/sec so synced-lyric highlighting tracks the music closely.
+        // A 1s interval makes the active line trail the vocal by up to a second.
+        let interval = CMTime(value: 1, timescale: 4)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             // The callback is delivered on the main queue; hop to the main actor
             // to satisfy strict concurrency.

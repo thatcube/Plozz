@@ -51,6 +51,9 @@ public struct ProfilePickerView: View {
 
     /// How long focus must rest on a tile before the background fades to it.
     private let backgroundSettleDelay: Duration = .milliseconds(300)
+    /// Guards the one-time programmatic initial focus so later re-renders don't
+    /// keep yanking focus back to the default tile.
+    @State private var didSetInitialFocus = false
 
     /// The profile whose colors the background should currently show. Before
     /// focus settles (i.e. at startup) it is pinned to the **default-focused**
@@ -92,7 +95,6 @@ public struct ProfilePickerView: View {
             }
             .padding(.horizontal, 80)
             .focusSection()
-            .defaultFocus($focusedProfileID, defaultFocusID)
 
             if let onCancel {
                 Button("Cancel", action: onCancel)
@@ -116,7 +118,25 @@ public struct ProfilePickerView: View {
             do { try await Task.sleep(for: backgroundSettleDelay) } catch { return }
             settledProfileID = id
         }
-        .onAppear { prefetchAvatars() }
+        .onAppear {
+            prefetchAvatars()
+            setInitialFocusIfNeeded()
+        }
+    }
+
+    /// Move focus to the default tile (last-used profile, else first) once when
+    /// the picker appears. tvOS's declarative `.defaultFocus` is unreliable with
+    /// `LazyVGrid`, so we set the `@FocusState` explicitly after a short runloop
+    /// hop — letting the focus engine finish its first pass — which dependably
+    /// pre-selects the right tile.
+    private func setInitialFocusIfNeeded() {
+        guard !didSetInitialFocus else { return }
+        didSetInitialFocus = true
+        let target = defaultFocusID
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            focusedProfileID = target
+        }
     }
 
     /// Warm the decoded-image cache for every profile photo as soon as the picker

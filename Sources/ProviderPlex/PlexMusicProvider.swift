@@ -188,7 +188,7 @@ extension PlexProvider: MusicProvider {
         }
         // LRC parses to synced lines; plain text falls back to unsynced.
         let lyrics = Lyrics(lrc: text) ?? Lyrics(plainText: text)
-        return lyrics.isEmpty ? nil : lyrics
+        return lyrics.isEmpty ? nil : lyrics.taggingSource(.plex)
     }
 
     /// Builds a `PlaybackQuality` from Plex media facts. Direct play reflects the

@@ -212,7 +212,7 @@ extension JellyfinProvider: MusicProvider {
             )
         }
         let lyrics = Lyrics(lines: lines)
-        return lyrics.isEmpty ? nil : lyrics
+        return lyrics.isEmpty ? nil : lyrics.taggingSource(.jellyfin)
     }
 
     /// Containers AVPlayer direct-plays on tvOS — must match the `Container`

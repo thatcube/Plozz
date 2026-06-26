@@ -28,12 +28,34 @@ public struct LyricLine: Codable, Hashable, Sendable {
     }
 }
 
+/// Where a track's lyrics came from, surfaced as a small attribution badge on
+/// the Now Playing lyrics panel. The two servers are first-class; `lrclib` is
+/// the keyless public fallback used when the server has none.
+public enum LyricsSource: String, Codable, Hashable, Sendable {
+    case jellyfin
+    case plex
+    case lrclib
+
+    /// Human-facing name shown next to the source logo.
+    public var displayName: String {
+        switch self {
+        case .jellyfin: return "Jellyfin"
+        case .plex: return "Plex"
+        case .lrclib: return "LRCLIB"
+        }
+    }
+}
+
 /// A track's lyrics: an ordered list of lines, synced or plain.
 public struct Lyrics: Codable, Hashable, Sendable {
     public var lines: [LyricLine]
+    /// Where these lyrics were sourced from, for the attribution badge. `nil`
+    /// when unknown.
+    public var source: LyricsSource?
 
-    public init(lines: [LyricLine]) {
+    public init(lines: [LyricLine], source: LyricsSource? = nil) {
         self.lines = lines
+        self.source = source
     }
 
     /// Whether any line carries a timestamp (karaoke-capable).
@@ -41,6 +63,13 @@ public struct Lyrics: Codable, Hashable, Sendable {
 
     /// Whether there is no meaningful content to show.
     public var isEmpty: Bool { lines.allSatisfy { $0.text.trimmingCharacters(in: .whitespaces).isEmpty } }
+
+    /// Returns a copy stamped with `source`.
+    public func taggingSource(_ source: LyricsSource) -> Lyrics {
+        var copy = self
+        copy.source = source
+        return copy
+    }
 
     /// Convenience: plain-text lyrics from a single string, split on newlines.
     public init(plainText: String) {

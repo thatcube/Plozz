@@ -254,9 +254,15 @@ struct NowPlayingLyricsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("Lyrics")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Lyrics")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if case let .loaded(lyrics) = state, let source = lyrics.source {
+                    LyricsSourceBadge(source: source)
+                }
+            }
 
             content
         }
@@ -329,6 +335,34 @@ struct NowPlayingLyricsView: View {
 
     private func isActive(index: Int, in lyrics: Lyrics) -> Bool {
         activeIndex(in: lyrics) == index
+    }
+}
+
+/// Tiny attribution shown in the lyrics panel header: the source's brand mark
+/// (the same app-bundle logos used in Settings for Jellyfin/Plex) plus its name.
+/// LRCLIB has no bundled logo, so it uses an SF Symbol stand-in.
+struct LyricsSourceBadge: View {
+    let source: LyricsSource
+
+    var body: some View {
+        HStack(spacing: 6) {
+            logo
+            Text(source.displayName)
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(.tertiary)
+    }
+
+    @ViewBuilder
+    private var logo: some View {
+        switch source {
+        case .jellyfin:
+            Image("JellyfinLogo").renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
+        case .plex:
+            Image("PlexLogo").renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
+        case .lrclib:
+            Image(systemName: "quote.bubble").font(.caption)
+        }
     }
 }
 

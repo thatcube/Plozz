@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import MetadataKit
 
 /// Navigation routes inside the Music tab's stack.
 enum MusicRoute: Hashable {
@@ -113,9 +114,24 @@ func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackControll
 /// `streamURLResolver`, so the Now Playing lyrics panel works for whichever
 /// backend owns the track.
 @MainActor
+/// Resolves a track's lyrics: the user's server first, then the keyless LRCLIB
+/// public fallback when the server has none. The result carries its own source
+/// tag (Jellyfin/Plex/LRCLIB) for the attribution badge.
 func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
     { track in
-        try? await provider.lyrics(for: track.id)
+        if let serverLyrics = try? await provider.lyrics(for: track.id), !serverLyrics.isEmpty {
+            return serverLyrics
+        }
+        guard let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !artist.isEmpty else {
+            return nil
+        }
+        return await LRCLIBLyricsProvider().lyrics(
+            title: track.title,
+            artist: artist,
+            album: track.albumTitle,
+            duration: track.duration
+        )
     }
 }
 #endif

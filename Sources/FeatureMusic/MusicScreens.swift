@@ -559,7 +559,16 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             // Play and Shuffle buttons fit comfortably side by side.
             let infoWidth = max(480, geo.size.width * 0.33)
             let bottomInset = PlozzTheme.Metrics.screenPadding
-            HStack(alignment: .top, spacing: 56) {
+            // Side gutters inside the scroll view: the leading one gives the
+            // focus scale + shadow room to grow without being clipped; the
+            // trailing one both does that and leaves space for the system scroll
+            // indicator so it sits clear of the track durations. The scroll area
+            // is widened by these same amounts (tighter column spacing on the
+            // left, smaller trailing page padding on the right) so the rows keep
+            // their current width.
+            let focusGutter: CGFloat = 24
+            let indicatorGutter: CGFloat = 16
+            HStack(alignment: .top, spacing: 56 - focusGutter) {
                 info
                     .frame(width: infoWidth, alignment: .leading)
                     // Position the info column with the shared top offset; the
@@ -582,9 +591,6 @@ struct MusicDetailLayout<InfoColumn: View>: View {
                         onPlayTrack: onPlayTrack
                     )
                 }
-                // Hide the system scroll indicators — when scrolling fast they
-                // pop up over the track durations on the right edge.
-                .scrollIndicators(.hidden)
                 // The scroll view fills the full page height so rows travel all
                 // the way to the page's top and bottom edges instead of vanishing
                 // at an inset boundary. Content margins keep the first row aligned
@@ -593,19 +599,19 @@ struct MusicDetailLayout<InfoColumn: View>: View {
                 .frame(maxHeight: .infinity)
                 .contentMargins(.top, topPadding, for: .scrollContent)
                 .contentMargins(.bottom, bottomInset + 24, for: .scrollContent)
-                // Replace the scroll view's built-in clip (which chops the focus
-                // scale + shadow off a row's left/right edges) with a mask that
-                // only clips vertically. Rows still vanish cleanly at the page's
-                // top and bottom, but the focus growth can overflow on the sides.
-                .scrollClipDisabled()
-                .mask {
-                    Rectangle().padding(.horizontal, -48)
-                }
+                // Inset the rows from the scroll view's side edges so the focus
+                // scale + shadow have room to grow without being clipped, and the
+                // scroll indicator lands in the right-hand gutter, clear of the
+                // durations. Default vertical clipping is kept so rows still
+                // scroll cleanly to the page's top and bottom edges.
+                .contentMargins(.leading, focusGutter, for: .scrollContent)
+                .contentMargins(.trailing, indicatorGutter, for: .scrollContent)
                 // Track list is its own focus section so Right from the info
                 // column reliably enters the list regardless of row alignment.
                 .focusSection()
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(.leading, PlozzTheme.Metrics.screenPadding)
+            .padding(.trailing, indicatorGutter)
         }
     }
 }

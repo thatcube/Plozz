@@ -80,6 +80,86 @@ public struct Lyrics: Codable, Hashable, Sendable {
         self.init(lines: lines)
     }
 
+    /// Parses Plex's timed-lyrics JSON (returned by a `streamType == 4` lyric
+    /// stream when the words came from Plex's own provider rather than an `.lrc`
+    /// sidecar). The payload is an array of line objects — possibly wrapped in a
+    /// container object — each shaped like:
+    ///
+    /// ```json
+    /// {"startOffset":18990,"endOffset":21200,
+    ///  "Span":[{"text":"I said to you","startOffset":18990,"endOffset":21200}]}
+    /// ```
+    ///
+    /// Offsets are milliseconds. Returns `nil` when the input isn't this format
+    /// or carries no usable lines, so callers can fall back to LRC/plain text.
+    public init?(plexTimedJSON json: String) {
+        guard let data = json.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data),
+              let rawLines = Self.findLyricLineArray(in: root),
+              !rawLines.isEmpty else {
+            return nil
+        }
+
+        var parsed: [LyricLine] = []
+        var sawTimestamp = false
+        for object in rawLines {
+            let text = Self.plexLineText(from: object)
+            guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            var start: TimeInterval?
+            if let ms = Self.number(object["startOffset"]) {
+                start = ms / 1000
+                sawTimestamp = true
+            }
+            parsed.append(LyricLine(text: text, start: start))
+        }
+
+        guard !parsed.isEmpty else { return nil }
+        if sawTimestamp {
+            parsed.sort { ($0.start ?? 0) < ($1.start ?? 0) }
+        }
+        self.init(lines: parsed)
+    }
+
+    /// Recursively locates the array of line objects inside a parsed Plex lyrics
+    /// payload, tolerating an outer wrapper object (e.g. `{"Lyrics":{"Line":[…]}}`)
+    /// as well as a bare top-level array.
+    private static func findLyricLineArray(in node: Any) -> [[String: Any]]? {
+        if let array = node as? [[String: Any]],
+           array.contains(where: { $0["Span"] != nil || ($0["startOffset"] != nil && $0["text"] != nil) }) {
+            return array
+        }
+        if let dict = node as? [String: Any] {
+            for value in dict.values {
+                if let found = findLyricLineArray(in: value) { return found }
+            }
+        }
+        if let array = node as? [Any] {
+            for value in array {
+                if let found = findLyricLineArray(in: value) { return found }
+            }
+        }
+        return nil
+    }
+
+    /// Joins the text of a Plex line: each `Span`'s `text`, or the line's own
+    /// `text` when there are no spans.
+    private static func plexLineText(from object: [String: Any]) -> String {
+        if let spans = object["Span"] as? [[String: Any]] {
+            return spans.compactMap { $0["text"] as? String }.joined()
+        }
+        return (object["text"] as? String) ?? ""
+    }
+
+    /// Reads a JSON number (NSNumber/Int/Double/String) as a `Double`.
+    private static func number(_ value: Any?) -> Double? {
+        switch value {
+        case let double as Double: return double
+        case let int as Int: return Double(int)
+        case let string as String: return Double(string)
+        default: return nil
+        }
+    }
+
     /// Parses an LRC file (Plex sidecar lyrics) into timestamped lines. Falls
     /// back to treating the input as plain text when it carries no `[mm:ss.xx]`
     /// timestamps. Returns `nil` when there is nothing usable.

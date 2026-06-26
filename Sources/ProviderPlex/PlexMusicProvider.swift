@@ -186,9 +186,18 @@ extension PlexProvider: MusicProvider {
               let text = try? await client.lyricsText(forStreamKey: key) else {
             return nil
         }
-        // LRC parses to synced lines; plain text falls back to unsynced.
-        let lyrics = Lyrics(lrc: text) ?? Lyrics(plainText: text)
-        return lyrics.isEmpty ? nil : lyrics.taggingSource(.plex)
+        // Plex serves lyrics either as an `.lrc` sidecar or as its own timed-JSON
+        // payload; pick the parser by sniffing the body so JSON is never rendered
+        // raw. A leading brace/bracket means JSON; anything else is LRC/plain.
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lyrics: Lyrics?
+        if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
+            lyrics = Lyrics(plexTimedJSON: text)
+        } else {
+            lyrics = Lyrics(lrc: text) ?? Lyrics(plainText: text)
+        }
+        guard let lyrics, !lyrics.isEmpty else { return nil }
+        return lyrics.taggingSource(.plex)
     }
 
     /// Builds a `PlaybackQuality` from Plex media facts. Direct play reflects the

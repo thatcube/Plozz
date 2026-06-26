@@ -71,57 +71,70 @@ public struct ProfilePickerView: View {
     }
 }
 
-/// A single selectable profile tile: avatar symbol on a colored disc plus the
-/// profile name. On focus it lifts onto a soft, theme-aware Liquid Glass
-/// platter (rounded, translucent) with a gentle scale + shadow — no stark white
-/// system plate. The active profile carries a small, quiet accent dot under its
-/// name rather than a corner badge, so the indicator never collides with focus.
+/// A single selectable profile tile: avatar on a colored disc plus the name.
+///
+/// Focus uses the same theme-aware "inverted card" language as the Settings
+/// rows (`SettingsFocusButtonStyle`): in dark mode the focused tile fills WHITE
+/// and its label flips to BLACK; in light mode it fills BLACK with a WHITE
+/// label — so the focused tile always reads as a crisp, intentional lift rather
+/// than a stark plate with unreadable white-on-white text. A gentle scale +
+/// soft shadow + continuous corners complete it. The active profile carries a
+/// small, quiet accent dot under its name.
 private struct ProfileTile: View {
     let profile: Profile
     let isActive: Bool
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.themePalette) private var palette
 
     private let avatarSize: CGFloat = 200
+
+    /// Inverted-card fill/foreground, matching the Settings focus treatment.
+    private var focusFill: Color { colorScheme == .dark ? .white : .black }
+    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 16) {
                 ProfileAvatarView(profile: profile, size: avatarSize)
                     .overlay {
-                        // Thin, theme-aware rim for crisp definition on focus.
+                        // On the focused card the photo/disc gets a faint rim in
+                        // the inverted foreground so it separates from the fill.
                         Circle().strokeBorder(
-                            palette.primaryText.opacity(isFocused ? 0.9 : 0),
-                            lineWidth: 3
+                            focusForeground.opacity(isFocused ? 0.18 : 0),
+                            lineWidth: 2
                         )
                     }
 
                 VStack(spacing: 8) {
                     Text(profile.name)
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+                        .foregroundStyle(isFocused ? focusForeground : palette.secondaryText)
                         .lineLimit(1)
 
                     // Subtle "currently active" indicator. Reserves its slot via
                     // opacity so active/inactive tiles keep the same rhythm.
                     Circle()
-                        .fill(palette.accent)
+                        .fill(isFocused ? focusForeground.opacity(0.55) : palette.accent)
                         .frame(width: 10, height: 10)
                         .opacity(isActive ? 1 : 0)
                 }
             }
             .padding(.horizontal, 28)
-            .padding(.vertical, 24)
-            .plozzFocusPlatter(cornerRadius: 36, isFocused: isFocused)
-            .scaleEffect(isFocused ? 1.08 : 1.0)
-            .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 24, y: 12)
+            .padding(.vertical, 28)
+            .background(
+                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                    .fill(isFocused ? focusFill : .clear)
+                    .shadow(color: .black.opacity(isFocused ? 0.28 : 0), radius: 18, y: 8)
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
         }
         .buttonStyle(.plain)
         .focused($isFocused)
         .focusEffectDisabled()
-        .animation(.easeOut(duration: 0.2), value: isFocused)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 
@@ -132,42 +145,52 @@ private struct AddProfileTile: View {
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.themePalette) private var palette
 
     private let avatarSize: CGFloat = 200
+
+    private var focusFill: Color { colorScheme == .dark ? .white : .black }
+    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 16) {
                 ZStack {
                     Circle()
-                        .strokeBorder(palette.secondaryText.opacity(isFocused ? 0.9 : 0.5),
-                                      style: StrokeStyle(lineWidth: 4, dash: [12, 10]))
+                        .strokeBorder(
+                            (isFocused ? focusForeground : palette.secondaryText)
+                                .opacity(isFocused ? 0.9 : 0.5),
+                            style: StrokeStyle(lineWidth: 4, dash: [12, 10])
+                        )
                     Image(systemName: "plus")
                         .font(.system(size: 80, weight: .semibold))
-                        .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+                        .foregroundStyle(isFocused ? focusForeground : palette.secondaryText)
                 }
                 .frame(width: avatarSize, height: avatarSize)
 
                 VStack(spacing: 8) {
                     Text("Add Profile")
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+                        .foregroundStyle(isFocused ? focusForeground : palette.secondaryText)
 
                     // Keep the same vertical rhythm as a profile tile's dot slot.
                     Circle().fill(.clear).frame(width: 10, height: 10)
                 }
             }
             .padding(.horizontal, 28)
-            .padding(.vertical, 24)
-            .plozzFocusPlatter(cornerRadius: 36, isFocused: isFocused)
-            .scaleEffect(isFocused ? 1.08 : 1.0)
-            .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 24, y: 12)
+            .padding(.vertical, 28)
+            .background(
+                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                    .fill(isFocused ? focusFill : .clear)
+                    .shadow(color: .black.opacity(isFocused ? 0.28 : 0), radius: 18, y: 8)
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
         }
         .buttonStyle(.plain)
         .focused($isFocused)
         .focusEffectDisabled()
-        .animation(.easeOut(duration: 0.2), value: isFocused)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 #endif

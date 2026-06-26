@@ -23,7 +23,7 @@ public extension View {
 struct PlozzGlassPillButtonModifier: ViewModifier {
     var isSelected: Bool
     var shape: PlozzControlShape
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -76,7 +76,7 @@ public struct PlozzSeasonTabStyle: ButtonStyle {
         let configuration: ButtonStyle.Configuration
         let isSelected: Bool
         @Environment(\.isFocused) private var isFocused
-        @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+        @Environment(\.plozzReduceTransparency) private var reduceTransparency
         @Environment(\.themePalette) private var palette
 
         /// Whether the tab shows its pill (focused tab, or the active season).

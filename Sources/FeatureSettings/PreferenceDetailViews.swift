@@ -5,6 +5,7 @@ import CoreUI
 
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
+    @AppStorage("reduceTransparencyOverride") private var reduceTransparency = false
 
     var body: some View {
         ScrollView {
@@ -37,6 +38,15 @@ struct AppearanceDetailView: View {
                         .padding(.vertical, 6)
                     }
                     .scrollClipDisabled()
+                }
+
+                SettingsPanel(
+                    title: "Transparency",
+                    footer: "Replaces the translucent “liquid glass” blur on cards, menus and overlays with solid surfaces. Turns on automatically when Reduce Transparency is enabled in tvOS Accessibility settings."
+                ) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Toggle("Reduce transparency", isOn: $reduceTransparency)
+                    }
                 }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

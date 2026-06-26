@@ -123,6 +123,12 @@ struct NowPlayingView: View {
         ZStack {
             background
 
+            // Drives the scrub model from the 4x/sec playback clock in isolation,
+            // so playback ticks no longer re-evaluate the whole player body. (See
+            // PlaybackClock.) Always mounted so progress stays current even while
+            // the controls are hidden.
+            PlaybackClock(controller: controller, model: scrubModel)
+
             // Main content + bottom bar share the ZStack. The bar stays mounted
             // and its two groups (scrub bar / transport buttons) each slide off
             // the bottom edge via offset/opacity (rather than an insert/remove
@@ -182,8 +188,6 @@ struct NowPlayingView: View {
             setIdleTimerDisabled(false)
             hideTask?.cancel()
         }
-        .onChange(of: controller.currentTime) { _, _ in syncScrubModel() }
-        .onChange(of: controller.duration) { _, _ in syncScrubModel() }
         .onChange(of: scrubModel.isScrubbing) { _, _ in scheduleHide() }
         // Any focus movement among the controls (or onto the scrub bar, which
         // clears `focus`) is a live interaction, so restart the idle countdown —
@@ -265,11 +269,7 @@ struct NowPlayingView: View {
             metaColumn
                 .frame(maxWidth: showsLyricsPanel ? 620 : 760)
             if showsLyricsPanel {
-                NowPlayingLyricsView(
-                    state: controller.lyricsState,
-                    currentTime: controller.currentTime,
-                    showTrackDetails: showTrackDetails
-                )
+                LyricsPanel(controller: controller, showTrackDetails: showTrackDetails)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -626,6 +626,48 @@ struct NowPlayingView: View {
 }
 
 // MARK: - Lyrics panel
+
+/// Isolates the lyrics' per-tick `currentTime` read. `AudioPlaybackController` is
+/// `@Observable`, so SwiftUI tracks property reads per view body: by reading
+/// `currentTime` here (instead of in `NowPlayingView.body`) only the lyrics column
+/// — which inherently needs the playback position to highlight + auto-scroll —
+/// re-renders on each 4x/sec tick, not the artwork, meta, transport buttons (and
+/// their glass effects), equalizer or background.
+private struct LyricsPanel: View {
+    let controller: AudioPlaybackController
+    let showTrackDetails: Bool
+
+    var body: some View {
+        NowPlayingLyricsView(
+            state: controller.lyricsState,
+            currentTime: controller.currentTime,
+            showTrackDetails: showTrackDetails
+        )
+    }
+}
+
+/// A zero-size, non-interactive sink that confines the 4x/sec `currentTime` (and
+/// `duration`) dependency to itself. Reading those in `NowPlayingView.body` made
+/// the whole player re-evaluate on every playback tick; here only this trivial
+/// view re-runs, forwarding the position into the scrub model so the scrub bar
+/// stays live without dragging the rest of the player into the invalidation.
+private struct PlaybackClock: View {
+    let controller: AudioPlaybackController
+    let model: MusicScrubModel
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .onChange(of: controller.currentTime, initial: true) { _, time in
+                model.duration = controller.duration
+                if !model.isScrubbing { model.currentSeconds = time }
+            }
+            .onChange(of: controller.duration) { _, duration in
+                model.duration = duration
+            }
+    }
+}
 
 /// The right-hand lyrics column on the Now Playing screen. Renders the loading
 /// state, the lyrics themselves (synced lyrics highlight + auto-scroll the active

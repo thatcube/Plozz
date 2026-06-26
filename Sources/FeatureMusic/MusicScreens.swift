@@ -582,6 +582,9 @@ struct MusicDetailLayout<InfoColumn: View>: View {
                         onPlayTrack: onPlayTrack
                     )
                 }
+                // Hide the system scroll indicators — when scrolling fast they
+                // pop up over the track durations on the right edge.
+                .scrollIndicators(.hidden)
                 // The scroll view fills the full page height so rows travel all
                 // the way to the page's top and bottom edges instead of vanishing
                 // at an inset boundary. Content margins keep the first row aligned
@@ -590,6 +593,14 @@ struct MusicDetailLayout<InfoColumn: View>: View {
                 .frame(maxHeight: .infinity)
                 .contentMargins(.top, topPadding, for: .scrollContent)
                 .contentMargins(.bottom, bottomInset + 24, for: .scrollContent)
+                // Replace the scroll view's built-in clip (which chops the focus
+                // scale + shadow off a row's left/right edges) with a mask that
+                // only clips vertically. Rows still vanish cleanly at the page's
+                // top and bottom, but the focus growth can overflow on the sides.
+                .scrollClipDisabled()
+                .mask {
+                    Rectangle().padding(.horizontal, -48)
+                }
                 // Track list is its own focus section so Right from the info
                 // column reliably enters the list regardless of row alignment.
                 .focusSection()

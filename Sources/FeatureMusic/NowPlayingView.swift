@@ -310,7 +310,7 @@ struct NowPlayingLyricsView: View {
         return GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 30) {
+                    VStack(alignment: .leading, spacing: 52) {
                         // Top/bottom breathing room so the first and last lines
                         // can scroll all the way to the vertical center.
                         Color.clear.frame(height: geo.size.height * 0.45)
@@ -344,16 +344,21 @@ struct NowPlayingLyricsView: View {
         }
     }
 
-    /// Vertical edge fade so lines dissolve in/out across the top and bottom
-    /// thirds of the panel — only the middle third is fully solid — matching the
-    /// Apple Music / Plex lyric feel.
+    /// Vertical edge fade that makes the lyrics physically dissolve toward the
+    /// top and bottom — a near-continuous gradient that's only fully solid in a
+    /// thin central band, so lines melt into the background as they move away
+    /// from the active line (Apple Music / Plex feel).
     private var edgeFade: some View {
         LinearGradient(
             stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .black, location: 0.34),
-                .init(color: .black, location: 0.66),
-                .init(color: .clear, location: 1)
+                .init(color: .clear, location: 0.0),
+                .init(color: .black.opacity(0.15), location: 0.18),
+                .init(color: .black.opacity(0.6), location: 0.36),
+                .init(color: .black, location: 0.48),
+                .init(color: .black, location: 0.52),
+                .init(color: .black.opacity(0.6), location: 0.64),
+                .init(color: .black.opacity(0.15), location: 0.82),
+                .init(color: .clear, location: 1.0)
             ],
             startPoint: .top,
             endPoint: .bottom
@@ -364,13 +369,11 @@ struct NowPlayingLyricsView: View {
     /// line is solid, neighbours dim progressively. With no active line (unsynced
     /// or pre-roll) every line sits at a calm, even brightness.
     private func opacity(forIndex index: Int, active: Int?) -> Double {
-        guard let active else { return 0.5 }
+        guard let active else { return 0.7 }
         switch abs(index - active) {
         case 0: return 1.0
-        case 1: return 0.55
-        case 2: return 0.38
-        case 3: return 0.26
-        default: return 0.16
+        case 1: return 0.7
+        default: return 0.55
         }
     }
 

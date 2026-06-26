@@ -2,6 +2,9 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The full-screen Now Playing surface: large artwork, track/artist/album, a
 /// quality badge, a full-width analog Liquid Glass scrub bar with the play/pause
@@ -56,9 +59,21 @@ struct NowPlayingView: View {
             .buttonStyle(.plain)
             .padding(32)
         }
-        .onAppear { syncScrubModel() }
+        .onAppear {
+            syncScrubModel()
+            setIdleTimerDisabled(true)
+        }
+        .onDisappear { setIdleTimerDisabled(false) }
         .onChange(of: controller.currentTime) { _, _ in syncScrubModel() }
         .onChange(of: controller.duration) { _, _ in syncScrubModel() }
+    }
+
+    /// Keeps the Apple TV awake while the full-screen player is open so synced
+    /// lyrics keep scrolling and artwork stays up during long, hands-off listens.
+    private func setIdleTimerDisabled(_ disabled: Bool) {
+        #if canImport(UIKit)
+        UIApplication.shared.isIdleTimerDisabled = disabled
+        #endif
     }
 
     /// The left-hand player column: artwork, track/artist/album, quality badge,
@@ -253,22 +268,15 @@ struct NowPlayingLyricsView: View {
     let currentTime: TimeInterval
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Lyrics")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottomTrailing) {
                 if case let .loaded(lyrics) = state, let source = lyrics.source {
                     LyricsSourceBadge(source: source)
+                        .padding(.trailing, 4)
+                        .padding(.bottom, 4)
                 }
             }
-
-            content
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(40)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
     }
 
     @ViewBuilder
@@ -283,14 +291,14 @@ struct NowPlayingLyricsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case .unavailable:
-            VStack(alignment: .leading) {
+            VStack {
                 Spacer()
                 Text("No lyrics found")
-                    .font(.title2)
+                    .font(.system(size: 34, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case let .loaded(lyrics):
             lyricsScroll(lyrics)
@@ -298,27 +306,70 @@ struct NowPlayingLyricsView: View {
     }
 
     private func lyricsScroll(_ lyrics: Lyrics) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { index, line in
-                        let active = isActive(index: index, in: lyrics)
-                        Text(line.text.isEmpty ? " " : line.text)
-                            .font(.system(size: 30, weight: active ? .bold : .regular))
-                            .foregroundStyle(active ? .primary : .secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id(index)
-                            .animation(.easeInOut(duration: 0.2), value: active)
+        let active = activeIndex(in: lyrics)
+        return GeometryReader { geo in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 30) {
+                        // Top/bottom breathing room so the first and last lines
+                        // can scroll all the way to the vertical center.
+                        Color.clear.frame(height: geo.size.height * 0.45)
+                        ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { index, line in
+                            let isActive = (index == active)
+                            Text(line.text.isEmpty ? " " : line.text)
+                                .font(.system(size: 46, weight: isActive ? .bold : .semibold))
+                                .foregroundStyle(.primary)
+                                .opacity(opacity(forIndex: index, active: active))
+                                .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(index)
+                                .animation(.easeInOut(duration: 0.3), value: active)
+                        }
+                        Color.clear.frame(height: geo.size.height * 0.45)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollDisabled(true)
+                .mask(edgeFade)
+                .onChange(of: active) { _, newIndex in
+                    guard let newIndex else { return }
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        proxy.scrollTo(newIndex, anchor: .center)
                     }
                 }
-                .padding(.vertical, 8)
-            }
-            .onChange(of: activeIndex(in: lyrics)) { _, newIndex in
-                guard lyrics.isSynced, let newIndex else { return }
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    proxy.scrollTo(newIndex, anchor: .center)
+                .onAppear {
+                    if let active { proxy.scrollTo(active, anchor: .center) }
                 }
             }
+        }
+    }
+
+    /// Vertical edge fade so lines dissolve in/out at the top and bottom rather
+    /// than hard-clipping, matching the Apple Music / Plex lyric feel.
+    private var edgeFade: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .black, location: 0.22),
+                .init(color: .black, location: 0.78),
+                .init(color: .clear, location: 1)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    /// How visible a line is given its distance from the active one: the current
+    /// line is solid, neighbours dim progressively. With no active line (unsynced
+    /// or pre-roll) every line sits at a calm, even brightness.
+    private func opacity(forIndex index: Int, active: Int?) -> Double {
+        guard let active else { return 0.5 }
+        switch abs(index - active) {
+        case 0: return 1.0
+        case 1: return 0.55
+        case 2: return 0.38
+        case 3: return 0.26
+        default: return 0.16
         }
     }
 
@@ -331,10 +382,6 @@ struct NowPlayingLyricsView: View {
             if start <= currentTime { match = index } else { break }
         }
         return match
-    }
-
-    private func isActive(index: Int, in lyrics: Lyrics) -> Bool {
-        activeIndex(in: lyrics) == index
     }
 }
 

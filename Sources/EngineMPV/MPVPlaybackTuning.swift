@@ -6,10 +6,13 @@ import Foundation
 /// Per Plozz's "build for flexibility" mandate, the knobs that affect playback
 /// performance are **values**, not hardcoded option strings buried in `load()`,
 /// so a default can be changed (or A/B-tested on-device) by flipping a field
-/// rather than editing the engine. The shipped `.default` mirrors the previously
-/// hardcoded behaviour plus a slightly larger network read-ahead for smoother
-/// direct play; the colorimetry / HDR options stay in the engine because they're
-/// computed per-stream from the source metadata.
+/// rather than editing the engine. The shipped `.default` leaves mpv's own
+/// demuxer-cache sizing in place (an earlier forced ~320MiB read-ahead inflated
+/// the demuxed-packet working set and, stacked on gpu-next/libplacebo's
+/// Dolby-Vision reshape plus Metal/MoltenVK buffers, pushed the fanless Apple TV
+/// into memory pressure on high-bitrate 4K DoVi direct play); the colorimetry /
+/// HDR options stay in the engine because they're computed per-stream from the
+/// source metadata.
 ///
 /// On-device triage flow: turn on the Diagnostics overlay and read the **Decode**
 /// row. If it shows `Software (CPU)`, decode never reached VideoToolbox — try a
@@ -33,16 +36,23 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
     /// `gpu` removes that per-frame libplacebo cost while leaving HDR/DV untouched.
     public var sdrVideoOutput: String
     /// Whether to enable libmpv's stream cache (`--cache`). On for smooth
-    /// network direct play.
+    /// network direct play. mpv's own cache sizing is used unless the demuxer
+    /// ceilings below are set to explicit overrides.
     public var cacheEnabled: Bool
-    /// libmpv `--demuxer-readahead-secs`: how far ahead to keep demuxed packets,
-    /// smoothing brief network hiccups during direct play.
-    public var demuxerReadaheadSecs: Int
-    /// libmpv `--demuxer-max-bytes`: forward demuxer cache ceiling.
-    public var demuxerMaxBytes: String
-    /// libmpv `--demuxer-max-back-bytes`: backward demuxer cache ceiling (cheap
-    /// instant back-seeks without a re-read).
-    public var demuxerMaxBackBytes: String
+    /// libmpv `--demuxer-readahead-secs` override, or `nil` to use mpv's native
+    /// default. `nil` by default: a large forced read-ahead inflated the demuxed
+    /// packet working set, which on a high-bitrate 4K Dolby Vision stream stacked
+    /// on gpu-next/libplacebo + Metal/MoltenVK buffers pushed the fanless Apple TV
+    /// into memory pressure (throttling). Set an explicit value to A/B a deeper
+    /// cache on hardware that can afford it.
+    public var demuxerReadaheadSecs: Int?
+    /// libmpv `--demuxer-max-bytes` override (forward demuxer cache ceiling), or
+    /// `nil` to use mpv's native default. See ``demuxerReadaheadSecs`` for why the
+    /// default no longer forces a large ceiling.
+    public var demuxerMaxBytes: String?
+    /// libmpv `--demuxer-max-back-bytes` override (backward demuxer cache ceiling,
+    /// for cheap instant back-seeks), or `nil` to use mpv's native default.
+    public var demuxerMaxBackBytes: String?
     /// libmpv `--video-sync`. Defaults to `display-resample`: time video to the
     /// display's vsync (resampling audio by an inaudible fraction) so each frame
     /// is presented exactly on a refresh. Paired with SDR frame-rate matching —
@@ -66,9 +76,9 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
         videoOutput: String = "gpu-next",
         sdrVideoOutput: String = "gpu",
         cacheEnabled: Bool = true,
-        demuxerReadaheadSecs: Int = 20,
-        demuxerMaxBytes: String = "256MiB",
-        demuxerMaxBackBytes: String = "64MiB",
+        demuxerReadaheadSecs: Int? = nil,
+        demuxerMaxBytes: String? = nil,
+        demuxerMaxBackBytes: String? = nil,
         videoSync: String? = "display-resample",
         interpolation: Bool = false
     ) {
@@ -89,20 +99,28 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
         isHDR ? videoOutput : sdrVideoOutput
     }
 
-    /// The shipped default: previous decode/render behaviour plus smoother
-    /// direct-play caching.
+    /// The shipped default: hardware decode + per-range renderer, mpv's own
+    /// (lighter) demuxer-cache sizing, and the display-resample video-sync that
+    /// pairs with frame-rate matching.
     public static let `default` = MPVPlaybackTuning()
 
     /// The cache/demuxer option pairs to apply before `mpv_initialize`, in a
-    /// deterministic order. Decode (`hwdec`) and output (`vo`) are applied by the
+    /// deterministic order. `cache` is always set; each demuxer ceiling is only
+    /// emitted when it has an explicit override (otherwise mpv's native default is
+    /// left in place). Decode (`hwdec`) and output (`vo`) are applied by the
     /// engine alongside the colorimetry options they're coupled to.
     func cacheOptionPairs() -> [(String, String)] {
-        [
-            ("cache", cacheEnabled ? "yes" : "no"),
-            ("demuxer-readahead-secs", String(demuxerReadaheadSecs)),
-            ("demuxer-max-bytes", demuxerMaxBytes),
-            ("demuxer-max-back-bytes", demuxerMaxBackBytes)
-        ]
+        var pairs: [(String, String)] = [("cache", cacheEnabled ? "yes" : "no")]
+        if let demuxerReadaheadSecs {
+            pairs.append(("demuxer-readahead-secs", String(demuxerReadaheadSecs)))
+        }
+        if let demuxerMaxBytes {
+            pairs.append(("demuxer-max-bytes", demuxerMaxBytes))
+        }
+        if let demuxerMaxBackBytes {
+            pairs.append(("demuxer-max-back-bytes", demuxerMaxBackBytes))
+        }
+        return pairs
     }
 }
 #endif

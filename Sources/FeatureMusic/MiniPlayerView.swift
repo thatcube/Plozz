@@ -3,65 +3,94 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// A slim persistent bar shown at the bottom of the Music tab **only while audio
-/// is loaded**. It is focusable (reachable by swiping down from the grid) but
-/// does not auto-grab focus on appearance, per the focus-engine requirement.
-/// Selecting it opens the full Now Playing screen.
-struct MiniPlayerBar: View {
+/// The compact, focusable "Now Playing" affordance that floats in the
+/// **top-trailing corner** of the Music tab while audio is loaded. Selecting it
+/// opens the full Now Playing screen.
+///
+/// It floats top-trailing (not a pinned bottom bar) on purpose: a focusable bar
+/// pinned to the bottom sits "below" the content in the tvOS focus graph, so
+/// pressing **down** through a vertical track list fights the focus engine and
+/// jumps into the bar. A top-trailing element is only reachable by moving
+/// *up/right*, so it never competes with downward list navigation.
+struct NowPlayingPill: View {
     @Bindable var controller: AudioPlaybackController
+
     let onOpen: () -> Void
 
     var body: some View {
         if controller.hasActivePlayback, let track = controller.currentTrack {
-            HStack(spacing: 20) {
-                Button(action: onOpen) {
-                    HStack(spacing: 16) {
-                        MusicArtworkImage(
-                            url: track.artworkURL,
-                            systemPlaceholder: "music.note",
-                            cornerRadius: 8,
-                            asyncFallbackURL: MusicArtworkFallback.trackCover(
-                                title: track.title,
-                                album: track.albumTitle,
-                                artist: track.artistName
-                            )
+            Button(action: onOpen) {
+                HStack(spacing: 14) {
+                    MusicArtworkImage(
+                        url: track.artworkURL,
+                        systemPlaceholder: "music.note",
+                        cornerRadius: 6,
+                        asyncFallbackURL: MusicArtworkFallback.trackCover(
+                            title: track.title,
+                            album: track.albumTitle,
+                            artist: track.artistName
                         )
-                            .frame(width: 64, height: 64)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(track.title).font(.headline).lineLimit(1)
-                            if let subtitle = track.subtitle {
-                                Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                            }
+                    )
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.title)
+                            .font(.headline)
+                            .lineLimit(1)
+                        if let subtitle = track.subtitle {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                        Spacer(minLength: 0)
                     }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                    .frame(maxWidth: 220, alignment: .leading)
 
-                Button {
-                    controller.togglePlayPause()
-                } label: {
-                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title2)
-                        .frame(width: 64, height: 64)
+                    Group {
+                        if controller.isPlaying {
+                            NowPlayingEqualizer(isAnimating: true)
+                                .frame(width: 22)
+                        } else {
+                            Image(systemName: "pause.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
+                .padding(.leading, 10)
+                .padding(.trailing, 22)
+                .padding(.vertical, 10)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(NowPlayingPillButtonStyle())
+            .focusEffectDisabled()
+            .background(.thinMaterial, in: Capsule())
+            .clipShape(Capsule())
+        }
+    }
+}
 
-                Button { controller.next() } label: {
-                    Image(systemName: "forward.fill")
-                        .font(.title2)
-                        .frame(width: 64, height: 64)
+/// A gentle lift + shadow when the floating Now Playing pill is focused, in
+/// keeping with the app's card focus language.
+private struct NowPlayingPillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyleBody(configuration: configuration)
+    }
+
+    private struct StyleBody: View {
+        let configuration: Configuration
+        @Environment(\.isFocused) private var isFocused
+
+        var body: some View {
+            configuration.label
+                .overlay {
+                    Capsule().stroke(.white.opacity(isFocused ? 0.5 : 0), lineWidth: 1)
                 }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 14)
-            .background(.ultraThinMaterial)
-            .overlay(alignment: .top) {
-                ProgressBar(fraction: controller.progressFraction)
-                    .frame(height: 4)
-            }
+                .scaleEffect(isFocused ? (configuration.isPressed ? 1.03 : 1.06) : 1)
+                .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 18, y: 8)
+                .animation(.easeOut(duration: 0.16), value: isFocused)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }
     }
 }

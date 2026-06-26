@@ -160,6 +160,7 @@ extension PlexProvider: MusicProvider {
             throw AppError.notFound
         }
         let track = mapTrack(detail)
+        let quality = Self.playbackQuality(media: media, part: part, isTranscoding: resolved.isTranscoding)
         return AudioPlaybackRequest(
             track: track,
             streamURL: resolved.url,
@@ -167,7 +168,31 @@ extension PlexProvider: MusicProvider {
             queue: [track],
             queueIndex: 0,
             startPosition: 0,
-            isTranscoding: resolved.isTranscoding
+            isTranscoding: resolved.isTranscoding,
+            quality: quality
+        )
+    }
+
+    /// Builds a `PlaybackQuality` from Plex media facts. Direct play reflects the
+    /// source audio stream; a transcode is always Plex's progressive MP3 320 kbps
+    /// music target (see `audioTranscodeURL`).
+    private static func playbackQuality(media: PlexMedia, part: PlexPart, isTranscoding: Bool) -> PlaybackQuality {
+        if isTranscoding {
+            return PlaybackQuality(isDirectPlay: false, bitrate: 320_000, transcodeCodec: "mp3")
+        }
+        let audio = part.Stream?.first { $0.streamType == 2 }
+        let codec = (audio?.codec ?? media.audioCodec)?.lowercased()
+        let container = (media.container ?? part.container)?.lowercased()
+        // Plex reports per-stream bitrate in kbps.
+        let bitrate = audio?.bitrate.map { $0 * 1000 }
+        return PlaybackQuality(
+            isDirectPlay: true,
+            codec: codec,
+            container: container,
+            bitrate: bitrate,
+            sampleRate: audio?.samplingRate,
+            bitDepth: nil,
+            channels: audio?.channels ?? media.audioChannels
         )
     }
 

@@ -42,7 +42,6 @@ struct MusicLandingView: View {
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
         }
-        .navigationTitle("Music")
         .task { if case .idle = viewModel.state { await viewModel.load() } }
     }
 
@@ -75,7 +74,9 @@ private struct EntryTile: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 14) {
-                Image(systemName: icon).font(.system(size: 44))
+                Image(systemName: icon)
+                    .font(.system(size: 44))
+                    .foregroundStyle(Color.accentColor.gradient)
                 Text(title).font(.headline)
             }
             .frame(width: 280, height: 160)
@@ -128,20 +129,26 @@ struct MusicGridView: View {
     var body: some View {
         ContentStateView(state: viewModel.state, emptyMessage: emptyMessage, onRetry: { Task { await viewModel.loadMore() } }) { _ in
             ScrollView {
-                LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.rowSpacing) {
-                    content
-                }
-                .padding(PlozzTheme.Metrics.screenPadding)
-                if viewModel.hasMore {
-                    ProgressView()
-                        .onAppear { Task { await viewModel.loadMore() } }
-                        .padding()
+                VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
+                    Text(title)
+                        .font(.system(size: 48, weight: .bold))
+                        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                        .padding(.top, PlozzTheme.Metrics.rowSpacing)
+
+                    LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.rowSpacing) {
+                        content
+                    }
+                    .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                    if viewModel.hasMore {
+                        ProgressView()
+                            .onAppear { Task { await viewModel.loadMore() } }
+                            .padding()
+                    }
                 }
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
         }
-        .navigationTitle(title)
         .task { await viewModel.loadFirstPageIfNeeded() }
     }
 
@@ -189,7 +196,9 @@ private struct GenreCard: View {
     var body: some View {
         Button(action: action) {
             VStack {
-                Image(systemName: "guitars").font(.system(size: 40))
+                Image(systemName: "guitars")
+                    .font(.system(size: 40))
+                    .foregroundStyle(Color.accentColor.gradient)
                 Text(genre.name).font(.headline).lineLimit(1)
             }
             .frame(width: 280, height: 160)
@@ -242,7 +251,6 @@ struct ArtistDetailView: View {
             }
             .padding(.vertical, PlozzTheme.Metrics.rowSpacing)
         }
-        .navigationTitle(viewModel.artist.name)
         .scrollClipDisabled()
         .task { await viewModel.load() }
     }
@@ -255,24 +263,20 @@ struct AlbumDetailView: View {
     let controller: AudioPlaybackController
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                header
-                TrackListView(
-                    tracks: viewModel.tracks,
-                    artworkFallback: viewModel.album.artworkURL,
-                    onPlayTrack: { play(from: $0) }
-                )
-            }
-            .padding(PlozzTheme.Metrics.screenPadding)
+        MusicDetailLayout(
+            tracks: viewModel.tracks,
+            artworkFallback: viewModel.album.artworkURL,
+            nowPlayingTrackID: controller.currentTrack?.id,
+            isPlaying: controller.isPlaying,
+            onPlayTrack: { play(from: $0) }
+        ) {
+            infoColumn
         }
-        .navigationTitle(viewModel.album.title)
-        .scrollClipDisabled()
         .task { await viewModel.load() }
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: 32) {
+    private var infoColumn: some View {
+        VStack(alignment: .leading, spacing: 16) {
             MusicArtworkImage(
                 url: viewModel.album.artworkURL,
                 systemPlaceholder: "opticaldisc",
@@ -281,23 +285,20 @@ struct AlbumDetailView: View {
                     artist: viewModel.album.artistName
                 )
             )
-                .frame(width: 320, height: 320)
-            VStack(alignment: .leading, spacing: 14) {
-                Text(viewModel.album.title).font(.system(size: 52, weight: .bold)).lineLimit(2)
-                Text(viewModel.album.subtitleLine).font(.title3).foregroundStyle(.secondary)
-                if let count = viewModel.album.trackCount {
-                    Text("\(count) tracks · \(MusicFormat.duration(viewModel.album.totalDuration))")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                }
-                PlayShuffleButtons(
-                    isEmpty: viewModel.tracks.isEmpty,
-                    onPlay: { play(from: nil) },
-                    onShuffle: { shuffle() }
-                )
-                .padding(.top, 8)
+                .frame(width: 360, height: 360)
+            Text(viewModel.album.title).font(.system(size: 40, weight: .bold)).lineLimit(3)
+            Text(viewModel.album.subtitleLine).font(.title3).foregroundStyle(.secondary).lineLimit(2)
+            if let count = viewModel.album.trackCount {
+                Text("\(count) tracks · \(MusicFormat.duration(viewModel.album.totalDuration))")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
             }
-            Spacer()
+            PlayShuffleButtons(
+                isEmpty: viewModel.tracks.isEmpty,
+                onPlay: { play(from: nil) },
+                onShuffle: { shuffle() }
+            )
+            .padding(.top, 8)
         }
     }
 
@@ -324,38 +325,31 @@ struct PlaylistDetailView: View {
     let controller: AudioPlaybackController
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                header
-                TrackListView(
-                    tracks: viewModel.tracks,
-                    artworkFallback: viewModel.playlist.artworkURL,
-                    showArtist: true,
-                    onPlayTrack: { play(from: $0) }
-                )
-            }
-            .padding(PlozzTheme.Metrics.screenPadding)
+        MusicDetailLayout(
+            tracks: viewModel.tracks,
+            artworkFallback: viewModel.playlist.artworkURL,
+            showArtist: true,
+            nowPlayingTrackID: controller.currentTrack?.id,
+            isPlaying: controller.isPlaying,
+            onPlayTrack: { play(from: $0) }
+        ) {
+            infoColumn
         }
-        .navigationTitle(viewModel.playlist.title)
-        .scrollClipDisabled()
         .task { await viewModel.load() }
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: 32) {
+    private var infoColumn: some View {
+        VStack(alignment: .leading, spacing: 16) {
             MusicArtworkImage(url: viewModel.playlist.artworkURL, systemPlaceholder: "music.note.list")
-                .frame(width: 320, height: 320)
-            VStack(alignment: .leading, spacing: 14) {
-                Text(viewModel.playlist.title).font(.system(size: 52, weight: .bold)).lineLimit(2)
-                Text("\(viewModel.tracks.count) tracks").font(.title3).foregroundStyle(.secondary)
-                PlayShuffleButtons(
-                    isEmpty: viewModel.tracks.isEmpty,
-                    onPlay: { play(from: nil) },
-                    onShuffle: { shuffle() }
-                )
-                .padding(.top, 8)
-            }
-            Spacer()
+                .frame(width: 360, height: 360)
+            Text(viewModel.playlist.title).font(.system(size: 40, weight: .bold)).lineLimit(3)
+            Text("\(viewModel.tracks.count) tracks").font(.title3).foregroundStyle(.secondary)
+            PlayShuffleButtons(
+                isEmpty: viewModel.tracks.isEmpty,
+                onPlay: { play(from: nil) },
+                onShuffle: { shuffle() }
+            )
+            .padding(.top, 8)
         }
     }
 
@@ -395,23 +389,73 @@ struct PlayShuffleButtons: View {
     }
 }
 
+/// Shared album/playlist detail layout: a fixed info column on the left
+/// (artwork, title, metadata, play/shuffle) and a scrollable track list on the
+/// right. Keeping the track list on its own side stops it from fighting tvOS's
+/// vertical focus when paging through a long album.
+struct MusicDetailLayout<InfoColumn: View>: View {
+    let tracks: [MusicTrack]
+    var artworkFallback: URL?
+    var showArtist: Bool = false
+    var nowPlayingTrackID: String? = nil
+    var isPlaying: Bool = false
+    let onPlayTrack: (MusicTrack) -> Void
+    @ViewBuilder var info: InfoColumn
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 56) {
+            info
+                .frame(width: 380, alignment: .leading)
+            ScrollView {
+                TrackListView(
+                    tracks: tracks,
+                    artworkFallback: artworkFallback,
+                    showArtist: showArtist,
+                    nowPlayingTrackID: nowPlayingTrackID,
+                    isPlaying: isPlaying,
+                    onPlayTrack: onPlayTrack
+                )
+                .padding(.bottom, 40)
+            }
+            .scrollClipDisabled()
+        }
+        .padding(PlozzTheme.Metrics.screenPadding)
+    }
+}
+
 struct TrackListView: View {
     let tracks: [MusicTrack]
     var artworkFallback: URL?
     var showArtist: Bool = false
+    /// The id of the track currently loaded in the player (if any), so the row
+    /// shows an animated equalizer instead of its track number.
+    var nowPlayingTrackID: String? = nil
+    /// Whether the player is actively playing (vs paused) — drives whether the
+    /// equalizer bars animate or sit still.
+    var isPlaying: Bool = false
     let onPlayTrack: (MusicTrack) -> Void
 
     var body: some View {
         VStack(spacing: 4) {
             ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                let isCurrent = track.id == nowPlayingTrackID
                 Button { onPlayTrack(track) } label: {
                     HStack(spacing: 20) {
-                        Text(track.trackNumber.map(String.init) ?? "\(index + 1)")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .trailing)
+                        Group {
+                            if isCurrent {
+                                NowPlayingEqualizer(isAnimating: isPlaying)
+                            } else {
+                                Text(track.trackNumber.map(String.init) ?? "\(index + 1)")
+                                    .font(.headline.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(width: 44, alignment: .trailing)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(track.title).font(.headline).lineLimit(1)
+                            Text(track.title)
+                                .font(.headline)
+                                .foregroundStyle(isCurrent ? Color.accentColor : .primary)
+                                .lineLimit(1)
                             if showArtist, let artist = track.artistName {
                                 Text(artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                             }
@@ -422,12 +466,71 @@ struct TrackListView: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 14)
-                    .padding(.horizontal, 20)
-                    .contentShape(Rectangle())
+                    .padding(.horizontal, 22)
+                    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(TrackRowButtonStyle())
+                .focusEffectDisabled()
             }
         }
+    }
+}
+
+/// Focus treatment for a track row: a soft glass highlight, a hairline accent
+/// rim and a gentle lift when focused — matching the app's card focus language
+/// without the heavy white tvOS focus plate.
+private struct TrackRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyleBody(configuration: configuration)
+    }
+
+    private struct StyleBody: View {
+        let configuration: Configuration
+        @Environment(\.isFocused) private var isFocused
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+            configuration.label
+                .background {
+                    shape
+                        .fill(.thinMaterial)
+                        .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 1))
+                        .opacity(isFocused ? 1 : 0)
+                }
+                .scaleEffect(isFocused ? (configuration.isPressed ? 1.0 : 1.02) : 1)
+                .shadow(color: .black.opacity(isFocused ? 0.28 : 0), radius: 16, y: 8)
+                .animation(.easeOut(duration: 0.16), value: isFocused)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+        }
+    }
+}
+
+/// A small set of bars that animate up and down like a music equalizer, marking
+/// the track currently playing in a list. Bars freeze (mid-height) when paused.
+struct NowPlayingEqualizer: View {
+    var isAnimating: Bool
+    private let barCount = 4
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.08, paused: !isAnimating)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .bottom, spacing: 3) {
+                ForEach(0..<barCount, id: \.self) { i in
+                    Capsule()
+                        .fill(Color.accentColor)
+                        .frame(width: 4, height: height(bar: i, at: t))
+                }
+            }
+            .frame(height: 24, alignment: .bottom)
+        }
+    }
+
+    private func height(bar i: Int, at t: TimeInterval) -> CGFloat {
+        guard isAnimating else { return 9 }
+        let speed = 6.0
+        let phase = Double(i) * 0.8
+        let v = (sin(t * speed + phase) + 1) / 2 // 0...1
+        return 5 + CGFloat(v) * 17 // 5...22
     }
 }
 #endif

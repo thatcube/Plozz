@@ -35,20 +35,44 @@ public final class MusicLandingViewModel {
 
     public func load() async {
         state = .loading
+        let accounts = context.musicAccounts
+        let sampleSize = self.sampleSize
+
+        // Fetch every (account × kind) request concurrently. Previously these ran
+        // strictly serially — 3 round-trips per account, accounts back-to-back —
+        // so the landing screen waited on the sum of every request. Running them
+        // in one task group collapses that to roughly a single round-trip.
+        let fetched = await withTaskGroup(
+            of: (account: Int, kind: MusicItemKind, page: MusicPage?).self
+        ) { group -> [(account: Int, kind: MusicItemKind, page: MusicPage?)] in
+            for (index, account) in accounts.enumerated() {
+                for kind in [MusicItemKind.album, .artist, .playlist] {
+                    group.addTask {
+                        let page = PageRequest(startIndex: 0, limit: sampleSize)
+                        let result = try? await account.provider.musicItems(in: "", kind: kind, page: page)
+                        return (index, kind, result)
+                    }
+                }
+            }
+            var results: [(account: Int, kind: MusicItemKind, page: MusicPage?)] = []
+            for await result in group { results.append(result) }
+            return results
+        }
+
+        // Reassemble in stable account order so the merged rails stay deterministic
+        // regardless of which network response landed first.
         var albums: [MusicAlbum] = []
         var artists: [MusicArtist] = []
         var playlists: [MusicPlaylist] = []
-
-        for account in context.musicAccounts {
-            let page = PageRequest(startIndex: 0, limit: sampleSize)
-            if let result = try? await account.provider.musicItems(in: "", kind: .album, page: page) {
-                albums += result.albums.map { $0.taggingSource(account.accountID) }
-            }
-            if let result = try? await account.provider.musicItems(in: "", kind: .artist, page: page) {
-                artists += result.artists.map { $0.taggingSource(account.accountID) }
-            }
-            if let result = try? await account.provider.musicItems(in: "", kind: .playlist, page: page) {
-                playlists += result.playlists.map { $0.taggingSource(account.accountID) }
+        for (index, account) in accounts.enumerated() {
+            for entry in fetched where entry.account == index {
+                guard let result = entry.page else { continue }
+                switch entry.kind {
+                case .album: albums += result.albums.map { $0.taggingSource(account.accountID) }
+                case .artist: artists += result.artists.map { $0.taggingSource(account.accountID) }
+                case .playlist: playlists += result.playlists.map { $0.taggingSource(account.accountID) }
+                default: break
+                }
             }
         }
 
@@ -171,12 +195,22 @@ public final class ArtistDetailViewModel {
     public func load() async {
         guard let provider else { state = .empty; return }
         state = .loading
-        if let detail = try? await provider.artist(id: artist.id), !detail.name.isEmpty {
-            artist = detail.taggingSource(accountID ?? "")
+        let artistID = artist.id
+        let tag = accountID ?? ""
+        // Fetch the artist's refreshed metadata and album list concurrently —
+        // they're independent, so there's no reason to wait for one before the
+        // other.
+        async let detailTask = try? await provider.artist(id: artistID)
+        async let albumsTask = try? await provider.musicItems(
+            in: artistID, kind: .album, page: PageRequest(startIndex: 0, limit: 100)
+        )
+        let detail = await detailTask
+        let result = await albumsTask
+        if let detail, !detail.name.isEmpty {
+            artist = detail.taggingSource(tag)
         }
-        let page = PageRequest(startIndex: 0, limit: 100)
-        if let result = try? await provider.musicItems(in: artist.id, kind: .album, page: page) {
-            albums = result.albums.map { $0.taggingSource(accountID ?? "") }
+        if let result {
+            albums = result.albums.map { $0.taggingSource(tag) }
         }
         state = albums.isEmpty ? .empty : .loaded(())
     }
@@ -203,11 +237,20 @@ public final class AlbumDetailViewModel {
     public func load() async {
         guard let provider else { state = .empty; return }
         state = .loading
-        if let detail = try? await provider.album(id: album.id), !detail.title.isEmpty {
-            album = detail.taggingSource(accountID ?? "")
+        let albumID = album.id
+        let tag = accountID ?? ""
+        // The album's refreshed metadata and its track list are independent —
+        // fetch them concurrently so the screen fills in as fast as the slower
+        // of the two, not their sum.
+        async let detailTask = try? await provider.album(id: albumID)
+        async let tracksTask = try? await provider.tracks(in: albumID)
+        let detail = await detailTask
+        let loaded = await tracksTask
+        if let detail, !detail.title.isEmpty {
+            album = detail.taggingSource(tag)
         }
-        if let loaded = try? await provider.tracks(in: album.id) {
-            tracks = loaded.map { $0.taggingSource(accountID ?? "") }
+        if let loaded {
+            tracks = loaded.map { $0.taggingSource(tag) }
         }
         state = tracks.isEmpty ? .empty : .loaded(())
     }

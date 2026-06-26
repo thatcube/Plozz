@@ -40,39 +40,58 @@ public struct MusicTabView: View {
                 destination(for: route)
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            MiniPlayerBar(controller: controller) { showNowPlaying = true }
+        // A single floating Now Playing pill over the whole Music tab, pinned
+        // top-trailing. It lives outside the content's vertical focus path, so
+        // pressing *down* through a track list never fights the focus engine, and
+        // it persists across pushes without a per-screen toolbar.
+        .overlay(alignment: .topTrailing) {
+            if !showNowPlaying {
+                NowPlayingPill(controller: controller) { showNowPlaying = true }
+                    .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                    .padding(.top, 24)
+            }
         }
         .fullScreenCover(isPresented: $showNowPlaying) {
             NowPlayingView(controller: controller)
+        }
+        // Starting a song jumps straight into the full-screen player, like
+        // Apple Music. The pill remains for re-opening it after dismissal.
+        .onChange(of: controller.playbackStartToken) { _, _ in
+            showNowPlaying = true
         }
     }
 
     @ViewBuilder
     private func destination(for route: MusicRoute) -> some View {
-        switch route {
-        case let .grid(kind):
-            MusicGridView(
-                viewModel: MusicGridViewModel(context: context, kind: kind),
-                controller: controller,
-                onSelectRoute: { path.append($0) }
-            )
-        case let .artist(artist):
-            ArtistDetailView(
-                viewModel: ArtistDetailViewModel(artist: artist, context: context),
-                onSelectAlbum: { path.append(MusicRoute.album($0)) }
-            )
-        case let .album(album):
-            AlbumDetailView(
-                viewModel: AlbumDetailViewModel(album: album, context: context),
-                controller: controller
-            )
-        case let .playlist(playlist):
-            PlaylistDetailView(
-                viewModel: PlaylistDetailViewModel(playlist: playlist, context: context),
-                controller: controller
-            )
+        // Hide the top tab bar once the user drills one level in (grid, artist,
+        // album, playlist, etc.) so detail screens get the full height; it
+        // reappears automatically when they pop back to the landing screen.
+        Group {
+            switch route {
+            case let .grid(kind):
+                MusicGridView(
+                    viewModel: MusicGridViewModel(context: context, kind: kind),
+                    controller: controller,
+                    onSelectRoute: { path.append($0) }
+                )
+            case let .artist(artist):
+                ArtistDetailView(
+                    viewModel: ArtistDetailViewModel(artist: artist, context: context),
+                    onSelectAlbum: { path.append(MusicRoute.album($0)) }
+                )
+            case let .album(album):
+                AlbumDetailView(
+                    viewModel: AlbumDetailViewModel(album: album, context: context),
+                    controller: controller
+                )
+            case let .playlist(playlist):
+                PlaylistDetailView(
+                    viewModel: PlaylistDetailViewModel(playlist: playlist, context: context),
+                    controller: controller
+                )
+            }
         }
+        .toolbar(.hidden, for: .tabBar)
     }
 }
 
@@ -83,7 +102,10 @@ public struct MusicTabView: View {
 @MainActor
 func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackController.StreamURLResolver {
     { track in
-        (try? await provider.audioPlaybackInfo(for: track.id, queueContext: nil))?.streamURL
+        guard let info = try? await provider.audioPlaybackInfo(for: track.id, queueContext: nil) else {
+            return nil
+        }
+        return AudioPlaybackController.ResolvedStream(url: info.streamURL, quality: info.quality)
     }
 }
 #endif

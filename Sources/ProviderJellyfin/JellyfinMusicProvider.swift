@@ -178,8 +178,10 @@ extension JellyfinProvider: MusicProvider {
         // Best-effort metadata for the request's own track (the queue itself is
         // supplied by the caller, which already holds the loaded track list).
         let track: MusicTrack
+        var quality: PlaybackQuality?
         if let dto = try? await client.item(userID: session.userID, id: trackID) {
             track = mapTrack(dto)
+            quality = Self.playbackQuality(from: dto)
         } else {
             track = MusicTrack(id: trackID, title: "")
         }
@@ -188,7 +190,46 @@ extension JellyfinProvider: MusicProvider {
             streamURL: streamURL,
             playSessionID: playSessionID,
             queue: [track],
-            queueIndex: 0
+            queueIndex: 0,
+            isTranscoding: quality.map { !$0.isDirectPlay } ?? false,
+            quality: quality
+        )
+    }
+
+    /// Containers AVPlayer direct-plays on tvOS — must match the `Container`
+    /// allow-list `audioStreamURL` sends to Jellyfin's `/universal` endpoint.
+    /// When the source container is in this set the server streams the original
+    /// file untouched; otherwise it transcodes to an AAC HLS fallback.
+    private static let directPlayAudioContainers: Set<String> = ["mp3", "aac", "m4a", "flac", "alac", "wav", "m4b"]
+
+    /// Derives `PlaybackQuality` from a track's `MediaSources`/`MediaStreams`,
+    /// reproducing the same direct-play decision `audioStreamURL` relies on so we
+    /// don't need a `PlaybackInfo` round-trip.
+    private static func playbackQuality(from dto: BaseItemDto) -> PlaybackQuality? {
+        let source = dto.MediaSources?.first
+        let container = source?.Container?.lowercased()
+        let audio = (source?.MediaStreams ?? dto.MediaStreams)?.first { $0.`Type` == "Audio" }
+        guard container != nil || audio != nil else { return nil }
+
+        // The container token can be a comma list (e.g. "mp3,flac"); direct-play
+        // only when *every* listed container is playable.
+        let isDirectPlay: Bool = {
+            guard let container else { return false }
+            let tokens = container.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            return !tokens.isEmpty && tokens.allSatisfy { directPlayAudioContainers.contains($0) }
+        }()
+
+        if !isDirectPlay {
+            return PlaybackQuality(isDirectPlay: false, transcodeCodec: "aac")
+        }
+        return PlaybackQuality(
+            isDirectPlay: true,
+            codec: audio?.Codec?.lowercased(),
+            container: container,
+            bitrate: audio?.BitRate ?? source?.Bitrate,
+            sampleRate: audio?.SampleRate,
+            bitDepth: audio?.BitDepth,
+            channels: audio?.Channels
         )
     }
 

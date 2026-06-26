@@ -38,9 +38,21 @@ public final class AudioPlaybackController {
         case off, all, one
     }
 
-    /// Closure that resolves a playable stream URL for a track (provider-backed),
-    /// allowing the engine to stay decoupled from any concrete provider.
-    public typealias StreamURLResolver = @MainActor (MusicTrack) async -> URL?
+    /// Closure that resolves a playable stream (URL + fidelity) for a track
+    /// (provider-backed), allowing the engine to stay decoupled from any concrete
+    /// provider.
+    public typealias StreamURLResolver = @MainActor (MusicTrack) async -> ResolvedStream?
+
+    /// The result of resolving a track: a playable URL plus the fidelity the
+    /// stream delivers, so the UI can show a quality badge.
+    public struct ResolvedStream: Sendable {
+        public let url: URL
+        public let quality: PlaybackQuality?
+        public init(url: URL, quality: PlaybackQuality? = nil) {
+            self.url = url
+            self.quality = quality
+        }
+    }
 
     // MARK: Observable state
 
@@ -55,6 +67,14 @@ public final class AudioPlaybackController {
     public private(set) var currentTime: TimeInterval = 0
     /// Duration of the current track, in seconds (0 until known).
     public private(set) var duration: TimeInterval = 0
+    /// Fidelity of the currently playing stream (direct-play/lossless vs
+    /// transcode), surfaced in the Now Playing UI. `nil` until resolved or when
+    /// the provider doesn't report it.
+    public private(set) var currentQuality: PlaybackQuality?
+    /// Increments every time a *new* playback session begins (a `play` /
+    /// `playShuffled` call). The Music tab observes this to auto-present the
+    /// full-screen Now Playing player when the user starts a song.
+    public private(set) var playbackStartToken: Int = 0
     /// Whether anything is loaded — drives mini-player visibility. The
     /// mini-player and Music tab are absent whenever this is `false`.
     public var hasActivePlayback: Bool { !queue.isEmpty }
@@ -103,13 +123,21 @@ public final class AudioPlaybackController {
         resolveStreamURL: @escaping StreamURLResolver
     ) {
         guard !tracks.isEmpty else { return }
+        let clampedStart = min(max(startIndex, 0), tracks.count - 1)
+        // Tapping the song that's already playing shouldn't restart it — just
+        // surface the full-screen player again (the Music tab observes the token).
+        if hasActivePlayback, currentTrack?.id == tracks[clampedStart].id {
+            playbackStartToken &+= 1
+            return
+        }
         self.resolver = resolveStreamURL
         self.playSessionID = playSessionID
         self.orderedQueue = tracks
         self.isShuffled = false
         self.queue = tracks
-        self.index = min(max(startIndex, 0), tracks.count - 1)
+        self.index = clampedStart
         configureSessionIfNeeded()
+        playbackStartToken &+= 1
         Task { await startCurrent() }
     }
 
@@ -127,6 +155,7 @@ public final class AudioPlaybackController {
         self.queue = tracks.shuffled()
         self.index = 0
         configureSessionIfNeeded()
+        playbackStartToken &+= 1
         Task { await startCurrent() }
     }
 
@@ -207,6 +236,7 @@ public final class AudioPlaybackController {
         index = 0
         currentTime = 0
         duration = 0
+        currentQuality = nil
         // Relinquish the system Play/Pause button so the video player can
         // receive it again once music is no longer playing.
         disableRemoteCommands()
@@ -271,7 +301,10 @@ public final class AudioPlaybackController {
 
     private func startCurrent() async {
         guard let track = currentTrack, let resolver else { return }
-        guard let url = await resolver(track) else { return }
+        currentQuality = nil
+        guard let resolved = await resolver(track) else { return }
+        let url = resolved.url
+        currentQuality = resolved.quality
         // Claim the system remote/Now Playing controls only once music is
         // actually playing. Registering them eagerly (e.g. at app launch) makes
         // tvOS route the Siri Remote's Play/Pause button to the command center

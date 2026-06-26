@@ -66,13 +66,45 @@ struct NowPlayingView: View {
     /// player is presented in — used only when `playerAppearance` is `.matchTheme`.
     @Environment(\.colorScheme) private var systemColorScheme
 
-    /// The lyrics panel is shown next to the player **only once lyrics are
-    /// actually found**. While the background lookup is in flight (or if the track
-    /// has none) the player stays centered full-width — we never give up half the
-    /// screen for a spinner or an empty state. When lyrics arrive the player
-    /// slides left to make room.
+    /// The latched decision of whether to reserve the lyrics panel. It is held
+    /// steady across the brief `.loading` window after a track change so the
+    /// artwork doesn't fly to center and then jump back when the next song also
+    /// has lyrics.
+    ///
+    /// `nil` means "not decided for any track yet" — on first open we fall back to
+    /// the live state, so the player opens **centered** unless we already *know*
+    /// the track has lyrics (already resolved `.loaded`), in which case the panel
+    /// shows immediately with no slide. Once a track resolves we latch a concrete
+    /// value and only ever change it on the next *definitive* result
+    /// (`.loaded`/`.unavailable`) or when the user toggles lyrics — never during
+    /// `.loading`. So a song→song hand-off where both have lyrics never moves the
+    /// artwork, while moving to a song without lyrics waits for the lookup to
+    /// finish, then centers.
+    @State private var latchedShowsLyricsPanel: Bool?
+
+    /// Whether to reserve the lyrics panel next to the player. Falls back to the
+    /// live state only until the first track resolves (see `latchedShowsLyricsPanel`).
     private var showsLyricsPanel: Bool {
-        lyricsEnabled && controller.lyricsState.hasLyrics
+        latchedShowsLyricsPanel ?? (lyricsEnabled && controller.lyricsState.hasLyrics)
+    }
+
+    /// Recomputes the latched panel decision from a *definitive* lyrics result.
+    /// `.loading` is deliberately ignored so the layout holds steady during the
+    /// lookup — that hold is the "wait" before any artwork animation. Disabling
+    /// lyrics always collapses the panel immediately.
+    private func updateLyricsPanelLatch() {
+        guard lyricsEnabled else {
+            latchedShowsLyricsPanel = false
+            return
+        }
+        switch controller.lyricsState {
+        case .loaded:
+            latchedShowsLyricsPanel = true
+        case .unavailable, .idle:
+            latchedShowsLyricsPanel = false
+        case .loading:
+            break
+        }
     }
 
     var body: some View {
@@ -109,6 +141,10 @@ struct NowPlayingView: View {
             syncScrubModel()
             setIdleTimerDisabled(true)
             showControls()
+            // Seed the latch from the track we opened on, so a track we already
+            // know has lyrics shows the panel immediately (no open-time slide),
+            // while an unresolved/none track opens centered.
+            updateLyricsPanelLatch()
         }
         .onDisappear {
             setIdleTimerDisabled(false)
@@ -124,6 +160,12 @@ struct NowPlayingView: View {
             if controlsVisible { scheduleHide() }
         }
         .task(id: controller.currentTrack?.id) { await loadArtworkPalette() }
+        // Re-evaluate the lyrics-panel layout only on a *definitive* result (or a
+        // toggle change), holding it steady through `.loading` so the artwork
+        // doesn't fly to center and snap back between two songs that both have
+        // lyrics. See `latchedShowsLyricsPanel`.
+        .onChange(of: controller.lyricsState) { _, _ in updateLyricsPanelLatch() }
+        .onChange(of: lyricsEnabled) { _, _ in updateLyricsPanelLatch() }
         // Back/Menu first dismisses the controls if they're showing; pressing it
         // again (with the controls already hidden) closes the player.
         .onExitCommand {

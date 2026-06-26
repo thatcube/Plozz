@@ -396,7 +396,6 @@ struct NowPlayingView: View {
             HStack(spacing: 28) {
                 transportButton(
                     icon: "shuffle",
-                    prominent: controller.isShuffled,
                     tint: controller.isShuffled ? Color.accentColor : .primary
                 ) { controller.toggleShuffle() }
                     .focused($focus, equals: .shuffle)
@@ -419,7 +418,6 @@ struct NowPlayingView: View {
             HStack(spacing: 28) {
                 transportButton(
                     icon: repeatIcon,
-                    prominent: controller.repeatMode != .off,
                     tint: controller.repeatMode == .off ? .primary : Color.accentColor
                 ) { controller.cycleRepeatMode() }
                     .focused($focus, equals: .repeatMode)
@@ -454,7 +452,6 @@ struct NowPlayingView: View {
         let hasLyrics = controller.lyricsState.hasLyrics
         return transportButton(
             icon: lyricsEnabled ? "quote.bubble.fill" : "quote.bubble",
-            prominent: lyricsEnabled && hasLyrics,
             tint: (lyricsEnabled && hasLyrics) ? Color.accentColor : .primary
         ) {
             lyricsEnabled.toggle()
@@ -463,9 +460,13 @@ struct NowPlayingView: View {
         .opacity(hasLyrics ? 1 : 0.4)
     }
 
+    /// A secondary transport control. Its glass button style is **constant** —
+    /// active/inactive state is conveyed only by `tint`, never by swapping to a
+    /// prominent style. Switching button styles dynamically changes the view's
+    /// identity, which on tvOS drops focus (bouncing it to the scrub bar), so the
+    /// style must stay fixed for these toggles.
     private func transportButton(
         icon: String,
-        prominent: Bool = false,
         tint: Color = .primary,
         action: @escaping () -> Void
     ) -> some View {
@@ -476,7 +477,7 @@ struct NowPlayingView: View {
             Image(systemName: icon)
                 .foregroundStyle(tint)
         }
-        .musicGlassButton(prominent: prominent)
+        .musicGlassButton(prominent: false)
     }
 
     private var repeatIcon: String {

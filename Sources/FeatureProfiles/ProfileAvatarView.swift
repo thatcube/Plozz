@@ -6,9 +6,11 @@ import CoreModels
 /// (`Profile.avatarImageURL`) when present and reachable; otherwise falls
 /// back to the SF Symbol on the colored tile (`avatarSymbol` + `colorIndex`).
 ///
-/// A stale or broken URL never yields an empty circle — `AsyncImage`'s
-/// failure phase reuses the symbol fallback so the picker tile and Settings
-/// hero always show *something* recognizable.
+/// While a photo is loading it shows a quiet neutral placeholder (not the
+/// colored symbol), so a photo profile never briefly flashes a stand-in icon
+/// behind the photo. The symbol fallback is reserved for symbol-only profiles
+/// and genuine load failures, so a stale or broken URL still yields something
+/// recognizable rather than an empty circle.
 public struct ProfileAvatarView: View {
     public let profile: Profile
     public let size: CGFloat
@@ -23,11 +25,22 @@ public struct ProfileAvatarView: View {
             if let urlString = profile.avatarImageURL?.trimmingCharacters(in: .whitespaces),
                !urlString.isEmpty,
                let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
+                // Animate phase changes so the photo gently crossfades in over a
+                // neutral placeholder — never flashing the colored symbol tile
+                // underneath while the photo is still downloading.
+                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.35))) { phase in
                     switch phase {
                     case let .success(image):
                         image.resizable().scaledToFill()
-                    case .empty, .failure:
+                            .transition(.opacity)
+                    case .empty:
+                        // Still loading: a quiet, adaptive placeholder — NOT the
+                        // colored symbol — so a photo profile never momentarily
+                        // shows a stand-in icon.
+                        loadingPlaceholder
+                    case .failure:
+                        // The photo genuinely failed: fall back to the symbol so
+                        // the tile still shows something recognizable.
                         symbolFallback
                     @unknown default:
                         symbolFallback
@@ -39,6 +52,12 @@ public struct ProfileAvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+    }
+
+    /// A neutral, theme-adaptive circle shown while a photo is loading. Keeps the
+    /// avatar slot calm and consistent instead of flashing the colored symbol.
+    private var loadingPlaceholder: some View {
+        Circle().fill(.quaternary)
     }
 
     /// Symbol on colored tile — the original avatar style. Also used as the

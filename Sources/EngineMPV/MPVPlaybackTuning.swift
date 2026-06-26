@@ -43,18 +43,22 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
     /// libmpv `--demuxer-max-back-bytes`: backward demuxer cache ceiling (cheap
     /// instant back-seeks without a re-read).
     public var demuxerMaxBackBytes: String
-    /// libmpv `--video-sync`. `nil` leaves mpv's default (`audio` — drop/dupe
-    /// whole frames to hold audio sync), which is what shipped before SDR
-    /// frame-rate matching. Once the panel is frame-rate-matched, `display-resample`
-    /// can give the smoothest cadence (sync video to the display clock, resample
-    /// audio) but it adds GPU cost on the Vulkan→MoltenVK→Metal present chain —
-    /// the same cost that made `gpu-next` miss deadlines on SDR — so it's a
-    /// deliberate value to A/B on-device, not a hardcoded default.
+    /// libmpv `--video-sync`. Defaults to `display-resample`: time video to the
+    /// display's vsync (resampling audio by an inaudible fraction) so each frame
+    /// is presented exactly on a refresh. Paired with SDR frame-rate matching —
+    /// which drives the panel to the content's rate — this is what removes the
+    /// residual "late frames" that `audio` sync leaves behind (with `audio`, mpv
+    /// times to the audio clock, so presents drift past the vsync deadline and
+    /// show as late even on a matched panel). The feared GPU cost is from
+    /// `interpolation`, NOT from `display-resample` itself: on a frame-rate-matched
+    /// panel the display ≈ content rate, so resample is ~1:1 and adds no per-frame
+    /// libplacebo shaders. Set to `audio` (or `nil` to leave mpv's default, which
+    /// is also `audio`) to A/B the lighter clock on weaker hardware.
     public var videoSync: String?
     /// libmpv `--interpolation`. Off by default: it only helps when the display
     /// rate doesn't divide the source rate (which frame-rate matching is meant to
-    /// avoid) and is the most expensive present-path option, so enabling it is an
-    /// explicit, measured opt-in.
+    /// avoid) and IS the expensive present-path option (the per-frame libplacebo
+    /// cost), so enabling it is an explicit, measured opt-in.
     public var interpolation: Bool
 
     public init(
@@ -65,7 +69,7 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
         demuxerReadaheadSecs: Int = 20,
         demuxerMaxBytes: String = "256MiB",
         demuxerMaxBackBytes: String = "64MiB",
-        videoSync: String? = nil,
+        videoSync: String? = "display-resample",
         interpolation: Bool = false
     ) {
         self.hwdec = hwdec

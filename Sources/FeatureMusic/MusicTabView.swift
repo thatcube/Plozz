@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import MetadataKit
 
 /// Navigation routes inside the Music tab's stack.
 enum MusicRoute: Hashable {
@@ -21,58 +22,98 @@ enum MusicRoute: Hashable {
 public struct MusicTabView: View {
     private let context: MusicContext
     private let controller: AudioPlaybackController
+    private let appTheme: AppTheme
+    private let musicPlayer: MusicPlayerSettingsModel
 
     @State private var path = NavigationPath()
     @State private var showNowPlaying = false
+    @State private var layoutModel = MusicLandingLayoutModel()
 
-    public init(accounts: [ResolvedAccount], controller: AudioPlaybackController) {
-        self.context = MusicContext(accounts: accounts)
+    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController, appTheme: AppTheme = .system, musicPlayer: MusicPlayerSettingsModel) {
+        self.context = MusicContext(
+            accounts: accounts,
+            visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
+        )
         self.controller = controller
+        self.appTheme = appTheme
+        self.musicPlayer = musicPlayer
     }
 
     public var body: some View {
         NavigationStack(path: $path) {
             MusicLandingView(
-                viewModel: MusicLandingViewModel(context: context),
-                onSelectRoute: { path.append($0) }
+                viewModel: MusicLandingViewModel(context: context, cache: .shared),
+                controller: controller,
+                onSelectRoute: { path.append($0) },
+                onPlayTrack: { playTrack($0) },
+                layout: layoutModel.layout
             )
             .navigationDestination(for: MusicRoute.self) { route in
                 destination(for: route)
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            MiniPlayerBar(controller: controller) { showNowPlaying = true }
-        }
+        // The Now Playing control is no longer a fixed overlay — it lives inside
+        // each page's header and scrolls with the content. We plumb the "open the
+        // full player" action down via the environment so any header's
+        // `NowPlayingCard` can trigger it without threading a closure through
+        // every screen.
+        .environment(\.openNowPlaying) { showNowPlaying = true }
         .fullScreenCover(isPresented: $showNowPlaying) {
-            NowPlayingView(controller: controller)
+            NowPlayingView(controller: controller, appTheme: appTheme, musicPlayer: musicPlayer)
+        }
+        // Starting a song jumps straight into the full-screen player, like
+        // Apple Music. The card remains for re-opening it after dismissal.
+        .onChange(of: controller.playbackStartToken) { _, _ in
+            showNowPlaying = true
         }
     }
 
+    /// Plays a single recently-played song from the landing rail. Resolves the
+    /// owning provider from the track's source account so the same engine (stream
+    /// + lyrics resolvers) used by album/playlist playback drives it, then starts
+    /// a one-track queue — which also flips into the full-screen player via the
+    /// playbackStartToken observer above.
+    private func playTrack(_ track: MusicTrack) {
+        guard let provider = context.provider(for: track.sourceAccountID) else { return }
+        controller.play(
+            tracks: [track],
+            startIndex: 0,
+            resolveStreamURL: streamURLResolver(for: provider),
+            resolveLyrics: lyricsResolver(for: provider)
+        )
+    }
+
     @ViewBuilder
-    private func destination(for route: MusicRoute) -> some View {
-        switch route {
-        case let .grid(kind):
-            MusicGridView(
-                viewModel: MusicGridViewModel(context: context, kind: kind),
-                controller: controller,
-                onSelectRoute: { path.append($0) }
-            )
-        case let .artist(artist):
-            ArtistDetailView(
-                viewModel: ArtistDetailViewModel(artist: artist, context: context),
-                onSelectAlbum: { path.append(MusicRoute.album($0)) }
-            )
-        case let .album(album):
-            AlbumDetailView(
-                viewModel: AlbumDetailViewModel(album: album, context: context),
-                controller: controller
-            )
-        case let .playlist(playlist):
-            PlaylistDetailView(
-                viewModel: PlaylistDetailViewModel(playlist: playlist, context: context),
-                controller: controller
-            )
+    private func destination(for route: MusicRoute) -> some View {        // Hide the top tab bar once the user drills one level in (grid, artist,
+        // album, playlist, etc.) so detail screens get the full height; it
+        // reappears automatically when they pop back to the landing screen.
+        Group {
+            switch route {
+            case let .grid(kind):
+                MusicGridView(
+                    viewModel: MusicGridViewModel(context: context, kind: kind),
+                    controller: controller,
+                    onSelectRoute: { path.append($0) }
+                )
+            case let .artist(artist):
+                ArtistDetailView(
+                    viewModel: ArtistDetailViewModel(artist: artist, context: context),
+                    controller: controller,
+                    onSelectAlbum: { path.append(MusicRoute.album($0)) }
+                )
+            case let .album(album):
+                AlbumDetailView(
+                    viewModel: AlbumDetailViewModel(album: album, context: context),
+                    controller: controller
+                )
+            case let .playlist(playlist):
+                PlaylistDetailView(
+                    viewModel: PlaylistDetailViewModel(playlist: playlist, context: context),
+                    controller: controller
+                )
+            }
         }
+        .toolbar(.hidden, for: .tabBar)
     }
 }
 
@@ -83,7 +124,61 @@ public struct MusicTabView: View {
 @MainActor
 func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackController.StreamURLResolver {
     { track in
-        (try? await provider.audioPlaybackInfo(for: track.id, queueContext: nil))?.streamURL
+        guard let info = try? await provider.audioPlaybackInfo(for: track.id, queueContext: nil) else {
+            return nil
+        }
+        return AudioPlaybackController.ResolvedStream(url: info.streamURL, quality: info.quality)
+    }
+}
+
+/// Builds a lyrics resolver bound to a music provider, mirroring
+/// `streamURLResolver`, so the Now Playing lyrics panel works for whichever
+/// backend owns the track.
+@MainActor
+/// Resolves a track's lyrics, returning **only a synced (scrollable/karaoke)
+/// version**. On a TV there's no way to manually scroll plain lyrics, so an
+/// unsynced result is treated as "no lyrics": we just show the centered song.
+/// Tries the user's server first; if it has no synced lyrics, consults the
+/// keyless LRCLIB fallback and uses that only when it's synced. Each result
+/// carries its own source tag (Jellyfin/Plex/LRCLIB) for the attribution badge.
+func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
+    { track in
+        let serverLyrics = try? await provider.lyrics(for: track.id)
+        if let serverLyrics, !serverLyrics.isEmpty, serverLyrics.isSynced {
+            return serverLyrics
+        }
+
+        // Server had no synced lyrics — try LRCLIB for a synced copy, but only
+        // when the user hasn't turned lyrics off. Don't send a opted-out user's
+        // track title/artist to a third party (lrclib.net) just to populate a
+        // panel they've hidden. Read defensively so the on-by-default applies
+        // when the key was never written.
+        //
+        // NOTE: this reads the *global* lyrics-enabled key, which is correct
+        // today because the toggle is global. If the "show lyrics" toggle is
+        // ever made per-profile (it lives as @AppStorage in NowPlayingView while
+        // appearance/showTrackDetails went per-profile in MusicPlayerSettingsStore),
+        // this read MUST become profile-namespace-scoped (SettingsKey.scoped) at
+        // the same time — otherwise the resolver reads the global key while the UI
+        // writes a scoped one and this gating silently desyncs.
+        let lyricsEnabled = UserDefaults.standard.object(forKey: MusicLyricsPreference.storageKey) as? Bool
+            ?? MusicLyricsPreference.defaultEnabled
+        if lyricsEnabled,
+           let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !artist.isEmpty {
+            let lrclibLyrics = await LRCLIBLyricsProvider().lyrics(
+                title: track.title,
+                artist: artist,
+                album: track.albumTitle,
+                duration: track.duration
+            )
+            if let lrclibLyrics, lrclibLyrics.isSynced {
+                return lrclibLyrics
+            }
+        }
+
+        // Nothing synced anywhere: report no lyrics so the player stays centered.
+        return nil
     }
 }
 #endif

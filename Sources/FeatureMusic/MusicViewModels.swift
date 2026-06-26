@@ -11,21 +11,54 @@ import CoreModels
 @Observable
 public final class MusicLandingViewModel {
     public struct Content: Equatable, Sendable {
+        public var recentlyPlayed: [RecentlyPlayedItem]
         public var albums: [MusicAlbum]
         public var artists: [MusicArtist]
         public var playlists: [MusicPlaylist]
 
-        public var isEmpty: Bool { albums.isEmpty && artists.isEmpty && playlists.isEmpty }
+        public init(
+            recentlyPlayed: [RecentlyPlayedItem] = [],
+            albums: [MusicAlbum] = [],
+            artists: [MusicArtist] = [],
+            playlists: [MusicPlaylist] = []
+        ) {
+            self.recentlyPlayed = recentlyPlayed
+            self.albums = albums
+            self.artists = artists
+            self.playlists = playlists
+        }
+
+        public var isEmpty: Bool {
+            recentlyPlayed.isEmpty && albums.isEmpty && artists.isEmpty && playlists.isEmpty
+        }
+
+        init(snapshot: MusicLandingCache.Snapshot) {
+            self.recentlyPlayed = snapshot.recentlyPlayed
+            self.albums = snapshot.albums
+            self.artists = snapshot.artists
+            self.playlists = snapshot.playlists
+        }
+
+        var snapshot: MusicLandingCache.Snapshot {
+            MusicLandingCache.Snapshot(
+                recentlyPlayed: recentlyPlayed,
+                albums: albums,
+                artists: artists,
+                playlists: playlists
+            )
+        }
     }
 
     public private(set) var state: LoadState<Content> = .idle
 
     private let context: MusicContext
     private let sampleSize: Int
+    private let cache: MusicLandingCache
 
-    public init(context: MusicContext, sampleSize: Int = 18) {
+    public init(context: MusicContext, sampleSize: Int = 18, cache: MusicLandingCache = .ephemeral) {
         self.context = context
         self.sampleSize = sampleSize
+        self.cache = cache
     }
 
     public var hasPlaylists: Bool {
@@ -33,31 +66,151 @@ public final class MusicLandingViewModel {
         return false
     }
 
-    public func load() async {
-        state = .loading
-        var albums: [MusicAlbum] = []
-        var artists: [MusicArtist] = []
-        var playlists: [MusicPlaylist] = []
+    /// Key the cached combined snapshot by the **visible** music-library set, so
+    /// flipping a library toggle invalidates the stale snapshot instead of
+    /// painting hidden content.
+    private var cacheKey: String {
+        MusicLandingCache.key(visibleLibraryIDs: context.visibleLibraryIDs ?? [:])
+    }
 
-        for account in context.musicAccounts {
-            let page = PageRequest(startIndex: 0, limit: sampleSize)
-            if let result = try? await account.provider.musicItems(in: "", kind: .album, page: page) {
-                albums += result.albums.map { $0.taggingSource(account.accountID) }
-            }
-            if let result = try? await account.provider.musicItems(in: "", kind: .artist, page: page) {
-                artists += result.artists.map { $0.taggingSource(account.accountID) }
-            }
-            if let result = try? await account.provider.musicItems(in: "", kind: .playlist, page: page) {
-                playlists += result.playlists.map { $0.taggingSource(account.accountID) }
+    private var isLoaded: Bool {
+        if case .loaded = state { return true }
+        return false
+    }
+
+    public func load() async {
+        let key = cacheKey
+        // Stale-while-revalidate: paint the last merged snapshot instantly (no
+        // spinner) if we have one, otherwise show the loading state, then refresh
+        // from the network below.
+        if !isLoaded {
+            if let snapshot = await cache.snapshot(for: key), !snapshot.isEmpty {
+                state = .loaded(Content(snapshot: snapshot))
+            } else {
+                state = .loading
             }
         }
 
-        let content = Content(
-            albums: Array(albums.prefix(sampleSize)),
-            artists: Array(artists.prefix(sampleSize)),
-            playlists: Array(playlists.prefix(sampleSize))
+        let content = await fetchContent()
+        if content.isEmpty {
+            // Don't flip a populated (cached) screen to empty on a transient
+            // fetch miss — only show empty when there was nothing to begin with.
+            if !isLoaded { state = .empty }
+        } else {
+            state = .loaded(content)
+            await cache.store(content.snapshot, for: key)
+        }
+    }
+
+    /// Warms the disk cache in the background (no `state` mutation) so the page is
+    /// ready before the user ever opens the tab. Called as soon as music is
+    /// detected.
+    public func prefetch() async {
+        let content = await fetchContent()
+        guard !content.isEmpty else { return }
+        await cache.store(content.snapshot, for: cacheKey)
+    }
+
+    /// Fetches every (account × kind) request — plus each account's recently
+    /// played albums — concurrently, then collapses cross-server duplicates
+    /// through the single identity/merge seam. Previously these ran strictly
+    /// serially, so the landing screen waited on the sum of every request. One
+    /// task group collapses that to roughly a single round-trip and scales to
+    /// ~10 libraries without summing latencies.
+    private func fetchContent() async -> Content {
+        let accounts = context.musicAccounts
+        let sampleSize = self.sampleSize
+
+        let fetched = await withTaskGroup(of: Partial.self) { group -> [Partial] in
+            for (index, account) in accounts.enumerated() {
+                for kind in [MusicItemKind.album, .artist, .playlist] {
+                    group.addTask {
+                        let page = PageRequest(startIndex: 0, limit: sampleSize)
+                        let result = try? await account.provider.musicItems(in: "", kind: kind, page: page, libraryIDs: account.libraryIDs)
+                        return .items(account: index, kind: kind, page: result)
+                    }
+                }
+                group.addTask {
+                    let albums = (try? await account.provider.recentlyPlayed(limit: sampleSize, libraryIDs: account.libraryIDs)) ?? []
+                    return .recent(account: index, albums: albums)
+                }
+                group.addTask {
+                    let tracks = (try? await account.provider.recentlyPlayedTracks(limit: sampleSize, libraryIDs: account.libraryIDs)) ?? []
+                    return .recentTracks(account: index, tracks: tracks)
+                }
+            }
+            var results: [Partial] = []
+            for await result in group { results.append(result) }
+            return results
+        }
+
+        // Reassemble in stable account order so the merged rails stay deterministic
+        // regardless of which network response landed first, tagging each item with
+        // its source account before the de-dup merge so provenance is preserved.
+        var albums: [MusicAlbum] = []
+        var artists: [MusicArtist] = []
+        var playlists: [MusicPlaylist] = []
+        var recents: [MusicAlbum] = []
+        var recentTracks: [MusicTrack] = []
+        for (index, account) in accounts.enumerated() {
+            for entry in fetched {
+                switch entry {
+                case let .items(acc, kind, page) where acc == index:
+                    guard let result = page else { continue }
+                    switch kind {
+                    case .album: albums += result.albums.map { $0.taggingSource(account.accountID) }
+                    case .artist: artists += result.artists.map { $0.taggingSource(account.accountID) }
+                    case .playlist: playlists += result.playlists.map { $0.taggingSource(account.accountID) }
+                    default: break
+                    }
+                case let .recent(acc, recentAlbums) where acc == index:
+                    recents += recentAlbums.map { $0.taggingSource(account.accountID) }
+                case let .recentTracks(acc, tracks) where acc == index:
+                    recentTracks += tracks.map { $0.taggingSource(account.accountID) }
+                default:
+                    break
+                }
+            }
+        }
+
+        // Collapse cross-server duplicates through the single identity/merge seam.
+        // The Recently Played rail interleaves recently-played songs *and* albums
+        // ordered by real play recency, so Plex + Jellyfin read as one combined,
+        // de-duplicated library.
+        return Content(
+            recentlyPlayed: MusicMerge.recentlyPlayedItems(albums: recents, tracks: recentTracks, limit: sampleSize),
+            albums: Array(MusicMerge.albums(albums).prefix(sampleSize)),
+            artists: Array(MusicMerge.artists(artists).prefix(sampleSize)),
+            playlists: Array(MusicMerge.playlists(playlists).prefix(sampleSize))
         )
-        state = content.isEmpty ? .empty : .loaded(content)
+    }
+
+    /// One account's partial landing result, carried out of the parallel fetch.
+    private enum Partial: Sendable {
+        case items(account: Int, kind: MusicItemKind, page: MusicPage?)
+        case recent(account: Int, albums: [MusicAlbum])
+        case recentTracks(account: Int, tracks: [MusicTrack])
+    }
+}
+
+/// Warms the persistent landing cache in the background the moment music is
+/// detected, so the page paints instantly the first time the user opens the tab
+/// (not just on a revisit). Fire-and-forget; failures are harmless (the tab just
+/// falls back to a normal fetch).
+@MainActor
+public enum MusicLandingPrefetch {
+    /// Warms the persistent landing cache. Runs the fetch **inline** (awaited) so
+    /// it inherits the caller's task priority — callers invoke this from a
+    /// deferred, low-priority launch task so the heavy multi-account landing
+    /// fetch never competes with the Home page's movies/TV loads.
+    public static func warm(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]]) async {
+        guard !accounts.isEmpty else { return }
+        let context = MusicContext(
+            accounts: accounts,
+            visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
+        )
+        let viewModel = MusicLandingViewModel(context: context, cache: .shared)
+        await viewModel.prefetch()
     }
 }
 
@@ -119,7 +272,7 @@ public final class MusicGridViewModel {
         for i in pagers.indices where !pagers[i].finished {
             let pager = pagers[i]
             let page = PageRequest(startIndex: pager.nextIndex, limit: pageLimit)
-            guard let result = try? await pager.account.provider.musicItems(in: containerID, kind: kind, page: page) else {
+            guard let result = try? await pager.account.provider.musicItems(in: containerID, kind: kind, page: page, libraryIDs: pager.account.libraryIDs) else {
                 pagers[i].finished = true
                 continue
             }
@@ -143,10 +296,17 @@ public final class MusicGridViewModel {
     }
 
     private func sortAll() {
-        artists.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        albums.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        playlists.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        genres.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        // De-duplicate the accumulated pages through the one shared identity/merge
+        // seam (idempotent across page loads), then sort by display name, so the
+        // grid reads as one combined library across servers.
+        artists = MusicMerge.artists(artists)
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        albums = MusicMerge.albums(albums)
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        playlists = MusicMerge.playlists(playlists)
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        genres = MusicMerge.genres(genres)
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }
 
@@ -171,12 +331,22 @@ public final class ArtistDetailViewModel {
     public func load() async {
         guard let provider else { state = .empty; return }
         state = .loading
-        if let detail = try? await provider.artist(id: artist.id), !detail.name.isEmpty {
-            artist = detail.taggingSource(accountID ?? "")
+        let artistID = artist.id
+        let tag = accountID ?? ""
+        // Fetch the artist's refreshed metadata and album list concurrently —
+        // they're independent, so there's no reason to wait for one before the
+        // other.
+        async let detailTask = try? await provider.artist(id: artistID)
+        async let albumsTask = try? await provider.musicItems(
+            in: artistID, kind: .album, page: PageRequest(startIndex: 0, limit: 100)
+        )
+        let detail = await detailTask
+        let result = await albumsTask
+        if let detail, !detail.name.isEmpty {
+            artist = detail.taggingSource(tag)
         }
-        let page = PageRequest(startIndex: 0, limit: 100)
-        if let result = try? await provider.musicItems(in: artist.id, kind: .album, page: page) {
-            albums = result.albums.map { $0.taggingSource(accountID ?? "") }
+        if let result {
+            albums = result.albums.map { $0.taggingSource(tag) }
         }
         state = albums.isEmpty ? .empty : .loaded(())
     }
@@ -203,11 +373,20 @@ public final class AlbumDetailViewModel {
     public func load() async {
         guard let provider else { state = .empty; return }
         state = .loading
-        if let detail = try? await provider.album(id: album.id), !detail.title.isEmpty {
-            album = detail.taggingSource(accountID ?? "")
+        let albumID = album.id
+        let tag = accountID ?? ""
+        // The album's refreshed metadata and its track list are independent —
+        // fetch them concurrently so the screen fills in as fast as the slower
+        // of the two, not their sum.
+        async let detailTask = try? await provider.album(id: albumID)
+        async let tracksTask = try? await provider.tracks(in: albumID)
+        let detail = await detailTask
+        let loaded = await tracksTask
+        if let detail, !detail.title.isEmpty {
+            album = detail.taggingSource(tag)
         }
-        if let loaded = try? await provider.tracks(in: album.id) {
-            tracks = loaded.map { $0.taggingSource(accountID ?? "") }
+        if let loaded {
+            tracks = loaded.map { $0.taggingSource(tag) }
         }
         state = tracks.isEmpty ? .empty : .loaded(())
     }

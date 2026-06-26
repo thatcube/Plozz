@@ -265,3 +265,17 @@ enum JellyfinTicks {
         Int64(seconds * TimeInterval(perSecond))
     }
 }
+
+// MARK: - Lyrics
+
+/// `GET /Audio/{itemId}/Lyrics` response. `Lyrics` carries one entry per line;
+/// `Start` (when present) is the line's offset in 100ns ticks. Plain-text
+/// lyrics omit `Start`.
+struct LyricDto: Decodable {
+    let Lyrics: [LyricLineDto]?
+}
+
+struct LyricLineDto: Decodable {
+    let Text: String?
+    let Start: Int64?
+}

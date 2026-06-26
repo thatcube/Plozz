@@ -8,6 +8,7 @@ final class ArtworkImageVariantTests: XCTestCase {
         // Cards are aggressively bounded; the hero is high-fidelity but still capped;
         // only `.original` decodes at native source size.
         XCTAssertNil(ArtworkImageVariant.original.maxPixelSize)
+        XCTAssertEqual(ArtworkImageVariant.musicThumbnail.maxPixelSize, 256)
         XCTAssertEqual(ArtworkImageVariant.posterCard.maxPixelSize, 960)
         XCTAssertEqual(ArtworkImageVariant.landscapeCard.maxPixelSize, 1_200)
         XCTAssertEqual(ArtworkImageVariant.heroBackdrop.maxPixelSize, 2_000)

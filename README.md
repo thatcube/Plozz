@@ -125,6 +125,15 @@ The libmpv-backed `EngineMPV` is intentionally excluded from the host
 compile out behind `#if canImport(Libmpv)` on other platforms. It is covered by
 the tvOS simulator/app build instead.
 
+### Performance / lag / freeze debugging
+
+If the app feels **laggy, janky, slow, or freezes**, or you see **blank
+artwork** or **memory crashes** on the Apple TV, follow
+[`docs/performance-debugging.md`](docs/performance-debugging.md) — a step-by-step
+playbook for measuring on-device with the watchdog and Instruments (`xctrace`)
+**before** changing code, with worked case studies for the two recurring bug
+classes (resource storms and SwiftUI re-render storms).
+
 ## Releasing to TestFlight & versioning
 
 Distribution is automated with fastlane (App Store Connect API key auth — no

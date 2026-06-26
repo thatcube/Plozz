@@ -243,6 +243,21 @@ public struct PlexClient: Sendable {
         return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
     }
 
+    /// Albums in a music section ordered by most-recently-played first. Uses the
+    /// raw Plex `sort=lastViewedAt:desc` key, which the shared `SortDescriptor`
+    /// can't express. Never-played albums sort last (Plex reports them with no
+    /// `lastViewedAt`), so callers filter to `viewCount >= 1` and take the head.
+    func recentlyViewedAlbums(sectionID: String, type: Int, limit: Int) async throws -> [PlexMetadata] {
+        let query = [
+            URLQueryItem(name: "type", value: String(type)),
+            URLQueryItem(name: "X-Plex-Container-Start", value: "0"),
+            URLQueryItem(name: "X-Plex-Container-Size", value: String(max(0, limit))),
+            URLQueryItem(name: "sort", value: "lastViewedAt:desc")
+        ]
+        let endpoint = Endpoint(path: "/library/sections/\(sectionID)/all", queryItems: query, headers: headers)
+        return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer.Metadata ?? []
+    }
+
     /// `GET /library/sections/{id}/genre` — the genres present in a music
     /// section, returned as `Directory` entries (`key` = genre id, `title` =
     /// name).
@@ -441,6 +456,22 @@ public struct PlexClient: Sendable {
     }
 
     // MARK: URLs
+
+    /// Fetches the raw text of a lyrics (or other sidecar) stream by its
+    /// server-relative `key` (e.g. `/library/streams/5555`). Plex serves an
+    /// `.lrc` or plain-text body; `download=1` asks for the file itself rather
+    /// than a transcoded view. Returns `nil` when the body isn't decodable text.
+    func lyricsText(forStreamKey key: String) async throws -> String? {
+        let endpoint = Endpoint(
+            path: key,
+            queryItems: [URLQueryItem(name: "download", value: "1")],
+            headers: headers
+        )
+        let (data, _) = try await send(endpoint)
+        // Most sidecars are UTF-8; fall back to Latin-1 so a non-UTF-8 `.lrc`
+        // still decodes (Latin-1 maps any byte, so this won't return nil).
+        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+    }
 
     /// Builds an absolute, token-bearing stream URL for a part `key` (which is
     /// already a server-relative `/library/parts/…/file.…` path). Used for

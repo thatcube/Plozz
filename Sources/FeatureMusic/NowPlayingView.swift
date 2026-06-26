@@ -98,7 +98,7 @@ struct NowPlayingView: View {
                     .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
                 if let subtitle = controller.currentTrack?.subtitle {
                     Text(subtitle)
-                        .font(.title2)
+                        .font(.system(size: 18))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
@@ -367,12 +367,8 @@ struct NowPlayingLyricsView: View {
     /// line is solid, neighbours dim progressively. With no active line (unsynced
     /// or pre-roll) every line sits at a calm, even brightness.
     private func opacity(forIndex index: Int, active: Int?) -> Double {
-        guard let active else { return 0.4 }
-        switch abs(index - active) {
-        case 0: return 1.0
-        case 1: return 0.4
-        default: return 0.3
-        }
+        guard let active else { return 0.25 }
+        return index == active ? 1.0 : 0.25
     }
 
     /// The index of the line currently being sung, for synced lyrics.

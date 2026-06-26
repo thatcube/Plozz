@@ -73,11 +73,18 @@ public struct ProfilePickerView: View {
         activeProfileID ?? profiles.first?.id
     }
 
-    /// Resolve the focused (else settled, else default) tile's center into unit
-    /// coordinates of the background, so the colored glow can pool around the
-    /// icon you're looking at. Falls back to centre before any tile is measured.
+    /// Resolve the *settled* (else default) tile's center into unit coordinates
+    /// of the background, so the colored glow pools around the icon the wash has
+    /// committed to. Deliberately driven by `settledProfileID`, **not** the live
+    /// `focusedProfileID`: if the glow chased raw focus it would animate its
+    /// full-screen mask center on every focus move, stacking overlapping 0.6s
+    /// transitions and re-rendering the whole background as you sweep across
+    /// tiles — the source of the rapid-focus lag. Tracking the settled profile
+    /// instead means a fast sweep does zero background work; the glow only eases
+    /// to where you land and pause, which is the intended "settle-then-fade"
+    /// behaviour. Falls back to centre before any tile is measured.
     private func focalPoint(centers: [String: Anchor<CGPoint>], proxy: GeometryProxy) -> UnitPoint {
-        let id = focusedProfileID ?? settledProfileID ?? defaultFocusID
+        let id = settledProfileID ?? defaultFocusID
         guard let id, let anchor = centers[id] else { return .center }
         let point = proxy[anchor]
         let size = proxy.size

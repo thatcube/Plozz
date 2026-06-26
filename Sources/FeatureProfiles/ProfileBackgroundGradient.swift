@@ -28,7 +28,10 @@ final class ProfileBackgroundPalettes {
     /// Observed, so inserting an extracted palette re-renders any view reading it.
     private var cache: [String: [Color]] = [:]
     /// Profile ids whose photo extraction is in flight, to coalesce work.
-    private var inFlight: Set<String> = []
+    /// Not observed: it's mutated from `palette(for:)`, which runs during a
+    /// view's body evaluation, and observing it would both register a spurious
+    /// dependency and trip SwiftUI's "modifying state during view update" path.
+    @ObservationIgnored private var inFlight: Set<String> = []
 
     /// The best palette known *right now* for `profile`, always ≥ 4 colors so the
     /// mesh has plenty to morph between — *unless* the profile uses a photo whose
@@ -144,12 +147,19 @@ struct ProfileBackgroundGradient: View {
     @Environment(ProfileBackgroundPalettes.self) private var palettes
 
     @State private var appeared = false
+    /// Gates the 30fps morphing animation. Stays `false` (a static, fully-colored
+    /// mesh) through the launch/first-interaction window, then flips `true` so the
+    /// field starts drifting. Deferring the per-frame `MeshGradient` + mask render
+    /// past first paint keeps cold-launch cost off the most sensitive window —
+    /// progressive enhancement: the colored field is there instantly, motion joins
+    /// a beat later.
+    @State private var motionStarted = false
 
     var body: some View {
         GeometryReader { proxy in
             LiquidArtworkBackground(
                 palette: resolvedColors,
-                animate: !reduceMotion,
+                animate: !reduceMotion && motionStarted,
                 // Use the OLED treatment for every theme — the most restrained
                 // intensity — so the profile color is a gentle bloom rather than
                 // a bright wash. Each theme's own background colour still shows
@@ -171,6 +181,15 @@ struct ProfileBackgroundGradient: View {
             // Gentle fade-in on first paint so the background arrives elegantly
             // instead of popping in at launch.
             withAnimation(.easeOut(duration: 0.9)) { appeared = true }
+            // Hold the 30fps mesh animation until the picker has painted and the
+            // initial focus has settled, so launch never pays continuous
+            // mesh+mask render cost during first paint / first interaction. The
+            // static field is already on screen; only the drift is deferred.
+            guard !reduceMotion else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(900))
+                motionStarted = true
+            }
         }
     }
 

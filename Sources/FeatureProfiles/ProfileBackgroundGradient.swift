@@ -133,6 +133,10 @@ final class ProfileBackgroundPalettes {
 struct ProfileBackgroundGradient: View {
     /// The profile whose colors drive the field. `nil` shows the neutral field.
     let profile: Profile?
+    /// Where the colored glow is centered, in unit coordinates of this view —
+    /// nominally the focused profile tile's position, so the color pools around
+    /// the icon you're looking at rather than washing the whole screen.
+    var focal: UnitPoint = .center
 
     @Environment(\.themePalette) private var palette
     @Environment(\.colorScheme) private var colorScheme
@@ -142,18 +146,45 @@ struct ProfileBackgroundGradient: View {
     @State private var appeared = false
 
     var body: some View {
-        LiquidArtworkBackground(
-            palette: resolvedColors,
-            animate: !reduceMotion,
-            style: style,
-            paletteCrossfade: 1.8
-        )
+        GeometryReader { proxy in
+            LiquidArtworkBackground(
+                palette: resolvedColors,
+                animate: !reduceMotion,
+                style: style,
+                paletteCrossfade: 1.8,
+                showsBackdrop: false
+            )
+            // Pool the color into a soft glow around the focused icon and let it
+            // fade out to the app's normal background, so the field reads as a
+            // localized tint rather than a full-screen wash.
+            .mask { glowMask(in: proxy.size) }
+            .animation(.easeOut(duration: 0.6), value: focal)
+        }
+        .ignoresSafeArea()
         .opacity(appeared ? 1 : 0)
         .onAppear {
             // Gentle fade-in on first paint so the background arrives elegantly
             // instead of popping in at launch.
             withAnimation(.easeOut(duration: 0.9)) { appeared = true }
         }
+    }
+
+    /// A soft radial falloff centered on `focal`: opaque at the icon, fading to
+    /// clear well before the screen edges, so only a contained pool of color
+    /// surrounds the focused profile.
+    private func glowMask(in size: CGSize) -> some View {
+        let radius = max(size.width, size.height) * 0.34
+        return RadialGradient(
+            stops: [
+                .init(color: .white, location: 0.0),
+                .init(color: .white.opacity(0.65), location: 0.45),
+                .init(color: .clear, location: 1.0)
+            ],
+            center: focal,
+            startRadius: 0,
+            endRadius: radius
+        )
+        .ignoresSafeArea()
     }
 
     /// Colors for the mesh: the focused profile's extracted/harmonised palette,

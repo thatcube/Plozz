@@ -73,6 +73,18 @@ public struct ProfilePickerView: View {
         activeProfileID ?? profiles.first?.id
     }
 
+    /// Resolve the focused (else settled, else default) tile's center into unit
+    /// coordinates of the background, so the colored glow can pool around the
+    /// icon you're looking at. Falls back to centre before any tile is measured.
+    private func focalPoint(centers: [String: Anchor<CGPoint>], proxy: GeometryProxy) -> UnitPoint {
+        let id = focusedProfileID ?? settledProfileID ?? defaultFocusID
+        guard let id, let anchor = centers[id] else { return .center }
+        let point = proxy[anchor]
+        let size = proxy.size
+        guard size.width > 0, size.height > 0 else { return .center }
+        return UnitPoint(x: point.x / size.width, y: point.y / size.height)
+    }
+
     public var body: some View {
         VStack(spacing: 48) {
             Text(title)
@@ -88,6 +100,9 @@ public struct ProfilePickerView: View {
                         onSelect(profile)
                     }
                     .focused($focusedProfileID, equals: profile.id)
+                    .anchorPreference(key: TileCentersKey.self, value: .center) {
+                        [profile.id: $0]
+                    }
                 }
                 if let onAddProfile {
                     AddProfileTile(action: onAddProfile)
@@ -104,8 +119,14 @@ public struct ProfilePickerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 80)
-        .background {
-            ProfileBackgroundGradient(profile: backgroundProfile)
+        .backgroundPreferenceValue(TileCentersKey.self) { centers in
+            GeometryReader { proxy in
+                ProfileBackgroundGradient(
+                    profile: backgroundProfile,
+                    focal: focalPoint(centers: centers, proxy: proxy)
+                )
+            }
+            .ignoresSafeArea()
         }
         .environment(palettes)
         .task(id: focusedProfileID) {
@@ -153,6 +174,16 @@ public struct ProfilePickerView: View {
             ArtworkImageCache.shared.prefetch(url, variant: .posterCard)
         }
         #endif
+    }
+}
+
+/// Collects each profile tile's center point (as an `Anchor`) keyed by profile
+/// id, so the background can look up the focused tile's position and pool its
+/// color glow there.
+private struct TileCentersKey: PreferenceKey {
+    static let defaultValue: [String: Anchor<CGPoint>] = [:]
+    static func reduce(value: inout [String: Anchor<CGPoint>], nextValue: () -> [String: Anchor<CGPoint>]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 

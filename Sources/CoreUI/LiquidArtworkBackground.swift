@@ -25,24 +25,30 @@ public struct LiquidArtworkBackground: View {
     /// How long the crossfade takes when `palette` changes. Longer values let
     /// the field drift gently behind a fast-moving selection.
     public var paletteCrossfade: Double = 1.2
+    /// When true (default) the view paints its own opaque floor + legibility
+    /// scrim, fully owning the screen. When false it renders *only* the morphing
+    /// color mesh with a transparent surround, so callers can composite it as a
+    /// localized tint over their own background (e.g. a glow around one element).
+    public var showsBackdrop: Bool = true
 
     /// The three background treatments the player offers.
     public enum Style { case dark, light, oled }
 
-    public init(palette: [Color], animate: Bool = true, style: Style = .dark, paletteCrossfade: Double = 1.2) {
+    public init(palette: [Color], animate: Bool = true, style: Style = .dark, paletteCrossfade: Double = 1.2, showsBackdrop: Bool = true) {
         self.palette = palette
         self.animate = animate
         self.style = style
         self.paletteCrossfade = paletteCrossfade
+        self.showsBackdrop = showsBackdrop
     }
 
     public var body: some View {
         ZStack {
-            base
+            if showsBackdrop { base }
             gradientLayer
                 .ignoresSafeArea()
                 .opacity(gradientOpacity)
-            scrim
+            if showsBackdrop { scrim }
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: paletteCrossfade), value: palette)

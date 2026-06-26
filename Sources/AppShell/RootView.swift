@@ -72,8 +72,10 @@ public struct RootView: View {
                 )
 
             case .ready:
+                ZStack {
                 if appState.isChoosingProfile {
                     ProfileSelectionView(appState: appState, canCancel: appState.primaryProvider != nil)
+                        .transition(.opacity)
                 } else {
                     let accounts = appState.homeAccounts
                     if !accounts.isEmpty {
@@ -114,8 +116,11 @@ public struct RootView: View {
                         onSelectPlexHomeUser: { appState.setPlexHomeUserForActiveProfile(accountID: $0, user: $1) }
                     )
                     .id("\(appState.profilesModel.activeProfileID)#\(appState.plexIdentityGeneration)")
+                    .transition(.opacity)
                     }
                 }
+                }
+                .animation(.easeInOut(duration: 0.5), value: appState.isChoosingProfile)
 
             case let .failed(error, _):
                 FailureView(message: error.userMessage) {

@@ -623,6 +623,43 @@ private enum MPVProperty {
     static let duration = "duration"
     static let pause = "pause"
     static let eofReached = "eof-reached"
+    /// Active hardware decoder name, or `no`/empty when decoding on the CPU.
+    static let hwdecCurrent = "hwdec-current"
+    /// Frames the decoder dropped because it couldn't keep up (decode bottleneck).
+    static let decoderFrameDropCount = "decoder-frame-drop-count"
+    /// Frames dropped at the output stage (render / display-timing bottleneck).
+    static let frameDropCount = "frame-drop-count"
+    /// Frame rate actually being rendered right now.
+    static let estimatedVFFPS = "estimated-vf-fps"
+    /// The container's declared frame rate (the target to keep up with).
+    static let containerFPS = "container-fps"
+}
+
+// MARK: - Live engine stats (diagnostics overlay)
+
+extension MPVVideoEngine: PlaybackStatsProviding {
+    /// Reads libmpv's own runtime-health properties so the diagnostics overlay can
+    /// answer "is the device keeping up?" for the mpv engine — which has no
+    /// `AVPlayer` for the platform sampler to read. All reads are cheap synchronous
+    /// property gets funnelled through the thread-safe ``MPVClient``; called ~1s.
+    public func sampleEngineStats() -> PlaybackEngineStats? {
+        guard client.isAlive else { return nil }
+        let hwdec = client.getString(MPVProperty.hwdecCurrent)
+        return PlaybackEngineStats(
+            decodePath: PlaybackEngineStats.decodePath(fromHWDecCurrent: hwdec),
+            hwdecName: hwdec,
+            decoderDroppedFrames: client.getInt(MPVProperty.decoderFrameDropCount).map(Int.init),
+            lateFrames: client.getInt(MPVProperty.frameDropCount).map(Int.init),
+            renderedFrameRate: nonNegative(client.getDouble(MPVProperty.estimatedVFFPS)),
+            containerFrameRate: nonNegative(client.getDouble(MPVProperty.containerFPS))
+        )
+    }
+
+    /// `getDouble` returns `0` for an unavailable property; treat that as "no
+    /// reading" so the overlay hides the row rather than showing a bogus `0 fps`.
+    private func nonNegative(_ value: Double) -> Double? {
+        value.isFinite && value > 0 ? value : nil
+    }
 }
 
 // MARK: - C wakeup callback

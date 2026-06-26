@@ -198,11 +198,19 @@ public struct PlayerView: View {
     /// the latter case the sampler publishes the metadata-only baseline plus the
     /// engine name, so the overlay works on every engine.
     private func startSampling() {
+        // Pull live engine health for engines that report it (mpv); `nil` for the
+        // native AVPlayer engine, which the sampler reads via its access log.
+        let engine = viewModel.videoEngine
+        let engineStats: (@MainActor () -> PlaybackEngineStats?)? =
+            (engine as? PlaybackStatsProviding).map { provider in
+                { [weak provider] in provider?.sampleEngineStats() }
+            }
         diagnosticsSampler.start(
             player: viewModel.player,
             mode: viewModel.deliveryMode,
             metadata: viewModel.sourceMetadata,
-            engineName: viewModel.engineDisplayName
+            engineName: viewModel.engineDisplayName,
+            engineStats: engineStats
         )
     }
 }

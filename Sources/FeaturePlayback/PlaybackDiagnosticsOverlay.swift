@@ -46,9 +46,17 @@ struct PlaybackDiagnosticsOverlay: View {
             optionalRow("Audio", d.audioLineText)
             optionalRow("Subtitles", d.subtitleText)
             row("Source", sourceText(d))
+            // Runtime health — the "is the device keeping up?" rows. Hidden when
+            // the active engine can't report them (e.g. AVPlayer shows the access
+            // log's "Dropped" row below instead). Software decode and main-thread
+            // hitches are flagged so the cause of stutter is obvious.
+            optionalRow("Decode", d.decodeText, warn: d.isSoftwareDecoding)
+            optionalRow("Render", d.renderRateText)
+            optionalRow("Frame drops", d.engineDropsText)
             row("Buffer", d.bufferStatusText)
             row("Network", d.observedBitrateText)
             row("Dropped", "\(d.droppedFramesText) frames")
+            optionalRow("Main thread", d.mainThreadText, warn: d.hasMainThreadHitch)
             optionalRow("Device", d.deviceText)
             optionalRow("Disk", d.diskText)
         }
@@ -62,13 +70,22 @@ struct PlaybackDiagnosticsOverlay: View {
     /// A row that's hidden entirely when its value is the placeholder, so static
     /// facts the provider didn't report don't clutter the panel.
     @ViewBuilder
-    private func optionalRow(_ label: String, _ value: String) -> some View {
+    private func optionalRow(_ label: String, _ value: String, warn: Bool = false) -> some View {
         if value != PlaybackDiagnostics.placeholder {
-            row(label, value)
+            row(label, value, warn: warn)
         }
     }
 
-    private func row(_ label: String, _ value: String) -> some View {
+    /// A row hidden entirely when its value is `nil` — for the engine-health rows
+    /// that only some engines report.
+    @ViewBuilder
+    private func optionalRow(_ label: String, _ value: String?, warn: Bool = false) -> some View {
+        if let value {
+            row(label, value, warn: warn)
+        }
+    }
+
+    private func row(_ label: String, _ value: String, warn: Bool = false) -> some View {
         GridRow {
             Text(label)
                 .font(.system(size: 15, design: .monospaced))
@@ -76,7 +93,7 @@ struct PlaybackDiagnosticsOverlay: View {
                 .gridColumnAlignment(.leading)
             Text(value)
                 .font(.system(size: 15, design: .monospaced).weight(.semibold))
-                .foregroundStyle(palette.primaryText)
+                .foregroundStyle(warn ? Color.orange : palette.primaryText)
                 .gridColumnAlignment(.leading)
         }
     }

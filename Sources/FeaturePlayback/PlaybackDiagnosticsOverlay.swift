@@ -51,6 +51,9 @@ struct PlaybackDiagnosticsOverlay: View {
             row("Dropped", "\(d.droppedFramesText) frames")
             optionalRow("Device", d.deviceText)
             optionalRow("Disk", d.diskText)
+            optionalRow("Memory", d.memoryText)
+            optionalRow("Thermal", d.thermalText)
+            optionalRow("Live", d.liveInstancesText)
         }
     }
 

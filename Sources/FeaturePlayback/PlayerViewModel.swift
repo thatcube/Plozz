@@ -180,6 +180,7 @@ public final class PlayerViewModel {
         self.autoDismissOnEnd = autoDismissOnEnd
         self.engine = engineFactory.makeNative(captionSettings)
         self.currentEngineKind = .native
+        PlaybackInstrumentation.increment(.viewModel)
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
         configureEngineCallbacks()
@@ -190,6 +191,10 @@ public final class PlayerViewModel {
         prefetchTask = Task { @MainActor [weak self] in
             await self?.startPlayback(forceTranscode: false, resumeOverride: nil)
         }
+    }
+
+    deinit {
+        PlaybackInstrumentation.decrement(.viewModel)
     }
 
     private func configureEngineCallbacks() {

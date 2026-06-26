@@ -8,41 +8,16 @@ import CoreUI
 struct MusicLandingView: View {
     @State var viewModel: MusicLandingViewModel
     let onSelectRoute: (MusicRoute) -> Void
+    var layout: MusicLandingLayout = .default
 
     var body: some View {
         ContentStateView(state: viewModel.state, emptyMessage: "No music found in your libraries.", onRetry: { Task { await viewModel.load() } }) { content in
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
-                    if !content.recentlyPlayed.isEmpty {
-                        MusicRow(title: "Recently Played") {
-                            ForEach(content.recentlyPlayed) { album in
-                                AlbumCard(album: album) { onSelectRoute(.album(album)) }
-                            }
-                        }
-                    }
-
-                    entryTiles
-
-                    if !content.albums.isEmpty {
-                        MusicRow(title: "Albums", seeAll: { onSelectRoute(.grid(.album)) }) {
-                            ForEach(content.albums) { album in
-                                AlbumCard(album: album) { onSelectRoute(.album(album)) }
-                            }
-                        }
-                    }
-                    if !content.artists.isEmpty {
-                        MusicRow(title: "Artists", seeAll: { onSelectRoute(.grid(.artist)) }) {
-                            ForEach(content.artists) { artist in
-                                ArtistCard(artist: artist) { onSelectRoute(.artist(artist)) }
-                            }
-                        }
-                    }
-                    if !content.playlists.isEmpty {
-                        MusicRow(title: "Playlists", seeAll: { onSelectRoute(.grid(.playlist)) }) {
-                            ForEach(content.playlists) { playlist in
-                                PlaylistCard(playlist: playlist) { onSelectRoute(.playlist(playlist)) }
-                            }
-                        }
+                    // The page is composed by iterating the data-driven layout, so
+                    // reordering or hiding a section is a value change, not a rewrite.
+                    ForEach(layout.visibleSections, id: \.self) { section in
+                        sectionView(section, content: content)
                     }
                 }
                 .padding(.vertical, PlozzTheme.Metrics.rowSpacing)
@@ -51,6 +26,46 @@ struct MusicLandingView: View {
             .scrollClipDisabled()
         }
         .task { if case .idle = viewModel.state { await viewModel.load() } }
+    }
+
+    @ViewBuilder
+    private func sectionView(_ section: MusicLandingSection, content: MusicLandingViewModel.Content) -> some View {
+        switch section {
+        case .recentlyPlayed:
+            if !content.recentlyPlayed.isEmpty {
+                MusicRow(title: "Recently Played") {
+                    ForEach(content.recentlyPlayed) { album in
+                        AlbumCard(album: album) { onSelectRoute(.album(album)) }
+                    }
+                }
+            }
+        case .browse:
+            entryTiles
+        case .albums:
+            if !content.albums.isEmpty {
+                MusicRow(title: "Albums", seeAll: { onSelectRoute(.grid(.album)) }) {
+                    ForEach(content.albums) { album in
+                        AlbumCard(album: album) { onSelectRoute(.album(album)) }
+                    }
+                }
+            }
+        case .artists:
+            if !content.artists.isEmpty {
+                MusicRow(title: "Artists", seeAll: { onSelectRoute(.grid(.artist)) }) {
+                    ForEach(content.artists) { artist in
+                        ArtistCard(artist: artist) { onSelectRoute(.artist(artist)) }
+                    }
+                }
+            }
+        case .playlists:
+            if !content.playlists.isEmpty {
+                MusicRow(title: "Playlists", seeAll: { onSelectRoute(.grid(.playlist)) }) {
+                    ForEach(content.playlists) { playlist in
+                        PlaylistCard(playlist: playlist) { onSelectRoute(.playlist(playlist)) }
+                    }
+                }
+            }
+        }
     }
 
     private var entryTiles: some View {

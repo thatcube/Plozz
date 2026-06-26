@@ -199,7 +199,13 @@ public final class AudioPlaybackController {
 
     public func resume() {
         guard hasActivePlayback else { return }
-        player.play()
+        // Re-assert the audio session in case it was deactivated while paused,
+        // and use `playImmediately(atRate:)` so playback resumes now instead of
+        // getting stuck in AVPlayer's stall-avoidance wait state.
+        #if canImport(AVFoundation) && !os(macOS)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        #endif
+        player.playImmediately(atRate: 1.0)
         isPlaying = true
         #if canImport(MediaPlayer)
         updateNowPlayingInfo()
@@ -394,7 +400,9 @@ public final class AudioPlaybackController {
             guard !Task.isCancelled, let self else { return }
             // Ignore a result that arrived after the user moved on.
             guard self.currentTrack?.id == trackID else { return }
-            if let result, !result.isEmpty {
+            // Only synced lyrics are usable on a TV (no manual scrolling), so an
+            // unsynced result is treated as "no lyrics" — the player stays centered.
+            if let result, !result.isEmpty, result.isSynced {
                 self.lyricsState = .loaded(result)
             } else {
                 self.lyricsState = .unavailable

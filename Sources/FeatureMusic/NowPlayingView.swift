@@ -65,6 +65,11 @@ struct NowPlayingView: View {
         .onDisappear { setIdleTimerDisabled(false) }
         .onChange(of: controller.currentTime) { _, _ in syncScrubModel() }
         .onChange(of: controller.duration) { _, _ in syncScrubModel() }
+        // In the foreground the Siri Remote's play/pause press is delivered
+        // through the focus/responder chain, not MPRemoteCommandCenter — so the
+        // command center alone resumes inconsistently. Handle it here so the
+        // hardware button reliably toggles playback while the player is open.
+        .onPlayPauseCommand { controller.togglePlayPause() }
     }
 
     /// Keeps the Apple TV awake while the full-screen player is open so synced

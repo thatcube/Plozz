@@ -702,6 +702,10 @@ private struct TrackRowButtonStyle: ButtonStyle {
 /// the track currently playing in a list. Bars freeze (mid-height) when paused.
 struct NowPlayingEqualizer: View {
     var isAnimating: Bool
+    /// Optional bar color. Defaults to the app accent; the Now Playing card
+    /// passes the inverted focus foreground so the bars stay legible on the
+    /// contrast-flipped focused card.
+    var tint: Color? = nil
     private let barCount = 4
 
     var body: some View {
@@ -710,7 +714,7 @@ struct NowPlayingEqualizer: View {
             HStack(alignment: .bottom, spacing: 3) {
                 ForEach(0..<barCount, id: \.self) { i in
                     Capsule()
-                        .fill(Color.accentColor)
+                        .fill(tint ?? Color.accentColor)
                         .frame(width: 4, height: height(bar: i, at: t))
                 }
             }

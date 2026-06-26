@@ -29,12 +29,23 @@ extension EnvironmentValues {
 struct NowPlayingCard: View {
     var controller: AudioPlaybackController
     @Environment(\.openNowPlaying) private var openNowPlaying
+    @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var isFocused: Bool
 
     /// Maximum width for the title/subtitle column. Wider than the old pill so
     /// the average song title + "Artist · Album" line fits without truncation.
     var textWidth: CGFloat = 320
 
     private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
+    // On focus the card flips contrast in a theme-dependent way (mirrors the
+    // Settings rows' SettingsFocusButtonStyle, which we can't import here since
+    // FeatureMusic doesn't depend on FeatureSettings):
+    //   • Light theme  → BLACK card, WHITE content.
+    //   • Dark / OLED  → WHITE card, BLACK content.
+    // (OLED resolves to a .dark colorScheme, so it shares the dark behavior.)
+    private var focusFill: Color { colorScheme == .dark ? .white : .black }
+    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
     var body: some View {
         if controller.hasActivePlayback, let track = controller.currentTrack {
@@ -57,23 +68,27 @@ struct NowPlayingCard: View {
                         Text(track.title)
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
+                            .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
                         if let subtitle = track.subtitle {
                             Text(subtitle)
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                                .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
                         }
                     }
                     .frame(maxWidth: textWidth, alignment: .leading)
 
                     Group {
                         if controller.isPlaying {
-                            NowPlayingEqualizer(isAnimating: true)
+                            // Flip the equalizer bars to the inverted foreground on
+                            // focus so accent-colored bars don't clash with the
+                            // inverted card fill.
+                            NowPlayingEqualizer(isAnimating: true, tint: isFocused ? focusForeground : nil)
                                 .frame(width: 22)
                         } else {
                             Image(systemName: "pause.fill")
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.85)) : AnyShapeStyle(.secondary))
                         }
                     }
                 }
@@ -82,35 +97,21 @@ struct NowPlayingCard: View {
                 .padding(.vertical, 10)
                 .contentShape(shape)
             }
-            .buttonStyle(NowPlayingCardButtonStyle())
+            .buttonStyle(.plain)
+            .focused($isFocused)
             .focusEffectDisabled()
-            .background(.thinMaterial, in: shape)
-            .clipShape(shape)
-        }
-    }
-}
-
-/// A gentle lift + shadow when the Now Playing card is focused, in keeping with
-/// the app's card focus language.
-private struct NowPlayingCardButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        StyleBody(configuration: configuration)
-    }
-
-    private struct StyleBody: View {
-        let configuration: Configuration
-        @Environment(\.isFocused) private var isFocused
-
-        var body: some View {
-            let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-            configuration.label
-                .overlay {
-                    shape.stroke(.white.opacity(isFocused ? 0.5 : 0), lineWidth: 1)
+            // Material when idle; an opaque inverted fill fades in over it on
+            // focus so the whole card flips contrast and stands out.
+            .background {
+                ZStack {
+                    shape.fill(.thinMaterial)
+                    shape.fill(focusFill).opacity(isFocused ? 1 : 0)
                 }
-                .scaleEffect(isFocused ? (configuration.isPressed ? 1.03 : 1.06) : 1)
-                .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 18, y: 8)
-                .animation(.easeOut(duration: 0.16), value: isFocused)
-                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            }
+            .clipShape(shape)
+            .scaleEffect(isFocused ? 1.06 : 1)
+            .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 18, y: 8)
+            .animation(.easeOut(duration: 0.16), value: isFocused)
         }
     }
 }

@@ -21,32 +21,36 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
 
 /// The pure brain that picks which engine plays a resolved source.
 ///
-/// ## Policy (CONSERVATIVE)
-/// Preserve the rock-solid, power-efficient `AVPlayer` path for everything it
-/// handles well; use the mpv hybrid engine **only** for what AVPlayer can't
-/// direct-play without a server transcode:
+/// ## Policy (PREFER AVPlayer; mpv only when unavoidable)
+/// Keep the rock-solid, power-efficient `AVPlayer` path for everything it can
+/// handle — including **plain SDR / HDR10 / HLG in a Matroska or transport-stream
+/// container**. AVPlayer can't demux those containers from a raw file, but the
+/// *server* remuxes them to HLS (and AVPlayer then decodes on the hardware path
+/// with automatic frame-rate matching). The mpv hybrid engine is reserved for the
+/// formats that genuinely need on-device decode, captured by
+/// ``requiresHybridDecode(source:capabilities:)``:
 ///
-///   * **Dolby Vision in an Apple container** → ``PlaybackEngineKind/native``.
-///     AVPlayer renders DoVi with full dynamic metadata on tvOS. But AVPlayer
-///     cannot demux Matroska and a server transcode of DoVi is unreliable, so
-///     **DoVi in an MKV** goes to the on-device engine (which decodes the HEVC
-///     base layer), matching Infuse.
-///   * **Hybrid-only containers (Matroska/WebM/transport-stream variants),
-///     AV1, DTS/DTS-HD/TrueHD audio, interlaced video, or an
-///     AVPlayer-incompatible video codec** → ``PlaybackEngineKind/hybrid``
-///     (decode on-device, no transcode). Plain HDR10/HLG in an *Apple* container
-///     stays native — AVPlayer renders it on the efficient hardware path.
-///   * **Ambiguous/unknown, already transcoding, or no hybrid engine available**
-///     → ``PlaybackEngineKind/native`` (it carries the server-transcode safety net).
+///   * **Dolby Vision** → ``PlaybackEngineKind/native`` in an Apple container
+///     (AVPlayer renders it with full dynamic metadata). A server transcode of
+///     DoVi is unreliable, so **DoVi in a container AVPlayer can't demux**
+///     (Matroska) goes to the on-device engine (HEVC base layer), like Infuse.
+///   * **hev1-tagged HEVC, 10-bit H.264, HEVC range-extensions, interlaced video,
+///     AV1 (no HW), an AVPlayer-incompatible video codec, or DTS/DTS-HD/TrueHD/
+///     Opus/Vorbis/WMA audio** → ``PlaybackEngineKind/hybrid`` (decode on-device).
+///   * **Everything else** — plain SDR/HDR10/HLG in any container, ambiguous/
+///     unknown sources, an already-transcoding stream, or no hybrid engine wired
+///     in → ``PlaybackEngineKind/native`` (the server-transcode safety net carries
+///     anything AVPlayer can't direct-play).
 ///
 /// ## Lockstep with the capability layer
 /// The router and the provider capability profiles must advertise the *same* set
 /// of formats as direct-play: never advertise something the router can't route to
-/// a working engine. The capability expansion (gated by the same hybrid flag that
-/// sets `hybridAvailable` here) advertises raw MKV for every display-supported
-/// range — SDR, HDR10/HLG, **and Dolby Vision** (decoded on-device) — plus
-/// DTS/TrueHD and AV1, which is exactly what the rules below send to the hybrid
-/// engine.
+/// a working engine, and never route to the hybrid engine something the providers
+/// stopped advertising (it would arrive as a server transcode, caught by
+/// `isTranscoding` → native). The providers advertise raw hybrid containers as
+/// direct-play **only** for the formats ``requiresHybridDecode(source:capabilities:)``
+/// sends to the hybrid engine; plain SDR/HDR10/HLG with mainstream audio is no
+/// longer advertised, so the server remuxes it to a native HLS stream.
 public enum EngineRouter {
 
     /// Picks the engine for a resolved stream.
@@ -71,82 +75,104 @@ public enum EngineRouter {
         guard hybridAvailable else { return .native }
 
         // A server transcode is always a seekable HLS stream AVPlayer plays well.
+        // This is also the path plain SDR/HDR10/HLG hybrid-container files take:
+        // the provider stops advertising them as direct-play, the server remuxes
+        // them to HLS, and they arrive here as a transcode → native.
         guard !isTranscoding else { return .native }
 
         // No source facts → ambiguous → native (safety net handles surprises).
         guard let source else { return .native }
 
+        // The single, data-driven decision: only the formats that genuinely need
+        // on-device decode go to the hybrid engine. Everything else (incl. plain
+        // SDR/HDR10/HLG that was direct-played from an Apple container) stays on
+        // the power-efficient AVPlayer path.
+        return requiresHybridDecode(source: source, capabilities: capabilities) ? .hybrid : .native
+    }
+
+    /// Pure predicate: does this **direct-played** source genuinely need the
+    /// on-device (mpv) engine, because AVPlayer can neither decode it nor reach it
+    /// through a clean server remux?
+    ///
+    /// Returns `false` for plain SDR/HDR10/HLG H.264/HEVC (with mainstream audio) —
+    /// even in a Matroska or transport-stream container — so it stays
+    /// ``PlaybackEngineKind/native``. Such a file is never *direct-played* from a
+    /// hybrid container (the providers no longer advertise it); the server remuxes
+    /// it to HLS and it returns here as a transcode. This predicate must stay in
+    /// lockstep with the provider capability profiles: every `true` case is one the
+    /// providers advertise as direct-play, and nothing they advertise returns a
+    /// kind AVPlayer can't actually play.
+    public static func requiresHybridDecode(
+        source: MediaSourceMetadata,
+        capabilities: MediaCapabilities
+    ) -> Bool {
+        let video = source.video
+        let inHybridContainer = isHybridContainer(source.container)
+
         // Dolby Vision is best on AVPlayer (the only engine that renders DoVi with
         // full dynamic metadata on tvOS) — but ONLY when it can actually reach
         // AVPlayer. AVPlayer cannot demux Matroska, and a server transcode of DoVi
-        // is unreliable (and outright fails on many servers), so DoVi *in an MKV*
-        // is decoded on-device instead: the engine decodes the HEVC base layer
-        // (HDR10/HLG/SDR for Profile 8, tone-mapped for Profile 5), exactly as
-        // Infuse does. DoVi in an Apple container still goes native.
-        if isDolbyVision(source.video), !isHybridContainer(source.container) { return .native }
-
-        // AVPlayer cannot demux hybrid-only containers (Matroska/WebM and
-        // transport-stream variants); the hybrid engine can.
-        if isHybridContainer(source.container) { return .hybrid }
+        // is unreliable (and outright fails on many servers), so DoVi *in a hybrid
+        // container* is decoded on-device instead: the engine decodes the HEVC base
+        // layer (HDR10/HLG/SDR for Profile 8, tone-mapped for Profile 5), exactly
+        // as Infuse does. DoVi in an Apple container is not a hybrid case.
+        if isDolbyVision(video), inHybridContainer { return true }
 
         // AVPlayer/VideoToolbox only decode HEVC tagged `hvc1`; an HEVC stream
-        // tagged `hev1` (in-band parameter sets) in an Apple/MP4-family container
-        // plays audio with a **black screen** on AVPlayer. When it hasn't been
-        // remuxed to `hvc1` (this branch only runs for non-transcoded sources),
-        // decode it on-device instead — the hybrid engine handles `hev1` fine.
-        // `hev1` in hybrid-only containers already falls under the container rule above.
-        if isHevcHev1(source.video) { return .hybrid }
+        // tagged `hev1` (in-band parameter sets) plays audio with a **black
+        // screen** on AVPlayer. When it reaches the router as a direct play (not
+        // remuxed to `hvc1`), decode it on-device — the hybrid engine handles it.
+        if isHevcHev1(video) { return true }
 
         // AV1 has no hardware decoder on current Apple TV silicon, so AVPlayer
-        // can't render it (a software path doesn't exist on tvOS). Decode it on
-        // the on-device engine instead — but stay native on any future device
-        // that reports hardware AV1 support.
-        if isAV1(source.video), !capabilities.supportsAV1 { return .hybrid }
+        // can't render it (no software path on tvOS). Stay native on any future
+        // device that reports hardware AV1 support.
+        if isAV1(video), !capabilities.supportsAV1 { return true }
 
-        // AVPlayer/VideoToolbox can't decode 10-bit **H.264** (High 10 profile) —
-        // it plays audio over a black screen, exactly like `hev1`. (10-bit HEVC,
-        // i.e. Main 10, IS supported and is the basis of HDR, so this is H.264
-        // only.) Decode it on-device instead.
-        if isTenBitH264(source.video) { return .hybrid }
+        // AVPlayer/VideoToolbox can't decode 10-bit **H.264** (High 10); it plays
+        // audio over a black screen. (10-bit HEVC / Main 10 IS supported.)
+        if isTenBitH264(video) { return true }
 
         // HEVC Range Extensions (4:2:2 / 4:4:4 chroma, or 12-bit) aren't part of
-        // VideoToolbox's Main/Main 10 hardware decode, so they black-screen on
-        // AVPlayer even under an `hvc1` tag. The on-device engine decodes them.
-        if isHevcRangeExtensions(source.video) { return .hybrid }
+        // VideoToolbox's Main/Main 10 hardware decode → black screen on AVPlayer.
+        if isHevcRangeExtensions(video) { return true }
 
         // Interlaced content is better handled on the on-device engine; AVPlayer
         // often deinterlaces poorly or trips into compatibility transcodes.
-        if isInterlaced(source.video) { return .hybrid }
+        if isInterlaced(video) { return true }
 
         if let audio = source.audio?.codec?.lowercased() {
             // AVPlayer can't decode TrueHD/MLP at all → hybrid.
-            if isTrueHD(audio) { return .hybrid }
-            // Opus/Vorbis aren't decodable by AVPlayer in an MP4-family container
-            // (Matroska/WebM, where they usually live, already routed above) →
-            // the file plays video with **no sound**. Decode on-device instead.
-            if isAVPlayerIncompatibleAudio(audio) { return .hybrid }
-            // DTS family: AVPlayer can only *passthrough* the bitstream to an
-            // external decoder. With a passthrough-capable route, keep it native
-            // (bitstream is best). Otherwise the hybrid engine decodes it on-device.
+            if isTrueHD(audio) { return true }
+            // Opus/Vorbis/WMA aren't decodable by AVPlayer in an MP4-family
+            // container → the file plays video with **no sound**. Decode on-device.
+            if isAVPlayerIncompatibleAudio(audio) { return true }
+            // DTS family: in a container AVPlayer can't demux, DTS must be decoded
+            // on-device even with a passthrough-capable route (AVPlayer can't reach
+            // the bitstream). In an Apple container, native passthrough is best when
+            // available; otherwise decode on-device.
             if isDTSFamily(audio) {
-                return capabilities.supportsDTSPassthrough ? .native : .hybrid
+                if inHybridContainer { return true }
+                return !capabilities.supportsDTSPassthrough
             }
         }
 
         // A video codec AVPlayer definitely can't decode → hybrid. Unknown codecs
         // fall through to native (the conservative default + transcode safety net).
-        if let videoCodec = source.video?.codec?.lowercased(),
+        if let videoCodec = video?.codec?.lowercased(),
            Self.nativeIncompatibleVideoCodecs.contains(videoCodec) {
-            return .hybrid
+            return true
         }
 
-        return .native
+        return false
     }
 
     // MARK: - Classifiers (pure)
 
-    /// Containers AVPlayer cannot reliably direct-play from a raw file URL but the
-    /// hybrid engine can decode on-device.
+    /// Containers AVPlayer cannot reliably direct-play from a raw file URL. Plain
+    /// content in these is remuxed to HLS by the server and played natively; only
+    /// the formats ``requiresHybridDecode(source:capabilities:)`` flags (DoVi,
+    /// hybrid-only codecs/audio) are direct-played to the on-device engine.
     static func isHybridContainer(_ container: String?) -> Bool {
         guard let container = container?.lowercased() else { return false }
         return container == "mkv"
@@ -161,8 +187,10 @@ public enum EngineRouter {
     }
 
     /// True when the video stream carries a **Dolby Vision** signal (any profile).
-    /// Only DoVi forces the native engine; plain HDR10/HLG follow the container
-    /// rules (Apple container → native, hybrid-only container → on-device hybrid).
+    /// DoVi in an Apple container plays natively; DoVi in a hybrid container is
+    /// decoded on-device (a server DoVi transcode is unreliable). Plain HDR10/HLG
+    /// is not special-cased here — it stays native unless something else about the
+    /// stream needs on-device decode.
     static func isDolbyVision(_ video: MediaSourceMetadata.VideoStream?) -> Bool {
         guard let video else { return false }
 

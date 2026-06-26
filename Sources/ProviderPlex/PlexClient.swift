@@ -581,10 +581,15 @@ public struct PlexClient: Sendable {
     /// Vision the display can't accept all fall back to a server transcode
     /// (matching server-side decisioning).
     ///
-    /// When `hybridEngineEnabled`, also accepts the extra formats the on-device
-    /// engine handles: hybrid-only containers (Matroska/WebM/TS-family),
-    /// interlaced video, and DTS/DTS-HD/TrueHD/Opus/Vorbis audio (decoded
-    /// on-device).
+    /// When `hybridEngineEnabled`, a hybrid-only container (Matroska/WebM/TS-family)
+    /// is direct-played **only** when the source genuinely needs on-device decode
+    /// (``hybridContainerNeedsOnDeviceDecode(media:part:)``): Dolby Vision the
+    /// display supports, a hybrid-only video codec (AV1/VP9/VC-1/MPEG-1/2/…),
+    /// DTS/DTS-HD/TrueHD/Opus/Vorbis audio, or interlaced video. Plain SDR/HDR10/
+    /// HLG H.264/HEVC with mainstream audio is intentionally **not** direct-played,
+    /// so Plex remuxes it to a seekable HLS stream AVPlayer plays on the efficient
+    /// hardware path (the router routes exactly this advertised set — advertise ⇔
+    /// route lockstep).
     func canDirectPlay(media: PlexMedia, part: PlexPart) -> Bool {
         let container = (media.container ?? part.container ?? Self.containerExtension(fromKey: part.key))?.lowercased()
         guard let container else { return false }
@@ -598,11 +603,15 @@ public struct PlexClient: Sendable {
             return false
         }
 
-        // Video codec gate. Apple containers must be a hardware-decodable codec;
-        // the hybrid engine demuxes/decodes the broad set inside hybrid-only
-        // containers, so the
-        // codec is left to VLCKit there (the SDR range gate below still applies).
-        if !isHybridContainer, let video = media.videoCodec?.lowercased() {
+        // Hybrid-only container: direct-play to the on-device engine ONLY when the
+        // source needs it. Otherwise transcode (server remuxes to HLS for AVPlayer).
+        if isHybridContainer {
+            return hybridContainerNeedsOnDeviceDecode(media: media, part: part)
+        }
+
+        // Apple container path. Must be a hardware-decodable video codec, an audio
+        // codec we can decode or passthrough, and a display-acceptable HDR range.
+        if let video = media.videoCodec?.lowercased() {
             guard let mapped = Self.directPlayVideoCodec(forPlexCodec: video),
                   capabilities.allowedDirectPlayVideoCodecs.contains(mapped) else { return false }
         }
@@ -611,13 +620,57 @@ public struct PlexClient: Sendable {
             return false
         }
 
-        if isHybridContainer {
-            guard isHybridDirectPlayableRange(part: part) else { return false }
-        } else {
-            guard canDirectPlayVideoRange(part: part) else { return false }
-        }
+        guard canDirectPlayVideoRange(part: part) else { return false }
 
         return true
+    }
+
+    /// Whether a file in a hybrid-only container (Matroska/WebM/TS-family) should be
+    /// direct-played to the on-device (mpv) engine rather than remuxed by the server.
+    ///
+    /// Mirrors ``CoreModels/EngineRouter/requiresHybridDecode(source:capabilities:)``
+    /// in the data Plex exposes: Dolby Vision (when the display supports it), a
+    /// hybrid-only video codec, hybrid-decodable audio, or interlaced video. Plain
+    /// SDR/HDR10/HLG H.264/HEVC with mainstream audio returns `false`, so Plex
+    /// transcodes (remuxes) it to HLS for AVPlayer.
+    func hybridContainerNeedsOnDeviceDecode(media: PlexMedia, part: PlexPart) -> Bool {
+        let video = part.Stream?.first(where: { $0.streamType == 1 })
+
+        // Dolby Vision: decoded on-device (HEVC base layer) when the display can
+        // present it — a server DoVi transcode is unreliable. A DoVi signal the
+        // display can't accept transcodes instead (the server tone-maps).
+        if video?.DOVIPresent == true {
+            let allowed = Set(capabilities.allowedHDRRanges)
+            let doviRanges: Set<HDRRange> = [.dolbyVision, .dolbyVisionWithHDR10, .dolbyVisionWithHLG, .dolbyVisionWithSDR]
+            return !allowed.isDisjoint(with: doviRanges)
+        }
+
+        // A video codec AVPlayer can't direct-play and we don't want to force the
+        // server to re-encode (AV1, VP8/VP9, VC-1, MPEG-1/2, …) → on-device decode.
+        if let codec = media.videoCodec?.lowercased(), Self.isHybridOnlyVideoCodec(codec) {
+            return true
+        }
+
+        // Audio only the on-device engine decodes (DTS/DTS-HD/TrueHD/Opus/Vorbis).
+        if let audio = media.audioCodec?.lowercased(), Self.isHybridDecodableAudio(audio) {
+            return true
+        }
+
+        // Interlaced video is deinterlaced on the on-device engine.
+        if Self.isInterlaced(video) { return true }
+
+        return false
+    }
+
+    /// Video codecs AVPlayer (and HLS) can carry/remux to a native stream — h264,
+    /// hevc, MPEG-4 Part 2 and MJPEG. A hybrid-only container carrying anything else
+    /// (AV1, VP8/VP9, VC-1, MPEG-1/2, Theora, RealVideo, …) is decoded on-device.
+    static func isHybridOnlyVideoCodec(_ codec: String) -> Bool {
+        let appleFriendly: Set<String> = [
+            "h264", "avc", "avc1", "hevc", "h265", "hev1", "hvc1",
+            "mpeg4", "mp4v", "msmpeg4v3", "mjpeg"
+        ]
+        return !appleFriendly.contains(codec)
     }
 
     /// Maps a Plex `videoCodec` token onto a `MediaCapabilities` direct-play
@@ -700,31 +753,6 @@ public struct PlexClient: Sendable {
             return !allowed.isDisjoint(with: doviRanges)
         }
 
-        switch video.colorTrc?.lowercased() {
-        case "smpte2084", "pq":
-            return allowed.contains(.hdr10)
-        case "arib-std-b67", "hlg":
-            return allowed.contains(.hlg)
-        default:
-            return true
-        }
-    }
-
-    /// Range gate for a raw MKV sent to the on-device engine: allows SDR and any
-    /// **display-supported** range, including HDR10 / HLG **and Dolby Vision** —
-    /// the on-device engine decodes the HEVC base layer (HDR10/SDR base for
-    /// Profile 8, tone-mapped for Profile 5), so DoVi-in-MKV plays without the
-    /// unreliable server transcode AVPlayer would otherwise need (it can't demux
-    /// MKV). Matches Infuse and mirrors `EngineRouter` (DoVi-in-MKV → hybrid).
-    private func isHybridDirectPlayableRange(part: PlexPart) -> Bool {
-        guard let video = part.Stream?.first(where: { $0.streamType == 1 }) else { return true }
-        let allowed = Set(capabilities.allowedHDRRanges)
-        if video.DOVIPresent == true {
-            // Decoded on-device whenever the display supports Dolby Vision (which,
-            // on an Apple TV 4K, tracks HEVC hardware decode — effectively always).
-            let doviRanges: Set<HDRRange> = [.dolbyVision, .dolbyVisionWithHDR10, .dolbyVisionWithHLG, .dolbyVisionWithSDR]
-            return !allowed.isDisjoint(with: doviRanges)
-        }
         switch video.colorTrc?.lowercased() {
         case "smpte2084", "pq":
             return allowed.contains(.hdr10)

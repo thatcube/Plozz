@@ -136,6 +136,14 @@ public extension PlaybackDiagnostics {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// Live late-frame **rate** line, e.g. `late 11.8/s` — the render-health
+    /// watchdog's trip signal, shown so the threshold can be tuned on-device.
+    /// `nil` until a rate is available (so the row hides for AVPlayer / startup).
+    var lateFrameRateText: String? {
+        guard let rate = engineLateFramesPerSecond, rate.isFinite, rate >= 0 else { return nil }
+        return String(format: "late %.1f/s", rate)
+    }
+
     /// Coarse main-thread responsiveness line driven by the sampler's measured
     /// scheduling slip, e.g. `OK` or `hitch 420 ms`. `nil` until measured.
     var mainThreadText: String? {

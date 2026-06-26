@@ -53,6 +53,7 @@ struct PlaybackDiagnosticsOverlay: View {
             optionalRow("Decode", d.decodeText, warn: d.isSoftwareDecoding)
             optionalRow("Render", d.renderRateText)
             optionalRow("Frame drops", d.engineDropsText)
+            optionalRow("Late rate", d.lateFrameRateText)
             row("Buffer", d.bufferStatusText)
             row("Network", d.observedBitrateText)
             row("Dropped", "\(d.droppedFramesText) frames")

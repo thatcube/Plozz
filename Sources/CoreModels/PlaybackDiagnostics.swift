@@ -144,6 +144,11 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var engineDecoderDropFrames: Int?
     /// Frames dropped/mistimed at the output stage (render/display-timing).
     public var engineLateFrames: Int?
+    /// Live late-frame **rate** (frames/sec) over the sampler's trailing window —
+    /// the render-health watchdog's actual trip signal, surfaced so the threshold
+    /// can be tuned empirically on-device. `nil` until enough samples land or for
+    /// engines that don't report late frames.
+    public var engineLateFramesPerSecond: Double?
     /// Frame rate actually rendered right now (engine-reported), vs the target
     /// `frameRate`; a rendered rate well below target means dropped frames.
     public var renderedFrameRate: Double?

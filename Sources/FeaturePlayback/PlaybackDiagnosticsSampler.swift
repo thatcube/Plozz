@@ -32,6 +32,9 @@ public final class PlaybackDiagnosticsSampler {
     /// Last measured main-thread scheduling slip (ms), applied to each snapshot so
     /// the overlay can flag a blocked main actor.
     private var lastHitchMillis: Double?
+    /// Sliding-window estimator for the engine's late-frame rate, surfaced in the
+    /// overlay so the render-health threshold can be tuned on-device.
+    private var lateFrameRate = LateFrameRateTracker()
     /// Immutable per-stream facts (codec/HDR/fps/mode/container/device) merged
     /// into every dynamic sample.
     private var staticDiagnostics = PlaybackDiagnostics()
@@ -73,6 +76,7 @@ public final class PlaybackDiagnosticsSampler {
         self.player = player
         self.engineStatsProvider = engineStats
         self.lastHitchMillis = nil
+        self.lateFrameRate.reset()
         var base = PlaybackDiagnostics.base(from: metadata, mode: mode)
         base.engineName = engineName
         Self.fillDeviceInfo(into: &base)
@@ -124,6 +128,10 @@ public final class PlaybackDiagnosticsSampler {
         }
         if let stats = engineStatsProvider?() {
             diagnostics.apply(engineStats: stats)
+            if let late = stats.lateFrames {
+                lateFrameRate.record(cumulativeLateFrames: late, at: ProcessInfo.processInfo.systemUptime)
+                diagnostics.engineLateFramesPerSecond = lateFrameRate.ratePerSecond
+            }
         }
         diagnostics.mainThreadHitchMillis = lastHitchMillis
         latest = diagnostics

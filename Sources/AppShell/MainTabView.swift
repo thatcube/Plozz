@@ -13,6 +13,20 @@ import ProviderTrailers
 import RatingsService
 import TraktService
 
+/// Bundles the watch-outbox interactions the full-screen player needs: live-
+/// session registration (so the convergence reconciler defers writes against the
+/// server currently streaming) plus the durable final convergence enqueue. Passed
+/// down the tab hierarchy in place of a bare enqueue closure so the player can
+/// both guard and converge through one value.
+struct WatchOutboxBridge: Sendable {
+    /// Register `(accountID, itemID)` as the live in-app session (idempotent).
+    let beginLiveSession: @Sendable (_ accountID: String, _ itemID: String) -> Void
+    /// End the live session for `(accountID, itemID)` and enqueue the optional
+    /// final convergence `mutation`, in that order, so the just-played server is
+    /// no longer deferred and its resume/played write goes out.
+    let finishPlayback: @Sendable (_ accountID: String?, _ itemID: String, _ mutation: WatchMutation?) -> Void
+}
+
 /// The signed-in experience: Home, Search and Settings tabs, with item-detail
 /// navigation and full-screen playback.
 ///
@@ -32,6 +46,7 @@ struct MainTabView: View {
     let trakt: TraktService
     let mediaItemActionHandler: any MediaItemActionHandling
     let enqueueWatchMutation: (WatchMutation) -> Void
+    let watchBridge: WatchOutboxBridge
     let displayAccounts: [Account]
     let activeAccountID: String?
     let profiles: [Profile]
@@ -74,6 +89,7 @@ struct MainTabView: View {
                 ratingsProvider: ratingsProvider,
                 scrobbler: trakt.scrobbler,
                 enqueueWatchMutation: enqueueWatchMutation,
+                watchBridge: watchBridge,
                 pendingPlayItemID: $pendingPlayItemID
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
@@ -86,7 +102,8 @@ struct MainTabView: View {
                 themePalette: resolvedPalette,
                 ratingsProvider: ratingsProvider,
                 scrobbler: trakt.scrobbler,
-                enqueueWatchMutation: enqueueWatchMutation
+                enqueueWatchMutation: enqueueWatchMutation,
+                watchBridge: watchBridge
             )
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
@@ -274,7 +291,7 @@ private func makePlayerViewModel(
     accounts: [ResolvedAccount],
     captionSettings: CaptionSettings,
     scrobbler: any TraktScrobbling,
-    enqueueWatchMutation: @escaping (WatchMutation) -> Void
+    watchBridge: WatchOutboxBridge
 ) -> PlayerViewModel {
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
@@ -311,6 +328,12 @@ private func makePlayerViewModel(
     // sources, so the mutation fans out to every server holding the title + Trakt.
     let convergingItem = request.item
     let primaryAccountID = accounts.first?.account.id
+    // The live session key must match the origin target the factory derives for
+    // the streaming server, so the reconciler defers writes against exactly that
+    // (account,item) while it plays. `sourceAccountID` falls back to the primary
+    // account for single-source items, mirroring WatchMutationFactory.targets(for:).
+    let liveAccountID = request.item.sourceAccountID ?? primaryAccountID
+    let liveItemID = request.item.id
     return PlayerViewModel(
         provider: resolveProvider(request.item.sourceAccountID, in: accounts),
         itemID: request.item.id,
@@ -320,13 +343,22 @@ private func makePlayerViewModel(
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(),
         onPlaybackStopped: { position, percent in
-            guard let mutation = WatchMutationFactory.playbackStop(
+            let mutation = WatchMutationFactory.playbackStop(
                 item: convergingItem,
                 position: position,
                 watchedPercent: percent,
                 primaryAccountID: primaryAccountID
-            ) else { return }
-            enqueueWatchMutation(mutation)
+            )
+            // End the live session (so the just-played server is no longer
+            // deferred) and enqueue the final convergence write, in that order.
+            watchBridge.finishPlayback(liveAccountID, liveItemID, mutation)
+        },
+        onPlaybackStarted: {
+            // Guard the streaming server while it plays: a mid-play drain can't
+            // disturb/zero its now-playing session. Deferred, not dropped.
+            if let liveAccountID {
+                watchBridge.beginLiveSession(liveAccountID, liveItemID)
+            }
         }
     )
 }
@@ -344,6 +376,7 @@ private struct HomeTab: View {
     let ratingsProvider: any ExternalRatingsProviding
     let scrobbler: any TraktScrobbling
     let enqueueWatchMutation: (WatchMutation) -> Void
+    let watchBridge: WatchOutboxBridge
     @Binding var pendingPlayItemID: String?
 
     @State private var path = NavigationPath()
@@ -443,7 +476,7 @@ private struct HomeTab: View {
                     accounts: accounts,
                     captionSettings: captionSettings,
                     scrobbler: scrobbler,
-                    enqueueWatchMutation: enqueueWatchMutation
+                    watchBridge: watchBridge
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
@@ -619,6 +652,7 @@ private struct SearchTab: View {
     let ratingsProvider: any ExternalRatingsProviding
     let scrobbler: any TraktScrobbling
     let enqueueWatchMutation: (WatchMutation) -> Void
+    let watchBridge: WatchOutboxBridge
 
     @State private var path = NavigationPath()
     @State private var playRequest: PlayRequest?
@@ -713,7 +747,7 @@ private struct SearchTab: View {
                     accounts: accounts,
                     captionSettings: captionSettings,
                     scrobbler: scrobbler,
-                    enqueueWatchMutation: enqueueWatchMutation
+                    watchBridge: watchBridge
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette

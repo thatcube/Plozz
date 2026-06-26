@@ -77,6 +77,14 @@ public struct RootView: View {
                         trakt: appState.traktService,
                         mediaItemActionHandler: appState.mediaItemActionHandler,
                         enqueueWatchMutation: { appState.enqueueWatchMutation($0) },
+                        watchBridge: WatchOutboxBridge(
+                            beginLiveSession: { accountID, itemID in
+                                appState.beginLiveWatchSession(accountID: accountID, itemID: itemID)
+                            },
+                            finishPlayback: { accountID, itemID, mutation in
+                                appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, mutation: mutation)
+                            }
+                        ),
                         displayAccounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
                         profiles: appState.profilesModel.profiles,

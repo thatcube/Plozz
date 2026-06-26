@@ -244,3 +244,103 @@ final class WatchOutboxTraktTests: XCTestCase {
         XCTAssertEqual(done, 0)
     }
 }
+
+// MARK: - Live-session guard (never clobber the now-playing session)
+
+/// The bug these tests pin: a convergence drain that lands on the exact
+/// `(account,item)` currently streaming in-app must NOT write to that server
+/// while it plays (an out-of-band write — even a session-less one — could race
+/// the live now-playing session). The reconciler defers such a target until the
+/// live session ends, then converges it. Deferral is never a drop.
+final class WatchOutboxLiveSessionTests: XCTestCase {
+    private func resumeMutation(capturedAt: Date, targets: [WatchMutationTarget]) -> WatchMutation {
+        WatchMutation(
+            capturedAt: capturedAt,
+            canonicalMediaID: "imdb:tt1",
+            resumePosition: 120,
+            targets: targets
+        )
+    }
+
+    /// A drain while item X is the live-playing session emits NO write to X; the
+    /// mutation stays queued (deferred, not dropped) and converges once the live
+    /// session ends.
+    func testDrainDuringLiveSessionDefersWriteToThatItemThenConverges() async throws {
+        let store = InMemoryWatchMutationStore()
+        let applier = FakeWatchApplier()
+        let reconciler = WatchStateReconciler(store: store, applier: applier)
+
+        // X is the server currently streaming in-app.
+        await reconciler.beginLiveSession(accountID: "jellyfin", itemID: "j1")
+        await reconciler.enqueue(resumeMutation(capturedAt: Date(), targets: [target("jellyfin", "j1")]))
+        await reconciler.drain()
+
+        XCTAssertTrue(applier.resumeWrites.isEmpty, "No write may land on the live-playing item")
+        XCTAssertTrue(applier.playedWrites.isEmpty)
+        let deferred = await reconciler.pendingCount
+        XCTAssertEqual(deferred, 1, "The write is deferred, not dropped")
+
+        // Playback ends → the deferred write converges.
+        await reconciler.endLiveSession(accountID: "jellyfin", itemID: "j1")
+        XCTAssertEqual(
+            applier.resumeWrites,
+            [.init(seconds: 120, accountID: "jellyfin", itemID: "j1")],
+            "The deferred write converges once the live session ends"
+        )
+        let done = await reconciler.pendingCount
+        XCTAssertEqual(done, 0)
+    }
+
+    /// A drain during a live session still converges the OTHER servers holding the
+    /// title immediately — only the live server is deferred. This is the real
+    /// cross-server case: keep converging Plex while Jellyfin is the live stream.
+    func testDrainDuringLiveSessionStillConvergesOtherServers() async throws {
+        let store = InMemoryWatchMutationStore()
+        let applier = FakeWatchApplier()
+        let reconciler = WatchStateReconciler(store: store, applier: applier)
+
+        await reconciler.beginLiveSession(accountID: "jellyfin", itemID: "j1")
+        await reconciler.enqueue(resumeMutation(
+            capturedAt: Date(),
+            targets: [target("jellyfin", "j1"), target("plex", "p1")]
+        ))
+        await reconciler.drain()
+
+        XCTAssertEqual(
+            applier.resumeWrites,
+            [.init(seconds: 120, accountID: "plex", itemID: "p1")],
+            "The non-live server converges immediately"
+        )
+        XCTAssertFalse(
+            applier.resumeWrites.contains(.init(seconds: 120, accountID: "jellyfin", itemID: "j1")),
+            "The live server is never written while playing"
+        )
+        let pending = await reconciler.pendingCount
+        XCTAssertEqual(pending, 1, "The live target is still queued")
+
+        await reconciler.endLiveSession(accountID: "jellyfin", itemID: "j1")
+        XCTAssertTrue(applier.resumeWrites.contains(.init(seconds: 120, accountID: "jellyfin", itemID: "j1")))
+        let done = await reconciler.pendingCount
+        XCTAssertEqual(done, 0)
+    }
+
+    /// The guard is item-scoped: a live session for one item never defers writes
+    /// for a *different* item on the same account.
+    func testLiveSessionGuardIsScopedToTheExactItem() async throws {
+        let store = InMemoryWatchMutationStore()
+        let applier = FakeWatchApplier()
+        let reconciler = WatchStateReconciler(store: store, applier: applier)
+
+        await reconciler.beginLiveSession(accountID: "jellyfin", itemID: "j1")
+        await reconciler.enqueue(resumeMutation(capturedAt: Date(), targets: [target("jellyfin", "j2")]))
+        await reconciler.drain()
+
+        XCTAssertEqual(
+            applier.resumeWrites,
+            [.init(seconds: 120, accountID: "jellyfin", itemID: "j2")],
+            "A different item on the same account is unaffected"
+        )
+        let done = await reconciler.pendingCount
+        XCTAssertEqual(done, 0)
+    }
+}

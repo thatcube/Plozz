@@ -60,6 +60,17 @@ public actor WatchStateReconciler {
     private var isDraining = false
     private var drainRequestedWhileDraining = false
 
+    /// `(accountID:itemID)` keys (matching ``WatchMutationTarget/id``) that have a
+    /// **live in-app playback session** right now. The reconciler never issues a
+    /// convergence write against one of these targets — the live player already
+    /// owns that server's now-playing session, and an out-of-band write (even via
+    /// the session-less endpoints) is deferred until playback ends so a mid-play
+    /// drain can't race/disturb/zero the live session. Purely in-memory and never
+    /// persisted: a kill mid-play simply forgets the guard, so a relaunch drains
+    /// everything normally (durability preserved). Deferral ≠ drop — a guarded
+    /// target stays queued and converges on ``endLiveSession(accountID:itemID:)``.
+    private var liveSessions: Set<String> = []
+
     public init(
         store: any WatchMutationStoring,
         applier: any WatchMutationApplying,
@@ -80,6 +91,30 @@ public actor WatchStateReconciler {
 
     /// A snapshot of the persisted state — for diagnostics / tests.
     public func snapshot() -> WatchOutboxState { state }
+
+    // MARK: - Live playback guard
+
+    /// Marks `(accountID, itemID)` as the live in-app playback session, so the
+    /// reconciler defers (never issues) convergence writes against it until the
+    /// session ends. Idempotent — registering the same session twice is a no-op.
+    /// The live player itself keeps that server's now-playing session in sync; the
+    /// outbox only converges the *other* servers + provides durability.
+    public func beginLiveSession(accountID: String, itemID: String) {
+        liveSessions.insert(WatchMutationTarget(accountID: accountID, itemID: itemID).id)
+    }
+
+    /// Ends the live session for `(accountID, itemID)` and drains, so any writes
+    /// that were deferred *because* it was playing now converge. Idempotent.
+    public func endLiveSession(accountID: String, itemID: String) async {
+        liveSessions.remove(WatchMutationTarget(accountID: accountID, itemID: itemID).id)
+        await drain()
+    }
+
+    /// Whether `(accountID, itemID)` is currently a guarded live session — for
+    /// diagnostics / tests.
+    public func isLiveSession(accountID: String, itemID: String) -> Bool {
+        liveSessions.contains(WatchMutationTarget(accountID: accountID, itemID: itemID).id)
+    }
 
     // MARK: - Enqueue
 
@@ -209,6 +244,14 @@ public actor WatchStateReconciler {
 
         var remaining: [WatchMutationTarget] = []
         for target in mutation.targets {
+            // Never write to a target that is the live in-app playback session:
+            // defer it (keep it queued) so a mid-play drain can't disturb the
+            // now-playing session. The live player owns that server; the deferred
+            // write converges when the session ends (endLiveSession drains).
+            if liveSessions.contains(target.id) {
+                remaining.append(target)
+                continue
+            }
             do {
                 if let played = mutation.played {
                     try await applier.setPlayed(played, on: target)

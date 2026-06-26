@@ -156,6 +156,13 @@ public final class PlayerViewModel {
     /// the player is usable standalone / in tests.
     private let onPlaybackStopped: @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void
 
+    /// Called once the live playback session has actually begun (right after the
+    /// first `.start` report). The AppShell wires this to register the streaming
+    /// server as a live session so the convergence reconciler defers out-of-band
+    /// writes against it until playback ends — a mid-play drain can never disturb
+    /// the now-playing session. Idempotent on the receiver. Defaults to a no-op.
+    private let onPlaybackStarted: @Sendable () -> Void
+
     /// Optional playback bring-up started eagerly in `init` so the (network-bound)
     /// `playbackInfo` resolution and engine warm-up overlap the SwiftUI fullscreen
     /// navigation transition instead of starting only once the view appears. The
@@ -175,7 +182,8 @@ public final class PlayerViewModel {
         capabilities: MediaCapabilities = .detected(),
         preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore(),
         autoDismissOnEnd: Bool = false,
-        onPlaybackStopped: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in }
+        onPlaybackStopped: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
+        onPlaybackStarted: @escaping @Sendable () -> Void = {}
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -188,6 +196,7 @@ public final class PlayerViewModel {
         self.preferencesStore = preferencesStore
         self.autoDismissOnEnd = autoDismissOnEnd
         self.onPlaybackStopped = onPlaybackStopped
+        self.onPlaybackStarted = onPlaybackStarted
         self.engine = engineFactory.makeNative(captionSettings)
         self.currentEngineKind = .native
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
@@ -407,6 +416,10 @@ public final class PlayerViewModel {
         // resumed a position learned from another server, this converges the chosen
         // server to that unified furthest-progress point on entry.
         await report(event: .start, isPaused: false, positionOverride: startPosition > 0 ? startPosition : nil)
+        // Register the live session (idempotent) now that the server has a real
+        // now-playing session, so convergence writes against this server defer
+        // until stop() ends it.
+        onPlaybackStarted()
 
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).

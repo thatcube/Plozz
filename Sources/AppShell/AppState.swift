@@ -172,6 +172,32 @@ public final class AppState {
         }
     }
 
+    /// Registers `(accountID, itemID)` as the live in-app playback session so the
+    /// reconciler defers convergence writes against that exact server while it is
+    /// playing — a mid-play drain can never disturb/zero the now-playing session.
+    public func beginLiveWatchSession(accountID: String, itemID: String) {
+        let reconciler = watchReconciler
+        Task { await reconciler.beginLiveSession(accountID: accountID, itemID: itemID) }
+    }
+
+    /// Ends the live session for `(accountID, itemID)` and enqueues the optional
+    /// final convergence `mutation`, **in that order**, so the just-played server
+    /// is no longer deferred and its final resume/played write goes out. Sequenced
+    /// in a single task so the end always precedes the enqueue's drain. `accountID`
+    /// is optional so a barely-started/untargeted stop still flushes deferred work.
+    public func finishLiveWatchSession(accountID: String?, itemID: String, mutation: WatchMutation?) {
+        let reconciler = watchReconciler
+        Task {
+            if let accountID {
+                await reconciler.endLiveSession(accountID: accountID, itemID: itemID)
+            }
+            if let mutation {
+                await reconciler.enqueue(mutation)
+                await reconciler.drain()
+            }
+        }
+    }
+
     private var machine = SessionStateMachine()
     private let accountStore: AccountPersisting
     private let registry: ProviderRegistry

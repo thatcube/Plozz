@@ -31,16 +31,34 @@ public final class MusicLandingViewModel {
         public var isEmpty: Bool {
             recentlyPlayed.isEmpty && albums.isEmpty && artists.isEmpty && playlists.isEmpty
         }
+
+        init(snapshot: MusicLandingCache.Snapshot) {
+            self.recentlyPlayed = snapshot.recentlyPlayed
+            self.albums = snapshot.albums
+            self.artists = snapshot.artists
+            self.playlists = snapshot.playlists
+        }
+
+        var snapshot: MusicLandingCache.Snapshot {
+            MusicLandingCache.Snapshot(
+                recentlyPlayed: recentlyPlayed,
+                albums: albums,
+                artists: artists,
+                playlists: playlists
+            )
+        }
     }
 
     public private(set) var state: LoadState<Content> = .idle
 
     private let context: MusicContext
     private let sampleSize: Int
+    private let cache: MusicLandingCache
 
-    public init(context: MusicContext, sampleSize: Int = 18) {
+    public init(context: MusicContext, sampleSize: Int = 18, cache: MusicLandingCache = .ephemeral) {
         self.context = context
         self.sampleSize = sampleSize
+        self.cache = cache
     }
 
     public var hasPlaylists: Bool {
@@ -48,16 +66,61 @@ public final class MusicLandingViewModel {
         return false
     }
 
+    /// Key the cached combined snapshot by the **visible** music-library set, so
+    /// flipping a library toggle invalidates the stale snapshot instead of
+    /// painting hidden content.
+    private var cacheKey: String {
+        MusicLandingCache.key(visibleLibraryIDs: context.visibleLibraryIDs ?? [:])
+    }
+
+    private var isLoaded: Bool {
+        if case .loaded = state { return true }
+        return false
+    }
+
     public func load() async {
-        state = .loading
+        let key = cacheKey
+        // Stale-while-revalidate: paint the last merged snapshot instantly (no
+        // spinner) if we have one, otherwise show the loading state, then refresh
+        // from the network below.
+        if !isLoaded {
+            if let snapshot = await cache.snapshot(for: key), !snapshot.isEmpty {
+                state = .loaded(Content(snapshot: snapshot))
+            } else {
+                state = .loading
+            }
+        }
+
+        let content = await fetchContent()
+        if content.isEmpty {
+            // Don't flip a populated (cached) screen to empty on a transient
+            // fetch miss — only show empty when there was nothing to begin with.
+            if !isLoaded { state = .empty }
+        } else {
+            state = .loaded(content)
+            await cache.store(content.snapshot, for: key)
+        }
+    }
+
+    /// Warms the disk cache in the background (no `state` mutation) so the page is
+    /// ready before the user ever opens the tab. Called as soon as music is
+    /// detected.
+    public func prefetch() async {
+        let content = await fetchContent()
+        guard !content.isEmpty else { return }
+        await cache.store(content.snapshot, for: cacheKey)
+    }
+
+    /// Fetches every (account × kind) request — plus each account's recently
+    /// played albums — concurrently, then collapses cross-server duplicates
+    /// through the single identity/merge seam. Previously these ran strictly
+    /// serially, so the landing screen waited on the sum of every request. One
+    /// task group collapses that to roughly a single round-trip and scales to
+    /// ~10 libraries without summing latencies.
+    private func fetchContent() async -> Content {
         let accounts = context.musicAccounts
         let sampleSize = self.sampleSize
 
-        // Fetch every (account × kind) request — plus each account's recently
-        // played albums — concurrently. Previously these ran strictly serially,
-        // so the landing screen waited on the sum of every request. One task
-        // group collapses that to roughly a single round-trip, and scales to
-        // ~10 libraries without summing latencies.
         let fetched = await withTaskGroup(of: Partial.self) { group -> [Partial] in
             for (index, account) in accounts.enumerated() {
                 for kind in [MusicItemKind.album, .artist, .playlist] {
@@ -106,19 +169,35 @@ public final class MusicLandingViewModel {
         // Collapse cross-server duplicates through the single identity/merge seam
         // (recents merge-sorted by real play recency first), so Plex + Jellyfin
         // read as one combined, de-duplicated library.
-        let content = Content(
+        return Content(
             recentlyPlayed: MusicMerge.recentlyPlayedAlbums(recents, limit: sampleSize),
             albums: Array(MusicMerge.albums(albums).prefix(sampleSize)),
             artists: Array(MusicMerge.artists(artists).prefix(sampleSize)),
             playlists: Array(MusicMerge.playlists(playlists).prefix(sampleSize))
         )
-        state = content.isEmpty ? .empty : .loaded(content)
     }
 
     /// One account's partial landing result, carried out of the parallel fetch.
     private enum Partial: Sendable {
         case items(account: Int, kind: MusicItemKind, page: MusicPage?)
         case recent(account: Int, albums: [MusicAlbum])
+    }
+}
+
+/// Warms the persistent landing cache in the background the moment music is
+/// detected, so the page paints instantly the first time the user opens the tab
+/// (not just on a revisit). Fire-and-forget; failures are harmless (the tab just
+/// falls back to a normal fetch).
+@MainActor
+public enum MusicLandingPrefetch {
+    public static func warm(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]]) {
+        guard !accounts.isEmpty else { return }
+        let context = MusicContext(
+            accounts: accounts,
+            visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
+        )
+        let viewModel = MusicLandingViewModel(context: context, cache: .shared)
+        Task { await viewModel.prefetch() }
     }
 }
 

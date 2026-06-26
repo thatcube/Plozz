@@ -37,7 +37,7 @@ public struct MusicTabView: View {
     public var body: some View {
         NavigationStack(path: $path) {
             MusicLandingView(
-                viewModel: MusicLandingViewModel(context: context),
+                viewModel: MusicLandingViewModel(context: context, cache: .shared),
                 onSelectRoute: { path.append($0) },
                 layout: layoutModel.layout
             )

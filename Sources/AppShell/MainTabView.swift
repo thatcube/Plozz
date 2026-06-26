@@ -138,7 +138,21 @@ struct MainTabView: View {
             // Re-runs when accounts or the per-profile library toggles change, so
             // hiding/showing a music library live re-evaluates the tab + content.
             musicAvailability.seedFromCache(accounts: accounts, visibility: homeVisibility.visibility)
+            if musicAvailability.hasMusic {
+                // Warm the landing cache immediately from the seeded set so the
+                // page is ready before the user ever taps the tab.
+                MusicLandingPrefetch.warm(
+                    accounts: musicAvailability.detectedAccounts,
+                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs
+                )
+            }
             await musicAvailability.probe(accounts: accounts, visibility: homeVisibility.visibility)
+            if musicAvailability.hasMusic {
+                MusicLandingPrefetch.warm(
+                    accounts: musicAvailability.detectedAccounts,
+                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs
+                )
+            }
         }
         .mediaItemActionHandler(mediaItemActionHandler)
     }

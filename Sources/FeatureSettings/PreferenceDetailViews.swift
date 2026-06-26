@@ -44,31 +44,35 @@ struct AppearanceDetailView: View {
 
                 SettingsPanel(
                     title: "Music Player",
-                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme — frosted light in a light theme, vibrant dark otherwise. Or pick a fixed look."
+                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme — frosted light in a light theme, vibrant dark otherwise. Or pick a fixed look. “Show track details” adds the album name, audio quality and format (e.g. \"Original AAC 44.1 kHz 320 kbps\"), and the lyrics source — off by default so the player stays focused on the artwork, song and artist."
                 ) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(MusicPlayerAppearance.allCases) { option in
-                                Button {
-                                    playerAppearance = option
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: option.symbolName)
-                                        Text(option.displayName)
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .opacity(playerAppearance == option ? 1 : 0)
+                    VStack(alignment: .leading, spacing: 18) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(MusicPlayerAppearance.allCases) { option in
+                                    Button {
+                                        playerAppearance = option
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: option.symbolName)
+                                            Text(option.displayName)
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .opacity(playerAppearance == option ? 1 : 0)
+                                        }
+                                        .font(.headline)
+                                        .padding(.horizontal, 4)
                                     }
-                                    .font(.headline)
-                                    .padding(.horizontal, 4)
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: playerAppearance == option))
+                                    .accessibilityValue(playerAppearance == option ? "Selected" : "")
                                 }
-                                .buttonStyle(PlozzSeasonTabStyle(isSelected: playerAppearance == option))
-                                .accessibilityValue(playerAppearance == option ? "Selected" : "")
                             }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
                         }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 6)
+                        .scrollClipDisabled()
+
+                        Toggle("Show track details", isOn: $showTrackDetails)
                     }
-                    .scrollClipDisabled()
                 }
 
                 SettingsPanel(
@@ -78,12 +82,6 @@ struct AppearanceDetailView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         Toggle("Reduce transparency", isOn: $reduceTransparency)
                     }
-                }
-
-                SettingsPanel(
-                    footer: "Adds the album name, the audio quality and format (e.g. \"Original AAC 44.1 kHz 320 kbps\"), and the lyrics source to the full-screen player. Off by default so the player stays focused on the artwork, song and artist."
-                ) {
-                    Toggle("Show track details", isOn: $showTrackDetails)
                 }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

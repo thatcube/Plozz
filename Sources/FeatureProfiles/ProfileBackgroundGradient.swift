@@ -146,7 +146,7 @@ struct ProfileBackgroundGradient: View {
             palette: resolvedColors,
             animate: !reduceMotion,
             style: style,
-            paletteCrossfade: 2.6
+            paletteCrossfade: 1.8
         )
         .opacity(appeared ? 1 : 0)
         .onAppear {

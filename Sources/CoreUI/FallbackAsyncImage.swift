@@ -106,6 +106,12 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
 
     @State private var image: UIImage?
     @State private var resolved: Bool
+    /// The `.task` id the current `image`/`resolved` state was produced for. Lets
+    /// `resolve()` tell "same inputs, keep the result" apart from "the urls
+    /// changed (e.g. the player advanced to a new track), re-resolve" — the view
+    /// keeps a stable identity in the full-screen player, so its `@State` survives
+    /// across track changes and must be refreshed when the artwork url changes.
+    @State private var loadedKey: String?
 
     init(
         urls: [URL],
@@ -124,6 +130,13 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
         let seeded = Self.cachedUsableImage(urls: urls, maxAspectRatio: maxAspectRatio, variant: variant)
         _image = State(initialValue: seeded)
         _resolved = State(initialValue: seeded != nil)
+        _loadedKey = State(initialValue: seeded != nil
+            ? Self.makeKey(urls: urls, variant: variant, maxAspectRatio: maxAspectRatio)
+            : nil)
+    }
+
+    private var taskKey: String {
+        Self.makeKey(urls: urls, variant: variant, maxAspectRatio: maxAspectRatio)
     }
 
     var body: some View {
@@ -138,15 +151,27 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
                 Color.primary.opacity(0.06)
             }
         }
-        .task(id: [variant.rawValue, maxAspectRatio.map { "\($0)" } ?? "nil"] + urls.map(\.absoluteString)) {
+        .task(id: taskKey) {
             await resolve()
         }
     }
 
     private func resolve() async {
-        // A synchronously-seeded image (cache hit) is already correct — keep it
-        // rather than wiping it back to gray and re-resolving.
-        if image != nil { return }
+        let key = taskKey
+        // Same inputs we already resolved for — keep the current result rather
+        // than wiping it back to gray and re-resolving.
+        if loadedKey == key, image != nil { return }
+        // The urls changed (or this is the first run). Prefer a synchronous cache
+        // hit for the *new* urls so a warmed image shows with no flash.
+        if let seeded = Self.cachedUsableImage(urls: urls, maxAspectRatio: maxAspectRatio, variant: variant) {
+            image = seeded
+            resolved = true
+            loadedKey = key
+            return
+        }
+        // No cached image for the new inputs: drop any stale art so we never leave
+        // a previous track's cover on screen, and show the loading state instead.
+        image = nil
         resolved = false
         // 1) Try provider candidates in order, skipping any that are too wide.
         for url in urls {
@@ -154,6 +179,7 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
             guard Self.usableSize(loaded, maxAspectRatio: maxAspectRatio) != nil else { continue }
             image = loaded
             resolved = true
+            loadedKey = key
             return
         }
         // 2) Nothing usable from the provider — try the async fallback (TMDb).
@@ -162,9 +188,18 @@ private struct FilteredArtworkImage<Placeholder: View>: View {
            let loaded = await ArtworkImageCache.shared.image(for: url, variant: variant) {
             image = loaded
             resolved = true
+            loadedKey = key
             return
         }
         resolved = true
+        loadedKey = key
+    }
+
+    /// Stable key for a given set of inputs, used both as the `.task` id and to
+    /// remember which inputs the current `image` was resolved for.
+    private static func makeKey(urls: [URL], variant: ArtworkImageVariant, maxAspectRatio: CGFloat?) -> String {
+        ([variant.rawValue, maxAspectRatio.map { "\($0)" } ?? "nil"] + urls.map(\.absoluteString))
+            .joined(separator: "\n")
     }
 
     /// First already-decoded candidate (in priority order) that is acceptable for

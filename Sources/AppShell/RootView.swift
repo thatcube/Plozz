@@ -15,6 +15,18 @@ public struct RootView: View {
     @State private var appState: AppState
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
+    /// The OS-level Reduce Transparency setting, OR-combined with the in-app
+    /// "Reduce transparency" toggle (Settings ▸ Appearance) and injected as the
+    /// app-wide `\.plozzReduceTransparency` so the liquid-glass surfaces switch
+    /// to solid when *either* is on (the app override never weakens the OS one).
+    @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+    /// Deliberately an APP-WIDE (global) setting: a plain `@AppStorage` key with no
+    /// profile namespace, so it persists across every profile and is intentionally
+    /// NOT part of `AppState.rebuildSettingsModels()` (the per-profile store set).
+    /// Do not scope this per profile — accessibility/visual-comfort preferences
+    /// belong to the household, not an individual profile. See AGENTS.local.md
+    /// ("Per-profile vs app-wide settings").
+    @AppStorage("reduceTransparencyOverride") private var reduceTransparencyOverride = false
     /// Window-level black veil that survives the player's dismiss into Home so it
     /// can cover the TV's *physical* HDR/DV → SDR panel switch (which on some TVs
     /// lags ~1s behind tvOS's `displayDidSettle`). Injected into the environment so
@@ -61,8 +73,10 @@ public struct RootView: View {
                 )
 
             case .ready:
+                ZStack {
                 if appState.isChoosingProfile {
-                    ProfileSelectionView(appState: appState, canCancel: appState.primaryProvider != nil)
+                    ProfileSelectionView(appState: appState, canCancel: appState.isProfileSelectionCancelable)
+                        .transition(.opacity)
                 } else {
                     let accounts = appState.homeAccounts
                     if !accounts.isEmpty {
@@ -72,6 +86,8 @@ public struct RootView: View {
                         spoilerModel: appState.spoilerModel,
                         themeModel: appState.themeModel,
                         diagnosticsModel: appState.diagnosticsModel,
+                        musicPlayerModel: appState.musicPlayerModel,
+                        audioController: appState.audioController,
                         homeVisibility: appState.homeLibraryVisibilityModel,
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,
@@ -112,8 +128,11 @@ public struct RootView: View {
                         onWarmIdentityIndex: { appState.warmIdentityIndex() }
                     )
                     .id("\(appState.profilesModel.activeProfileID)#\(appState.plexIdentityGeneration)")
+                    .transition(.opacity)
                     }
                 }
+                }
+                .animation(.easeInOut(duration: 0.5), value: appState.isChoosingProfile)
 
             case let .failed(error, _):
                 FailureView(message: error.userMessage) {
@@ -123,6 +142,7 @@ public struct RootView: View {
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
+        .environment(\.plozzReduceTransparency, systemReduceTransparency || reduceTransparencyOverride)
         .environment(displayVeil)
         .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)
         .fullScreenCover(item: Binding(

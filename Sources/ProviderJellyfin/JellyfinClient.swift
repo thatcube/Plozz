@@ -541,7 +541,8 @@ public struct JellyfinClient: Sendable {
         limit: Int,
         sortBy: String,
         sortOrder: String,
-        albumArtistID: String? = nil
+        albumArtistID: String? = nil,
+        filters: [String] = []
     ) async throws -> ItemsResponse {
         var queryItems = [
             URLQueryItem(name: "StartIndex", value: String(startIndex)),
@@ -557,6 +558,9 @@ public struct JellyfinClient: Sendable {
         }
         if let albumArtistID, !albumArtistID.isEmpty {
             queryItems.append(URLQueryItem(name: "AlbumArtistIds", value: albumArtistID))
+        }
+        if !filters.isEmpty {
+            queryItems.append(URLQueryItem(name: "Filters", value: filters.joined(separator: ",")))
         }
         if recursive {
             queryItems.append(URLQueryItem(name: "Recursive", value: "true"))
@@ -656,8 +660,14 @@ public struct JellyfinClient: Sendable {
         return components.url
     }
 
-    /// Builds an absolute image URL. Token is *not* required for images; the
-    /// item id + image type is enough.
+    /// `GET /Audio/{itemId}/Lyrics` — the track's lyrics, timestamped (ticks) or
+    /// plain. Returns `nil` when the server has no lyrics (it answers 404), which
+    /// is mapped to "no lyrics" rather than an error by the caller.
+    func lyrics(itemID: String) async throws -> LyricDto {
+        let endpoint = Endpoint(path: "/Audio/\(itemID)/Lyrics", headers: authHeaders)
+        return try await http.decode(LyricDto.self, from: endpoint, baseURL: baseURL)
+    }
+
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? {
         let typeSegment: String
         switch kind {

@@ -13,7 +13,7 @@ public struct PlozzGlassCardModifier: ViewModifier {
     private let cornerRadius: CGFloat
     private let isFocused: Bool
 
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
 
     public init(cornerRadius: CGFloat, isFocused: Bool) {
@@ -174,7 +174,7 @@ public struct PlozzGlassPanelModifier: ViewModifier {
     private let cornerRadius: CGFloat
     private let scrimOpacity: Double
 
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
     @Environment(\.colorScheme) private var colorScheme
 

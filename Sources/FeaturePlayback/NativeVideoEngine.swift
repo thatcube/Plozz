@@ -125,6 +125,11 @@ public final class NativeVideoEngine: VideoEngine {
 
     public init(captionSettings: CaptionSettings = .default) {
         self.captionSettings = captionSettings
+        PlaybackInstrumentation.increment(.nativeEngine)
+    }
+
+    deinit {
+        PlaybackInstrumentation.decrement(.nativeEngine)
     }
 
     public let displayName = "AVPlayer"

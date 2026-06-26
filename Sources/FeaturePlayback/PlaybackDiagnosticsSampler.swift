@@ -58,15 +58,17 @@ public final class PlaybackDiagnosticsSampler {
         staticDiagnostics = base
         latest = staticDiagnostics
 
-        // No AVPlayer (VLCKit/mpv): the baseline above is the whole snapshot —
-        // there's no AVFoundation item to sample, so skip the live timer.
-        guard player != nil else { return }
-
-        Task { await loadStaticInfo() }
+        // mpv/VLCKit expose no AVFoundation item, but we still run the timer so
+        // the system metrics (memory / thermal / live-instance counts) refresh
+        // ~1s on *every* engine — that's what surfaces a leak on the HDR/DoVi
+        // (mpv) path, which otherwise published a single static snapshot.
+        if player != nil {
+            Task { await loadStaticInfo() }
+        }
 
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
-                self?.sampleDynamic()
+                self?.sampleTick()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -80,29 +82,56 @@ public final class PlaybackDiagnosticsSampler {
 
     // MARK: Dynamic (per-tick) sampling
 
-    private func sampleDynamic() {
-        guard let item = player?.currentItem else { return }
+    private func sampleTick() {
         var diagnostics = staticDiagnostics
 
-        // Source metadata resolution wins; only fall back to the rendered
-        // presentation size when the provider didn't report dimensions.
-        if diagnostics.resolution == nil {
-            let size = item.presentationSize
-            if size.width > 0, size.height > 0 {
-                diagnostics.resolution = .init(width: Int(size.width.rounded()), height: Int(size.height.rounded()))
+        // Per-tick AVFoundation metrics (native engine only; mpv has no item).
+        if let item = player?.currentItem {
+            // Source metadata resolution wins; only fall back to the rendered
+            // presentation size when the provider didn't report dimensions.
+            if diagnostics.resolution == nil {
+                let size = item.presentationSize
+                if size.width > 0, size.height > 0 {
+                    diagnostics.resolution = .init(width: Int(size.width.rounded()), height: Int(size.height.rounded()))
+                }
             }
+
+            if let event = item.accessLog()?.events.last {
+                if event.indicatedBitrate > 0 { diagnostics.indicatedBitrate = event.indicatedBitrate }
+                if event.observedBitrate > 0 { diagnostics.observedBitrate = event.observedBitrate }
+                if event.numberOfDroppedVideoFrames >= 0 {
+                    diagnostics.droppedVideoFrames = event.numberOfDroppedVideoFrames
+                }
+            }
+
+            diagnostics.bufferedSecondsAhead = bufferedSecondsAhead(in: item)
         }
 
-        if let event = item.accessLog()?.events.last {
-            if event.indicatedBitrate > 0 { diagnostics.indicatedBitrate = event.indicatedBitrate }
-            if event.observedBitrate > 0 { diagnostics.observedBitrate = event.observedBitrate }
-            if event.numberOfDroppedVideoFrames >= 0 {
-                diagnostics.droppedVideoFrames = event.numberOfDroppedVideoFrames
-            }
-        }
-
-        diagnostics.bufferedSecondsAhead = bufferedSecondsAhead(in: item)
+        // System metrics refresh on every engine so a leak is visible on the
+        // mpv (HDR/DoVi) path too.
+        Self.fillSystemMetrics(into: &diagnostics)
         latest = diagnostics
+    }
+
+    /// Live process memory, thermal pressure, and leak-counter snapshot. These
+    /// distinguish a leak (memory / live counts climb, thermal flat) from
+    /// thermal throttling (thermal rises toward critical, memory flat).
+    private static func fillSystemMetrics(into diagnostics: inout PlaybackDiagnostics) {
+        diagnostics.memoryFootprintBytes = PlaybackInstrumentation.memoryFootprintBytes()
+        diagnostics.thermalState = currentThermalLevel()
+        diagnostics.liveViewModels = PlaybackInstrumentation.count(.viewModel)
+        diagnostics.liveNativeEngines = PlaybackInstrumentation.count(.nativeEngine)
+        diagnostics.liveMPVEngines = PlaybackInstrumentation.count(.mpvEngine)
+    }
+
+    private static func currentThermalLevel() -> PlaybackDiagnostics.ThermalLevel {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: return .nominal
+        case .fair: return .fair
+        case .serious: return .serious
+        case .critical: return .critical
+        @unknown default: return .nominal
+        }
     }
 
     /// Seconds of contiguous media buffered ahead of the current position.

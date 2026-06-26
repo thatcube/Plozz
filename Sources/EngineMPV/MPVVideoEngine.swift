@@ -151,9 +151,11 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     public init(extraOptions: [String: String] = [:]) {
         self.extraOptions = extraOptions
         super.init()
+        PlaybackInstrumentation.increment(.mpvEngine)
     }
 
     deinit {
+        PlaybackInstrumentation.decrement(.mpvEngine)
         // Safety net. With a retained wakeup ctx the engine normally can't reach
         // deinit until `teardownClient()` has released that ref (after destroying
         // the handle), so by here the handle is already gone — this `destroy()` is

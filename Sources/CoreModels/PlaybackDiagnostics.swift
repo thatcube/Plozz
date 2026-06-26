@@ -100,6 +100,24 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         }
     }
 
+    /// Coarse mirror of `ProcessInfo.ThermalState`, kept Foundation-only and
+    /// `Sendable` so the pure model and its tests don't depend on a live process.
+    public enum ThermalLevel: Int, Equatable, Sendable, CaseIterable {
+        case nominal
+        case fair
+        case serious
+        case critical
+
+        public var displayName: String {
+            switch self {
+            case .nominal: return "Nominal"
+            case .fair: return "Fair"
+            case .serious: return "Serious (throttling)"
+            case .critical: return "Critical (throttling)"
+            }
+        }
+    }
+
     public var resolution: VideoResolution?
     /// Bitrate the playlist *declares* for the current variant, in bits/sec.
     public var indicatedBitrate: Double?
@@ -142,6 +160,19 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var freeDiskBytes: Int64?
     /// Total space on the volume, in bytes.
     public var totalDiskBytes: Int64?
+    /// Resident memory of the app process (`phys_footprint`), in bytes. Climbs
+    /// across playbacks when a leak accumulates; flat under thermal throttling.
+    public var memoryFootprintBytes: Int64?
+    /// Coarse system thermal pressure. Rises toward `.critical` when the SoC is
+    /// throttling — the alternative explanation to a leak for "worse over time".
+    public var thermalState: ThermalLevel?
+    /// Live `PlayerViewModel` instances. Should be 0 outside the player and 1
+    /// during playback; a value that climbs and never falls is a leak.
+    public var liveViewModels: Int?
+    /// Live `NativeVideoEngine` (AVPlayer) instances. See `liveViewModels`.
+    public var liveNativeEngines: Int?
+    /// Live `MPVVideoEngine` (libmpv) instances. See `liveViewModels`.
+    public var liveMPVEngines: Int?
 
     public init(
         resolution: VideoResolution? = nil,
@@ -167,7 +198,12 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         deviceModel: String? = nil,
         deviceMemoryBytes: Int64? = nil,
         freeDiskBytes: Int64? = nil,
-        totalDiskBytes: Int64? = nil
+        totalDiskBytes: Int64? = nil,
+        memoryFootprintBytes: Int64? = nil,
+        thermalState: ThermalLevel? = nil,
+        liveViewModels: Int? = nil,
+        liveNativeEngines: Int? = nil,
+        liveMPVEngines: Int? = nil
     ) {
         self.resolution = resolution
         self.indicatedBitrate = indicatedBitrate
@@ -193,6 +229,11 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.deviceMemoryBytes = deviceMemoryBytes
         self.freeDiskBytes = freeDiskBytes
         self.totalDiskBytes = totalDiskBytes
+        self.memoryFootprintBytes = memoryFootprintBytes
+        self.thermalState = thermalState
+        self.liveViewModels = liveViewModels
+        self.liveNativeEngines = liveNativeEngines
+        self.liveMPVEngines = liveMPVEngines
     }
 }
 
@@ -546,6 +587,27 @@ public extension PlaybackDiagnostics {
             return "\(free) free / \(total)"
         }
         return "\(free) free"
+    }
+
+    /// Process memory line, e.g. `412.5 MB`. Watch it across playbacks: a steady
+    /// climb that never falls back is the signature of a leak.
+    var memoryText: String {
+        Self.formatBytes(memoryFootprintBytes) ?? Self.placeholder
+    }
+
+    /// System thermal pressure, e.g. `Serious (throttling)`.
+    var thermalText: String {
+        thermalState?.displayName ?? Self.placeholder
+    }
+
+    /// Live-instance line, e.g. `VM 1 · Native 1 · MPV 0`. Outside the player all
+    /// three should read 0; during playback exactly one engine + one VM. Values
+    /// that climb and never fall as you leave/re-enter the player name the leak.
+    var liveInstancesText: String {
+        guard liveViewModels != nil || liveNativeEngines != nil || liveMPVEngines != nil else {
+            return Self.placeholder
+        }
+        return "VM \(liveViewModels ?? 0) · Native \(liveNativeEngines ?? 0) · MPV \(liveMPVEngines ?? 0)"
     }
 }
 

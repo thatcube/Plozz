@@ -5,9 +5,15 @@ import CoreUI
 
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
+    @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
+    /// App-wide (global) — persists across all profiles. Same un-namespaced
+    /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
+    /// See AGENTS.local.md ("Per-profile vs app-wide settings").
+    @AppStorage("reduceTransparencyOverride") private var reduceTransparency = false
 
     var body: some View {
-        ScrollView {
+        @Bindable var musicPlayer = musicPlayer
+        return ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 Text("Appearance").font(.largeTitle.bold())
                 SettingsPanel(
@@ -37,6 +43,48 @@ struct AppearanceDetailView: View {
                         .padding(.vertical, 6)
                     }
                     .scrollClipDisabled()
+                }
+
+                SettingsPanel(
+                    title: "Music Player",
+                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme; or pin a fixed look."
+                ) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(MusicPlayerAppearance.allCases) { option in
+                                    Button {
+                                        musicPlayer.appearance = option
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: option.symbolName)
+                                            Text(option.displayName)
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .opacity(musicPlayer.appearance == option ? 1 : 0)
+                                        }
+                                        .font(.headline)
+                                        .padding(.horizontal, 4)
+                                    }
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: musicPlayer.appearance == option))
+                                    .accessibilityValue(musicPlayer.appearance == option ? "Selected" : "")
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
+                        }
+                        .scrollClipDisabled()
+
+                        Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
+                    }
+                }
+
+                SettingsPanel(
+                    title: "Transparency",
+                    footer: "Replaces the translucent “liquid glass” blur on cards, menus and overlays with solid surfaces. Turns on automatically when Reduce Transparency is enabled in tvOS Accessibility settings."
+                ) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Toggle("Reduce transparency", isOn: $reduceTransparency)
+                    }
                 }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

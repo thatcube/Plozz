@@ -16,17 +16,26 @@ struct MusicArtworkImage: View {
     let url: URL?
     var systemPlaceholder: String = "music.note"
     var cornerRadius: CGFloat = 12
+    var variant: ArtworkImageVariant = .original
+    /// Whether to draw the theme-aware hairline rim around the artwork. Off for
+    /// the full-screen player, which wants plain classic rounded corners that
+    /// don't shift with the app theme.
+    var showsMediaEdge: Bool = true
     var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
 
     init(
         url: URL?,
         systemPlaceholder: String = "music.note",
         cornerRadius: CGFloat = 12,
+        variant: ArtworkImageVariant = .original,
+        showsMediaEdge: Bool = true,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil
     ) {
         self.url = url
         self.systemPlaceholder = systemPlaceholder
         self.cornerRadius = cornerRadius
+        self.variant = variant
+        self.showsMediaEdge = showsMediaEdge
         self.asyncFallbackURL = asyncFallbackURL
     }
 
@@ -36,13 +45,14 @@ struct MusicArtworkImage: View {
                 .fill(Color.primary.opacity(0.08))
             FallbackAsyncImage(
                 urls: [url].compactMap { $0 },
+                variant: variant,
                 asyncFallbackURL: asyncFallbackURL
             ) {
                 placeholder
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .plozzMediaEdge(cornerRadius: cornerRadius)
+        .modifier(OptionalMediaEdge(cornerRadius: cornerRadius, enabled: showsMediaEdge))
     }
 
     private var placeholder: some View {
@@ -52,46 +62,100 @@ struct MusicArtworkImage: View {
     }
 }
 
+/// Applies the shared media-edge rim only when enabled, so callers (the player)
+/// can opt out of the theme-aware border and keep plain rounded corners.
+private struct OptionalMediaEdge: ViewModifier {
+    let cornerRadius: CGFloat
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.plozzMediaEdge(cornerRadius: cornerRadius)
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - Cards
 
-/// A focusable square card used across the music grids/rows.
-struct MusicCard<Caption: View>: View {
+/// A focusable square card used across the music grids/rows. Mirrors CoreUI's
+/// `PosterCardView` 1:1: the shared liquid-glass lift (theme-aware across
+/// dark/OLED/light via `plozzGlassCard`), a focused drop shadow + scale, and
+/// title/subtitle that flip to dark ink on the opaque white focus lift (Reduce
+/// Transparency on, or pre-tvOS 26) so text never vanishes into the plate.
+struct MusicCard: View {
     let artworkURL: URL?
     var systemPlaceholder: String = "music.note"
     var isCircular: Bool = false
     let width: CGFloat
+    let title: String
+    var subtitle: String? = nil
     var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
     let action: () -> Void
-    @ViewBuilder var caption: () -> Caption
+
+    @FocusState private var isFocused: Bool
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
 
     init(
         artworkURL: URL?,
         systemPlaceholder: String = "music.note",
         isCircular: Bool = false,
         width: CGFloat,
+        title: String,
+        subtitle: String? = nil,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
-        action: @escaping () -> Void,
-        @ViewBuilder caption: @escaping () -> Caption
+        action: @escaping () -> Void
     ) {
         self.artworkURL = artworkURL
         self.systemPlaceholder = systemPlaceholder
         self.isCircular = isCircular
         self.width = width
+        self.title = title
+        self.subtitle = subtitle
         self.asyncFallbackURL = asyncFallbackURL
         self.action = action
-        self.caption = caption
     }
 
+    /// True when the focused card renders an opaque white "lift" surface (Reduce
+    /// Transparency, or pre-Liquid-Glass tvOS), in which case the caption must
+    /// flip to dark ink. On the translucent-glass path (tvOS 26+) it stays
+    /// primary/secondary over the glass. Mirrors `PosterCardView`.
+    private var usesLiftText: Bool {
+        guard isFocused else { return false }
+        if reduceTransparency { return true }
+        if #available(tvOS 26.0, *) { return false }
+        return true
+    }
+
+    private var titleColor: Color { usesLiftText ? .black.opacity(0.9) : .primary }
+    private var subtitleColor: Color { usesLiftText ? .black.opacity(0.6) : .secondary }
+
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                artwork
-                    .frame(width: width, height: width)
-                caption()
-                    .frame(width: width, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+            artwork
+                .frame(width: width, height: width)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(titleColor)
+                    .lineLimit(1)
+                Text(subtitle ?? " ")
+                    .font(.system(size: 20))
+                    .foregroundStyle(subtitleColor)
+                    .lineLimit(1)
+                    .opacity(subtitle == nil ? 0 : 1)
             }
+            .frame(width: width, alignment: .leading)
         }
-        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius)
+        .padding(PlozzTheme.Metrics.mediumCardInset)
+        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, action: action)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 
     @ViewBuilder
@@ -108,6 +172,7 @@ struct MusicCard<Caption: View>: View {
             MusicArtworkImage(
                 url: artworkURL,
                 systemPlaceholder: systemPlaceholder,
+                cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
                 asyncFallbackURL: asyncFallbackURL
             )
         }
@@ -124,19 +189,32 @@ struct AlbumCard: View {
             artworkURL: album.artworkURL,
             systemPlaceholder: "opticaldisc",
             width: width,
+            title: album.title,
+            subtitle: album.subtitleLine,
             asyncFallbackURL: MusicArtworkFallback.albumCover(title: album.title, artist: album.artistName),
             action: action
-        ) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(album.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(album.subtitleLine)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
+        )
+    }
+}
+
+/// A recently-played **song** card for the unified Recently Played rail. Square
+/// artwork with a music-note placeholder; tapping plays the track immediately
+/// (it routes to playback, not to a detail page like albums/artists do).
+struct RecentTrackCard: View {
+    let track: MusicTrack
+    var width: CGFloat = 260
+    let action: () -> Void
+
+    var body: some View {
+        MusicCard(
+            artworkURL: track.artworkURL,
+            systemPlaceholder: "music.note",
+            width: width,
+            title: track.title,
+            subtitle: track.artistName,
+            asyncFallbackURL: MusicArtworkFallback.albumCover(title: track.albumTitle ?? track.title, artist: track.artistName),
+            action: action
+        )
     }
 }
 
@@ -144,21 +222,16 @@ struct ArtistCard: View {
     let artist: MusicArtist
     var width: CGFloat = 240
     let action: () -> Void
-
     var body: some View {
         MusicCard(
             artworkURL: artist.artworkURL,
             systemPlaceholder: "music.mic",
             isCircular: true,
             width: width,
+            title: artist.name,
             asyncFallbackURL: MusicArtworkFallback.artistImage(name: artist.name),
             action: action
-        ) {
-            Text(artist.name)
-                .font(.headline)
-                .lineLimit(1)
-                .multilineTextAlignment(.leading)
-        }
+        )
     }
 }
 
@@ -168,18 +241,14 @@ struct PlaylistCard: View {
     let action: () -> Void
 
     var body: some View {
-        MusicCard(artworkURL: playlist.artworkURL, systemPlaceholder: "music.note.list", width: width, action: action) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(playlist.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                if let count = playlist.trackCount {
-                    Text("\(count) tracks")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
+        MusicCard(
+            artworkURL: playlist.artworkURL,
+            systemPlaceholder: "music.note.list",
+            width: width,
+            title: playlist.title,
+            subtitle: playlist.trackCount.map { "\($0) tracks" },
+            action: action
+        )
     }
 }
 

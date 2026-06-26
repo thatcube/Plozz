@@ -49,29 +49,38 @@ extension PlexProvider: MusicProvider {
 
     public func musicItems(in containerID: String, kind: MusicItemKind, page: PageRequest) async throws -> MusicPage {
         if containerID.isEmpty {
-            return try await globalMusicItems(kind: kind, page: page)
+            return try await globalMusicItems(kind: kind, page: page, sectionFilter: nil)
         }
         return try await scopedMusicItems(containerID: containerID, kind: kind)
     }
 
-    private func globalMusicItems(kind: MusicItemKind, page: PageRequest) async throws -> MusicPage {
+    public func musicItems(in containerID: String, kind: MusicItemKind, page: PageRequest, libraryIDs: [String]?) async throws -> MusicPage {
+        // Library scope only applies to the whole-library (empty container) query;
+        // a non-empty container is already an artist/album scope.
+        guard containerID.isEmpty else {
+            return try await scopedMusicItems(containerID: containerID, kind: kind)
+        }
+        return try await globalMusicItems(kind: kind, page: page, sectionFilter: libraryIDs)
+    }
+
+    private func globalMusicItems(kind: MusicItemKind, page: PageRequest, sectionFilter: [String]?) async throws -> MusicPage {
         switch kind {
         case .artist:
-            let result = try await pagedMusic(type: PlexMusicType.artist, page: page)
+            let result = try await pagedMusic(type: PlexMusicType.artist, page: page, sectionFilter: sectionFilter)
             return MusicPage(
                 artists: result.items.map(mapArtist(_:)),
                 startIndex: page.startIndex,
                 totalCount: result.total
             )
         case .album:
-            let result = try await pagedMusic(type: PlexMusicType.album, page: page)
+            let result = try await pagedMusic(type: PlexMusicType.album, page: page, sectionFilter: sectionFilter)
             return MusicPage(
                 albums: result.items.map(mapAlbum(_:)),
                 startIndex: page.startIndex,
                 totalCount: result.total
             )
         case .track:
-            let result = try await pagedMusic(type: PlexMusicType.track, page: page)
+            let result = try await pagedMusic(type: PlexMusicType.track, page: page, sectionFilter: sectionFilter)
             return MusicPage(
                 tracks: result.items.map(mapTrack(_:)),
                 startIndex: page.startIndex,
@@ -86,7 +95,7 @@ extension PlexProvider: MusicProvider {
         case .genre:
             guard page.startIndex == 0 else { return MusicPage(startIndex: page.startIndex, totalCount: 0) }
             var genres: [MusicGenre] = []
-            for section in try await musicSectionDirectories() {
+            for section in try await musicSectionDirectories(sectionFilter: sectionFilter) {
                 guard let sectionID = section.key else { continue }
                 let dirs = (try? await client.musicGenres(sectionID: sectionID)) ?? []
                 genres += dirs.compactMap { dir in
@@ -117,11 +126,74 @@ extension PlexProvider: MusicProvider {
         }
     }
 
-    // MARK: Detail
+    // MARK: Recently played
 
-    public func artist(id: String) async throws -> MusicArtist {
-        mapArtist(try await client.metadata(ratingKey: id))
+    public func recentlyPlayed(limit: Int) async throws -> [MusicAlbum] {
+        try await recentlyPlayed(limit: limit, sectionFilter: nil)
     }
+
+    public func recentlyPlayed(limit: Int, libraryIDs: [String]?) async throws -> [MusicAlbum] {
+        try await recentlyPlayed(limit: limit, sectionFilter: libraryIDs)
+    }
+
+    private func recentlyPlayed(limit: Int, sectionFilter: [String]?) async throws -> [MusicAlbum] {
+        guard limit > 0 else { return [] }
+        let sections = try await musicSectionDirectories(sectionFilter: sectionFilter).compactMap(\.key)
+        guard !sections.isEmpty else { return [] }
+
+        // Pull each section's most-recent albums, then merge-sort by real play
+        // recency and take the head. Never-played albums (no `lastViewedAt`) are
+        // dropped — Plex sorts them last but still returns them.
+        var albums: [MusicAlbum] = []
+        for sectionID in sections {
+            let metas = (try? await client.recentlyViewedAlbums(
+                sectionID: sectionID,
+                type: PlexMusicType.album,
+                limit: limit
+            )) ?? []
+            albums += metas
+                .filter { ($0.viewCount ?? 0) >= 1 && ($0.lastViewedAt ?? 0) > 0 }
+                .map(mapAlbum(_:))
+        }
+        return Array(
+            albums
+                .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .prefix(limit)
+        )
+    }
+
+    public func recentlyPlayedTracks(limit: Int) async throws -> [MusicTrack] {
+        try await recentlyPlayedTracks(limit: limit, sectionFilter: nil)
+    }
+
+    public func recentlyPlayedTracks(limit: Int, libraryIDs: [String]?) async throws -> [MusicTrack] {
+        try await recentlyPlayedTracks(limit: limit, sectionFilter: libraryIDs)
+    }
+
+    private func recentlyPlayedTracks(limit: Int, sectionFilter: [String]?) async throws -> [MusicTrack] {
+        guard limit > 0 else { return [] }
+        let sections = try await musicSectionDirectories(sectionFilter: sectionFilter).compactMap(\.key)
+        guard !sections.isEmpty else { return [] }
+
+        var tracks: [MusicTrack] = []
+        for sectionID in sections {
+            let metas = (try? await client.recentlyViewedAlbums(
+                sectionID: sectionID,
+                type: PlexMusicType.track,
+                limit: limit
+            )) ?? []
+            tracks += metas
+                .filter { ($0.viewCount ?? 0) >= 1 && ($0.lastViewedAt ?? 0) > 0 }
+                .map(mapTrack(_:))
+        }
+        return Array(
+            tracks
+                .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .prefix(limit)
+        )
+    }
+
+    // MARK: Detail
 
     public func album(id: String) async throws -> MusicAlbum {
         mapAlbum(try await client.metadata(ratingKey: id))
@@ -160,6 +232,7 @@ extension PlexProvider: MusicProvider {
             throw AppError.notFound
         }
         let track = mapTrack(detail)
+        let quality = Self.playbackQuality(media: media, part: part, isTranscoding: resolved.isTranscoding)
         return AudioPlaybackRequest(
             track: track,
             streamURL: resolved.url,
@@ -167,23 +240,78 @@ extension PlexProvider: MusicProvider {
             queue: [track],
             queueIndex: 0,
             startPosition: 0,
-            isTranscoding: resolved.isTranscoding
+            isTranscoding: resolved.isTranscoding,
+            quality: quality
+        )
+    }
+
+    // MARK: Lyrics
+
+    public func lyrics(for trackID: String) async throws -> Lyrics? {
+        // A Plex track exposes lyrics as a `streamType == 4` stream on its media
+        // part; its `key` fetches the (usually `.lrc`) file. Any failure along the
+        // way is treated as "no lyrics" so the UI shows its empty state.
+        guard let detail = try? await client.metadata(ratingKey: trackID),
+              let streams = detail.Media?.first?.Part?.first?.Stream,
+              let lyricStream = streams.first(where: { $0.streamType == 4 }),
+              let key = lyricStream.key,
+              let text = try? await client.lyricsText(forStreamKey: key) else {
+            return nil
+        }
+        // Plex serves lyrics either as an `.lrc` sidecar or as its own timed-JSON
+        // payload; pick the parser by sniffing the body so JSON is never rendered
+        // raw. A leading brace/bracket means JSON; anything else is LRC/plain.
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lyrics: Lyrics?
+        if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
+            lyrics = Lyrics(plexTimedJSON: text)
+        } else {
+            lyrics = Lyrics(lrc: text) ?? Lyrics(plainText: text)
+        }
+        guard let lyrics, !lyrics.isEmpty else { return nil }
+        return lyrics.taggingSource(.plex)
+    }
+
+    /// Builds a `PlaybackQuality` from Plex media facts. Direct play reflects the
+    /// source audio stream; a transcode is always Plex's progressive MP3 320 kbps
+    /// music target (see `audioTranscodeURL`).
+    private static func playbackQuality(media: PlexMedia, part: PlexPart, isTranscoding: Bool) -> PlaybackQuality {
+        if isTranscoding {
+            return PlaybackQuality(isDirectPlay: false, bitrate: 320_000, transcodeCodec: "mp3")
+        }
+        let audio = part.Stream?.first { $0.streamType == 2 }
+        let codec = (audio?.codec ?? media.audioCodec)?.lowercased()
+        let container = (media.container ?? part.container)?.lowercased()
+        // Plex reports per-stream bitrate in kbps.
+        let bitrate = audio?.bitrate.map { $0 * 1000 }
+        return PlaybackQuality(
+            isDirectPlay: true,
+            codec: codec,
+            container: container,
+            bitrate: bitrate,
+            sampleRate: audio?.samplingRate,
+            bitDepth: nil,
+            channels: audio?.channels ?? media.audioChannels
         )
     }
 
     // MARK: - Multi-section paging
 
-    /// The directory entries for every music (`type == "artist"`) section.
-    private func musicSectionDirectories() async throws -> [PlexDirectory] {
-        try await client.sections().filter { $0.type == "artist" && $0.key != nil }
+    /// The directory entries for every music (`type == "artist"`) section,
+    /// optionally restricted to a set of visible section IDs.
+    private func musicSectionDirectories(sectionFilter: [String]? = nil) async throws -> [PlexDirectory] {
+        let all = try await client.sections().filter { $0.type == "artist" && $0.key != nil }
+        guard let sectionFilter, !sectionFilter.isEmpty else { return all }
+        let allowed = Set(sectionFilter)
+        return all.filter { $0.key.map(allowed.contains) ?? false }
     }
 
-    /// Pages a music content `type` across *all* music sections as one virtual
-    /// list. The overwhelmingly common single-section case is a single request;
-    /// multiple music libraries are paged with a cumulative offset walk so the
-    /// grid's pager sees a correct combined `totalCount`.
-    private func pagedMusic(type: Int, page: PageRequest) async throws -> (items: [PlexMetadata], total: Int) {
-        let sections = try await musicSectionDirectories().compactMap(\.key)
+    /// Pages a music content `type` across the in-scope music sections as one
+    /// virtual list. The overwhelmingly common single-section case is a single
+    /// request; multiple music libraries are paged with a cumulative offset walk
+    /// so the grid's pager sees a correct combined `totalCount`.
+    private func pagedMusic(type: Int, page: PageRequest, sectionFilter: [String]?) async throws -> (items: [PlexMetadata], total: Int) {
+        let sections = try await musicSectionDirectories(sectionFilter: sectionFilter).compactMap(\.key)
         guard !sections.isEmpty else { return ([], 0) }
 
         if sections.count == 1 {
@@ -256,7 +384,8 @@ extension PlexProvider: MusicProvider {
             artworkURL: artwork(dto.thumb ?? dto.parentThumb),
             trackCount: dto.leafCount,
             totalDuration: PlexTime.seconds(fromMilliseconds: dto.duration),
-            genres: (dto.Genre ?? []).compactMap(\.tag)
+            genres: (dto.Genre ?? []).compactMap(\.tag),
+            lastPlayedAt: dto.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
     }
 
@@ -270,7 +399,8 @@ extension PlexProvider: MusicProvider {
             trackNumber: dto.index,
             discNumber: dto.parentIndex,
             duration: PlexTime.seconds(fromMilliseconds: dto.duration),
-            artworkURL: artwork(dto.thumb ?? dto.parentThumb ?? dto.grandparentThumb)
+            artworkURL: artwork(dto.thumb ?? dto.parentThumb ?? dto.grandparentThumb),
+            lastPlayedAt: dto.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
     }
 

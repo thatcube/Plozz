@@ -41,6 +41,10 @@ struct MainTabView: View {
     let spoilerModel: SpoilerSettingsModel
     let themeModel: ThemeSettingsModel
     let diagnosticsModel: DiagnosticsSettingsModel
+    let musicPlayerModel: MusicPlayerSettingsModel
+    /// App-scoped audio engine, owned by `AppState` so it survives the per-profile
+    /// subtree rebuild (this view is re-created with a new `.id` on profile switch).
+    let audioController: AudioPlaybackController
     let homeVisibility: HomeLibraryVisibilityModel
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
@@ -76,7 +80,6 @@ struct MainTabView: View {
     let onWarmIdentityIndex: () -> Void
 
     @State private var discovery = LibraryDiscoveryModel()
-    @State private var audioController = AudioPlaybackController()
     @State private var musicAvailability = MusicAvailabilityModel()
     @Environment(\.colorScheme) private var systemColorScheme
 
@@ -122,7 +125,10 @@ struct MainTabView: View {
             if musicAvailability.hasMusic {
                 MusicTabView(
                     accounts: musicAvailability.detectedAccounts,
-                    controller: audioController
+                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
+                    controller: audioController,
+                    appTheme: themeModel.theme,
+                    musicPlayer: musicPlayerModel
                 )
                 .tabItem { Label("Music", systemImage: "music.note") }
             }
@@ -160,11 +166,45 @@ struct MainTabView: View {
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
+        .environment(musicPlayerModel)
         .task(id: accounts.map(\.account.id)) {
-            await musicAvailability.probe(accounts: accounts)
             onWarmIdentityIndex()
         }
+        .task(id: musicProbeKey) {
+            // Paint the Music tab on the first frame from the last persisted
+            // result (synchronous, no network) so tab visibility never waits on
+            // a probe. Re-runs when accounts or the per-profile library toggles
+            // change, so hiding/showing a music library live re-evaluates the tab.
+            musicAvailability.seedFromCache(accounts: accounts, visibility: homeVisibility.visibility)
+        }
+        .task(id: musicProbeKey, priority: .utility) {
+            // Everything network-bound runs at LOW priority and out of the
+            // critical launch window so the Home page (movies/TV) — the first
+            // thing the user sees — always wins the launch network/CPU. The
+            // synchronous seed above already shows the tab; the probe only
+            // refreshes its presence, so it can afford to yield.
+            await musicAvailability.probe(accounts: accounts, visibility: homeVisibility.visibility)
+            guard musicAvailability.hasMusic else { return }
+            // Defer the heavy multi-account landing prefetch until after Home has
+            // had the launch window. The Music tab still opens instantly from this
+            // warm cache once the user gets there; if they open it sooner,
+            // MusicLandingView's own load() fetches on demand (and caches) anyway.
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, musicAvailability.hasMusic else { return }
+            await MusicLandingPrefetch.warm(
+                accounts: musicAvailability.detectedAccounts,
+                visibleLibraryIDs: musicAvailability.visibleLibraryIDs
+            )
+        }
         .mediaItemActionHandler(mediaItemActionHandler)
+    }
+
+    /// Restarts the music probe whenever the signed-in accounts or the per-profile
+    /// library-visibility toggles change.
+    private var musicProbeKey: String {
+        let ids = accounts.map(\.account.id).sorted()
+        let excluded = homeVisibility.visibility.excludedKeys.sorted()
+        return (ids + ["|"] + excluded).joined(separator: ",")
     }
 }
 
@@ -414,6 +454,50 @@ func makePlaybackStoppedHandler(
     }
 }
 
+/// Hosts the full-screen player and builds its ``PlayerViewModel`` exactly once,
+/// off the render path.
+///
+/// Constructing the view model inline inside a `.fullScreenCover` content closure
+/// is a trap: SwiftUI re-invokes that closure on every parent render, and because
+/// ``PlayerView`` keeps the model in `@State` (the first value wins), every extra
+/// invocation builds a throwaway `PlayerViewModel` — and a throwaway
+/// `NativeVideoEngine` at its `init` — that is discarded immediately. Under the
+/// player's own `@Observable` mutation churn this becomes self-reinforcing: each
+/// render spawns engines that storm `AttributeGraph`, which drives more renders.
+/// On device this showed up as the live VM/Native instance counters racing
+/// upward (Native far ahead of VM, since every model makes a native engine before
+/// it ever routes to mpv), thermal throttling, and growing lag the longer the
+/// player stayed up.
+///
+/// Building the model in `.task`, gated by this view's identity, fires the factory
+/// once per presentation instead of once per render.
+@MainActor
+private struct PlayerPresentation: View {
+    let request: PlayRequest
+    let make: (PlayRequest) -> PlayerViewModel
+    let showDiagnostics: Bool
+    let themePalette: ThemePalette
+    @State private var viewModel: PlayerViewModel?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let viewModel {
+                PlayerView(
+                    viewModel: viewModel,
+                    showDiagnostics: showDiagnostics,
+                    themePalette: themePalette
+                )
+            }
+        }
+        .task {
+            if viewModel == nil {
+                viewModel = make(request)
+            }
+        }
+    }
+}
+
 /// Home tab with its own navigation stack: Home → Library (paged) → Detail and
 /// full-screen player presentation. Every destination resolves its provider from
 /// the tapped item/library's `sourceAccountID`.
@@ -522,15 +606,18 @@ private struct HomeTab: View {
             }
         }
         .fullScreenCover(item: $playRequest) { request in
-            PlayerView(
-                viewModel: makePlayerViewModel(
-                    for: request,
-                    accounts: accounts,
-                    captionSettings: captionSettings,
-                    scrobbler: scrobbler,
-                    watchBridge: watchBridge,
-                    identitySources: identitySources
-                ),
+            PlayerPresentation(
+                request: request,
+                make: {
+                    makePlayerViewModel(
+                        for: $0,
+                        accounts: accounts,
+                        captionSettings: captionSettings,
+                        scrobbler: scrobbler,
+                        watchBridge: watchBridge,
+                        identitySources: identitySources
+                    )
+                },
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
             )
@@ -795,15 +882,18 @@ private struct SearchTab: View {
             }
         }
         .fullScreenCover(item: $playRequest) { request in
-            PlayerView(
-                viewModel: makePlayerViewModel(
-                    for: request,
-                    accounts: accounts,
-                    captionSettings: captionSettings,
-                    scrobbler: scrobbler,
-                    watchBridge: watchBridge,
-                    identitySources: identitySources
-                ),
+            PlayerPresentation(
+                request: request,
+                make: {
+                    makePlayerViewModel(
+                        for: $0,
+                        accounts: accounts,
+                        captionSettings: captionSettings,
+                        scrobbler: scrobbler,
+                        watchBridge: watchBridge,
+                        identitySources: identitySources
+                    )
+                },
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
             )

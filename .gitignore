@@ -9,6 +9,10 @@ xcuserdata/
 *.xcscmblueprint
 *.moved-aside
 
+# Instruments traces captured by tools/trace-device.sh
+trace-output/
+*.trace
+
 # Swift Package Manager
 .build/
 .swiftpm/

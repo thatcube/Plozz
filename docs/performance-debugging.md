@@ -1,15 +1,36 @@
 # Performance Debugging Playbook (tvOS)
 
-A field guide for diagnosing **slowness, freezes, blank/no-artwork hangs, and
-memory crashes** in Plozz on a real Apple TV. Written so any agent or contributor
-can re-run the same process from scratch. It captures the methodology, the
-on-device tooling, how to read an Instruments trace without the GUI, and a
-worked case study (the navigation-churn freeze) that this process actually solved.
+A field guide for diagnosing **slowness, freezes, blank/no-artwork hangs, memory
+crashes, UI jank, and focus-navigation lag** in Plozz on a real Apple TV. Written
+so any agent or contributor can re-run the same process from scratch. It captures
+the methodology, the on-device tooling, how to read an Instruments trace without
+the GUI, and two worked case studies (a memory/CPU storm and a SwiftUI re-render
+storm) that this process actually solved.
 
 > Golden rule: **get ground truth before changing code.** tvOS performance bugs
 > are almost always the opposite of what they look like. "No artwork" was never an
-> artwork bug; it was JavaScriptCore garbage collection pinning every core. Measure
+> artwork bug; it was JavaScriptCore garbage collection pinning every core. "The
+> whole app is laggy" was a single SwiftUI view re-rendering 4×/second. Measure
 > first, theorise second.
+
+## When to use this playbook (invocation)
+
+Reach for this document the moment anyone reports — or you observe — any of:
+**"laggy", "janky", "stutters", "slow", "freezes", "hangs", "navigation lag",
+"focus feels heavy", "blank/no artwork", "memory crash", "gets killed", "fan
+spins", "drops frames".** The drill is always the same: **reproduce on the
+device → measure with the watchdog and/or `xctrace` → aggregate the trace →
+name the subsystem → fix at the source → re-measure.** Do not change code on a
+hunch before a measurement names the culprit.
+
+There are two dominant bug **classes** in this app; identify which one you're in
+early (the decision tree in §4 routes you):
+1. **Resource storm** — memory climbs and/or CPU pegs across cores; often a
+   background subsystem (JSC GC, decode, network fan-out). See §2, §6 (Case 1).
+2. **SwiftUI re-render storm** — the *main thread* is busy with the SwiftUI
+   attribute graph (`AG::Graph::*`, `Attribute.init`, `*.body.getter`) and/or
+   Liquid Glass (`SDFLayer`, `GlassContainer`), memory flat, no single heavy
+   binary. This is what makes navigation/focus "laggy". See §7, §8 (Case 2).
 
 ---
 
@@ -97,6 +118,34 @@ grep -oE "mem=[0-9]+MB" /tmp/plz.log | grep -oE "[0-9]+" | sort -n | tail   # pe
 grep -oE "cpu=[0-9]+%"  /tmp/plz.log | grep -oE "[0-9]+" | sort -n | tail   # peak CPU
 ```
 
+### The live instance-count row (catches object churn / leaks without a trace)
+
+The Playback Diagnostics overlay (toggled by the **Playback Diagnostics** setting;
+`PlaybackDiagnosticsOverlay` + `PlaybackDiagnosticsSampler`, model in
+`CoreModels/PlaybackDiagnostics.swift`) has a **Live** row reading
+`VM <x> · Native <y> · MPV <z>`. Those are process-wide **live-instance counters**
+incremented in `init` / decremented in `deinit` of `PlayerViewModel`,
+`NativeVideoEngine`, and `MPVVideoEngine` (`CoreModels/PlaybackInstrumentation.swift`,
+backed by `TASK_VM_INFO.phys_footprint` for the Memory row). They only reset on a
+full app relaunch.
+
+Read it like this — it names a whole class of bug in seconds, no trace needed:
+- **Outside the player it should read `0 · 0 · 0`.** During playback, ~`1 · 1`
+  (a transient native→mpv blip is normal when a Dolby Vision file routes to mpv).
+- **Counts climb and never fall** as you leave/re-enter the player → a true
+  **leak** (a retain cycle). Capture **Leaks**/**Allocations** to name the retainer.
+- **Counts climb, then "correct down," then climb again** → **reachable
+  throwaways**, not a leak: something is *constructing* these objects faster than
+  ARC reaps them. This is almost always objects built **in a SwiftUI view body**
+  (see the §5 trap and the §9 case study).
+- **`Native` climbing far ahead of `VM`** is a specific tell: every
+  `PlayerViewModel.init` builds a `NativeVideoEngine` *before* routing decides to
+  use mpv, so a view-model-construction storm shows Native racing ahead of VM and
+  MPV. (This single observation cracked the §9 bug.)
+
+Like the file-logger, the overlay is a diagnostic aid — keep it gated behind the
+setting; don't let it churn SwiftUI layout in the hot path.
+
 ---
 
 ## 3. Instruments without the GUI (`xctrace`)
@@ -128,11 +177,23 @@ binary** (see `scripts`/the case study below for a ~30-line Python aggregator).
 Key reading tips:
 - Each `<row>` is one ~1 ms sample with a `<weight>` and a `<tagged-backtrace>`; the
   **first** `<frame>` is the innermost (leaf) — where the CPU actually was.
-- Frames are **not symbolicated** by default (`name` == address). You don't need
-  symbols to win: the **thread name** and **leaf binary** are usually enough.
+- Frames are **not symbolicated** by default in a *release* trace (`name` ==
+  address). You don't need symbols to win: the **thread name** and **leaf
+  binary** are usually enough. **But a Debug build (what you deploy with
+  `xcodebuild build` here) *does* ship symbols**, so an attached Debug trace
+  gives you real Swift symbol names like `NowPlayingView.body.getter`,
+  `MusicCard.body.getter`, `SDFLayer.updateSDFEffects`, and the
+  `Attribute.init<A>` closures. For a SwiftUI re-render storm those symbol names
+  *are* the decisive signal — aggregate by symbol, not just by binary (see §7).
 - Leaf binary `UNKNOWN` with no named binary often means **JIT code in anonymous
   memory** (i.e. JavaScriptCore executing). Treat a large UNKNOWN bucket as a clue,
   not noise — correlate it with JSC threads.
+- **Attach vs launch.** `--attach Plozz` (by name) profiles the *live* app
+  without relaunching — use it when the user is already in the laggy state and
+  you don't want to lose it. `--attach <pid>` is flaky between repeated runs;
+  prefer the name. `--launch com.thatcube.Plozz` relaunches the app (fresh home
+  screen) and is the most reliable when you control the repro from zero. Find the
+  live pid with `xcrun devicectl device info processes --device <devicectl-id> | grep -i plozz`.
 
 ---
 
@@ -146,6 +207,14 @@ Key reading tips:
    - Pegged CPU, modest memory → record **Time Profiler**, aggregate by thread.
    - `MAIN BLOCKED` but CPU idle → main actor is `await`-blocked → look for a
      synchronous wait / a `Task {}` that inherited `@MainActor`.
+   - **Main thread busy but memory flat, no single heavy binary, and the hot
+     symbols are `AG::Graph::*` / `Attribute.init` / `*.body.getter` /
+     `SDFLayer` / `GlassContainer`** → **SwiftUI re-render storm**, not a resource
+     storm. Jump to §7.
+   - **In the player? Read the Live instance-count row (§2) too.** Engine/VM
+     counts climbing (especially `Native` ≫ `VM`), whether monotonically (leak)
+     or "climb → correct down → climb" (reachable throwaways built in a view
+     body), names an object-churn bug directly. Jump to §9.
 3. **Aggregate the trace by thread, then by leaf binary.** Name the subsystem.
 4. **Find the trigger in code**, not just the symbol. Ask: *what user action
    speculatively starts this work, and is it cancelled when the user leaves?*
@@ -179,6 +248,17 @@ Key reading tips:
 - **Downsample artwork.** `ArtworkImageVariant` caps decode pixel size per use
   (poster 960, landscape 1200, hero 2000); only `.original` is full-res. A bulk
   decode of `.original` is a fast way to blow up memory — don't.
+- **Never construct a view model (or anything heavy) inside a view-body / sheet /
+  cover content closure.** SwiftUI re-invokes those closures on *every* render
+  pass, and `@State`/`@StateObject` keep only the **first** value — so a
+  `MyModel(...)` written inline in `.fullScreenCover { … } `/`.sheet { … }`/a
+  `body` builds and **throws away** a fresh model on every render. For
+  `PlayerViewModel` each throwaway also spins up a `NativeVideoEngine` at init,
+  and under the player's own `@Observable` churn it compounds into a runaway
+  allocation + re-render storm (see §9). Build the model **once**, off the render
+  path: in the event handler that triggers presentation, or in a tiny wrapper
+  view that creates it in `.task` gated by view identity. The live instance-count
+  row (§2) is how you catch a regression of this — `Native` ≫ `VM` and climbing.
 
 ---
 
@@ -226,3 +306,210 @@ memory-pressure jetsam. The "no artwork" was collateral: every core was doing GC
 subsystem. Thread-level CPU aggregation named the real culprit (JSC GC) in one step,
 and the fix was about *when/how much* speculative work runs, not about artwork at
 all.
+
+---
+
+## 7. SwiftUI re-render storms (the second big class)
+
+The storm in §6 was about *resources* (memory/CPU across cores). The other
+recurring class is **the main thread doing too much SwiftUI work** — the app feels
+laggy/janky during navigation or playback even though memory is flat and no single
+binary dominates. The cause is almost always **a view body that re-evaluates far
+more often, or far more widely, than it needs to.**
+
+### How to recognise it in a Time Profiler trace
+
+Attach to the live app (`--attach Plozz`) while reproducing, export the
+`time-profile` table, then aggregate **by symbol** (Debug builds are
+symbolicated, so this works):
+
+```bash
+# rank every frame's symbol across all samples
+grep -oE '<frame [^>]*name="[^"]*"' /tmp/samples.xml \
+  | sed -E 's/.*name="([^"]*)".*/\1/' | sort | uniq -c | sort -rn | head -40
+```
+
+It's a re-render storm (not a resource storm) when the top of that list is
+SwiftUI machinery rather than your logic or a decoder:
+
+- `specialized ... closure ... in Attribute.init<A>(_:)` — the attribute graph
+  rebuilding nodes (a very common #1).
+- `AG::Graph::UpdateStack::update()`, `AG::Subgraph::update`,
+  `AG::Graph::propagate_dirty`, `AGGraphGetValue/SetOutputValue` — graph churn.
+- `SDFLayer.updateSDFEffects`, `GlassContainer.*.shapeBounds`,
+  `GlassEffectAnimatedPathSet.updateValue` — **Liquid Glass** recomputing its
+  signed-distance-field per element (it does this whenever a glass view is laid
+  out / focus-scaled).
+- One of your own views as the top *app* symbol: `SomeView.body.getter`.
+
+Three aggregations turn the raw samples into a diagnosis (≈20-line Python each;
+all parse the same exported XML — resolve `<thread id=.. fmt=..>`/`<thread ref=..>`
+to a name, the first `<frame>` is the innermost):
+
+1. **Main vs background split.** A re-render storm is overwhelmingly on
+   `Main Thread`. If 85–95 % of samples are main-thread, that's the smoking gun.
+2. **Per-time-bin distribution** (bucket sample-times into 5 s bins). A steady
+   non-zero floor when you *aren't* interacting means something animates/ticks
+   continuously (a `TimelineView`, a 4×/sec clock); spikes only during focus
+   moves mean it's focus-driven recompute.
+3. **Render-path bucketing** — count samples whose stack matches `AG::Graph|
+   Attribute.init` (swiftui-graph), `SDFLayer|GlassContainer|GlassEffect`
+   (liquid-glass), `ShadowEffect|_shadow` (shadow), `resample|_decodeImage|
+   rawPalette` (artwork decode), `commit_transaction|_copyRenderLayer`
+   (CA-commit). This tells you *which* cost to attack and, just as importantly,
+   **rules out** suspects (e.g. animated card shadows measured at 0.0 % here, so
+   don't waste time "optimising" them).
+
+Always also export `potential-hangs` (threshold 250 ms). Zero hangs + high main
+utilisation = "death by a thousand re-renders", not one big stall.
+
+### The fix patterns (in priority order)
+
+1. **Scope an `@Observable` dependency to the smallest view that needs it.**
+   With the Observation framework, SwiftUI tracks property reads **per view
+   body**. If `BigView.body` reads a property that changes often
+   (`controller.currentTime` ticks 4×/sec), the **entire** `BigView` re-evaluates
+   on every change — rebuilding everything downstream (artwork, buttons, their
+   `.glassEffect()` SDFs, backgrounds), none of which care about that property.
+   **Fix:** move the hot read into a tiny dedicated child view so only it
+   re-renders. A zero-size "sink" view that reads the value and forwards it into
+   an `@Observable`/`@State` model is a clean way to confine a high-frequency
+   clock (see `PlaybackClock` in `NowPlayingView.swift`).
+2. **Make off-screen content lazy so Liquid Glass doesn't stay live.** A
+   `.glassEffect()`/`plozzGlassCard` keeps recomputing its SDF as long as the
+   view exists. Eager `HStack`/`VStack` rails inside a `ScrollView` keep *every*
+   card (even off-screen) mounted and live. Use `LazyHStack`/`LazyVStack`/
+   `LazyVGrid` so only visible cards pay. (This was the home nav-lag fix; the
+   rest of the app already used lazy stacks.) Do **not** reach for
+   `GlassEffectContainer` to "fix" it — Home/Search prove it's unnecessary and it
+   can alter glass blending.
+3. **Throttle continuous animators.** A `TimelineView(.animation(minimumInterval:
+   …))` re-renders its subtree at that rate forever while visible. Keep the
+   interval as coarse as the effect allows and the animated subtree tiny (the
+   now-playing equaliser is 4 capsules at 12.5 Hz → measured ~0.5 %, fine; a
+   larger subtree at that rate would not be).
+4. **Mind the `GeometryReader` + `.transition` gotcha.** Children of a
+   `GeometryReader` do **not** inherit a `.move` transition — they snap to their
+   final position while siblings slide. To animate such a subtree as one unit,
+   keep it mounted and animate `.offset`/`.opacity` instead of insert/remove.
+
+### Profiling that ends in "no change" is a valid, valuable result
+
+Sometimes the measurement exonerates the code: the decode pipeline is already
+off-main, shadows are free, the hot path is intrinsic Liquid Glass that the lazy
+fix already minimised, and there's no rogue loop left. **Reporting "measured, it's
+clean, here's the breakdown" is a real outcome** — it stops you from cargo-culting
+"optimisations" that cost readability and fix nothing. Record the numbers so the
+next agent doesn't re-chase a ghost.
+
+---
+
+## 8. Case study: the "whole app is laggy" player re-render (June 2026)
+
+**Symptom.** Two reports: (a) the full-screen music player felt heavy, and (b)
+home-screen focus felt laggy when sweeping left↔right across Recently Played /
+Albums / Artists. "Everything is laggy" — sounds global.
+
+**What the tools said.**
+- Attached Time Profiler to the *live* app (`--attach Plozz`) during each repro.
+  No hangs ≥250 ms in either; memory flat. So: re-render storm, not a resource
+  storm.
+- **Player trace:** ~11 k samples in 30 s, ~3× the player's earlier baseline. Top
+  app symbol `NowPlayingView.body.getter`, with the whole player subtree
+  (artwork, meta, transport buttons, equaliser, lyrics) and a lot of
+  `Attribute.init`/`AnimatorState`/`FluidSpringAnimation` underneath. The body
+  read `controller.currentTime` (which ticks **4×/sec**, `CMTime(timescale: 4)`)
+  in three places, so the *entire* player re-evaluated four times a second.
+- **Home trace:** ~17 k samples in 60 s, **90 % on the main thread**. Render-path
+  bucketing: swiftui-graph 3.5 %, **liquid-glass SDF 3.4 %**, CA-commit 0.5 %,
+  blit/mask 0.4 %, **animated shadows 0.0 % (ruled out)**. Artwork
+  decode/resample/palette was **100 % off-main** (healthy). The now-playing pill
+  did **not** read `currentTime` (no 4×/sec pill re-render). The equaliser's
+  12.5 Hz `TimelineView` was only ~0.5 %.
+
+**Root cause & fix.**
+- *Player:* `NowPlayingView.body` depended on the 4×/sec clock. Moved the
+  `currentTime` reads into two tiny child views — `LyricsPanel` (the lyrics column
+  legitimately needs the position to highlight/scroll, so only it re-renders) and
+  `PlaybackClock` (a zero-size sink that forwards `currentTime`/`duration` into
+  the scrub model). The rest of the player stopped re-rendering during playback.
+  (commit `be020b3`.)
+- *Home:* the dominant cost was Liquid Glass SDF recompute on focus. The big
+  multiplier — **eager** music-landing rails keeping every off-screen card's glass
+  live — was converted to `LazyHStack` (matching the rest of the app), which
+  removed the off-screen glass cost with zero visual change. (commit `6d008de`.)
+  After that, the remaining glass cost is intrinsic per-focused-card recompute;
+  a 60 s re-profile found no rogue hot spot left — a legitimate "it's clean now"
+  result.
+
+**Lesson.** "Everything is laggy" was two *different*, local re-render problems,
+not one global one. Symbol-level aggregation (not just thread/binary) named both
+in one step each: a single high-frequency property read fanning out across a big
+body, and eager containers keeping Liquid Glass alive off-screen. The fixes were
+about **scoping dependencies and laziness**, and the render-path bucketing was as
+useful for *ruling out* the wrong suspect (shadows) as for finding the right one.
+
+---
+
+## 9. Case study: the "playback degrades the longer the app is open" engine storm (June 2026)
+
+**Symptom.** Playback silky-smooth right after a fresh launch, then "slower and
+slower the longer the app is open" and the more you play/browse; a full
+quit+reopen resets it to smooth. Felt global. The leading hypothesis was a repeat
+of the §6 JavaScriptCore storm (same "accumulates over time, restart fixes it"
+signature).
+
+**It was not the leading hypothesis.** The §6 fix (commit `7c06ee0`) was verified
+fully intact on the branch — `extractionGate` caps JSContexts at 1, dwell gates
+present and cancellable, no other uncapped JSContext caller. So: measure, don't
+assume. The hunt then pivoted twice on live overlay readings before any code
+changed.
+
+**What the tools said.**
+- **Live instance-count row (§2)** during repro: `VM` and `Native` climbed as
+  playback was retried, and crucially **`Native` raced far ahead of `VM`**
+  (e.g. `VM 22 · Native 165 · MPV 25`) with **Thermal → Serious** and memory
+  ~855 MB. It also **"climbed, corrected down to 2–5, then climbed again"** — so
+  the instances were *reachable throwaways*, not a permanent leak (which would be
+  monotonic). That ruled the bug *in* as object-churn from over-construction and
+  ruled *out* both a retain cycle and the JSC storm.
+- **Time Profiler, attached to the live lag:** ~36.7 k samples in 50 s (vs ~163
+  when the same app was idle/frozen earlier — i.e. a real compute storm, not a
+  stall). Aggregating Debug symbols: the main thread was pinned in an
+  **AttributeGraph render loop** (`ViewGraphRootValueUpdater.render`,
+  `AG::Graph::UpdateStack::update`, `GraphHost.flushTransactions`,
+  `CA::Transaction::commit` every DisplayLink tick). The hot **app** symbols were
+  `PlayerViewModel.startPlayback` → `NativeVideoEngine.load`/`MPVVideoEngine.load`
+  → `handleEngineFailure` → `playResolved`, plus many `mpv_create`,
+  `AVPlayer.init`, and **`makePlayerViewModel`** — construction on the hot path.
+
+**Root cause.** `makePlayerViewModel(...)` was called **inside** the
+`.fullScreenCover(item:)` content closure for both the Home and Search tabs.
+SwiftUI re-invokes a cover's content closure on every parent render; `PlayerView`
+keeps its model in `@State` (first value wins), so every extra render **built a
+full `PlayerViewModel` — and a `NativeVideoEngine` at its `init` — and discarded
+it**. Once playback was underway the player's own `@Observable` mutations *drove*
+those renders, so the throwaways compounded: a self-reinforcing storm of engine
+allocation feeding AttributeGraph churn feeding more renders. `Native` led `VM`
+because every model builds a native engine *before* routing decides to use mpv.
+Nothing was leaked — the instances were reachable and drained in bursts — which is
+exactly why a restart "fixed" it and why the counts oscillated instead of pinning.
+
+**Fix (commit `6d6503a`).** Hoisted construction off the render path into a small
+`PlayerPresentation` wrapper that builds the model **exactly once in `.task`**,
+gated by the view's identity; both `.fullScreenCover` sites now pass a `make:`
+factory closure that is only invoked inside `.task`, never during a render.
+
+**Confirmed by the tools.** After the fix the Live row sits at ~`1 · 1` during
+playback (transient native→mpv blip only) instead of racing into the dozens/
+hundreds; thermal and lag stay flat the longer the player is up. Device-confirmed
+by Brandon.
+
+**Lesson.** "Degrades over time + restart fixes it" does **not** imply the §6 JSC
+storm — confirm the suspected cause is even live before chasing it. The decisive
+signal here was the **Live instance-count row**, not a trace: climbing counts that
+*correct down* mean over-**construction** (reachable throwaways), and `Native ≫ VM`
+pointed straight at view-model construction. The fix was a one-view structural
+change (build the model once, off the render path), echoing §8's theme — most
+"playback/whole-app is slow" bugs are SwiftUI doing work it shouldn't, in the
+wrong place or too often.

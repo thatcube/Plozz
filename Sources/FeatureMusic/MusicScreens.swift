@@ -13,6 +13,14 @@ struct MusicLandingView: View {
         ContentStateView(state: viewModel.state, emptyMessage: "No music found in your libraries.", onRetry: { Task { await viewModel.load() } }) { content in
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
+                    if !content.recentlyPlayed.isEmpty {
+                        MusicRow(title: "Recently Played") {
+                            ForEach(content.recentlyPlayed) { album in
+                                AlbumCard(album: album) { onSelectRoute(.album(album)) }
+                            }
+                        }
+                    }
+
                     entryTiles
 
                     if !content.albums.isEmpty {

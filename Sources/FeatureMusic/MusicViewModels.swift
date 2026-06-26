@@ -11,11 +11,26 @@ import CoreModels
 @Observable
 public final class MusicLandingViewModel {
     public struct Content: Equatable, Sendable {
+        public var recentlyPlayed: [MusicAlbum]
         public var albums: [MusicAlbum]
         public var artists: [MusicArtist]
         public var playlists: [MusicPlaylist]
 
-        public var isEmpty: Bool { albums.isEmpty && artists.isEmpty && playlists.isEmpty }
+        public init(
+            recentlyPlayed: [MusicAlbum] = [],
+            albums: [MusicAlbum] = [],
+            artists: [MusicArtist] = [],
+            playlists: [MusicPlaylist] = []
+        ) {
+            self.recentlyPlayed = recentlyPlayed
+            self.albums = albums
+            self.artists = artists
+            self.playlists = playlists
+        }
+
+        public var isEmpty: Bool {
+            recentlyPlayed.isEmpty && albums.isEmpty && artists.isEmpty && playlists.isEmpty
+        }
     }
 
     public private(set) var state: LoadState<Content> = .idle
@@ -38,50 +53,72 @@ public final class MusicLandingViewModel {
         let accounts = context.musicAccounts
         let sampleSize = self.sampleSize
 
-        // Fetch every (account × kind) request concurrently. Previously these ran
-        // strictly serially — 3 round-trips per account, accounts back-to-back —
-        // so the landing screen waited on the sum of every request. Running them
-        // in one task group collapses that to roughly a single round-trip.
-        let fetched = await withTaskGroup(
-            of: (account: Int, kind: MusicItemKind, page: MusicPage?).self
-        ) { group -> [(account: Int, kind: MusicItemKind, page: MusicPage?)] in
+        // Fetch every (account × kind) request — plus each account's recently
+        // played albums — concurrently. Previously these ran strictly serially,
+        // so the landing screen waited on the sum of every request. One task
+        // group collapses that to roughly a single round-trip, and scales to
+        // ~10 libraries without summing latencies.
+        let fetched = await withTaskGroup(of: Partial.self) { group -> [Partial] in
             for (index, account) in accounts.enumerated() {
                 for kind in [MusicItemKind.album, .artist, .playlist] {
                     group.addTask {
                         let page = PageRequest(startIndex: 0, limit: sampleSize)
                         let result = try? await account.provider.musicItems(in: "", kind: kind, page: page)
-                        return (index, kind, result)
+                        return .items(account: index, kind: kind, page: result)
                     }
                 }
+                group.addTask {
+                    let albums = (try? await account.provider.recentlyPlayed(limit: sampleSize)) ?? []
+                    return .recent(account: index, albums: albums)
+                }
             }
-            var results: [(account: Int, kind: MusicItemKind, page: MusicPage?)] = []
+            var results: [Partial] = []
             for await result in group { results.append(result) }
             return results
         }
 
         // Reassemble in stable account order so the merged rails stay deterministic
-        // regardless of which network response landed first.
+        // regardless of which network response landed first, tagging each item with
+        // its source account before the de-dup merge so provenance is preserved.
         var albums: [MusicAlbum] = []
         var artists: [MusicArtist] = []
         var playlists: [MusicPlaylist] = []
+        var recents: [MusicAlbum] = []
         for (index, account) in accounts.enumerated() {
-            for entry in fetched where entry.account == index {
-                guard let result = entry.page else { continue }
-                switch entry.kind {
-                case .album: albums += result.albums.map { $0.taggingSource(account.accountID) }
-                case .artist: artists += result.artists.map { $0.taggingSource(account.accountID) }
-                case .playlist: playlists += result.playlists.map { $0.taggingSource(account.accountID) }
-                default: break
+            for entry in fetched {
+                switch entry {
+                case let .items(acc, kind, page) where acc == index:
+                    guard let result = page else { continue }
+                    switch kind {
+                    case .album: albums += result.albums.map { $0.taggingSource(account.accountID) }
+                    case .artist: artists += result.artists.map { $0.taggingSource(account.accountID) }
+                    case .playlist: playlists += result.playlists.map { $0.taggingSource(account.accountID) }
+                    default: break
+                    }
+                case let .recent(acc, recentAlbums) where acc == index:
+                    recents += recentAlbums.map { $0.taggingSource(account.accountID) }
+                default:
+                    break
                 }
             }
         }
 
+        // Collapse cross-server duplicates through the single identity/merge seam
+        // (recents merge-sorted by real play recency first), so Plex + Jellyfin
+        // read as one combined, de-duplicated library.
         let content = Content(
-            albums: Array(albums.prefix(sampleSize)),
-            artists: Array(artists.prefix(sampleSize)),
-            playlists: Array(playlists.prefix(sampleSize))
+            recentlyPlayed: MusicMerge.recentlyPlayedAlbums(recents, limit: sampleSize),
+            albums: Array(MusicMerge.albums(albums).prefix(sampleSize)),
+            artists: Array(MusicMerge.artists(artists).prefix(sampleSize)),
+            playlists: Array(MusicMerge.playlists(playlists).prefix(sampleSize))
         )
         state = content.isEmpty ? .empty : .loaded(content)
+    }
+
+    /// One account's partial landing result, carried out of the parallel fetch.
+    private enum Partial: Sendable {
+        case items(account: Int, kind: MusicItemKind, page: MusicPage?)
+        case recent(account: Int, albums: [MusicAlbum])
     }
 }
 
@@ -167,10 +204,17 @@ public final class MusicGridViewModel {
     }
 
     private func sortAll() {
-        artists.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        albums.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        playlists.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        genres.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        // De-duplicate the accumulated pages through the one shared identity/merge
+        // seam (idempotent across page loads), then sort by display name, so the
+        // grid reads as one combined library across servers.
+        artists = MusicMerge.artists(artists)
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        albums = MusicMerge.albums(albums)
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        playlists = MusicMerge.playlists(playlists)
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        genres = MusicMerge.genres(genres)
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }
 

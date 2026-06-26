@@ -7,17 +7,19 @@ import CoreUI
 
 struct MusicLandingView: View {
     @State var viewModel: MusicLandingViewModel
+    let controller: AudioPlaybackController
     let onSelectRoute: (MusicRoute) -> Void
     var layout: MusicLandingLayout = .default
 
     var body: some View {
         ContentStateView(state: viewModel.state, emptyMessage: "No music found in your libraries.", onRetry: { Task { await viewModel.load() } }) { content in
+            let firstSection = firstRenderedSection(content)
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
                     // The page is composed by iterating the data-driven layout, so
                     // reordering or hiding a section is a value change, not a rewrite.
                     ForEach(layout.visibleSections, id: \.self) { section in
-                        sectionView(section, content: content)
+                        sectionView(section, content: content, isFirst: section == firstSection)
                     }
                 }
                 .padding(.vertical, PlozzTheme.Metrics.rowSpacing)
@@ -28,22 +30,45 @@ struct MusicLandingView: View {
         .task { if case .idle = viewModel.state { await viewModel.load() } }
     }
 
+    /// The first section that will actually render given the loaded content, so
+    /// we can hang the scrolling Now Playing card on its header (it lives on the
+    /// trailing edge of the first existing section, not in a fixed overlay).
+    private func firstRenderedSection(_ content: MusicLandingViewModel.Content) -> MusicLandingSection? {
+        for section in layout.visibleSections {
+            switch section {
+            case .recentlyPlayed: if !content.recentlyPlayed.isEmpty { return section }
+            case .browse: return section
+            case .albums: if !content.albums.isEmpty { return section }
+            case .artists: if !content.artists.isEmpty { return section }
+            case .playlists: if !content.playlists.isEmpty { return section }
+            }
+        }
+        return nil
+    }
+
+    /// The Now Playing card, wrapped for use as a header's trailing accessory.
+    /// Self-hides when nothing is playing.
+    private var nowPlayingTrailing: AnyView {
+        AnyView(NowPlayingCard(controller: controller))
+    }
+
     @ViewBuilder
-    private func sectionView(_ section: MusicLandingSection, content: MusicLandingViewModel.Content) -> some View {
+    private func sectionView(_ section: MusicLandingSection, content: MusicLandingViewModel.Content, isFirst: Bool) -> some View {
+        let trailing: AnyView? = isFirst ? nowPlayingTrailing : nil
         switch section {
         case .recentlyPlayed:
             if !content.recentlyPlayed.isEmpty {
-                MusicRow(title: "Recently Played") {
+                MusicRow(title: "Recently Played", trailing: trailing) {
                     ForEach(content.recentlyPlayed) { album in
                         AlbumCard(album: album) { onSelectRoute(.album(album)) }
                     }
                 }
             }
         case .browse:
-            entryTiles
+            entryTiles(trailing: trailing)
         case .albums:
             if !content.albums.isEmpty {
-                MusicRow(title: "Albums", seeAll: { onSelectRoute(.grid(.album)) }) {
+                MusicRow(title: "Albums", seeAll: { onSelectRoute(.grid(.album)) }, trailing: trailing) {
                     ForEach(content.albums) { album in
                         AlbumCard(album: album) { onSelectRoute(.album(album)) }
                     }
@@ -51,7 +76,7 @@ struct MusicLandingView: View {
             }
         case .artists:
             if !content.artists.isEmpty {
-                MusicRow(title: "Artists", seeAll: { onSelectRoute(.grid(.artist)) }) {
+                MusicRow(title: "Artists", seeAll: { onSelectRoute(.grid(.artist)) }, trailing: trailing) {
                     ForEach(content.artists) { artist in
                         ArtistCard(artist: artist) { onSelectRoute(.artist(artist)) }
                     }
@@ -59,7 +84,7 @@ struct MusicLandingView: View {
             }
         case .playlists:
             if !content.playlists.isEmpty {
-                MusicRow(title: "Playlists", seeAll: { onSelectRoute(.grid(.playlist)) }) {
+                MusicRow(title: "Playlists", seeAll: { onSelectRoute(.grid(.playlist)) }, trailing: trailing) {
                     ForEach(content.playlists) { playlist in
                         PlaylistCard(playlist: playlist) { onSelectRoute(.playlist(playlist)) }
                     }
@@ -68,11 +93,15 @@ struct MusicLandingView: View {
         }
     }
 
-    private var entryTiles: some View {
+    private func entryTiles(trailing: AnyView?) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Browse")
-                .font(.system(size: 32, weight: .bold))
-                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            HStack {
+                Text("Browse")
+                    .font(.system(size: 32, weight: .bold))
+                Spacer()
+                if let trailing { trailing }
+            }
+            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             ScrollView(.horizontal, showsIndicators: false) {
                 // Lazy so only on-screen tiles build their Liquid Glass surface —
                 // eager rails kept every card's glass effect live, which made
@@ -115,11 +144,14 @@ private struct EntryTile: View {
 private struct MusicRow<Content: View>: View {
     let title: String
     var seeAll: (() -> Void)?
+    /// Optional trailing accessory (used to hang the scrolling Now Playing card
+    /// on the first section's header).
+    var trailing: AnyView? = nil
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
+            HStack(spacing: 24) {
                 Text(title).font(.system(size: 32, weight: .bold))
                 Spacer()
                 if let seeAll {
@@ -127,6 +159,7 @@ private struct MusicRow<Content: View>: View {
                         .buttonStyle(.plain)
                         .font(.headline)
                 }
+                if let trailing { trailing }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
 
@@ -147,6 +180,26 @@ private struct MusicRow<Content: View>: View {
     }
 }
 
+/// A shared top-level page header: a big title on the left and the scrolling
+/// Now Playing card pinned to the far right. Used by the grid pages (Albums,
+/// Artists, Playlists, Genres) so the now-playing control scrolls with the page
+/// instead of floating in a fixed overlay. The card self-hides when nothing is
+/// playing.
+struct MusicPageHeader: View {
+    let title: String
+    var titleFont: Font = .system(size: 48, weight: .bold)
+    var controller: AudioPlaybackController
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 24) {
+            Text(title).font(titleFont)
+            Spacer(minLength: 24)
+            NowPlayingCard(controller: controller)
+        }
+        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+    }
+}
+
 // MARK: - Grid
 
 struct MusicGridView: View {
@@ -160,9 +213,7 @@ struct MusicGridView: View {
         ContentStateView(state: viewModel.state, emptyMessage: emptyMessage, onRetry: { Task { await viewModel.loadMore() } }) { _ in
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
-                    Text(title)
-                        .font(.system(size: 48, weight: .bold))
-                        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                    MusicPageHeader(title: title, controller: controller)
                         .padding(.top, PlozzTheme.Metrics.rowSpacing)
 
                     LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.rowSpacing) {
@@ -241,6 +292,7 @@ private struct GenreCard: View {
 
 struct ArtistDetailView: View {
     @State var viewModel: ArtistDetailViewModel
+    let controller: AudioPlaybackController
     let onSelectAlbum: (MusicAlbum) -> Void
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: PlozzTheme.Metrics.gridSpacing)]
@@ -248,7 +300,7 @@ struct ArtistDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
-                HStack(spacing: 32) {
+                HStack(alignment: .top, spacing: 32) {
                     MusicArtworkImage(
                         url: viewModel.artist.artworkURL,
                         systemPlaceholder: "music.mic",
@@ -266,6 +318,8 @@ struct ArtistDetailView: View {
                         }
                     }
                     Spacer()
+                    // Now Playing card scrolls with the page, pinned top-right.
+                    NowPlayingCard(controller: controller)
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
 
@@ -329,7 +383,22 @@ struct AlbumDetailView: View {
                 onShuffle: { shuffle() }
             )
             .padding(.top, 8)
+
+            // Show the Now Playing card here only when the playing track is NOT
+            // part of this album. If the user is listening to this very album we
+            // hide it (the track list already shows the now-playing equalizer).
+            if shouldShowNowPlaying {
+                NowPlayingCard(controller: controller)
+                    .padding(.top, 12)
+            }
         }
+    }
+
+    /// True when audio is playing but the current track isn't one of this
+    /// album's tracks, so the page should surface the Now Playing card.
+    private var shouldShowNowPlaying: Bool {
+        guard controller.hasActivePlayback, let id = controller.currentTrack?.id else { return false }
+        return !viewModel.tracks.contains { $0.id == id }
     }
 
     private func play(from track: MusicTrack?) {
@@ -386,7 +455,22 @@ struct PlaylistDetailView: View {
                 onShuffle: { shuffle() }
             )
             .padding(.top, 8)
+
+            // Show the Now Playing card here only when the playing track is NOT
+            // part of this playlist. If the user is listening to this playlist we
+            // hide it (the track list already shows the now-playing equalizer).
+            if shouldShowNowPlaying {
+                NowPlayingCard(controller: controller)
+                    .padding(.top, 12)
+            }
         }
+    }
+
+    /// True when audio is playing but the current track isn't one of this
+    /// playlist's tracks, so the page should surface the Now Playing card.
+    private var shouldShowNowPlaying: Bool {
+        guard controller.hasActivePlayback, let id = controller.currentTrack?.id else { return false }
+        return !viewModel.tracks.contains { $0.id == id }
     }
 
     private func play(from track: MusicTrack?) {

@@ -3,49 +3,68 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// The compact, focusable "Now Playing" affordance that floats in the
-/// **top-trailing corner** of the Music tab while audio is loaded. Selecting it
-/// opens the full Now Playing screen.
-///
-/// It floats top-trailing (not a pinned bottom bar) on purpose: a focusable bar
-/// pinned to the bottom sits "below" the content in the tvOS focus graph, so
-/// pressing **down** through a vertical track list fights the focus engine and
-/// jumps into the bar. A top-trailing element is only reachable by moving
-/// *up/right*, so it never competes with downward list navigation.
-struct NowPlayingPill: View {
-    @Bindable var controller: AudioPlaybackController
+/// An action that opens the full-screen Now Playing screen, plumbed down the
+/// Music tab's view tree so the scrolling `NowPlayingCard` (which now lives
+/// inside each page's header, not as a fixed overlay) can trigger it from deep
+/// in the navigation stack without threading a closure through every screen.
+private struct OpenNowPlayingKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
 
-    let onOpen: () -> Void
+extension EnvironmentValues {
+    var openNowPlaying: () -> Void {
+        get { self[OpenNowPlayingKey.self] }
+        set { self[OpenNowPlayingKey.self] = newValue }
+    }
+}
+
+/// The compact, focusable "Now Playing" affordance shown while audio is loaded.
+/// Selecting it opens the full Now Playing screen.
+///
+/// Unlike the old fixed top-trailing pill, this card lives **inside each page's
+/// header and scrolls with the page**. It self-hides when nothing is playing, so
+/// it can be dropped into any header and a placement with no active playback
+/// simply renders nothing. The open action comes from `\.openNowPlaying` in the
+/// environment, injected once at the Music tab root.
+struct NowPlayingCard: View {
+    var controller: AudioPlaybackController
+    @Environment(\.openNowPlaying) private var openNowPlaying
+
+    /// Maximum width for the title/subtitle column. Wider than the old pill so
+    /// the average song title + "Artist · Album" line fits without truncation.
+    var textWidth: CGFloat = 320
+
+    private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
     var body: some View {
         if controller.hasActivePlayback, let track = controller.currentTrack {
-            Button(action: onOpen) {
-                HStack(spacing: 14) {
+            Button(action: openNowPlaying) {
+                HStack(spacing: 16) {
                     MusicArtworkImage(
                         url: track.artworkURL,
                         systemPlaceholder: "music.note",
-                        cornerRadius: 6,
+                        cornerRadius: 8,
                         asyncFallbackURL: MusicArtworkFallback.trackCover(
                             title: track.title,
                             album: track.albumTitle,
                             artist: track.artistName
                         )
                     )
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(track.title)
-                            .font(.headline)
+                            .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
                         if let subtitle = track.subtitle {
                             Text(subtitle)
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                     }
-                    .frame(maxWidth: 220, alignment: .leading)
+                    .frame(maxWidth: textWidth, alignment: .leading)
 
                     Group {
                         if controller.isPlaying {
@@ -58,22 +77,22 @@ struct NowPlayingPill: View {
                         }
                     }
                 }
-                .padding(.leading, 10)
+                .padding(.leading, 12)
                 .padding(.trailing, 22)
                 .padding(.vertical, 10)
-                .contentShape(Capsule())
+                .contentShape(shape)
             }
-            .buttonStyle(NowPlayingPillButtonStyle())
+            .buttonStyle(NowPlayingCardButtonStyle())
             .focusEffectDisabled()
-            .background(.thinMaterial, in: Capsule())
-            .clipShape(Capsule())
+            .background(.thinMaterial, in: shape)
+            .clipShape(shape)
         }
     }
 }
 
-/// A gentle lift + shadow when the floating Now Playing pill is focused, in
-/// keeping with the app's card focus language.
-private struct NowPlayingPillButtonStyle: ButtonStyle {
+/// A gentle lift + shadow when the Now Playing card is focused, in keeping with
+/// the app's card focus language.
+private struct NowPlayingCardButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         StyleBody(configuration: configuration)
     }
@@ -83,9 +102,10 @@ private struct NowPlayingPillButtonStyle: ButtonStyle {
         @Environment(\.isFocused) private var isFocused
 
         var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
             configuration.label
                 .overlay {
-                    Capsule().stroke(.white.opacity(isFocused ? 0.5 : 0), lineWidth: 1)
+                    shape.stroke(.white.opacity(isFocused ? 0.5 : 0), lineWidth: 1)
                 }
                 .scaleEffect(isFocused ? (configuration.isPressed ? 1.03 : 1.06) : 1)
                 .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 18, y: 8)

@@ -43,6 +43,7 @@ public struct MusicTabView: View {
         NavigationStack(path: $path) {
             MusicLandingView(
                 viewModel: MusicLandingViewModel(context: context, cache: .shared),
+                controller: controller,
                 onSelectRoute: { path.append($0) },
                 layout: layoutModel.layout
             )
@@ -50,22 +51,17 @@ public struct MusicTabView: View {
                 destination(for: route)
             }
         }
-        // A single floating Now Playing pill over the whole Music tab, pinned
-        // top-trailing. It lives outside the content's vertical focus path, so
-        // pressing *down* through a track list never fights the focus engine, and
-        // it persists across pushes without a per-screen toolbar.
-        .overlay(alignment: .topTrailing) {
-            if !showNowPlaying {
-                NowPlayingPill(controller: controller) { showNowPlaying = true }
-                    .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                    .padding(.top, 24)
-            }
-        }
+        // The Now Playing control is no longer a fixed overlay — it lives inside
+        // each page's header and scrolls with the content. We plumb the "open the
+        // full player" action down via the environment so any header's
+        // `NowPlayingCard` can trigger it without threading a closure through
+        // every screen.
+        .environment(\.openNowPlaying) { showNowPlaying = true }
         .fullScreenCover(isPresented: $showNowPlaying) {
             NowPlayingView(controller: controller, appTheme: appTheme, musicPlayer: musicPlayer)
         }
         // Starting a song jumps straight into the full-screen player, like
-        // Apple Music. The pill remains for re-opening it after dismissal.
+        // Apple Music. The card remains for re-opening it after dismissal.
         .onChange(of: controller.playbackStartToken) { _, _ in
             showNowPlaying = true
         }
@@ -87,6 +83,7 @@ public struct MusicTabView: View {
             case let .artist(artist):
                 ArtistDetailView(
                     viewModel: ArtistDetailViewModel(artist: artist, context: context),
+                    controller: controller,
                     onSelectAlbum: { path.append(MusicRoute.album($0)) }
                 )
             case let .album(album):

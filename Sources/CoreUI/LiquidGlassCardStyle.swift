@@ -74,6 +74,55 @@ public struct PlozzGlassCardModifier: ViewModifier {
     }
 }
 
+/// A focus-only liquid-glass "platter" that paints **nothing at rest** and a
+/// soft, theme-aware Liquid Glass surface behind its content **only when
+/// focused**. Distinct from `PlozzGlassCardModifier` (which always shows a card
+/// surface): this is for focusable elements that should float freely until
+/// focused — e.g. the circular avatar tiles in the "Who's watching?" picker,
+/// where an always-on card would read as heavy and boxy.
+///
+/// On focus it uses native Liquid Glass on tvOS 26+ (a faint theme-aware tint
+/// blended into live glass), an `.ultraThinMaterial` fallback below that, and a
+/// solid high-contrast `liftSurface` when **Reduce Transparency** is on — so the
+/// lift stays legible without leaning on translucency.
+public struct PlozzFocusPlatterModifier: ViewModifier {
+    private let cornerRadius: CGFloat
+    private let isFocused: Bool
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.themePalette) private var palette
+
+    public init(cornerRadius: CGFloat, isFocused: Bool) {
+        self.cornerRadius = cornerRadius
+        self.isFocused = isFocused
+    }
+
+    public func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        if !isFocused {
+            // At rest the element floats with no surface behind it.
+            content
+        } else if reduceTransparency {
+            content
+                .background { shape.fill(palette.liftSurface) }
+                .overlay { shape.strokeBorder(palette.cardOpaqueBorder, lineWidth: 1) }
+                .clipShape(shape)
+        } else if #available(tvOS 26.0, *) {
+            content
+                .glassEffect(
+                    .regular.tint(palette.focusedCardGlassTint),
+                    in: .rect(cornerRadius: cornerRadius)
+                )
+        } else {
+            content
+                .background { shape.fill(.ultraThinMaterial) }
+                .overlay { shape.strokeBorder(palette.cardBorder.opacity(0.5), lineWidth: 1) }
+                .clipShape(shape)
+        }
+    }
+}
+
 /// Hairline frosted-glass rim drawn around a clipped media thumbnail, ported
 /// from Twozz's `mediaEdgeColor` overlay. Gives every card's artwork the same
 /// inner glass edge and covers the sub-pixel bleed a clipped image/video plane
@@ -136,6 +185,14 @@ public extension View {
     /// Wraps the view in the shared Plozz liquid-glass browsing-card surface.
     func plozzGlassCard(cornerRadius: CGFloat, isFocused: Bool) -> some View {
         modifier(PlozzGlassCardModifier(cornerRadius: cornerRadius, isFocused: isFocused))
+    }
+
+    /// Paints a focus-only Liquid Glass platter behind the view: invisible at
+    /// rest, a soft theme-aware glass surface when `isFocused`. For focusable
+    /// elements that should float freely until focused (e.g. profile avatar
+    /// tiles) rather than always showing a card.
+    func plozzFocusPlatter(cornerRadius: CGFloat, isFocused: Bool) -> some View {
+        modifier(PlozzFocusPlatterModifier(cornerRadius: cornerRadius, isFocused: isFocused))
     }
 
     /// Draws Twozz's hairline "inner glass" rim around a clipped media thumbnail:

@@ -72,7 +72,10 @@ public struct ProfilePickerView: View {
 }
 
 /// A single selectable profile tile: avatar symbol on a colored disc plus the
-/// profile name, with a tvOS focus scale + an "active" badge.
+/// profile name. On focus it lifts onto a soft, theme-aware Liquid Glass
+/// platter (rounded, translucent) with a gentle scale + shadow — no stark white
+/// system plate. The active profile carries a small, quiet accent dot under its
+/// name rather than a corner badge, so the indicator never collides with focus.
 private struct ProfileTile: View {
     let profile: Profile
     let isActive: Bool
@@ -81,35 +84,44 @@ private struct ProfileTile: View {
     @FocusState private var isFocused: Bool
     @Environment(\.themePalette) private var palette
 
+    private let avatarSize: CGFloat = 200
+
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 18) {
-                ProfileAvatarView(profile: profile, size: 220)
-                .overlay(alignment: .topTrailing) {
-                    if isActive {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.green)
-                            .background(Circle().fill(.white))
-                            .offset(x: 6, y: -6)
+            VStack(spacing: 16) {
+                ProfileAvatarView(profile: profile, size: avatarSize)
+                    .overlay {
+                        // Thin, theme-aware rim for crisp definition on focus.
+                        Circle().strokeBorder(
+                            palette.primaryText.opacity(isFocused ? 0.9 : 0),
+                            lineWidth: 3
+                        )
                     }
-                }
-                .overlay(
-                    Circle()
-                        .strokeBorder(palette.accent, lineWidth: isFocused ? 8 : 0)
-                )
-                .scaleEffect(isFocused ? 1.12 : 1.0)
-                .shadow(radius: isFocused ? 24 : 0)
 
-                Text(profile.name)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
-                    .lineLimit(1)
+                VStack(spacing: 8) {
+                    Text(profile.name)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+                        .lineLimit(1)
+
+                    // Subtle "currently active" indicator. Reserves its slot via
+                    // opacity so active/inactive tiles keep the same rhythm.
+                    Circle()
+                        .fill(palette.accent)
+                        .frame(width: 10, height: 10)
+                        .opacity(isActive ? 1 : 0)
+                }
             }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+            .plozzFocusPlatter(cornerRadius: 36, isFocused: isFocused)
+            .scaleEffect(isFocused ? 1.08 : 1.0)
+            .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 24, y: 12)
         }
         .buttonStyle(.plain)
         .focused($isFocused)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .focusEffectDisabled()
+        .animation(.easeOut(duration: 0.2), value: isFocused)
     }
 }
 
@@ -122,32 +134,40 @@ private struct AddProfileTile: View {
     @FocusState private var isFocused: Bool
     @Environment(\.themePalette) private var palette
 
+    private let avatarSize: CGFloat = 200
+
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 18) {
+            VStack(spacing: 16) {
                 ZStack {
                     Circle()
-                        .strokeBorder(palette.secondaryText.opacity(0.5),
+                        .strokeBorder(palette.secondaryText.opacity(isFocused ? 0.9 : 0.5),
                                       style: StrokeStyle(lineWidth: 4, dash: [12, 10]))
                     Image(systemName: "plus")
-                        .font(.system(size: 88, weight: .semibold))
-                        .foregroundStyle(palette.secondaryText)
+                        .font(.system(size: 80, weight: .semibold))
+                        .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
                 }
-                .frame(width: 220, height: 220)
-                .overlay(
-                    Circle()
-                        .strokeBorder(palette.accent, lineWidth: isFocused ? 8 : 0)
-                )
-                .scaleEffect(isFocused ? 1.12 : 1.0)
+                .frame(width: avatarSize, height: avatarSize)
 
-                Text("Add Profile")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+                VStack(spacing: 8) {
+                    Text("Add Profile")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+
+                    // Keep the same vertical rhythm as a profile tile's dot slot.
+                    Circle().fill(.clear).frame(width: 10, height: 10)
+                }
             }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+            .plozzFocusPlatter(cornerRadius: 36, isFocused: isFocused)
+            .scaleEffect(isFocused ? 1.08 : 1.0)
+            .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 24, y: 12)
         }
         .buttonStyle(.plain)
         .focused($isFocused)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        .focusEffectDisabled()
+        .animation(.easeOut(duration: 0.2), value: isFocused)
     }
 }
 #endif

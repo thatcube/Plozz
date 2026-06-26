@@ -322,6 +322,10 @@ struct ArtistDetailView: View {
                     NowPlayingCard(controller: controller)
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                // Make the hero its own focus section so pressing Up from anywhere
+                // in the albums grid below reliably lands on the Now Playing card,
+                // even when it's far to the right (off the album's vertical axis).
+                .focusSection()
 
                 Text("Albums").font(.system(size: 32, weight: .bold))
                     .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
@@ -522,6 +526,10 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             HStack(alignment: .top, spacing: 56) {
                 info
                     .frame(width: infoWidth, alignment: .leading)
+                    // Own focus section: pressing Left from any track row jumps
+                    // back to Play/Shuffle/Now Playing even when the list is short
+                    // and the buttons sit far below the focused row.
+                    .focusSection()
                 ScrollView {
                     TrackListView(
                         tracks: tracks,
@@ -535,6 +543,9 @@ struct MusicDetailLayout<InfoColumn: View>: View {
                     .padding(.bottom, 40)
                 }
                 .scrollClipDisabled()
+                // Track list is its own focus section so Right from the info
+                // column reliably enters the list regardless of row alignment.
+                .focusSection()
             }
             .padding(PlozzTheme.Metrics.screenPadding)
         }

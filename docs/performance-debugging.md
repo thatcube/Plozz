@@ -118,6 +118,34 @@ grep -oE "mem=[0-9]+MB" /tmp/plz.log | grep -oE "[0-9]+" | sort -n | tail   # pe
 grep -oE "cpu=[0-9]+%"  /tmp/plz.log | grep -oE "[0-9]+" | sort -n | tail   # peak CPU
 ```
 
+### The live instance-count row (catches object churn / leaks without a trace)
+
+The Playback Diagnostics overlay (toggled by the **Playback Diagnostics** setting;
+`PlaybackDiagnosticsOverlay` + `PlaybackDiagnosticsSampler`, model in
+`CoreModels/PlaybackDiagnostics.swift`) has a **Live** row reading
+`VM <x> · Native <y> · MPV <z>`. Those are process-wide **live-instance counters**
+incremented in `init` / decremented in `deinit` of `PlayerViewModel`,
+`NativeVideoEngine`, and `MPVVideoEngine` (`CoreModels/PlaybackInstrumentation.swift`,
+backed by `TASK_VM_INFO.phys_footprint` for the Memory row). They only reset on a
+full app relaunch.
+
+Read it like this — it names a whole class of bug in seconds, no trace needed:
+- **Outside the player it should read `0 · 0 · 0`.** During playback, ~`1 · 1`
+  (a transient native→mpv blip is normal when a Dolby Vision file routes to mpv).
+- **Counts climb and never fall** as you leave/re-enter the player → a true
+  **leak** (a retain cycle). Capture **Leaks**/**Allocations** to name the retainer.
+- **Counts climb, then "correct down," then climb again** → **reachable
+  throwaways**, not a leak: something is *constructing* these objects faster than
+  ARC reaps them. This is almost always objects built **in a SwiftUI view body**
+  (see the §5 trap and the §9 case study).
+- **`Native` climbing far ahead of `VM`** is a specific tell: every
+  `PlayerViewModel.init` builds a `NativeVideoEngine` *before* routing decides to
+  use mpv, so a view-model-construction storm shows Native racing ahead of VM and
+  MPV. (This single observation cracked the §9 bug.)
+
+Like the file-logger, the overlay is a diagnostic aid — keep it gated behind the
+setting; don't let it churn SwiftUI layout in the hot path.
+
 ---
 
 ## 3. Instruments without the GUI (`xctrace`)
@@ -183,6 +211,10 @@ Key reading tips:
      symbols are `AG::Graph::*` / `Attribute.init` / `*.body.getter` /
      `SDFLayer` / `GlassContainer`** → **SwiftUI re-render storm**, not a resource
      storm. Jump to §7.
+   - **In the player? Read the Live instance-count row (§2) too.** Engine/VM
+     counts climbing (especially `Native` ≫ `VM`), whether monotonically (leak)
+     or "climb → correct down → climb" (reachable throwaways built in a view
+     body), names an object-churn bug directly. Jump to §9.
 3. **Aggregate the trace by thread, then by leaf binary.** Name the subsystem.
 4. **Find the trigger in code**, not just the symbol. Ask: *what user action
    speculatively starts this work, and is it cancelled when the user leaves?*
@@ -216,6 +248,17 @@ Key reading tips:
 - **Downsample artwork.** `ArtworkImageVariant` caps decode pixel size per use
   (poster 960, landscape 1200, hero 2000); only `.original` is full-res. A bulk
   decode of `.original` is a fast way to blow up memory — don't.
+- **Never construct a view model (or anything heavy) inside a view-body / sheet /
+  cover content closure.** SwiftUI re-invokes those closures on *every* render
+  pass, and `@State`/`@StateObject` keep only the **first** value — so a
+  `MyModel(...)` written inline in `.fullScreenCover { … } `/`.sheet { … }`/a
+  `body` builds and **throws away** a fresh model on every render. For
+  `PlayerViewModel` each throwaway also spins up a `NativeVideoEngine` at init,
+  and under the player's own `@Observable` churn it compounds into a runaway
+  allocation + re-render storm (see §9). Build the model **once**, off the render
+  path: in the event handler that triggers presentation, or in a tiny wrapper
+  view that creates it in `.task` gated by view identity. The live instance-count
+  row (§2) is how you catch a regression of this — `Native` ≫ `VM` and climbing.
 
 ---
 
@@ -405,3 +448,68 @@ in one step each: a single high-frequency property read fanning out across a big
 body, and eager containers keeping Liquid Glass alive off-screen. The fixes were
 about **scoping dependencies and laziness**, and the render-path bucketing was as
 useful for *ruling out* the wrong suspect (shadows) as for finding the right one.
+
+---
+
+## 9. Case study: the "playback degrades the longer the app is open" engine storm (June 2026)
+
+**Symptom.** Playback silky-smooth right after a fresh launch, then "slower and
+slower the longer the app is open" and the more you play/browse; a full
+quit+reopen resets it to smooth. Felt global. The leading hypothesis was a repeat
+of the §6 JavaScriptCore storm (same "accumulates over time, restart fixes it"
+signature).
+
+**It was not the leading hypothesis.** The §6 fix (commit `7c06ee0`) was verified
+fully intact on the branch — `extractionGate` caps JSContexts at 1, dwell gates
+present and cancellable, no other uncapped JSContext caller. So: measure, don't
+assume. The hunt then pivoted twice on live overlay readings before any code
+changed.
+
+**What the tools said.**
+- **Live instance-count row (§2)** during repro: `VM` and `Native` climbed as
+  playback was retried, and crucially **`Native` raced far ahead of `VM`**
+  (e.g. `VM 22 · Native 165 · MPV 25`) with **Thermal → Serious** and memory
+  ~855 MB. It also **"climbed, corrected down to 2–5, then climbed again"** — so
+  the instances were *reachable throwaways*, not a permanent leak (which would be
+  monotonic). That ruled the bug *in* as object-churn from over-construction and
+  ruled *out* both a retain cycle and the JSC storm.
+- **Time Profiler, attached to the live lag:** ~36.7 k samples in 50 s (vs ~163
+  when the same app was idle/frozen earlier — i.e. a real compute storm, not a
+  stall). Aggregating Debug symbols: the main thread was pinned in an
+  **AttributeGraph render loop** (`ViewGraphRootValueUpdater.render`,
+  `AG::Graph::UpdateStack::update`, `GraphHost.flushTransactions`,
+  `CA::Transaction::commit` every DisplayLink tick). The hot **app** symbols were
+  `PlayerViewModel.startPlayback` → `NativeVideoEngine.load`/`MPVVideoEngine.load`
+  → `handleEngineFailure` → `playResolved`, plus many `mpv_create`,
+  `AVPlayer.init`, and **`makePlayerViewModel`** — construction on the hot path.
+
+**Root cause.** `makePlayerViewModel(...)` was called **inside** the
+`.fullScreenCover(item:)` content closure for both the Home and Search tabs.
+SwiftUI re-invokes a cover's content closure on every parent render; `PlayerView`
+keeps its model in `@State` (first value wins), so every extra render **built a
+full `PlayerViewModel` — and a `NativeVideoEngine` at its `init` — and discarded
+it**. Once playback was underway the player's own `@Observable` mutations *drove*
+those renders, so the throwaways compounded: a self-reinforcing storm of engine
+allocation feeding AttributeGraph churn feeding more renders. `Native` led `VM`
+because every model builds a native engine *before* routing decides to use mpv.
+Nothing was leaked — the instances were reachable and drained in bursts — which is
+exactly why a restart "fixed" it and why the counts oscillated instead of pinning.
+
+**Fix (commit `6d6503a`).** Hoisted construction off the render path into a small
+`PlayerPresentation` wrapper that builds the model **exactly once in `.task`**,
+gated by the view's identity; both `.fullScreenCover` sites now pass a `make:`
+factory closure that is only invoked inside `.task`, never during a render.
+
+**Confirmed by the tools.** After the fix the Live row sits at ~`1 · 1` during
+playback (transient native→mpv blip only) instead of racing into the dozens/
+hundreds; thermal and lag stay flat the longer the player is up. Device-confirmed
+by Brandon.
+
+**Lesson.** "Degrades over time + restart fixes it" does **not** imply the §6 JSC
+storm — confirm the suspected cause is even live before chasing it. The decisive
+signal here was the **Live instance-count row**, not a trace: climbing counts that
+*correct down* mean over-**construction** (reachable throwaways), and `Native ≫ VM`
+pointed straight at view-model construction. The fix was a one-view structural
+change (build the model once, off the render path), echoing §8's theme — most
+"playback/whole-app is slow" bugs are SwiftUI doing work it shouldn't, in the
+wrong place or too often.

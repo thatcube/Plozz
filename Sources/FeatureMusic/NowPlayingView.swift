@@ -21,6 +21,22 @@ struct NowPlayingView: View {
     /// liquid background. Recomputed whenever the track changes.
     @State private var artworkPalette: [Color] = []
 
+    /// Whether the bottom control bar is currently shown. It auto-hides after a
+    /// spell of no interaction so only the artwork, title/album and lyrics
+    /// remain, and slides back on any remote activity.
+    @State private var controlsVisible = true
+    /// Pending auto-hide; cancelled/rescheduled on every interaction.
+    @State private var hideTask: Task<Void, Never>?
+
+    /// Focus targets on the player. Play/pause is the anchor the bar always
+    /// comes back focused on; the reveal catcher holds focus while the bar is
+    /// hidden so tvOS focus never lands on an invisible control.
+    private enum Focus: Hashable { case playPause, revealCatcher }
+    @FocusState private var focus: Focus?
+
+    /// Seconds of inactivity before the control bar fades away.
+    private static let controlsAutoHideDelay: TimeInterval = 5
+
     /// Whether the user wants the lyrics panel shown. Persisted (default on) so
     /// the choice is remembered across sessions. The toggle is disabled — and so
     /// can't be changed — when the current track has no lyrics.
@@ -38,44 +54,96 @@ struct NowPlayingView: View {
     var body: some View {
         ZStack {
             background
-            HStack(alignment: .center, spacing: 56) {
-                playerColumn
-                    .frame(maxWidth: showsLyricsPanel ? 760 : 960)
-                if showsLyricsPanel {
-                    NowPlayingLyricsView(
-                        state: controller.lyricsState,
-                        currentTime: controller.currentTime
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
+
+            mainContent
+                .padding(.horizontal, 80)
+                .padding(.top, 60)
+                .padding(.bottom, 140)
+
+            // While the bar is hidden, a transparent full-screen catcher takes
+            // focus so a Select/click brings the controls back.
+            if !controlsVisible {
+                Button { showControls() } label: { Color.clear }
+                    .buttonStyle(.plain)
+                    .focused($focus, equals: .revealCatcher)
+                    .onMoveCommand { _ in showControls() }
             }
-            .padding(.horizontal, 80)
-            .padding(.vertical, 60)
-            .animation(.easeInOut(duration: 0.25), value: showsLyricsPanel)
         }
-        .overlay(alignment: .topTrailing) {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.title2)
-                    .padding(24)
+        .overlay(alignment: .bottom) {
+            if controlsVisible {
+                bottomControls
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .buttonStyle(.plain)
-            .padding(32)
         }
+        .animation(.spring(response: 0.5, dampingFraction: 0.86), value: controlsVisible)
         .onAppear {
             syncScrubModel()
             setIdleTimerDisabled(true)
+            showControls()
         }
-        .onDisappear { setIdleTimerDisabled(false) }
+        .onDisappear {
+            setIdleTimerDisabled(false)
+            hideTask?.cancel()
+        }
         .onChange(of: controller.currentTime) { _, _ in syncScrubModel() }
         .onChange(of: controller.duration) { _, _ in syncScrubModel() }
+        .onChange(of: scrubModel.isScrubbing) { _, _ in scheduleHide() }
         .task(id: controller.currentTrack?.id) { await loadArtworkPalette() }
+        // The Menu/Back button now closes the player (the X was removed).
+        .onExitCommand { dismiss() }
         // In the foreground the Siri Remote's play/pause press is delivered
         // through the focus/responder chain, not MPRemoteCommandCenter — so the
         // command center alone resumes inconsistently. Handle it here so the
-        // hardware button reliably toggles playback while the player is open.
-        .onPlayPauseCommand { controller.togglePlayPause() }
+        // hardware button reliably toggles playback while the player is open,
+        // and reveal the controls so the user sees the state change.
+        .onPlayPauseCommand {
+            controller.togglePlayPause()
+            showControls()
+        }
+    }
+
+    /// The centered content that stays on screen even after the controls hide:
+    /// artwork + title/album on the left, lyrics on the right when present.
+    private var mainContent: some View {
+        HStack(alignment: .center, spacing: 56) {
+            metaColumn
+                .frame(maxWidth: showsLyricsPanel ? 620 : 760)
+            if showsLyricsPanel {
+                NowPlayingLyricsView(
+                    state: controller.lyricsState,
+                    currentTime: controller.currentTime
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.25), value: showsLyricsPanel)
+    }
+
+    /// Reveals the control bar and (re)arms the auto-hide timer, focusing
+    /// play/pause so the bar always returns with it highlighted.
+    private func showControls() {
+        controlsVisible = true
+        focus = .playPause
+        scheduleHide()
+    }
+
+    /// Schedules the control bar to fade away after `controlsAutoHideDelay`,
+    /// cancelling any previously scheduled hide. Stays up while the user is
+    /// actively scrubbing.
+    private func scheduleHide() {
+        hideTask?.cancel()
+        hideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.controlsAutoHideDelay))
+            guard !Task.isCancelled else { return }
+            if scrubModel.isScrubbing {
+                scheduleHide()
+                return
+            }
+            controlsVisible = false
+            focus = .revealCatcher
+        }
     }
 
     /// Keeps the Apple TV awake while the full-screen player is open so synced
@@ -86,10 +154,10 @@ struct NowPlayingView: View {
         #endif
     }
 
-    /// The left-hand player column: artwork, track/artist/album, quality badge,
-    /// scrub bar with play/pause, and the transport + lyrics-toggle row.
-    private var playerColumn: some View {
-        VStack(spacing: 36) {
+    /// The artwork + title/artist/album/quality block. Stays on screen after the
+    /// controls auto-hide.
+    private var metaColumn: some View {
+        VStack(spacing: 32) {
             MusicArtworkImage(
                 url: controller.currentTrack?.artworkURL,
                 systemPlaceholder: "music.note",
@@ -113,10 +181,28 @@ struct NowPlayingView: View {
                 }
                 qualityBadge
             }
+        }
+    }
 
+    /// The full-width transport bar across the bottom: scrub row + button row,
+    /// over a soft dark scrim so it stays legible against the artwork colors.
+    private var bottomControls: some View {
+        VStack(spacing: 24) {
             scrubRow
             transportRow
         }
+        .padding(.horizontal, 80)
+        .padding(.top, 48)
+        .padding(.bottom, 56)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.55)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
     }
 
     private func syncScrubModel() {
@@ -186,6 +272,7 @@ struct NowPlayingView: View {
                 icon: controller.isPlaying ? "pause.fill" : "play.fill",
                 prominent: true
             ) { controller.togglePlayPause() }
+                .focused($focus, equals: .playPause)
 
             VStack(spacing: 10) {
                 MusicScrubBar(model: scrubModel)
@@ -199,6 +286,7 @@ struct NowPlayingView: View {
                 .foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
     /// Every other control, evenly sized, on the row below. Includes the lyrics
@@ -245,7 +333,10 @@ struct NowPlayingView: View {
         tint: Color = .primary,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button {
+            scheduleHide()
+            action()
+        } label: {
             Image(systemName: icon)
                 .foregroundStyle(tint)
         }
@@ -280,6 +371,8 @@ struct NowPlayingView: View {
 struct NowPlayingLyricsView: View {
     let state: AudioPlaybackController.LyricsState
     let currentTime: TimeInterval
+    /// Eases the lines in on first appearance instead of letting them pop.
+    @State private var appeared = false
 
     var body: some View {
         content
@@ -326,6 +419,7 @@ struct NowPlayingLyricsView: View {
         // the very start) — this guarantees the lyrics open centered rather than
         // pinned to the top.
         let focus = focusIndex(in: lyrics)
+        let highlight = Animation.spring(response: 0.55, dampingFraction: 0.85)
         return GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
@@ -335,12 +429,13 @@ struct NowPlayingLyricsView: View {
                         Color.clear.frame(height: geo.size.height * 0.45)
                         ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { index, line in
                             Text(line.text.isEmpty ? " " : line.text)
-                                .font(.system(size: 46, weight: .semibold))
+                                .font(.system(size: 46, weight: .bold))
                                 .foregroundStyle(.primary)
                                 .opacity(opacity(forIndex: index, active: active))
+                                .scaleEffect(index == active ? 1.06 : 1.0, anchor: .leading)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .id(index)
-                                .animation(.easeInOut(duration: 0.3), value: active)
+                                .animation(highlight, value: active)
                         }
                         Color.clear.frame(height: geo.size.height * 0.45)
                     }
@@ -348,15 +443,20 @@ struct NowPlayingLyricsView: View {
                 }
                 .scrollDisabled(true)
                 .mask(edgeFade)
+                .opacity(appeared ? 1 : 0)
                 .onChange(of: focus) { _, newIndex in
-                    withAnimation(.easeInOut(duration: 0.4)) {
+                    withAnimation(highlight) {
                         proxy.scrollTo(newIndex, anchor: .center)
                     }
                 }
                 // Position correctly as soon as the panel appears and again once
                 // the geometry settles (the panel animates in, so the first
-                // onAppear can fire before the final height is known).
-                .onAppear { proxy.scrollTo(focus, anchor: .center) }
+                // onAppear can fire before the final height is known). The first
+                // appearance also eases the lines in rather than popping.
+                .onAppear {
+                    proxy.scrollTo(focus, anchor: .center)
+                    withAnimation(.easeOut(duration: 0.5)) { appeared = true }
+                }
                 .onChange(of: geo.size.height) { _, _ in
                     proxy.scrollTo(focus, anchor: .center)
                 }
@@ -376,18 +476,15 @@ struct NowPlayingLyricsView: View {
         return 0
     }
 
-    /// Vertical edge fade that makes lyrics fully dissolve **well before** the
-    /// top and bottom edges: the outer ~quarter on each side is completely
-    /// transparent, then it ramps up to solid only in a thin central band. Lines
-    /// vanish into the background instead of reaching the panel edges.
+    /// Vertical edge fade. Lines stay fully visible through a wide central band
+    /// and only dissolve in the outer ~16% at the top and bottom, so lyrics
+    /// reach much closer to the panel edges before fading into the background.
     private var edgeFade: some View {
         LinearGradient(
             stops: [
                 .init(color: .clear, location: 0.0),
-                .init(color: .clear, location: 0.26),
-                .init(color: .black, location: 0.46),
-                .init(color: .black, location: 0.54),
-                .init(color: .clear, location: 0.74),
+                .init(color: .black, location: 0.16),
+                .init(color: .black, location: 0.84),
                 .init(color: .clear, location: 1.0)
             ],
             startPoint: .top,

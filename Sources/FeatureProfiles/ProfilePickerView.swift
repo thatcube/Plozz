@@ -86,7 +86,7 @@ public struct ProfilePickerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 80)
-        .background(alignment: .top) {
+        .background {
             ProfileBackgroundGradient(profile: backgroundProfile)
         }
         .environment(palettes)

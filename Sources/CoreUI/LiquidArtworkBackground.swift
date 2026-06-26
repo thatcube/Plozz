@@ -15,18 +15,24 @@ import SwiftUI
 /// A dark scrim and gentle vignette are layered on top so foreground text and
 /// lyrics keep their contrast regardless of how bright the artwork is. When
 /// `palette` is empty (no artwork yet) it shows a calm neutral dark field.
-struct LiquidArtworkBackground: View {
+public struct LiquidArtworkBackground: View {
     /// Prominent colors, most significant first. May be empty.
-    var palette: [Color]
+    public var palette: [Color]
     /// When false (Reduce Motion) the gradient is rendered statically.
-    var animate: Bool = true
+    public var animate: Bool = true
     /// How the scrim over the morphing colors is painted.
-    var style: Style = .dark
+    public var style: Style = .dark
 
     /// The three background treatments the player offers.
-    enum Style { case dark, light, oled }
+    public enum Style { case dark, light, oled }
 
-    var body: some View {
+    public init(palette: [Color], animate: Bool = true, style: Style = .dark) {
+        self.palette = palette
+        self.animate = animate
+        self.style = style
+    }
+
+    public var body: some View {
         ZStack {
             base
             gradientLayer

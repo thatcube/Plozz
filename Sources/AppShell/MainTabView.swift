@@ -351,6 +351,50 @@ private func makePlayerViewModel(
     )
 }
 
+/// Hosts the full-screen player and builds its ``PlayerViewModel`` exactly once,
+/// off the render path.
+///
+/// Constructing the view model inline inside a `.fullScreenCover` content closure
+/// is a trap: SwiftUI re-invokes that closure on every parent render, and because
+/// ``PlayerView`` keeps the model in `@State` (the first value wins), every extra
+/// invocation builds a throwaway `PlayerViewModel` — and a throwaway
+/// `NativeVideoEngine` at its `init` — that is discarded immediately. Under the
+/// player's own `@Observable` mutation churn this becomes self-reinforcing: each
+/// render spawns engines that storm `AttributeGraph`, which drives more renders.
+/// On device this showed up as the live VM/Native instance counters racing
+/// upward (Native far ahead of VM, since every model makes a native engine before
+/// it ever routes to mpv), thermal throttling, and growing lag the longer the
+/// player stayed up.
+///
+/// Building the model in `.task`, gated by this view's identity, fires the factory
+/// once per presentation instead of once per render.
+@MainActor
+private struct PlayerPresentation: View {
+    let request: PlayRequest
+    let make: (PlayRequest) -> PlayerViewModel
+    let showDiagnostics: Bool
+    let themePalette: ThemePalette
+    @State private var viewModel: PlayerViewModel?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let viewModel {
+                PlayerView(
+                    viewModel: viewModel,
+                    showDiagnostics: showDiagnostics,
+                    themePalette: themePalette
+                )
+            }
+        }
+        .task {
+            if viewModel == nil {
+                viewModel = make(request)
+            }
+        }
+    }
+}
+
 /// Home tab with its own navigation stack: Home → Library (paged) → Detail and
 /// full-screen player presentation. Every destination resolves its provider from
 /// the tapped item/library's `sourceAccountID`.
@@ -456,13 +500,16 @@ private struct HomeTab: View {
             }
         }
         .fullScreenCover(item: $playRequest) { request in
-            PlayerView(
-                viewModel: makePlayerViewModel(
-                    for: request,
-                    accounts: accounts,
-                    captionSettings: captionSettings,
-                    scrobbler: scrobbler
-                ),
+            PlayerPresentation(
+                request: request,
+                make: {
+                    makePlayerViewModel(
+                        for: $0,
+                        accounts: accounts,
+                        captionSettings: captionSettings,
+                        scrobbler: scrobbler
+                    )
+                },
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
             )
@@ -724,13 +771,16 @@ private struct SearchTab: View {
             }
         }
         .fullScreenCover(item: $playRequest) { request in
-            PlayerView(
-                viewModel: makePlayerViewModel(
-                    for: request,
-                    accounts: accounts,
-                    captionSettings: captionSettings,
-                    scrobbler: scrobbler
-                ),
+            PlayerPresentation(
+                request: request,
+                make: {
+                    makePlayerViewModel(
+                        for: $0,
+                        accounts: accounts,
+                        captionSettings: captionSettings,
+                        scrobbler: scrobbler
+                    )
+                },
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
             )

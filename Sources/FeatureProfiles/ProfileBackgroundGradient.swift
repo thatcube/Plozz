@@ -169,23 +169,38 @@ struct ProfileBackgroundGradient: View {
         }
     }
 
-    /// A gentle center-weighting that never cuts off: the color is a little
-    /// stronger around the focused icon and eases down toward the edges, but
-    /// stays faintly present all the way out (no hard ring). Kept low-alpha for
-    /// an OLED-like subtlety rather than a bright spotlight.
+    /// A gentle center-weighting that never cuts off: the color is stronger
+    /// around the focused icon and eases down toward the edges, but stays faintly
+    /// present all the way out (no hard ring). The peak alpha is low and
+    /// per-theme, so the profile color reads as a subtle tint over the app's
+    /// existing background rather than a saturated wash.
     private func glowMask(in size: CGSize) -> some View {
         let radius = max(size.width, size.height) * 0.95
+        let peak = peakIntensity
         return RadialGradient(
             stops: [
-                .init(color: .white.opacity(0.50), location: 0.0),
-                .init(color: .white.opacity(0.30), location: 0.5),
-                .init(color: .white.opacity(0.14), location: 1.0)
+                .init(color: .white.opacity(peak), location: 0.0),
+                .init(color: .white.opacity(peak * 0.55), location: 0.5),
+                .init(color: .white.opacity(peak * 0.28), location: 1.0)
             ],
             center: focal,
             startRadius: 0,
             endRadius: radius
         )
         .ignoresSafeArea()
+    }
+
+    /// How strongly the profile color shows at the focal point, per theme. Kept
+    /// deliberately low — the app already has its own tinted background, so this
+    /// only needs to add a faint, center-weighted bloom of the profile's color.
+    /// OLED stays the most restrained; light gets a touch less than dark so the
+    /// color doesn't muddy the bright field.
+    private var peakIntensity: Double {
+        switch style {
+        case .dark: return 0.30
+        case .light: return 0.24
+        case .oled: return 0.18
+        }
     }
 
     /// Colors for the mesh: the focused profile's extracted/harmonised palette,

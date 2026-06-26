@@ -558,13 +558,17 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             // Give the album/playlist info column ~a third of the screen so the
             // Play and Shuffle buttons fit comfortably side by side.
             let infoWidth = max(480, geo.size.width * 0.33)
+            let bottomInset = PlozzTheme.Metrics.screenPadding
             HStack(alignment: .top, spacing: 56) {
                 info
                     .frame(width: infoWidth, alignment: .leading)
-                    // Pin the info column to the top of the page (matching the
-                    // track list), but keep the focus section spanning the full
+                    // Position the info column with the shared top offset; the
+                    // track list uses the same value for its top content margin
+                    // so both tops stay aligned. The focus section spans the full
                     // height so Left from any track row still reaches the
                     // transport controls.
+                    .padding(.top, topPadding)
+                    .padding(.bottom, bottomInset)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .focusSection()
                 ScrollView {
@@ -577,18 +581,20 @@ struct MusicDetailLayout<InfoColumn: View>: View {
                         isPlaying: isPlaying,
                         onPlayTrack: onPlayTrack
                     )
-                    .padding(.bottom, 40)
                 }
-                .scrollClipDisabled()
+                // The scroll view fills the full page height so rows travel all
+                // the way to the page's top and bottom edges instead of vanishing
+                // at an inset boundary. Content margins keep the first row aligned
+                // with the artwork (same offset as the info column) and leave a
+                // little breathing room at the bottom.
+                .frame(maxHeight: .infinity)
+                .contentMargins(.top, topPadding, for: .scrollContent)
+                .contentMargins(.bottom, bottomInset + 24, for: .scrollContent)
                 // Track list is its own focus section so Right from the info
                 // column reliably enters the list regardless of row alignment.
                 .focusSection()
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.bottom, PlozzTheme.Metrics.screenPadding)
-            // Both columns share this top padding, so their tops always align;
-            // it shrinks when the Now Playing card is present (taller column).
-            .padding(.top, topPadding)
         }
     }
 }

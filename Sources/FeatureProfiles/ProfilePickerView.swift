@@ -88,7 +88,7 @@ public struct ProfilePickerView: View {
     public var body: some View {
         VStack(spacing: 48) {
             Text(title)
-                .font(.system(size: 56, weight: .bold, design: .rounded))
+                .font(.system(size: 56, weight: .bold))
                 .foregroundStyle(palette.primaryText)
 
             LazyVGrid(columns: columns, spacing: 56) {

@@ -68,6 +68,11 @@ public final class AppState {
     /// When `true`, `RootView` shows the profile picker instead of the signed-in
     /// UI (shown at launch with >1 profile, and from "Switch Profile").
     public private(set) var isChoosingProfile = false
+    /// Whether the current profile picker can be dismissed without choosing.
+    /// `false` for the mandatory launch picker (Back / Cancel must not bail out
+    /// of it), `true` when opened from Settings → "Switch Profile" over an
+    /// already-active profile.
+    public private(set) var isProfileSelectionCancelable = false
 
     /// A pending Plex PIN prompt, raised when activating a profile mapped to a
     /// PIN-protected Plex Home user. `RootView` presents an entry sheet bound to
@@ -271,6 +276,8 @@ public final class AppState {
         // profile) is used silently and the picker stays hidden.
         isChoosingProfile = profilesModel.askProfileOnStartup
             && profilesModel.profiles.count > 1
+        // The launch picker is mandatory: Back / Cancel must not dismiss it.
+        isProfileSelectionCancelable = false
         apply(.restored(accounts))
         // Honor a remembered/auto-landed profile's Plex Home-user mapping at
         // launch. When the picker is shown, the switch happens once the user
@@ -589,6 +596,7 @@ public final class AppState {
 
     /// Opens the profile picker (from Settings → "Switch Profile").
     public func requestProfileSelection() {
+        isProfileSelectionCancelable = true
         isChoosingProfile = true
     }
 

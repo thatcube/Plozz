@@ -74,7 +74,7 @@ public struct RootView: View {
             case .ready:
                 ZStack {
                 if appState.isChoosingProfile {
-                    ProfileSelectionView(appState: appState, canCancel: appState.primaryProvider != nil)
+                    ProfileSelectionView(appState: appState, canCancel: appState.isProfileSelectionCancelable)
                         .transition(.opacity)
                 } else {
                     let accounts = appState.homeAccounts

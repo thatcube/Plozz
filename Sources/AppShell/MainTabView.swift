@@ -354,15 +354,12 @@ private func makePlayerViewModel(
             autoDismissOnEnd: true
         )
     }
-    // Capture only Sendable value types for the durable convergence hook so it can
-    // run off the main actor when the player stops. The item carries its cross-server
-    // sources, so the mutation fans out to every server holding the title + Trakt.
+    // Capture only Sendable value types / closures for the durable convergence hook
+    // so it can run off the main actor when the player stops. The eager identity
+    // lookup itself is resolved at stop time, after the shared index has had the
+    // full playback window to warm.
     let convergingItem = request.item
     let primaryAccountID = accounts.first?.account.id
-    // Snapshot the eager index's known servers for this title up front (Sendable
-    // value) so the off-main stop hook fans the final convergence write out to
-    // every server holding it, regardless of which entry path opened the player.
-    let convergingExtraSources = identitySources(convergingItem)
     // The live session key must match the origin target the factory derives for
     // the streaming server, so the reconciler defers writes against exactly that
     // (account,item) while it plays. `sourceAccountID` falls back to the primary
@@ -377,18 +374,14 @@ private func makePlayerViewModel(
         startPosition: request.startPosition,
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(),
-        onPlaybackStopped: { position, percent in
-            let mutation = WatchMutationFactory.playbackStop(
-                item: convergingItem,
-                position: position,
-                watchedPercent: percent,
-                primaryAccountID: primaryAccountID,
-                additionalSources: convergingExtraSources
-            )
-            // End the live session (so the just-played server is no longer
-            // deferred) and enqueue the final convergence write, in that order.
-            watchBridge.finishPlayback(liveAccountID, liveItemID, mutation)
-        },
+        onPlaybackStopped: makePlaybackStoppedHandler(
+            convergingItem: convergingItem,
+            primaryAccountID: primaryAccountID,
+            liveAccountID: liveAccountID,
+            liveItemID: liveItemID,
+            watchBridge: watchBridge,
+            identitySources: identitySources
+        ),
         onPlaybackStarted: {
             // Guard the streaming server while it plays: a mid-play drain can't
             // disturb/zero its now-playing session. Deferred, not dropped.
@@ -397,6 +390,28 @@ private func makePlayerViewModel(
             }
         }
     )
+}
+
+func makePlaybackStoppedHandler(
+    convergingItem: MediaItem,
+    primaryAccountID: String?,
+    liveAccountID: String?,
+    liveItemID: String,
+    watchBridge: WatchOutboxBridge,
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+) -> @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void {
+    { position, percent in
+        let mutation = WatchMutationFactory.playbackStop(
+            item: convergingItem,
+            position: position,
+            watchedPercent: percent,
+            primaryAccountID: primaryAccountID,
+            additionalSources: identitySources(convergingItem)
+        )
+        // End the live session (so the just-played server is no longer deferred)
+        // and enqueue the final convergence write, in that order.
+        watchBridge.finishPlayback(liveAccountID, liveItemID, mutation)
+    }
 }
 
 /// Home tab with its own navigation stack: Home → Library (paged) → Detail and

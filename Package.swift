@@ -307,6 +307,10 @@ let package = Package(
             dependencies: ["FeatureMusic", "CoreModels"]
         ),
         .testTarget(
+            name: "AppShellTests",
+            dependencies: ["AppShell", "CoreModels"]
+        ),
+        .testTarget(
             name: "FeaturePlaybackTests",
             dependencies: ["FeaturePlayback", "CoreModels"]
         ),

@@ -44,6 +44,24 @@ import Libmpv
 /// and lets the owner decide. Engine *routing* is intentionally NOT wired here;
 /// the app default stays on `NativeVideoEngine`.
 @MainActor
+struct MPVProgressCadence: Sendable {
+    let interval: TimeInterval
+    private var lastReportedSecond: Int = -1
+
+    mutating func reset() {
+        lastReportedSecond = -1
+    }
+
+    mutating func shouldReport(at seconds: TimeInterval, hasReachedEnd: Bool) -> Bool {
+        guard !hasReachedEnd else { return false }
+        let whole = Int(seconds)
+        guard whole != lastReportedSecond, whole % Int(interval) == 0 else { return false }
+        lastReportedSecond = whole
+        return true
+    }
+}
+
+@MainActor
 public final class MPVVideoEngine: NSObject, VideoEngine {
     // MARK: Observable state
 
@@ -94,8 +112,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     private var outputView: MPVRenderView?
 
     private var request: PlaybackRequest?
-    private let reportInterval: TimeInterval = 10
-    private var lastReportedSecond: Int = -1
+    private var progressCadence = MPVProgressCadence(interval: 10)
     private var hasFailed = false
 
     /// The opaque, *retained* `self` pointer handed to mpv's wakeup callback.
@@ -184,7 +201,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         didAttachExternalAudio = false
         currentTime = 0
         duration = 0
-        lastReportedSecond = -1
+        progressCadence.reset()
         furthestObservedPosition = max(furthestObservedPosition, startPosition)
 
         guard client.create() else {
@@ -327,7 +344,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         pendingDisplayCriteria = nil
         requestedDolbyVisionSwitch = false
         hdrStatus = MPVHDRStatus()
-        lastReportedSecond = -1
+        progressCadence.reset()
     }
 
     // MARK: - HDR display-mode switching
@@ -586,9 +603,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     }
 
     private func reportProgressIfNeeded(at seconds: TimeInterval) {
-        let whole = Int(seconds)
-        guard whole != lastReportedSecond, whole % Int(reportInterval) == 0 else { return }
-        lastReportedSecond = whole
+        guard progressCadence.shouldReport(at: seconds, hasReachedEnd: hasReachedEnd) else { return }
         onProgress?()
     }
 

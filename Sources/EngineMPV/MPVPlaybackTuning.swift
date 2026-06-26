@@ -43,6 +43,19 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
     /// libmpv `--demuxer-max-back-bytes`: backward demuxer cache ceiling (cheap
     /// instant back-seeks without a re-read).
     public var demuxerMaxBackBytes: String
+    /// libmpv `--video-sync`. `nil` leaves mpv's default (`audio` — drop/dupe
+    /// whole frames to hold audio sync), which is what shipped before SDR
+    /// frame-rate matching. Once the panel is frame-rate-matched, `display-resample`
+    /// can give the smoothest cadence (sync video to the display clock, resample
+    /// audio) but it adds GPU cost on the Vulkan→MoltenVK→Metal present chain —
+    /// the same cost that made `gpu-next` miss deadlines on SDR — so it's a
+    /// deliberate value to A/B on-device, not a hardcoded default.
+    public var videoSync: String?
+    /// libmpv `--interpolation`. Off by default: it only helps when the display
+    /// rate doesn't divide the source rate (which frame-rate matching is meant to
+    /// avoid) and is the most expensive present-path option, so enabling it is an
+    /// explicit, measured opt-in.
+    public var interpolation: Bool
 
     public init(
         hwdec: String = "videotoolbox",
@@ -51,7 +64,9 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
         cacheEnabled: Bool = true,
         demuxerReadaheadSecs: Int = 20,
         demuxerMaxBytes: String = "256MiB",
-        demuxerMaxBackBytes: String = "64MiB"
+        demuxerMaxBackBytes: String = "64MiB",
+        videoSync: String? = nil,
+        interpolation: Bool = false
     ) {
         self.hwdec = hwdec
         self.videoOutput = videoOutput
@@ -60,6 +75,8 @@ public struct MPVPlaybackTuning: Sendable, Equatable {
         self.demuxerReadaheadSecs = demuxerReadaheadSecs
         self.demuxerMaxBytes = demuxerMaxBytes
         self.demuxerMaxBackBytes = demuxerMaxBackBytes
+        self.videoSync = videoSync
+        self.interpolation = interpolation
     }
 
     /// The renderer to use for a stream: the heavier libplacebo `gpu-next` only

@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import FeatureAuth
 import FeatureDiscovery
+import FeatureMusic
 import FeatureProfiles
 import ProviderJellyfin
 import ProviderPlex
@@ -57,6 +58,13 @@ public final class AppState {
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
     public let profilesModel: ProfilesModel
+
+    /// The app-scoped audio playback engine. Created **once** and shared across
+    /// profile switches so there's only ever a single `AVQueuePlayer` — otherwise
+    /// switching profiles (which rebuilds the tab subtree) would spin up a second
+    /// controller and leave the previous profile's track audibly playing. Stopped
+    /// on profile switch so a new profile starts silent.
+    public let audioController = AudioPlaybackController()
     /// When `true`, `RootView` shows the profile picker instead of the signed-in
     /// UI (shown at launch with >1 profile, and from "Switch Profile").
     public private(set) var isChoosingProfile = false
@@ -594,6 +602,7 @@ public final class AppState {
     /// dismisses the picker. Fast: a few `UserDefaults` reads plus an in-memory
     /// account recompute; content reloads async via the rebuilt view subtree.
     public func switchProfile(to id: String) {
+        audioController.stop()
         profilesModel.select(id)
         rebuildSettingsModels()
         updateTraktForActiveProfile()

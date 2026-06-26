@@ -44,7 +44,7 @@ struct AppearanceDetailView: View {
 
                 SettingsPanel(
                     title: "Music Player",
-                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme; or pin a fixed look. “Show extra info” adds the album name, audio quality/format, and lyrics source under the title."
+                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme; or pin a fixed look."
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -71,7 +71,7 @@ struct AppearanceDetailView: View {
                         }
                         .scrollClipDisabled()
 
-                        Toggle("Show album & audio info", isOn: $musicPlayer.showTrackDetails)
+                        Toggle("Show album, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
                     }
                 }
 

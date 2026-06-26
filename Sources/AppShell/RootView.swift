@@ -78,6 +78,7 @@ public struct RootView: View {
                         themeModel: appState.themeModel,
                         diagnosticsModel: appState.diagnosticsModel,
                         musicPlayerModel: appState.musicPlayerModel,
+                        audioController: appState.audioController,
                         homeVisibility: appState.homeLibraryVisibilityModel,
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,

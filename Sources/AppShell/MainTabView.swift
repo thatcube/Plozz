@@ -28,6 +28,9 @@ struct MainTabView: View {
     let themeModel: ThemeSettingsModel
     let diagnosticsModel: DiagnosticsSettingsModel
     let musicPlayerModel: MusicPlayerSettingsModel
+    /// App-scoped audio engine, owned by `AppState` so it survives the per-profile
+    /// subtree rebuild (this view is re-created with a new `.id` on profile switch).
+    let audioController: AudioPlaybackController
     let homeVisibility: HomeLibraryVisibilityModel
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
@@ -54,7 +57,6 @@ struct MainTabView: View {
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 
     @State private var discovery = LibraryDiscoveryModel()
-    @State private var audioController = AudioPlaybackController()
     @State private var musicAvailability = MusicAvailabilityModel()
     @Environment(\.colorScheme) private var systemColorScheme
 

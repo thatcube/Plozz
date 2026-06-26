@@ -1356,4 +1356,41 @@ final class PlexWatchStateTests: XCTestCase {
             "42"
         )
     }
+
+    /// The out-of-band resume write must set `viewOffset` via `/:/progress` and
+    /// must NOT report `/:/timeline` (a `state=stopped` timeline ends the live
+    /// session and zeroes the server's now-playing dashboard — the reproduced
+    /// bug).
+    func testSetResumePositionUsesProgressNotTimeline() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/:/progress", json: "")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        try await provider.setResumePosition(120, itemID: "42")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/:/progress") })
+        XCTAssertFalse(stub.sentPaths.contains { $0.hasSuffix("/:/timeline") })
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/:/progress"))
+        XCTAssertEqual(query.first(where: { $0.name == "key" })?.value, "42")
+        XCTAssertEqual(query.first(where: { $0.name == "identifier" })?.value, "com.plexapp.plugins.library")
+        XCTAssertEqual(query.first(where: { $0.name == "time" })?.value, "120000")
+        XCTAssertEqual(query.first(where: { $0.name == "state" })?.value, "stopped")
+    }
+
+    /// Clearing the resume point (position 0) still goes through `/:/progress`,
+    /// never a timeline report.
+    func testSetResumePositionZeroUsesProgressNotTimeline() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/:/progress", json: "")
+        let provider = PlexProvider(session: makeSession(), http: stub)
+
+        try await provider.setResumePosition(0, itemID: "42")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/:/progress") })
+        XCTAssertFalse(stub.sentPaths.contains { $0.hasSuffix("/:/timeline") })
+        XCTAssertEqual(
+            stub.queryItems(forPathSuffix: "/:/progress")?.first(where: { $0.name == "time" })?.value,
+            "0"
+        )
+    }
 }

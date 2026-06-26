@@ -398,6 +398,29 @@ public struct JellyfinClient: Sendable {
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 
+    /// `POST /UserItems/{itemId}/UserData?userId={userId}` — updates **only** the
+    /// user's saved playback position, session-lessly. Unlike
+    /// `/Sessions/Playing/Stopped`, this never opens or terminates a live
+    /// now-playing session, so an out-of-band convergence write can't zero a
+    /// dashboard that is currently streaming the title. Sending only
+    /// `PlaybackPositionTicks` leaves every other user-data field (played,
+    /// favorite, play count) untouched — the server merges field-by-field.
+    ///
+    /// Available on Jellyfin **10.9+**. Older servers (10.8) lack this endpoint
+    /// and return `404`/``AppError/notFound``; the caller handles that fallback.
+    func updatePlaybackPosition(_ seconds: TimeInterval, userID: String, itemID: String) async throws {
+        var endpoint = Endpoint(
+            method: .post,
+            path: "/UserItems/\(itemID)/UserData",
+            queryItems: [URLQueryItem(name: "userId", value: userID)],
+            headers: authHeaders
+        )
+        endpoint = try endpoint.jsonBody(UpdateUserItemDataBody(
+            PlaybackPositionTicks: JellyfinTicks.ticks(fromSeconds: max(seconds, 0))
+        ))
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
+
     /// `POST`/`DELETE /Users/{userId}/PlayedItems/{itemId}` — marks an item
     /// played (POST) or unplayed (DELETE) for the user. For a season/series id
     /// Jellyfin cascades the change to the contained episodes.
@@ -692,4 +715,10 @@ private struct PlaybackProgressBody: Encodable {
     let PlaySessionId: String?
     let PositionTicks: Int64
     let IsPaused: Bool
+}
+
+/// Body for `POST /UserItems/{itemId}/UserData`. Only the position is sent so the
+/// server's field-by-field merge preserves played/favorite/play-count state.
+private struct UpdateUserItemDataBody: Encodable {
+    let PlaybackPositionTicks: Int64
 }

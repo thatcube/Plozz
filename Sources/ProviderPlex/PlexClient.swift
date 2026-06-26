@@ -343,6 +343,28 @@ public struct PlexClient: Sendable {
         _ = try await send(endpoint)
     }
 
+    /// `GET /:/progress` — set the saved resume point (`viewOffset`) **out-of-
+    /// band**, without opening or closing a live `/:/timeline` session. Used by
+    /// the convergence/durability path so a position write can't terminate a
+    /// now-playing session the way `/:/timeline?state=stopped` does (which would
+    /// zero the server's now-playing dashboard). Params mirror the Plex playstate
+    /// API used by sync tools: `key`=ratingKey,
+    /// `identifier`=`com.plexapp.plugins.library`, `time`=ms, `state`.
+    func reportProgress(ratingKey: String, timeMs: Int, state: String = "stopped") async throws {
+        let endpoint = Endpoint(
+            path: "/:/progress",
+            queryItems: [
+                URLQueryItem(name: "key", value: ratingKey),
+                URLQueryItem(name: "identifier", value: "com.plexapp.plugins.library"),
+                URLQueryItem(name: "time", value: String(timeMs)),
+                URLQueryItem(name: "state", value: state),
+                URLQueryItem(name: "X-Plex-Token", value: token)
+            ],
+            headers: headers
+        )
+        _ = try await send(endpoint)
+    }
+
     /// `GET /:/scrobble` (watched) or `GET /:/unscrobble` (unwatched) — toggles
     /// an item's watched state. Scrobbling a season/series ratingKey marks the
     /// contained episodes too.

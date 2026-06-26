@@ -815,16 +815,17 @@ extension PlexProvider: WatchStateProviding {
 }
 
 extension PlexProvider: ResumeStateWriting {
-    /// Writes a resume position session-lessly via `/:/timeline` (a `stopped`
-    /// report at the position). A position of `0` clears the resume point.
+    /// Writes a resume position **out-of-band** (convergence/durability path) via
+    /// `/:/progress`, which updates the saved `viewOffset` without opening or
+    /// terminating a live `/:/timeline` session. The previous implementation
+    /// reported `/:/timeline?state=stopped`, which **ends the session** and would
+    /// snap a concurrent now-playing dashboard to 0:00 — the bug this avoids. A
+    /// position of `0` clears the resume point.
     public func setResumePosition(_ seconds: TimeInterval, itemID: String) async throws {
-        let progress = PlaybackProgress(
-            itemID: itemID,
-            playSessionID: nil,
-            positionSeconds: max(seconds, 0),
-            isPaused: true
+        try await client.reportProgress(
+            ratingKey: itemID,
+            timeMs: PlexTime.milliseconds(fromSeconds: max(seconds, 0))
         )
-        try await reportPlayback(progress, event: .stop)
     }
 }
 

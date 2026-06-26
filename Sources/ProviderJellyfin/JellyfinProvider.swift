@@ -817,17 +817,33 @@ extension JellyfinProvider: WatchStateProviding {
 }
 
 extension JellyfinProvider: ResumeStateWriting {
-    /// Writes a resume position session-lessly by reporting a `stop` at that
-    /// position for `itemID`, which updates the user's `PlaybackPositionTicks`.
-    /// A position of `0` clears the resume point.
+    /// Writes a resume position **out-of-band** (convergence/durability path)
+    /// without disturbing any live now-playing session.
+    ///
+    /// Routes through the session-less user-data endpoint
+    /// (`POST /UserItems/{itemId}/UserData`, Jellyfin 10.9+), which updates only
+    /// `PlaybackPositionTicks`. The previous implementation reported a `stop` at
+    /// the position, which posts to `/Sessions/Playing/Stopped` and **terminates
+    /// the live session**, snapping the server's now-playing dashboard to 0:00 —
+    /// the bug this avoids. A position of `0` clears the resume point.
+    ///
+    /// On Jellyfin < 10.9 (no user-data endpoint → `404`) it falls back to the
+    /// legacy stop report so the position still converges rather than being
+    /// silently dropped (durability / never-drop). Documented caveat: on that
+    /// older-server fallback only, a convergence write can still disturb a
+    /// concurrent live session of the same title.
     public func setResumePosition(_ seconds: TimeInterval, itemID: String) async throws {
-        let progress = PlaybackProgress(
-            itemID: itemID,
-            playSessionID: nil,
-            positionSeconds: max(seconds, 0),
-            isPaused: true
-        )
-        try await reportPlayback(progress, event: .stop)
+        do {
+            try await client.updatePlaybackPosition(max(seconds, 0), userID: session.userID, itemID: itemID)
+        } catch AppError.notFound {
+            let progress = PlaybackProgress(
+                itemID: itemID,
+                playSessionID: nil,
+                positionSeconds: max(seconds, 0),
+                isPaused: true
+            )
+            try await reportPlayback(progress, event: .stop)
+        }
     }
 }
 

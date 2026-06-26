@@ -780,6 +780,64 @@ final class JellyfinWatchStateTests: XCTestCase {
 
         XCTAssertEqual(stub.method(forPathSuffix: "/Users/u1/PlayedItems/i1"), .delete)
     }
+
+    /// The out-of-band resume write must update the saved position via the
+    /// session-less user-data endpoint and must NOT post to
+    /// `/Sessions/Playing/Stopped` (which terminates a live now-playing session
+    /// and zeroes the server dashboard — the reproduced bug).
+    func testSetResumePositionUsesSessionlessUserDataEndpoint() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/UserItems/i1/UserData", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setResumePosition(120, itemID: "i1")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/UserItems/i1/UserData") })
+        XCTAssertEqual(stub.method(forPathSuffix: "/UserItems/i1/UserData"), .post)
+        // Never a session-ending stop report.
+        XCTAssertFalse(stub.sentPaths.contains { $0.hasSuffix("/Sessions/Playing/Stopped") })
+        // userId carried as a query param.
+        XCTAssertEqual(
+            stub.queryItems(forPathSuffix: "/UserItems/i1/UserData")?.first(where: { $0.name == "userId" })?.value,
+            "u1"
+        )
+        // Body sends only the position (120s → 1_200_000_000 ticks), preserving
+        // played/favorite via the server's field-by-field merge.
+        let body = try XCTUnwrap(stub.sentBodies.first { $0.key.hasSuffix("/UserItems/i1/UserData") }?.value)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let ticks = try XCTUnwrap(json["PlaybackPositionTicks"] as? NSNumber)
+        XCTAssertEqual(ticks.int64Value, 1_200_000_000)
+        XCTAssertNil(json["Played"])
+        XCTAssertNil(json["IsFavorite"])
+    }
+
+    /// Clearing the resume point (position 0) still goes through the session-less
+    /// endpoint, never a stop report.
+    func testSetResumePositionZeroUsesUserDataNotStop() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/UserItems/i1/UserData", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setResumePosition(0, itemID: "i1")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/UserItems/i1/UserData") })
+        XCTAssertFalse(stub.sentPaths.contains { $0.hasSuffix("/Sessions/Playing/Stopped") })
+    }
+
+    /// On Jellyfin < 10.9 the user-data endpoint 404s; the write falls back to the
+    /// legacy stop report so the position still converges (durability / never
+    /// silently drop a watch).
+    func testSetResumePositionFallsBackToStopWhenUserDataUnavailable() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/UserItems/i1/UserData", json: "{}", status: 404)
+        stub.stub(pathSuffix: "/Sessions/Playing/Stopped", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setResumePosition(120, itemID: "i1")
+
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/UserItems/i1/UserData") })
+        XCTAssertTrue(stub.sentPaths.contains { $0.hasSuffix("/Sessions/Playing/Stopped") })
+    }
 }
 
 final class JellyfinDeliveryModeTests: XCTestCase {

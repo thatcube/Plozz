@@ -157,7 +157,13 @@ struct MusicScrubBar: View {
 
             ZStack(alignment: .leading) {
                 glassTrack(height: barHeight)
-                Capsule()
+                UnevenRoundedRectangle(
+                    topLeadingRadius: barHeight / 2,
+                    bottomLeadingRadius: barHeight / 2,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: 0,
+                    style: .continuous
+                )
                     .fill(.white.opacity(focused ? 0.85 : 0.5))
                     .frame(width: max(knobWidth, knobX), height: barHeight)
                 RoundedRectangle(cornerRadius: knobWidth / 2, style: .continuous)

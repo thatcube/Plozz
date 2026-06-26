@@ -251,6 +251,10 @@ let package = Package(
             dependencies: ["CoreModels", "CoreUI"]
         ),
         .testTarget(
+            name: "AppShellTests",
+            dependencies: ["AppShell", "CoreModels"]
+        ),
+        .testTarget(
             name: "CoreUITests",
             dependencies: ["CoreUI", "CoreModels"]
         ),

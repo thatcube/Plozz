@@ -514,8 +514,28 @@ struct TrackListView: View {
                 }
                 .buttonStyle(TrackRowButtonStyle())
                 .focusEffectDisabled()
+                .onAppear { prefetchArtwork(around: index) }
             }
         }
+    }
+
+    /// Warms the decoded-image cache for a window of rows just *below* the one
+    /// that appeared, so a normal downward scroll finds each playlist thumbnail
+    /// already decoded and it renders instantly instead of fading in. Bounded
+    /// lookahead + the cache's background-warm limiter keep this cheap even on an
+    /// 8000-track playlist. No-op for albums (numbered list, no per-row art).
+    private func prefetchArtwork(around index: Int) {
+        #if canImport(UIKit)
+        guard showArtwork, !tracks.isEmpty else { return }
+        let lookahead = 16
+        let end = min(index + lookahead, tracks.count - 1)
+        guard end > index else { return }
+        for i in (index + 1)...end {
+            if let url = tracks[i].artworkURL ?? artworkFallback {
+                ArtworkImageCache.shared.prefetch(url, variant: .musicThumbnail)
+            }
+        }
+        #endif
     }
 
     /// The leading column of a track row. Playlists show the track's own album
@@ -528,7 +548,8 @@ struct TrackListView: View {
             MusicArtworkImage(
                 url: track.artworkURL ?? artworkFallback,
                 systemPlaceholder: "music.note",
-                cornerRadius: 8
+                cornerRadius: 8,
+                variant: .musicThumbnail
             )
             .frame(width: 72, height: 72)
             .overlay {

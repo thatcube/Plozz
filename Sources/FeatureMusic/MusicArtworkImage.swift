@@ -16,17 +16,20 @@ struct MusicArtworkImage: View {
     let url: URL?
     var systemPlaceholder: String = "music.note"
     var cornerRadius: CGFloat = 12
+    var variant: ArtworkImageVariant = .original
     var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
 
     init(
         url: URL?,
         systemPlaceholder: String = "music.note",
         cornerRadius: CGFloat = 12,
+        variant: ArtworkImageVariant = .original,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil
     ) {
         self.url = url
         self.systemPlaceholder = systemPlaceholder
         self.cornerRadius = cornerRadius
+        self.variant = variant
         self.asyncFallbackURL = asyncFallbackURL
     }
 
@@ -36,6 +39,7 @@ struct MusicArtworkImage: View {
                 .fill(Color.primary.opacity(0.08))
             FallbackAsyncImage(
                 urls: [url].compactMap { $0 },
+                variant: variant,
                 asyncFallbackURL: asyncFallbackURL
             ) {
                 placeholder

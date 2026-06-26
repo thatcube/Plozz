@@ -20,29 +20,67 @@ struct LiquidArtworkBackground: View {
     var palette: [Color]
     /// When false (Reduce Motion) the gradient is rendered statically.
     var animate: Bool = true
+    /// How the scrim over the morphing colors is painted.
+    var style: Style = .dark
+
+    /// The three background treatments the player offers.
+    enum Style { case dark, light, oled }
 
     var body: some View {
         ZStack {
-            Color.black
+            base
             gradientLayer
                 .ignoresSafeArea()
-            // Keep foreground legible: an even dim, a darker vignette toward the
-            // edges, and a subtle bottom-weighted gradient behind the controls.
-            Color.black.opacity(0.32)
-            RadialGradient(
-                colors: [.clear, Color.black.opacity(0.45)],
-                center: .center,
-                startRadius: 200,
-                endRadius: 1400
-            )
-            LinearGradient(
-                colors: [.clear, .clear, Color.black.opacity(0.35)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+                .opacity(gradientOpacity)
+            scrim
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 1.2), value: palette)
+    }
+
+    /// The solid floor under the morphing colors.
+    private var base: some View {
+        (style == .light ? Color.white : Color.black)
+    }
+
+    /// How strongly the artwork colors show through, per style.
+    private var gradientOpacity: Double {
+        switch style {
+        case .dark: return 1.0
+        case .light: return 0.85
+        case .oled: return 0.5
+        }
+    }
+
+    /// Per-style legibility layers: dark veils + vignette for dark/OLED, a light
+    /// veil for the frosted look. Keeps foreground text readable regardless of
+    /// how bright or busy the artwork is.
+    @ViewBuilder
+    private var scrim: some View {
+        switch style {
+        case .dark:
+            Color.black.opacity(0.32)
+            RadialGradient(colors: [.clear, Color.black.opacity(0.45)],
+                           center: .center, startRadius: 200, endRadius: 1400)
+            LinearGradient(colors: [.clear, .clear, Color.black.opacity(0.35)],
+                           startPoint: .top, endPoint: .bottom)
+        case .oled:
+            // Push almost everything to true black, leaving the colors as faint
+            // accents — easy on OLED panels and very high contrast.
+            Color.black.opacity(0.6)
+            RadialGradient(colors: [.clear, Color.black.opacity(0.78)],
+                           center: .center, startRadius: 160, endRadius: 1400)
+            LinearGradient(colors: [.clear, .clear, Color.black.opacity(0.55)],
+                           startPoint: .top, endPoint: .bottom)
+        case .light:
+            // A frosted near-white veil mutes the colors and lifts the field so
+            // dark text stays legible while keeping the artwork tint.
+            Color.white.opacity(0.55)
+            RadialGradient(colors: [.clear, Color.white.opacity(0.3)],
+                           center: .center, startRadius: 220, endRadius: 1400)
+            LinearGradient(colors: [.clear, .clear, Color.white.opacity(0.28)],
+                           startPoint: .top, endPoint: .bottom)
+        }
     }
 
     @ViewBuilder

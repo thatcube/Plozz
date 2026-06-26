@@ -48,9 +48,16 @@ struct NowPlayingView: View {
 
     /// Whether the player shows extra track detail — album name, audio
     /// quality/format, and the lyrics source. Off by default to keep the screen
-    /// clean (it's a niche audiophile detail); toggled from Settings ▸ Now
-    /// Playing and remembered across sessions.
+    /// clean (it's a niche audiophile detail); toggled from Settings ▸ Appearance
+    /// and remembered across sessions.
     @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
+
+    /// The player's chosen background look (Settings ▸ Appearance ▸ Music
+    /// Player). Defaults to following the app theme.
+    @AppStorage(MusicPlayerAppearance.storageKey) private var playerAppearance: MusicPlayerAppearance = .matchTheme
+    /// The app's current light/dark resolution, read from the environment the
+    /// player is presented in — used only when `playerAppearance` is `.matchTheme`.
+    @Environment(\.colorScheme) private var systemColorScheme
 
     /// The lyrics panel is shown next to the player **only once lyrics are
     /// actually found**. While the background lookup is in flight (or if the track
@@ -128,12 +135,26 @@ struct NowPlayingView: View {
             controller.togglePlayPause()
             showControls()
         }
-        // The player always sits on its own dark, artwork-tinted background, so
-        // it must never follow the app's light/dark theme — force the whole
-        // subtree to resolve as dark so text and glass stay light-on-dark even
-        // when the rest of the app is in a light theme.
-        .environment(\.colorScheme, .dark)
+        // The player paints its own background, so it never blindly inherits the
+        // app theme. It resolves its own look (see `playerStyle`) and forces the
+        // subtree's color scheme to match so text and glass read correctly —
+        // light-on-dark for Vibrant Dark / OLED, dark-on-light for Frosted Light.
+        .environment(\.colorScheme, isLightPlayer ? .light : .dark)
     }
+
+    /// The resolved background treatment, collapsing `.matchTheme` against the
+    /// app's current light/dark appearance.
+    private var playerStyle: LiquidArtworkBackground.Style {
+        switch playerAppearance {
+        case .matchTheme: return systemColorScheme == .light ? .light : .dark
+        case .dark: return .dark
+        case .light: return .light
+        case .oled: return .oled
+        }
+    }
+
+    /// Whether the resolved player look is the light one (drives text color).
+    private var isLightPlayer: Bool { playerStyle == .light }
 
     /// A button style that renders only its label with no platform focus
     /// decoration. Used for the full-screen reveal catcher so taking focus while
@@ -213,6 +234,8 @@ struct NowPlayingView: View {
             MusicArtworkImage(
                 url: controller.currentTrack?.artworkURL,
                 systemPlaceholder: "music.note",
+                cornerRadius: 16,
+                showsMediaEdge: false,
                 asyncFallbackURL: trackFallback(controller.currentTrack)
             )
                 .frame(width: 420, height: 420)
@@ -246,8 +269,9 @@ struct NowPlayingView: View {
         }
     }
 
-    /// The full-width transport bar across the bottom: scrub row + button row,
-    /// over a soft dark scrim so it stays legible against the artwork colors.
+    /// The full-width transport bar across the bottom, over a soft scrim so it
+    /// stays legible against the artwork colors. The scrim flips to white for the
+    /// frosted-light look so it lightens rather than darkens the controls area.
     private var bottomControls: some View {
         VStack(spacing: 24) {
             scrubRow
@@ -259,7 +283,7 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity)
         .background(
             LinearGradient(
-                colors: [.clear, .black.opacity(0.55)],
+                colors: [.clear, (isLightPlayer ? Color.white : Color.black).opacity(0.55)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -277,7 +301,7 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private var background: some View {
-        LiquidArtworkBackground(palette: artworkPalette, animate: !reduceMotion)
+        LiquidArtworkBackground(palette: artworkPalette, animate: !reduceMotion, style: playerStyle)
     }
 
     /// Loads the current track's artwork (reusing the shared decoded-image cache)

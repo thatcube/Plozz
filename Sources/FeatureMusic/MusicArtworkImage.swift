@@ -17,6 +17,10 @@ struct MusicArtworkImage: View {
     var systemPlaceholder: String = "music.note"
     var cornerRadius: CGFloat = 12
     var variant: ArtworkImageVariant = .original
+    /// Whether to draw the theme-aware hairline rim around the artwork. Off for
+    /// the full-screen player, which wants plain classic rounded corners that
+    /// don't shift with the app theme.
+    var showsMediaEdge: Bool = true
     var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
 
     init(
@@ -24,12 +28,14 @@ struct MusicArtworkImage: View {
         systemPlaceholder: String = "music.note",
         cornerRadius: CGFloat = 12,
         variant: ArtworkImageVariant = .original,
+        showsMediaEdge: Bool = true,
         asyncFallbackURL: (@Sendable () async -> URL?)? = nil
     ) {
         self.url = url
         self.systemPlaceholder = systemPlaceholder
         self.cornerRadius = cornerRadius
         self.variant = variant
+        self.showsMediaEdge = showsMediaEdge
         self.asyncFallbackURL = asyncFallbackURL
     }
 
@@ -46,13 +52,28 @@ struct MusicArtworkImage: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .plozzMediaEdge(cornerRadius: cornerRadius)
+        .modifier(OptionalMediaEdge(cornerRadius: cornerRadius, enabled: showsMediaEdge))
     }
 
     private var placeholder: some View {
         Image(systemName: systemPlaceholder)
             .font(.system(size: 44))
             .foregroundStyle(.secondary)
+    }
+}
+
+/// Applies the shared media-edge rim only when enabled, so callers (the player)
+/// can opt out of the theme-aware border and keep plain rounded corners.
+private struct OptionalMediaEdge: ViewModifier {
+    let cornerRadius: CGFloat
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.plozzMediaEdge(cornerRadius: cornerRadius)
+        } else {
+            content
+        }
     }
 }
 

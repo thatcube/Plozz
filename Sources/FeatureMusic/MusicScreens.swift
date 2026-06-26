@@ -490,9 +490,11 @@ struct TrackListView: View {
                                 Text(track.trackNumber.map(String.init) ?? "\(index + 1)")
                                     .font(.headline.monospacedDigit())
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
                             }
                         }
-                        .frame(width: 44, alignment: .trailing)
+                        .frame(width: 56, alignment: .trailing)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(track.title)
                                 .font(.headline)

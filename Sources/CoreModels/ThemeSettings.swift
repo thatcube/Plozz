@@ -82,3 +82,14 @@ public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, 
     /// AppStorage key shared by the player (reads it) and Settings (writes it).
     public static let storageKey = "musicPlayerAppearance"
 }
+
+/// Persistence for the Now Playing lyrics on/off toggle. Held here so every site
+/// that reads the preference — the player's `@AppStorage` toggle and the lyrics
+/// resolver that decides whether to consult the third-party LRCLIB fallback —
+/// shares one key and default instead of duplicating a string literal.
+public enum MusicLyricsPreference {
+    /// AppStorage/UserDefaults key for whether the lyrics panel is enabled.
+    public static let storageKey = "musicLyricsEnabled"
+    /// Lyrics are on by default.
+    public static let defaultEnabled = true
+}

@@ -136,8 +136,15 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
             return serverLyrics
         }
 
-        // Server had no synced lyrics — try LRCLIB for a synced copy.
-        if let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines),
+        // Server had no synced lyrics — try LRCLIB for a synced copy, but only
+        // when the user hasn't turned lyrics off. Don't send a opted-out user's
+        // track title/artist to a third party (lrclib.net) just to populate a
+        // panel they've hidden. Read defensively so the on-by-default applies
+        // when the key was never written.
+        let lyricsEnabled = UserDefaults.standard.object(forKey: MusicLyricsPreference.storageKey) as? Bool
+            ?? MusicLyricsPreference.defaultEnabled
+        if lyricsEnabled,
+           let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !artist.isEmpty {
             let lrclibLyrics = await LRCLIBLyricsProvider().lyrics(
                 title: track.title,

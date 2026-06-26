@@ -489,7 +489,7 @@ struct TrackListView: View {
         // thousands of tracks, and an eager VStack materialised every row at once
         // (8000+ → out-of-memory crash).
         LazyVStack(spacing: 4) {
-            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+            ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
                 let isCurrent = track.id == nowPlayingTrackID
                 Button { onPlayTrack(track) } label: {
                     HStack(spacing: 20) {

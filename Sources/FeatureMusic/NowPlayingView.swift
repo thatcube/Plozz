@@ -51,7 +51,7 @@ struct NowPlayingView: View {
     /// Whether the user wants the lyrics panel shown. Persisted (default on) so
     /// the choice is remembered across sessions. The toggle is disabled — and so
     /// can't be changed — when the current track has no lyrics.
-    @AppStorage("musicLyricsEnabled") private var lyricsEnabled = true
+    @AppStorage(MusicLyricsPreference.storageKey) private var lyricsEnabled = MusicLyricsPreference.defaultEnabled
 
     /// Whether the player shows extra track detail — album name, audio
     /// quality/format, and the lyrics source. Off by default to keep the screen

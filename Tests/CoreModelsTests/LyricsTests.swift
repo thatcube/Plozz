@@ -33,7 +33,7 @@ final class LyricsTests: XCTestCase {
         // ID tags are skipped; four timestamped lines remain.
         XCTAssertEqual(lyrics.lines.count, 4)
         XCTAssertEqual(lyrics.lines[0].text, "Intro")
-        XCTAssertEqual(lyrics.lines[0].start, 0, accuracy: 0.001)
+        XCTAssertEqual(lyrics.lines[0].start ?? -1, 0, accuracy: 0.001)
         XCTAssertEqual(lyrics.lines[1].start ?? -1, 12.5, accuracy: 0.001)
         XCTAssertEqual(lyrics.lines[2].start ?? -1, 65.0, accuracy: 0.001)
         XCTAssertEqual(lyrics.lines[3].start ?? -1, 70.0, accuracy: 0.001)
@@ -69,5 +69,25 @@ final class LyricsTests: XCTestCase {
 
     func testBlankLRCReturnsNil() {
         XCTAssertNil(Lyrics(lrc: "   \n\n  "))
+    }
+
+    func testLRCWithLeadingBOMParsesFirstLine() throws {
+        // A BOM-prefixed `.lrc` (some Plex sidecars) must not turn the first
+        // timestamped line into an untimed plain line.
+        let lyrics = try XCTUnwrap(Lyrics(lrc: "\u{FEFF}[00:01.00]First\n[00:02.00]Second"))
+        XCTAssertTrue(lyrics.isSynced)
+        XCTAssertEqual(lyrics.lines.map(\.text), ["First", "Second"])
+        XCTAssertEqual(lyrics.lines[0].start ?? -1, 1, accuracy: 0.001)
+    }
+
+    func testLRCNormalizesLoneCarriageReturns() throws {
+        // Classic-Mac line breaks (lone \r) split lines, not stay inside text.
+        let lyrics = try XCTUnwrap(Lyrics(lrc: "[00:01.00]A\r[00:02.00]B"))
+        XCTAssertEqual(lyrics.lines.map(\.text), ["A", "B"])
+    }
+
+    func testPlainTextNormalizesLoneCarriageReturns() {
+        let lyrics = Lyrics(plainText: "A\rB\rC")
+        XCTAssertEqual(lyrics.lines.map(\.text), ["A", "B", "C"])
     }
 }

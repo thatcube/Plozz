@@ -468,7 +468,9 @@ public struct PlexClient: Sendable {
             headers: headers
         )
         let (data, _) = try await send(endpoint)
-        return String(data: data, encoding: .utf8)
+        // Most sidecars are UTF-8; fall back to Latin-1 so a non-UTF-8 `.lrc`
+        // still decodes (Latin-1 maps any byte, so this won't return nil).
+        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
     }
 
     /// Builds an absolute, token-bearing stream URL for a part `key` (which is

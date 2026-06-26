@@ -75,6 +75,7 @@ public struct Lyrics: Codable, Hashable, Sendable {
     public init(plainText: String) {
         let lines = plainText
             .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
             .components(separatedBy: "\n")
             .map { LyricLine(text: $0.trimmingCharacters(in: .whitespaces)) }
         self.init(lines: lines)
@@ -167,13 +168,21 @@ public struct Lyrics: Codable, Hashable, Sendable {
     /// Supports multiple timestamps on one line (`[00:12.00][00:47.00]Chorus`)
     /// and ignores ID-tag lines like `[ar:Artist]` / `[ti:Title]`.
     public init?(lrc: String) {
-        let trimmed = lrc.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip a leading UTF-8/UTF-16 BOM (U+FEFF) that some Plex `.lrc`
+        // sidecars carry — it isn't whitespace, so without this the first line
+        // fails the `[` timestamp check and becomes an untimed plain line.
+        let trimmed = lrc
+            .replacingOccurrences(of: "\u{FEFF}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
         var parsed: [LyricLine] = []
         var sawTimestamp = false
 
-        for raw in trimmed.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
+        for raw in trimmed
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n") {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty else { continue }
 

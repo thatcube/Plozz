@@ -323,11 +323,19 @@ extension JellyfinProvider: MusicProvider {
               let rawLines = dto.Lyrics, !rawLines.isEmpty else {
             return nil
         }
-        let lines = rawLines.map { line in
+        var lines = rawLines.map { line in
             LyricLine(
                 text: line.Text ?? "",
                 start: JellyfinTicks.seconds(fromTicks: line.Start)
             )
+        }
+        // Sort synced lines by timestamp (parity with the LRC and Plex-JSON
+        // parsers). The active-line scan in the player relies on ascending order,
+        // so guard against a server that returns timed lines out of order. Only
+        // sort when there are timestamps — reordering plain (unsynced) lines
+        // would scramble their intended reading order.
+        if lines.contains(where: { $0.start != nil }) {
+            lines.sort { ($0.start ?? 0) < ($1.start ?? 0) }
         }
         let lyrics = Lyrics(lines: lines)
         return lyrics.isEmpty ? nil : lyrics.taggingSource(.jellyfin)

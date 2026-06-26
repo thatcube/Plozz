@@ -114,24 +114,39 @@ func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackControll
 /// `streamURLResolver`, so the Now Playing lyrics panel works for whichever
 /// backend owns the track.
 @MainActor
-/// Resolves a track's lyrics: the user's server first, then the keyless LRCLIB
-/// public fallback when the server has none. The result carries its own source
-/// tag (Jellyfin/Plex/LRCLIB) for the attribution badge.
+/// Resolves a track's lyrics, **preferring a synced (scrollable/karaoke)
+/// version**. Tries the user's server first; if the server has none — or only
+/// unsynced plain text — it consults the keyless LRCLIB fallback and uses its
+/// result when that one is synced. Each result carries its own source tag
+/// (Jellyfin/Plex/LRCLIB) for the attribution badge.
 func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
     { track in
-        if let serverLyrics = try? await provider.lyrics(for: track.id), !serverLyrics.isEmpty {
+        let serverLyrics = try? await provider.lyrics(for: track.id)
+        if let serverLyrics, !serverLyrics.isEmpty, serverLyrics.isSynced {
             return serverLyrics
         }
-        guard let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !artist.isEmpty else {
-            return nil
+
+        // Server gave nothing or only plain text — try LRCLIB for a synced copy.
+        var lrclibLyrics: Lyrics?
+        if let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !artist.isEmpty {
+            lrclibLyrics = await LRCLIBLyricsProvider().lyrics(
+                title: track.title,
+                artist: artist,
+                album: track.albumTitle,
+                duration: track.duration
+            )
         }
-        return await LRCLIBLyricsProvider().lyrics(
-            title: track.title,
-            artist: artist,
-            album: track.albumTitle,
-            duration: track.duration
-        )
+
+        // Prefer whichever is synced; otherwise keep the server's plain lyrics,
+        // falling back to LRCLIB's plain lyrics only if the server had none.
+        if let lrclibLyrics, lrclibLyrics.isSynced {
+            return lrclibLyrics
+        }
+        if let serverLyrics, !serverLyrics.isEmpty {
+            return serverLyrics
+        }
+        return lrclibLyrics
     }
 }
 #endif

@@ -28,15 +28,20 @@ public struct LRCLIBLyricsProvider: Sendable {
         let trimmedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty, !trimmedArtist.isEmpty else { return nil }
 
-        if let exact = await exactMatch(title: trimmedTitle, artist: trimmedArtist, album: album, duration: duration),
-           let lyrics = exact.lyrics() {
-            return lyrics
+        // Prefer a synced result. The exact `/get` match is best when it's
+        // synced; otherwise keep it as a plain fallback and try `/search`, which
+        // can surface a synced copy from another upload.
+        let exact = await exactMatch(title: trimmedTitle, artist: trimmedArtist, album: album, duration: duration)
+        if let exactLyrics = exact?.lyrics(), exactLyrics.isSynced {
+            return exactLyrics
         }
         if let searched = await search(title: trimmedTitle, artist: trimmedArtist, duration: duration),
-           let lyrics = searched.lyrics() {
-            return lyrics
+           let searchedLyrics = searched.lyrics() {
+            if searchedLyrics.isSynced { return searchedLyrics }
+            // Neither is synced: keep the exact match if it had anything.
+            return exact?.lyrics() ?? searchedLyrics
         }
-        return nil
+        return exact?.lyrics()
     }
 
     private func exactMatch(
@@ -72,13 +77,16 @@ public struct LRCLIBLyricsProvider: Sendable {
         return bestMatch(in: results, duration: duration)
     }
 
-    /// Picks the best record: prefer ones carrying usable lyrics, then — when a
-    /// duration is known — the one whose duration is closest.
+    /// Picks the best record: first prefer ones with **synced** lyrics, then —
+    /// when a duration is known — the one whose duration is closest.
     private func bestMatch(in records: [LRCLIBRecord], duration: TimeInterval?) -> LRCLIBRecord? {
         let usable = records.filter { $0.lyrics() != nil }
         guard !usable.isEmpty else { return nil }
-        guard let duration, duration > 0 else { return usable.first }
-        return usable.min { lhs, rhs in
+        // Prefer synced records when any exist, so the panel can scroll/highlight.
+        let synced = usable.filter { $0.hasSyncedLyrics }
+        let pool = synced.isEmpty ? usable : synced
+        guard let duration, duration > 0 else { return pool.first }
+        return pool.min { lhs, rhs in
             abs((lhs.duration ?? .greatestFiniteMagnitude) - duration)
                 < abs((rhs.duration ?? .greatestFiniteMagnitude) - duration)
         }
@@ -97,6 +105,12 @@ private struct LRCLIBRecord: Decodable {
     let instrumental: Bool?
     let plainLyrics: String?
     let syncedLyrics: String?
+
+    /// Whether this record carries usable synced (timestamped) lyrics.
+    var hasSyncedLyrics: Bool {
+        guard let synced = syncedLyrics, let parsed = Lyrics(lrc: synced) else { return false }
+        return parsed.isSynced && !parsed.isEmpty
+    }
 
     /// Converts the record into a tagged `Lyrics`, preferring synced over plain,
     /// returning `nil` for instrumentals or empty payloads.

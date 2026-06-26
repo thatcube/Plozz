@@ -169,16 +169,17 @@ struct ProfileBackgroundGradient: View {
         }
     }
 
-    /// A soft radial falloff centered on `focal`: opaque at the icon, fading to
-    /// clear well before the screen edges, so only a contained pool of color
-    /// surrounds the focused profile.
+    /// A gentle center-weighting that never cuts off: the color is a little
+    /// stronger around the focused icon and eases down toward the edges, but
+    /// stays faintly present all the way out (no hard ring). Kept low-alpha for
+    /// an OLED-like subtlety rather than a bright spotlight.
     private func glowMask(in size: CGSize) -> some View {
-        let radius = max(size.width, size.height) * 0.34
+        let radius = max(size.width, size.height) * 0.95
         return RadialGradient(
             stops: [
-                .init(color: .white, location: 0.0),
-                .init(color: .white.opacity(0.65), location: 0.45),
-                .init(color: .clear, location: 1.0)
+                .init(color: .white.opacity(0.50), location: 0.0),
+                .init(color: .white.opacity(0.30), location: 0.5),
+                .init(color: .white.opacity(0.14), location: 1.0)
             ],
             center: focal,
             startRadius: 0,

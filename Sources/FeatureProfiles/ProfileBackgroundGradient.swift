@@ -138,6 +138,8 @@ struct ProfileBackgroundGradient: View {
     /// the icon you're looking at rather than washing the whole screen.
     var focal: UnitPoint = .center
 
+    @Environment(\.themePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ProfileBackgroundPalettes.self) private var palettes
 
@@ -179,17 +181,27 @@ struct ProfileBackgroundGradient: View {
     /// background in every theme.
     private func glowMask(in size: CGSize) -> some View {
         let radius = max(size.width, size.height) * 0.95
+        let dim = dimFactor
         return RadialGradient(
             stops: [
-                .init(color: .white.opacity(0.50), location: 0.0),
-                .init(color: .white.opacity(0.30), location: 0.5),
-                .init(color: .white.opacity(0.14), location: 1.0)
+                .init(color: .white.opacity(0.50 * dim), location: 0.0),
+                .init(color: .white.opacity(0.30 * dim), location: 0.5),
+                .init(color: .white.opacity(0.14 * dim), location: 1.0)
             ],
             center: focal,
             startRadius: 0,
             endRadius: radius
         )
         .ignoresSafeArea()
+    }
+
+    /// Slightly damps the bloom in the standard Dark theme, whose dark
+    /// background makes the same color read more vividly than it does over the
+    /// Light or OLED fields. Light and OLED stay at full strength.
+    private var dimFactor: Double {
+        if palette == .oled { return 1.0 }
+        if colorScheme == .light { return 1.0 }
+        return 0.55
     }
 
     /// Colors for the mesh: the focused profile's extracted/harmonised palette,

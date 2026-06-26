@@ -21,9 +21,6 @@ struct NowPlayingView: View {
     /// can't be changed — when the current track has no lyrics.
     @AppStorage("musicLyricsEnabled") private var lyricsEnabled = true
 
-    /// Uniform size for every transport control so the row reads evenly.
-    private let controlSize: CGFloat = 64
-
     /// The lyrics panel is shown next to the player **only once lyrics are
     /// actually found**. While the background lookup is in flight (or if the track
     /// has none) the player stays centered full-width — we never give up half the
@@ -233,9 +230,7 @@ struct NowPlayingView: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.title2)
                 .foregroundStyle(tint)
-                .frame(width: controlSize, height: controlSize)
         }
         .musicGlassButton(prominent: prominent)
     }
@@ -309,6 +304,11 @@ struct NowPlayingLyricsView: View {
 
     private func lyricsScroll(_ lyrics: Lyrics) -> some View {
         let active = activeIndex(in: lyrics)
+        // The line to keep vertically centered. Before the first timestamp is
+        // reached `active` is nil, so fall back to the upcoming line (line 0 at
+        // the very start) — this guarantees the lyrics open centered rather than
+        // pinned to the top.
+        let focus = focusIndex(in: lyrics)
         return GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
@@ -331,17 +331,32 @@ struct NowPlayingLyricsView: View {
                 }
                 .scrollDisabled(true)
                 .mask(edgeFade)
-                .onChange(of: active) { _, newIndex in
-                    guard let newIndex else { return }
+                .onChange(of: focus) { _, newIndex in
                     withAnimation(.easeInOut(duration: 0.4)) {
                         proxy.scrollTo(newIndex, anchor: .center)
                     }
                 }
-                .onAppear {
-                    if let active { proxy.scrollTo(active, anchor: .center) }
+                // Position correctly as soon as the panel appears and again once
+                // the geometry settles (the panel animates in, so the first
+                // onAppear can fire before the final height is known).
+                .onAppear { proxy.scrollTo(focus, anchor: .center) }
+                .onChange(of: geo.size.height) { _, _ in
+                    proxy.scrollTo(focus, anchor: .center)
                 }
             }
         }
+    }
+
+    /// The line to keep centered: the active line, or — before the first
+    /// timestamp is reached — the next upcoming line (line 0 at song start), so
+    /// the lyrics always open in the middle.
+    private func focusIndex(in lyrics: Lyrics) -> Int {
+        if let active = activeIndex(in: lyrics) { return active }
+        if lyrics.isSynced,
+           let upcoming = lyrics.lines.firstIndex(where: { ($0.start ?? .infinity) > currentTime }) {
+            return upcoming
+        }
+        return 0
     }
 
     /// Vertical edge fade that makes lyrics fully dissolve **well before** the

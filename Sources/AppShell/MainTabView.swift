@@ -134,25 +134,29 @@ struct MainTabView: View {
         }
         .task(id: musicProbeKey) {
             // Paint the Music tab on the first frame from the last persisted
-            // result (synchronous, no network), then refresh in the background.
-            // Re-runs when accounts or the per-profile library toggles change, so
-            // hiding/showing a music library live re-evaluates the tab + content.
+            // result (synchronous, no network) so tab visibility never waits on
+            // a probe. Re-runs when accounts or the per-profile library toggles
+            // change, so hiding/showing a music library live re-evaluates the tab.
             musicAvailability.seedFromCache(accounts: accounts, visibility: homeVisibility.visibility)
-            if musicAvailability.hasMusic {
-                // Warm the landing cache immediately from the seeded set so the
-                // page is ready before the user ever taps the tab.
-                MusicLandingPrefetch.warm(
-                    accounts: musicAvailability.detectedAccounts,
-                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs
-                )
-            }
+        }
+        .task(id: musicProbeKey, priority: .utility) {
+            // Everything network-bound runs at LOW priority and out of the
+            // critical launch window so the Home page (movies/TV) — the first
+            // thing the user sees — always wins the launch network/CPU. The
+            // synchronous seed above already shows the tab; the probe only
+            // refreshes its presence, so it can afford to yield.
             await musicAvailability.probe(accounts: accounts, visibility: homeVisibility.visibility)
-            if musicAvailability.hasMusic {
-                MusicLandingPrefetch.warm(
-                    accounts: musicAvailability.detectedAccounts,
-                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs
-                )
-            }
+            guard musicAvailability.hasMusic else { return }
+            // Defer the heavy multi-account landing prefetch until after Home has
+            // had the launch window. The Music tab still opens instantly from this
+            // warm cache once the user gets there; if they open it sooner,
+            // MusicLandingView's own load() fetches on demand (and caches) anyway.
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, musicAvailability.hasMusic else { return }
+            await MusicLandingPrefetch.warm(
+                accounts: musicAvailability.detectedAccounts,
+                visibleLibraryIDs: musicAvailability.visibleLibraryIDs
+            )
         }
         .mediaItemActionHandler(mediaItemActionHandler)
     }

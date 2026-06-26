@@ -190,14 +190,18 @@ public final class MusicLandingViewModel {
 /// falls back to a normal fetch).
 @MainActor
 public enum MusicLandingPrefetch {
-    public static func warm(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]]) {
+    /// Warms the persistent landing cache. Runs the fetch **inline** (awaited) so
+    /// it inherits the caller's task priority — callers invoke this from a
+    /// deferred, low-priority launch task so the heavy multi-account landing
+    /// fetch never competes with the Home page's movies/TV loads.
+    public static func warm(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]]) async {
         guard !accounts.isEmpty else { return }
         let context = MusicContext(
             accounts: accounts,
             visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
         )
         let viewModel = MusicLandingViewModel(context: context, cache: .shared)
-        Task { await viewModel.prefetch() }
+        await viewModel.prefetch()
     }
 }
 

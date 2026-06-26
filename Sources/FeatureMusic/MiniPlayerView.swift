@@ -79,9 +79,14 @@ private struct NowPlayingCardContent: View {
     @Environment(\.nowPlayingCardFocused) private var isFocused
     @Environment(\.colorScheme) private var colorScheme
 
-    // Light theme focuses to a black card → white content; dark/OLED focuses to
-    // a white card → black content.
-    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
+    // The card is ALWAYS contrast-inverted vs the theme so the playing item
+    // stands out; focusing flips it to the theme's normal contrast.
+    //   Light theme: idle = black card / white text, focused = white card / black text.
+    //   Dark / OLED: idle = white card / black text, focused = black card / white text.
+    private var foreground: Color {
+        if colorScheme == .dark { return isFocused ? .white : .black }
+        return isFocused ? .black : .white
+    }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -102,26 +107,26 @@ private struct NowPlayingCardContent: View {
                 Text(track.title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                    .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
+                    .foregroundStyle(foreground)
                 if let subtitle = track.subtitle {
                     Text(subtitle)
                         .font(.caption2)
                         .lineLimit(1)
-                        .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(foreground.opacity(0.72))
                 }
             }
             .frame(maxWidth: textWidth, alignment: .leading)
 
             Group {
                 if isPlaying {
-                    // Flip the equalizer bars to the inverted foreground on focus
-                    // so accent-colored bars don't clash with the inverted fill.
-                    NowPlayingEqualizer(isAnimating: true, tint: isFocused ? focusForeground : nil)
+                    // Match the equalizer bars to the inverted foreground so they
+                    // stay legible on the card's solid fill in either state.
+                    NowPlayingEqualizer(isAnimating: true, tint: foreground)
                         .frame(width: 22)
                 } else {
                     Image(systemName: "pause.fill")
                         .font(.subheadline)
-                        .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.85)) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(foreground.opacity(0.85))
                 }
             }
         }
@@ -146,23 +151,23 @@ private struct NowPlayingCardButtonStyle: ButtonStyle {
         @Environment(\.colorScheme) private var colorScheme
 
         private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        private var focusFill: Color { colorScheme == .dark ? .white : .black }
+
+        // Solid fill that's inverted vs the theme by default and flips on focus.
+        //   Light theme: idle = black, focused = white.
+        //   Dark / OLED: idle = white, focused = black.
+        private var fill: Color {
+            if colorScheme == .dark { return isFocused ? .black : .white }
+            return isFocused ? .white : .black
+        }
 
         var body: some View {
             configuration.label
                 .environment(\.nowPlayingCardFocused, isFocused)
                 .contentShape(shape)
-                // Material when idle; an opaque inverted fill fades in over it on
-                // focus so the whole card flips contrast and stands out.
-                .background {
-                    ZStack {
-                        shape.fill(.thinMaterial)
-                        shape.fill(focusFill).opacity(isFocused ? 1 : 0)
-                    }
-                }
+                .background { shape.fill(fill) }
                 .clipShape(shape)
                 .scaleEffect(isFocused ? (configuration.isPressed ? 1.03 : 1.06) : 1)
-                .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 18, y: 8)
+                .shadow(color: .black.opacity(isFocused ? 0.35 : 0.2), radius: isFocused ? 18 : 10, y: isFocused ? 8 : 4)
                 .animation(.easeOut(duration: 0.16), value: isFocused)
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }

@@ -35,6 +35,12 @@ struct NowPlayingView: View {
     /// Pending auto-hide; cancelled/rescheduled on every interaction.
     @State private var hideTask: Task<Void, Never>?
 
+    /// True while the control bar is mid slide-in/out. During the slide the
+    /// scrub bar suppresses its progress spring so the fill + knob ride the slide
+    /// in lockstep with the glass track (rather than picking up a separate easing
+    /// from playback ticks).
+    @State private var controlsSliding = false
+
     /// Measured height of the bottom control bar, so it can slide fully off the
     /// bottom edge (as one persistent layer) instead of being inserted/removed —
     /// keeping the glass scrub track, played fill and knob moving in lockstep with
@@ -118,12 +124,12 @@ struct NowPlayingView: View {
             background
 
             // Main content + bottom bar share the ZStack. The bar stays mounted
-            // and slides off the bottom edge via offset/opacity (rather than an
-            // insert/remove transition) so the whole bar — including the glass
-            // scrub track, played fill and knob inside its GeometryReader — moves
-            // as one persistent layer. (Children of a GeometryReader don't inherit
-            // a .move transition, which made the fill + knob snap to their final
-            // spot while the rest of the bar slid.)
+            // and its two groups (scrub bar / transport buttons) each slide off
+            // the bottom edge via offset/opacity (rather than an insert/remove
+            // transition). Each group moves as one persistent layer — so the glass
+            // scrub track, played fill and knob (which live inside a GeometryReader
+            // that wouldn't inherit a .move transition) travel together — and the
+            // two groups are staggered slightly for a layered settle.
             mainContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 80)
@@ -134,17 +140,7 @@ struct NowPlayingView: View {
                 .padding(.bottom, controlsVisible ? bottomBarHeight : 0)
 
             bottomControls
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: BottomBarHeightKey.self,
-                            value: proxy.size.height
-                        )
-                    }
-                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .offset(y: controlsVisible ? 0 : bottomBarHeight + 60)
-                .opacity(controlsVisible ? 1 : 0)
                 .allowsHitTesting(controlsVisible)
 
             // While the bar is hidden, a transparent full-screen catcher takes
@@ -158,7 +154,18 @@ struct NowPlayingView: View {
                     .onMoveCommand { _ in showControls() }
             }
         }
+        // mainContent's bottom-padding re-center still rides one shared spring;
+        // each bar group drives its own (staggered) slide inside bottomControls.
         .animation(.spring(response: 0.5, dampingFraction: 0.86), value: controlsVisible)
+        .onChange(of: controlsVisible) { _, _ in
+            // Mark the slide window so the scrub bar holds its progress spring
+            // until the bar has settled (see controlsSliding).
+            controlsSliding = true
+            Task {
+                try? await Task.sleep(nanoseconds: 650_000_000)
+                controlsSliding = false
+            }
+        }
         .onPreferenceChange(BottomBarHeightKey.self) { height in
             bottomBarHeight = height
         }
@@ -380,14 +387,33 @@ struct NowPlayingView: View {
     /// stays legible against the artwork colors. The scrim flips to white for the
     /// frosted-light look so it lightens rather than darkens the controls area.
     private var bottomControls: some View {
-        VStack(spacing: 24) {
+        let slide = bottomBarHeight + 60
+        let reveal = Animation.spring(response: 0.5, dampingFraction: 0.86)
+        // Buttons trail the scrub bar by a hair so the two groups settle in
+        // layers rather than as one slab — each group still moves as a unit.
+        let buttonStagger = 0.07
+        return VStack(spacing: 24) {
             scrubRow
+                .offset(y: controlsVisible ? 0 : slide)
+                .opacity(controlsVisible ? 1 : 0)
+                .animation(reveal, value: controlsVisible)
             transportRow
+                .offset(y: controlsVisible ? 0 : slide)
+                .opacity(controlsVisible ? 1 : 0)
+                .animation(reveal.delay(controlsVisible ? buttonStagger : 0), value: controlsVisible)
         }
         .padding(.horizontal, 80)
         .padding(.top, 48)
         .padding(.bottom, 56)
         .frame(maxWidth: .infinity)
+        // Measure the bar's natural height so each group can slide fully clear of
+        // the bottom edge. Offsets don't change the reported size, so this stays
+        // stable whether the bar is shown or hidden.
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: BottomBarHeightKey.self, value: proxy.size.height)
+            }
+        )
         .background(
             LinearGradient(
                 colors: [.clear, (isLightPlayer ? Color.white : Color.black).opacity(0.55)],
@@ -395,6 +421,9 @@ struct NowPlayingView: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea()
+            .offset(y: controlsVisible ? 0 : slide)
+            .opacity(controlsVisible ? 1 : 0)
+            .animation(reveal, value: controlsVisible)
         )
     }
 
@@ -469,7 +498,7 @@ struct NowPlayingView: View {
     /// transport row below.
     private var scrubRow: some View {
         VStack(spacing: 10) {
-            MusicScrubBar(model: scrubModel)
+            MusicScrubBar(model: scrubModel, suppressProgressAnimation: controlsSliding)
                 .frame(height: 44)
             HStack {
                 Text(MusicFormat.duration(scrubModel.displaySeconds))

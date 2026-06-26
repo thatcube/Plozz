@@ -144,6 +144,11 @@ struct MusicScrubSurface: UIViewRepresentable {
 /// supplies the analog pan input; the bar itself is purely presentational.
 struct MusicScrubBar: View {
     let model: MusicScrubModel
+    /// While the control bar is sliding on/off screen, the played fill and knob
+    /// must ride that slide as one with the glass track — so suppress the
+    /// progress (`knobX`) spring, which would otherwise fire on every playback
+    /// tick mid-slide and give the fill/knob a different easing than the track.
+    var suppressProgressAnimation: Bool = false
 
     var body: some View {
         GeometryReader { geo in
@@ -175,7 +180,7 @@ struct MusicScrubBar: View {
             .frame(maxHeight: .infinity, alignment: .center)
             .animation(.easeOut(duration: 0.18), value: focused)
             .animation(.easeOut(duration: 0.12), value: model.isScrubbing)
-            .animation(model.isScrubbing ? nil : .spring(response: 0.34, dampingFraction: 0.85), value: knobX)
+            .animation((model.isScrubbing || suppressProgressAnimation) ? nil : .spring(response: 0.34, dampingFraction: 0.85), value: knobX)
             .overlay { MusicScrubSurface(model: model) }
         }
     }

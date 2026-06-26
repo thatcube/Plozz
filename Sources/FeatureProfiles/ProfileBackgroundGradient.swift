@@ -138,8 +138,6 @@ struct ProfileBackgroundGradient: View {
     /// the icon you're looking at rather than washing the whole screen.
     var focal: UnitPoint = .center
 
-    @Environment(\.themePalette) private var palette
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ProfileBackgroundPalettes.self) private var palettes
 
@@ -150,7 +148,12 @@ struct ProfileBackgroundGradient: View {
             LiquidArtworkBackground(
                 palette: resolvedColors,
                 animate: !reduceMotion,
-                style: style,
+                // Use the OLED treatment for every theme — the most restrained
+                // intensity — so the profile color is a gentle bloom rather than
+                // a bright wash. Each theme's own background colour still shows
+                // through underneath (this renders only the masked color mesh,
+                // showsBackdrop: false).
+                style: .oled,
                 paletteCrossfade: 1.8,
                 showsBackdrop: false
             )
@@ -171,17 +174,16 @@ struct ProfileBackgroundGradient: View {
 
     /// A gentle center-weighting that never cuts off: the color is stronger
     /// around the focused icon and eases down toward the edges, but stays faintly
-    /// present all the way out (no hard ring). The peak alpha is low and
-    /// per-theme, so the profile color reads as a subtle tint over the app's
-    /// existing background rather than a saturated wash.
+    /// present all the way out (no hard ring). Paired with the OLED treatment so
+    /// the profile color reads as a subtle bloom over the app's existing
+    /// background in every theme.
     private func glowMask(in size: CGSize) -> some View {
         let radius = max(size.width, size.height) * 0.95
-        let peak = peakIntensity
         return RadialGradient(
             stops: [
-                .init(color: .white.opacity(peak), location: 0.0),
-                .init(color: .white.opacity(peak * 0.55), location: 0.5),
-                .init(color: .white.opacity(peak * 0.28), location: 1.0)
+                .init(color: .white.opacity(0.50), location: 0.0),
+                .init(color: .white.opacity(0.30), location: 0.5),
+                .init(color: .white.opacity(0.14), location: 1.0)
             ],
             center: focal,
             startRadius: 0,
@@ -190,33 +192,11 @@ struct ProfileBackgroundGradient: View {
         .ignoresSafeArea()
     }
 
-    /// How strongly the profile color shows at the focal point, per theme. Kept
-    /// deliberately low — the app already has its own tinted background, so this
-    /// only needs to add a faint, center-weighted bloom of the profile's color.
-    /// OLED stays the most restrained; light gets a touch less than dark so the
-    /// color doesn't muddy the bright field.
-    private var peakIntensity: Double {
-        switch style {
-        case .dark: return 0.30
-        case .light: return 0.24
-        case .oled: return 0.18
-        }
-    }
-
     /// Colors for the mesh: the focused profile's extracted/harmonised palette,
     /// or an empty array (neutral field) before focus settles.
     private var resolvedColors: [Color] {
         guard let profile else { return [] }
         return palettes.palette(for: profile)
-    }
-
-    /// Maps the active theme onto a `LiquidArtworkBackground` treatment: OLED
-    /// stays near-black with the colors as faint accents, Light gets the frosted
-    /// veil, everything else the standard dark scrim.
-    private var style: LiquidArtworkBackground.Style {
-        if palette == .oled { return .oled }
-        if colorScheme == .light { return .light }
-        return .dark
     }
 }
 #endif

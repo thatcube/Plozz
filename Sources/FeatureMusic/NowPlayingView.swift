@@ -17,6 +17,9 @@ struct NowPlayingView: View {
     /// player's "Match Theme" appearance can distinguish OLED from plain Dark
     /// (the system color scheme alone can't tell them apart).
     var appTheme: AppTheme = .system
+    /// Per-profile player preferences (appearance + "show extra info"), injected
+    /// from the host so each profile keeps its own choice.
+    let musicPlayer: MusicPlayerSettingsModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var scrubModel = MusicScrubModel()
@@ -53,12 +56,12 @@ struct NowPlayingView: View {
     /// Whether the player shows extra track detail — album name, audio
     /// quality/format, and the lyrics source. Off by default to keep the screen
     /// clean (it's a niche audiophile detail); toggled from Settings ▸ Appearance
-    /// and remembered across sessions.
-    @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
+    /// and remembered per profile.
+    private var showTrackDetails: Bool { musicPlayer.showTrackDetails }
 
     /// The player's chosen background look (Settings ▸ Appearance ▸ Music
     /// Player). Defaults to following the app theme.
-    @AppStorage(MusicPlayerAppearance.storageKey) private var playerAppearance: MusicPlayerAppearance = .matchTheme
+    private var playerAppearance: MusicPlayerAppearance { musicPlayer.appearance }
     /// The app's current light/dark resolution, read from the environment the
     /// player is presented in — used only when `playerAppearance` is `.matchTheme`.
     @Environment(\.colorScheme) private var systemColorScheme
@@ -190,7 +193,8 @@ struct NowPlayingView: View {
             if showsLyricsPanel {
                 NowPlayingLyricsView(
                     state: controller.lyricsState,
-                    currentTime: controller.currentTime
+                    currentTime: controller.currentTime,
+                    showTrackDetails: showTrackDetails
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -508,11 +512,12 @@ struct NowPlayingView: View {
 struct NowPlayingLyricsView: View {
     let state: AudioPlaybackController.LyricsState
     let currentTime: TimeInterval
+    /// The lyrics source attribution is part of the optional "track details"
+    /// surface, so it only shows when that setting is on. Passed in from the
+    /// parent player (per-profile preference).
+    let showTrackDetails: Bool
     /// Eases the lines in on first appearance instead of letting them pop.
     @State private var appeared = false
-    /// The lyrics source attribution is part of the optional "track details"
-    /// surface, so it only shows when that setting is on.
-    @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
 
     var body: some View {
         content

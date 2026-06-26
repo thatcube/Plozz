@@ -23,18 +23,20 @@ public struct MusicTabView: View {
     private let context: MusicContext
     private let controller: AudioPlaybackController
     private let appTheme: AppTheme
+    private let musicPlayer: MusicPlayerSettingsModel
 
     @State private var path = NavigationPath()
     @State private var showNowPlaying = false
     @State private var layoutModel = MusicLandingLayoutModel()
 
-    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController, appTheme: AppTheme = .system) {
+    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController, appTheme: AppTheme = .system, musicPlayer: MusicPlayerSettingsModel) {
         self.context = MusicContext(
             accounts: accounts,
             visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
         )
         self.controller = controller
         self.appTheme = appTheme
+        self.musicPlayer = musicPlayer
     }
 
     public var body: some View {
@@ -60,7 +62,7 @@ public struct MusicTabView: View {
             }
         }
         .fullScreenCover(isPresented: $showNowPlaying) {
-            NowPlayingView(controller: controller, appTheme: appTheme)
+            NowPlayingView(controller: controller, appTheme: appTheme, musicPlayer: musicPlayer)
         }
         // Starting a song jumps straight into the full-screen player, like
         // Apple Music. The pill remains for re-opening it after dismissal.

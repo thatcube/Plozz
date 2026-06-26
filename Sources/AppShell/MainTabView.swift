@@ -27,6 +27,7 @@ struct MainTabView: View {
     let spoilerModel: SpoilerSettingsModel
     let themeModel: ThemeSettingsModel
     let diagnosticsModel: DiagnosticsSettingsModel
+    let musicPlayerModel: MusicPlayerSettingsModel
     let homeVisibility: HomeLibraryVisibilityModel
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
@@ -95,7 +96,8 @@ struct MainTabView: View {
                     accounts: musicAvailability.detectedAccounts,
                     visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
                     controller: audioController,
-                    appTheme: themeModel.theme
+                    appTheme: themeModel.theme,
+                    musicPlayer: musicPlayerModel
                 )
                 .tabItem { Label("Music", systemImage: "music.note") }
             }
@@ -133,6 +135,7 @@ struct MainTabView: View {
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
+        .environment(musicPlayerModel)
         .task(id: musicProbeKey) {
             // Paint the Music tab on the first frame from the last persisted
             // result (synchronous, no network) so tab visibility never waits on

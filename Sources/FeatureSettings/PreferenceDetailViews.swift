@@ -5,12 +5,12 @@ import CoreUI
 
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
+    @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
     @AppStorage("reduceTransparencyOverride") private var reduceTransparency = false
-    @AppStorage(MusicPlayerAppearance.storageKey) private var playerAppearance: MusicPlayerAppearance = .matchTheme
-    @AppStorage("musicShowTrackDetails") private var showTrackDetails = false
 
     var body: some View {
-        ScrollView {
+        @Bindable var musicPlayer = musicPlayer
+        return ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 Text("Appearance").font(.largeTitle.bold())
                 SettingsPanel(
@@ -44,26 +44,26 @@ struct AppearanceDetailView: View {
 
                 SettingsPanel(
                     title: "Music Player",
-                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme — frosted light in a light theme, vibrant dark otherwise. Or pick a fixed look. “Show track details” adds the album name, audio quality and format (e.g. \"Original AAC 44.1 kHz 320 kbps\"), and the lyrics source — off by default so the player stays focused on the artwork, song and artist."
+                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme; or pin a fixed look. “Show extra info” adds the album name, audio quality/format, and lyrics source under the title."
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 16) {
                                 ForEach(MusicPlayerAppearance.allCases) { option in
                                     Button {
-                                        playerAppearance = option
+                                        musicPlayer.appearance = option
                                     } label: {
                                         HStack(spacing: 10) {
                                             Image(systemName: option.symbolName)
                                             Text(option.displayName)
                                             Image(systemName: "checkmark.circle.fill")
-                                                .opacity(playerAppearance == option ? 1 : 0)
+                                                .opacity(musicPlayer.appearance == option ? 1 : 0)
                                         }
                                         .font(.headline)
                                         .padding(.horizontal, 4)
                                     }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: playerAppearance == option))
-                                    .accessibilityValue(playerAppearance == option ? "Selected" : "")
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: musicPlayer.appearance == option))
+                                    .accessibilityValue(musicPlayer.appearance == option ? "Selected" : "")
                                 }
                             }
                             .padding(.horizontal, 4)
@@ -71,7 +71,7 @@ struct AppearanceDetailView: View {
                         }
                         .scrollClipDisabled()
 
-                        Toggle("Show track details", isOn: $showTrackDetails)
+                        Toggle("Show album & audio info", isOn: $musicPlayer.showTrackDetails)
                     }
                 }
 

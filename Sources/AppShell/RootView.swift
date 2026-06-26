@@ -77,6 +77,7 @@ public struct RootView: View {
                         spoilerModel: appState.spoilerModel,
                         themeModel: appState.themeModel,
                         diagnosticsModel: appState.diagnosticsModel,
+                        musicPlayerModel: appState.musicPlayerModel,
                         homeVisibility: appState.homeLibraryVisibilityModel,
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,

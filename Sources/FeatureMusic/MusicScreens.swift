@@ -357,6 +357,7 @@ struct PlaylistDetailView: View {
             tracks: viewModel.tracks,
             artworkFallback: viewModel.playlist.artworkURL,
             showArtist: true,
+            showArtwork: true,
             nowPlayingTrackID: controller.currentTrack?.id,
             isPlaying: controller.isPlaying,
             onPlayTrack: { play(from: $0) }
@@ -434,6 +435,7 @@ struct MusicDetailLayout<InfoColumn: View>: View {
     let tracks: [MusicTrack]
     var artworkFallback: URL?
     var showArtist: Bool = false
+    var showArtwork: Bool = false
     var nowPlayingTrackID: String? = nil
     var isPlaying: Bool = false
     let onPlayTrack: (MusicTrack) -> Void
@@ -452,6 +454,7 @@ struct MusicDetailLayout<InfoColumn: View>: View {
                         tracks: tracks,
                         artworkFallback: artworkFallback,
                         showArtist: showArtist,
+                        showArtwork: showArtwork,
                         nowPlayingTrackID: nowPlayingTrackID,
                         isPlaying: isPlaying,
                         onPlayTrack: onPlayTrack
@@ -469,6 +472,10 @@ struct TrackListView: View {
     let tracks: [MusicTrack]
     var artworkFallback: URL?
     var showArtist: Bool = false
+    /// Whether to show each track's own album artwork as a leading thumbnail.
+    /// Used for playlists (whose tracks span many albums); albums keep the
+    /// numbered list since every row shares one cover.
+    var showArtwork: Bool = false
     /// The id of the track currently loaded in the player (if any), so the row
     /// shows an animated equalizer instead of its track number.
     var nowPlayingTrackID: String? = nil
@@ -478,23 +485,15 @@ struct TrackListView: View {
     let onPlayTrack: (MusicTrack) -> Void
 
     var body: some View {
-        VStack(spacing: 4) {
+        // LazyVStack so only the on-screen rows are built — playlists can hold
+        // thousands of tracks, and an eager VStack materialised every row at once
+        // (8000+ → out-of-memory crash).
+        LazyVStack(spacing: 4) {
             ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                 let isCurrent = track.id == nowPlayingTrackID
                 Button { onPlayTrack(track) } label: {
                     HStack(spacing: 20) {
-                        Group {
-                            if isCurrent {
-                                NowPlayingEqualizer(isAnimating: isPlaying)
-                            } else {
-                                Text(track.trackNumber.map(String.init) ?? "\(index + 1)")
-                                    .font(.headline.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .fixedSize(horizontal: true, vertical: false)
-                            }
-                        }
-                        .frame(width: 56, alignment: .trailing)
+                        leadingAccessory(track: track, index: index, isCurrent: isCurrent)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(track.title)
                                 .font(.headline)
@@ -516,6 +515,44 @@ struct TrackListView: View {
                 .buttonStyle(TrackRowButtonStyle())
                 .focusEffectDisabled()
             }
+        }
+    }
+
+    /// The leading column of a track row. Playlists show the track's own album
+    /// artwork (with a now-playing equalizer overlaid when it's the current
+    /// track); albums keep the numbered list, swapping the number for an
+    /// equalizer while playing.
+    @ViewBuilder
+    private func leadingAccessory(track: MusicTrack, index: Int, isCurrent: Bool) -> some View {
+        if showArtwork {
+            MusicArtworkImage(
+                url: track.artworkURL ?? artworkFallback,
+                systemPlaceholder: "music.note",
+                cornerRadius: 8
+            )
+            .frame(width: 56, height: 56)
+            .overlay {
+                if isCurrent {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.black.opacity(0.45))
+                        NowPlayingEqualizer(isAnimating: isPlaying)
+                    }
+                }
+            }
+        } else {
+            Group {
+                if isCurrent {
+                    NowPlayingEqualizer(isAnimating: isPlaying)
+                } else {
+                    Text(track.trackNumber.map(String.init) ?? "\(index + 1)")
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .frame(width: 56, alignment: .trailing)
         }
     }
 }

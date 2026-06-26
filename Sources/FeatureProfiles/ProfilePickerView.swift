@@ -52,10 +52,13 @@ public struct ProfilePickerView: View {
     /// How long focus must rest on a tile before the background fades to it.
     private let backgroundSettleDelay: Duration = .milliseconds(300)
 
-    /// The profile whose colors the background should currently show: the one
-    /// focus has settled on, else the active, else the first.
+    /// The profile whose colors the background should currently show. Before
+    /// focus settles (i.e. at startup) it is pinned to the **first** profile, so
+    /// the background only ever opens on the first tile's image/color — never the
+    /// last-active profile's, which would otherwise flash in for a beat before
+    /// focus settles. Once focus rests on a tile, that tile drives the wash.
     private var backgroundProfile: Profile? {
-        let id = settledProfileID ?? activeProfileID
+        let id = settledProfileID ?? profiles.first?.id
         return profiles.first { $0.id == id } ?? profiles.first
     }
 

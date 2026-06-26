@@ -559,16 +559,18 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             // Play and Shuffle buttons fit comfortably side by side.
             let infoWidth = max(480, geo.size.width * 0.33)
             let bottomInset = PlozzTheme.Metrics.screenPadding
-            // Side gutters inside the scroll view: the leading one gives the
-            // focus scale + shadow room to grow without being clipped; the
-            // trailing one both does that and leaves space for the system scroll
-            // indicator so it sits clear of the track durations. The scroll area
-            // is widened by these same amounts (tighter column spacing on the
-            // left, smaller trailing page padding on the right) so the rows keep
-            // their current width.
-            let focusGutter: CGFloat = 24
-            let indicatorGutter: CGFloat = 16
-            HStack(alignment: .top, spacing: 56 - focusGutter) {
+            // Side gutters inside the scroll view. The leading one gives the
+            // focus scale + shadow room to grow without being clipped by the
+            // scroll view's frame. The trailing one does the same AND leaves a
+            // clear gap for the system scroll indicator so it sits well to the
+            // right of the track durations. The scroll area is widened to match
+            // (tighter column spacing on the left, smaller trailing page padding
+            // on the right) so the left text position is preserved and the rows
+            // stay close to their current width.
+            let leftGutter: CGFloat = 60
+            let rightGutter: CGFloat = 80
+            let trailingPad: CGFloat = 24
+            HStack(alignment: .top, spacing: 56 - leftGutter) {
                 info
                     .frame(width: infoWidth, alignment: .leading)
                     // Position the info column with the shared top offset; the
@@ -604,14 +606,14 @@ struct MusicDetailLayout<InfoColumn: View>: View {
                 // scroll indicator lands in the right-hand gutter, clear of the
                 // durations. Default vertical clipping is kept so rows still
                 // scroll cleanly to the page's top and bottom edges.
-                .contentMargins(.leading, focusGutter, for: .scrollContent)
-                .contentMargins(.trailing, indicatorGutter, for: .scrollContent)
+                .contentMargins(.leading, leftGutter, for: .scrollContent)
+                .contentMargins(.trailing, rightGutter, for: .scrollContent)
                 // Track list is its own focus section so Right from the info
                 // column reliably enters the list regardless of row alignment.
                 .focusSection()
             }
             .padding(.leading, PlozzTheme.Metrics.screenPadding)
-            .padding(.trailing, indicatorGutter)
+            .padding(.trailing, trailingPad)
         }
     }
 }

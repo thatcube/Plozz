@@ -215,6 +215,16 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         client.setOptionString("hwdec", tuning.hwdec)
         client.setOptionString("video-rotate", "no")
 
+        // Apply mpv video-sync / interpolation tuning (data-driven; defaults to
+        // mpv's behaviour so SDR frame-rate matching below is what fixes cadence,
+        // and these stay available to A/B on-device via `MPVPlaybackTuning`).
+        if let videoSync = tuning.videoSync {
+            client.setOptionString("video-sync", videoSync)
+        }
+        if tuning.interpolation {
+            client.setOptionString("interpolation", "yes")
+        }
+
         // Cache / demuxer tuning for smoother network direct play.
         for (key, value) in tuning.cacheOptionPairs() {
             client.setOptionString(key, value)
@@ -227,9 +237,8 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
             client.setOptionString("target-trc", trc)
             client.setOptionString("target-prim", "bt.2020")
         }
-        // Prepare (but don't yet apply) the tvOS display-mode switch for HDR; it
-        // needs a live UIWindow and is gated to HDR content so SDR never yanks the
-        // TV into HDR. Applied after init / once the view is in a window.
+        // Prepare (but don't yet apply) the tvOS display-mode switch; it needs a
+        // live UIWindow and is applied after init / once the view is in a window.
         //
         // For Dolby Vision we build the criteria with the 'dvh1' codec FourCC so
         // tvOS negotiates a true DoVi HDMI signal (and the TV lights its "Dolby
@@ -238,6 +247,11 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         // codec tag changes. If the 'dvh1' description can't be built for any
         // reason, fall back to the HDR10 ('hvc1'+PQ) switch rather than failing,
         // so we never drop to SDR for a DoVi source.
+        //
+        // For SDR we still build a criteria — but a *refresh-rate-only* one with
+        // BT.709 colorimetry — so the panel frame-rate-matches the source (like
+        // AVPlayer does) without ever switching into HDR. It degrades to no switch
+        // when the source frame rate is unknown.
         let frameRate = Float(request.sourceMetadata?.video?.frameRate ?? 0)
         if let desc = MPVHDR.formatDescription(for: hdrMode, video: request.sourceMetadata?.video) {
             pendingDisplayCriteria = AVDisplayCriteria(refreshRate: frameRate, formatDescription: desc)
@@ -246,6 +260,20 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
                   let fallback = MPVHDR.hdr10FallbackFormatDescription(video: request.sourceMetadata?.video) {
             log.error("HDR: dvh1 Dolby Vision criteria unavailable; falling back to HDR10 (hvc1+PQ) display switch")
             pendingDisplayCriteria = AVDisplayCriteria(refreshRate: frameRate, formatDescription: fallback)
+            requestedDolbyVisionSwitch = false
+        } else if hdrMode == .sdr,
+                  let sdrRefreshRate = FrameRateMatching.refreshRate(
+                      forSourceFrameRate: request.sourceMetadata?.video?.frameRate),
+                  let sdrDesc = MPVHDR.sdrFormatDescription(video: request.sourceMetadata?.video) {
+            // SDR refresh-rate (frame-rate) match: drive the panel to a mode that
+            // matches the source frame rate (e.g. 23.976fps → a 24Hz-family mode)
+            // so mpv presents one source frame per refresh instead of cadencing
+            // 23.98→60 — the late-frame cause AVPlayer avoids by matching natively.
+            // BT.709 SDR criteria, so this never pushes the panel into HDR. tvOS
+            // ignores it when the user's "Match Frame Rate" setting is off, and the
+            // helper returns nil for unknown/implausible rates, so it's a silent
+            // no-op that degrades gracefully and never makes SDR playback worse.
+            pendingDisplayCriteria = AVDisplayCriteria(refreshRate: sdrRefreshRate, formatDescription: sdrDesc)
             requestedDolbyVisionSwitch = false
         } else {
             pendingDisplayCriteria = nil

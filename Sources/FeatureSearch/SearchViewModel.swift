@@ -18,15 +18,20 @@ public final class SearchViewModel {
     private let accounts: [ResolvedAccount]
     private let limit: Int
     private let debounce: Duration
+    /// Shared identity-index lookup folded into dedup so each result card carries
+    /// its full cross-server source set even before the detail picker probes.
+    private let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
 
     public init(
         accounts: [ResolvedAccount],
         limit: Int = 40,
-        debounceMilliseconds: Int = 350
+        debounceMilliseconds: Int = 350,
+        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) {
         self.accounts = accounts
         self.limit = limit
         self.debounce = .milliseconds(debounceMilliseconds)
+        self.identitySources = identitySources
     }
 
     /// Runs a debounced search for the current `query`. Safe to call on every
@@ -54,7 +59,11 @@ public final class SearchViewModel {
             let items = try await aggregatedSearch(query: requested)
             guard SearchPolicy.isCurrent(requestedQuery: requested, liveQuery: query) else { return }
             let serverInfo = accounts.sourceServerInfo()
-            let deduped = SearchDeduplicator.deduplicate(items) { serverInfo[$0] }
+            let deduped = SearchDeduplicator.deduplicate(
+                items,
+                identitySources: identitySources,
+                serverInfo: { serverInfo[$0] }
+            )
             let sections = SearchSection.sections(from: deduped)
             state = sections.isEmpty ? .empty : .loaded(sections)
         } catch let error as AppError {

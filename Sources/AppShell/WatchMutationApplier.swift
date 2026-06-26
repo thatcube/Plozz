@@ -20,6 +20,16 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     /// Every signed-in `Account.id`, so episode twin expansion knows which *other*
     /// servers to probe. Resolved live (main-actor) so a sign-in/out is reflected.
     var allAccountIDs: @Sendable () async -> [String] = { [] }
+    /// The eager identity index's known **series** sources for an origin series —
+    /// the shared source of truth for "which servers host this show", each carrying
+    /// *that server's own* series item id. When the index already knows a twin
+    /// series on a server we skip the per-server search and go straight to the
+    /// children-walk for the final per-(season,episode) step, satisfying the SSOT
+    /// rule "derive the episode on each known server as the last step; never
+    /// re-resolve the series by id at drain time". Empty (cold index / unknown
+    /// server) ⇒ that server falls back to the existing search probe, so a write is
+    /// never dropped while the index warms.
+    var indexedSeriesSources: @Sendable (MediaItem) -> [IndexedSource] = { _ in [] }
     /// Per-server bounded series search. Mirrors the cross-server detail resolver's
     /// `searchWithDeadline` so a slow/asleep server can't stall convergence.
     var searchDeadline: TimeInterval = 4
@@ -97,12 +107,34 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
         }
 
         let deadline = searchDeadline
+        // The SSOT's known series twins for this origin, keyed by account → that
+        // server's own series item id. For these accounts the children-walk runs
+        // directly on the known id (no drain-time series re-resolution / search);
+        // unknown accounts fall back to the live search probe below.
+        let knownSeriesByAccount: [String: String] = {
+            var map: [String: String] = [:]
+            for source in indexedSeriesSources(originSeries) where source.kind == .series {
+                map[source.accountID] = source.itemID
+            }
+            return map
+        }()
+        // A synthetic series carrying the origin's identity so the resolver's
+        // identity match succeeds without a network round-trip. The id is the
+        // index's known server-local series id, so the children-walk addresses the
+        // right show on that server.
+        let originSeriesForSynthesis = originSeries
         let expansion = await EpisodeTwinResolver.resolve(
             originSeries: originSeries,
             seasonNumber: season,
             episodeNumber: episode,
             otherAccountIDs: resolvableAccountIDs,
             searchSeries: { accountID, query in
+                if let knownID = knownSeriesByAccount[accountID] {
+                    var synthetic = originSeriesForSynthesis
+                    synthetic.id = knownID
+                    synthetic.sourceAccountID = accountID
+                    return [synthetic]
+                }
                 guard let provider = providers[accountID] else { return nil }
                 return await Self.searchSeries(provider, query: query, seconds: deadline)
             },

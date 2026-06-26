@@ -22,8 +22,9 @@ public enum SearchDeduplicator {
     ///     Defaults to "unknown", which still merges identically.
     public static func deduplicate(
         _ items: [MediaItem],
+        identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] },
         serverInfo: (String) -> SourceServerInfo? = { _ in nil }
     ) -> [MediaItem] {
-        MediaItemMerger.merge(items, serverInfo: serverInfo)
+        MediaItemMerger.merge(items, serverInfo: serverInfo, identitySources: identitySources)
     }
 }

@@ -69,7 +69,8 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         guard let mutation = WatchMutationFactory.playedToggle(
             item: item,
             played: played,
-            primaryAccountID: appState.primaryActiveAccount?.id
+            primaryAccountID: appState.primaryActiveAccount?.id,
+            additionalSources: appState.identitySnapshot.sourceRefs(for: item)
         ) else { return }
 
         var ids = Set(mutation.targets.map(\.itemID))

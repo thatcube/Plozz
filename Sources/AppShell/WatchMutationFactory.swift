@@ -14,18 +14,30 @@ enum WatchMutationFactory {
     /// server's* own item id. One per cross-server source, or the primary owner for
     /// a single-source / untagged item. Providers are resolved live at drain time,
     /// so a momentarily-unreachable server is still recorded.
-    static func targets(for item: MediaItem, primaryAccountID: String?) -> [WatchMutationTarget] {
-        if !item.sources.isEmpty {
-            var seen = Set<String>()
-            return item.sources.compactMap { source in
-                guard seen.insert(source.id).inserted else { return nil }
-                return WatchMutationTarget(
-                    accountID: source.accountID,
-                    itemID: source.itemID,
-                    providerKind: source.providerKind
-                )
-            }
+    ///
+    /// `additionalSources` are the eager identity index's known servers for the
+    /// title (the shared source of truth). They're unioned with the item's own
+    /// `sources` so the fan-out is **origin-agnostic and N-account complete** even
+    /// when the item was reached from a Home row that only one server populated.
+    /// Empty (cold index) ⇒ behaviour is exactly the item's own sources.
+    static func targets(
+        for item: MediaItem,
+        primaryAccountID: String?,
+        additionalSources: [MediaSourceRef] = []
+    ) -> [WatchMutationTarget] {
+        var seen = Set<String>()
+        var result: [WatchMutationTarget] = []
+        func add(_ ref: MediaSourceRef) {
+            guard seen.insert(ref.id).inserted else { return }
+            result.append(WatchMutationTarget(
+                accountID: ref.accountID,
+                itemID: ref.itemID,
+                providerKind: ref.providerKind
+            ))
         }
+        item.sources.forEach(add)
+        additionalSources.forEach(add)
+        if !result.isEmpty { return result }
         guard let accountID = item.sourceAccountID ?? primaryAccountID else { return [] }
         return [WatchMutationTarget(accountID: accountID, itemID: item.id)]
     }
@@ -69,8 +81,8 @@ enum WatchMutationFactory {
     /// A mark-watched / mark-unwatched mutation. Marking watched clears resume
     /// everywhere and mirrors to Trakt (write-if-missing); unwatch never touches
     /// Trakt (no deletes) and leaves resume alone.
-    static func playedToggle(item: MediaItem, played: Bool, primaryAccountID: String?, capturedAt: Date = Date()) -> WatchMutation? {
-        let targets = targets(for: item, primaryAccountID: primaryAccountID)
+    static func playedToggle(item: MediaItem, played: Bool, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], capturedAt: Date = Date()) -> WatchMutation? {
+        let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources)
         guard !targets.isEmpty else { return nil }
         let expansion = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
         return WatchMutation(
@@ -93,8 +105,8 @@ enum WatchMutationFactory {
     /// best-source switch resumes where you left off, on whichever server backs it.
     /// Returns `nil` when there is nothing worth converging (no targets, or an
     /// unfinished item barely started).
-    static func playbackStop(item: MediaItem, position: TimeInterval, watchedPercent: Double, primaryAccountID: String?, capturedAt: Date = Date()) -> WatchMutation? {
-        let targets = targets(for: item, primaryAccountID: primaryAccountID)
+    static func playbackStop(item: MediaItem, position: TimeInterval, watchedPercent: Double, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], capturedAt: Date = Date()) -> WatchMutation? {
+        let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources)
         guard !targets.isEmpty else { return nil }
         let expansion = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
 

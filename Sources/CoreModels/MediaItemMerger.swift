@@ -64,11 +64,19 @@ public enum MediaItemMerger {
     ///   - serverInfo: resolves an account id to its backend kind / friendly
     ///     names, used only to label ``MediaSourceRef``s. Defaults to "unknown",
     ///     which still merges correctly — the picker just shows neutral labels.
+    ///   - identitySources: the **single source of truth** lookup — given a merged
+    ///     item, returns every server known (from the eager identity index) to host
+    ///     that title. Folded into each card's `sources` so a title surfaced by
+    ///     only one server still carries its full cross-server set, making Home,
+    ///     Browse, Search and the watch fan-out all read one consistent set
+    ///     regardless of entry path. Defaults to a no-op so cold-start / existing
+    ///     callers behave exactly as before.
     public static func merge(
         _ items: [MediaItem],
-        serverInfo: (String) -> SourceServerInfo? = { _ in nil }
+        serverInfo: (String) -> SourceServerInfo? = { _ in nil },
+        identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) -> [MediaItem] {
-        guard items.count > 1 else { return items }
+        guard !items.isEmpty else { return items }
 
         var parent = Array(items.indices)
 
@@ -114,7 +122,7 @@ public enum MediaItemMerger {
             let root = find(index)
             guard emitted.insert(root).inserted else { continue }
             let members = membersByRoot[root] ?? [index]
-            output.append(mergeGroup(members.map { items[$0] }, serverInfo: serverInfo))
+            output.append(mergeGroup(members.map { items[$0] }, serverInfo: serverInfo, identitySources: identitySources))
         }
         return output
     }
@@ -125,12 +133,18 @@ public enum MediaItemMerger {
     /// most-recent-wins unified fold.
     public static func mergeGroup(
         _ duplicates: [MediaItem],
-        serverInfo: (String) -> SourceServerInfo? = { _ in nil }
+        serverInfo: (String) -> SourceServerInfo? = { _ in nil },
+        identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) -> MediaItem {
         guard var primary = duplicates.first else {
             preconditionFailure("mergeGroup requires at least one item")
         }
-        guard duplicates.count > 1 else { return primary }
+
+        // The eager index's known servers for this title (origin-agnostic SSOT),
+        // resolved from the primary's identities. Folded in below so even a
+        // single-source card carries its full cross-server set.
+        let indexSources = identitySources(primary)
+        guard duplicates.count > 1 || !indexSources.isEmpty else { return primary }
 
         // Union external ids so the merged card carries every catalogue id.
         var providerIDs = primary.providerIDs
@@ -159,6 +173,10 @@ public enum MediaItemMerger {
                 duplicate.sources.forEach(appendSource)
             }
         }
+        // Append index-only servers LAST so the loaded rows' live watch-state
+        // always wins the unified fold (index refs carry no watch-state); they
+        // only add membership that no loaded row surfaced.
+        for ref in indexSources { appendSource(ref) }
         primary.sources = sources
 
         // Legacy alternates list (other distinct accounts, first-seen order) kept

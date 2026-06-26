@@ -140,6 +140,9 @@ public final class AppState {
             },
             allAccountIDs: { [weak self] in
                 await MainActor.run { self?.accounts.map(\.id) ?? [] }
+            },
+            indexedSeriesSources: { [identitySnapshotStore] originSeries in
+                identitySnapshotStore.current.sources(for: originSeries).filter { $0.kind == .series }
             }
         )
         return WatchStateReconciler(store: store, applier: applier)
@@ -196,6 +199,131 @@ public final class AppState {
                 await reconciler.drain()
             }
         }
+    }
+
+    // MARK: - Eager identity index (single source of truth for cross-server sources)
+
+    /// The eager `identity → sources` index built at sign-in / sync. The single
+    /// shared store every surface reads (Home/Browse/Search merge, the detail
+    /// server-picker, and the watch fan-out) so a title's cross-server/cross-account
+    /// set is identical regardless of entry path. Profile-scoped: rebuilt when the
+    /// active profile changes so one profile's catalogue never leaks into another.
+    @ObservationIgnored
+    private var _identityIndex = IdentityIndex()
+
+    /// In-flight warming task, cancelled and replaced when the active accounts /
+    /// profile change so a stale scan can't clobber a newer one.
+    @ObservationIgnored
+    private var identityWarmTask: Task<Void, Never>?
+
+    /// An immutable snapshot of ``_identityIndex`` that synchronous callers read.
+    /// `.empty` until the first account warms — every lookup then returns `[]`, so
+    /// callers degrade to their existing on-demand discovery and never drop a write.
+    public private(set) var identitySnapshot: IdentityIndexSnapshot = .empty
+
+    /// Thread-safe mirror of ``identitySnapshot`` so the `@Sendable` lookup closure
+    /// handed to Home/Browse/Search merging and the off-main player stop hook can
+    /// read the live source-of-truth without hopping to the main actor.
+    @ObservationIgnored
+    private let identitySnapshotStore = IdentityIndexSnapshotStore()
+
+    /// A `@Sendable` identity → cross-server sources lookup over the live index.
+    /// The single accessor every surface (merge enrichment, detail picker, watch
+    /// fan-out) uses to read the shared source of truth.
+    public var identitySourcesProvider: @Sendable (MediaItem) -> [MediaSourceRef] {
+        identitySnapshotStore.sourcesProvider()
+    }
+
+    /// How long an account's index stays fresh before an opportunistic re-warm.
+    private let identityIndexTTL: TimeInterval = 600
+
+    /// Per-library scan caps so building the index can never become an unbounded
+    /// full-library walk that stalls launch on a huge catalogue.
+    private let identityChunkSize = 200
+    private let identityMaxItemsPerLibrary = 10_000
+
+    /// Warms (or incrementally refreshes) the identity index for the currently
+    /// active accounts. Cold and stale accounts are (re)scanned; removed accounts
+    /// are pruned. Bounded and fully best-effort: a failing/asleep server simply
+    /// contributes nothing and is retried on the next warm, so the index only ever
+    /// grows toward completeness and never blocks playback or watch writes.
+    public func warmIdentityIndex(force: Bool = false) {
+        let resolved = homeAccounts
+        guard !resolved.isEmpty else { return }
+        let activeIDs = Set(resolved.map(\.account.id))
+        let serverInfo = resolved.sourceServerInfo()
+        let index = _identityIndex
+        let ttl = identityIndexTTL
+        let chunkSize = identityChunkSize
+        let maxPerLibrary = identityMaxItemsPerLibrary
+
+        identityWarmTask?.cancel()
+        identityWarmTask = Task { [weak self] in
+            await index.retainAccounts(activeIDs)
+            let stale = await index.staleAccounts(olderThan: ttl)
+            for resolvedAccount in resolved {
+                if Task.isCancelled { break }
+                let accountID = resolvedAccount.account.id
+                let warm = await index.isWarm(accountID)
+                if warm && !force && !stale.contains(accountID) { continue }
+                await Self.indexAccount(
+                    resolvedAccount,
+                    into: index,
+                    serverInfo: serverInfo[accountID],
+                    chunkSize: chunkSize,
+                    maxPerLibrary: maxPerLibrary
+                )
+                // Publish progressively so surfaces see each warmed account.
+                let snapshot = await index.snapshot()
+                await MainActor.run {
+                    self?.identitySnapshot = snapshot
+                    self?.identitySnapshotStore.update(snapshot)
+                }
+            }
+        }
+    }
+
+    /// Scans one account's movie + series libraries in bounded pages and ingests
+    /// every catalogue entry's identity → source into the index.
+    private static func indexAccount(
+        _ resolved: ResolvedAccount,
+        into index: IdentityIndex,
+        serverInfo: SourceServerInfo?,
+        chunkSize: Int,
+        maxPerLibrary: Int
+    ) async {
+        let provider = resolved.provider
+        let accountID = resolved.account.id
+        guard let libraries = try? await provider.libraries() else { return }
+
+        await index.beginRebuild(for: accountID)
+        for library in libraries where library.kind == .movie || library.kind == .series {
+            if Task.isCancelled { return }
+            var offset = 0
+            while offset < maxPerLibrary {
+                if Task.isCancelled { return }
+                guard let page = try? await provider.items(
+                    in: library.id,
+                    kind: library.kind,
+                    page: PageRequest(startIndex: offset, limit: chunkSize, sort: .default)
+                ) else { break }
+                if page.items.isEmpty { break }
+                await index.ingest(page.items, accountID: accountID, serverInfo: serverInfo)
+                offset += page.items.count
+                if offset >= page.totalCount { break }
+            }
+        }
+        await index.finishRebuild(for: accountID)
+    }
+
+    /// Flushes the identity index when the active profile changes so the next warm
+    /// rebuilds it for the now-active profile's accounts.
+    private func resetIdentityIndex() {
+        identityWarmTask?.cancel()
+        identityWarmTask = nil
+        _identityIndex = IdentityIndex()
+        identitySnapshot = .empty
+        identitySnapshotStore.update(.empty)
     }
 
     private var machine = SessionStateMachine()
@@ -827,6 +955,7 @@ public final class AppState {
     private func updateTraktForActiveProfile() {
         let ns = profilesModel.activeNamespace
         resetWatchReconciler()
+        resetIdentityIndex()
         Task { await traktService.setActiveProfile(namespace: ns) }
     }
 

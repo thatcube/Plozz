@@ -27,13 +27,18 @@ public final class HomeViewModel {
 
     private let accounts: [ResolvedAccount]
     private let aggregator: HomeAggregator
+    /// The shared identity-index lookup folded into every merged row so a card
+    /// surfaced by one server still carries its full cross-server source set.
+    private let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
 
     public init(
         accounts: [ResolvedAccount],
-        aggregator: HomeAggregator = HomeAggregator()
+        aggregator: HomeAggregator = HomeAggregator(),
+        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) {
         self.accounts = accounts
         self.aggregator = aggregator
+        self.identitySources = identitySources
     }
 
     /// User-facing name for the greeting header — the primary (first) account.
@@ -44,8 +49,9 @@ public final class HomeViewModel {
 
         let aggregator = self.aggregator
         let accounts = self.accounts
+        let identitySources = self.identitySources
         let merged = await Task.detached(priority: .userInitiated) {
-            await aggregator.content(from: accounts)
+            await aggregator.content(from: accounts, identitySources: identitySources)
         }.value
         guard !Task.isCancelled else { return }
         let content = Content(

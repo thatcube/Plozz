@@ -41,9 +41,14 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         var totals: [String: Int] = [:]
         var exhausted: Set<String> = []
         let serverInfo: [String: SourceServerInfo]
+        let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
 
-        init(serverInfo: [String: SourceServerInfo]) {
+        init(
+            serverInfo: [String: SourceServerInfo],
+            identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+        ) {
             self.serverInfo = serverInfo
+            self.identitySources = identitySources
         }
 
         func initialize(with sourceIDs: [String]) {
@@ -64,7 +69,11 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         /// (a title that sorts differently per server) still collapse. Done under
         /// the actor lock so concurrent page requests can't corrupt the buffer.
         func appendMergedBatch(_ items: [MediaItem]) {
-            merged = MediaItemMerger.merge(merged + items, serverInfo: { [serverInfo] id in serverInfo[id] })
+            merged = MediaItemMerger.merge(
+                merged + items,
+                serverInfo: { [serverInfo] id in serverInfo[id] },
+                identitySources: identitySources
+            )
         }
 
         func totalUpperBound() -> Int { totals.values.reduce(0, +) }
@@ -75,11 +84,12 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
 
     public init(
         sources: [AggregatedLibrarySource],
-        serverInfo: [String: SourceServerInfo] = [:]
+        serverInfo: [String: SourceServerInfo] = [:],
+        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) {
         precondition(!sources.isEmpty, "AggregatedLibraryProvider requires at least one source")
         self.sources = sources
-        self.cache = Cache(serverInfo: serverInfo)
+        self.cache = Cache(serverInfo: serverInfo, identitySources: identitySources)
         self.kind = sources[0].provider.kind
         self.session = sources[0].provider.session
     }

@@ -46,7 +46,8 @@ public struct HomeAggregator: Sendable {
         from accounts: [ResolvedAccount],
         continueWatchingLimit: Int = 20,
         latestLimit: Int = 20,
-        watchlistLimit: Int = 20
+        watchlistLimit: Int = 20,
+        identitySources: @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) async -> Content {
         let perAccount = await Self.loadPerAccount(accounts) { resolved in
             await Self.load(
@@ -69,17 +70,20 @@ public struct HomeAggregator: Sendable {
             continueWatching: Self.mergedRow(
                 from: perAccount.map(\.continueWatching),
                 limit: continueWatchingLimit,
-                serverInfo: resolve
+                serverInfo: resolve,
+                identitySources: identitySources
             ),
             latest: Self.mergedRow(
                 from: perAccount.map(\.latest),
                 limit: latestLimit,
-                serverInfo: resolve
+                serverInfo: resolve,
+                identitySources: identitySources
             ),
             watchlist: Self.mergedRow(
                 from: perAccount.map(\.watchlist),
                 limit: watchlistLimit,
-                serverInfo: resolve
+                serverInfo: resolve,
+                identitySources: identitySources
             ),
             // Library TILES are NEVER merged across accounts/servers: every
             // enabled library keeps its own tile (keyed `accountID:library.id`)
@@ -213,10 +217,15 @@ public struct HomeAggregator: Sendable {
     private static func mergedRow(
         from groups: [[MediaItem]],
         limit: Int,
-        serverInfo: (String) -> SourceServerInfo?
+        serverInfo: (String) -> SourceServerInfo?,
+        identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) -> [MediaItem] {
         guard limit > 0 else { return [] }
-        let merged = MediaItemMerger.merge(Self.interleave(groups), serverInfo: serverInfo)
+        let merged = MediaItemMerger.merge(
+            Self.interleave(groups),
+            serverInfo: serverInfo,
+            identitySources: identitySources
+        )
         guard merged.count > limit else { return merged }
         return Array(merged.prefix(limit))
     }

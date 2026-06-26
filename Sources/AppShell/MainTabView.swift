@@ -67,6 +67,13 @@ struct MainTabView: View {
     let onSwitchProfile: () -> Void
     let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
+    /// The shared source-of-truth lookup: a title → its full cross-server source
+    /// set from the eager identity index. Threaded into Home/Search/Browse merging,
+    /// the detail picker and the watch fan-out so all read one consistent set.
+    let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
+    /// Kicks off (or incrementally refreshes) the identity index for the signed-in
+    /// accounts. Invoked when the signed-in UI appears.
+    let onWarmIdentityIndex: () -> Void
 
     @State private var discovery = LibraryDiscoveryModel()
     @State private var audioController = AudioPlaybackController()
@@ -90,6 +97,7 @@ struct MainTabView: View {
                 scrobbler: trakt.scrobbler,
                 enqueueWatchMutation: enqueueWatchMutation,
                 watchBridge: watchBridge,
+                identitySources: identitySources,
                 pendingPlayItemID: $pendingPlayItemID
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
@@ -103,7 +111,8 @@ struct MainTabView: View {
                 ratingsProvider: ratingsProvider,
                 scrobbler: trakt.scrobbler,
                 enqueueWatchMutation: enqueueWatchMutation,
-                watchBridge: watchBridge
+                watchBridge: watchBridge,
+                identitySources: identitySources
             )
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
@@ -153,6 +162,7 @@ struct MainTabView: View {
         }
         .task(id: accounts.map(\.account.id)) {
             await musicAvailability.probe(accounts: accounts)
+            onWarmIdentityIndex()
         }
         .mediaItemActionHandler(mediaItemActionHandler)
     }
@@ -220,7 +230,8 @@ private func searchWithDeadline(
 }
 
 private func crossServerSourceResolver(
-    in accounts: [ResolvedAccount]
+    in accounts: [ResolvedAccount],
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
 ) -> (@Sendable (MediaItem) async -> [MediaSourceRef])? {
     guard !accounts.isEmpty else { return nil }
     let serverInfo = accounts.sourceServerInfo()
@@ -229,13 +240,18 @@ private func crossServerSourceResolver(
         uniquingKeysWith: { first, _ in first }
     )
     return { primary in
+        // Start from the eager index's known sources for this title — the shared
+        // source of truth — so the picker is at least as complete as the watch
+        // fan-out even before (or without) an on-demand probe.
+        var sources: [MediaSourceRef] = identitySources(primary)
+        var seen = Set(sources.map(\.id))
         // Probe EVERY signed-in account, including the primary's own. The
         // primary's own item id is filtered inside the resolver so same-server
         // duplicate movie items (two Jellyfin items, one film) group into one
         // detail with a multi-entry version picker — without this only OTHER
         // servers' twins were discovered and a same-server duplicate was invisible.
         let everyAccount = Array(providersByAccountID.keys)
-        return await CrossServerSourceResolver.resolve(
+        let resolved = await CrossServerSourceResolver.resolve(
             primary: primary,
             otherAccountIDs: everyAccount,
             search: { accountID, query in
@@ -244,6 +260,15 @@ private func crossServerSourceResolver(
             },
             serverInfo: { serverInfo[$0] }
         )
+        // The on-demand probe carries live versions/watch-state, so let it win on
+        // id collisions: drop index placeholders the probe already covered, then
+        // union in any index-only server the probe missed.
+        let resolvedIDs = Set(resolved.map(\.id))
+        sources.removeAll { resolvedIDs.contains($0.id) }
+        seen = resolvedIDs
+        var merged = resolved
+        for ref in sources where seen.insert(ref.id).inserted { merged.append(ref) }
+        return merged
     }
 }
 
@@ -256,7 +281,8 @@ private func crossServerSourceResolver(
 /// view-model doesn't re-tag items and clobber their per-source identity.
 private func resolveLibraryBrowse(
     for library: MediaLibrary,
-    in accounts: [ResolvedAccount]
+    in accounts: [ResolvedAccount],
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
 ) -> (provider: any MediaProvider, sourceAccountID: String?) {
     let accountIDs = library.allSourceAccountIDs
     if accountIDs.count > 1 {
@@ -269,7 +295,11 @@ private func resolveLibraryBrowse(
         }
         if sources.count > 1 {
             return (
-                AggregatedLibraryProvider(sources: sources, serverInfo: accounts.sourceServerInfo()),
+                AggregatedLibraryProvider(
+                    sources: sources,
+                    serverInfo: accounts.sourceServerInfo(),
+                    identitySources: identitySources
+                ),
                 nil
             )
         }
@@ -291,7 +321,8 @@ private func makePlayerViewModel(
     accounts: [ResolvedAccount],
     captionSettings: CaptionSettings,
     scrobbler: any TraktScrobbling,
-    watchBridge: WatchOutboxBridge
+    watchBridge: WatchOutboxBridge,
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
 ) -> PlayerViewModel {
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
@@ -328,6 +359,10 @@ private func makePlayerViewModel(
     // sources, so the mutation fans out to every server holding the title + Trakt.
     let convergingItem = request.item
     let primaryAccountID = accounts.first?.account.id
+    // Snapshot the eager index's known servers for this title up front (Sendable
+    // value) so the off-main stop hook fans the final convergence write out to
+    // every server holding it, regardless of which entry path opened the player.
+    let convergingExtraSources = identitySources(convergingItem)
     // The live session key must match the origin target the factory derives for
     // the streaming server, so the reconciler defers writes against exactly that
     // (account,item) while it plays. `sourceAccountID` falls back to the primary
@@ -347,7 +382,8 @@ private func makePlayerViewModel(
                 item: convergingItem,
                 position: position,
                 watchedPercent: percent,
-                primaryAccountID: primaryAccountID
+                primaryAccountID: primaryAccountID,
+                additionalSources: convergingExtraSources
             )
             // End the live session (so the just-played server is no longer
             // deferred) and enqueue the final convergence write, in that order.
@@ -377,6 +413,7 @@ private struct HomeTab: View {
     let scrobbler: any TraktScrobbling
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
+    let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
     @Binding var pendingPlayItemID: String?
 
     @State private var path = NavigationPath()
@@ -386,7 +423,7 @@ private struct HomeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             HomeView(
-                viewModel: HomeViewModel(accounts: accounts),
+                viewModel: HomeViewModel(accounts: accounts, identitySources: identitySources),
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
                 onSelectItem: { navigate($0) },
@@ -396,7 +433,7 @@ private struct HomeTab: View {
                 }
             )
             .navigationDestination(for: MediaLibrary.self) { library in
-                let browse = resolveLibraryBrowse(for: library, in: accounts)
+                let browse = resolveLibraryBrowse(for: library, in: accounts, identitySources: identitySources)
                 LibraryBrowseView(
                     viewModel: LibraryBrowseViewModel(
                         provider: browse.provider,
@@ -436,7 +473,7 @@ private struct HomeTab: View {
                         // discovery matches the series by provider IDs and fills
                         // the server list once the page settles.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                         snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
@@ -459,7 +496,7 @@ private struct HomeTab: View {
                         // The fronted page IS the series, so it gets the same
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                         snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
@@ -476,7 +513,8 @@ private struct HomeTab: View {
                     accounts: accounts,
                     captionSettings: captionSettings,
                     scrobbler: scrobbler,
-                    watchBridge: watchBridge
+                    watchBridge: watchBridge,
+                    identitySources: identitySources
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette
@@ -544,7 +582,7 @@ private struct HomeTab: View {
                 originSourceAccountID: libraryOrigin,
                 initialSources: item.sources,
                 alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                crossServerSourceResolver: crossServerSourceResolver(in: accounts),
+                crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                 snapshotCache: .shared
             ),
             spoilerSettings: spoilerSettings,
@@ -653,6 +691,7 @@ private struct SearchTab: View {
     let scrobbler: any TraktScrobbling
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
+    let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
 
     @State private var path = NavigationPath()
     @State private var playRequest: PlayRequest?
@@ -661,7 +700,7 @@ private struct SearchTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             SearchView(
-                viewModel: SearchViewModel(accounts: accounts),
+                viewModel: SearchViewModel(accounts: accounts, identitySources: identitySources),
                 spoilerSettings: spoilerSettings,
                 onSelect: { open($0) }
             )
@@ -675,7 +714,7 @@ private struct SearchTab: View {
                         sourceAccountID: item.sourceAccountID,
                         initialSources: item.sources,
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                         snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
@@ -698,7 +737,7 @@ private struct SearchTab: View {
                         // The fronted page IS the series, so it gets the same
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                         snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
@@ -721,7 +760,7 @@ private struct SearchTab: View {
                         // The fronted page IS the series, so it gets the same
                         // cross-server "…" picker a directly-opened series does.
                         alternateProviderResolver: { resolveOptionalProvider($0, in: accounts) },
-                        crossServerSourceResolver: crossServerSourceResolver(in: accounts),
+                        crossServerSourceResolver: crossServerSourceResolver(in: accounts, identitySources: identitySources),
                         snapshotCache: .shared
                     ),
                     spoilerSettings: spoilerSettings,
@@ -747,7 +786,8 @@ private struct SearchTab: View {
                     accounts: accounts,
                     captionSettings: captionSettings,
                     scrobbler: scrobbler,
-                    watchBridge: watchBridge
+                    watchBridge: watchBridge,
+                    identitySources: identitySources
                 ),
                 showDiagnostics: showDiagnostics,
                 themePalette: themePalette

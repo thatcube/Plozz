@@ -128,6 +128,11 @@ struct NowPlayingView: View {
             controller.togglePlayPause()
             showControls()
         }
+        // The player always sits on its own dark, artwork-tinted background, so
+        // it must never follow the app's light/dark theme — force the whole
+        // subtree to resolve as dark so text and glass stay light-on-dark even
+        // when the rest of the app is in a light theme.
+        .environment(\.colorScheme, .dark)
     }
 
     /// A button style that renders only its label with no platform focus

@@ -569,7 +569,12 @@ struct MusicDetailLayout<InfoColumn: View>: View {
                 // column reliably enters the list regardless of row alignment.
                 .focusSection()
             }
-            .padding(PlozzTheme.Metrics.screenPadding)
+            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(.bottom, PlozzTheme.Metrics.screenPadding)
+            // Pull the whole detail (both columns) up toward the top of the page;
+            // tvOS reserves a sizable top safe-area inset that otherwise leaves
+            // the artwork and track list sitting too low.
+            .padding(.top, PlozzTheme.Metrics.screenPadding - 80)
         }
     }
 }

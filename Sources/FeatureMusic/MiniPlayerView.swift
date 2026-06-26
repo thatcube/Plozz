@@ -49,13 +49,18 @@ struct NowPlayingCard: View {
     /// the average song title + "Artist · Album" line fits without truncation.
     var textWidth: CGFloat = 320
 
+    /// When true the card stretches to fill its container's width (equalizer
+    /// pinned to the trailing edge) so it can line up with sibling controls.
+    var fillWidth: Bool = false
+
     var body: some View {
         if controller.hasActivePlayback, let track = controller.currentTrack {
             Button(action: openNowPlaying) {
                 NowPlayingCardContent(
                     track: track,
                     isPlaying: controller.isPlaying,
-                    textWidth: textWidth
+                    textWidth: textWidth,
+                    fillWidth: fillWidth
                 )
             }
             // A fully custom ButtonStyle (rather than `.plain`) so tvOS doesn't
@@ -75,6 +80,7 @@ private struct NowPlayingCardContent: View {
     let track: MusicTrack
     let isPlaying: Bool
     let textWidth: CGFloat
+    var fillWidth: Bool = false
 
     @Environment(\.nowPlayingCardFocused) private var isFocused
     @Environment(\.colorScheme) private var colorScheme
@@ -114,6 +120,8 @@ private struct NowPlayingCardContent: View {
             }
             .frame(maxWidth: textWidth, alignment: .leading)
 
+            if fillWidth { Spacer(minLength: 12) }
+
             Group {
                 if isPlaying {
                     // Flip the equalizer bars to the inverted foreground on focus
@@ -130,6 +138,7 @@ private struct NowPlayingCardContent: View {
         .padding(.leading, 18)
         .padding(.trailing, 28)
         .padding(.vertical, 16)
+        .frame(maxWidth: fillWidth ? .infinity : nil, alignment: .leading)
     }
 }
 

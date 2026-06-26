@@ -336,6 +336,10 @@ struct ArtistDetailView: View {
                     }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+                // Own focus section so pressing Down from the Now Playing card
+                // (pinned top-right of the hero) drops back into the grid, even
+                // though no album sits directly beneath it.
+                .focusSection()
             }
             .padding(.vertical, PlozzTheme.Metrics.rowSpacing)
         }
@@ -363,6 +367,8 @@ struct AlbumDetailView: View {
         .task { await viewModel.load() }
     }
 
+    private let columnWidth: CGFloat = 360
+
     private var infoColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
             MusicArtworkImage(
@@ -373,7 +379,7 @@ struct AlbumDetailView: View {
                     artist: viewModel.album.artistName
                 )
             )
-                .frame(width: 360, height: 360)
+                .frame(width: columnWidth, height: columnWidth)
             Text(viewModel.album.title).font(.system(size: 40, weight: .bold)).lineLimit(3)
             Text(viewModel.album.subtitleLine).font(.title3).foregroundStyle(.secondary).lineLimit(2)
             if let count = viewModel.album.trackCount {
@@ -384,15 +390,22 @@ struct AlbumDetailView: View {
             PlayShuffleButtons(
                 isEmpty: viewModel.tracks.isEmpty,
                 onPlay: { play(from: nil) },
-                onShuffle: { shuffle() }
+                onShuffle: { shuffle() },
+                fillWidth: true
             )
+            .frame(width: columnWidth)
             .padding(.top, 8)
+            // Its own focus section so Left from a track row lands here (the
+            // transport) first, rather than the wider Now Playing card below.
+            .focusSection()
 
             // The Now Playing card sits under the Play/Shuffle buttons. It shows
             // whenever something is playing (including a track from this very
             // album) so the user always has a quick way back to the player.
-            NowPlayingCard(controller: controller)
+            NowPlayingCard(controller: controller, fillWidth: true)
+                .frame(width: columnWidth)
                 .padding(.top, 12)
+                .focusSection()
         }
     }
 
@@ -438,24 +451,33 @@ struct PlaylistDetailView: View {
         .task { await viewModel.load() }
     }
 
+    private let columnWidth: CGFloat = 360
+
     private var infoColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
             MusicArtworkImage(url: viewModel.playlist.artworkURL, systemPlaceholder: "music.note.list")
-                .frame(width: 360, height: 360)
+                .frame(width: columnWidth, height: columnWidth)
             Text(viewModel.playlist.title).font(.system(size: 40, weight: .bold)).lineLimit(3)
             Text("\(viewModel.tracks.count) tracks").font(.title3).foregroundStyle(.secondary)
             PlayShuffleButtons(
                 isEmpty: viewModel.tracks.isEmpty,
                 onPlay: { play(from: nil) },
-                onShuffle: { shuffle() }
+                onShuffle: { shuffle() },
+                fillWidth: true
             )
+            .frame(width: columnWidth)
             .padding(.top, 8)
+            // Its own focus section so Left from a track row lands here (the
+            // transport) first, rather than the wider Now Playing card below.
+            .focusSection()
 
             // The Now Playing card sits under the Play/Shuffle buttons. It shows
             // whenever something is playing (including a track from this very
             // playlist) so the user always has a quick way back to the player.
-            NowPlayingCard(controller: controller)
+            NowPlayingCard(controller: controller, fillWidth: true)
+                .frame(width: columnWidth)
                 .padding(.top, 12)
+                .focusSection()
         }
     }
 
@@ -486,11 +508,16 @@ struct PlayShuffleButtons: View {
     let isEmpty: Bool
     let onPlay: () -> Void
     let onShuffle: () -> Void
+    /// When true the row spans its container with Play stretching to fill the
+    /// leftover width and Shuffle keeping its natural size.
+    var fillWidth: Bool = false
 
     var body: some View {
         HStack(spacing: 20) {
             Button(action: onPlay) {
-                Label("Play", systemImage: "play.fill").padding(.horizontal, 12)
+                Label("Play", systemImage: "play.fill")
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: fillWidth ? .infinity : nil)
             }
             .buttonStyle(.borderedProminent)
             .disabled(isEmpty)
@@ -501,6 +528,7 @@ struct PlayShuffleButtons: View {
             .buttonStyle(.bordered)
             .disabled(isEmpty)
         }
+        .frame(maxWidth: fillWidth ? .infinity : nil, alignment: .leading)
     }
 }
 
@@ -526,10 +554,6 @@ struct MusicDetailLayout<InfoColumn: View>: View {
             HStack(alignment: .top, spacing: 56) {
                 info
                     .frame(width: infoWidth, alignment: .leading)
-                    // Own focus section: pressing Left from any track row jumps
-                    // back to Play/Shuffle/Now Playing even when the list is short
-                    // and the buttons sit far below the focused row.
-                    .focusSection()
                 ScrollView {
                     TrackListView(
                         tracks: tracks,

@@ -22,14 +22,18 @@ public struct LiquidArtworkBackground: View {
     public var animate: Bool = true
     /// How the scrim over the morphing colors is painted.
     public var style: Style = .dark
+    /// How long the crossfade takes when `palette` changes. Longer values let
+    /// the field drift gently behind a fast-moving selection.
+    public var paletteCrossfade: Double = 1.2
 
     /// The three background treatments the player offers.
     public enum Style { case dark, light, oled }
 
-    public init(palette: [Color], animate: Bool = true, style: Style = .dark) {
+    public init(palette: [Color], animate: Bool = true, style: Style = .dark, paletteCrossfade: Double = 1.2) {
         self.palette = palette
         self.animate = animate
         self.style = style
+        self.paletteCrossfade = paletteCrossfade
     }
 
     public var body: some View {
@@ -41,7 +45,7 @@ public struct LiquidArtworkBackground: View {
             scrim
         }
         .ignoresSafeArea()
-        .animation(.easeInOut(duration: 1.2), value: palette)
+        .animation(.easeInOut(duration: paletteCrossfade), value: palette)
     }
 
     /// The solid floor under the morphing colors.

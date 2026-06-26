@@ -145,7 +145,8 @@ struct ProfileBackgroundGradient: View {
         LiquidArtworkBackground(
             palette: resolvedColors,
             animate: !reduceMotion,
-            style: style
+            style: style,
+            paletteCrossfade: 2.6
         )
         .opacity(appeared ? 1 : 0)
         .onAppear {

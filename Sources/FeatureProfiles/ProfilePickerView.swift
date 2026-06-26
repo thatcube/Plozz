@@ -41,17 +41,21 @@ public struct ProfilePickerView: View {
     /// Which profile tile currently holds focus. Drives the background gradient
     /// so the wash tracks the profile you're hovering. `nil` before focus settles.
     @FocusState private var focusedProfileID: String?
-    /// The last profile that held focus, so focusing the non-profile "Add" tile
-    /// (or losing focus briefly) keeps the most recent profile's wash instead of
-    /// snapping the background away.
-    @State private var lastFocusedProfileID: String?
+    /// The profile the background has actually *committed* to. Updated only after
+    /// focus rests on a tile for `backgroundSettleDelay`, so sweeping across tiles
+    /// (1 → 2 → 3) skips the in-between profiles entirely — the wash only fades to
+    /// where you land and pause, never to the ones you pass through.
+    @State private var settledProfileID: String?
     /// Per-profile resolved colors (instant base + progressive photo extraction).
     @State private var palettes = ProfileBackgroundPalettes()
 
-    /// The profile whose colors the background should currently show: the
-    /// focused one, else the last focused, else the active, else the first.
+    /// How long focus must rest on a tile before the background fades to it.
+    private let backgroundSettleDelay: Duration = .milliseconds(300)
+
+    /// The profile whose colors the background should currently show: the one
+    /// focus has settled on, else the active, else the first.
     private var backgroundProfile: Profile? {
-        let id = focusedProfileID ?? lastFocusedProfileID ?? activeProfileID
+        let id = settledProfileID ?? activeProfileID
         return profiles.first { $0.id == id } ?? profiles.first
     }
 
@@ -90,8 +94,15 @@ public struct ProfilePickerView: View {
             ProfileBackgroundGradient(profile: backgroundProfile)
         }
         .environment(palettes)
-        .onChange(of: focusedProfileID) { _, newValue in
-            if let newValue { lastFocusedProfileID = newValue }
+        .task(id: focusedProfileID) {
+            // Debounce: wait for focus to rest before committing the background.
+            // If focus moves again the task is cancelled and restarted, so the
+            // profiles you sweep past never get a chance to fade in — only the
+            // one you actually pause on does. Focusing the "Add" tile (nil) keeps
+            // the last settled wash rather than snapping away.
+            guard let id = focusedProfileID else { return }
+            do { try await Task.sleep(for: backgroundSettleDelay) } catch { return }
+            settledProfileID = id
         }
         .onAppear { prefetchAvatars() }
     }
@@ -136,38 +147,36 @@ private struct ProfileTile: View {
     }
 }
 
-/// Focus treatment shared by the profile and "Add" tiles: a subtle scale + the
-/// circular focus glass live here (the glass itself is drawn by `FocusGlassAvatar`
-/// inside the label). Owning focus in a `ButtonStyle` — rather than a `.plain`
-/// button with a manual overlay — keeps tvOS from also painting its own focus
-/// plate, so the tile shows a single, fully custom indicator.
+/// Focus treatment shared by the profile and "Add" tiles. Owning focus in a
+/// `ButtonStyle` — rather than a `.plain` button with a manual overlay — keeps
+/// tvOS from also painting its own focus plate, so the tile shows a single,
+/// fully custom indicator. The focus scale is applied to the *photo only*
+/// (inside `FocusGlassAvatar`); here we just add momentary press feedback to the
+/// avatar so the name and active dot keep a constant size.
 private struct ProfileTileButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        FocusBody(configuration: configuration)
-    }
-
-    private struct FocusBody: View {
-        let configuration: ButtonStyle.Configuration
-        @Environment(\.isFocused) private var isFocused
-
-        private var scale: CGFloat { PlozzTheme.Metrics.mediumFocusedCardScale }
-
-        var body: some View {
-            configuration.label
-                .scaleEffect(isFocused ? (configuration.isPressed ? scale * 0.97 : scale) : 1)
-                .animation(.easeOut(duration: 0.22), value: isFocused)
-                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-        }
+        configuration.label
+            .environment(\.profileTilePressed, configuration.isPressed)
     }
 }
 
 /// A fixed-size avatar slot that shows the shared liquid-glass focus surface as a
 /// **circle** around its content (with `focusPadding` of clearance) only when
-/// focused — no background at rest. The focused size is always reserved, so
-/// focusing never nudges the grid; the glass simply fades in with a soft lift.
+/// focused — no background at rest. On focus the *photo* gently scales up toward
+/// the halo while the glass stays put; the surrounding text is unaffected. The
+/// focused size is always reserved, so focusing never nudges the grid; the glass
+/// simply fades in with a soft lift.
 private struct FocusGlassAvatar<Content: View>: View {
     @ViewBuilder var content: () -> Content
     @Environment(\.isFocused) private var isFocused
+    @Environment(\.profileTilePressed) private var isPressed
+
+    private var scale: CGFloat { PlozzTheme.Metrics.mediumFocusedCardScale }
+
+    private var contentScale: CGFloat {
+        guard isFocused else { return 1 }
+        return isPressed ? scale * 0.97 : scale
+    }
 
     var body: some View {
         ZStack {
@@ -179,9 +188,22 @@ private struct FocusGlassAvatar<Content: View>: View {
 
             content()
                 .frame(width: ProfilePickerLayout.avatarSize, height: ProfilePickerLayout.avatarSize)
+                .scaleEffect(contentScale)
         }
         .frame(width: ProfilePickerLayout.slot, height: ProfilePickerLayout.slot)
         .animation(.easeOut(duration: 0.22), value: isFocused)
+        .animation(.easeOut(duration: 0.12), value: isPressed)
+    }
+}
+
+private struct ProfileTilePressedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private extension EnvironmentValues {
+    var profileTilePressed: Bool {
+        get { self[ProfileTilePressedKey.self] }
+        set { self[ProfileTilePressedKey.self] = newValue }
     }
 }
 

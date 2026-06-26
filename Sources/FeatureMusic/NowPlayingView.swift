@@ -94,8 +94,15 @@ struct NowPlayingView: View {
         .onChange(of: controller.duration) { _, _ in syncScrubModel() }
         .onChange(of: scrubModel.isScrubbing) { _, _ in scheduleHide() }
         .task(id: controller.currentTrack?.id) { await loadArtworkPalette() }
-        // The Menu/Back button now closes the player (the X was removed).
-        .onExitCommand { dismiss() }
+        // Back/Menu first dismisses the controls if they're showing; pressing it
+        // again (with the controls already hidden) closes the player.
+        .onExitCommand {
+            if controlsVisible {
+                hideControls()
+            } else {
+                dismiss()
+            }
+        }
         // In the foreground the Siri Remote's play/pause press is delivered
         // through the focus/responder chain, not MPRemoteCommandCenter — so the
         // command center alone resumes inconsistently. Handle it here so the
@@ -141,6 +148,14 @@ struct NowPlayingView: View {
         controlsVisible = true
         focus = .playPause
         scheduleHide()
+    }
+
+    /// Immediately hides the control bar (cancelling the pending auto-hide) and
+    /// moves focus to the reveal catcher, exactly as the auto-hide timer would.
+    private func hideControls() {
+        hideTask?.cancel()
+        controlsVisible = false
+        focus = .revealCatcher
     }
 
     /// Schedules the control bar to fade away after `controlsAutoHideDelay`,
@@ -497,8 +512,8 @@ struct NowPlayingLyricsView: View {
         LinearGradient(
             stops: [
                 .init(color: .clear, location: 0.0),
-                .init(color: .black, location: 0.16),
-                .init(color: .black, location: 0.84),
+                .init(color: .black, location: 0.24),
+                .init(color: .black, location: 0.76),
                 .init(color: .clear, location: 1.0)
             ],
             startPoint: .top,

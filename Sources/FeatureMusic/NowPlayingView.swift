@@ -35,6 +35,12 @@ struct NowPlayingView: View {
     /// Pending auto-hide; cancelled/rescheduled on every interaction.
     @State private var hideTask: Task<Void, Never>?
 
+    /// Measured height of the bottom control bar, so it can slide fully off the
+    /// bottom edge (as one persistent layer) instead of being inserted/removed —
+    /// keeping the glass scrub track, played fill and knob moving in lockstep with
+    /// the rest of the bar.
+    @State private var bottomBarHeight: CGFloat = 0
+
     /// Focus targets on the player. Play/pause is the anchor the bar always
     /// comes back focused on; the reveal catcher holds focus while the bar is
     /// hidden so tvOS focus never lands on an invisible control. Every visible
@@ -111,19 +117,35 @@ struct NowPlayingView: View {
         ZStack {
             background
 
-            // Main content + bottom bar share a vertical stack so the artwork
-            // and lyrics center in the space *above* the controls, then settle
-            // down and re-center on the full screen once the bar slides away.
-            VStack(spacing: 0) {
-                mainContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 80)
-                    .padding(.top, 60)
-                if controlsVisible {
-                    bottomControls
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
+            // Main content + bottom bar share the ZStack. The bar stays mounted
+            // and slides off the bottom edge via offset/opacity (rather than an
+            // insert/remove transition) so the whole bar — including the glass
+            // scrub track, played fill and knob inside its GeometryReader — moves
+            // as one persistent layer. (Children of a GeometryReader don't inherit
+            // a .move transition, which made the fill + knob snap to their final
+            // spot while the rest of the bar slid.)
+            mainContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 80)
+                .padding(.top, 60)
+                // Reserve room for the bar while it's shown so the artwork and
+                // lyrics center in the space *above* the controls, then re-center
+                // on the full screen once the bar slides away.
+                .padding(.bottom, controlsVisible ? bottomBarHeight : 0)
+
+            bottomControls
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: BottomBarHeightKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .offset(y: controlsVisible ? 0 : bottomBarHeight + 60)
+                .opacity(controlsVisible ? 1 : 0)
+                .allowsHitTesting(controlsVisible)
 
             // While the bar is hidden, a transparent full-screen catcher takes
             // focus so a Select/click brings the controls back. It uses a fully
@@ -137,6 +159,9 @@ struct NowPlayingView: View {
             }
         }
         .animation(.spring(response: 0.5, dampingFraction: 0.86), value: controlsVisible)
+        .onPreferenceChange(BottomBarHeightKey.self) { height in
+            bottomBarHeight = height
+        }
         .onAppear {
             syncScrubModel()
             setIdleTimerDisabled(true)
@@ -783,6 +808,15 @@ private extension View {
                 buttonStyle(.bordered)
             }
         }
+    }
+}
+
+/// Reports the natural height of the bottom control bar so the player can slide
+/// it fully off the bottom edge as a single layer.
+private struct BottomBarHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 #endif

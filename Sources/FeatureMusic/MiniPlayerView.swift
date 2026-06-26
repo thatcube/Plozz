@@ -18,6 +18,21 @@ extension EnvironmentValues {
     }
 }
 
+/// Whether the Now Playing card is currently focused, injected by its button
+/// style so the card's inner content (title, subtitle, equalizer) can flip its
+/// colors to match the contrast-inverted focused fill. Mirrors the Settings
+/// rows' `settingsRowIsFocused` pattern.
+private struct NowPlayingCardFocusedKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+    var nowPlayingCardFocused: Bool {
+        get { self[NowPlayingCardFocusedKey.self] }
+        set { self[NowPlayingCardFocusedKey.self] = newValue }
+    }
+}
+
 /// The compact, focusable "Now Playing" affordance shown while audio is loaded.
 /// Selecting it opens the full Now Playing screen.
 ///
@@ -29,89 +44,127 @@ extension EnvironmentValues {
 struct NowPlayingCard: View {
     var controller: AudioPlaybackController
     @Environment(\.openNowPlaying) private var openNowPlaying
-    @Environment(\.colorScheme) private var colorScheme
-    @FocusState private var isFocused: Bool
 
     /// Maximum width for the title/subtitle column. Wider than the old pill so
     /// the average song title + "Artist · Album" line fits without truncation.
     var textWidth: CGFloat = 320
 
-    private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-
-    // On focus the card flips contrast in a theme-dependent way (mirrors the
-    // Settings rows' SettingsFocusButtonStyle, which we can't import here since
-    // FeatureMusic doesn't depend on FeatureSettings):
-    //   • Light theme  → BLACK card, WHITE content.
-    //   • Dark / OLED  → WHITE card, BLACK content.
-    // (OLED resolves to a .dark colorScheme, so it shares the dark behavior.)
-    private var focusFill: Color { colorScheme == .dark ? .white : .black }
-    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
-
     var body: some View {
         if controller.hasActivePlayback, let track = controller.currentTrack {
             Button(action: openNowPlaying) {
-                HStack(spacing: 16) {
-                    MusicArtworkImage(
-                        url: track.artworkURL,
-                        systemPlaceholder: "music.note",
-                        cornerRadius: 8,
-                        asyncFallbackURL: MusicArtworkFallback.trackCover(
-                            title: track.title,
-                            album: track.albumTitle,
-                            artist: track.artistName
-                        )
-                    )
-                        .frame(width: 64, height: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(track.title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                            .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
-                        if let subtitle = track.subtitle {
-                            Text(subtitle)
-                                .font(.caption2)
-                                .lineLimit(1)
-                                .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
-                        }
-                    }
-                    .frame(maxWidth: textWidth, alignment: .leading)
-
-                    Group {
-                        if controller.isPlaying {
-                            // Flip the equalizer bars to the inverted foreground on
-                            // focus so accent-colored bars don't clash with the
-                            // inverted card fill.
-                            NowPlayingEqualizer(isAnimating: true, tint: isFocused ? focusForeground : nil)
-                                .frame(width: 22)
-                        } else {
-                            Image(systemName: "pause.fill")
-                                .font(.subheadline)
-                                .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.85)) : AnyShapeStyle(.secondary))
-                        }
-                    }
-                }
-                .padding(.leading, 12)
-                .padding(.trailing, 22)
-                .padding(.vertical, 10)
-                .contentShape(shape)
+                NowPlayingCardContent(
+                    track: track,
+                    isPlaying: controller.isPlaying,
+                    textWidth: textWidth
+                )
             }
-            .buttonStyle(.plain)
-            .focused($isFocused)
+            // A fully custom ButtonStyle (rather than `.plain`) so tvOS doesn't
+            // draw its own focus plate over our inverted fill — `.plain` keeps a
+            // system hover plate that `.focusEffectDisabled()` doesn't fully
+            // remove, which read as a grey overlay covering the contrast flip.
+            .buttonStyle(NowPlayingCardButtonStyle())
             .focusEffectDisabled()
-            // Material when idle; an opaque inverted fill fades in over it on
-            // focus so the whole card flips contrast and stands out.
-            .background {
-                ZStack {
-                    shape.fill(.thinMaterial)
-                    shape.fill(focusFill).opacity(isFocused ? 1 : 0)
+        }
+    }
+}
+
+/// The Now Playing card's inner content. Reads `\.nowPlayingCardFocused`
+/// (injected by `NowPlayingCardButtonStyle`) so its text and equalizer flip to
+/// the inverted foreground when the card is focused.
+private struct NowPlayingCardContent: View {
+    let track: MusicTrack
+    let isPlaying: Bool
+    let textWidth: CGFloat
+
+    @Environment(\.nowPlayingCardFocused) private var isFocused
+    @Environment(\.colorScheme) private var colorScheme
+
+    // Light theme focuses to a black card → white content; dark/OLED focuses to
+    // a white card → black content.
+    private var focusForeground: Color { colorScheme == .dark ? .black : .white }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            MusicArtworkImage(
+                url: track.artworkURL,
+                systemPlaceholder: "music.note",
+                cornerRadius: 8,
+                asyncFallbackURL: MusicArtworkFallback.trackCover(
+                    title: track.title,
+                    album: track.albumTitle,
+                    artist: track.artistName
+                )
+            )
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground) : AnyShapeStyle(.primary))
+                if let subtitle = track.subtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
                 }
             }
-            .clipShape(shape)
-            .scaleEffect(isFocused ? 1.06 : 1)
-            .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 18, y: 8)
-            .animation(.easeOut(duration: 0.16), value: isFocused)
+            .frame(maxWidth: textWidth, alignment: .leading)
+
+            Group {
+                if isPlaying {
+                    // Flip the equalizer bars to the inverted foreground on focus
+                    // so accent-colored bars don't clash with the inverted fill.
+                    NowPlayingEqualizer(isAnimating: true, tint: isFocused ? focusForeground : nil)
+                        .frame(width: 22)
+                } else {
+                    Image(systemName: "pause.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.85)) : AnyShapeStyle(.secondary))
+                }
+            }
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 22)
+        .padding(.vertical, 10)
+    }
+}
+
+/// Theme-aware focus treatment for the Now Playing card: the whole card flips
+/// contrast on focus (light theme → black fill, dark/OLED → white fill), an
+/// opaque fill fading in over the idle material, plus a lift + shadow. Injects
+/// `\.nowPlayingCardFocused` so the card's content flips its colors to match.
+private struct NowPlayingCardButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyleBody(configuration: configuration)
+    }
+
+    private struct StyleBody: View {
+        let configuration: Configuration
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.colorScheme) private var colorScheme
+
+        private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        private var focusFill: Color { colorScheme == .dark ? .white : .black }
+
+        var body: some View {
+            configuration.label
+                .environment(\.nowPlayingCardFocused, isFocused)
+                .contentShape(shape)
+                // Material when idle; an opaque inverted fill fades in over it on
+                // focus so the whole card flips contrast and stands out.
+                .background {
+                    ZStack {
+                        shape.fill(.thinMaterial)
+                        shape.fill(focusFill).opacity(isFocused ? 1 : 0)
+                    }
+                }
+                .clipShape(shape)
+                .scaleEffect(isFocused ? (configuration.isPressed ? 1.03 : 1.06) : 1)
+                .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 18, y: 8)
+                .animation(.easeOut(duration: 0.16), value: isFocused)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }
     }
 }

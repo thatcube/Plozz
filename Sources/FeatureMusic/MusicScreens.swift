@@ -384,21 +384,12 @@ struct AlbumDetailView: View {
             )
             .padding(.top, 8)
 
-            // Show the Now Playing card here only when the playing track is NOT
-            // part of this album. If the user is listening to this very album we
-            // hide it (the track list already shows the now-playing equalizer).
-            if shouldShowNowPlaying {
-                NowPlayingCard(controller: controller)
-                    .padding(.top, 12)
-            }
+            // The Now Playing card sits under the Play/Shuffle buttons. It shows
+            // whenever something is playing (including a track from this very
+            // album) so the user always has a quick way back to the player.
+            NowPlayingCard(controller: controller)
+                .padding(.top, 12)
         }
-    }
-
-    /// True when audio is playing but the current track isn't one of this
-    /// album's tracks, so the page should surface the Now Playing card.
-    private var shouldShowNowPlaying: Bool {
-        guard controller.hasActivePlayback, let id = controller.currentTrack?.id else { return false }
-        return !viewModel.tracks.contains { $0.id == id }
     }
 
     private func play(from track: MusicTrack?) {
@@ -456,21 +447,12 @@ struct PlaylistDetailView: View {
             )
             .padding(.top, 8)
 
-            // Show the Now Playing card here only when the playing track is NOT
-            // part of this playlist. If the user is listening to this playlist we
-            // hide it (the track list already shows the now-playing equalizer).
-            if shouldShowNowPlaying {
-                NowPlayingCard(controller: controller)
-                    .padding(.top, 12)
-            }
+            // The Now Playing card sits under the Play/Shuffle buttons. It shows
+            // whenever something is playing (including a track from this very
+            // playlist) so the user always has a quick way back to the player.
+            NowPlayingCard(controller: controller)
+                .padding(.top, 12)
         }
-    }
-
-    /// True when audio is playing but the current track isn't one of this
-    /// playlist's tracks, so the page should surface the Now Playing card.
-    private var shouldShowNowPlaying: Bool {
-        guard controller.hasActivePlayback, let id = controller.currentTrack?.id else { return false }
-        return !viewModel.tracks.contains { $0.id == id }
     }
 
     private func play(from track: MusicTrack?) {

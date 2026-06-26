@@ -822,6 +822,9 @@ final class PlexProviderMappingTests: XCTestCase {
         // no-op against a live PMS.)
         let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/library/metadata/9/children"))
         XCTAssertEqual(query.first(where: { $0.name == "includeElements" })?.value, "Stream")
+        // /children must also inline the external Guid array so episodes/seasons
+        // walked for cross-server twin resolution carry imdb/tmdb/tvdb ids.
+        XCTAssertEqual(query.first(where: { $0.name == "includeGuids" })?.value, "1")
     }
 
     func testChildrenStreamsYieldFullDoViBadges() async throws {

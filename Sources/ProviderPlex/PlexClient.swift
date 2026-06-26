@@ -174,7 +174,16 @@ public struct PlexClient: Sendable {
     func children(ratingKey: String) async throws -> [PlexMetadata] {
         let endpoint = Endpoint(
             path: "/library/metadata/\(ratingKey)/children",
-            queryItems: [URLQueryItem(name: "includeElements", value: "Stream")],
+            queryItems: [
+                URLQueryItem(name: "includeElements", value: "Stream"),
+                // Inline each child's external `Guid` array so episodes/seasons
+                // walked here carry their imdb://, tmdb://, tvdb:// ids. Without
+                // it Plex omits guids on /children, leaving the cross-server
+                // episode-twin step to match by ordinal alone — fine for the
+                // (season,episode) walk, but the ids make identity resolution
+                // robust and mirror metadata()/section listings.
+                URLQueryItem(name: "includeGuids", value: "1")
+            ],
             headers: headers
         )
         return try await decode(PlexMediaContainerResponse.self, endpoint)

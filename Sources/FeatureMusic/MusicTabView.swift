@@ -25,8 +25,11 @@ public struct MusicTabView: View {
     @State private var path = NavigationPath()
     @State private var showNowPlaying = false
 
-    public init(accounts: [ResolvedAccount], controller: AudioPlaybackController) {
-        self.context = MusicContext(accounts: accounts)
+    public init(accounts: [ResolvedAccount], visibleLibraryIDs: [String: [String]] = [:], controller: AudioPlaybackController) {
+        self.context = MusicContext(
+            accounts: accounts,
+            visibleLibraryIDs: visibleLibraryIDs.isEmpty ? nil : visibleLibraryIDs
+        )
         self.controller = controller
     }
 

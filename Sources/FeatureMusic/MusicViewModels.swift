@@ -63,12 +63,12 @@ public final class MusicLandingViewModel {
                 for kind in [MusicItemKind.album, .artist, .playlist] {
                     group.addTask {
                         let page = PageRequest(startIndex: 0, limit: sampleSize)
-                        let result = try? await account.provider.musicItems(in: "", kind: kind, page: page)
+                        let result = try? await account.provider.musicItems(in: "", kind: kind, page: page, libraryIDs: account.libraryIDs)
                         return .items(account: index, kind: kind, page: result)
                     }
                 }
                 group.addTask {
-                    let albums = (try? await account.provider.recentlyPlayed(limit: sampleSize)) ?? []
+                    let albums = (try? await account.provider.recentlyPlayed(limit: sampleSize, libraryIDs: account.libraryIDs)) ?? []
                     return .recent(account: index, albums: albums)
                 }
             }
@@ -180,7 +180,7 @@ public final class MusicGridViewModel {
         for i in pagers.indices where !pagers[i].finished {
             let pager = pagers[i]
             let page = PageRequest(startIndex: pager.nextIndex, limit: pageLimit)
-            guard let result = try? await pager.account.provider.musicItems(in: containerID, kind: kind, page: page) else {
+            guard let result = try? await pager.account.provider.musicItems(in: containerID, kind: kind, page: page, libraryIDs: pager.account.libraryIDs) else {
                 pagers[i].finished = true
                 continue
             }

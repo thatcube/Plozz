@@ -93,6 +93,7 @@ struct MainTabView: View {
             if musicAvailability.hasMusic {
                 MusicTabView(
                     accounts: musicAvailability.detectedAccounts,
+                    visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
                     controller: audioController
                 )
                 .tabItem { Label("Music", systemImage: "music.note") }
@@ -131,13 +132,23 @@ struct MainTabView: View {
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
-        .task(id: accounts.map(\.account.id)) {
+        .task(id: musicProbeKey) {
             // Paint the Music tab on the first frame from the last persisted
             // result (synchronous, no network), then refresh in the background.
-            musicAvailability.seedFromCache(accounts: accounts)
-            await musicAvailability.probe(accounts: accounts)
+            // Re-runs when accounts or the per-profile library toggles change, so
+            // hiding/showing a music library live re-evaluates the tab + content.
+            musicAvailability.seedFromCache(accounts: accounts, visibility: homeVisibility.visibility)
+            await musicAvailability.probe(accounts: accounts, visibility: homeVisibility.visibility)
         }
         .mediaItemActionHandler(mediaItemActionHandler)
+    }
+
+    /// Restarts the music probe whenever the signed-in accounts or the per-profile
+    /// library-visibility toggles change.
+    private var musicProbeKey: String {
+        let ids = accounts.map(\.account.id).sorted()
+        let excluded = homeVisibility.visibility.excludedKeys.sorted()
+        return (ids + ["|"] + excluded).joined(separator: ",")
     }
 }
 

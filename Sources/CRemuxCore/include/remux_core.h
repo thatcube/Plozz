@@ -86,6 +86,7 @@ typedef struct {
     int dovi_profile;        /* Dolby Vision profile (5, 8, 7, ...); 0 if unknown */
     int dovi_level;          /* Dolby Vision level from the dvcC/dvvC record; 0 if unknown */
     int dovi_el_present;     /* 1 when a dual-layer enhancement layer is present (P7) */
+    int dovi_bl_compat;      /* dv_bl_signal_compatibility_id (0 = P5 no HDR10 fallback) */
     int error_stage;         /* plozz_remux_stage of the failing step (0 on success) */
     int error_code;          /* libavformat AVERROR from the failing step (0 if n/a) */
 } plozz_remux_open_result;
@@ -106,6 +107,23 @@ plozz_remux_session *plozz_remux_open(void *opaque,
 
 /* Number of segments in the built table. */
 int plozz_remux_segment_count(plozz_remux_session *s);
+
+/*
+ * Opt into the B3 Dolby-Vision-level consistency normalization (default OFF).
+ *
+ * When enabled, the muxer raises a missing/too-low dvcC `dv_level` to the floor
+ * implied by the coded resolution + frame rate before each segment's moov is
+ * written, so the emitted DoVi configuration record can never advertise a level
+ * lower than the picture actually requires. This targets the AVPlayer
+ * `CoreMediaErrorDomain -4` (invalid format description) seen on DoVi Profile 5
+ * at full 3840x2160 while the same profile at 3840x1600 is accepted. Lowering a
+ * level is never performed (that could only ever invalidate a valid stream), so
+ * the change is a no-op for sources that already carry a correct level.
+ *
+ * Callers gate this on the `com.plozz.playback.remuxHev1Mp4` debug flag. Safe to
+ * call before generating the init/media segments; ignored when `s` is NULL.
+ */
+void plozz_remux_set_normalize_dovi_level(plozz_remux_session *s, int enabled);
 
 /* Copy the segment table entry at `index` into `out`. Returns 1 on success. */
 int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segment *out);

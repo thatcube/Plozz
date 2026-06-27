@@ -63,6 +63,10 @@ struct plozz_remux_session {
     int segment_count;
 
     double duration_seconds;
+
+    /* B3: when set, raise a too-low/missing dvcC dv_level to the resolution
+     * floor before muxing (gated by the com.plozz.playback.remuxHev1Mp4 flag). */
+    int normalize_dovi_level;
 };
 
 /* ----- AVIO callback adapters ------------------------------------------- */
@@ -303,6 +307,7 @@ plozz_remux_session *plozz_remux_open(void *opaque,
                     out_result->dovi_profile = dovi->dv_profile;
                     out_result->dovi_level = dovi->dv_level;
                     out_result->dovi_el_present = dovi->el_present_flag;
+                    out_result->dovi_bl_compat = dovi->dv_bl_signal_compatibility_id;
                 }
                 break;
             }
@@ -327,6 +332,11 @@ int plozz_remux_segment_count(plozz_remux_session *s) {
     return s ? s->segment_count : 0;
 }
 
+void plozz_remux_set_normalize_dovi_level(plozz_remux_session *s, int enabled) {
+    if (!s) return;
+    s->normalize_dovi_level = enabled ? 1 : 0;
+}
+
 int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segment *out) {
     if (!s || !out || index < 0 || index >= s->segment_count) return 0;
     *out = s->segments[index];
@@ -335,14 +345,57 @@ int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segmen
 
 /* ----- muxer helpers ----------------------------------------------------- */
 
-/* DVH1 fourcc for the Dolby-Vision-tagged HEVC sample entry. */
+/* HEVC sample-entry fourccs. `dvh1` carries the Dolby Vision signalling; `hvc1`
+ * is the plain HEVC entry. Both use out-of-band parameter sets (vs `hev1`/`dvhe`,
+ * which carry in-band parameter sets and which AVPlayer/VideoToolbox refuse). */
 #define PLOZZ_TAG_DVH1 MKTAG('d', 'v', 'h', '1')
+#define PLOZZ_TAG_HVC1 MKTAG('h', 'v', 'c', '1')
+
+/* Locate the Dolby Vision configuration record on a codecpar's coded side data
+ * (mutable so callers may normalize it before the moov is written). Returns NULL
+ * when the stream carries no DoVi configuration. */
+static AVDOVIDecoderConfigurationRecord *find_dovi_conf(AVCodecParameters *par) {
+    if (!par) return NULL;
+    for (int i = 0; i < par->nb_coded_side_data; i++) {
+        if (par->coded_side_data[i].type == AV_PKT_DATA_DOVI_CONF &&
+            par->coded_side_data[i].size >= (int)sizeof(AVDOVIDecoderConfigurationRecord)) {
+            return (AVDOVIDecoderConfigurationRecord *)par->coded_side_data[i].data;
+        }
+    }
+    return NULL;
+}
+
+/* Minimum Dolby Vision level implied by the coded luma sample rate (W x H x fps),
+ * using the canonical Dolby tier ladder. Mirrors the Swift fallback estimator so
+ * the manifest and the dvcC can never disagree. Returns 0 when inputs are unknown
+ * (caller then leaves the source level untouched). */
+static int dovi_level_floor(int width, int height, double fps) {
+    if (width <= 0 || height <= 0) return 0;
+    if (!(fps > 0.0) || !(fps == fps) /* NaN */) {
+        return ((long)width * height >= 3840L * 2160) ? 6 : 4;
+    }
+    double rate = (double)width * (double)height * fps;
+    /* (max luma sample rate, level) ascending; 1% tolerance for NTSC rates. */
+    static const struct { double ceiling; int level; } ladder[] = {
+        { 1280.0 * 720 * 24, 1 },  { 1280.0 * 720 * 30, 2 },
+        { 1920.0 * 1080 * 24, 3 }, { 1920.0 * 1080 * 30, 4 },
+        { 1920.0 * 1080 * 60, 5 }, { 3840.0 * 2160 * 24, 6 },
+        { 3840.0 * 2160 * 30, 7 }, { 3840.0 * 2160 * 48, 8 },
+        { 3840.0 * 2160 * 60, 9 }, { 3840.0 * 2160 * 120, 10 },
+    };
+    for (size_t i = 0; i < sizeof(ladder) / sizeof(ladder[0]); i++) {
+        if (rate <= ladder[i].ceiling * 1.01) return ladder[i].level;
+    }
+    return ladder[sizeof(ladder) / sizeof(ladder[0]) - 1].level;
+}
 
 /*
  * Build the output fMP4 context with a video (+ optional audio) stream copied
- * `-c copy` from the source. The video sample entry is tagged `dvh1` so AVPlayer
- * recognises the Dolby Vision track; movenc emits the dvcC/dvvC + dec3 boxes from
- * the copied codecpar side data. Output streams map: 0 = video, 1 = audio.
+ * `-c copy` from the source. The video sample entry is tagged `dvh1` when the
+ * source carries a Dolby Vision configuration record, otherwise `hvc1` — never
+ * the AVPlayer-incompatible `hev1`, so an `hev1`-tagged MP4/MKV HEVC source is
+ * retagged to a sample entry VideoToolbox accepts. movenc emits the dvcC/dvvC +
+ * dec3 boxes from the copied codecpar side data. Output streams: 0=video, 1=audio.
  */
 static AVFormatContext *make_output(plozz_remux_session *s, int *out_audio_index) {
     AVFormatContext *oc = NULL;
@@ -359,7 +412,27 @@ static AVFormatContext *make_output(plozz_remux_session *s, int *out_audio_index
     if (avcodec_parameters_copy(dst_v->codecpar, src_v->codecpar) < 0) {
         avformat_free_context(oc); return NULL;
     }
-    dst_v->codecpar->codec_tag = PLOZZ_TAG_DVH1;
+    /* Choose the sample-entry tag from the actual DoVi signalling, and ALWAYS
+     * override the source tag (which may be `hev1`/`dvhe`, both rejected by
+     * VideoToolbox). DoVi present -> `dvh1`; plain HEVC -> `hvc1`. */
+    AVDOVIDecoderConfigurationRecord *dovi = find_dovi_conf(dst_v->codecpar);
+    dst_v->codecpar->codec_tag = dovi ? PLOZZ_TAG_DVH1 : PLOZZ_TAG_HVC1;
+
+    /* B3 (flag-gated): raise a missing/too-low dvcC dv_level to the floor the
+     * coded resolution requires, so the emitted DoVi configuration record agrees
+     * with the picture. Targets the DoVi P5 @ 2160 AVPlayer `-4` rejection while
+     * leaving an already-correct level (e.g. the working 3840x1600 case) intact. */
+    if (dovi && s->normalize_dovi_level) {
+        double fps = av_q2d(src_v->avg_frame_rate);
+        if (!(fps > 0.0)) fps = av_q2d(src_v->r_frame_rate);
+        int floor = dovi_level_floor(src_v->codecpar->width, src_v->codecpar->height, fps);
+        if (floor > 0 && dovi->dv_level < floor) {
+            remux_log(1, "remux: DoVi level %d below %dx%d floor %d — clamping",
+                      dovi->dv_level, src_v->codecpar->width, src_v->codecpar->height, floor);
+            dovi->dv_level = floor;
+        }
+    }
+
     dst_v->time_base = src_v->time_base;
     dst_v->avg_frame_rate = src_v->avg_frame_rate;
     dst_v->r_frame_rate = src_v->r_frame_rate;

@@ -97,6 +97,18 @@ public final class PlayerViewModel {
     /// Device/display/audio policy the router uses to pick an engine.
     private let capabilities: MediaCapabilities
 
+    /// Debug launch-arg flag (`-com.plozz.playback.remuxHevcAny YES`, **default
+    /// OFF**): widen local-remux eligibility from Dolby-Vision-only to *any*
+    /// AVPlayer-decodable HEVC (HDR10 / HDR10+ / HLG / SDR, 8- or 10-bit) in an MKV
+    /// with AC-3 / E-AC-3 audio. Set as a launch argument, it lands in the standard
+    /// `NSArgumentDomain`, so the maintainer can A/B exactly this one routing change
+    /// on the shared Apple TV. When ON, those titles reach remux→AVPlayer (native
+    /// seek + surround/Atmos) instead of falling through to the multichannel-
+    /// crashing mpv engine. Dolby Vision Profile 7 and TrueHD still stay on mpv.
+    private var allowAnyDecodableHEVCRemux: Bool {
+        UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxHevcAny")
+    }
+
     /// The active engine. A `var` so the cross-engine fallback can swap engines
     /// at runtime (e.g. a failed VLCKit attempt → native, or vice-versa).
     private var engine: any VideoEngine
@@ -528,7 +540,7 @@ public final class PlayerViewModel {
             localRemuxActivationMessage = "This provider did not expose original-file bytes for remux testing."
             return request
         }
-        switch descriptor.eligibility(capabilities: capabilities) {
+        switch descriptor.eligibility(capabilities: capabilities, allowAnyDecodableHEVC: allowAnyDecodableHEVCRemux) {
         case .eligible:
             break
         case .ineligible(let reason):
@@ -1104,7 +1116,7 @@ public final class PlayerViewModel {
     /// source facts when it qualifies, or the disqualifying reason when it doesn't.
     public var remuxEligibilitySummary: (eligible: Bool, detail: String)? {
         guard let descriptor = request?.localRemuxSource else { return nil }
-        switch descriptor.eligibility(capabilities: capabilities) {
+        switch descriptor.eligibility(capabilities: capabilities, allowAnyDecodableHEVC: allowAnyDecodableHEVCRemux) {
         case .eligible:
             let metadata = descriptor.sourceMetadata
             let doVi = descriptor.normalizedDolbyVisionProfile.map { "DoVi P\($0)" }
@@ -1192,7 +1204,7 @@ public final class PlayerViewModel {
         let selectedRemuxStrategyID = preferencesStore.loadLocalRemuxStrategyID()
         controls.selectedLocalRemuxStrategyID = selectedRemuxStrategyID
         if let descriptor = request.localRemuxSource {
-            switch descriptor.eligibility(capabilities: capabilities) {
+            switch descriptor.eligibility(capabilities: capabilities, allowAnyDecodableHEVC: allowAnyDecodableHEVCRemux) {
             case .eligible:
                 controls.localRemuxEligible = true
                 controls.localRemuxEligibilityMessage = localRemuxActivationMessage

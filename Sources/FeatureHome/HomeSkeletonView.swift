@@ -57,16 +57,27 @@ struct HomeSkeletonView: View {
                 .redacted(reason: .placeholder)
                 .shimmering()
 
-            HStack(spacing: PlozzTheme.Metrics.cardSpacing) {
-                ForEach(0..<cardCount(for: kind), id: \.self) { _ in
-                    SkeletonCardView(style: cardStyle(for: kind))
-                        .frame(width: cardWidth(for: kind))
+            // Mirror MediaRowView exactly: the cards live in a *horizontal*
+            // ScrollView (scrolling disabled here). This is load-bearing — a plain
+            // HStack of oversized cards has an ideal width wider than the screen, so
+            // it overflows its column and the whole row drifts out of the tvOS
+            // overscan safe area (cards bleed off the left edge). The ScrollView
+            // clips its frame to the viewport, so the leading inset matches the real
+            // row 1:1.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: PlozzTheme.Metrics.cardSpacing) {
+                    ForEach(0..<cardCount(for: kind), id: \.self) { _ in
+                        SkeletonCardView(style: cardStyle(for: kind))
+                            .frame(width: cardWidth(for: kind))
+                    }
                 }
+                .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                .padding(.top, 16)
+                .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
             }
-            .padding(.leading, PlozzTheme.Metrics.screenPadding)
-            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-            .padding(.top, 16)
-            .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
+            .scrollClipDisabled()
+            .scrollDisabled(true)
         }
     }
 

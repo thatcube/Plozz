@@ -32,6 +32,11 @@ struct WatchOutboxBridge: Sendable {
     /// stays deferred while it plays). Pure local enqueue + drain — no network on
     /// the caller's path.
     let checkpoint: @Sendable (_ mutation: WatchMutation) -> Void
+    /// Live, off-main read of the active profile's "sync watch state across
+    /// servers" preference, evaluated at stop/checkpoint time (not captured at
+    /// player start) so flipping the toggle mid-playback takes effect on the next
+    /// convergence. Backed by a thread-safe UserDefaults read.
+    let crossServerSync: @Sendable () -> Bool
 }
 
 /// The signed-in experience: Home, Search and Settings tabs, with item-detail
@@ -476,7 +481,8 @@ func makePlaybackCheckpointHandler(
             position: position,
             watchedPercent: percent,
             primaryAccountID: primaryAccountID,
-            additionalSources: union
+            additionalSources: union,
+            crossServerSync: watchBridge.crossServerSync()
         )
         guard let mutation else { return }
         FanoutDiagnostics.emit(FanoutDiagnostics.stopLine(
@@ -511,7 +517,8 @@ func makePlaybackStoppedHandler(
             position: position,
             watchedPercent: percent,
             primaryAccountID: primaryAccountID,
-            additionalSources: union
+            additionalSources: union,
+            crossServerSync: watchBridge.crossServerSync()
         )
         // (b)+(c) Make the stop event visible: the played item's resolved identity,
         // the index union found for it, and the final mutation target set. Pure

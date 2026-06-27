@@ -105,6 +105,9 @@ public struct RootView: View {
                             },
                             checkpoint: { mutation in
                                 appState.checkpointWatchState(mutation: mutation)
+                            },
+                            crossServerSync: { [namespace = appState.profilesModel.activeNamespace] in
+                                PlaybackSettingsStore.currentSyncAcrossServers(namespace: namespace)
                             }
                         ),
                         displayAccounts: appState.accounts,

@@ -3,6 +3,55 @@ import XCTest
 import CoreModels
 
 final class PlaybackStopFanOutTests: XCTestCase {
+    func testPlaybackStopHonorsCrossServerSyncOffAtStopTime() {
+        let item = MediaItem(
+            id: "origin-item",
+            title: "Dune",
+            kind: .movie,
+            runtime: 100,
+            providerIDs: ["Tmdb": "438631"],
+            sourceAccountID: "origin"
+        )
+        let lookup = MutableIdentityLookup()
+        let recorder = PlaybackStopRecorder()
+        // Live reader returns OFF: the stop must scope to the origin server only,
+        // even though the warm identity union knows peer servers.
+        let bridge = WatchOutboxBridge(
+            beginLiveSession: { _, _ in },
+            finishPlayback: { accountID, itemID, _, mutation in
+                recorder.record(accountID: accountID, itemID: itemID, mutation: mutation)
+            },
+            checkpoint: { _ in },
+            crossServerSync: { false }
+        )
+
+        let handler = makePlaybackStoppedHandler(
+            convergingItem: item,
+            primaryAccountID: "origin",
+            liveAccountID: "origin",
+            liveItemID: "origin-item",
+            watchBridge: bridge,
+            identitySources: lookup.sources(for:)
+        )
+
+        lookup.sources = [
+            MediaSourceRef(accountID: "origin", itemID: "origin-item", providerKind: .jellyfin),
+            MediaSourceRef(accountID: "plex", itemID: "plex-item", providerKind: .plex),
+            MediaSourceRef(accountID: "jellyfin-two", itemID: "jf-two-item", providerKind: .jellyfin)
+        ]
+
+        handler(95, 95)
+
+        let call = recorder.onlyCall
+        XCTAssertEqual(
+            call?.mutation?.targets,
+            [WatchMutationTarget(accountID: "origin", itemID: "origin-item", providerKind: .jellyfin)],
+            "With sync OFF the stop must converge on the origin server only"
+        )
+        XCTAssertEqual(call?.mutation?.expansionPending, false, "Sync OFF must suppress drain-time re-expansion")
+        XCTAssertEqual(call?.mutation?.identities, [], "Sync OFF must carry no identity seeds")
+    }
+
     func testPlaybackStopFanOutUsesLiveIdentitySourcesAtStopTime() {
         let item = MediaItem(
             id: "origin-item",
@@ -19,7 +68,8 @@ final class PlaybackStopFanOutTests: XCTestCase {
             finishPlayback: { accountID, itemID, _, mutation in
                 recorder.record(accountID: accountID, itemID: itemID, mutation: mutation)
             },
-            checkpoint: { _ in }
+            checkpoint: { _ in },
+            crossServerSync: { true }
         )
 
         let handler = makePlaybackStoppedHandler(
@@ -68,7 +118,8 @@ final class PlaybackStopFanOutTests: XCTestCase {
         let bridge = WatchOutboxBridge(
             beginLiveSession: { _, _ in },
             finishPlayback: { _, _, _, _ in finishCalls += 1 },
-            checkpoint: { mutation in checkpoints.record(mutation) }
+            checkpoint: { mutation in checkpoints.record(mutation) },
+            crossServerSync: { true }
         )
 
         let handler = makePlaybackCheckpointHandler(

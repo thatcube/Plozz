@@ -13,8 +13,17 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     /// servers/items that expose no markers. Covers both intros and credits.
     public var skipIntros: SkipIntrosMode
 
-    public init(skipIntros: SkipIntrosMode = .off) {
+    /// Whether finishing/resuming/marking a title converges your watch state on
+    /// **every** server that holds it (the default), or only the server you
+    /// actually watched on. ON (default) preserves today's cross-server fan-out;
+    /// OFF scopes writes to the origin server and suppresses all cross-server
+    /// probing/expansion. Independent of Trakt, which is an account-level
+    /// integration and keeps scrobbling either way.
+    public var syncWatchAcrossServers: Bool
+
+    public init(skipIntros: SkipIntrosMode = .off, syncWatchAcrossServers: Bool = true) {
         self.skipIntros = skipIntros
+        self.syncWatchAcrossServers = syncWatchAcrossServers
     }
 
     public static let `default` = PlaybackSettings()
@@ -25,11 +34,14 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
 public extension PlaybackSettings {
     private enum CodingKeys: String, CodingKey {
         case skipIntros
+        case syncWatchAcrossServers
     }
 
     /// Decodes leniently so a payload written before a field existed (or in the
     /// older boolean shape) still loads instead of resetting to defaults. The
     /// legacy `{"skipIntros": true/false}` boolean maps to `.on` / `.off`.
+    /// `syncWatchAcrossServers` defaults to `true` when absent so installs that
+    /// predate the toggle keep today's cross-server sync behaviour.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = PlaybackSettings.default
@@ -40,5 +52,8 @@ public extension PlaybackSettings {
         } else {
             self.skipIntros = defaults.skipIntros
         }
+        self.syncWatchAcrossServers =
+            (try? container.decodeIfPresent(Bool.self, forKey: .syncWatchAcrossServers))
+            .flatMap { $0 } ?? defaults.syncWatchAcrossServers
     }
 }

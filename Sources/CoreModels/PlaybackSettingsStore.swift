@@ -32,6 +32,25 @@ public final class PlaybackSettingsStore: PlaybackSettingsStoring, @unchecked Se
             defaults.set(data, forKey: key)
         }
     }
+
+    /// Thread-safe live read of just the cross-server sync flag for a profile
+    /// namespace, for callers that run **off the main actor** (the player's
+    /// `@Sendable` stop/checkpoint convergence hooks). UserDefaults is itself
+    /// thread-safe, so this reads the current persisted value at call time —
+    /// flipping the toggle mid-playback takes effect on the next checkpoint/stop
+    /// without restarting the app. Returns the default (`true`) when nothing has
+    /// been persisted yet or the payload can't be decoded.
+    public static func currentSyncAcrossServers(
+        defaults: UserDefaults = .standard,
+        namespace: String? = nil
+    ) -> Bool {
+        let key = SettingsKey.scoped("com.plozz.playbackSettings", namespace: namespace)
+        guard let data = defaults.data(forKey: key),
+              let settings = try? JSONDecoder().decode(PlaybackSettings.self, from: data) else {
+            return PlaybackSettings.default.syncWatchAcrossServers
+        }
+        return settings.syncWatchAcrossServers
+    }
 }
 
 /// Observable wrapper so SwiftUI settings screens can two-way bind and have

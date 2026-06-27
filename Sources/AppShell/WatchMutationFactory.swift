@@ -29,7 +29,8 @@ enum WatchMutationFactory {
     static func targets(
         for item: MediaItem,
         primaryAccountID: String?,
-        additionalSources: [MediaSourceRef] = []
+        additionalSources: [MediaSourceRef] = [],
+        crossServerSync: Bool = true
     ) -> [WatchMutationTarget] {
         var seen = Set<String>()
         var result: [WatchMutationTarget] = []
@@ -55,6 +56,11 @@ enum WatchMutationFactory {
                 .providerKind
             append(accountID: originAccountID, itemID: item.id, providerKind: originKind)
         }
+        // Cross-server sync OFF: scope the write to the origin server only. We
+        // still resolved the origin's providerKind above (that's origin metadata,
+        // not a fan-out target), but we skip unioning the item's own peer sources
+        // and the identity-index union so no other server is touched.
+        guard crossServerSync else { return result }
         item.sources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }
         additionalSources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }
         return result
@@ -113,11 +119,15 @@ enum WatchMutationFactory {
     /// A mark-watched / mark-unwatched mutation. Marking watched clears resume
     /// everywhere and mirrors to Trakt (write-if-missing); unwatch never touches
     /// Trakt (no deletes) and leaves resume alone.
-    static func playedToggle(item: MediaItem, played: Bool, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], capturedAt: Date = Date()) -> WatchMutation? {
-        let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources)
+    static func playedToggle(item: MediaItem, played: Bool, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], crossServerSync: Bool = true, capturedAt: Date = Date()) -> WatchMutation? {
+        let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources, crossServerSync: crossServerSync)
         guard !targets.isEmpty else { return nil }
-        let episode = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
-        let identity = identityExpansion(for: item)
+        // OFF: suppress ALL cross-server expansion seeds too — not just the extra
+        // targets. Leaving episodeOrigin/identities/expansionPending populated
+        // would let the reconciler re-expand at drain time and silently undo the
+        // opt-out, so the origin-only write must carry no expansion intent.
+        let episode = crossServerSync ? episodeExpansion(for: item, primaryAccountID: primaryAccountID) : (origin: nil, pending: false)
+        let identity = crossServerSync ? identityExpansion(for: item) : (identities: [], pending: false)
         return WatchMutation(
             capturedAt: capturedAt,
             canonicalMediaID: canonicalID(for: item),
@@ -139,11 +149,12 @@ enum WatchMutationFactory {
     /// best-source switch resumes where you left off, on whichever server backs it.
     /// Returns `nil` when there is nothing worth converging (no targets, or an
     /// unfinished item barely started).
-    static func playbackStop(item: MediaItem, position: TimeInterval, watchedPercent: Double, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], capturedAt: Date = Date()) -> WatchMutation? {
-        let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources)
+    static func playbackStop(item: MediaItem, position: TimeInterval, watchedPercent: Double, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], crossServerSync: Bool = true, capturedAt: Date = Date()) -> WatchMutation? {
+        let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources, crossServerSync: crossServerSync)
         guard !targets.isEmpty else { return nil }
-        let episode = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
-        let identity = identityExpansion(for: item)
+        // OFF: origin-only convergence with no expansion seeds (see `playedToggle`).
+        let episode = crossServerSync ? episodeExpansion(for: item, primaryAccountID: primaryAccountID) : (origin: nil, pending: false)
+        let identity = crossServerSync ? identityExpansion(for: item) : (identities: [], pending: false)
 
         if watchedPercent >= finishedThreshold {
             return WatchMutation(

@@ -81,5 +81,34 @@ final class DolbyVisionLevelTests: XCTestCase {
         let planner = RemuxSegmentPlanner(segmentDurations: [6], stream: stream)
         XCTAssertEqual(planner.videoCodecToken, "dvh1.08.09")
     }
+
+    // MARK: Profile 5 uses the SAME level derivation (level is independent of
+    // profile — purely W×H×fps). dvh1.05.06 only *looks* universal because 4K24
+    // dominates P5 catalogs; a 4K60 P5 title must advertise .05.09, not .05.06.
+
+    private func p5Token(width: Int, height: Int, frameRate: Double, probedLevel: Int = 0) -> String {
+        let level = FullTimelineVODSession.dolbyVisionLevel(
+            probedLevel: probedLevel, width: width, height: height, frameRate: frameRate)
+        let stream = RemuxSegmentPlanner.StreamInfo(
+            width: width, height: height,
+            dolbyVisionProfile: 5,
+            dolbyVisionLevel: level,
+            audioIsEAC3: true, bandwidth: 0
+        )
+        return RemuxSegmentPlanner(segmentDurations: [6], stream: stream).videoCodecToken
+    }
+
+    func testProfile5LevelTracksFrameRate() {
+        XCTAssertEqual(p5Token(width: 1920, height: 1080, frameRate: 24), "dvh1.05.03")
+        XCTAssertEqual(p5Token(width: 3840, height: 2160, frameRate: 23.976), "dvh1.05.06")
+        XCTAssertEqual(p5Token(width: 3840, height: 2160, frameRate: 30), "dvh1.05.07")
+        XCTAssertEqual(p5Token(width: 3840, height: 2160, frameRate: 60), "dvh1.05.09")
+    }
+
+    func testProfile5PrefersProbedLevel() {
+        // Record-supplied dv_level wins for P5 too (e.g. a 4K24 file the bitstream
+        // tags as level 9), and movenc copies that same record into the box.
+        XCTAssertEqual(p5Token(width: 3840, height: 2160, frameRate: 23.976, probedLevel: 9), "dvh1.05.09")
+    }
 }
 #endif

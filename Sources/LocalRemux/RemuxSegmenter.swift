@@ -60,6 +60,7 @@ final class RemuxSegmenter: @unchecked Sendable {
         var audioChannels: Int
         var hasDolbyVision: Bool
         var dolbyVisionProfile: Int
+        var dolbyVisionLevel: Int
         var dolbyVisionELPresent: Bool
         var segmentDurations: [Double]
 
@@ -114,11 +115,12 @@ final class RemuxSegmenter: @unchecked Sendable {
             audioChannels: Int(result.audio_channels),
             hasDolbyVision: result.has_dovi_config == 1,
             dolbyVisionProfile: Int(result.dovi_profile),
+            dolbyVisionLevel: Int(result.dovi_level),
             dolbyVisionELPresent: result.dovi_el_present == 1,
             segmentDurations: durations
         )
         RemuxLog.info("RemuxSegmenter: opened \(facts.width)x\(facts.height) \(facts.videoCodec)/\(facts.audioCodec) "
-            + "DoVi p\(facts.dolbyVisionProfile) EL=\(facts.dolbyVisionELPresent) segs=\(durations.count)")
+            + "DoVi p\(facts.dolbyVisionProfile) L\(facts.dolbyVisionLevel) EL=\(facts.dolbyVisionELPresent) segs=\(durations.count)")
     }
 
     /// The shared fMP4 init segment (ftyp + moov).

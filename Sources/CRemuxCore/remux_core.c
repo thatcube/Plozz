@@ -257,6 +257,7 @@ plozz_remux_session *plozz_remux_open(void *opaque,
                     const AVDOVIDecoderConfigurationRecord *dovi =
                         (const AVDOVIDecoderConfigurationRecord *)vp->coded_side_data[i].data;
                     out_result->dovi_profile = dovi->dv_profile;
+                    out_result->dovi_level = dovi->dv_level;
                     out_result->dovi_el_present = dovi->el_present_flag;
                 }
                 break;

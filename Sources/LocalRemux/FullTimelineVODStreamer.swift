@@ -168,17 +168,19 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
             width: width,
             height: height,
             dolbyVisionProfile: profile,
-            dolbyVisionLevel: dolbyVisionLevel(width: width, height: height),
+            dolbyVisionLevel: dolbyVisionLevel(probedLevel: facts.dolbyVisionLevel, width: width, height: height),
             audioIsEAC3: facts.audioIsEAC3,
             bandwidth: bandwidth
         )
     }
 
-    /// A plausible Dolby Vision level for the CODECS token. The init segment's
-    /// dvcC/dvvC boxes are what actually drive decode; this just keeps the HLS
-    /// CODECS attribute well-formed. Use a UHD-vs-HD split (Dolby level ~6 for 4K,
-    /// ~4 below) which AVPlayer accepts for a `dvh1` variant.
-    nonisolated static func dolbyVisionLevel(width: Int, height: Int) -> Int {
+    /// The Dolby Vision level for the HLS `CODECS` token (`dvh1.PP.LL`). A wrong
+    /// level can make AVPlayer refuse the variant, so prefer the value libavformat
+    /// read straight from the title's dvcC/dvvC configuration record; only fall
+    /// back to a UHD-vs-HD heuristic (Dolby level ~6 for 4K, ~4 below) when the
+    /// record didn't expose one (level 0/unknown).
+    nonisolated static func dolbyVisionLevel(probedLevel: Int, width: Int, height: Int) -> Int {
+        if probedLevel > 0 { return probedLevel }
         let pixels = width * height
         return pixels >= 3840 * 2160 ? 6 : 4
     }

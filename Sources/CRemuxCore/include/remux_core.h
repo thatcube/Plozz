@@ -69,6 +69,7 @@ typedef struct {
     char audio_codec[32];    /* e.g. "eac3" */
     int has_dovi_config;     /* 1 when a Dolby Vision configuration record is present */
     int dovi_profile;        /* Dolby Vision profile (5, 8, 7, ...); 0 if unknown */
+    int dovi_level;          /* Dolby Vision level from the dvcC/dvvC record; 0 if unknown */
     int dovi_el_present;     /* 1 when a dual-layer enhancement layer is present (P7) */
 } plozz_remux_open_result;
 

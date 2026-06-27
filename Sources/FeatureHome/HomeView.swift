@@ -34,17 +34,15 @@ public struct HomeView: View {
             emptyMessage: "Your libraries are empty. Add media on your media server to see it here.",
             onRetry: { Task { await viewModel.load() } }
         ) { content in
-            let visibleLibraries = content.libraries.filter { visibility.isVisible($0.key) }
+            // The screen is a data-driven list of rows. Both this loaded view and
+            // (later) a skeleton/streaming view render from the same ordered
+            // `HomeRow` array, which keeps them 1:1 and makes the order the single
+            // thing a future row-customization feature edits.
+            let rows = HomeRow.rows(for: content) { visibility.isVisible($0) }
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
-                    MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, spoilerSettings: spoilerSettings, onSelect: onPlayItem)
-                    if !content.watchlist.isEmpty {
-                        MediaRowView(title: "Watchlist", items: content.watchlist, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
-                    }
-                    MediaRowView(title: "Recently Added", items: content.latest, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
-
-                    if !visibleLibraries.isEmpty {
-                        librariesRow(visibleLibraries)
+                    ForEach(rows) { row in
+                        rowView(row)
                     }
                 }
                 .padding(.vertical, 40)
@@ -59,6 +57,29 @@ public struct HomeView: View {
             } else {
                 Task { await viewModel.load() }
             }
+        }
+    }
+
+    /// Renders one resolved `HomeRow`. The per-kind wiring (card style, and
+    /// whether selecting a card plays it or opens its detail) is exactly what the
+    /// view used inline before the row model existed.
+    @ViewBuilder
+    private func rowView(_ row: HomeRow) -> some View {
+        switch row.kind {
+        case .continueWatching:
+            MediaRowView(title: row.title, items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, onSelect: onPlayItem)
+        case .watchlist, .recentlyAdded:
+            MediaRowView(title: row.title, items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, onSelect: onSelectItem)
+        case .libraries:
+            librariesRow(row.libraries)
+        }
+    }
+
+    /// Maps the SwiftUI-free `HomeRowStyle` back to the concrete card style.
+    private func posterStyle(_ style: HomeRowStyle) -> PosterCardView.Style {
+        switch style {
+        case .poster: return .poster
+        case .landscape: return .landscape
         }
     }
 

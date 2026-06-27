@@ -538,7 +538,11 @@ private struct HomeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             HomeView(
-                viewModel: HomeViewModel(accounts: accounts, identitySources: identitySources),
+                viewModel: HomeViewModel(
+                    accounts: accounts,
+                    identitySources: identitySources,
+                    currentVisibility: { homeVisibility.visibility }
+                ),
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
                 onSelectItem: { navigate($0) },

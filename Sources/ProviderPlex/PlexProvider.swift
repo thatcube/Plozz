@@ -459,6 +459,7 @@ public struct PlexProvider: MediaProvider {
             ratings: Self.ratings(from: dto),
             providerIDs: Self.providerIDs(from: dto),
             mediaInfo: Self.sourceMetadata(from: dto),
+            libraryID: dto.librarySectionID.map(String.init),
             versions: Self.versions(from: dto.Media, edition: dto.editionTitle),
             isFavorite: false,
             lastPlayedAt: dto.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }

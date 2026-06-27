@@ -35,13 +35,17 @@ public struct HomeView: View {
             onRetry: { Task { await viewModel.load() } }
         ) { content in
             let visibleLibraries = content.libraries.filter { visibility.isVisible($0.key) }
+            let isLibraryVisible: (String) -> Bool = { visibility.isVisible($0) }
+            let continueWatching = content.continueWatching.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
+            let watchlist = content.watchlist.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
+            let latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
-                    MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, spoilerSettings: spoilerSettings, onSelect: onPlayItem)
-                    if !content.watchlist.isEmpty {
-                        MediaRowView(title: "Watchlist", items: content.watchlist, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
+                    MediaRowView(title: "Continue Watching", items: continueWatching, style: .landscape, spoilerSettings: spoilerSettings, onSelect: onPlayItem)
+                    if !watchlist.isEmpty {
+                        MediaRowView(title: "Watchlist", items: watchlist, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
                     }
-                    MediaRowView(title: "Recently Added", items: content.latest, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
+                    MediaRowView(title: "Recently Added", items: latest, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
 
                     if !visibleLibraries.isEmpty {
                         librariesRow(visibleLibraries)
@@ -52,7 +56,14 @@ public struct HomeView: View {
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
         }
-        .task { if viewModel.state.value == nil { await viewModel.load() } }
+        .task(id: visibility.visibility.excludedKeys) {
+            // First appearance loads; thereafter a change to the hidden-library set
+            // re-aggregates so library-scoped providers (Jellyfin) re-fetch with the
+            // new visible set. Providers that tag items inline (Plex) are also
+            // filtered live above, so their toggles feel instant even before the
+            // reload settles.
+            await viewModel.load()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             if let mutation = MediaItemMutation.from(note) {
                 viewModel.applyWatchedState(mutation)

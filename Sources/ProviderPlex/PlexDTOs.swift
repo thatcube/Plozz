@@ -41,6 +41,12 @@ struct PlexDirectory: Decodable {
 struct PlexMetadata: Decodable {
     let ratingKey: String?
     let key: String?
+    /// The owning library section's numeric id (present on hub/onDeck/
+    /// recentlyAdded item feeds). Equals the `/library/sections` `key`, so
+    /// stringified it matches `MediaLibrary.id` and lets Home suppress an item
+    /// whose library the user hid. Absent on surfaces that don't report it
+    /// (e.g. account-level Watchlist) — then the item stays fail-open.
+    let librarySectionID: Int?
     /// The item's canonical **global** Plex guid (`plex://movie/<id>`,
     /// `plex://show/<id>`, …) — distinct from the per-server `ratingKey`. The
     /// account-level Watchlist (Discover) service keys on this, so it's stashed

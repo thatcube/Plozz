@@ -83,8 +83,11 @@ public struct PlozzSeasonTabStyle: ButtonStyle {
         private var active: Bool { isFocused || isSelected }
 
         private var foreground: Color {
-            if reduceTransparency && isFocused { return .black }
-            if active { return palette.primaryText }
+            // The focused tab wears the bright solid "focus" pill, so its label is
+            // dark for contrast (the standard tvOS focused-button look). A merely
+            // selected (active, not focused) tab keeps light text on its glass pill.
+            if isFocused { return .black }
+            if isSelected { return palette.primaryText }
             return palette.secondaryText
         }
 
@@ -92,30 +95,62 @@ public struct PlozzSeasonTabStyle: ButtonStyle {
             configuration.label
                 .font(.subheadline.weight(active ? .semibold : .regular))
                 .foregroundStyle(foreground)
+                // Text colour + weight snap INSTANTLY. Animating them is what made
+                // the label colour appear to "lag behind" focus during a fast swipe:
+                // each chip crossfaded its dark focused text back to light over 0.16s,
+                // so trailing chips briefly kept a dark label. Clearing the animation
+                // for just this label subtree fixes that without needing to detect a
+                // swipe. The scale lift below still animates — that's the nice bit on
+                // single left/right steps, and being pure geometry it leaves no ghost.
+                .transaction { $0.animation = nil }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
                 .background(pill)
                 .scaleEffect(configuration.isPressed ? 0.96 : (isFocused ? 1.06 : 1.0))
                 .animation(.easeOut(duration: 0.16), value: isFocused)
-                .animation(.easeOut(duration: 0.16), value: isSelected)
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }
 
-        /// The pill is *always* present in the tree (stable identity); only its
-        /// opacity animates, so a tab fades between text-only and pill without a
-        /// structural change that would disturb focus.
+        /// Two always-present layers (stable identity — the view-tree shape never
+        /// changes with focus/selection, so focus moves freely):
+        ///
+        ///  - `basePill`: the glass "button" pill, shown for the *selected* season
+        ///    while it is NOT the focused tab. The expensive Liquid Glass layer, but
+        ///    it is only ever visible on the single selected chip — never on chips
+        ///    the focus flies across — so fast swipes don't pay for glass.
+        ///  - `focusPill`: a cheap *solid* bright capsule that rides focus.
+        ///
+        /// Crucially the opacities here switch with **no animation** (`.transaction`
+        /// clears it). Animating them (a 0.16s fade per chip) is what produced the
+        /// "comet trail" of half-faded pills during a rapid swipe — a 50%-opacity
+        /// white pill over the dark bar even reads as a gray glass pill. Snapping
+        /// them instantly means exactly one crisp pill sits under the focused chip
+        /// every frame, which both looks and feels fast. The scale lift on the label
+        /// above still animates, so single steps keep their gentle bounce.
         private var pill: some View {
             let shape = Capsule(style: .continuous)
-            return pillFill(shape).opacity(active ? 1 : 0)
+            return ZStack {
+                basePill(shape).opacity(isSelected && !isFocused ? 1 : 0)
+                focusPill(shape).opacity(isFocused ? 1 : 0)
+            }
+            .transaction { $0.animation = nil }
+        }
+
+        /// The bright focus capsule — a solid fill (white on the translucent paths,
+        /// the themed card surface is unnecessary here). Cheap to composite, so it
+        /// never bottlenecks a rapid focus swipe.
+        private func focusPill(_ shape: Capsule) -> some View {
+            shape.fill(.white)
         }
 
         // The branch here keys off Reduce Transparency / OS availability — both
-        // stable while navigating — never off focus or selection, so focus moves
-        // freely.
+        // stable while navigating — never off focus or selection (the view tree
+        // shape AND the `Glass` value stay identical), so focus moves freely and the
+        // glass is never recomputed mid-swipe.
         @ViewBuilder
-        private func pillFill(_ shape: Capsule) -> some View {
+        private func basePill(_ shape: Capsule) -> some View {
             if reduceTransparency {
-                shape.fill(isFocused ? Color.white : palette.cardSurface)
+                shape.fill(palette.cardSurface)
             } else if #available(tvOS 26.0, *) {
                 shape.fill(.clear).glassEffect(.regular, in: shape)
             } else {

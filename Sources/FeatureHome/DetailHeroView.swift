@@ -368,13 +368,19 @@ struct DetailHeroView: View {
                     }
                 }
                 .padding(.top, 8)
-                // Make the action row its own focus section so pressing "up" from
-                // a season parked far to the right reliably lands here. Note we no
-                // longer stretch this to `.infinity`: a full-width focusable HStack
-                // inside the hero, combined with the over-wide full-bleed backdrop,
-                // was part of what let the focus engine pan the page off the left
-                // edge. Leading-sized + `.focusSection()` keeps the "up" target
-                // without contributing any over-wide focusable geometry.
+                // Stretch the focus section the full content width (buttons stay
+                // leading-aligned) so pressing "up" from a season chip parked far
+                // to the RIGHT reliably lands on the action row. tvOS only enters a
+                // section if some part of it sits in the swipe's path: a
+                // leading-sized section has no geometry above a far-right chip, so
+                // "up" from there found nothing and the user was trapped. The
+                // earlier worry that a full-width row pans the page off the left
+                // edge was really the over-wide full-bleed backdrop inflating the
+                // layout width — now fixed by hosting the backdrop in a
+                // `.background` (decoupled from layout). The buttons themselves
+                // remain leading via the HStack's content, so widening only the
+                // section's frame adds no over-wide *focusable* geometry.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .focusSection()
             }
         }

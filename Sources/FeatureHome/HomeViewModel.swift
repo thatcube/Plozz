@@ -54,6 +54,14 @@ public final class HomeViewModel {
     private nonisolated(unsafe) var aggregationTask: Task<HomeAggregator.Content, Never>?
     private nonisolated(unsafe) var topShelfPublishTask: Task<Void, Never>?
 
+    /// The hidden-library set the currently-loaded content was aggregated for.
+    /// `nil` until the first successful load. Used by ``loadIfNeeded(excludedKeys:)``
+    /// to tell a genuine input change (hide/show a library) apart from a mere view
+    /// reappearance — tvOS restarts a `.task(id:)` every time Home returns from a
+    /// pushed detail, so an unguarded reload would re-fetch (flashing the skeleton)
+    /// and rebuild the rows (yanking focus to the top) on every back-navigation.
+    private var lastLoadedExcludedKeys: Set<String>?
+
     public init(
         accounts: [ResolvedAccount],
         aggregator: HomeAggregator = HomeAggregator(),
@@ -89,6 +97,25 @@ public final class HomeViewModel {
         layoutStore.save(kinds)
     }
 
+    /// Loads on first appearance and re-aggregates only when the hidden-library
+    /// set actually changed since the last successful load. tvOS cancels and
+    /// restarts a `.task(id:)` every time Home reappears (returning from a pushed
+    /// detail), so binding `load()` directly to the task would reload on every
+    /// back-navigation — flashing the skeleton and resetting focus to the top.
+    /// This guard makes the reappearance a no-op while still reacting to a genuine
+    /// visibility change.
+    public func loadIfNeeded(excludedKeys: Set<String>) async {
+        switch state {
+        case .loaded, .empty:
+            if lastLoadedExcludedKeys == excludedKeys {
+                return
+            }
+        default:
+            break
+        }
+        await load()
+    }
+
     public func load() async {
         PlozzLog.boot("HomeVM.load START vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) accounts=\(accounts.count) state=\(String(describing: state))")
         state = .loading
@@ -110,6 +137,10 @@ public final class HomeViewModel {
             libraries: merged.libraries
         )
         state = content.isEmpty ? .empty : .loaded(content)
+        // Record what this content was aggregated for so a later reappearance with
+        // an unchanged hidden-library set is recognised as a no-op (see
+        // `loadIfNeeded(excludedKeys:)`).
+        lastLoadedExcludedKeys = visibility.excludedKeys
         PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) cw=\(content.continueWatching.count) latest=\(content.latest.count) libs=\(content.libraries.count)")
         guard !Task.isCancelled else { return }
 

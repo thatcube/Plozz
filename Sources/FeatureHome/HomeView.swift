@@ -61,10 +61,12 @@ public struct HomeView: View {
         .task(id: visibility.visibility.excludedKeys) {
             // First appearance loads; thereafter a change to the hidden-library set
             // re-aggregates so library-scoped providers (Jellyfin) re-fetch with the
-            // new visible set. Providers that tag items inline (Plex) are also
-            // filtered live above, so their toggles feel instant even before the
-            // reload settles.
-            await viewModel.load()
+            // new visible set. `loadIfNeeded` skips the reload on a bare reappearance
+            // (tvOS restarts this `.task` every time Home returns from a pushed
+            // detail), so back-navigation no longer flashes the skeleton or resets
+            // focus. Providers that tag items inline (Plex) are also filtered live
+            // above, so their toggles feel instant even before the reload settles.
+            await viewModel.loadIfNeeded(excludedKeys: visibility.visibility.excludedKeys)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             if let mutation = MediaItemMutation.from(note) {

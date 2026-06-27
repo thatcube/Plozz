@@ -46,6 +46,17 @@ static void remux_log(int level, const char *fmt, ...) {
 
 #define PLOZZ_AVIO_BUFFER_SIZE (1 << 20)  /* 1 MiB read buffer */
 #define PLOZZ_MAX_SEGMENTS 100000
+/*
+ * Hard ceiling on seek-probes performed during keyframe-scan discovery. The probe
+ * count is the open-latency footprint, and it scales with duration/GOP, so a
+ * multi-hour title could otherwise cost a thousand-plus probes. We instead scale
+ * the *effective* segment target up on long sources (eff = max(target, dur/CAP))
+ * so discovery stays a few-hundred small ranged reads regardless of file length.
+ * Boundaries remain real keyframes (correctness intact: EXTINF==span, no overlap);
+ * the only effect is coarser — but still byte-bounded — segments on very long files.
+ * This is what lets a 30-40 GB remux start fast without reading O(filesize).
+ */
+#define PLOZZ_MAX_SCAN_SEGMENTS 512
 
 struct plozz_remux_session {
     void *opaque;
@@ -437,13 +448,26 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
     if (!s) return 0;
     double target = (s->target_segment_seconds < 1.0) ? 6.0 : s->target_segment_seconds;
 
+    /*
+     * Bound the probe budget: on a long source, hold #segments (== #probes) to
+     * PLOZZ_MAX_SCAN_SEGMENTS by widening the effective target. Discovery then
+     * costs a few-hundred small ranged reads even for a 40 GB multi-hour title,
+     * instead of one probe per ~target second of runtime. Boundaries are still
+     * real keyframes, so EXTINF==span and segments never overlap.
+     */
+    double eff_target = target;
+    if (s->duration_seconds > 0.0) {
+        double cap_target = s->duration_seconds / (double)PLOZZ_MAX_SCAN_SEGMENTS;
+        if (cap_target > eff_target) eff_target = cap_target;
+    }
+
     double *kf = NULL;
     int probes = 0;
-    int kf_count = discover_keyframes_by_seek(s, target, &kf, &probes);
+    int kf_count = discover_keyframes_by_seek(s, eff_target, &kf, &probes);
     if (kf_count <= 1) { free(kf); return 0; }
 
     plozz_remux_segment *segs = NULL;
-    int count = build_segments_from_keyframes(kf, kf_count, s->duration_seconds, target, &segs);
+    int count = build_segments_from_keyframes(kf, kf_count, s->duration_seconds, eff_target, &segs);
     free(kf);
     if (count <= 0) { free(segs); return 0; }
 
@@ -458,10 +482,12 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
     avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
 
     /* Telemetry: the seek-probe count is the open-latency footprint — O(segments),
-     * not O(filesize). The coordinator's A/B reads this against the sibling's
-     * full-file scan to confirm the startup-speed win. */
+     * not O(filesize), and capped at PLOZZ_MAX_SCAN_SEGMENTS via eff_target. The
+     * coordinator's A/B reads this against the sibling's full-file scan to confirm
+     * the startup-speed win on multi-GB 4K titles. */
     remux_log(1, "remux: keyframe-scan rebuilt %d segments (was %d fixed-cadence) "
-              "from %d keyframes via %d seek-probes", count, old, kf_count, probes);
+              "from %d keyframes via %d seek-probes (target=%.2fs eff=%.2fs)",
+              count, old, kf_count, probes, target, eff_target);
     return count;
 }
 

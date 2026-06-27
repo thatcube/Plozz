@@ -101,6 +101,38 @@ public struct JellyfinProvider: MediaProvider {
         try await client.children(userID: session.userID, parentID: itemID).map(map(item:))
     }
 
+    public func mediaSegments(for itemID: String) async throws -> [MediaSegment] {
+        // Best-effort: servers without a media-segment provider 404 here, which
+        // should degrade to "no skip markers" rather than failing playback.
+        let dtos = (try? await client.mediaSegments(itemID: itemID)) ?? []
+        return dtos.compactMap(Self.map(segment:))
+    }
+
+    /// Maps a Jellyfin media-segment DTO onto the provider-agnostic
+    /// `MediaSegment`. Jellyfin calls the closing-credits segment `Outro`; Plozz
+    /// normalises that to `.credits`. Ticks are 100-nanosecond units.
+    private static func map(segment dto: MediaSegmentDto) -> MediaSegment? {
+        guard let startTicks = dto.StartTicks, let endTicks = dto.EndTicks, endTicks > startTicks else {
+            return nil
+        }
+        let kind: MediaSegment.Kind
+        switch dto.segmentType?.lowercased() {
+        case "intro": kind = .intro
+        case "outro", "credits": kind = .credits
+        case "recap": kind = .recap
+        case "preview": kind = .preview
+        case "commercial": kind = .commercial
+        default: kind = .unknown
+        }
+        let ticksPerSecond = 10_000_000.0
+        return MediaSegment(
+            id: dto.Id ?? "\(dto.segmentType ?? "segment")-\(startTicks)",
+            kind: kind,
+            start: Double(startTicks) / ticksPerSecond,
+            end: Double(endTicks) / ticksPerSecond
+        )
+    }
+
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         let (recursive, includeItemTypes) = Self.query(forContainerKind: kind)
         PlozzLog.networking.info(

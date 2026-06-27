@@ -19,6 +19,10 @@ struct PlayerActions {
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
+    /// Seek past the active intro/credits segment (Skip button Select).
+    var skipSegment: () -> Void = {}
+    /// Dismiss the skip button without seeking (Menu / swipe away).
+    var dismissSkip: () -> Void = {}
     var dismiss: () -> Void = {}
 }
 
@@ -82,6 +86,10 @@ struct VideoSurfaceContainer: UIViewRepresentable {
 /// structurally; the overlay uses it directly.
 struct ThemePaletteBox {
     let makeControls: (PlayerControlsModel, PlayerOptionsActions, @escaping () -> Void) -> AnyView
+    /// Builds the focusable Skip Intro/Credits button. `onSkip` seeks past the
+    /// active segment; `onDismiss` hides it without seeking. Both also return
+    /// focus to the scrub surface (the controller owns that transition).
+    let makeSkipButton: (PlayerControlsModel, @escaping () -> Void, @escaping () -> Void) -> AnyView
 }
 
 /// The focusable root view that receives Siri Remote presses and indirect-touch
@@ -136,12 +144,18 @@ final class PlayerInputViewController: UIViewController {
     /// Whether the Siri Remote currently drives the scrub surface or the bottom
     /// control bar. In `.controlBar` the surface gesture recognizers are disabled
     /// so the SwiftUI focus engine owns navigation.
-    private enum FocusContext { case surface, controlBar }
+    private enum FocusContext { case surface, controlBar, skipButton }
     private var focusContext: FocusContext = .surface
 
     /// The always-attached, focusable bottom control bar. It only takes focus
     /// while `focusContext == .controlBar`.
     private var controlBarHost: UIHostingController<AnyView>?
+
+    /// The always-attached Skip Intro/Credits button overlay. Interactive (and
+    /// focused) only while `focusContext == .skipButton`; collapses to nothing
+    /// when no segment is active. Tracked so presentation only flips on change.
+    private var skipButtonHost: UIHostingController<AnyView>?
+    private var presentingSkipButton = false
 
     /// Surface gesture recognizers we toggle off while the control bar owns focus.
     private var surfaceRecognizers: [UIGestureRecognizer] = []
@@ -250,6 +264,24 @@ final class PlayerInputViewController: UIViewController {
         view.addSubview(host.view)
         host.didMove(toParent: self)
         controlBarHost = host
+
+        // Skip Intro/Credits overlay on top of the control bar. Off until a
+        // segment becomes active and the viewer is on the scrub surface.
+        let skipHost = UIHostingController(
+            rootView: themePalette.makeSkipButton(
+                model,
+                { [weak self] in self?.performSkip() },
+                { [weak self] in self?.dismissSkipButton() }
+            )
+        )
+        skipHost.view.backgroundColor = .clear
+        skipHost.view.isUserInteractionEnabled = false
+        addChild(skipHost)
+        skipHost.view.frame = view.bounds
+        skipHost.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(skipHost.view)
+        skipHost.didMove(toParent: self)
+        skipButtonHost = skipHost
     }
 
     // MARK: Engine state refresh
@@ -294,14 +326,75 @@ final class PlayerInputViewController: UIViewController {
         }
         model.bufferedSeconds = engine.bufferedPosition
         model.isPaused = engine.isPaused
+        evaluateSkipPresentation()
+    }
+
+    // MARK: Skip intro/credits presentation
+
+    /// Presents or hides the focusable Skip button as the live position enters /
+    /// leaves a skippable segment. Only auto-presents from the scrub surface so it
+    /// never yanks focus out of the control bar or a scrub; returns focus to the
+    /// surface as soon as the segment passes or is dismissed.
+    private func evaluateSkipPresentation() {
+        let wantsSkip = model.activeSkipSegment != nil
+        if wantsSkip {
+            guard !presentingSkipButton, focusContext == .surface, !model.isScrubbing else { return }
+            enterSkipButton()
+        } else if presentingSkipButton {
+            exitSkipButton()
+        }
+    }
+
+    private func enterSkipButton() {
+        presentingSkipButton = true
+        focusContext = .skipButton
+        cancelAutoHide()
+        setSurfaceRecognizers(enabled: false)
+        skipButtonHost?.view.isUserInteractionEnabled = true
+        playerInputView?.allowsFocus = false
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+    }
+
+    /// Returns focus to the scrub surface after the skip button is used,
+    /// dismissed, or its segment window passes.
+    private func exitSkipButton() {
+        presentingSkipButton = false
+        skipButtonHost?.view.isUserInteractionEnabled = false
+        // The control bar may have taken over in the meantime; only restore the
+        // surface if the skip button was the focus owner.
+        if focusContext == .skipButton {
+            focusContext = .surface
+            playerInputView?.allowsFocus = true
+            setSurfaceRecognizers(enabled: true)
+            setNeedsFocusUpdate()
+            updateFocusIfNeeded()
+        }
+    }
+
+    /// Skip button Select: seek past the active segment, then return to surface.
+    private func performSkip() {
+        actions.skipSegment()
+        exitSkipButton()
+        flashControls()
+    }
+
+    /// Skip button Menu / swipe-up: hide without seeking, return to surface.
+    private func dismissSkipButton() {
+        actions.dismissSkip()
+        exitSkipButton()
     }
 
     // MARK: Focus
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         // While the bottom control bar is active, hand focus to it so the Siri
-        // Remote drives its native buttons; otherwise the input surface owns
-        // focus so pans/presses reach our gesture recognizers.
+        // Remote drives its native buttons; the skip button likewise grabs focus
+        // while it's presented; otherwise the input surface owns focus so
+        // pans/presses reach our gesture recognizers.
+        if focusContext == .skipButton, let skipButtonHost {
+            return [skipButtonHost.view]
+        }
         if focusContext == .controlBar, let controlBarHost {
             return [controlBarHost.view]
         }

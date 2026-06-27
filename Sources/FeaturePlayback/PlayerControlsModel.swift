@@ -100,6 +100,15 @@ public final class PlayerControlsModel {
     /// the in-player control bar; seeded from the caller's initial preference.
     public var diagnosticsEnabled: Bool = false
 
+    // MARK: Skip intros/credits
+    /// Server-detected skippable segments (intros/credits) for the playing item.
+    /// Populated by the view model only when the per-profile Skip Intros setting
+    /// is on; empty otherwise, so no skip button is ever offered.
+    public var skippableSegments: [MediaSegment] = []
+    /// True while the user has dismissed the skip button for the *current*
+    /// segment, so it doesn't keep re-grabbing focus for the rest of that window.
+    public var dismissedSegmentID: String?
+
     public init() {}
 
     /// Where the transport playhead should render: the scrub target while
@@ -118,5 +127,13 @@ public final class PlayerControlsModel {
 
     public var hasSelectableAudio: Bool { audioOptions.count > 1 }
     public var hasSelectableSubtitles: Bool { !subtitleOptions.isEmpty }
+
+    /// The skippable segment whose window currently contains the live position,
+    /// unless the user already dismissed that segment's button. Drives whether
+    /// the in-player Skip Intro/Credits button is shown and focusable.
+    public var activeSkipSegment: MediaSegment? {
+        guard let segment = skippableSegments.activeSkippable(at: currentSeconds) else { return nil }
+        return segment.id == dismissedSegmentID ? nil : segment
+    }
 }
 #endif

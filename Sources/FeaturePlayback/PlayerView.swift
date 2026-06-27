@@ -61,6 +61,8 @@ public struct PlayerView: View {
                         setAudioDelay: { viewModel.setAudioDelay($0) },
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
+                        skipSegment: { viewModel.skipActiveSegment() },
+                        dismissSkip: { viewModel.dismissActiveSkipSegment() },
                         dismiss: { dismissSmoothly() }
                     ),
                     scrubPreview: viewModel.scrubPreview,
@@ -71,6 +73,14 @@ public struct PlayerView: View {
                                 palette: themePalette,
                                 actions: actions,
                                 onExitToSurface: onExitToSurface
+                            ))
+                        },
+                        makeSkipButton: { model, onSkip, onDismiss in
+                            AnyView(SkipSegmentButton(
+                                model: model,
+                                palette: themePalette,
+                                onSkip: onSkip,
+                                onDismiss: onDismiss
                             ))
                         }
                     )

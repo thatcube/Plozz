@@ -84,6 +84,7 @@ public struct RootView: View {
                         accounts: accounts,
                         captionModel: appState.captionModel,
                         spoilerModel: appState.spoilerModel,
+                        playbackModel: appState.playbackModel,
                         themeModel: appState.themeModel,
                         diagnosticsModel: appState.diagnosticsModel,
                         musicPlayerModel: appState.musicPlayerModel,

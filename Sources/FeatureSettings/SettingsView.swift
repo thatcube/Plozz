@@ -28,6 +28,7 @@ public struct SettingsView: View {
 
     private let captions: CaptionSettingsModel
     private let spoilers: SpoilerSettingsModel
+    private let playback: PlaybackSettingsModel
     private let theme: ThemeSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
     private let trakt: TraktService
@@ -59,6 +60,7 @@ public struct SettingsView: View {
     public init(
         captions: CaptionSettingsModel,
         spoilers: SpoilerSettingsModel,
+        playback: PlaybackSettingsModel,
         theme: ThemeSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
         trakt: TraktService,
@@ -89,6 +91,7 @@ public struct SettingsView: View {
     ) {
         self.captions = captions
         self.spoilers = spoilers
+        self.playback = playback
         self.theme = theme
         self.homeVisibility = homeVisibility
         self.trakt = trakt
@@ -122,6 +125,7 @@ public struct SettingsView: View {
         SettingsContext(
             captions: captions,
             spoilers: spoilers,
+            playback: playback,
             theme: theme,
             homeVisibility: homeVisibility,
             discoveredLibraries: discoveredLibraries,
@@ -260,9 +264,9 @@ public struct SettingsView: View {
             navRow("Appearance", icon: "paintpalette",
                    value: theme.theme.displayName,
                    route: .appearance)
-            navRow("Captions", icon: "captions.bubble",
-                   value: nil,
-                   route: .captions)
+            navRow("Playback", icon: "play.rectangle",
+                   value: playback.settings.skipIntros ? "Skip intros on" : nil,
+                   route: .playback)
             navRow("Spoilers", icon: "eye.slash",
                    value: spoilers.settings.isEnabled ? "On" : "Off",
                    route: .spoilers)
@@ -339,6 +343,8 @@ public struct SettingsView: View {
             ServersAndLibrariesDetailView(context: context)
         case .appearance:
             AppearanceDetailView(theme: theme)
+        case .playback:
+            PlaybackDetailView(playback: playback)
         case .captions:
             CaptionsDetailView(captions: captions)
         case .spoilers:

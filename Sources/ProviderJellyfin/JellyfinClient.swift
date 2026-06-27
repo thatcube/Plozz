@@ -202,6 +202,25 @@ public struct JellyfinClient: Sendable {
         return result
     }
 
+    /// `GET /MediaSegments/{itemId}` — server-detected structural segments
+    /// (intro, outro, recap, …). Available on Jellyfin 10.10+ or any server with
+    /// a media-segment provider plugin; older servers 404, which the provider
+    /// treats as "no segments". Times are 100-nanosecond ticks.
+    func mediaSegments(itemID: String) async throws -> [MediaSegmentDto] {
+        let endpoint = Endpoint(
+            path: "/MediaSegments/\(itemID)",
+            queryItems: [
+                URLQueryItem(name: "includeSegmentTypes", value: "Intro"),
+                URLQueryItem(name: "includeSegmentTypes", value: "Outro"),
+                URLQueryItem(name: "includeSegmentTypes", value: "Recap"),
+                URLQueryItem(name: "includeSegmentTypes", value: "Preview"),
+                URLQueryItem(name: "includeSegmentTypes", value: "Commercial")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(MediaSegmentsResponse.self, from: endpoint, baseURL: baseURL).Items ?? []
+    }
+
     func children(userID: String, parentID: String) async throws -> [BaseItemDto] {
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items",

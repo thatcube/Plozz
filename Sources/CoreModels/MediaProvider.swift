@@ -107,6 +107,14 @@ public protocol MediaProvider: Sendable {
     /// attach it to the item, so every client sees it.
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws
 
+    // MARK: Skip segments
+
+    /// Server-detected structural segments (intro, credits, …) for an item, used
+    /// to offer the in-player Skip Intro/Credits button. Jellyfin exposes these
+    /// via `/MediaSegments`, Plex via metadata markers. Best-effort: a provider
+    /// or server without marker support returns an empty array.
+    func mediaSegments(for itemID: String) async throws -> [MediaSegment]
+
     // MARK: Images
 
     /// Absolute URL for an item's artwork, or `nil` if unavailable.
@@ -121,6 +129,11 @@ public protocol MediaProvider: Sendable {
 public extension MediaProvider {
     func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] { [] }
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {}
+
+    /// Default: no skip segments. Providers backed by a server marker source
+    /// (Jellyfin `/MediaSegments`, Plex metadata markers) override this; test
+    /// doubles and marker-less servers inherit the safe empty result.
+    func mediaSegments(for itemID: String) async throws -> [MediaSegment] { [] }
 
     /// Default: no trailers. Providers that can surface them (Jellyfin local
     /// trailers, Plex extras) override this; test doubles and other conformers

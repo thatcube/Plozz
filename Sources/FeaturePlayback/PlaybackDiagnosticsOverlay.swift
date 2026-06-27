@@ -41,12 +41,21 @@ struct PlaybackDiagnosticsOverlay: View {
     private func grid(for d: PlaybackDiagnostics) -> some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 4) {
             optionalRow("Engine", d.engineName ?? PlaybackDiagnostics.placeholder)
+            optionalRow("Source Provider", d.sourceProviderText)
             optionalRow("Container", d.containerText)
             optionalRow("Video", d.videoLineText)
+            optionalRow("Codec Tag", d.videoCodecTagText)
+            optionalRow("Color", d.colorText)
+            optionalRow("Dolby Vision", d.dolbyVisionText)
             optionalRow("Audio", d.audioLineText)
             optionalRow("Audio Output", d.audioOutputText)
             optionalRow("Subtitles", d.subtitleText)
             row("Source", sourceText(d))
+            optionalRow("Stream", d.streamTransportText)
+            optionalRow("Position", d.positionText)
+            optionalRow("Seekable", d.seekWindowText)
+            optionalRow("Player State", d.playbackStateText)
+            optionalRow("Remux Eligible", d.remuxEligibilityText)
             if d.mode == .localRemux {
                 optionalRow("Remux Strategy", d.remuxStrategyText)
                 optionalRow("Remux Transport", d.remuxTransportText)

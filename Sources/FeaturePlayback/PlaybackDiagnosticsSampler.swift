@@ -56,13 +56,25 @@ public final class PlaybackDiagnosticsSampler {
         metadata: MediaSourceMetadata? = nil,
         engineName: String? = nil,
         capabilities: MediaCapabilities = .detected(),
+        sourceProvider: ProviderKind? = nil,
+        streamURL: URL? = nil,
+        remuxEligible: Bool? = nil,
+        remuxEligibilityDetail: String? = nil,
         remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)? = nil
     ) {
         stop()
         self.player = player
         self.remuxSnapshot = remuxSnapshot
-        var base = PlaybackDiagnostics.base(from: metadata, mode: mode, capabilities: capabilities)
+        var base = PlaybackDiagnostics.base(
+            from: metadata,
+            mode: mode,
+            capabilities: capabilities,
+            sourceProvider: sourceProvider
+        )
         base.engineName = engineName
+        base.streamTransport = PlaybackDiagnostics.streamTransportSummary(url: streamURL)
+        base.remuxEligible = remuxEligible
+        base.remuxEligibilityDetail = remuxEligibilityDetail
         Self.fillDeviceInfo(into: &base)
         staticDiagnostics = base
         latest = staticDiagnostics
@@ -119,6 +131,27 @@ public final class PlaybackDiagnosticsSampler {
             }
 
             diagnostics.bufferedSecondsAhead = bufferedSecondsAhead(in: item)
+
+            // Timeline + seek window: the key seek diagnostic. A throttled server
+            // HLS stream reports a small trailing seekable window; a true app-owned
+            // remux should report the whole duration as seekable.
+            let duration = item.duration.seconds
+            if duration.isFinite, duration > 0 { diagnostics.durationSeconds = duration }
+            let position = item.currentTime().seconds
+            if position.isFinite, position >= 0 { diagnostics.positionSeconds = position }
+            if let seekable = item.seekableTimeRanges.last?.timeRangeValue {
+                let start = seekable.start.seconds
+                let end = (seekable.start + seekable.duration).seconds
+                if start.isFinite { diagnostics.seekableStartSeconds = start }
+                if end.isFinite { diagnostics.seekableEndSeconds = end }
+            }
+
+            diagnostics.playbackState = Self.playbackStateText(item: item, player: player)
+
+            // Fall back to the live asset URL if the transport wasn't seeded at start.
+            if diagnostics.streamTransport == nil, let urlAsset = item.asset as? AVURLAsset {
+                diagnostics.streamTransport = PlaybackDiagnostics.streamTransportSummary(url: urlAsset.url)
+            }
         }
 
         if diagnostics.remux == nil {
@@ -149,6 +182,31 @@ public final class PlaybackDiagnosticsSampler {
         case .serious: return .serious
         case .critical: return .critical
         @unknown default: return .nominal
+        }
+    }
+
+    /// Live player state, combining the item's load status with the player's
+    /// time-control status so a black-screen failure or a buffering stall is
+    /// visible in the overlay.
+    private static func playbackStateText(item: AVPlayerItem, player: AVPlayer?) -> String {
+        switch item.status {
+        case .failed:
+            if let error = item.error { return "Failed: \(error.localizedDescription)" }
+            return "Failed"
+        case .unknown:
+            return "Loading"
+        case .readyToPlay:
+            let control: String?
+            switch player?.timeControlStatus {
+            case .playing: control = "Playing"
+            case .paused: control = "Paused"
+            case .waitingToPlayAtSpecifiedRate: control = "Waiting/Buffering"
+            case .none: control = nil
+            @unknown default: control = nil
+            }
+            return ["Ready", control].compactMap { $0 }.joined(separator: " · ")
+        @unknown default:
+            return "Unknown"
         }
     }
 

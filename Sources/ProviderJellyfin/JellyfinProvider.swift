@@ -364,7 +364,8 @@ public struct JellyfinProvider: MediaProvider {
             deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
             sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
             localRemuxSource: localRemuxSource,
-            scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled)
+            scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled),
+            sourceProvider: .jellyfin
         )
     }
 

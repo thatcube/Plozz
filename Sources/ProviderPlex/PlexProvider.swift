@@ -238,7 +238,8 @@ public struct PlexProvider: MediaProvider {
                 mediaVideoDisplayTitle: media.videoStreamDisplayTitle
             ),
             localRemuxSource: localRemuxSource,
-            scrubPreview: scrubPreview(for: part)
+            scrubPreview: scrubPreview(for: part),
+            sourceProvider: .plex
         )
     }
 

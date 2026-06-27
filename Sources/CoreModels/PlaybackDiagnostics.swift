@@ -262,6 +262,45 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     /// Local-remux comparison-harness metrics, when the active playback path is
     /// routed through the shared remux seam.
     public var remux: RemuxDiagnostics?
+    /// Which backend resolved this playback (Plex / Jellyfin), shown in the
+    /// "Source Provider" row.
+    public var sourceProvider: ProviderKind?
+    /// Container codec FourCC tag, e.g. `hvc1` / `hev1` / `dvh1`. The hvc1-vs-hev1
+    /// distinction is make-or-break for AVPlayer (hev1 plays audio with a black
+    /// screen), so it's surfaced explicitly.
+    public var videoCodecTag: String?
+    /// Bits per luma sample, e.g. `10`.
+    public var videoBitDepth: Int?
+    /// Explicit Dolby Vision profile (5 / 7 / 8), when known or inferable.
+    public var dolbyVisionProfile: Int?
+    /// Raw color transfer characteristics token, e.g. `smpte2084`, `arib-std-b67`.
+    public var colorTransfer: String?
+    /// Specific HDR range token, e.g. `DOVI`, `HDR10`, `DOVIWithHDR10`.
+    public var videoRangeType: String?
+    /// Compact, token-stripped summary of the URL AVPlayer is actually playing,
+    /// e.g. `App-local 127.0.0.1:52344 · HLS` for an app-owned local remux vs.
+    /// `media.server · HLS` for a server stream. The query string (auth tokens) is
+    /// never included.
+    public var streamTransport: String?
+    /// Total media duration in seconds, when the player knows it.
+    public var durationSeconds: Double?
+    /// Current playhead position in seconds.
+    public var positionSeconds: Double?
+    /// Start of the player's currently-seekable window in seconds. For server HLS
+    /// this is often a small throttled window; for a true app-owned remux it should
+    /// be ~0 (the whole timeline is seekable).
+    public var seekableStartSeconds: Double?
+    /// End of the player's currently-seekable window in seconds. When this trails
+    /// far behind `durationSeconds`, seek-ahead will fail — the core bug this work
+    /// exists to diagnose.
+    public var seekableEndSeconds: Double?
+    /// Live player state, e.g. `Ready · Playing`, `Loading`, or `Failed: …`.
+    public var playbackState: String?
+    /// Whether the active title is eligible for the native local-remux path.
+    public var remuxEligible: Bool?
+    /// Why the title is (in)eligible, e.g. `MKV · HEVC · DoVi P8 · EAC3` or
+    /// `TrueHD stays on the hybrid engine`.
+    public var remuxEligibilityDetail: String?
 
     public init(
         resolution: VideoResolution? = nil,
@@ -294,7 +333,21 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         liveViewModels: Int? = nil,
         liveNativeEngines: Int? = nil,
         liveMPVEngines: Int? = nil,
-        remux: RemuxDiagnostics? = nil
+        remux: RemuxDiagnostics? = nil,
+        sourceProvider: ProviderKind? = nil,
+        videoCodecTag: String? = nil,
+        videoBitDepth: Int? = nil,
+        dolbyVisionProfile: Int? = nil,
+        colorTransfer: String? = nil,
+        videoRangeType: String? = nil,
+        streamTransport: String? = nil,
+        durationSeconds: Double? = nil,
+        positionSeconds: Double? = nil,
+        seekableStartSeconds: Double? = nil,
+        seekableEndSeconds: Double? = nil,
+        playbackState: String? = nil,
+        remuxEligible: Bool? = nil,
+        remuxEligibilityDetail: String? = nil
     ) {
         self.resolution = resolution
         self.indicatedBitrate = indicatedBitrate
@@ -327,6 +380,20 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.liveNativeEngines = liveNativeEngines
         self.liveMPVEngines = liveMPVEngines
         self.remux = remux
+        self.sourceProvider = sourceProvider
+        self.videoCodecTag = videoCodecTag
+        self.videoBitDepth = videoBitDepth
+        self.dolbyVisionProfile = dolbyVisionProfile
+        self.colorTransfer = colorTransfer
+        self.videoRangeType = videoRangeType
+        self.streamTransport = streamTransport
+        self.durationSeconds = durationSeconds
+        self.positionSeconds = positionSeconds
+        self.seekableStartSeconds = seekableStartSeconds
+        self.seekableEndSeconds = seekableEndSeconds
+        self.playbackState = playbackState
+        self.remuxEligible = remuxEligible
+        self.remuxEligibilityDetail = remuxEligibilityDetail
     }
 }
 
@@ -595,6 +662,105 @@ public extension PlaybackDiagnostics {
         return "\(milliseconds) ms"
     }
 
+    /// Formats a seconds value as a wall-clock timecode, e.g. `1:58:24` or `12:34`.
+    static func formatTimecode(_ seconds: Double?) -> String {
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return placeholder }
+        let total = Int(seconds.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        }
+        return String(format: "%d:%02d", minutes, secs)
+    }
+
+    /// Formats the player's seekable window against the full duration — the single
+    /// most diagnostic line for the seek bug. A true app-owned remux should report
+    /// the **whole** timeline as seekable (`… · full timeline`); a throttled server
+    /// HLS stream reports only a small trailing window (`… · server window 21s`),
+    /// which is exactly why seek-ahead 404s.
+    static func formatSeekWindow(start: Double?, end: Double?, duration: Double?) -> String {
+        guard let start, let end, start.isFinite, end.isFinite, end >= start else {
+            return placeholder
+        }
+        let window = "\(formatTimecode(start))–\(formatTimecode(end))"
+        guard let duration, duration.isFinite, duration > 0 else { return window }
+        let coversWholeTimeline = end >= duration - 5 && start <= 5
+        let tag = coversWholeTimeline
+            ? "full timeline"
+            : String(format: "server window %.0fs", max(0, end - start))
+        return "\(window) of \(formatTimecode(duration)) · \(tag)"
+    }
+
+    /// Human-readable Dolby Vision profile, calling out the make-or-break facts:
+    /// Profile 5 has **no** HDR10 fallback (a wrong sample entry = no picture),
+    /// Profile 8 is HDR10-compatible, Profile 7 is dual-layer (stays on mpv).
+    static func dolbyVisionDescription(profile: Int?) -> String? {
+        guard let profile else { return nil }
+        switch profile {
+        case 5: return "Profile 5 (single-layer · no HDR10 fallback)"
+        case 7: return "Profile 7 (dual-layer · hybrid engine)"
+        case 8: return "Profile 8 (single-layer · HDR10-compatible)"
+        default: return "Profile \(profile)"
+        }
+    }
+
+    /// Friendly transfer-function label from a raw token, e.g. `smpte2084` → `PQ`.
+    static func transferFunctionLabel(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+        let value = raw.lowercased()
+        if value.contains("2084") || value == "pq" || value.contains("st2084") {
+            return "PQ (ST 2084)"
+        }
+        if value.contains("b67") || value.contains("hlg") || value.contains("arib") {
+            return "HLG"
+        }
+        if value.contains("2020") { return "BT.2020" }
+        if value.contains("709") { return "BT.709" }
+        if value.contains("601") { return "BT.601" }
+        return raw
+    }
+
+    /// Composite color line, e.g. `10-bit · PQ (ST 2084) · DOVI`.
+    static func colorDescription(bitDepth: Int?, transfer: String?, rangeType: String?) -> String? {
+        let depth = bitDepth.flatMap { $0 > 0 ? "\($0)-bit" : nil }
+        let trc = transferFunctionLabel(transfer)
+        let range: String? = {
+            guard let raw = rangeType?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+            return raw.uppercased()
+        }()
+        let parts = [depth, trc, range].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// A compact, **token-stripped** summary of the URL AVPlayer is playing. Local
+    /// (app-owned) hosts are flagged as `App-local …`; the query string (which
+    /// carries auth tokens) is always dropped so the overlay never leaks secrets.
+    static func streamTransportSummary(url: URL?) -> String? {
+        guard let url else { return nil }
+        let host = (url.host ?? "").lowercased()
+        let ext = url.pathExtension.lowercased()
+        let kind: String
+        switch ext {
+        case "m3u8": kind = "HLS"
+        case "mp4", "m4v": kind = "fMP4/MP4"
+        case "mov": kind = "QuickTime"
+        case "mkv": kind = "Matroska"
+        case "ts", "m2ts": kind = "MPEG-TS"
+        default: kind = (url.scheme ?? "").uppercased()
+        }
+        let isLocal = host == "127.0.0.1" || host == "localhost" || host == "::1"
+        if isLocal {
+            let port = url.port.map { ":\($0)" } ?? ""
+            return "App-local \(host)\(port) · \(kind)"
+        }
+        if host.isEmpty {
+            return kind.isEmpty ? nil : kind
+        }
+        return "\(host) · \(kind)"
+    }
+
     /// Formats a resolution with an optional quality label, e.g.
     /// `3840×2160 (4K)`.
     static func formatResolution(_ resolution: VideoResolution?) -> String {
@@ -702,6 +868,55 @@ public extension PlaybackDiagnostics {
 
     var audioOutputText: String {
         audioOutputDescription ?? Self.placeholder
+    }
+
+    /// Backend that resolved the stream, e.g. `Plex` / `Jellyfin`.
+    var sourceProviderText: String { sourceProvider?.displayName ?? Self.placeholder }
+
+    /// Container codec tag, annotating the AVPlayer-hostile `hev1` case.
+    var videoCodecTagText: String {
+        guard let tag = videoCodecTag?.trimmingCharacters(in: .whitespaces), !tag.isEmpty else {
+            return Self.placeholder
+        }
+        if tag.lowercased() == "hev1" {
+            return "\(tag) (AVPlayer needs hvc1 — black-screen risk)"
+        }
+        return tag
+    }
+
+    /// Composite color line, e.g. `10-bit · PQ (ST 2084) · DOVI`.
+    var colorText: String {
+        Self.colorDescription(bitDepth: videoBitDepth, transfer: colorTransfer, rangeType: videoRangeType)
+            ?? Self.placeholder
+    }
+
+    /// Explicit Dolby Vision profile line.
+    var dolbyVisionText: String {
+        Self.dolbyVisionDescription(profile: dolbyVisionProfile) ?? Self.placeholder
+    }
+
+    /// Token-stripped transport summary of what AVPlayer is actually playing.
+    var streamTransportText: String { streamTransport ?? Self.placeholder }
+
+    /// Current position over duration, e.g. `12:34 / 1:58:24`.
+    var positionText: String {
+        guard positionSeconds != nil || durationSeconds != nil else { return Self.placeholder }
+        return "\(Self.formatTimecode(positionSeconds)) / \(Self.formatTimecode(durationSeconds))"
+    }
+
+    /// Seekable window vs. duration — the key seek diagnostic.
+    var seekWindowText: String {
+        Self.formatSeekWindow(start: seekableStartSeconds, end: seekableEndSeconds, duration: durationSeconds)
+    }
+
+    /// Live player state, e.g. `Ready · Playing`.
+    var playbackStateText: String { playbackState ?? Self.placeholder }
+
+    /// Local-remux eligibility line, e.g. `Eligible · MKV · HEVC · DoVi P8 · EAC3`.
+    var remuxEligibilityText: String {
+        guard let remuxEligible else { return Self.placeholder }
+        let prefix = remuxEligible ? "Eligible" : "Not eligible"
+        return Self.joinParts([prefix, remuxEligibilityDetail])
     }
 
     /// Subtitle line, e.g. `SubRip · English`, or a placeholder when none.
@@ -823,9 +1038,11 @@ public extension PlaybackDiagnostics {
     static func base(
         from metadata: MediaSourceMetadata?,
         mode: PlaybackMode,
-        capabilities: MediaCapabilities = .default
+        capabilities: MediaCapabilities = .default,
+        sourceProvider: ProviderKind? = nil
     ) -> PlaybackDiagnostics {
         var d = PlaybackDiagnostics(mode: mode)
+        d.sourceProvider = sourceProvider
         guard let metadata else { return d }
 
         d.container = metadata.container
@@ -833,6 +1050,21 @@ public extension PlaybackDiagnostics {
         if let v = metadata.video {
             d.videoCodec = friendlyCodecName(v.codec)
             d.videoProfile = v.profile?.trimmingCharacters(in: .whitespaces)
+            d.videoCodecTag = v.codecTag?.trimmingCharacters(in: .whitespaces)
+            d.videoBitDepth = v.bitDepth
+            d.colorTransfer = v.colorTransfer
+            d.videoRangeType = v.videoRangeType
+            // Explicit profile wins; otherwise infer single-layer profile from the
+            // provider's range token (mirrors LocalRemuxSourceDescriptor).
+            if let explicit = v.dolbyVisionProfile {
+                d.dolbyVisionProfile = explicit
+            } else {
+                switch (v.videoRangeType ?? "").uppercased() {
+                case "DOVIWITHHDR10", "DOVIWITHHLG", "DOVIWITHSDR": d.dolbyVisionProfile = 8
+                case "DOVI": d.dolbyVisionProfile = 5
+                default: break
+                }
+            }
             if let w = v.width, let h = v.height, w > 0, h > 0 {
                 d.resolution = VideoResolution(width: w, height: h)
             }

@@ -229,6 +229,11 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// (server HLS or a local-remux HLS facade) and therefore should be fed
     /// straight to AVPlayer rather than wrapped for subtitle injection.
     public var isManifestStream: Bool
+    /// Which backend (Plex / Jellyfin) resolved this playback. Surfaced in the
+    /// diagnostics overlay's "Source Provider" row so a tester can tell at a glance
+    /// whether a given title is being served from Plex or Jellyfin. `nil` for
+    /// sources without a first-class provider (e.g. YouTube trailers).
+    public var sourceProvider: ProviderKind?
 
     public init(
         item: MediaItem,
@@ -242,7 +247,8 @@ public struct PlaybackRequest: Hashable, Sendable {
         deliveryMode: PlaybackDiagnostics.PlaybackMode? = nil,
         sourceMetadata: MediaSourceMetadata? = nil,
         localRemuxSource: LocalRemuxSourceDescriptor? = nil,
-        scrubPreview: ScrubPreviewSource? = nil
+        scrubPreview: ScrubPreviewSource? = nil,
+        sourceProvider: ProviderKind? = nil
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -257,6 +263,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.localRemuxSource = localRemuxSource
         self.scrubPreview = scrubPreview
         self.isManifestStream = isTranscoding || streamURL.pathExtension.lowercased() == "m3u8"
+        self.sourceProvider = sourceProvider
     }
 }
 

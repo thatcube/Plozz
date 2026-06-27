@@ -1092,6 +1092,34 @@ public final class PlayerViewModel {
     /// to populate the playback diagnostics overlay.
     public var sourceMetadata: MediaSourceMetadata? { request?.sourceMetadata }
 
+    /// Which backend (Plex / Jellyfin) resolved the active playback.
+    public var sourceProvider: ProviderKind? { request?.sourceProvider }
+
+    /// The URL AVPlayer is actually playing (after any local-remux swap), used for
+    /// the diagnostics "Stream" transport row.
+    public var diagnosticsStreamURL: URL? { request?.streamURL }
+
+    /// Local-remux eligibility for the active title, as a `(eligible, detail)` pair
+    /// for the diagnostics overlay. `detail` is a compact reason — the eligible
+    /// source facts when it qualifies, or the disqualifying reason when it doesn't.
+    public var remuxEligibilitySummary: (eligible: Bool, detail: String)? {
+        guard let descriptor = request?.localRemuxSource else { return nil }
+        switch descriptor.eligibility(capabilities: capabilities) {
+        case .eligible:
+            let metadata = descriptor.sourceMetadata
+            let doVi = descriptor.normalizedDolbyVisionProfile.map { "DoVi P\($0)" }
+            let parts = [
+                metadata.container?.uppercased(),
+                metadata.video?.codec?.uppercased(),
+                doVi,
+                metadata.audio?.codec?.uppercased()
+            ].compactMap { $0 }
+            return (true, parts.joined(separator: " · "))
+        case .ineligible(let reason):
+            return (false, reason)
+        }
+    }
+
     /// Local-remux comparison-harness snapshot, when the current playback is using
     /// the shared remux seam.
     public var localRemuxDiagnostics: PlaybackDiagnostics.RemuxDiagnostics? {

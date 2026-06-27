@@ -219,13 +219,16 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
             container: "mkv",
             video: .init(
                 codec: "hevc",
+                codecTag: "dvh1",
                 profile: "Main 10",
                 width: 1920,
                 height: 1080,
+                bitDepth: 10,
                 bitrate: 4_830_000,
                 frameRate: 24,
                 videoRange: "HDR",
-                videoRangeType: "DOVI"
+                videoRangeType: "DOVI",
+                colorTransfer: "smpte2084"
             ),
             audio: .init(
                 codec: "eac3",
@@ -238,7 +241,12 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
             subtitle: .init(codec: "subrip", language: "eng")
         )
         let capabilities = MediaCapabilities(maxOutputChannels: 6, supportsAtmos: true)
-        let d = PlaybackDiagnostics.base(from: metadata, mode: .directPlay, capabilities: capabilities)
+        let d = PlaybackDiagnostics.base(
+            from: metadata,
+            mode: .directPlay,
+            capabilities: capabilities,
+            sourceProvider: .plex
+        )
 
         XCTAssertEqual(d.containerText, "Matroska (MKV)")
         XCTAssertEqual(d.hdr, .dolbyVision)
@@ -247,6 +255,12 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
         XCTAssertEqual(d.audioOutputText, "E-AC-3 JOC Atmos passthrough expected")
         XCTAssertEqual(d.subtitleText, "SubRip · English")
         XCTAssertEqual(d.mode, .directPlay)
+        // Enriched diagnostics fields.
+        XCTAssertEqual(d.sourceProviderText, "Plex")
+        XCTAssertEqual(d.videoCodecTagText, "dvh1")
+        XCTAssertEqual(d.dolbyVisionProfile, 5)
+        XCTAssertEqual(d.dolbyVisionText, "Profile 5 (single-layer · no HDR10 fallback)")
+        XCTAssertEqual(d.colorText, "10-bit · PQ (ST 2084) · DOVI")
     }
 
     func testBaseFromNilMetadataIsEmptyButPlaceholdered() {
@@ -287,6 +301,121 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
         XCTAssertEqual(diagnostics.remuxBytesText, "1.00 GB")
         XCTAssertEqual(diagnostics.remuxUsageText, "RAM 64 MB · Disk 500 MB")
         XCTAssertEqual(diagnostics.remuxHarnessText, "Failed · Seek near EOF timed out")
+    }
+}
+
+final class PlaybackDiagnosticsEnrichedTests: XCTestCase {
+    func testFormatTimecode() {
+        XCTAssertEqual(PlaybackDiagnostics.formatTimecode(0), "0:00")
+        XCTAssertEqual(PlaybackDiagnostics.formatTimecode(75), "1:15")
+        XCTAssertEqual(PlaybackDiagnostics.formatTimecode(3600 + 58 * 60 + 24), "1:58:24")
+        XCTAssertEqual(PlaybackDiagnostics.formatTimecode(nil), "—")
+        XCTAssertEqual(PlaybackDiagnostics.formatTimecode(.infinity), "—")
+    }
+
+    func testFormatSeekWindowFlagsFullTimelineVsServerWindow() {
+        // A true app-owned remux: the whole movie is seekable.
+        XCTAssertEqual(
+            PlaybackDiagnostics.formatSeekWindow(start: 0, end: 7104, duration: 7104),
+            "0:00–1:58:24 of 1:58:24 · full timeline"
+        )
+        // A throttled server HLS window: only a short trailing span is seekable.
+        XCTAssertEqual(
+            PlaybackDiagnostics.formatSeekWindow(start: 30, end: 51, duration: 7104),
+            "0:30–0:51 of 1:58:24 · server window 21s"
+        )
+        XCTAssertEqual(
+            PlaybackDiagnostics.formatSeekWindow(start: nil, end: nil, duration: 7104),
+            "—"
+        )
+    }
+
+    func testDolbyVisionDescription() {
+        XCTAssertEqual(
+            PlaybackDiagnostics.dolbyVisionDescription(profile: 5),
+            "Profile 5 (single-layer · no HDR10 fallback)"
+        )
+        XCTAssertEqual(
+            PlaybackDiagnostics.dolbyVisionDescription(profile: 8),
+            "Profile 8 (single-layer · HDR10-compatible)"
+        )
+        XCTAssertEqual(
+            PlaybackDiagnostics.dolbyVisionDescription(profile: 7),
+            "Profile 7 (dual-layer · hybrid engine)"
+        )
+        XCTAssertNil(PlaybackDiagnostics.dolbyVisionDescription(profile: nil))
+    }
+
+    func testTransferFunctionLabel() {
+        XCTAssertEqual(PlaybackDiagnostics.transferFunctionLabel("smpte2084"), "PQ (ST 2084)")
+        XCTAssertEqual(PlaybackDiagnostics.transferFunctionLabel("arib-std-b67"), "HLG")
+        XCTAssertEqual(PlaybackDiagnostics.transferFunctionLabel("bt709"), "BT.709")
+        XCTAssertNil(PlaybackDiagnostics.transferFunctionLabel(nil))
+    }
+
+    func testColorDescription() {
+        XCTAssertEqual(
+            PlaybackDiagnostics.colorDescription(bitDepth: 10, transfer: "smpte2084", rangeType: "DOVI"),
+            "10-bit · PQ (ST 2084) · DOVI"
+        )
+        XCTAssertEqual(
+            PlaybackDiagnostics.colorDescription(bitDepth: 10, transfer: nil, rangeType: nil),
+            "10-bit"
+        )
+        XCTAssertNil(PlaybackDiagnostics.colorDescription(bitDepth: nil, transfer: nil, rangeType: nil))
+    }
+
+    func testStreamTransportSummaryFlagsLocalAndStripsTokens() {
+        let local = URL(string: "http://127.0.0.1:52344/remux/master.m3u8?token=secret")!
+        XCTAssertEqual(
+            PlaybackDiagnostics.streamTransportSummary(url: local),
+            "App-local 127.0.0.1:52344 · HLS"
+        )
+        let server = URL(string: "https://media.example.com/video/start.m3u8?X-Plex-Token=abc123")!
+        XCTAssertEqual(
+            PlaybackDiagnostics.streamTransportSummary(url: server),
+            "media.example.com · HLS"
+        )
+        let progressive = URL(string: "http://127.0.0.1:8888/stream.mp4")!
+        XCTAssertEqual(
+            PlaybackDiagnostics.streamTransportSummary(url: progressive),
+            "App-local 127.0.0.1:8888 · fMP4/MP4"
+        )
+        XCTAssertNil(PlaybackDiagnostics.streamTransportSummary(url: nil))
+    }
+
+    func testRemuxEligibilityText() {
+        var eligible = PlaybackDiagnostics(mode: .localRemux)
+        eligible.remuxEligible = true
+        eligible.remuxEligibilityDetail = "MKV · HEVC · DoVi P8 · EAC3"
+        XCTAssertEqual(eligible.remuxEligibilityText, "Eligible · MKV · HEVC · DoVi P8 · EAC3")
+
+        var ineligible = PlaybackDiagnostics(mode: .directPlay)
+        ineligible.remuxEligible = false
+        ineligible.remuxEligibilityDetail = "TrueHD stays on the hybrid engine"
+        XCTAssertEqual(ineligible.remuxEligibilityText, "Not eligible · TrueHD stays on the hybrid engine")
+
+        XCTAssertEqual(PlaybackDiagnostics(mode: .directPlay).remuxEligibilityText, "—")
+    }
+
+    func testCodecTagFlagsHev1BlackScreenRisk() {
+        var hev1 = PlaybackDiagnostics()
+        hev1.videoCodecTag = "hev1"
+        XCTAssertEqual(hev1.videoCodecTagText, "hev1 (AVPlayer needs hvc1 — black-screen risk)")
+
+        var hvc1 = PlaybackDiagnostics()
+        hvc1.videoCodecTag = "hvc1"
+        XCTAssertEqual(hvc1.videoCodecTagText, "hvc1")
+    }
+
+    func testPositionAndSeekWindowInstanceText() {
+        var d = PlaybackDiagnostics()
+        d.positionSeconds = 754
+        d.durationSeconds = 7104
+        d.seekableStartSeconds = 0
+        d.seekableEndSeconds = 7104
+        XCTAssertEqual(d.positionText, "12:34 / 1:58:24")
+        XCTAssertEqual(d.seekWindowText, "0:00–1:58:24 of 1:58:24 · full timeline")
     }
 }
 

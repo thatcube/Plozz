@@ -441,13 +441,29 @@ func makePlaybackStoppedHandler(
     identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
 ) -> @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void {
     { position, percent in
+        let union = identitySources(convergingItem)
         let mutation = WatchMutationFactory.playbackStop(
             item: convergingItem,
             position: position,
             watchedPercent: percent,
             primaryAccountID: primaryAccountID,
-            additionalSources: identitySources(convergingItem)
+            additionalSources: union
         )
+        // (b)+(c) Make the stop event visible: the played item's resolved identity,
+        // the index union found for it, and the final mutation target set. Pure
+        // string building + fire-and-forget os_log — never delays the durable write.
+        FanoutDiagnostics.emit(FanoutDiagnostics.stopLine(
+            title: convergingItem.title,
+            kind: convergingItem.kind,
+            itemID: convergingItem.id,
+            originAccountID: convergingItem.sourceAccountID ?? primaryAccountID,
+            identities: MediaItemIdentity.identities(for: convergingItem),
+            indexUnion: union,
+            mutationTargets: mutation?.targets,
+            played: mutation?.played,
+            resumePosition: mutation?.resumePosition,
+            watchedPercent: percent
+        ))
         // End the live session (so the just-played server is no longer deferred)
         // and enqueue the final convergence write, in that order.
         watchBridge.finishPlayback(liveAccountID, liveItemID, mutation)

@@ -98,6 +98,27 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// The number of distinct identities indexed — diagnostics only.
     public var identityCount: Int { byIdentity.count }
 
+    /// Diagnostics only: how many indexed identities have sources on **more than
+    /// one account** (a genuine cross-server union). When this is `0` while accounts
+    /// are warm, the index holds only origin-local memberships — so a watch can
+    /// never fan out, no matter the entry path (the H1 / "index didn't warm a
+    /// union" bug class).
+    public var crossServerIdentityCount: Int {
+        byIdentity.values.reduce(into: 0) { count, sources in
+            if Set(sources.map(\.accountID)).count > 1 { count += 1 }
+        }
+    }
+
+    /// Diagnostics only: every distinct `Account.id` that contributed at least one
+    /// indexed source. Lets the fan-out readout show which accounts actually warmed.
+    public var indexedAccountIDs: Set<String> {
+        var ids = Set<String>()
+        for sources in byIdentity.values {
+            for source in sources { ids.insert(source.accountID) }
+        }
+        return ids
+    }
+
     /// Every indexed source for `identities`, unioned across all of them and
     /// de-duplicated by `(account,item)`, in stable order. The union is what makes
     /// a title's set **origin-agnostic**: the same answer whether it was reached

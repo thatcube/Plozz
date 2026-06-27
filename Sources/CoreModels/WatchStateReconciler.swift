@@ -240,7 +240,22 @@ public actor WatchStateReconciler {
             if expansion.isConclusive {
                 mutation.expansionPending = false
             }
+            FanoutDiagnostics.emit(
+                "drain.expand canonical=\(mutation.canonicalMediaID) "
+                + "addedTwins=\(expansion.targets.count) conclusive=\(expansion.isConclusive) "
+                + "inconclusiveAccts=\(expansion.inconclusiveAccountIDs)")
         }
+
+        // (d) The full target set about to be written (post-expansion), so the drain
+        // is visible end-to-end alongside the stop event.
+        FanoutDiagnostics.emit(FanoutDiagnostics.drainHeaderLine(
+            canonicalMediaID: mutation.canonicalMediaID,
+            played: mutation.played,
+            resumePosition: mutation.resumePosition,
+            clearResume: mutation.clearResume,
+            targets: mutation.targets,
+            expansionPending: mutation.expansionPending
+        ))
 
         var remaining: [WatchMutationTarget] = []
         for target in mutation.targets {
@@ -250,19 +265,35 @@ public actor WatchStateReconciler {
             // write converges when the session ends (endLiveSession drains).
             if liveSessions.contains(target.id) {
                 remaining.append(target)
+                FanoutDiagnostics.emit(FanoutDiagnostics.drainTargetLine(target, outcome: "deferred(live session)"))
                 continue
             }
+            // Build a per-op outcome string so a silent write failure is visible:
+            // which of setPlayed / setResume succeeded, and the exact error if one
+            // threw (a thrown target stays queued for the next drain). NOTE: a Plex
+            // scrobble/watched-write returning 409 is swallowed as success by the
+            // provider, so it shows OK here — that is correct, not a miss.
+            var outcome = ""
             do {
                 if let played = mutation.played {
                     try await applier.setPlayed(played, on: target)
+                    outcome += "setPlayed(\(played))=OK "
                 }
                 if let resume = mutation.resumePosition {
                     try await applier.setResumePosition(resume, on: target)
+                    outcome += "setResume(\(Int(resume)))=OK"
                 } else if mutation.clearResume {
                     try await applier.setResumePosition(0, on: target)
+                    outcome += "clearResume=OK"
                 }
+                FanoutDiagnostics.emit(FanoutDiagnostics.drainTargetLine(
+                    target,
+                    outcome: outcome.isEmpty ? "noop(no state to write)" : outcome.trimmingCharacters(in: .whitespaces)))
             } catch {
                 remaining.append(target)
+                FanoutDiagnostics.emit(FanoutDiagnostics.drainTargetLine(
+                    target,
+                    outcome: outcome + "THROW(\(error)) -> requeued"))
             }
         }
         mutation.targets = remaining
@@ -281,6 +312,12 @@ public actor WatchStateReconciler {
                 }
             }
         }
+
+        FanoutDiagnostics.emit(FanoutDiagnostics.drainDoneLine(
+            canonicalMediaID: mutation.canonicalMediaID,
+            remainingTargets: mutation.targets.count,
+            fullyApplied: mutation.isFullyApplied,
+            traktPending: mutation.traktPending))
     }
 
     // MARK: - Housekeeping

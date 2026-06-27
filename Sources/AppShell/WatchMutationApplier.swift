@@ -36,17 +36,25 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
 
     func setPlayed(_ played: Bool, on target: WatchMutationTarget) async throws {
         guard let provider = await resolveProvider(target.accountID) else {
+            FanoutDiagnostics.emit("write.setPlayed acct=\(target.accountID) item=\(target.itemID) -> provider=nil (unreachable/unresolved, will retry)")
             throw AppError.serverUnreachable
         }
-        guard let watch = provider as? WatchStateProviding else { return }
+        guard let watch = provider as? WatchStateProviding else {
+            FanoutDiagnostics.emit("write.setPlayed acct=\(target.accountID) item=\(target.itemID) -> provider=\(provider.kind.rawValue) NOT WatchStateProviding (no write, treated success)")
+            return
+        }
         try await watch.setPlayed(played, itemID: target.itemID)
     }
 
     func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget) async throws {
         guard let provider = await resolveProvider(target.accountID) else {
+            FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=nil (unreachable/unresolved, will retry)")
             throw AppError.serverUnreachable
         }
-        guard let resumeWriter = provider as? ResumeStateWriting else { return }
+        guard let resumeWriter = provider as? ResumeStateWriting else {
+            FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=\(provider.kind.rawValue) NOT ResumeStateWriting (no write, treated success)")
+            return
+        }
         try await resumeWriter.setResumePosition(seconds, itemID: target.itemID)
     }
 

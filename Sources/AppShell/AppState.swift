@@ -206,6 +206,10 @@ public final class AppState {
     /// is optional so a barely-started/untargeted stop still flushes deferred work.
     public func finishLiveWatchSession(accountID: String?, itemID: String, mutation: WatchMutation?) {
         let reconciler = watchReconciler
+        // (a) Index state captured at the moment of stop — the value the fan-out
+        // actually saw. If crossServer=0 here, the index never warmed a union for
+        // any title, so the stop's targets could only be origin-only.
+        FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(identitySnapshotStore.current, phase: "stop-index"))
         publishOptimisticWatchedFlip(itemID: itemID, mutation: mutation)
         Task {
             if let accountID {
@@ -314,6 +318,10 @@ public final class AppState {
                     self?.identitySnapshot = snapshot
                     self?.identitySnapshotStore.update(snapshot)
                 }
+                // Make warm progress visible: each publish shows how many identities
+                // and cross-server unions the index now holds. crossServer staying 0
+                // as accounts warm is the H1 signal (no union ⇒ nothing fans out).
+                FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "warm"))
             }
         }
     }

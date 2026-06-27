@@ -388,8 +388,9 @@ public final class PlayerViewModel {
             let startPosition = resumeOverride ?? startPositionOverride ?? request.startPosition
 
             // Pick the engine from the resolved source facts (pure decision).
+            let isLocalRemux = request.deliveryMode == .localRemux
             var kind: PlaybackEngineKind
-            if request.deliveryMode == .localRemux {
+            if isLocalRemux {
                 kind = .native
             } else {
                 kind = EngineRouter.selectEngine(
@@ -404,7 +405,7 @@ public final class PlayerViewModel {
             // high-resolution YouTube DASH trailer). Only the hybrid (mpv) engine
             // can mux two bare URLs, so force it there — AVPlayer would otherwise
             // play the video-only stream silently.
-            if request.externalAudioURL != nil, engineFactory.hybridAvailable {
+            if !isLocalRemux, request.externalAudioURL != nil, engineFactory.hybridAvailable {
                 kind = .hybrid
             }
 
@@ -413,7 +414,7 @@ public final class PlayerViewModel {
             // so it appears, but only when we're direct-playing and a hybrid
             // engine is available. (A file with a text-subtitle equivalent stays
             // native; see `defaultSubtitleNeedsHybridEngine`.)
-            if kind == .native, !request.isTranscoding, engineFactory.hybridAvailable,
+            if !isLocalRemux, kind == .native, !request.isTranscoding, engineFactory.hybridAvailable,
                request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
                    mode: captionSettings.subtitleMode,
                    preferredLanguage: captionSettings.resolvedPreferredLanguage) {
@@ -684,7 +685,8 @@ public final class PlayerViewModel {
         //    adaptive source (separate audio track): only the hybrid engine can
         //    mux it, so swapping to native would play silent video — go straight
         //    to the re-resolved safe (muxed) fallback below instead.
-        if !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
+        if request.deliveryMode != .localRemux,
+           !request.isTranscoding, !hasTriedAlternateEngine, request.externalAudioURL == nil,
            let alternate = alternateEngineKind {
             hasTriedAlternateEngine = true
             PlozzLog.playback.info("Engine failed; swapping to the alternate engine")

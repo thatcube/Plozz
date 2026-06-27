@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import CoreModels
+import CoreNetworking
 import TopShelfKit
 
 /// Loads and holds the unified Home screen's content rows, merged across every
@@ -60,6 +61,7 @@ public final class HomeViewModel {
     public var userName: String { accounts.first?.account.userName ?? "" }
 
     public func load() async {
+        PlozzLog.boot("HomeVM.load START vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) accounts=\(accounts.count) state=\(String(describing: state))")
         state = .loading
 
         let aggregator = self.aggregator
@@ -78,6 +80,7 @@ public final class HomeViewModel {
             libraries: merged.libraries
         )
         state = content.isEmpty ? .empty : .loaded(content)
+        PlozzLog.boot("HomeVM.load DONE vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) empty=\(content.isEmpty) cw=\(content.continueWatching.count) latest=\(content.latest.count) libs=\(content.libraries.count)")
         guard !Task.isCancelled else { return }
 
         // Publish the playable rows to the App Group so the Top Shelf extension

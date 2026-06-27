@@ -183,6 +183,18 @@ public struct JellyfinProvider: MediaProvider {
         // Prefer the explicitly chosen source; fall back to the server default.
         guard var source = Self.selectSource(mediaSourceID, in: info.MediaSources) else { throw AppError.notFound }
 
+        // Surface the server's direct-play-vs-transcode decision and, when it
+        // transcodes, *why* (e.g. `SubtitleCodecNotSupported`). Logged before any
+        // remux swap so it reflects the server's original `auto` decision —
+        // invaluable for diagnosing needless transcodes (an HDR remux with a
+        // default PGS subtitle forced a burn-in transcode that wouldn't play).
+        if !forceTranscode, source.TranscodingUrl != nil {
+            let reasons = source.TranscodeReasons?.joined(separator: ",") ?? "unknown"
+            PlozzLog.playback.info(
+                "Jellyfin chose transcode itemID=\(itemID) container=\(source.Container ?? "?") reasons=\(reasons)"
+            )
+        }
+
         // Capture the original source facts (true container + DoVi/HDR range)
         // BEFORE any remux swap below, so diagnostics and the native engine's
         // Dolby Vision display switch see the real source even if the server's

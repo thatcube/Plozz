@@ -6,8 +6,21 @@ final class BIFIndexTests: XCTestCase {
 
     /// Builds a minimal but spec-correct BIF blob from a list of frame payloads
     /// at a fixed `separationMs` interval, so the parser can be exercised without
-    /// a live Plex server.
+    /// a live Plex server. Entry timestamps default to the sequential `0, 1, 2, …`
+    /// (the evenly-spaced case).
     private func makeBIF(separationMs: UInt32, frames: [[UInt8]]) -> Data {
+        makeBIF(
+            separationMs: separationMs,
+            frames: frames,
+            timestamps: (0..<frames.count).map(UInt32.init)
+        )
+    }
+
+    /// Builds a BIF blob with explicit per-entry timestamps, so tests can model
+    /// servers (like Plex) that stride their index timestamps by more than one —
+    /// where a frame's real time is `timestamp × separationMs`, not `i × separationMs`.
+    private func makeBIF(separationMs: UInt32, frames: [[UInt8]], timestamps: [UInt32]) -> Data {
+        precondition(frames.count == timestamps.count, "one timestamp per frame")
         var data = [UInt8]()
         func appendU32(_ value: UInt32, into bytes: inout [UInt8]) {
             bytes.append(UInt8(value & 0xFF))
@@ -29,7 +42,7 @@ final class BIFIndexTests: XCTestCase {
         var offset = 64 + indexEntries * 8
         var index = [UInt8]()
         for (i, frame) in frames.enumerated() {
-            appendU32(UInt32(i), into: &index)
+            appendU32(timestamps[i], into: &index)
             appendU32(UInt32(offset), into: &index)
             offset += frame.count
         }
@@ -80,6 +93,30 @@ final class BIFIndexTests: XCTestCase {
         XCTAssertEqual(index.frameIndex(forSeconds: 9_999), 4)
         // Negative positions clamp to the first frame.
         XCTAssertEqual(index.frameIndex(forSeconds: -5), 0)
+    }
+
+    func testStridedTimestampsMapByRealTimeNotIndex() throws {
+        // A Plex-style file: the header separation is a 1000 ms multiplier, but the
+        // per-entry timestamps stride by 2, so the *real* interval is 2000 ms. The
+        // old `i × separation` math assumed a 1000 ms interval and ran the preview
+        // clock twice as fast — making the final frame appear at the movie's
+        // midpoint. Frame i now covers `(2i) × 1000` ms.
+        let frames = (0..<6).map { [UInt8(0x20 + $0)] }
+        let timestamps = (0..<6).map { UInt32($0 * 2) }
+        let index = try XCTUnwrap(
+            BIFIndex(data: makeBIF(separationMs: 1000, frames: frames, timestamps: timestamps))
+        )
+
+        XCTAssertEqual(index.frames.map(\.timestampMs), [0, 2000, 4000, 6000, 8000, 10000])
+
+        // 0 s → frame 0; 5 s → the frame at 4 s (index 2); 10 s → the last frame.
+        XCTAssertEqual(index.frameIndex(forSeconds: 0), 0)
+        XCTAssertEqual(index.frameIndex(forSeconds: 1.9), 0)
+        XCTAssertEqual(index.frameIndex(forSeconds: 2), 1)
+        XCTAssertEqual(index.frameIndex(forSeconds: 5), 2)
+        XCTAssertEqual(index.frameIndex(forSeconds: 10), 5)
+        // The midpoint of the clip stays at the middle frame, not the credits.
+        XCTAssertEqual(index.frameIndex(forSeconds: 5), 2)
     }
 
     func testZeroSeparationDefaultsToOneSecond() throws {

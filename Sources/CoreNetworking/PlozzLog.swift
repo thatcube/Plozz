@@ -38,6 +38,21 @@ public enum PlozzLog {
     public static let playback = PlozzLogger(category: "playback")
     public static let app = PlozzLogger(category: "app")
 
+    /// Temporary startup-flow telemetry. Emits via `os_log` (category `app`) AND,
+    /// when the process is launched with `PLZBOOT_STDOUT=1`, mirrors each line to
+    /// stdout so `devicectl device process launch --console` can stream it live off
+    /// the Apple TV (the unified log can't be streamed remotely on this toolchain).
+    /// Tagged `PLZBOOT` for easy filtering.
+    private static let bootMirrorsStdout: Bool =
+        ProcessInfo.processInfo.environment["PLZBOOT_STDOUT"] == "1"
+
+    public static func boot(_ message: String) {
+        app.info("PLZBOOT \(message)")
+        if bootMirrorsStdout {
+            try? FileHandle.standardOutput.write(contentsOf: Data(("PLZBOOT " + message + "\n").utf8))
+        }
+    }
+
     /// Header names whose values must never be printed.
     static let sensitiveHeaders: Set<String> = [
         "authorization",

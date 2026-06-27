@@ -46,6 +46,12 @@ final class RemuxContentSource: @unchecked Sendable {
     private var distinctSegmentsProduced = 0
     private var totalBytesProduced: Int64 = 0
 
+    /// Wall-clock (uptime ns) the previous on-demand segment mux finished, so the
+    /// per-segment throughput line can report the inter-request cadence gap — a
+    /// long gap before a just-in-time mux is the server-side fingerprint of an
+    /// AVPlayer rebuffer/stall.
+    private var lastSegmentServedUptimeNanos: UInt64 = 0
+
     let segmentCount: Int
 
     init(segmenter: RemuxSegmenter, planner: RemuxSegmentPlanner, segmentCacheLimitBytes: Int = 96 << 20) {
@@ -134,6 +140,16 @@ final class RemuxContentSource: @unchecked Sendable {
         }
         cacheLock.unlock()
 
+        // Throughput-starvation diagnostic: time the mux and the network the mux
+        // drove, and the cadence gap since the previous on-demand mux. A mux that
+        // takes longer than the segment's own duration cannot keep AVPlayer fed,
+        // so playback stalls/stutters — this line pinpoints that vs a clean
+        // timeline-drift bug (which would mux fast but play out of sync).
+        let netBefore = segmenter.networkSnapshot()
+        let muxStart = DispatchTime.now().uptimeNanoseconds
+        let gapNanos: UInt64 = lastSegmentServedUptimeNanos == 0
+            ? 0 : muxStart &- lastSegmentServedUptimeNanos
+
         var data = segmenter.mediaSegment(index)
         if data == nil || data?.isEmpty == true {
             // Never 404 a declared segment on a transient failure: retry once.
@@ -145,8 +161,39 @@ final class RemuxContentSource: @unchecked Sendable {
             return nil
         }
 
+        let muxEnd = DispatchTime.now().uptimeNanoseconds
+        lastSegmentServedUptimeNanos = muxEnd
+        logThroughput(index: index, bytesOut: produced.count,
+                      muxNanos: muxEnd &- muxStart, gapNanos: gapNanos,
+                      netBefore: netBefore, netAfter: segmenter.networkSnapshot())
+
         insertSegment(index, produced)
         return produced
+    }
+
+    /// Emits the always-on per-segment throughput/cadence telemetry line.
+    private func logThroughput(index: Int, bytesOut: Int, muxNanos: UInt64, gapNanos: UInt64,
+                               netBefore: HTTPRangeReader.NetworkSnapshot,
+                               netAfter: HTTPRangeReader.NetworkSnapshot) {
+        let muxMs = Double(muxNanos) / 1_000_000
+        let gapMs = Double(gapNanos) / 1_000_000
+        let fetchedBytes = max(0, netAfter.bytesFetched - netBefore.bytesFetched)
+        let netMs = Double(max(0, netAfter.networkWaitNanos - netBefore.networkWaitNanos)) / 1_000_000
+        let fetches = netAfter.fetchCount - netBefore.fetchCount
+        let outMB = Double(bytesOut) / 1_048_576
+        let inMB = Double(fetchedBytes) / 1_048_576
+        let muxRate = muxMs > 0 ? outMB / (muxMs / 1000) : 0
+        let fetchRate = netMs > 0 ? inMB / (netMs / 1000) : 0
+        let duration = (index >= 0 && index < planner.segmentDurations.count)
+            ? planner.segmentDurations[index] : 0
+        // starved=YES when producing this segment took longer than the segment's
+        // own playback duration — AVPlayer cannot stay ahead of real time.
+        let starved = duration > 0 && (muxMs / 1000) > duration
+        RemuxLog.info(String(
+            format: "remux-tput: seg=%d dur=%.2fs mux=%.0fms gap=%.0fms out=%.2fMB(%.1fMB/s) "
+                + "net=%.0fms in=%.2fMB(%.1fMB/s) fetches=%d starved=%@",
+            index, duration, muxMs, gapMs, outMB, muxRate, netMs, inMB, fetchRate, fetches,
+            starved ? "YES" : "no"))
     }
 
     /// Stores a freshly produced segment, updates counters, and evicts the LRU tail

@@ -4,6 +4,7 @@ import AVFoundation
 import CoreMedia
 import Observation
 import CoreModels
+import os
 
 /// Samples live playback metrics off the active `AVPlayer`/`AVPlayerItem` and
 /// publishes a `PlaybackDiagnostics` snapshot for the overlay.
@@ -30,6 +31,12 @@ public final class PlaybackDiagnosticsSampler {
     private var staticDiagnostics = PlaybackDiagnostics()
     private var remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)?
     private var timerTask: Task<Void, Never>?
+
+    /// Last AVPlayer access-log stall count we logged, so a `remux-stall:` marker
+    /// is emitted once per NEW stall (the direct stutter signal correlated, in the
+    /// coordinator's --console capture, with the `remux-av:`/`remux-tput:` lines).
+    private var lastLoggedStallCount = 0
+    private static let playbackLog = Logger(subsystem: "com.thatcube.Plozz", category: "Playback")
 
     public init() {}
 
@@ -65,6 +72,7 @@ public final class PlaybackDiagnosticsSampler {
         stop()
         self.player = player
         self.remuxSnapshot = remuxSnapshot
+        self.lastLoggedStallCount = 0
         var base = PlaybackDiagnostics.base(
             from: metadata,
             mode: mode,
@@ -104,6 +112,28 @@ public final class PlaybackDiagnosticsSampler {
 
     // MARK: Dynamic (per-tick) sampling
 
+    /// Emits a `remux-stall:` os_log marker once per NEW AVPlayer stall recorded
+    /// in the access log, with the live throughput context (observed vs indicated
+    /// bitrate, buffered-ahead, position). A growing stall count alongside a low
+    /// observed bitrate is the throughput-starvation fingerprint; stalls with
+    /// healthy throughput point instead at a timeline-drift bug.
+    private func logNewStalls(event: AVPlayerItemAccessLogEvent, item: AVPlayerItem) {
+        let stalls = event.numberOfStalls
+        guard stalls > lastLoggedStallCount else { return }
+        lastLoggedStallCount = stalls
+        let observedMbps = event.observedBitrate > 0 ? event.observedBitrate / 1_000_000 : -1
+        let indicatedMbps = event.indicatedBitrate > 0 ? event.indicatedBitrate / 1_000_000 : -1
+        let buffered = bufferedSecondsAhead(in: item) ?? -1
+        let pos = item.currentTime().seconds
+        Self.playbackLog.error("""
+            remux-stall: stalls=\(stalls, privacy: .public) \
+            observed=\(observedMbps, format: .fixed(precision: 1), privacy: .public)Mbps \
+            indicated=\(indicatedMbps, format: .fixed(precision: 1), privacy: .public)Mbps \
+            buffered=\(buffered, format: .fixed(precision: 2), privacy: .public)s \
+            pos=\(pos.isFinite ? pos : -1, format: .fixed(precision: 1), privacy: .public)s
+            """)
+    }
+
     private func sampleTick() {
         var diagnostics = staticDiagnostics
 
@@ -128,6 +158,7 @@ public final class PlaybackDiagnosticsSampler {
                     remux.stallCount = max(remux.stallCount ?? 0, event.numberOfStalls)
                     diagnostics.remux = remux
                 }
+                logNewStalls(event: event, item: item)
             }
 
             diagnostics.bufferedSecondsAhead = bufferedSecondsAhead(in: item)

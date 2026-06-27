@@ -18,6 +18,31 @@ final class HTTPRangeReader: @unchecked Sendable {
     private var position: Int64 = 0
     private(set) var totalSize: Int64 = -1
 
+    /// Cumulative network throughput counters for the throughput-starvation
+    /// diagnostic. Bumped on every satisfied `fetch`; read as an atomic snapshot
+    /// by the content source to compute per-segment fetch MB/s + network wait.
+    /// Guarded by `counterLock` so a future background prefetch can read them
+    /// concurrently with an on-demand mux.
+    private let counterLock = NSLock()
+    private var bytesFetched: Int64 = 0
+    private var networkWaitNanos: Int64 = 0
+    private var fetchCount: Int = 0
+
+    /// An immutable snapshot of the cumulative network counters.
+    struct NetworkSnapshot: Sendable {
+        var bytesFetched: Int64
+        var networkWaitNanos: Int64
+        var fetchCount: Int
+    }
+
+    func networkSnapshot() -> NetworkSnapshot {
+        counterLock.lock()
+        defer { counterLock.unlock() }
+        return NetworkSnapshot(bytesFetched: bytesFetched,
+                               networkWaitNanos: networkWaitNanos,
+                               fetchCount: fetchCount)
+    }
+
     /// The most recent network failure reason (HTTP status line or transport
     /// error), captured so a failed libavformat open can report *why* the bytes
     /// never arrived (auth/URL/TLS/offline) instead of an opaque AVERROR(EIO).
@@ -124,8 +149,15 @@ final class HTTPRangeReader: @unchecked Sendable {
             resultError = error
             semaphore.signal()
         }
+        let waitStart = DispatchTime.now()
         task.resume()
         semaphore.wait()
+        let waitNanos = DispatchTime.now().uptimeNanoseconds &- waitStart.uptimeNanoseconds
+        counterLock.lock()
+        networkWaitNanos &+= Int64(bitPattern: waitNanos)
+        fetchCount += 1
+        bytesFetched += Int64(resultData?.count ?? 0)
+        counterLock.unlock()
 
         if let http = resultResponse as? HTTPURLResponse {
             updateTotalSize(from: http)

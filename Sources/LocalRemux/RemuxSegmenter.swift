@@ -199,6 +199,12 @@ final class RemuxSegmenter: @unchecked Sendable {
         return data
     }
 
+    /// Cumulative network throughput counters from the underlying range reader,
+    /// for the per-segment throughput-starvation diagnostic.
+    func networkSnapshot() -> HTTPRangeReader.NetworkSnapshot {
+        reader.networkSnapshot()
+    }
+
     /// Scans an fMP4 init segment for the box four-cc atoms that matter for the
     /// DoVi+Atmos make-or-break, returning a compact summary for the log.
     private static func scanInit(_ data: Data) -> String {

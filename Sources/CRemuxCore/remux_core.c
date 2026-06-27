@@ -601,6 +601,18 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
      * would corrupt the fragment's decode timeline and the frag_discont start). */
     int64_t last_v_dts = AV_NOPTS_VALUE;
     int64_t last_a_dts = AV_NOPTS_VALUE;
+
+    /* A/V drift telemetry (always-on, one line per segment). We record the FINAL
+     * output timestamps (post rescale + 0-based shift, in out_v/out_a time_base)
+     * handed to movenc, so the coordinator's --console capture can tell a
+     * TIMELINE-DRIFT bug (A/V start skew drifts segment-to-segment, or the muxed
+     * video span disagrees with the declared EXTINF) apart from a THROUGHPUT
+     * starvation bug. Captured in raw stream-tick units; converted to seconds
+     * after the loop with the (post-header) output time_base. */
+    int64_t tel_first_v_pts = AV_NOPTS_VALUE, tel_first_v_dts = AV_NOPTS_VALUE;
+    int64_t tel_last_v_pts = AV_NOPTS_VALUE, tel_last_v_dts = AV_NOPTS_VALUE;
+    int64_t tel_first_a_pts = AV_NOPTS_VALUE, tel_last_a_pts = AV_NOPTS_VALUE;
+    int tel_v_count = 0, tel_a_count = 0;
     while (av_read_frame(s->ic, pkt) >= 0) {
         int is_video = (pkt->stream_index == s->video_index);
         int is_audio = (ast && pkt->stream_index == s->audio_index);
@@ -629,6 +641,13 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
             }
             pkt->stream_index = out_v->index;
             pkt->pos = -1;
+            if (tel_first_v_pts == AV_NOPTS_VALUE) {
+                tel_first_v_pts = pkt->pts;
+                tel_first_v_dts = pkt->dts;
+            }
+            tel_last_v_pts = pkt->pts;
+            tel_last_v_dts = pkt->dts;
+            tel_v_count++;
             if (av_interleaved_write_frame(oc, pkt) >= 0) wrote_any = 1;
             av_packet_unref(pkt);
         } else if (is_audio && out_a) {
@@ -656,6 +675,9 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
             }
             pkt->stream_index = out_a->index;
             pkt->pos = -1;
+            if (tel_first_a_pts == AV_NOPTS_VALUE) tel_first_a_pts = pkt->pts;
+            tel_last_a_pts = pkt->pts;
+            tel_a_count++;
             av_interleaved_write_frame(oc, pkt);
             av_packet_unref(pkt);
         } else {
@@ -663,6 +685,40 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
         }
     }
     av_packet_free(&pkt);
+
+    /* Emit the per-segment A/V drift telemetry before the trailer is written.
+     * out_v/out_a time_base were set by movenc in avformat_write_header, so the
+     * recorded raw ticks convert cleanly to seconds on the 0-based output
+     * timeline AVPlayer sees. `skew` = audio_start − video_start: ideally ~0 and
+     * STABLE across segments; a value that grows segment-to-segment is the
+     * accumulating audio desync. `vspan` vs `decl` (the declared EXTINF) reveals
+     * a video-timeline cut that disagrees with the playlist. */
+    {
+        double vtb = av_q2d(out_v->time_base);
+        double v0 = (tel_first_v_pts != AV_NOPTS_VALUE) ? tel_first_v_pts * vtb : -1.0;
+        double v1 = (tel_last_v_pts != AV_NOPTS_VALUE) ? tel_last_v_pts * vtb : -1.0;
+        double vdts0 = (tel_first_v_dts != AV_NOPTS_VALUE) ? tel_first_v_dts * vtb : -1.0;
+        double vspan = (tel_first_v_pts != AV_NOPTS_VALUE && tel_last_v_pts != AV_NOPTS_VALUE)
+            ? (tel_last_v_pts - tel_first_v_pts) * vtb : -1.0;
+        double decl = s->segments[index].duration_seconds;
+        if (out_a && tel_a_count > 0) {
+            double atb = av_q2d(out_a->time_base);
+            double a0 = (tel_first_a_pts != AV_NOPTS_VALUE) ? tel_first_a_pts * atb : -1.0;
+            double a1 = (tel_last_a_pts != AV_NOPTS_VALUE) ? tel_last_a_pts * atb : -1.0;
+            double aspan = (tel_first_a_pts != AV_NOPTS_VALUE && tel_last_a_pts != AV_NOPTS_VALUE)
+                ? (tel_last_a_pts - tel_first_a_pts) * atb : -1.0;
+            double skew = (a0 >= 0 && v0 >= 0) ? (a0 - v0) : 0.0;
+            remux_log(1,
+                "remux-av: seg=%d decl=%.3f v[n=%d 0=%.3f 1=%.3f span=%.3f dts0=%.3f] "
+                "a[n=%d 0=%.3f 1=%.3f span=%.3f] skew=%+.3f",
+                index, decl, tel_v_count, v0, v1, vspan, vdts0,
+                tel_a_count, a0, a1, aspan, skew);
+        } else {
+            remux_log(1,
+                "remux-av: seg=%d decl=%.3f v[n=%d 0=%.3f 1=%.3f span=%.3f dts0=%.3f] a[none]",
+                index, decl, tel_v_count, v0, v1, vspan, vdts0);
+        }
+    }
 
     av_write_trailer(oc);
     avio_flush(oc->pb);

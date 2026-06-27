@@ -409,8 +409,10 @@ public final class AppState {
 
     /// In-memory Plex auth-token overrides keyed by `Account.id`. Set when the
     /// active profile maps to a non-owner Plex Home user so providers resolve as
-    /// that user. **Never persisted** — protected-user tokens/PINs must not
-    /// survive relaunch; Plozz re-prompts (or re-switches) each launch.
+    /// that user. **PIN-protected** users are never persisted — their token must
+    /// not survive relaunch, so Plozz re-prompts each launch. **Unprotected**
+    /// users are seeded synchronously from `plexHomeUserTokenCache` (see below)
+    /// so their identity paints instantly without the startup double-load.
     private var plexTokenOverrides: [String: String] = [:]
 
     /// For each account, the Plex Home-user UUID the current override resolves to.
@@ -418,6 +420,13 @@ public final class AppState {
     /// stale override left by a previous profile, so a just-entered PIN isn't
     /// re-armed into an infinite prompt/re-prompt loop.
     private var plexResolvedHomeUser: [String: String] = [:]
+
+    /// Keychain-backed cache of resolved server tokens for **unprotected** Plex
+    /// Home users. Lets `ensurePlexIdentityForActiveProfile` install the right
+    /// identity synchronously at launch/profile-pick (instant, ungated paint),
+    /// then refresh it in the background. PIN-protected users are never cached.
+    @ObservationIgnored
+    private let plexHomeUserTokenCache: PlexHomeUserTokenCache
 
     /// Switches to a Plex Home user, returning the new auth token. Injectable for
     /// tests; defaults to a live `PlexAuthClient` call.
@@ -473,6 +482,7 @@ public final class AppState {
         self.profilesModel = profilesModel ?? Self.makeDefaultProfilesModel()
         self.systemBridge = systemBridge ?? Self.makeDefaultSystemBridge()
         self.ratingsProvider = ratingsProvider ?? RatingsServiceFactory.make()
+        self.plexHomeUserTokenCache = .makeDefault()
 
         // If the caller supplied any settings model, treat them all as injected
         // (test path) and don't rebuild them on profile switch. Otherwise build
@@ -552,6 +562,7 @@ public final class AppState {
     public func bootstrap() {
         accountStore.migrateLegacySessionIfNeeded()
         reloadAccounts()
+        PlozzLog.boot("bootstrap accounts=\(accounts.count) activeIDs=\(activeAccountIDs.count)")
         // The "Ask which profile on startup" toggle is the single source of
         // truth for whether the launch picker appears. When it's ON we MUST
         // show the picker even if the Apple TV system user has a remembered
@@ -713,12 +724,17 @@ public final class AppState {
     private func ensurePlexIdentityForActiveProfile() {
         let profile = profilesModel.activeProfile
         let plexAccounts = accounts.filter { $0.server.provider == .plex }
+        let boundCount = plexAccounts.filter { profile.homeUserBinding(forPlexAccount: $0.id) != nil }.count
+        PlozzLog.boot("ensurePlexIdentity profile=\(profile.id) plexAccounts=\(plexAccounts.count) withBinding=\(boundCount) gen=\(self.plexIdentityGeneration)")
 
         var pinTarget: (accountID: String, binding: PlexHomeUserBinding)?
 
         for account in plexAccounts {
             if let binding = profile.homeUserBinding(forPlexAccount: account.id) {
                 if binding.requiresPIN == true {
+                    // A protected user must never have a token sitting at rest;
+                    // if it was previously unprotected and cached, drop it now.
+                    plexHomeUserTokenCache.remove(account: account.id, homeUser: binding.homeUserID)
                     // Already resolved to exactly this user? It's satisfied —
                     // leave it, don't re-prompt. (Was the source of the
                     // re-entrancy loop: success cleared the override, the
@@ -732,11 +748,38 @@ public final class AppState {
                         plexTokenOverrides[account.id] = nil
                         plexResolvedHomeUser[account.id] = nil
                         plexIdentityGeneration += 1
+                        PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.staleOverride acct=\(account.id)")
                     }
                     if pinTarget == nil {
                         pinTarget = (account.id, binding)
                     }
                 } else {
+                    // Unprotected Home user. If we're already resolved to exactly
+                    // this user this session, there's nothing to do (and no need
+                    // for another background refresh — one already ran).
+                    if plexTokenOverrides[account.id] != nil,
+                       plexResolvedHomeUser[account.id] == binding.homeUserID {
+                        continue
+                    }
+                    // Seed the cached token synchronously so the signed-in subtree
+                    // paints immediately with the correct identity. On a cache hit
+                    // this is the whole switch — no network on the launch path, and
+                    // the background refresh below confirms the token (usually
+                    // unchanged → no reload). On a cache miss (first launch for this
+                    // Home user) Home paints fast with the admin token and reloads
+                    // once when the switch lands; that token is then cached so it
+                    // never happens again.
+                    if let cached = plexHomeUserTokenCache.token(account: account.id, homeUser: binding.homeUserID) {
+                        plexTokenOverrides[account.id] = cached
+                        plexResolvedHomeUser[account.id] = binding.homeUserID
+                        PlozzLog.boot("ensure.cachedOverride acct=\(account.id) home=\(binding.homeUserID) — instant paint")
+                    } else {
+                        PlozzLog.boot("ensure.unprotectedSwitch acct=\(account.id) home=\(binding.homeUserID) — cache miss, async")
+                    }
+                    // Refresh in the background to keep the cached token fresh.
+                    // `performPlexSwitch` only bumps the identity generation when the
+                    // resolved token actually changed, so a warm-cache refresh that
+                    // returns the same token triggers no reload.
                     Task { await performPlexSwitch(accountID: account.id, homeUserID: binding.homeUserID, pin: nil) }
                 }
             } else {
@@ -744,6 +787,7 @@ public final class AppState {
                     plexTokenOverrides[account.id] = nil
                     plexResolvedHomeUser[account.id] = nil
                     plexIdentityGeneration += 1
+                    PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=ensure.dropOverride acct=\(account.id)")
                 }
             }
         }
@@ -771,11 +815,13 @@ public final class AppState {
             plexTokenOverrides.removeAll()
             plexResolvedHomeUser.removeAll()
             plexIdentityGeneration += 1
+            PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=clearPlexOverrides")
         }
     }
 
     /// Performs the Plex Home-user switch and installs the resulting token as the
-    /// account's override, bumping the identity generation so content reloads.
+    /// account's override, bumping the identity generation only when the resolved
+    /// token actually changed (so a warm-cache refresh doesn't force a reload).
     private func performPlexSwitch(accountID: String, homeUserID: String, pin: String?) async {
         PlozzLog.auth.debug("performPlexSwitch acct=\(accountID) home=\(homeUserID) pin?=\(pin != nil)")
         guard let adminToken = accountStore.token(for: accountID) else {
@@ -795,15 +841,43 @@ public final class AppState {
             // back to the account token if the per-server lookup fails so the
             // switch never silently dead-ends. See `plexServerTokenResolve`.
             var resolvedToken = token
+            var gotServerToken = false
             if let serverID = accounts.first(where: { $0.id == accountID })?.server.id,
                let serverToken = await plexServerTokenResolve(serverID, token, deviceID) {
                 resolvedToken = serverToken
+                gotServerToken = true
+            }
+            let previousToken = plexTokenOverrides[accountID]
+            // Don't downgrade a good cached identity on a flaky refresh: if we
+            // already have an override for this account and the per-server lookup
+            // fell back to the account-level token, keep what we have instead of
+            // replacing it (which would also force a needless reload).
+            if previousToken != nil, !gotServerToken {
+                PlozzLog.boot("refresh fell back to account token — keeping existing override acct=\(accountID)")
+                pendingPlexPINRequest = nil
+                plexPINError = nil
+                if pin != nil { ensurePlexIdentityForActiveProfile() }
+                return
             }
             plexTokenOverrides[accountID] = resolvedToken
             plexResolvedHomeUser[accountID] = homeUserID
+            // Cache unprotected (no-PIN) switches so future launches install this
+            // identity synchronously. PIN-protected switches are never persisted.
+            if pin == nil {
+                plexHomeUserTokenCache.store(token: resolvedToken, account: accountID, homeUser: homeUserID)
+            }
             pendingPlexPINRequest = nil
             plexPINError = nil
-            plexIdentityGeneration += 1
+            // Only bump the identity generation — which tears down + rebuilds the
+            // signed-in subtree — when the token actually changed. A background
+            // refresh that returns the same token (the common case on a cache hit)
+            // must NOT rebuild, or it reintroduces the startup double-load.
+            if previousToken != resolvedToken {
+                plexIdentityGeneration += 1
+                PlozzLog.boot("genBump=\(self.plexIdentityGeneration) site=performPlexSwitch acct=\(accountID) home=\(homeUserID)")
+            } else {
+                PlozzLog.boot("refresh unchanged — no genBump acct=\(accountID) home=\(homeUserID)")
+            }
             // If another Plex account still needs a PIN, surface that next.
             if pin != nil { ensurePlexIdentityForActiveProfile() }
         } catch AppError.unauthorized {
@@ -868,6 +942,7 @@ public final class AppState {
         try? accountStore.remove(id: id)
         plexTokenOverrides[id] = nil
         plexResolvedHomeUser[id] = nil
+        plexHomeUserTokenCache.removeAll(account: id)
         reloadAccounts()
         apply(.accountsChanged(accounts))
     }
@@ -882,6 +957,9 @@ public final class AppState {
     /// Removes every account (full reset).
     public func signOutAll() {
         try? accountStore.clearAll()
+        plexTokenOverrides.removeAll()
+        plexResolvedHomeUser.removeAll()
+        plexHomeUserTokenCache.removeAll()
         reloadAccounts()
         apply(.accountsChanged(accounts))
     }

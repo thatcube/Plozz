@@ -68,7 +68,7 @@ extension JellyfinCapabilityProfile {
             directPlayProfiles: directPlay(capabilities, hybrid: hybridEngineEnabled),
             transcodingProfiles: [transcoding(capabilities)],
             codecProfiles: codec(capabilities, hybrid: hybridEngineEnabled),
-            subtitleProfiles: subtitles()
+            subtitleProfiles: subtitles(hybrid: hybridEngineEnabled)
         )
     }
 
@@ -270,8 +270,24 @@ extension JellyfinCapabilityProfile {
         return profiles
     }
 
-    private static func subtitles() -> [SubtitleProfile] {
-        [
+    private static func subtitles(hybrid: Bool = false) -> [SubtitleProfile] {
+        // Image-based (bitmap) and styled subtitles. AVPlayer can render neither,
+        // so the native-only profile asks the server to **burn them in**
+        // (`Encode`) — but that forces a full **video transcode** even when the
+        // video/audio/container would otherwise direct-play. A 4K HDR remux that
+        // ships a *default* PGS track is the common victim: the burn-in transcode
+        // (a) wastes the server and (b) on these servers produces an HDR10 stream
+        // the device can't play, surfacing as "this file can't be played".
+        //
+        // When the on-device mpv engine is wired in it renders bitmap subs (PGS/
+        // VOBSUB/…) and styled ASS/SSA itself (libass), so we advertise those as
+        // `Embed` instead. The server then leaves them in the **direct-played**
+        // container — no transcode — and the engine router sends the file (MKV,
+        // and any image-subtitle default) to mpv, which draws the subtitle. This
+        // is exactly why the same file direct-plays on Plex (whose client renders
+        // these subs) but transcoded on Jellyfin.
+        let imageAndStyledMethod = hybrid ? "Embed" : "Encode"
+        return [
             SubtitleProfile(format: "vtt", method: "Hls"),
             // "External" sidecar subtitles: the server returns a separate text file
             // that the player fetches and injects into the native picker. Our
@@ -281,15 +297,19 @@ extension JellyfinCapabilityProfile {
             SubtitleProfile(format: "subrip", method: "External"),
             SubtitleProfile(format: "cc_dec", method: "Embed"),
             SubtitleProfile(format: "ttml", method: "Embed"),
-            // Image-based and styled subtitles need the server to burn them into
-            // the video (Encode). ASS/SSA carry complex font/colour/positioning
-            // metadata that the native text renderer can't reproduce faithfully.
-            SubtitleProfile(format: "ass", method: "Encode"),
-            SubtitleProfile(format: "ssa", method: "Encode"),
-            SubtitleProfile(format: "dvbsub", method: "Encode"),
-            SubtitleProfile(format: "dvdsub", method: "Encode"),
-            SubtitleProfile(format: "pgssub", method: "Encode"),
-            SubtitleProfile(format: "xsub", method: "Encode")
+            // ASS/SSA carry complex font/colour/positioning metadata the native
+            // text renderer can't reproduce — so AVPlayer needs them burned in
+            // (`Encode`). mpv (libass) renders them faithfully, so the hybrid
+            // build embeds them instead and avoids the transcode.
+            SubtitleProfile(format: "ass", method: imageAndStyledMethod),
+            SubtitleProfile(format: "ssa", method: imageAndStyledMethod),
+            // Image-based subtitles: AVPlayer can't draw them at all → burn-in on
+            // the native-only build; mpv draws them, so the hybrid build embeds
+            // them and keeps the source direct-playing.
+            SubtitleProfile(format: "dvbsub", method: imageAndStyledMethod),
+            SubtitleProfile(format: "dvdsub", method: imageAndStyledMethod),
+            SubtitleProfile(format: "pgssub", method: imageAndStyledMethod),
+            SubtitleProfile(format: "xsub", method: imageAndStyledMethod)
         ]
     }
 }

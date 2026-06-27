@@ -156,4 +156,51 @@ final class JellyfinHybridProfileTests: XCTestCase {
         XCTAssertTrue(value.contains("DOVI"))
         XCTAssertFalse(value.contains("HDR10Plus"))
     }
+
+    // MARK: Subtitle delivery — hybrid embeds image/styled subs (no burn-in transcode)
+
+    private func subtitleMethods(_ json: [String: Any], format: String) throws -> [String] {
+        let subs = try XCTUnwrap(json["SubtitleProfiles"] as? [[String: Any]])
+        return subs
+            .filter { ($0["Format"] as? String) == format }
+            .compactMap { $0["Method"] as? String }
+    }
+
+    func testHybridOnEmbedsImageSubtitles() throws {
+        // mpv renders bitmap subs, so the server must keep them embedded in the
+        // direct-played container instead of forcing a burn-in (video) transcode.
+        let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: true))
+        for format in ["pgssub", "dvdsub", "dvbsub", "xsub"] {
+            XCTAssertEqual(try subtitleMethods(json, format: format), ["Embed"],
+                           "\(format) must be Embed when the mpv engine is wired in")
+        }
+    }
+
+    func testHybridOnEmbedsStyledSubtitles() throws {
+        // libass (mpv) renders ASS/SSA faithfully, so embed rather than burn in.
+        let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: true))
+        XCTAssertEqual(try subtitleMethods(json, format: "ass"), ["Embed"])
+        XCTAssertEqual(try subtitleMethods(json, format: "ssa"), ["Embed"])
+    }
+
+    func testHybridOffBurnsInImageAndStyledSubtitles() throws {
+        // Native-only build: AVPlayer can't draw image/styled subs, so the server
+        // must burn them in (Encode). Non-regression for today's behaviour.
+        let json = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: false))
+        for format in ["pgssub", "dvdsub", "dvbsub", "xsub", "ass", "ssa"] {
+            XCTAssertEqual(try subtitleMethods(json, format: format), ["Encode"],
+                           "\(format) must be Encode (burn-in) without the mpv engine")
+        }
+    }
+
+    func testHybridDoesNotChangeTextSubtitleDelivery() throws {
+        // Text/sidecar formats are unaffected by the hybrid flag.
+        let on = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: true))
+        let off = try encoded(.appleTV(capabilities: caps, hybridEngineEnabled: false))
+        for format in ["srt", "subrip"] {
+            XCTAssertEqual(try subtitleMethods(on, format: format), ["External"])
+            XCTAssertEqual(try subtitleMethods(off, format: format), ["External"])
+        }
+        XCTAssertEqual(try subtitleMethods(on, format: "vtt").sorted(), ["External", "Hls"])
+    }
 }

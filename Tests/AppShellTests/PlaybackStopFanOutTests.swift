@@ -16,9 +16,10 @@ final class PlaybackStopFanOutTests: XCTestCase {
         let recorder = PlaybackStopRecorder()
         let bridge = WatchOutboxBridge(
             beginLiveSession: { _, _ in },
-            finishPlayback: { accountID, itemID, mutation in
+            finishPlayback: { accountID, itemID, _, mutation in
                 recorder.record(accountID: accountID, itemID: itemID, mutation: mutation)
-            }
+            },
+            checkpoint: { _ in }
         )
 
         let handler = makePlaybackStoppedHandler(
@@ -50,6 +51,71 @@ final class PlaybackStopFanOutTests: XCTestCase {
             ],
             "Targets must come from the live warmed identity snapshot at stop time, not the empty creation-time snapshot"
         )
+    }
+
+    func testPlaybackCheckpointFansOutToUnionWithoutEndingSession() {
+        let item = MediaItem(
+            id: "origin-item",
+            title: "Dune",
+            kind: .movie,
+            runtime: 100,
+            providerIDs: ["Tmdb": "438631"],
+            sourceAccountID: "origin"
+        )
+        let lookup = MutableIdentityLookup()
+        let checkpoints = CheckpointRecorder()
+        var finishCalls = 0
+        let bridge = WatchOutboxBridge(
+            beginLiveSession: { _, _ in },
+            finishPlayback: { _, _, _, _ in finishCalls += 1 },
+            checkpoint: { mutation in checkpoints.record(mutation) }
+        )
+
+        let handler = makePlaybackCheckpointHandler(
+            convergingItem: item,
+            primaryAccountID: "origin",
+            watchBridge: bridge,
+            identitySources: lookup.sources(for:)
+        )
+
+        lookup.sources = [
+            MediaSourceRef(accountID: "origin", itemID: "origin-item", providerKind: .jellyfin),
+            MediaSourceRef(accountID: "plex", itemID: "plex-item", providerKind: .plex)
+        ]
+
+        // A partial mid-play position (~50%): converge resume to every server, but
+        // never end the live session (that only happens at stop).
+        handler(50, 50)
+
+        let mutation = checkpoints.onlyMutation
+        XCTAssertEqual(
+            mutation??.targets,
+            [
+                WatchMutationTarget(accountID: "origin", itemID: "origin-item", providerKind: .jellyfin),
+                WatchMutationTarget(accountID: "plex", itemID: "plex-item", providerKind: .plex)
+            ],
+            "A checkpoint must fan the resume position out to the full warmed union"
+        )
+        XCTAssertEqual(mutation??.played, nil, "A partial checkpoint must not mark the item played")
+        XCTAssertEqual(finishCalls, 0, "A checkpoint must not end the live session")
+    }
+}
+
+private final class CheckpointRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var mutations: [WatchMutation?] = []
+
+    var onlyMutation: WatchMutation?? {
+        lock.lock()
+        defer { lock.unlock() }
+        XCTAssertEqual(mutations.count, 1)
+        return mutations.first
+    }
+
+    func record(_ mutation: WatchMutation?) {
+        lock.lock()
+        mutations.append(mutation)
+        lock.unlock()
     }
 }
 

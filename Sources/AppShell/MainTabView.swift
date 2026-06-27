@@ -23,8 +23,15 @@ struct WatchOutboxBridge: Sendable {
     let beginLiveSession: @Sendable (_ accountID: String, _ itemID: String) -> Void
     /// End the live session for `(accountID, itemID)` and enqueue the optional
     /// final convergence `mutation`, in that order, so the just-played server is
-    /// no longer deferred and its resume/played write goes out.
-    let finishPlayback: @Sendable (_ accountID: String?, _ itemID: String, _ mutation: WatchMutation?) -> Void
+    /// no longer deferred and its resume/played write goes out. `watchedPercent`
+    /// (0...100) is the fraction watched at stop, used to drive the optimistic
+    /// in-UI progress update (the resume bar on the surface the user returns to).
+    let finishPlayback: @Sendable (_ accountID: String?, _ itemID: String, _ watchedPercent: Double, _ mutation: WatchMutation?) -> Void
+    /// Durably enqueue a mid-play convergence `mutation` without ending the live
+    /// session, so progress fans out to the **other** servers (the launch server
+    /// stays deferred while it plays). Pure local enqueue + drain — no network on
+    /// the caller's path.
+    let checkpoint: @Sendable (_ mutation: WatchMutation) -> Void
 }
 
 /// The signed-in experience: Home, Search and Settings tabs, with item-detail
@@ -428,8 +435,53 @@ private func makePlayerViewModel(
             if let liveAccountID {
                 watchBridge.beginLiveSession(liveAccountID, liveItemID)
             }
-        }
+        },
+        onPlaybackCheckpoint: makePlaybackCheckpointHandler(
+            convergingItem: convergingItem,
+            primaryAccountID: primaryAccountID,
+            watchBridge: watchBridge,
+            identitySources: identitySources
+        )
     )
+}
+
+/// Builds the periodic mid-play convergence hook. Mirrors
+/// ``makePlaybackStoppedHandler`` but **enqueue-only**: it does NOT end the live
+/// session (the launch server keeps playing/deferred) and does NOT publish an
+/// optimistic UI flip (the user is in the fullscreen player). Its sole job is to
+/// fan the latest position out to the **other** servers so a "walk away" mid-movie
+/// converges within ~60s without pressing Back.
+func makePlaybackCheckpointHandler(
+    convergingItem: MediaItem,
+    primaryAccountID: String?,
+    watchBridge: WatchOutboxBridge,
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+) -> @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void {
+    { position, percent in
+        let union = identitySources(convergingItem)
+        let mutation = WatchMutationFactory.playbackStop(
+            item: convergingItem,
+            position: position,
+            watchedPercent: percent,
+            primaryAccountID: primaryAccountID,
+            additionalSources: union
+        )
+        guard let mutation else { return }
+        FanoutDiagnostics.emit(FanoutDiagnostics.stopLine(
+            title: convergingItem.title,
+            kind: convergingItem.kind,
+            itemID: convergingItem.id,
+            originAccountID: convergingItem.sourceAccountID ?? primaryAccountID,
+            identities: MediaItemIdentity.identities(for: convergingItem),
+            indexUnion: union,
+            mutationTargets: mutation.targets,
+            played: mutation.played,
+            resumePosition: mutation.resumePosition,
+            watchedPercent: percent,
+            phase: "checkpoint"
+        ))
+        watchBridge.checkpoint(mutation)
+    }
 }
 
 func makePlaybackStoppedHandler(
@@ -465,8 +517,9 @@ func makePlaybackStoppedHandler(
             watchedPercent: percent
         ))
         // End the live session (so the just-played server is no longer deferred)
-        // and enqueue the final convergence write, in that order.
-        watchBridge.finishPlayback(liveAccountID, liveItemID, mutation)
+        // and enqueue the final convergence write, in that order. `percent` rides
+        // along so the surface the user returns to can flip its resume bar in place.
+        watchBridge.finishPlayback(liveAccountID, liveItemID, percent, mutation)
     }
 }
 

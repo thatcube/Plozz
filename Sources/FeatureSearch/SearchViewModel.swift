@@ -82,11 +82,7 @@ public final class SearchViewModel {
         guard case let .loaded(sections) = state else { return }
         state = .loaded(sections.map { section in
             SearchSection(title: section.title, items: section.items.map { item in
-                guard mutation.itemIDs.contains(item.id) else { return item }
-                var copy = item
-                if let played = mutation.played { copy.isPlayed = played }
-                if let favorite = mutation.favorite { copy.isFavorite = favorite }
-                return copy
+                mutation.applied(to: item)
             })
         })
     }

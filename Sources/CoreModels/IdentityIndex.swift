@@ -251,6 +251,58 @@ public actor IdentityIndex {
         }
     }
 
+    /// Exports the **warm** account buckets as a flat, JSON-friendly value for disk
+    /// persistence. Only conclusively-built accounts are exported so a half-scanned
+    /// account is never frozen as authoritative; the live scan re-derives it next
+    /// launch. Each entry pairs an identity with the membership source under it, so
+    /// loading can rebuild the `identity → source` buckets without re-deriving
+    /// identities (and without a JSON-unfriendly enum-keyed dictionary).
+    public func export() -> PersistedIdentityIndex {
+        var entriesByAccount: [String: [PersistedIdentityIndex.Entry]] = [:]
+        for (accountID, identityMap) in byAccount where warmAccounts.contains(accountID) {
+            var entries: [PersistedIdentityIndex.Entry] = []
+            for (identity, sourcesByID) in identityMap {
+                for source in sourcesByID.values {
+                    entries.append(PersistedIdentityIndex.Entry(identity: identity, source: source))
+                }
+            }
+            entriesByAccount[accountID] = entries
+        }
+        let builtAt = builtAtByAccount.filter { warmAccounts.contains($0.key) }
+        return PersistedIdentityIndex(entriesByAccount: entriesByAccount, builtAtByAccount: builtAt)
+    }
+
+    /// Seeds the index from a persisted snapshot at launch so cross-server unions
+    /// exist at **t=0** — the first post-boot stop fans out to every server instead
+    /// of origin-only while the live scan runs. Restored accounts are marked warm
+    /// with their **persisted** `builtAt`, so a stale one still re-warms on the
+    /// normal TTL path while a recently-persisted one is simply reused.
+    ///
+    /// - Only accounts in `retaining` are restored (**prune on load**): a server
+    ///   removed / a profile switched between launches is never resurrected.
+    /// - An account already populated in memory (a live scan won the race) is left
+    ///   untouched — disk never clobbers fresher live data.
+    /// - Returns `true` if at least one account was restored, so the caller can
+    ///   publish a snapshot immediately.
+    @discardableResult
+    public func restore(from persisted: PersistedIdentityIndex, retaining accountIDs: Set<String>) -> Bool {
+        var restoredAny = false
+        for (accountID, entries) in persisted.entriesByAccount {
+            guard accountIDs.contains(accountID) else { continue }
+            guard byAccount[accountID]?.isEmpty ?? true, !warmAccounts.contains(accountID) else { continue }
+            var bucket: [MediaIdentity: [String: IndexedSource]] = [:]
+            for entry in entries {
+                bucket[entry.identity, default: [:]][entry.source.id] = entry.source
+            }
+            guard !bucket.isEmpty else { continue }
+            byAccount[accountID] = bucket
+            warmAccounts.insert(accountID)
+            builtAtByAccount[accountID] = persisted.builtAtByAccount[accountID] ?? .distantPast
+            restoredAny = true
+        }
+        return restoredAny
+    }
+
     /// Whether `accountID`'s catalogue has been scanned at least once.
     public func isWarm(_ accountID: String) -> Bool { warmAccounts.contains(accountID) }
 
@@ -366,5 +418,100 @@ public final class IdentityIndexSnapshotStore: @unchecked Sendable {
     /// the ``MediaItemMerger`` enrichment seam and the watch fan-out.
     public func sourcesProvider() -> @Sendable (MediaItem) -> [MediaSourceRef] {
         { [weak self] item in self?.current.sourceRefs(for: item) ?? [] }
+    }
+}
+
+/// The on-disk form of the ``IdentityIndex`` membership: a flat, JSON-friendly
+/// value persisted as accounts warm and reloaded at launch so cross-server unions
+/// are known at **t=0** (the cold-boot convergence fix). It carries only the
+/// membership atoms and their freshness timestamps — never live watch-state, which
+/// is always folded fresh from the loaded rows.
+public struct PersistedIdentityIndex: Codable, Sendable, Equatable {
+    /// One `(identity, source)` membership pair. Stored as a pair rather than an
+    /// enum-keyed dictionary because `MediaIdentity` is an enum with associated
+    /// values and so can't be a JSON object key.
+    public struct Entry: Codable, Sendable, Equatable {
+        public var identity: MediaIdentity
+        public var source: IndexedSource
+
+        public init(identity: MediaIdentity, source: IndexedSource) {
+            self.identity = identity
+            self.source = source
+        }
+    }
+
+    /// account → its membership entries.
+    public var entriesByAccount: [String: [Entry]]
+    /// account → when its catalogue was last (re)built, so a reloaded account still
+    /// re-warms on the normal staleness path.
+    public var builtAtByAccount: [String: Date]
+
+    public static let empty = PersistedIdentityIndex(entriesByAccount: [:], builtAtByAccount: [:])
+
+    public init(entriesByAccount: [String: [Entry]], builtAtByAccount: [String: Date]) {
+        self.entriesByAccount = entriesByAccount
+        self.builtAtByAccount = builtAtByAccount
+    }
+
+    public var isEmpty: Bool { entriesByAccount.isEmpty }
+}
+
+/// Persistence seam for the identity index, mirroring the watch-outbox store: a
+/// missing/corrupt file reads as ``PersistedIdentityIndex/empty`` so first launch
+/// and torn writes recover cleanly.
+public protocol IdentityIndexStoring: Sendable {
+    func load() -> PersistedIdentityIndex
+    func save(_ snapshot: PersistedIdentityIndex) throws
+}
+
+/// In-memory store for tests/previews and the safe default.
+public final class InMemoryIdentityIndexStore: IdentityIndexStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var snapshot: PersistedIdentityIndex
+
+    public init(_ snapshot: PersistedIdentityIndex = .empty) {
+        self.snapshot = snapshot
+    }
+
+    public func load() -> PersistedIdentityIndex {
+        lock.lock(); defer { lock.unlock() }
+        return snapshot
+    }
+
+    public func save(_ snapshot: PersistedIdentityIndex) throws {
+        lock.lock(); defer { lock.unlock() }
+        self.snapshot = snapshot
+    }
+}
+
+/// JSON-file-backed store. Atomic writes; profile-scoped by `namespace` so each
+/// household profile keeps its own persisted membership.
+public final class FileIdentityIndexStore: IdentityIndexStoring, @unchecked Sendable {
+    private let url: URL
+    private let lock = NSLock()
+
+    public init(directory: URL? = nil, namespace: String? = nil) {
+        let base = directory ?? Self.defaultDirectory()
+        let suffix = namespace.map { "-\($0)" } ?? ""
+        self.url = base.appendingPathComponent("identity-index\(suffix).json")
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    }
+
+    private static func defaultDirectory() -> URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return support.appendingPathComponent("Plozz", isDirectory: true)
+    }
+
+    public func load() -> PersistedIdentityIndex {
+        lock.lock(); defer { lock.unlock() }
+        guard let data = try? Data(contentsOf: url) else { return .empty }
+        return (try? JSONDecoder().decode(PersistedIdentityIndex.self, from: data)) ?? .empty
+    }
+
+    public func save(_ snapshot: PersistedIdentityIndex) throws {
+        lock.lock(); defer { lock.unlock() }
+        let data = try JSONEncoder().encode(snapshot)
+        try data.write(to: url, options: .atomic)
     }
 }

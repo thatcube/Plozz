@@ -97,8 +97,11 @@ public struct RootView: View {
                             beginLiveSession: { accountID, itemID in
                                 appState.beginLiveWatchSession(accountID: accountID, itemID: itemID)
                             },
-                            finishPlayback: { accountID, itemID, mutation in
-                                appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, mutation: mutation)
+                            finishPlayback: { accountID, itemID, watchedPercent, mutation in
+                                appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, watchedPercent: watchedPercent, mutation: mutation)
+                            },
+                            checkpoint: { mutation in
+                                appState.checkpointWatchState(mutation: mutation)
                             }
                         ),
                         displayAccounts: appState.accounts,

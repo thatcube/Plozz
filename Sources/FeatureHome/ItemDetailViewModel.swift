@@ -615,31 +615,21 @@ public final class ItemDetailViewModel {
         return copy
     }
 
-    /// Applies a watched-state mutation to the loaded detail, its children and
-    /// any loaded season episodes **in place** — flipping only the `isPlayed`
-    /// flag on the affected items. Because the arrays keep their identity and
-    /// order (no refetch, no momentary emptying), SwiftUI updates just the
-    /// watched badges and the user's focus stays exactly where it was.
+    /// Applies a watched-state or progress mutation to the loaded detail, its
+    /// children and any loaded season episodes **in place** — updating only the
+    /// fields the mutation carries (watched badge, resume position, progress). The
+    /// arrays keep their identity and order (no refetch, no momentary emptying), so
+    /// SwiftUI updates just the affected cards and the user's focus stays exactly
+    /// where it was.
     public func applyWatchedState(_ mutation: MediaItemMutation) {
         if case var .loaded(detail) = state {
-            if mutation.itemIDs.contains(detail.item.id) {
-                if let played = mutation.played { detail.item.isPlayed = played }
-                if let favorite = mutation.favorite { detail.item.isFavorite = favorite }
-            }
-            detail.children = detail.children.map { apply(mutation, to: $0) }
+            detail.item = mutation.applied(to: detail.item)
+            detail.children = detail.children.map { mutation.applied(to: $0) }
             state = .loaded(detail)
         }
         for (seasonID, episodes) in seasonEpisodes {
-            seasonEpisodes[seasonID] = episodes.map { apply(mutation, to: $0) }
+            seasonEpisodes[seasonID] = episodes.map { mutation.applied(to: $0) }
         }
-    }
-
-    private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {
-        guard mutation.itemIDs.contains(item.id) else { return item }
-        var copy = item
-        if let played = mutation.played { copy.isPlayed = played }
-        if let favorite = mutation.favorite { copy.isFavorite = favorite }
-        return copy
     }
 
     /// Quietly re-fetches the detail, its children, and any season episode lists

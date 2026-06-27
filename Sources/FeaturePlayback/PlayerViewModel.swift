@@ -163,6 +163,31 @@ public final class PlayerViewModel {
     /// the now-playing session. Idempotent on the receiver. Defaults to a no-op.
     private let onPlaybackStarted: @Sendable () -> Void
 
+    /// Periodic mid-playback convergence hook, called roughly every
+    /// ``checkpointInterval`` seconds of continuous play with the current position
+    /// and watched percentage. The AppShell wires this to enqueue a ``WatchMutation``
+    /// into the durable outbox so progress fans out to **other** servers within a
+    /// minute *without* the user pressing Back (a "walk away" mid-movie still
+    /// converges). The launch server stays deferred by the live-session guard until
+    /// `stop()`, so its now-playing session is never disturbed. Enqueue is a local
+    /// actor + small disk write — never a network round-trip on this path. Defaults
+    /// to a no-op so the player is usable standalone / in tests.
+    private let onPlaybackCheckpoint: @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void
+
+    /// How often (seconds) the periodic convergence checkpoint fires during
+    /// continuous play. ~60s is the agreed compromise: a casual "walk away"
+    /// propagates to other servers within a minute, while servers and their Trakt
+    /// plugins aren't spammed. Tunable; `0` (or non-positive) disables the loop.
+    private let checkpointInterval: TimeInterval
+
+    /// Drives the periodic checkpoint; cancelled on `stop()`.
+    private var checkpointTask: Task<Void, Never>?
+
+    /// The position reported by the last checkpoint, so a stalled/paused player
+    /// doesn't re-enqueue the same position and a checkpoint only fires on real
+    /// forward progress.
+    private var lastCheckpointPosition: TimeInterval = 0
+
     /// Optional playback bring-up started eagerly in `init` so the (network-bound)
     /// `playbackInfo` resolution and engine warm-up overlap the SwiftUI fullscreen
     /// navigation transition instead of starting only once the view appears. The
@@ -183,7 +208,9 @@ public final class PlayerViewModel {
         preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore(),
         autoDismissOnEnd: Bool = false,
         onPlaybackStopped: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
-        onPlaybackStarted: @escaping @Sendable () -> Void = {}
+        onPlaybackStarted: @escaping @Sendable () -> Void = {},
+        onPlaybackCheckpoint: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
+        checkpointInterval: TimeInterval = 60
     ) {
         self.provider = provider
         self.itemID = itemID
@@ -197,6 +224,8 @@ public final class PlayerViewModel {
         self.autoDismissOnEnd = autoDismissOnEnd
         self.onPlaybackStopped = onPlaybackStopped
         self.onPlaybackStarted = onPlaybackStarted
+        self.onPlaybackCheckpoint = onPlaybackCheckpoint
+        self.checkpointInterval = checkpointInterval
         self.engine = engineFactory.makeNative(captionSettings)
         self.currentEngineKind = .native
         PlaybackInstrumentation.increment(.viewModel)
@@ -425,6 +454,10 @@ public final class PlayerViewModel {
         // now-playing session, so convergence writes against this server defer
         // until stop() ends it.
         onPlaybackStarted()
+        // Begin periodic mid-play convergence checkpoints from the resumed point so
+        // progress fans out to other servers without waiting for Back. Seeded so the
+        // first checkpoint only fires after real forward progress past the resume.
+        startCheckpointLoop(seedPosition: startPosition)
 
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
@@ -573,6 +606,49 @@ public final class PlayerViewModel {
         return min(max(position / duration * 100, 0), 100)
     }
 
+    // MARK: - Convergence checkpoints
+
+    /// Starts the periodic mid-play convergence loop. Each tick fires a checkpoint
+    /// (see ``emitCheckpoint``) so progress fans out to other servers roughly every
+    /// ``checkpointInterval`` seconds without the user pressing Back. Cancelled and
+    /// restarted defensively; `stop()` tears it down. A non-positive interval (or a
+    /// default no-op hook) leaves the loop off so standalone/test players are
+    /// unaffected.
+    private func startCheckpointLoop(seedPosition: TimeInterval) {
+        lastCheckpointPosition = max(0, seedPosition)
+        checkpointTask?.cancel()
+        guard checkpointInterval > 0 else { return }
+        let interval = checkpointInterval
+        checkpointTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                if Task.isCancelled { return }
+                self?.emitCheckpoint()
+            }
+        }
+    }
+
+    /// Enqueues a convergence checkpoint for the current position **iff** the player
+    /// has made real forward progress since the last one and isn't paused/stalled —
+    /// so a paused or stuck player never re-writes the same position to N servers.
+    /// Pure enqueue (no network on this path); safe to call from the timer or, on
+    /// app background, from `checkpointNow()`.
+    private func emitCheckpoint() {
+        guard request != nil, !engine.isPaused else { return }
+        let position = max(engine.furthestObservedPosition, engine.currentTime)
+        guard position > 1, position - lastCheckpointPosition >= 1 else { return }
+        lastCheckpointPosition = position
+        onPlaybackCheckpoint(position, watchedPercent(at: position))
+    }
+
+    /// Forces an immediate convergence checkpoint regardless of the timer — used
+    /// when the app is about to be backgrounded/suspended (the TV Home button or
+    /// sleep path, which never fires the view's `onDisappear`/`stop()`), so the
+    /// latest position is durably captured before the process can be killed.
+    public func checkpointNow() {
+        emitCheckpoint()
+    }
+
     // MARK: - Transport
 
     /// Requests a committed seek. Coalesces rapid presses: while one seek is
@@ -682,6 +758,8 @@ public final class PlayerViewModel {
         didStop = true
         prefetchTask?.cancel()
         prefetchTask = nil
+        checkpointTask?.cancel()
+        checkpointTask = nil
         cancelWatchdog()
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = nil

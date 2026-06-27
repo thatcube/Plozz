@@ -21,6 +21,7 @@ public struct PlayerView: View {
     /// around it (with a timeout so it can never strand on black).
     @State private var hdrTransition = HDRTransitionModel()
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     /// The app-root window veil (injected by `RootView`). On HDR/DV exit the player
     /// engages it so black survives the dismiss into Home and covers the TV's slow
     /// physical panel switch. Optional so previews/tests without it fall back to the
@@ -139,6 +140,16 @@ public struct PlayerView: View {
             hdrTransition.beginTransition(from: oldMode, to: newMode)
         }
         .modifier(DisplaySettleObserver { hdrTransition.displayDidSettle() })
+        .onChange(of: scenePhase) { _, phase in
+            // The TV Home button / sleep / app suspension never fires the view's
+            // onDisappear, so stop() (and its final convergence write) would never
+            // run on that path. Force an immediate durable checkpoint as we leave
+            // active, so the latest position is captured before the process can be
+            // suspended or jetsam-killed mid-movie.
+            if phase != .active {
+                viewModel.checkpointNow()
+            }
+        }
         .onDisappear {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }

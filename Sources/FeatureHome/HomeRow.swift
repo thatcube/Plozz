@@ -72,12 +72,16 @@ public extension HomeRow {
     /// caller can consult the shared, reactive visibility model; recomputing this
     /// on each render keeps visibility toggles taking effect without a reload.
     ///
-    /// Crucially, the same `isLibraryVisible` predicate is applied to **every**
-    /// media row's items via `MediaItem.isVisibleOnHome(isLibraryVisible:)`, so a
-    /// hidden library's movies/episodes are suppressed from Continue Watching,
-    /// Watchlist and Recently Added too — not just the Libraries tiles. Items that
-    /// can't be attributed to a library stay visible (fail-open), and a merged
-    /// cross-server card shows if *any* of its contributing libraries is visible.
+    /// Crucially, the same `isLibraryVisible` predicate is applied to the
+    /// Continue Watching and Recently Added rows' items via
+    /// `MediaItem.isVisibleOnHome(isLibraryVisible:)`, so a hidden library's
+    /// movies/episodes are suppressed from those rows too — not just the Libraries
+    /// tiles. Items that can't be attributed to a library stay visible
+    /// (fail-open), and a merged cross-server card shows if *any* of its
+    /// contributing libraries is visible. The **Watchlist** row is intentionally
+    /// exempt (see inline note): it's an explicit user save and the Plex watchlist
+    /// isn't a per-library list, so hiding a library never drops a watchlisted
+    /// title.
     static func rows(
         for content: HomeViewModel.Content,
         isLibraryVisible: (String) -> Bool
@@ -88,9 +92,14 @@ public extension HomeRow {
         if !continueWatching.isEmpty {
             rows.append(HomeRow(kind: .continueWatching, items: continueWatching))
         }
-        let watchlist = content.watchlist.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
-        if !watchlist.isEmpty {
-            rows.append(HomeRow(kind: .watchlist, items: watchlist))
+        // Watchlist is deliberately NOT library-filtered: it's an explicit user
+        // save ("find this later"), and the Plex watchlist is an account-level
+        // Discover list that isn't tied to any local library at all. So hiding a
+        // library never removes a title the user chose to watchlist. We keep this
+        // explicit (rather than relying on watchlist items happening to lack a
+        // libraryID) so the guarantee survives even if provenance is added later.
+        if !content.watchlist.isEmpty {
+            rows.append(HomeRow(kind: .watchlist, items: content.watchlist))
         }
         let latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
         if !latest.isEmpty {

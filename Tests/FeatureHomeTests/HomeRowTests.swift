@@ -142,5 +142,15 @@ final class HomeRowTests: XCTestCase {
         let rows = HomeRow.rows(for: c) { $0 == "jelly:J9" }
         XCTAssertEqual(rows.first?.items.map(\.id), ["m"])
     }
+
+    func testWatchlistIsExemptFromLibraryHiding() {
+        // A watchlisted title from a hidden library must still appear: the
+        // Watchlist row is a deliberate user save and is never library-filtered,
+        // even when the item carries a hidden library's provenance.
+        let c = content(watchlist: [taggedItem("saved", account: "a", library: "L2")])
+        let rows = HomeRow.rows(for: c) { _ in false } // hide everything
+        XCTAssertEqual(rows.map(\.kind), [.watchlist])
+        XCTAssertEqual(rows.first?.items.map(\.id), ["saved"])
+    }
 }
 #endif

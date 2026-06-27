@@ -7,9 +7,10 @@ import OSLog
 /// chain visible in the device console so a broken link can be pinpointed on real
 /// multi-server hardware (which can't be reproduced locally).
 ///
-/// Every line is tagged `[FANOUT]` and emitted under subsystem `com.plozz.app`,
-/// category `fanout`, so it streams cleanly in Console.app (filter on the category)
-/// or `log stream --predicate 'subsystem == "com.plozz.app" AND category == "fanout"'`.
+/// Every line is tagged `PLZXFAN` (a deliberately unique token — Apple's own push
+/// stack also logs the word "Fanout", so a generic tag collides) and emitted under
+/// subsystem `com.plozz.app`, category `fanout`. Search `PLZXFAN` in Console.app or
+/// `log stream --predicate 'eventMessage CONTAINS "PLZXFAN"'`.
 ///
 /// Design constraints (must hold):
 ///  - **Never delay or alter the durable watch write.** Emitting is a fire-and-
@@ -38,13 +39,17 @@ public enum FanoutDiagnostics {
     private static let logger = Logger(subsystem: "com.plozz.app", category: "fanout")
     #endif
 
-    /// Emits one already-formatted telemetry line (the `[FANOUT] ` prefix is added).
+    /// Emits one already-formatted telemetry line (the `PLZXFAN ` prefix is added).
     /// No-op when disabled. Public so the AppShell seams (stop handler, applier) can
     /// emit the lines they alone have the data for.
     public static func emit(_ line: String) {
         guard gate.isEnabled else { return }
         #if canImport(OSLog)
-        logger.info("[FANOUT] \(line, privacy: .public)")
+        // `.notice` (OSLogType.default) so Console.app shows these WITHOUT the
+        // "Include Info Messages" toggle, and so they persist to the log store
+        // (retrievable later via `log show` / sysdiagnose). Info/debug levels are
+        // hidden by default and were invisible on device.
+        logger.notice("PLZXFAN \(line, privacy: .public)")
         #endif
     }
 

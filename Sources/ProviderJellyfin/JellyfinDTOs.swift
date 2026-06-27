@@ -193,6 +193,11 @@ struct MediaSourceInfo: Decodable {
     /// Overall declared bitrate in bits/sec.
     let Bitrate: Int?
     let MediaStreams: [MediaStreamDto]?
+    /// Why the server chose to transcode this source rather than direct-play it
+    /// (e.g. `["SubtitleCodecNotSupported"]`, `["VideoRangeTypeNotSupported"]`,
+    /// `["AudioChannelsNotSupported"]`). Empty/absent when direct-playing. We log
+    /// this so "why did Jellyfin transcode?" is answerable from device logs.
+    let TranscodeReasons: [String]?
 }
 
 /// Body of `POST /Items/{id}/PlaybackInfo`. Carrying a `DeviceProfile` is what

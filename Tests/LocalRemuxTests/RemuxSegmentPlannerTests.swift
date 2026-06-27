@@ -84,6 +84,18 @@ final class RemuxSegmentPlannerTests: XCTestCase {
         XCTAssertTrue(m.contains("#EXT-X-MAP:URI=\"\(RemuxSegmentPlanner.initName)\""))
     }
 
+    func testMediaPlaylistHasNoVariantGateTags() {
+        // The media playlist is what we hand AVPlayer directly (NOT the master), so
+        // there is no `#EXT-X-STREAM-INF`/`CODECS`/`VIDEO-RANGE` for tvOS AVPlayer to
+        // evaluate against the display's momentary capability mid-DoVi-HDMI-handshake
+        // — which is what makes it reject the master URL with -1002 before fetching
+        // any media. A media playlist has no variant to reject. Guard that property.
+        let m = planner(profile: 8, level: 9).mediaPlaylist()
+        XCTAssertFalse(m.contains("#EXT-X-STREAM-INF"), "media playlist must not advertise a variant")
+        XCTAssertFalse(m.contains("CODECS="), "media playlist must not carry a CODECS gate")
+        XCTAssertFalse(m.contains("VIDEO-RANGE"), "media playlist must not carry a VIDEO-RANGE gate")
+    }
+
     func testMediaPlaylistHasOneSegmentPerDuration() {
         let durations = [6.0, 6.0, 6.0, 6.0, 2.25]
         let m = planner(durations: durations).mediaPlaylist()

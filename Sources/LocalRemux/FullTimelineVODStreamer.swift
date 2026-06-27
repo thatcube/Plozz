@@ -88,7 +88,25 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
     }
 
     public func preparePlayback() async throws -> LocalRemuxPreparedStream {
-        let url = components.baseURL.appendingPathComponent(RemuxRoute.masterName)
+        // Hand AVPlayer the MEDIA playlist directly, NOT the master.
+        //
+        // On-device root cause of the cold-play `NSURLErrorUnsupportedURL` (-1002):
+        // a master's single `#EXT-X-STREAM-INF` advertises `CODECS="dvh1.PP.LL,ec-3"`
+        // + `VIDEO-RANGE=PQ`, and tvOS AVPlayer evaluates that variant against the
+        // display's *current* capability at load time. While the Apple TV is still
+        // mid-handshake into its Dolby Vision HDMI output mode, the only variant
+        // momentarily looks unplayable, so AVPlayer rejects the master URL with
+        // -1002 *before ever fetching the media playlist* (origin shows master.m3u8
+        // fetched, then -1002, media.m3u8 never requested — the exact failure the
+        // overlay captured).
+        //
+        // A media playlist has no STREAM-INF/CODECS/VIDEO-RANGE to gate on, so there
+        // is no variant to reject: AVPlayer loads `init.mp4` (whose `dvh1` sample
+        // entry + dvcC/dvvC config is what actually lights up Dolby Vision) and the
+        // keyframe-cut VOD segments, and plays + seeks natively across the full
+        // timeline. This mirrors the proven direct-fMP4 DoVi path. The master route
+        // stays served by the origin for diagnostics; we just don't hand it over.
+        let url = components.baseURL.appendingPathComponent(RemuxRoute.mediaName)
         return LocalRemuxPreparedStream(
             playbackURL: url,
             isManifestStream: true,

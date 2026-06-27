@@ -62,6 +62,7 @@ public struct PlayerView: View {
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
                         skipSegment: { viewModel.skipActiveSegment() },
+                        autoSkipSegment: { viewModel.autoSkipActiveSegment() },
                         dismissSkip: { viewModel.dismissActiveSkipSegment() },
                         dismiss: { dismissSmoothly() }
                     ),

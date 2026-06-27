@@ -197,9 +197,32 @@ struct PlaybackDetailView: View {
 
                 SettingsPanel(
                     title: "Skip Intros & Credits",
-                    footer: "When your server has detected intro and credit markers, a Skip button appears during playback so you can jump past them. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin."
+                    footer: "When your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin."
                 ) {
-                    Toggle("Skip intros", isOn: $playback.settings.skipIntros)
+                    VStack(spacing: 4) {
+                        ForEach(SkipIntrosMode.allCases, id: \.self) { mode in
+                            Button {
+                                playback.settings.skipIntros = mode
+                            } label: {
+                                HStack(spacing: 16) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(mode.title).font(.callout.weight(.medium))
+                                        Text(mode.detail)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .font(.callout.weight(.semibold))
+                                        .opacity(playback.settings.skipIntros == mode ? 1 : 0)
+                                }
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(SettingsFocusButtonStyle())
+                            .accessibilityValue(playback.settings.skipIntros == mode ? "Selected" : "")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)

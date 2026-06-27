@@ -48,6 +48,32 @@ final class MediaSegmentTests: XCTestCase {
         XCTAssertEqual(MediaSegment.Kind.credits.skipActionLabel, "Skip Credits")
     }
 
+    func testRemainingCountsDownToZeroAtTrailingMargin() {
+        let seg = MediaSegment(kind: .intro, start: 30, end: 90)
+        // Near the start, almost the whole window remains.
+        XCTAssertEqual(seg.remaining(at: 30), 59.75, accuracy: 0.001)
+        XCTAssertEqual(seg.remaining(at: 60), 29.75, accuracy: 0.001)
+        // At/after the trailing margin it clamps to zero.
+        XCTAssertEqual(seg.remaining(at: 89.75), 0, accuracy: 0.001)
+        XCTAssertEqual(seg.remaining(at: 200), 0, accuracy: 0.001)
+    }
+
+    func testRemainingFractionSpansOneToZero() {
+        let seg = MediaSegment(kind: .credits, start: 100, end: 160)
+        // Earliest visible point (start - margin) → full bar.
+        XCTAssertEqual(seg.remainingFraction(at: 99.75), 1, accuracy: 0.001)
+        XCTAssertEqual(seg.remainingFraction(at: 130), 0.5, accuracy: 0.01)
+        XCTAssertEqual(seg.remainingFraction(at: 159.75), 0, accuracy: 0.001)
+        // Clamped outside the window.
+        XCTAssertEqual(seg.remainingFraction(at: 300), 0, accuracy: 0.001)
+    }
+
+    func testRemainingFractionZeroForDegenerateWindow() {
+        let seg = MediaSegment(kind: .intro, start: 50, end: 50)
+        XCTAssertEqual(seg.window, 0, accuracy: 0.001)
+        XCTAssertEqual(seg.remainingFraction(at: 50), 0, accuracy: 0.001)
+    }
+
     func testCodableRoundTrip() throws {
         let seg = MediaSegment(id: "abc", kind: .credits, start: 12.5, end: 99.0)
         let data = try JSONEncoder().encode(seg)
@@ -58,7 +84,8 @@ final class MediaSegmentTests: XCTestCase {
 
 final class PlaybackSettingsTests: XCTestCase {
     func testDefaultIsOff() {
-        XCTAssertFalse(PlaybackSettings.default.skipIntros)
+        XCTAssertEqual(PlaybackSettings.default.skipIntros, .off)
+        XCTAssertFalse(PlaybackSettings.default.skipIntros.fetchesMarkers)
     }
 
     func testLenientDecodeOfEmptyPayload() throws {
@@ -67,9 +94,39 @@ final class PlaybackSettingsTests: XCTestCase {
         XCTAssertEqual(decoded, .default)
     }
 
-    func testDecodePreservesValue() throws {
+    func testDecodePreservesModeValue() throws {
+        let data = Data(#"{"skipIntros":"autoInstant"}"#.utf8)
+        let decoded = try JSONDecoder().decode(PlaybackSettings.self, from: data)
+        XCTAssertEqual(decoded.skipIntros, .autoInstant)
+        XCTAssertTrue(decoded.skipIntros.isAutomatic)
+    }
+
+    func testLegacyBooleanTrueMapsToOn() throws {
         let data = Data(#"{"skipIntros":true}"#.utf8)
         let decoded = try JSONDecoder().decode(PlaybackSettings.self, from: data)
-        XCTAssertTrue(decoded.skipIntros)
+        XCTAssertEqual(decoded.skipIntros, .on)
+    }
+
+    func testLegacyBooleanFalseMapsToOff() throws {
+        let data = Data(#"{"skipIntros":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(PlaybackSettings.self, from: data)
+        XCTAssertEqual(decoded.skipIntros, .off)
+    }
+
+    func testRoundTripEncodeDecode() throws {
+        for mode in SkipIntrosMode.allCases {
+            let settings = PlaybackSettings(skipIntros: mode)
+            let data = try JSONEncoder().encode(settings)
+            let decoded = try JSONDecoder().decode(PlaybackSettings.self, from: data)
+            XCTAssertEqual(decoded.skipIntros, mode)
+        }
+    }
+
+    func testModeFlags() {
+        XCTAssertFalse(SkipIntrosMode.off.fetchesMarkers)
+        XCTAssertTrue(SkipIntrosMode.on.fetchesMarkers)
+        XCTAssertFalse(SkipIntrosMode.on.isAutomatic)
+        XCTAssertTrue(SkipIntrosMode.autoDelay.isAutomatic)
+        XCTAssertTrue(SkipIntrosMode.autoInstant.isAutomatic)
     }
 }

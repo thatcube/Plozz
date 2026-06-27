@@ -135,5 +135,33 @@ public final class PlayerControlsModel {
         guard let segment = skippableSegments.activeSkippable(at: currentSeconds) else { return nil }
         return segment.id == dismissedSegmentID ? nil : segment
     }
+
+    /// How intros/credits are handled (Off / On / Auto (delay) / Auto (instant)).
+    /// Mirrors the per-profile setting; set when markers load. Drives whether the
+    /// Skip button is surfaced, auto-skipped after a delay, or skipped instantly.
+    public var skipMode: SkipIntrosMode = .off
+
+    /// In `.autoDelay`, the playback position (seconds) at which the active
+    /// segment auto-skips. Set while the button counts down; `nil` otherwise.
+    /// The button's ring depletes toward this so the wait is visible.
+    public var autoSkipAtSeconds: TimeInterval?
+
+    /// A transient, non-interactive confirmation shown briefly after a segment is
+    /// auto-skipped instantly (e.g. "Skipping Intro"). Set by the view model and
+    /// cleared on a short timer; `nil` the rest of the time.
+    public var autoSkipNotice: AutoSkipNotice?
+}
+
+/// A brief on-screen confirmation that an intro/credits segment was skipped
+/// automatically. A fresh `id` per occurrence re-triggers the reveal animation
+/// even when consecutive notices share the same `label`.
+public struct AutoSkipNotice: Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let label: String
+
+    public init(label: String) {
+        self.id = UUID()
+        self.label = label
+    }
 }
 #endif

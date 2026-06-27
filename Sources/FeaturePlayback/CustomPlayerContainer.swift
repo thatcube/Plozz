@@ -21,6 +21,8 @@ struct PlayerActions {
     var setDialogEnhance: (Bool) -> Void = { _ in }
     /// Seek past the active intro/credits segment (Skip button Select).
     var skipSegment: () -> Void = {}
+    /// Auto-seek past the active segment (no button) when Auto-skip is enabled.
+    var autoSkipSegment: () -> Void = {}
     /// Dismiss the skip button without seeking (Menu / swipe away).
     var dismissSkip: () -> Void = {}
     var dismiss: () -> Void = {}
@@ -156,6 +158,10 @@ final class PlayerInputViewController: UIViewController {
     /// when no segment is active. Tracked so presentation only flips on change.
     private var skipButtonHost: UIHostingController<AnyView>?
     private var presentingSkipButton = false
+    /// In `.autoDelay`, the playback position (seconds) at which the presented
+    /// Skip button auto-skips. Tied to playback position (not wall-clock) so the
+    /// countdown pauses with the video. `nil` outside an active delay.
+    private var autoSkipAtSeconds: TimeInterval?
 
     /// Surface gesture recognizers we toggle off while the control bar owns focus.
     private var surfaceRecognizers: [UIGestureRecognizer] = []
@@ -190,8 +196,6 @@ final class PlayerInputViewController: UIViewController {
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
         startRefreshLoop()
-        // Briefly reveal the transport on entry, then let it auto-hide.
-        flashControls()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -331,24 +335,57 @@ final class PlayerInputViewController: UIViewController {
 
     // MARK: Skip intro/credits presentation
 
-    /// Presents or hides the focusable Skip button as the live position enters /
-    /// leaves a skippable segment. Only auto-presents from the scrub surface so it
-    /// never yanks focus out of the control bar or a scrub; returns focus to the
-    /// surface as soon as the segment passes or is dismissed.
+    /// Presents, auto-skips, or hides the Skip affordance as the live position
+    /// enters / leaves a skippable segment, per the active `skipMode`:
+    ///  * `.on` — present the focusable button (manual skip).
+    ///  * `.autoDelay` — present the button, then skip once playback advances
+    ///    `autoSkipDelay` seconds (the button's ring counts the wait down; the
+    ///    viewer can skip now or swipe-up to cancel).
+    ///  * `.autoInstant` — skip immediately with only a brief notice, no button.
+    ///  * `.off` — never reached (markers aren't fetched).
+    /// Only auto-presents from the scrub surface so it never yanks focus out of
+    /// the control bar or a scrub; returns focus to the surface once the segment
+    /// passes or is dismissed.
     private func evaluateSkipPresentation() {
-        let wantsSkip = model.activeSkipSegment != nil
-        if wantsSkip {
+        guard model.activeSkipSegment != nil else {
+            if presentingSkipButton { exitSkipButton() }
+            return
+        }
+
+        switch model.skipMode {
+        case .off, .on:
             guard !presentingSkipButton, focusContext == .surface, !model.isScrubbing else { return }
             enterSkipButton()
-        } else if presentingSkipButton {
-            exitSkipButton()
+
+        case .autoInstant:
+            guard !model.isScrubbing else { return }
+            actions.autoSkipSegment()
+
+        case .autoDelay:
+            if presentingSkipButton {
+                // Fire once playback reaches the deadline (skips while paused are
+                // deferred until it resumes, by design — the countdown is tied to
+                // playback position, not wall-clock).
+                if let deadline = autoSkipAtSeconds, model.currentSeconds >= deadline, !model.isScrubbing {
+                    autoSkipFromDelay()
+                }
+                return
+            }
+            guard focusContext == .surface, !model.isScrubbing else { return }
+            autoSkipAtSeconds = model.currentSeconds + SkipIntrosMode.autoSkipDelay
+            model.autoSkipAtSeconds = autoSkipAtSeconds
+            enterSkipButton()
         }
     }
 
     private func enterSkipButton() {
         presentingSkipButton = true
         focusContext = .skipButton
-        cancelAutoHide()
+        // Clear the transport so the skip button floats on its own — it must stay
+        // visible even when the scrub bar / controls are hidden, not ride on top
+        // of them. (Auto-hide otherwise can't fire here: it only hides while the
+        // surface owns focus, and the skip button has taken focus.)
+        hideControls()
         setSurfaceRecognizers(enabled: false)
         skipButtonHost?.view.isUserInteractionEnabled = true
         playerInputView?.allowsFocus = false
@@ -360,6 +397,8 @@ final class PlayerInputViewController: UIViewController {
     /// dismissed, or its segment window passes.
     private func exitSkipButton() {
         presentingSkipButton = false
+        autoSkipAtSeconds = nil
+        model.autoSkipAtSeconds = nil
         skipButtonHost?.view.isUserInteractionEnabled = false
         // The control bar may have taken over in the meantime; only restore the
         // surface if the skip button was the focus owner.
@@ -377,6 +416,13 @@ final class PlayerInputViewController: UIViewController {
         actions.skipSegment()
         exitSkipButton()
         flashControls()
+    }
+
+    /// `.autoDelay` deadline reached: seek past the segment (no notice — the
+    /// button was already visible) and return to the surface.
+    private func autoSkipFromDelay() {
+        actions.skipSegment()
+        exitSkipButton()
     }
 
     /// Skip button Menu / swipe-up: hide without seeking, return to surface.
@@ -414,6 +460,7 @@ final class PlayerInputViewController: UIViewController {
         surfaceRecognizers.append(addPress(.menu, #selector(handleMenu)))
         surfaceRecognizers.append(addPress(.leftArrow, #selector(handleLeft)))
         surfaceRecognizers.append(addPress(.rightArrow, #selector(handleRight)))
+        surfaceRecognizers.append(addPress(.upArrow, #selector(handleUp)))
         surfaceRecognizers.append(addPress(.downArrow, #selector(handleDown)))
     }
 
@@ -647,6 +694,13 @@ final class PlayerInputViewController: UIViewController {
     @objc private func handleDown() {
         guard focusContext == .surface, !model.isScrubbing else { return }
         enterControlBar()
+    }
+
+    /// An Up press from the scrub surface reveals the transport without moving
+    /// focus off the surface, matching the swipe-up reveal.
+    @objc private func handleUp() {
+        guard focusContext == .surface, !model.isScrubbing else { return }
+        flashControls()
     }
 
     private func skip(by seconds: TimeInterval) {

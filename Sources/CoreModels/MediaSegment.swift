@@ -35,6 +35,20 @@ public struct MediaSegment: Codable, Equatable, Sendable, Identifiable {
             case .unknown: return "Skip"
             }
         }
+
+        /// The transient, past-tense label shown after this kind is skipped
+        /// automatically (Auto (instant)) — the skip already happened, so it reads
+        /// as a confirmation, e.g. "Intro Skipped".
+        public var autoSkippedLabel: String {
+            switch self {
+            case .intro: return "Intro Skipped"
+            case .credits: return "Credits Skipped"
+            case .recap: return "Recap Skipped"
+            case .preview: return "Preview Skipped"
+            case .commercial: return "Skipped"
+            case .unknown: return "Skipped"
+            }
+        }
     }
 
     public var id: String
@@ -61,7 +75,28 @@ public struct MediaSegment: Codable, Equatable, Sendable, Identifiable {
     /// trailing margin is excluded so the button doesn't linger for the final
     /// frame, and a tiny lead-in tolerance is allowed so it appears promptly.
     public func contains(_ position: TimeInterval) -> Bool {
-        position >= start - 0.25 && position < end - 0.25
+        position >= start - Self.margin && position < end - Self.margin
+    }
+
+    /// The visibility margin (seconds) applied at both ends of the window so the
+    /// skip button appears just before the segment and clears just before it ends.
+    static let margin: TimeInterval = 0.25
+
+    /// The full length of the skip button's on-screen window, in seconds — the
+    /// span over which the "time remaining" indicator depletes.
+    public var window: TimeInterval { max(0, end - start) }
+
+    /// Seconds remaining until the skip button auto-dismisses, given the live
+    /// `position`. Clamped to `0` once the segment's trailing margin is reached.
+    public func remaining(at position: TimeInterval) -> TimeInterval {
+        max(0, (end - Self.margin) - position)
+    }
+
+    /// Fraction (0…1) of the skip window still remaining at `position`. `1` when
+    /// the segment has just begun, `0` as it ends. Drives the depleting indicator.
+    public func remainingFraction(at position: TimeInterval) -> Double {
+        guard window > 0 else { return 0 }
+        return min(1, max(0, remaining(at: position) / window))
     }
 }
 

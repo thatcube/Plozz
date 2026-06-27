@@ -265,7 +265,7 @@ public struct SettingsView: View {
                    value: theme.theme.displayName,
                    route: .appearance)
             navRow("Playback", icon: "play.rectangle",
-                   value: playback.settings.skipIntros ? "Skip intros on" : nil,
+                   value: playback.settings.skipIntros == .off ? nil : "Skip: \(playback.settings.skipIntros.title)",
                    route: .playback)
             navRow("Spoilers", icon: "eye.slash",
                    value: spoilers.settings.isEnabled ? "On" : "Off",

@@ -113,9 +113,10 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
     /// or the origin can't bind — in every case the caller falls back to normal
     /// routing.
     nonisolated static func buildComponents(source: LocalRemuxSourceDescriptor) throws -> Components {
-        guard let segmenter = RemuxSegmenter(sourceURL: source.originalURL) else {
-            throw FullTimelineVODError.demuxFailed
-        }
+        // Throws a RemuxOpenError carrying the precise failing libavformat stage +
+        // AVERROR + HTTP/transport reason, so a cold device play's captured error
+        // string pinpoints the cause (e.g. "...avformat_open_input (HTTP 401)").
+        let segmenter = try RemuxSegmenter(sourceURL: source.originalURL)
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only
@@ -130,7 +131,7 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         }
         guard !facts.segmentDurations.isEmpty else {
             segmenter.close()
-            throw FullTimelineVODError.demuxFailed
+            throw FullTimelineVODError.emptySegments
         }
 
         let planner = RemuxSegmentPlanner(
@@ -230,9 +231,23 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
 
 // MARK: - Errors
 
-enum FullTimelineVODError: Error {
-    case demuxFailed
+enum FullTimelineVODError: Error, CustomStringConvertible {
+    /// The probe opened the source but produced no playable segment table.
+    case emptySegments
+    /// The source is dual-layer Dolby Vision Profile 7 — must stay on mpv.
     case dualLayerDolbyVision
+    /// The loopback origin couldn't bind / become ready.
     case serverUnavailable
+
+    var description: String {
+        switch self {
+        case .emptySegments:
+            return "local remux produced an empty segment table"
+        case .dualLayerDolbyVision:
+            return "local remux refused dual-layer Dolby Vision (Profile 7) — stays on mpv"
+        case .serverUnavailable:
+            return "local remux loopback origin could not start"
+        }
+    }
 }
 #endif

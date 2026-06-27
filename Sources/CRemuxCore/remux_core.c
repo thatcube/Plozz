@@ -168,6 +168,24 @@ static void build_segment_table(plozz_remux_session *s, double target_seconds) {
 
 /* ----- open -------------------------------------------------------------- */
 
+/* Record a precise failure (stage + AVERROR) into the caller's result so an
+ * opaque "demux failed" becomes an actionable reason on a cold device play. */
+static void set_open_error(plozz_remux_open_result *r, int stage, int code) {
+    if (!r) return;
+    r->ok = 0;
+    r->error_stage = stage;
+    r->error_code = code;
+}
+
+/* Decode an AVERROR to text for the log sink (best-effort). */
+static void log_averror(const char *what, int rc) {
+    char errbuf[160];
+    if (av_strerror(rc, errbuf, sizeof(errbuf)) < 0) {
+        snprintf(errbuf, sizeof(errbuf), "unknown");
+    }
+    remux_log(2, "remux: %s failed (%d: %s)", what, rc, errbuf);
+}
+
 plozz_remux_session *plozz_remux_open(void *opaque,
                                       plozz_remux_read_cb read_cb,
                                       plozz_remux_seek_cb seek_cb,
@@ -176,7 +194,7 @@ plozz_remux_session *plozz_remux_open(void *opaque,
     if (out_result) memset(out_result, 0, sizeof(*out_result));
 
     plozz_remux_session *s = (plozz_remux_session *)calloc(1, sizeof(*s));
-    if (!s) return NULL;
+    if (!s) { set_open_error(out_result, PLOZZ_REMUX_STAGE_ALLOC, 0); return NULL; }
     s->opaque = opaque;
     s->read_cb = read_cb;
     s->seek_cb = seek_cb;
@@ -184,28 +202,42 @@ plozz_remux_session *plozz_remux_open(void *opaque,
     s->audio_index = -1;
 
     s->avio_buf = (unsigned char *)av_malloc(PLOZZ_AVIO_BUFFER_SIZE);
-    if (!s->avio_buf) { plozz_remux_close(s); return NULL; }
+    if (!s->avio_buf) {
+        set_open_error(out_result, PLOZZ_REMUX_STAGE_ALLOC, 0);
+        plozz_remux_close(s);
+        return NULL;
+    }
 
     s->avio = avio_alloc_context(s->avio_buf, PLOZZ_AVIO_BUFFER_SIZE, 0,
                                  s, avio_read_adapter, NULL, avio_seek_adapter);
-    if (!s->avio) { plozz_remux_close(s); return NULL; }
+    if (!s->avio) {
+        set_open_error(out_result, PLOZZ_REMUX_STAGE_ALLOC, 0);
+        plozz_remux_close(s);
+        return NULL;
+    }
     s->avio->seekable = AVIO_SEEKABLE_NORMAL;
 
     s->ic = avformat_alloc_context();
-    if (!s->ic) { plozz_remux_close(s); return NULL; }
+    if (!s->ic) {
+        set_open_error(out_result, PLOZZ_REMUX_STAGE_ALLOC, 0);
+        plozz_remux_close(s);
+        return NULL;
+    }
     s->ic->pb = s->avio;
     s->ic->flags |= AVFMT_FLAG_CUSTOM_IO;
 
     int rc = avformat_open_input(&s->ic, NULL, NULL, NULL);
     if (rc < 0) {
-        remux_log(2, "remux: avformat_open_input failed (%d)", rc);
+        log_averror("avformat_open_input", rc);
+        set_open_error(out_result, PLOZZ_REMUX_STAGE_OPEN_INPUT, rc);
         plozz_remux_close(s);
         return NULL;
     }
 
     rc = avformat_find_stream_info(s->ic, NULL);
     if (rc < 0) {
-        remux_log(2, "remux: find_stream_info failed (%d)", rc);
+        log_averror("avformat_find_stream_info", rc);
+        set_open_error(out_result, PLOZZ_REMUX_STAGE_FIND_STREAM_INFO, rc);
         plozz_remux_close(s);
         return NULL;
     }
@@ -214,6 +246,7 @@ plozz_remux_session *plozz_remux_open(void *opaque,
     s->audio_index = av_find_best_stream(s->ic, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
     if (s->video_index < 0) {
         remux_log(2, "remux: no video stream");
+        set_open_error(out_result, PLOZZ_REMUX_STAGE_NO_VIDEO, 0);
         plozz_remux_close(s);
         return NULL;
     }
@@ -224,6 +257,7 @@ plozz_remux_session *plozz_remux_open(void *opaque,
     build_segment_table(s, target_segment_seconds);
     if (s->segment_count <= 0) {
         remux_log(2, "remux: empty segment table");
+        set_open_error(out_result, PLOZZ_REMUX_STAGE_EMPTY_SEGMENTS, 0);
         plozz_remux_close(s);
         return NULL;
     }

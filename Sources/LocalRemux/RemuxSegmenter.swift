@@ -39,6 +39,50 @@ private let installRemuxLogBridge: Void = {
 
 // MARK: - RemuxSegmenter
 
+/// A precise reason `plozz_remux_open` couldn't prepare the source. Surfaced as a
+/// thrown error (instead of an opaque "demux failed") so a cold device play's
+/// captured `String(describing: error)` immediately reveals *which* step failed
+/// and *why* — e.g. `local remux open failed at avformat_open_input (HTTP 401)`
+/// pinpoints a stale token, vs `... (AVERROR -1414092869)` an unsupported probe.
+struct RemuxOpenError: Error, CustomStringConvertible, Equatable {
+    /// libavformat stage that failed (`plozz_remux_stage` raw value).
+    let stage: Int
+    /// AVERROR from the failing libavformat call (0 when not applicable).
+    let averror: Int32
+    /// Network-level reason captured by the reader (HTTP status / transport
+    /// error), when the failure was an I/O read rather than a parse.
+    let httpReason: String?
+
+    var description: String {
+        RemuxOpenError.describe(stage: stage, averror: averror, httpReason: httpReason)
+    }
+
+    /// Human label for a `plozz_remux_stage` value.
+    static func stageLabel(_ stage: Int) -> String {
+        switch stage {
+        case Int(PLOZZ_REMUX_STAGE_ALLOC.rawValue): return "alloc"
+        case Int(PLOZZ_REMUX_STAGE_OPEN_INPUT.rawValue): return "avformat_open_input"
+        case Int(PLOZZ_REMUX_STAGE_FIND_STREAM_INFO.rawValue): return "avformat_find_stream_info"
+        case Int(PLOZZ_REMUX_STAGE_NO_VIDEO.rawValue): return "no video stream"
+        case Int(PLOZZ_REMUX_STAGE_EMPTY_SEGMENTS.rawValue): return "empty segment table"
+        default: return "unknown(\(stage))"
+        }
+    }
+
+    /// Pure, unit-testable formatter for the thrown reason. Prefers the network
+    /// reason (the real root cause when the bytes never arrived) and falls back
+    /// to the AVERROR for parse/format failures.
+    static func describe(stage: Int, averror: Int32, httpReason: String?) -> String {
+        var detail = "local remux open failed at \(stageLabel(stage))"
+        if let httpReason, !httpReason.isEmpty {
+            detail += " (\(httpReason))"
+        } else if averror != 0 {
+            detail += " (AVERROR \(averror))"
+        }
+        return detail
+    }
+}
+
 /// Swift wrapper over `CRemuxCore`: opens the original MKV (lazily, via an
 /// `HTTPRangeReader`), exposes the keyframe-aligned segment table, and vends the
 /// shared fMP4 init segment plus each `-c copy` media segment on demand.
@@ -79,9 +123,11 @@ final class RemuxSegmenter: @unchecked Sendable {
     private let lock = NSLock()
     let facts: Facts
 
-    /// Opens `sourceURL` and builds the segment table. Returns `nil` when the
-    /// file can't be demuxed (caller falls back to the existing engine path).
-    init?(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0) {
+    /// Opens `sourceURL` and builds the segment table. Throws a `RemuxOpenError`
+    /// carrying the precise failing libavformat stage + AVERROR + network reason
+    /// when the file can't be demuxed, so the caller's fallback path can report
+    /// exactly why (vs an opaque failure).
+    init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -91,8 +137,13 @@ final class RemuxSegmenter: @unchecked Sendable {
         guard let session = plozz_remux_open(opaque, remuxReadAdapter, remuxSeekAdapter,
                                              targetSegmentSeconds, &result),
               result.ok == 1 else {
-            RemuxLog.error("RemuxSegmenter: open failed for \(sourceURL.lastPathComponent)")
-            return nil
+            let error = RemuxOpenError(
+                stage: Int(result.error_stage),
+                averror: result.error_code,
+                httpReason: reader.lastFailure
+            )
+            RemuxLog.error("RemuxSegmenter: \(error.description) for \(sourceURL.lastPathComponent)")
+            throw error
         }
         self.session = session
 

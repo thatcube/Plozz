@@ -18,6 +18,12 @@ final class HTTPRangeReader: @unchecked Sendable {
     private var position: Int64 = 0
     private(set) var totalSize: Int64 = -1
 
+    /// The most recent network failure reason (HTTP status line or transport
+    /// error), captured so a failed libavformat open can report *why* the bytes
+    /// never arrived (auth/URL/TLS/offline) instead of an opaque AVERROR(EIO).
+    /// Written/read on the single demux thread that drives the C open.
+    private(set) var lastFailure: String?
+
     /// Read-ahead cache: a contiguous block `[cacheStart, cacheStart+cache.count)`.
     private var cache = Data()
     private var cacheStart: Int64 = 0
@@ -124,18 +130,33 @@ final class HTTPRangeReader: @unchecked Sendable {
         if let http = resultResponse as? HTTPURLResponse {
             updateTotalSize(from: http)
             let status = http.statusCode
-            if status >= 400 || resultData == nil {
+            if status >= 400 {
                 // Auth/redirect/range failures here are the most likely reason a
-                // locally-muxed segment comes back empty → origin 404 → AVPlayer
-                // -1011. Always log them (redacted) so a single repro reveals it.
+                // cold device play can't even open the source. Capture the status
+                // and return nil — never hand the error-page body to libavformat,
+                // which would then fail with a misleading "invalid data" instead
+                // of the real "HTTP 401".
+                lastFailure = "HTTP \(status)"
                 RemuxLog.error("RangeReader: GET bytes=\(offset)-\(end) -> HTTP \(status) bytes=\(resultData?.count ?? -1) url=\(RemuxLog.redact(url))")
-            } else if offset == 0 && length <= 1 {
+                return nil
+            }
+            if resultData == nil {
+                lastFailure = "HTTP \(status) empty body"
+                RemuxLog.error("RangeReader: GET bytes=\(offset)-\(end) -> HTTP \(status) empty body url=\(RemuxLog.redact(url))")
+                return nil
+            }
+            if offset == 0 && length <= 1 {
                 RemuxLog.info("RangeReader: size probe -> HTTP \(status) total=\(totalSize) url=\(RemuxLog.redact(url))")
             }
         } else if let resultError {
-            RemuxLog.error("RangeReader: GET bytes=\(offset)-\(end) failed \(resultError.localizedDescription) url=\(RemuxLog.redact(url))")
+            let ns = resultError as NSError
+            lastFailure = "\(ns.domain) \(ns.code): \(resultError.localizedDescription)"
+            RemuxLog.error("RangeReader: GET bytes=\(offset)-\(end) failed \(lastFailure ?? "") url=\(RemuxLog.redact(url))")
+            return nil
         } else {
+            lastFailure = "no HTTP response"
             RemuxLog.error("RangeReader: GET bytes=\(offset)-\(end) no HTTP response url=\(RemuxLog.redact(url))")
+            return nil
         }
         return resultData
     }

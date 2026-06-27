@@ -411,7 +411,7 @@ let package = Package(
         // assertions themselves are platform-independent pure logic.
         .testTarget(
             name: "LocalRemuxTests",
-            dependencies: ["LocalRemux", "CoreModels"]
+            dependencies: ["LocalRemux", "CoreModels", "CRemuxCore"]
         ),
 
         // MARK: - EngineMPV binary dependencies

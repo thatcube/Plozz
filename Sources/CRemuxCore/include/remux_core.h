@@ -48,6 +48,20 @@ typedef void (*plozz_remux_log_cb)(void *opaque, int level, const char *message)
 
 typedef struct plozz_remux_session plozz_remux_session;
 
+/*
+ * The step of plozz_remux_open that failed, reported in
+ * plozz_remux_open_result.error_stage so the caller can surface a precise reason
+ * (instead of an opaque "demux failed") when a cold device play can't prepare.
+ */
+typedef enum {
+    PLOZZ_REMUX_STAGE_NONE = 0,             /* success */
+    PLOZZ_REMUX_STAGE_ALLOC = 1,            /* avio / format context allocation */
+    PLOZZ_REMUX_STAGE_OPEN_INPUT = 2,       /* avformat_open_input (first byte reads) */
+    PLOZZ_REMUX_STAGE_FIND_STREAM_INFO = 3, /* avformat_find_stream_info */
+    PLOZZ_REMUX_STAGE_NO_VIDEO = 4,         /* no decodable video stream */
+    PLOZZ_REMUX_STAGE_EMPTY_SEGMENTS = 5    /* segment table came out empty */
+} plozz_remux_stage;
+
 /* One keyframe-aligned segment boundary, in seconds on a 0-based timeline. */
 typedef struct {
     double start_seconds;
@@ -72,6 +86,8 @@ typedef struct {
     int dovi_profile;        /* Dolby Vision profile (5, 8, 7, ...); 0 if unknown */
     int dovi_level;          /* Dolby Vision level from the dvcC/dvvC record; 0 if unknown */
     int dovi_el_present;     /* 1 when a dual-layer enhancement layer is present (P7) */
+    int error_stage;         /* plozz_remux_stage of the failing step (0 on success) */
+    int error_code;          /* libavformat AVERROR from the failing step (0 if n/a) */
 } plozz_remux_open_result;
 
 /*

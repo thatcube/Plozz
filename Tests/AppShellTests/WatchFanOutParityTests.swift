@@ -161,6 +161,50 @@ final class WatchFanOutParityTests: XCTestCase {
         XCTAssertTrue(targets.contains("local-plex:6950"))
     }
 
+    /// Locks the origin-providerKind dedup seam (regression for 000c9ab): the
+    /// origin is appended FIRST and dedup is first-wins, so its `providerKind`
+    /// must be resolved up front from the item's own sources ∪ the warm snapshot.
+    /// When the snapshot knows the origin's kind the origin target must CARRY it
+    /// (not nil); when the origin is absent from every source (cold index) it must
+    /// stay nil but still be present. Without this the enriched same-account entry
+    /// is dedup-dropped and the kind is silently lost.
+    func testOriginTargetKeepsProviderKindFromWarmSnapshot() {
+        let origin = MediaItem(
+            id: "origin-item",
+            title: "Dune",
+            kind: .movie,
+            productionYear: 2021,
+            providerIDs: ["Tmdb": "438631"],
+            sourceAccountID: "origin"
+        )
+        // Warm snapshot knows the origin account's kind (.jellyfin) plus peers.
+        let warm = [
+            MediaSourceRef(accountID: "origin", itemID: "origin-item", providerKind: .jellyfin),
+            MediaSourceRef(accountID: "plex", itemID: "plex-item", providerKind: .plex)
+        ]
+        let warmTargets = WatchMutationFactory.targets(
+            for: origin,
+            primaryAccountID: "origin",
+            additionalSources: warm
+        )
+        XCTAssertEqual(
+            warmTargets.first { $0.accountID == "origin" }?.providerKind,
+            .jellyfin,
+            "Warm origin must carry the providerKind the snapshot knows, not nil"
+        )
+        XCTAssertEqual(warmTargets.first { $0.accountID == "plex" }?.providerKind, .plex)
+
+        // Cold index: origin absent from every source ⇒ kind genuinely unknown.
+        let coldTargets = WatchMutationFactory.targets(
+            for: origin,
+            primaryAccountID: "origin",
+            additionalSources: []
+        )
+        let coldOrigin = coldTargets.first { $0.accountID == "origin" }
+        XCTAssertNotNil(coldOrigin, "Origin must still be present when its kind is unknown")
+        XCTAssertNil(coldOrigin?.providerKind, "Cold origin (absent from sources) yields nil kind")
+    }
+
     /// A movie / series mutation persists the title's identities and is marked
     /// `expansionPending`, so a drain re-resolves the index union as it warms (the
     /// warm-race fix). A genuinely id-less, year-less title carries no identities

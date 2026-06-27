@@ -42,9 +42,18 @@ enum WatchMutationFactory {
             ))
         }
         // Origin first and always: you watched it there, so it must converge
-        // regardless of how warm (or which-account-warm) the index is.
+        // regardless of how warm (or which-account-warm) the index is. Because
+        // dedup is first-wins, resolve the origin's providerKind UP FRONT from the
+        // item's own sources ∪ the warm identity snapshot, so the origin entry
+        // carries its known kind instead of nil — otherwise the later enriched
+        // source for the same accountID+itemID would be dedup-dropped and the
+        // provider-kind metadata lost. Stays nil only when genuinely unknown
+        // (cold index / origin absent from every source).
         if let originAccountID = item.sourceAccountID ?? primaryAccountID {
-            append(accountID: originAccountID, itemID: item.id, providerKind: nil)
+            let originKind = (item.sources + additionalSources)
+                .first { $0.accountID == originAccountID && $0.itemID == item.id }?
+                .providerKind
+            append(accountID: originAccountID, itemID: item.id, providerKind: originKind)
         }
         item.sources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }
         additionalSources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }

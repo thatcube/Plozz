@@ -74,6 +74,27 @@ let package = Package(
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
 
+        // Thin C shim over the bundled libavformat (FFmpeg n8 / lavf 62) that
+        // demuxes an MKV read through Swift range callbacks and re-muxes GOPs to
+        // fragmented MP4 (CMAF) with `-c copy` — no transcode — preserving the
+        // single-layer Dolby Vision config (dvcC/dvvC, dvh1 sample entry) and the
+        // E-AC-3 dec3 box. The FFmpeg framework headers ship FLAT, yet they
+        // cross-include each other with `libavX/` prefixes, so we point clang at a
+        // committed symlink tree (ffmpeg-headers/libavX → each .framework/Headers)
+        // that reconstructs those prefixes. The links resolve once
+        // tools/setup-mpv.sh has staged Frameworks/mpv. Header references are
+        // arch-independent; the correct per-slice binary is linked via the
+        // binaryTargets below.
+        .target(
+            name: "CFFmpegRemux",
+            dependencies: [
+                "Libavformat", "Libavcodec", "Libavutil", "Libswresample"
+            ],
+            cSettings: [
+                .headerSearchPath("ffmpeg-headers")
+            ]
+        ),
+
         // MARK: libmpv-backed engine (the on-device decoding path)
         //
         // Implements `MPVVideoEngine: VideoEngine` over libmpv (vo=gpu-next →
@@ -98,6 +119,9 @@ let package = Package(
             dependencies: [
                 "CoreModels",
                 "FeaturePlayback",
+                // Thin libavformat shim that powers the cue-driven local remux
+                // (custom-AVIO MKV demux → fMP4 `-c copy` CMAF segments).
+                "CFFmpegRemux",
                 // LGPL-clean, locally-built FFmpeg + libmpv (local-path binaries).
                 "Libmpv", "Libavcodec", "Libavdevice", "Libavfilter",
                 "Libavformat", "Libavutil", "Libswresample", "Libswscale",

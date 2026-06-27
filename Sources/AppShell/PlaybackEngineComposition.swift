@@ -57,5 +57,16 @@ enum HybridPlayback {
         return .native
         #endif
     }
+
+    /// Registers the FFmpeg-backed local-remux engines into the shared
+    /// `LocalRemuxStrategyRegistry`. Only `AppShell` links these engines, so it
+    /// contributes them at launch; on a non-UIKit (unit-test) build this is a no-op
+    /// and only the harness's reference strategy exists.
+    @MainActor
+    static func registerLocalRemuxEngines() {
+        #if canImport(UIKit)
+        CueDrivenLocalRemuxEngine.register()
+        #endif
+    }
 }
 #endif

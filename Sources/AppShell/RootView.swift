@@ -37,6 +37,7 @@ public struct RootView: View {
     @MainActor
     public init(appState: AppState? = nil) {
         _appState = State(initialValue: appState ?? AppState())
+        HybridPlayback.registerLocalRemuxEngines()
     }
 
     /// The palette for the currently-selected theme, re-resolved when either the

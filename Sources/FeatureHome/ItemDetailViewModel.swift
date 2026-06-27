@@ -112,15 +112,19 @@ public final class ItemDetailViewModel {
     public private(set) var sources: [MediaSourceRef] = []
     /// In-flight enrichment pass for alternate sources. Kept cancellable so a
     /// reload/navigation change can drop stale work promptly.
-    private var alternateSourceEnrichmentTask: Task<Void, Never>?
+    // `nonisolated(unsafe)` so the nonisolated `deinit` can cancel these handles.
+    // Every mutation happens on the main actor (cancel-and-replace inside isolated
+    // methods); `deinit` only runs once the last reference is gone, so there is no
+    // concurrent access. `Task` is Sendable, so cancelling is safe from anywhere.
+    private nonisolated(unsafe) var alternateSourceEnrichmentTask: Task<Void, Never>?
     /// In-flight cross-server discovery pass (search other accounts for this
     /// title). Cancellable so a reload/navigation change drops stale work.
-    private var crossServerDiscoveryTask: Task<Void, Never>?
+    private nonisolated(unsafe) var crossServerDiscoveryTask: Task<Void, Never>?
     /// Off-critical-path restore of the persisted snapshot. Raced against the live
     /// `provider.item(id:)` fetch so first paint is NEVER gated on a (possibly
     /// disk-contended) snapshot read — it only paints/enriches if it wins and
     /// never downgrades a fresher render. Cancelled on each new load.
-    private var snapshotRestoreTask: Task<Void, Never>?
+    private nonisolated(unsafe) var snapshotRestoreTask: Task<Void, Never>?
     /// Set once the live fetch publishes fresh detail, so a late snapshot restore
     /// never clobbers a fresher hero.
     private var hasPaintedFreshDetail = false
@@ -130,24 +134,45 @@ public final class ItemDetailViewModel {
     /// flooding the cache's I/O queue and starving the NEXT page's snapshot read
     /// for many seconds. Cancel-and-replace + a short debounce collapses the burst
     /// into a single write of the latest snapshot.
-    private var pendingSnapshotWrite: Task<Void, Never>?
+    private nonisolated(unsafe) var pendingSnapshotWrite: Task<Void, Never>?
     /// Bound concurrent alternate-server detail fetches to keep Home-opened
     /// details responsive and avoid saturating startup/network image traffic.
     private static let alternateSourceFanoutLimit = 3
 
-    /// In-flight trailers+ratings enrichment, owned as a cancellable task that
-    /// `load()` does NOT await. Decoupling it from `load()` means a navigate-away
-    /// (which cancels via ``suspendEnrichment()``) stops YouTube trailer
-    /// extraction + external-ratings work from running to completion on the next
-    /// page's back — the cooperative-pool starvation that left a freshly-opened
-    /// detail's `provider.item` unscheduled for 15–20s after tapping through
-    /// several titles.
-    private var enrichmentTask: Task<Void, Never>?
+    /// True when running inside an XCTest host. The speculative-work dwell gates
+    /// below are wall-clock timers that exist purely to suppress work during
+    /// rapid on-device navigation churn; under tests they would only add (and
+    /// race) multi-second delays, so they collapse to zero and the enrichment
+    /// runs deterministically — exactly the behavior these suites assert.
+    private static let isRunningUnderTests =
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
+    /// Dwell before any speculative discovery fan-out (cross-server discovery,
+    /// alternate-source fetch) fires. A page tapped through in under this window
+    /// pays zero speculative cost. Zero under tests. (Trailer extraction has its
+    /// own dwell on the awaited path — see ``trailerExtractionDwellNanos``.)
+    private static var enrichmentDwellNanos: UInt64 { isRunningUnderTests ? 0 : 800_000_000 }
+
+    /// Further dwell before the authoritative YouTubeKit/JavaScriptCore trailer
+    /// extraction (the single biggest CPU consumer during browsing) runs, so only
+    /// a page genuinely settled on pays it. Zero under tests.
+    private static var trailerExtractionDwellNanos: UInt64 { isRunningUnderTests ? 0 : 1_700_000_000 }
+
+    /// In-flight SPECULATIVE discovery (cross-server picker + alternate-source
+    /// watch-state), owned as a cancellable task that `load()` does NOT await.
+    /// Decoupling it from `load()` means a navigate-away (which cancels via
+    /// ``suspendEnrichment()``) stops the multi-server search fan-out from running
+    /// to completion on the next page's back — the cooperative-pool starvation
+    /// that left a freshly-opened detail's `provider.item` unscheduled for 15–20s
+    /// after tapping through several titles. Trailers + ratings, by contrast, are
+    /// awaited on the `load()` path (see ``runTrailersAndRatings(for:)``).
+    private nonisolated(unsafe) var enrichmentTask: Task<Void, Never>?
     /// The fully-loaded item enrichment is keyed to, so a page returned to (popped
-    /// back onto) can resume the enrichment that was suspended on disappear.
+    /// back onto) can resume the speculative discovery that was suspended on
+    /// disappear.
     private var enrichmentItem: MediaItem?
-    /// Set once trailers+ratings enrichment ran to completion, so resuming on
-    /// reappear doesn't redo finished work.
+    /// Set once speculative discovery (alternate sources + cross-server) has been
+    /// kicked off, so resuming on reappear doesn't restart already-running work.
     private var enrichmentComplete = false
     /// This page's ``EnrichmentScheduler`` generation token. Stamped when the page
     /// becomes the active detail; the scheduler drops any background work tagged
@@ -220,6 +245,22 @@ public final class ItemDetailViewModel {
         await YouTubeTrailerProvider.firstPlayableVideoID(in: candidates)
     }
 
+    /// Cancels every piece of owned background work so no detached/async task can
+    /// outlive the view model. The view's `onDisappear` already calls
+    /// ``suspendEnrichment()``, but a view model torn down without that hook
+    /// (navigation pop under memory pressure, a unit test that just lets the
+    /// instance fall out of scope) would otherwise leak its in-flight tasks —
+    /// they keep occupying the cooperative pool, fire state mutations after the
+    /// page is gone, and in tests outlive the case and trip the simulator
+    /// watchdog. `Task.cancel()` is safe to call from this non-isolated `deinit`.
+    deinit {
+        enrichmentTask?.cancel()
+        crossServerDiscoveryTask?.cancel()
+        alternateSourceEnrichmentTask?.cancel()
+        snapshotRestoreTask?.cancel()
+        pendingSnapshotWrite?.cancel()
+    }
+
     public func load() async {
         alternateSourceEnrichmentTask?.cancel()
         alternateSourceEnrichmentTask = nil
@@ -289,18 +330,21 @@ public final class ItemDetailViewModel {
                 state = .loaded(Detail(item: taggedItem, children: seededChildren))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
-                // Off-critical-path enrichment (trailers, ratings, cross-server
-                // discovery, alternate sources) runs as a CANCELLABLE unit that
-                // `load()` does NOT await — so navigating away cancels it instead of
-                // letting it run to completion and starve the next page's
-                // `provider.item` for the cooperative thread pool.
-                startEnrichment(for: item)
+                // Speculative discovery (cross-server picker + alternate-source
+                // watch-state) runs as a CANCELLABLE unit that `load()` does NOT
+                // await — so navigating away cancels it instead of letting the
+                // multi-server search fan-out starve the next page's `provider.item`.
+                startSpeculativeEnrichment(for: item)
                 // Children fill in off the critical path of first paint; merge them
                 // in (same item identity ⇒ no hero flicker) when they arrive.
                 let fetchedChildren = (try? await activeProvider.children(of: item.id)) ?? []
                 try Task.checkCancellation()
                 state = .loaded(Detail(item: taggedItem, children: fetchedChildren.map(tagged)))
                 persistSnapshot()
+                // Trailers + ratings ARE awaited: opening a detail deterministically
+                // populates its Trailer button and rating badges. Cancelled with
+                // load() on navigate-away; heavy trailer extraction is dwell-gated.
+                await runTrailersAndRatings(for: item)
             } else {
                 // Leaf kinds (movie/episode/video): the hero IS the content, so
                 // publish it immediately, then load trailers/ratings off the
@@ -309,9 +353,12 @@ public final class ItemDetailViewModel {
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
                 persistSnapshot()
-                // See container branch: cancellable, non-awaited enrichment so a
-                // navigate-away cancels it rather than starving the next page.
-                startEnrichment(for: item)
+                // See container branch: speculative discovery is cancellable and
+                // NOT awaited (a navigate-away drops it), while trailers + ratings
+                // ARE awaited so the Trailer button / rating badges populate
+                // deterministically before load() returns.
+                startSpeculativeEnrichment(for: item)
+                await runTrailersAndRatings(for: item)
             }
         } catch is CancellationError {
             // Back-button during load: leave whatever state we already published
@@ -350,14 +397,19 @@ public final class ItemDetailViewModel {
         seasonEpisodes[seasonID]
     }
 
-    /// Starts all off-critical-path enrichment for `item` as cancellable work:
-    /// cross-server server-picker discovery, alternate-source watch-state, and
-    /// trailers+ratings. Crucially `load()` does NOT await this — so the page
-    /// paints and `load()` returns immediately, and ``suspendEnrichment()`` can
-    /// drop every piece the instant the user navigates away. This is what stops a
-    /// tapped-through page's YouTube extraction / multi-server search from holding
-    /// cooperative-pool threads and starving the next page's `provider.item`.
-    private func startEnrichment(for item: MediaItem) {
+    /// Starts the SPECULATIVE off-critical-path enrichment for `item` as
+    /// cancellable work: cross-server server-picker discovery and alternate-source
+    /// watch-state. Crucially `load()` does NOT await this — so navigating away
+    /// (which cancels via ``suspendEnrichment()``) drops the multi-server search
+    /// fan-out the instant the user leaves, instead of letting it run to
+    /// completion and starve the next page's `provider.item` for the cooperative
+    /// thread pool.
+    ///
+    /// Trailers and external ratings are NOT started here: those resolve on the
+    /// awaited `load()` path (see ``runTrailersAndRatings(for:)``) so that opening
+    /// a detail deterministically populates its Trailer button and rating badges,
+    /// while this speculative discovery stays decoupled and droppable.
+    private func startSpeculativeEnrichment(for item: MediaItem) {
         enrichmentItem = item
         enrichmentComplete = false
         enrichmentTask?.cancel()
@@ -373,8 +425,12 @@ public final class ItemDetailViewModel {
             // cancellable wait here means a sub-second open→back does nothing at
             // all; the first-paint detail (driven by load(), not this task) has
             // already shown. Cancelled by suspendEnrichment on navigate-away.
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            guard !Task.isCancelled else { return }
+            // Skipped entirely (not merely zero-length) under tests so enrichment
+            // is deterministic with no spurious suspension point.
+            if Self.enrichmentDwellNanos > 0 {
+                try? await Task.sleep(nanoseconds: Self.enrichmentDwellNanos)
+                guard !Task.isCancelled else { return }
+            }
             // Bump the GLOBAL enrichment generation: opening this page makes every
             // older page's still-in-flight discovery/alternate work stale, so the
             // scheduler drops it BEFORE it touches the network. This is what stops
@@ -387,20 +443,23 @@ public final class ItemDetailViewModel {
             self.enrichmentGeneration = token
             self.startAlternateSourceEnrichment(primaryID: item.id)
             self.startCrossServerDiscovery(for: taggedItem)
-            await self.runTrailersAndRatings(for: item)
+            self.enrichmentComplete = true
         }
     }
 
-    /// Resolves trailers and external ratings concurrently, off the first-paint
-    /// path. Runs inside the cancellable ``enrichmentTask`` so a navigate-away
-    /// cancels both mid-flight instead of letting them run to completion.
+    /// Resolves trailers and external ratings concurrently on the awaited `load()`
+    /// path, so opening a detail deterministically populates its Trailer button
+    /// and rating badges before `load()` returns. Cancellable via the awaiting
+    /// task: a navigate-away cancels `load()`, which cancels this mid-flight (the
+    /// guards below bail) instead of letting YouTube extraction / a ratings fetch
+    /// run to completion on the next page's back. The heavy trailer extraction is
+    /// additionally gated behind a cancellable dwell (see ``loadTrailers(for:)``)
+    /// so rapid tap-through never pays it.
     private func runTrailersAndRatings(for item: MediaItem) async {
         async let trailersDone: Void = loadTrailers(for: item)
         async let ratingsDone: Void = enrichRatings(for: item)
         _ = await trailersDone
         _ = await ratingsDone
-        guard !Task.isCancelled else { return }
-        enrichmentComplete = true
     }
 
     /// Cancels ALL off-critical-path enrichment (trailers, ratings, cross-server
@@ -421,7 +480,7 @@ public final class ItemDetailViewModel {
     public func resumeEnrichmentIfNeeded() {
         guard hasPaintedFreshDetail, !enrichmentComplete, enrichmentTask == nil,
               let item = enrichmentItem else { return }
-        startEnrichment(for: item)
+        startSpeculativeEnrichment(for: item)
     }
 
     /// Fetches the item's trailers off the critical path. The Trailer button is
@@ -476,14 +535,17 @@ public final class ItemDetailViewModel {
         // Dwell gate: the authoritative verify/replace pass below runs YouTubeKit's
         // JavaScriptCore stream extraction, which is heavy (a JSContext executing
         // YouTube's player JS) and the single biggest CPU consumer during browsing.
-        // Stacked on the umbrella enrichment dwell, this means roughly two and a
-        // half seconds of continuous dwell on ONE page before any trailer JS runs —
-        // so even "pause to look at it load" browsing never triggers speculative
-        // extraction, only a page the user has genuinely settled on. The optimistic
-        // button above has already appeared, so this never delays what the user
-        // sees. Cancelled with the enrichment task on navigate-away.
-        try? await Task.sleep(nanoseconds: 1_700_000_000)
-        guard !Task.isCancelled, isStillLoaded(item) else { return }
+        // This dwell means roughly 1.7s of continuous settle on ONE page before any
+        // trailer JS runs — so even "pause to look at it load" browsing never
+        // triggers extraction, only a page the user has genuinely settled on. The
+        // optimistic button above has already appeared, so this never delays what
+        // the user sees. trailers run on the awaited load() path, so a navigate-away
+        // cancels load() — and this dwell with it (the guard below bails). Skipped
+        // under tests so the (injected, instant) verify/search pass is deterministic.
+        if Self.trailerExtractionDwellNanos > 0 {
+            try? await Task.sleep(nanoseconds: Self.trailerExtractionDwellNanos)
+            guard !Task.isCancelled, isStillLoaded(item) else { return }
+        }
 
         // Verify (authoritative): refine to the first server id that actually
         // plays, else search for a replacement, then cache the outcome.

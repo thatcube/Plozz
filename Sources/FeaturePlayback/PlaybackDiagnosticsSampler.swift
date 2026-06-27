@@ -55,12 +55,13 @@ public final class PlaybackDiagnosticsSampler {
         mode: PlaybackDiagnostics.PlaybackMode,
         metadata: MediaSourceMetadata? = nil,
         engineName: String? = nil,
+        capabilities: MediaCapabilities = .detected(),
         remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)? = nil
     ) {
         stop()
         self.player = player
         self.remuxSnapshot = remuxSnapshot
-        var base = PlaybackDiagnostics.base(from: metadata, mode: mode)
+        var base = PlaybackDiagnostics.base(from: metadata, mode: mode, capabilities: capabilities)
         base.engineName = engineName
         Self.fillDeviceInfo(into: &base)
         staticDiagnostics = base

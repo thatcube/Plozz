@@ -221,6 +221,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var audioSampleRate: Int?
     /// Source-declared audio bitrate, in bits/sec.
     public var audioBitrate: Double?
+    /// Expected output handling for the current audio route, e.g. Atmos passthrough
+    /// vs. a route that may collapse to channel-bed audio.
+    public var audioOutputDescription: String?
     /// One-line subtitle description, e.g. `SubRip · English`.
     public var subtitleDescription: String?
     public var container: String?
@@ -273,6 +276,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         audioChannelLayout: String? = nil,
         audioSampleRate: Int? = nil,
         audioBitrate: Double? = nil,
+        audioOutputDescription: String? = nil,
         subtitleDescription: String? = nil,
         container: String? = nil,
         mode: PlaybackMode = .unknown,
@@ -304,6 +308,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.audioChannelLayout = audioChannelLayout
         self.audioSampleRate = audioSampleRate
         self.audioBitrate = audioBitrate
+        self.audioOutputDescription = audioOutputDescription
         self.subtitleDescription = subtitleDescription
         self.container = container
         self.mode = mode
@@ -454,6 +459,42 @@ public extension PlaybackDiagnostics {
             if lower.contains("dts-hd") { return "DTS-HD" }
         }
         return friendlyCodecName(codec)
+    }
+
+    /// Human-readable expectation for what leaves the Apple TV on the active
+    /// route. This is intentionally explicit for Atmos so diagnostics can show the
+    /// difference between "Atmos bitstream is present" and "the current route is
+    /// likely only receiving the 5.1 channel bed".
+    static func audioOutputDescription(
+        codec: String?,
+        profile: String?,
+        channels: Int?,
+        capabilities: MediaCapabilities
+    ) -> String? {
+        let token = (codec ?? "").lowercased().replacingOccurrences(of: "_", with: "-")
+        let profileText = (profile ?? "").lowercased()
+        let isAtmos = profileText.contains("atmos")
+        switch token {
+        case "eac3", "ec3", "ec-3", "e-ac-3":
+            if isAtmos {
+                return capabilities.supportsAtmos
+                    ? "E-AC-3 JOC Atmos passthrough expected"
+                    : "Atmos present; route may fall back to \(channelDescription(layout: nil, channels: channels) ?? "channel-bed audio")"
+            }
+            return "E-AC-3 passthrough"
+        case "ac3", "ac-3":
+            return "AC-3 passthrough"
+        case "truehd", "mlp":
+            return isAtmos ? "TrueHD Atmos is not AVPlayer-compatible" : "TrueHD is not AVPlayer-compatible"
+        case "dts", "dca":
+            return capabilities.supportsDTSPassthrough ? "DTS passthrough" : "DTS requires mpv decode or a passthrough route"
+        case "dts-hd", "dtshd", "dca-ma":
+            return capabilities.supportsDTSPassthrough ? "DTS-HD passthrough" : "DTS-HD requires mpv decode or a passthrough route"
+        case "aac", "mp4a", "alac", "mp3", "flac", "pcm", "lpcm":
+            return "Decoded by Apple TV"
+        default:
+            return token.isEmpty ? nil : nil
+        }
     }
 
     /// Friendly channel layout from an explicit layout label and/or a raw
@@ -659,6 +700,10 @@ public extension PlaybackDiagnostics {
         ])
     }
 
+    var audioOutputText: String {
+        audioOutputDescription ?? Self.placeholder
+    }
+
     /// Subtitle line, e.g. `SubRip · English`, or a placeholder when none.
     var subtitleText: String { subtitleDescription ?? Self.placeholder }
 
@@ -691,6 +736,14 @@ public extension PlaybackDiagnostics {
 
     var remuxStrategyText: String {
         remux?.strategyName ?? Self.placeholder
+    }
+
+    var remuxTransportText: String {
+        guard let remux else { return Self.placeholder }
+        if remux.strategyID == LocalRemuxStrategyChoice.referenceServerRemuxID {
+            return "Server-owned HLS · seek still depends on provider"
+        }
+        return "App-owned local stream"
     }
 
     var remuxTimeToFirstFrameText: String {
@@ -767,7 +820,11 @@ public extension PlaybackDiagnostics {
     /// Builds the authoritative baseline snapshot from a provider's source
     /// metadata. The platform sampler layers live values (observed bitrate,
     /// buffer, dropped frames) and device/disk info on top of this.
-    static func base(from metadata: MediaSourceMetadata?, mode: PlaybackMode) -> PlaybackDiagnostics {
+    static func base(
+        from metadata: MediaSourceMetadata?,
+        mode: PlaybackMode,
+        capabilities: MediaCapabilities = .default
+    ) -> PlaybackDiagnostics {
         var d = PlaybackDiagnostics(mode: mode)
         guard let metadata else { return d }
 
@@ -795,6 +852,12 @@ public extension PlaybackDiagnostics {
             d.audioChannelLayout = a.channelLayout
             if let rate = a.sampleRate, rate > 0 { d.audioSampleRate = rate }
             if let bitrate = a.bitrate, bitrate > 0 { d.audioBitrate = Double(bitrate) }
+            d.audioOutputDescription = audioOutputDescription(
+                codec: a.codec,
+                profile: a.profile,
+                channels: a.channels,
+                capabilities: capabilities
+            )
         }
 
         if let s = metadata.subtitle {

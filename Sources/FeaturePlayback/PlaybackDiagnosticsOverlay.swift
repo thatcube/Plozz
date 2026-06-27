@@ -44,10 +44,12 @@ struct PlaybackDiagnosticsOverlay: View {
             optionalRow("Container", d.containerText)
             optionalRow("Video", d.videoLineText)
             optionalRow("Audio", d.audioLineText)
+            optionalRow("Audio Output", d.audioOutputText)
             optionalRow("Subtitles", d.subtitleText)
             row("Source", sourceText(d))
             if d.mode == .localRemux {
                 optionalRow("Remux Strategy", d.remuxStrategyText)
+                optionalRow("Remux Transport", d.remuxTransportText)
                 optionalRow("Remux TTFF", d.remuxTimeToFirstFrameText)
                 optionalRow("Remux Seek", d.remuxSeekLatencyText)
                 optionalRow("Remux Stalls", d.remuxStallsText)
@@ -68,8 +70,11 @@ struct PlaybackDiagnosticsOverlay: View {
     }
 
     private func sourceText(_ d: PlaybackDiagnostics) -> String {
-        guard let label = PlaybackDiagnostics.containerLabel(d.container) else { return d.mode.displayName }
-        return "\(d.mode.displayName) · \(label)"
+        let mode = d.mode == .localRemux && d.remux?.strategyID == LocalRemuxStrategyChoice.referenceServerRemuxID
+            ? "Server HLS baseline"
+            : d.mode.displayName
+        guard let label = PlaybackDiagnostics.containerLabel(d.container) else { return mode }
+        return "\(mode) · \(label)"
     }
 
     /// A row that's hidden entirely when its value is the placeholder, so static

@@ -93,6 +93,30 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
         XCTAssertEqual(PlaybackDiagnostics.channelDescription(layout: nil, channels: 3), "3ch")
         XCTAssertNil(PlaybackDiagnostics.channelDescription(layout: nil, channels: nil))
     }
+
+    func testAudioOutputDescriptionReportsAtmosPassthroughExpectation() {
+        let atmosRoute = MediaCapabilities(maxOutputChannels: 6, supportsAtmos: true)
+        XCTAssertEqual(
+            PlaybackDiagnostics.audioOutputDescription(
+                codec: "eac3",
+                profile: "Dolby Atmos",
+                channels: 6,
+                capabilities: atmosRoute
+            ),
+            "E-AC-3 JOC Atmos passthrough expected"
+        )
+
+        let stereoRoute = MediaCapabilities(maxOutputChannels: 2, supportsAtmos: false)
+        XCTAssertEqual(
+            PlaybackDiagnostics.audioOutputDescription(
+                codec: "eac3",
+                profile: "Dolby Atmos",
+                channels: 6,
+                capabilities: stereoRoute
+            ),
+            "Atmos present; route may fall back to 5.1"
+        )
+    }
 }
 
 final class PlaybackDiagnosticsFormattingTests: XCTestCase {
@@ -213,12 +237,14 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
             ),
             subtitle: .init(codec: "subrip", language: "eng")
         )
-        let d = PlaybackDiagnostics.base(from: metadata, mode: .directPlay)
+        let capabilities = MediaCapabilities(maxOutputChannels: 6, supportsAtmos: true)
+        let d = PlaybackDiagnostics.base(from: metadata, mode: .directPlay, capabilities: capabilities)
 
         XCTAssertEqual(d.containerText, "Matroska (MKV)")
         XCTAssertEqual(d.hdr, .dolbyVision)
         XCTAssertEqual(d.videoLineText, "HEVC · Dolby Vision · 1920×1080 · 4.8 Mbps · 24.00 fps")
         XCTAssertEqual(d.audioLineText, "Dolby Atmos · 48 kHz · 5.1 · 768 Kbps")
+        XCTAssertEqual(d.audioOutputText, "E-AC-3 JOC Atmos passthrough expected")
         XCTAssertEqual(d.subtitleText, "SubRip · English")
         XCTAssertEqual(d.mode, .directPlay)
     }
@@ -253,6 +279,7 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
         let diagnostics = PlaybackDiagnostics(mode: .localRemux, remux: remux)
 
         XCTAssertEqual(diagnostics.remuxStrategyText, "Reference")
+        XCTAssertEqual(diagnostics.remuxTransportText, "Server-owned HLS · seek still depends on provider")
         XCTAssertEqual(diagnostics.remuxTimeToFirstFrameText, "840 ms")
         XCTAssertEqual(diagnostics.remuxSeekLatencyText, "125 ms")
         XCTAssertEqual(diagnostics.remuxStallsText, "2")

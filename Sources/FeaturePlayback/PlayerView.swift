@@ -229,6 +229,7 @@ public struct PlayerView: View {
             mode: viewModel.deliveryMode,
             metadata: viewModel.sourceMetadata,
             engineName: viewModel.engineDisplayName,
+            capabilities: viewModel.mediaCapabilities,
             remuxSnapshot: { viewModel.localRemuxDiagnostics }
         )
     }

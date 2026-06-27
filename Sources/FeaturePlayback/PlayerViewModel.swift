@@ -1098,6 +1098,9 @@ public final class PlayerViewModel {
         localRemuxSession?.metricsController.snapshot
     }
 
+    /// Device/display/audio capabilities used for routing and diagnostics.
+    public var mediaCapabilities: MediaCapabilities { capabilities }
+
     /// Scrubbing-preview source for the playing item, if the server has previews.
     public var scrubPreview: ScrubPreviewSource? { request?.scrubPreview }
 

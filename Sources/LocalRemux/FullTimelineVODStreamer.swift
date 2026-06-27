@@ -119,6 +119,7 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         isTornDown = true
         components.source.onMetrics = nil
         components.server.stop()
+        components.source.stop()
         components.segmenter.close()
         RemuxLog.info("Session: torn down")
     }
@@ -156,7 +157,27 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
             segmentDurations: facts.segmentDurations,
             stream: streamInfo(facts: facts, source: source)
         )
-        let contentSource = RemuxContentSource(segmenter: segmenter, planner: planner)
+
+        // Throughput fix (flag `com.plozz.playback.remuxPrefetch`, DEFAULT OFF):
+        // high-bitrate 4K HDR titles starve AVPlayer's audio buffer because each
+        // segment is fetched+muxed strictly on demand, serialised behind one lock.
+        // When enabled we (a) boost the range reader's per-round-trip read-ahead so
+        // a ~10–20 MB segment fetches in a few requests instead of dozens, and
+        // (b) background-prefetch the next few segments ahead of the playhead so
+        // they are cache-warm before AVPlayer asks. Reading the launch-arg here (it
+        // lands in NSArgumentDomain) lets the maintainer A/B exactly this one
+        // throughput change on the shared Apple TV. OFF = original on-demand path.
+        let prefetchEnabled = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxPrefetch")
+        if prefetchEnabled {
+            segmenter.boostReadAhead(4 << 20)
+            RemuxLog.info("Session: remuxPrefetch ON — readAhead=4MiB prefetchDepth=3")
+        }
+
+        let contentSource = RemuxContentSource(
+            segmenter: segmenter,
+            planner: planner,
+            prefetchDepth: prefetchEnabled ? 3 : 0
+        )
         let server = FullTimelineVODServer { path in contentSource.response(forPath: path) }
         guard let baseURL = server.start() else {
             segmenter.close()

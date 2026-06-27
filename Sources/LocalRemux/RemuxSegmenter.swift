@@ -205,6 +205,12 @@ final class RemuxSegmenter: @unchecked Sendable {
         reader.networkSnapshot()
     }
 
+    /// Raise the range reader's per-round-trip read-ahead (one-time, before the
+    /// origin serves) so high-bitrate 4K segments fetch in fewer round-trips.
+    func boostReadAhead(_ bytes: Int) {
+        reader.boostReadAhead(bytes)
+    }
+
     /// Scans an fMP4 init segment for the box four-cc atoms that matter for the
     /// DoVi+Atmos make-or-break, returning a compact summary for the log.
     private static func scanInit(_ data: Data) -> String {

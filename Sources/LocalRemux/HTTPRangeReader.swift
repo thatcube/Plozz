@@ -53,7 +53,7 @@ final class HTTPRangeReader: @unchecked Sendable {
     private var cache = Data()
     private var cacheStart: Int64 = 0
     /// Over-read granularity: fetch at least this many bytes per network round-trip.
-    private let readAhead: Int
+    private var readAhead: Int
 
     init(url: URL, headers: [String: String] = [:], readAhead: Int = 1 << 20) {
         self.url = url
@@ -63,6 +63,17 @@ final class HTTPRangeReader: @unchecked Sendable {
         config.timeoutIntervalForRequest = 30
         config.waitsForConnectivity = false
         self.session = URLSession(configuration: config)
+    }
+
+    /// Raises the per-round-trip read-ahead granularity. Fewer, larger ranged GETs
+    /// sustain a high-bitrate 4K segment fetch so the on-demand mux can keep
+    /// AVPlayer fed. MUST be called before the origin starts serving (single demux
+    /// thread, no concurrent reads yet) — it is a one-time pre-serving config, so
+    /// mutating `readAhead` here is race-free. Kept small during the open probe
+    /// (many tiny seeks) to avoid over-fetching; only boosted for segment muxing.
+    func boostReadAhead(_ bytes: Int) {
+        guard bytes > readAhead else { return }
+        readAhead = bytes
     }
 
     // MARK: - AVIO surface

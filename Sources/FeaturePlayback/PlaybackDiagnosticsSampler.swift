@@ -38,6 +38,13 @@ public final class PlaybackDiagnosticsSampler {
     private var lastLoggedStallCount = 0
     private static let playbackLog = Logger(subsystem: "com.thatcube.Plozz", category: "Playback")
 
+    /// `REMUX_STDOUT=1` mirrors the `remux-stall:` marker to stdout (prefixed
+    /// `PLZREMUX `) so `devicectl --console` captures it alongside LocalRemux's
+    /// remux-av / remux-tput stdout mirror — os_log alone isn't readable off a
+    /// network-paired Apple TV on this toolchain. Same seam as LocalRemux.RemuxLog.
+    private static let mirrorsStandardOut: Bool =
+        ProcessInfo.processInfo.environment["REMUX_STDOUT"] == "1"
+
     public init() {}
 
     /// Begins sampling `player`. Idempotent — restarts cleanly if called again.
@@ -125,13 +132,20 @@ public final class PlaybackDiagnosticsSampler {
         let indicatedMbps = event.indicatedBitrate > 0 ? event.indicatedBitrate / 1_000_000 : -1
         let buffered = bufferedSecondsAhead(in: item) ?? -1
         let pos = item.currentTime().seconds
+        let posValue = pos.isFinite ? pos : -1
         Self.playbackLog.error("""
             remux-stall: stalls=\(stalls, privacy: .public) \
             observed=\(observedMbps, format: .fixed(precision: 1), privacy: .public)Mbps \
             indicated=\(indicatedMbps, format: .fixed(precision: 1), privacy: .public)Mbps \
             buffered=\(buffered, format: .fixed(precision: 2), privacy: .public)s \
-            pos=\(pos.isFinite ? pos : -1, format: .fixed(precision: 1), privacy: .public)s
+            pos=\(posValue, format: .fixed(precision: 1), privacy: .public)s
             """)
+        if Self.mirrorsStandardOut {
+            let line = String(format:
+                "remux-stall: stalls=%d observed=%.1fMbps indicated=%.1fMbps buffered=%.2fs pos=%.1fs",
+                stalls, observedMbps, indicatedMbps, buffered, posValue)
+            try? FileHandle.standardOutput.write(contentsOf: Data(("PLZREMUX " + line + "\n").utf8))
+        }
     }
 
     private func sampleTick() {

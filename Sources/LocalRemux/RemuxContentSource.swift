@@ -52,13 +52,44 @@ final class RemuxContentSource: @unchecked Sendable {
     /// AVPlayer rebuffer/stall.
     private var lastSegmentServedUptimeNanos: UInt64 = 0
 
+    /// Background read-ahead (flag `com.plozz.playback.remuxPrefetch`). When > 0,
+    /// after each on-demand segment is served the source produces the next
+    /// `prefetchDepth` segments ahead of the playhead on a background queue, so a
+    /// high-bitrate 4K title's sequential segments are cache-warm before AVPlayer
+    /// asks — decoupling production (fetch+mux) from just-in-time delivery so the
+    /// audio buffer never underruns. 0 (default/flag-off) = the original strictly
+    /// on-demand behaviour, zero overhead.
+    private let prefetchDepth: Int
+    private let prefetchQueue = DispatchQueue(
+        label: "com.thatcube.Plozz.localremux.prefetch", qos: .utility)
+    /// Highest segment index AVPlayer has requested; the prefetch window follows
+    /// it so a seek re-aims read-ahead at the new playhead. Guarded by `cacheLock`.
+    private var prefetchCursor = -1
+    /// Whether a prefetch worker pass is queued/running (one at a time). `cacheLock`.
+    private var prefetchScheduled = false
+    /// Segment indices a prefetch pass is currently producing, so the worker never
+    /// double-schedules one. Guarded by `cacheLock`.
+    private var prefetchInFlight: Set<Int> = []
+    /// Set on teardown so an in-progress prefetch worker stops promptly. `cacheLock`.
+    private var stopped = false
+
     let segmentCount: Int
 
-    init(segmenter: RemuxSegmenter, planner: RemuxSegmentPlanner, segmentCacheLimitBytes: Int = 96 << 20) {
+    init(segmenter: RemuxSegmenter, planner: RemuxSegmentPlanner,
+         segmentCacheLimitBytes: Int = 96 << 20, prefetchDepth: Int = 0) {
         self.segmenter = segmenter
         self.planner = planner
         self.segmentCacheLimitBytes = segmentCacheLimitBytes
+        self.prefetchDepth = max(0, prefetchDepth)
         self.segmentCount = planner.segmentDurations.count
+    }
+
+    /// Stops background prefetch. Called on session teardown BEFORE the segmenter
+    /// is closed so the worker doesn't drive a freed demuxer.
+    func stop() {
+        cacheLock.lock()
+        stopped = true
+        cacheLock.unlock()
     }
 
     // MARK: - Serving
@@ -129,6 +160,19 @@ final class RemuxContentSource: @unchecked Sendable {
         }
         cacheLock.unlock()
 
+        let produced = produceSegment(index, isPrefetch: false)
+        // Kick read-ahead forward from this playhead (no-op when prefetch is off).
+        schedulePrefetch(playhead: index)
+        return produced
+    }
+
+    /// Produces (fetch + `-c copy` mux), caches, and throughput-logs one segment,
+    /// serialised behind `productionLock` (the C demuxer is single-threaded) with a
+    /// double-checked cache lookup so an on-demand request and a background prefetch
+    /// can never mux the same index twice. Shared by the on-demand and prefetch
+    /// paths. Returns the bytes, or `nil` if the mux failed after one retry.
+    @discardableResult
+    private func produceSegment(_ index: Int, isPrefetch: Bool) -> Data? {
         productionLock.lock()
         defer { productionLock.unlock() }
         // Double-check under the production lock: a peer may have just muxed it.
@@ -141,9 +185,9 @@ final class RemuxContentSource: @unchecked Sendable {
         cacheLock.unlock()
 
         // Throughput-starvation diagnostic: time the mux and the network the mux
-        // drove, and the cadence gap since the previous on-demand mux. A mux that
-        // takes longer than the segment's own duration cannot keep AVPlayer fed,
-        // so playback stalls/stutters — this line pinpoints that vs a clean
+        // drove, and the cadence gap since the previous mux. A mux that takes
+        // longer than the segment's own duration cannot keep AVPlayer fed, so
+        // playback stalls/stutters — this line pinpoints that vs a clean
         // timeline-drift bug (which would mux fast but play out of sync).
         let netBefore = segmenter.networkSnapshot()
         let muxStart = DispatchTime.now().uptimeNanoseconds
@@ -163,7 +207,7 @@ final class RemuxContentSource: @unchecked Sendable {
 
         let muxEnd = DispatchTime.now().uptimeNanoseconds
         lastSegmentServedUptimeNanos = muxEnd
-        logThroughput(index: index, bytesOut: produced.count,
+        logThroughput(index: index, isPrefetch: isPrefetch, bytesOut: produced.count,
                       muxNanos: muxEnd &- muxStart, gapNanos: gapNanos,
                       netBefore: netBefore, netAfter: segmenter.networkSnapshot())
 
@@ -171,8 +215,54 @@ final class RemuxContentSource: @unchecked Sendable {
         return produced
     }
 
+    // MARK: - Background prefetch (read-ahead)
+
+    /// Advances the prefetch window to follow `playhead` and ensures a worker pass
+    /// is running. No-op when `prefetchDepth == 0` (flag off) or torn down.
+    private func schedulePrefetch(playhead index: Int) {
+        guard prefetchDepth > 0 else { return }
+        cacheLock.lock()
+        if stopped { cacheLock.unlock(); return }
+        if index > prefetchCursor { prefetchCursor = index }
+        let needsWorker = !prefetchScheduled
+        if needsWorker { prefetchScheduled = true }
+        cacheLock.unlock()
+        if needsWorker {
+            prefetchQueue.async { [weak self] in self?.prefetchWorker() }
+        }
+    }
+
+    /// Serially produces the next uncached segments inside the window
+    /// `(cursor, cursor+prefetchDepth]`, re-reading the cursor between segments so
+    /// a seek re-aims the read-ahead at the new playhead. Exits when the window is
+    /// full (all cached / in flight) or on teardown.
+    private func prefetchWorker() {
+        while true {
+            cacheLock.lock()
+            if stopped { prefetchScheduled = false; cacheLock.unlock(); return }
+            let cursor = prefetchCursor
+            let maxIndex = min(cursor + prefetchDepth, segmentCount - 1)
+            var target = -1
+            var i = cursor + 1
+            while i <= maxIndex {
+                if segmentCache[i] == nil && !prefetchInFlight.contains(i) { target = i; break }
+                i += 1
+            }
+            if target < 0 { prefetchScheduled = false; cacheLock.unlock(); return }
+            prefetchInFlight.insert(target)
+            cacheLock.unlock()
+
+            produceSegment(target, isPrefetch: true)
+
+            cacheLock.lock()
+            prefetchInFlight.remove(target)
+            cacheLock.unlock()
+        }
+    }
+
     /// Emits the always-on per-segment throughput/cadence telemetry line.
-    private func logThroughput(index: Int, bytesOut: Int, muxNanos: UInt64, gapNanos: UInt64,
+    private func logThroughput(index: Int, isPrefetch: Bool, bytesOut: Int, muxNanos: UInt64,
+                               gapNanos: UInt64,
                                netBefore: HTTPRangeReader.NetworkSnapshot,
                                netAfter: HTTPRangeReader.NetworkSnapshot) {
         let muxMs = Double(muxNanos) / 1_000_000
@@ -190,10 +280,10 @@ final class RemuxContentSource: @unchecked Sendable {
         // own playback duration — AVPlayer cannot stay ahead of real time.
         let starved = duration > 0 && (muxMs / 1000) > duration
         RemuxLog.info(String(
-            format: "remux-tput: seg=%d dur=%.2fs mux=%.0fms gap=%.0fms out=%.2fMB(%.1fMB/s) "
+            format: "remux-tput: seg=%d kind=%@ dur=%.2fs mux=%.0fms gap=%.0fms out=%.2fMB(%.1fMB/s) "
                 + "net=%.0fms in=%.2fMB(%.1fMB/s) fetches=%d starved=%@",
-            index, duration, muxMs, gapMs, outMB, muxRate, netMs, inMB, fetchRate, fetches,
-            starved ? "YES" : "no"))
+            index, isPrefetch ? "pf" : "od", duration, muxMs, gapMs, outMB, muxRate,
+            netMs, inMB, fetchRate, fetches, starved ? "YES" : "no"))
     }
 
     /// Stores a freshly produced segment, updates counters, and evicts the LRU tail

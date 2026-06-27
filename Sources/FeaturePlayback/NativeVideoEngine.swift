@@ -259,7 +259,7 @@ public final class NativeVideoEngine: VideoEngine {
     /// URL directly (transcoded HLS already carries subtitles in its manifest).
     private func makeAsset(for request: PlaybackRequest) -> AVURLAsset {
         subtitleLoader = nil
-        guard !request.isTranscoding else {
+        guard !request.isManifestStream else {
             return AVURLAsset(url: request.streamURL)
         }
         let injectables: [InjectableSubtitle] = request.subtitleTracks.compactMap { track in
@@ -630,7 +630,7 @@ public final class NativeVideoEngine: VideoEngine {
     }
 
     private func seek(player: AVPlayer, to seconds: TimeInterval, kind: VideoSeekKind) async {
-        let target = clampToSeekableRange(seconds, item: player.currentItem)
+        let target = seekTarget(seconds, item: player.currentItem)
         let time = CMTime(seconds: target, preferredTimescale: 600)
         // `.fast` widens the tolerance so AVPlayer can snap to the nearest
         // available keyframe and return immediately — the right behaviour for
@@ -640,6 +640,20 @@ public final class NativeVideoEngine: VideoEngine {
         let toleranceSeconds: Double = kind == .fast ? 5 : 1
         let tolerance = CMTime(seconds: toleranceSeconds, preferredTimescale: 600)
         await player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+    }
+
+    /// Local-remux strategies own their random-access surface. Do not clamp those
+    /// seeks to AVPlayer's currently-advertised seekable range, because server-HLS
+    /// and freshly-generated local manifests often report only the buffered window
+    /// at startup; clamping there makes the scrubber appear unable to seek at all.
+    private func seekTarget(_ seconds: TimeInterval, item: AVPlayerItem?) -> TimeInterval {
+        guard request?.deliveryMode != .localRemux else {
+            let target = max(0, seconds)
+            let duration = item?.duration.seconds ?? request?.item.runtime ?? 0
+            guard duration.isFinite, duration > 0 else { return target }
+            return min(target, duration)
+        }
+        return clampToSeekableRange(seconds, item: item)
     }
 
     /// Clamps a target time into the item's seekable range when one is known, so

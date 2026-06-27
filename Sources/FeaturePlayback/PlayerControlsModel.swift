@@ -100,6 +100,31 @@ public final class PlayerControlsModel {
     /// the in-player control bar; seeded from the caller's initial preference.
     public var diagnosticsEnabled: Bool = false
 
+    // MARK: Local remux debug / comparison harness
+    /// Whether the current title is eligible for the shared local-remux seam.
+    public var localRemuxEligible: Bool = false
+    /// Whether playback is currently flowing through an active local-remux
+    /// strategy (as opposed to plain native/hybrid/server routing).
+    public var localRemuxActive: Bool = false
+    /// Available runtime-selectable local-remux strategies, persisted through the
+    /// playback preferences store.
+    public var localRemuxStrategies: [LocalRemuxStrategyChoice] = LocalRemuxStrategyChoice.builtInChoices
+    /// Persisted strategy selection for the next playback bring-up.
+    public var selectedLocalRemuxStrategyID: String = LocalRemuxStrategyChoice.disabledID
+    /// Human-readable name of the strategy actually active for *this* playback
+    /// session. A mid-play change to `selectedLocalRemuxStrategyID` does not rewrite
+    /// the active stream until the title is reloaded.
+    public var activeLocalRemuxStrategyName: String?
+    /// Human-readable reason why this title didn't enter the local-remux seam.
+    public var localRemuxEligibilityMessage: String = ""
+    /// Whether the scripted seek torture-test is currently running.
+    public var remuxHarnessRunning: Bool = false
+    /// Live status / last result for the scripted seek torture-test.
+    public var remuxHarnessStatus: String = ""
+    /// True when the selected remux mode is not what is currently playing, so the
+    /// player can offer an explicit reload instead of making the user guess.
+    public var localRemuxReloadAvailable: Bool = false
+
     // MARK: Skip intros/credits
     /// Server-detected skippable segments (intros/credits) for the playing item.
     /// Populated by the view model only when the per-profile Skip Intros setting

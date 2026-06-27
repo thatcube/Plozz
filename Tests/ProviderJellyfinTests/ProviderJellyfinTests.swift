@@ -466,6 +466,34 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(request.sourceMetadata?.video?.isInterlaced, true)
     }
 
+    func testPlaybackInfoExposesLocalRemuxSourceStaticURL() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Movie","Type":"Movie","RunTimeTicks":72000000000,
+         "MediaStreams":[
+           {"Index":0,"Type":"Video","Codec":"hevc","VideoRangeType":"DOVIWithHDR10"},
+           {"Index":1,"Type":"Audio","Codec":"eac3","DisplayTitle":"English"}
+         ]}
+        """)
+        stub.stub(pathSuffix: "/Items/i1/PlaybackInfo", json: """
+        {"MediaSources":[{"Id":"src1","ETag":"etag9","Container":"mkv","SupportsDirectPlay":true,
+          "MediaStreams":[
+            {"Index":0,"Type":"Video","Codec":"hevc","VideoRangeType":"DOVIWithHDR10"},
+            {"Index":1,"Type":"Audio","Codec":"eac3","DisplayTitle":"English"}
+          ]}],
+         "PlaySessionId":"ps1"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let request = try await provider.playbackInfo(for: "i1")
+        let source = try XCTUnwrap(request.localRemuxSource)
+        let url = source.originalURL.absoluteString
+        XCTAssertTrue(url.contains("/Videos/i1/stream.mkv"), url)
+        XCTAssertTrue(url.contains("static=true"), url)
+        XCTAssertTrue(url.contains("mediaSourceId=src1"), url)
+        XCTAssertTrue(url.contains("api_key=TOKEN"), url)
+    }
+
     func testPlaybackInfoPrefersTranscodingHLSURL() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """

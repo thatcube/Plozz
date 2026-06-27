@@ -93,6 +93,30 @@ final class PlaybackDiagnosticsHDRTests: XCTestCase {
         XCTAssertEqual(PlaybackDiagnostics.channelDescription(layout: nil, channels: 3), "3ch")
         XCTAssertNil(PlaybackDiagnostics.channelDescription(layout: nil, channels: nil))
     }
+
+    func testAudioOutputDescriptionReportsAtmosPassthroughExpectation() {
+        let atmosRoute = MediaCapabilities(maxOutputChannels: 6, supportsAtmos: true)
+        XCTAssertEqual(
+            PlaybackDiagnostics.audioOutputDescription(
+                codec: "eac3",
+                profile: "Dolby Atmos",
+                channels: 6,
+                capabilities: atmosRoute
+            ),
+            "E-AC-3 JOC Atmos passthrough expected"
+        )
+
+        let stereoRoute = MediaCapabilities(maxOutputChannels: 2, supportsAtmos: false)
+        XCTAssertEqual(
+            PlaybackDiagnostics.audioOutputDescription(
+                codec: "eac3",
+                profile: "Dolby Atmos",
+                channels: 6,
+                capabilities: stereoRoute
+            ),
+            "Atmos present; route may fall back to 5.1"
+        )
+    }
 }
 
 final class PlaybackDiagnosticsFormattingTests: XCTestCase {
@@ -155,6 +179,7 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
     func testModeAndHDRDisplayNames() {
         XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.directPlay.displayName, "Direct Play")
         XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.remux.displayName, "Remux (server, lossless)")
+        XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.localRemux.displayName, "Local Remux")
         XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.transcode.displayName, "Transcode (server)")
         XCTAssertEqual(PlaybackDiagnostics.HDRFormat.dolbyVision.displayName, "Dolby Vision")
         XCTAssertEqual(PlaybackDiagnostics.HDRFormat.hdr10.displayName, "HDR10 (PQ)")
@@ -212,12 +237,14 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
             ),
             subtitle: .init(codec: "subrip", language: "eng")
         )
-        let d = PlaybackDiagnostics.base(from: metadata, mode: .directPlay)
+        let capabilities = MediaCapabilities(maxOutputChannels: 6, supportsAtmos: true)
+        let d = PlaybackDiagnostics.base(from: metadata, mode: .directPlay, capabilities: capabilities)
 
         XCTAssertEqual(d.containerText, "Matroska (MKV)")
         XCTAssertEqual(d.hdr, .dolbyVision)
         XCTAssertEqual(d.videoLineText, "HEVC · Dolby Vision · 1920×1080 · 4.8 Mbps · 24.00 fps")
         XCTAssertEqual(d.audioLineText, "Dolby Atmos · 48 kHz · 5.1 · 768 Kbps")
+        XCTAssertEqual(d.audioOutputText, "E-AC-3 JOC Atmos passthrough expected")
         XCTAssertEqual(d.subtitleText, "SubRip · English")
         XCTAssertEqual(d.mode, .directPlay)
     }
@@ -228,6 +255,38 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
         XCTAssertEqual(d.audioLineText, "—")
         XCTAssertEqual(d.containerText, "—")
         XCTAssertEqual(d.subtitleText, "—")
+    }
+
+    func testRemuxFormattingConveniences() {
+        let remux = PlaybackDiagnostics.RemuxDiagnostics(
+            strategyID: "reference.server-remux",
+            strategyName: "Reference",
+            timeToFirstFrameMs: 840,
+            lastSeekLatencyMs: 125,
+            stallCount: 2,
+            segmentCount: 18,
+            bytesPulled: 1_073_741_824,
+            cacheDiskBytes: 524_288_000,
+            cacheMemoryBytes: 67_108_864,
+            harnessState: .failed,
+            lastHarnessResult: .init(
+                state: .failed,
+                summary: "Failed · Seek near EOF timed out",
+                startedAt: .distantPast,
+                finishedAt: .distantFuture
+            )
+        )
+        let diagnostics = PlaybackDiagnostics(mode: .localRemux, remux: remux)
+
+        XCTAssertEqual(diagnostics.remuxStrategyText, "Reference")
+        XCTAssertEqual(diagnostics.remuxTransportText, "Server-owned HLS · seek still depends on provider")
+        XCTAssertEqual(diagnostics.remuxTimeToFirstFrameText, "840 ms")
+        XCTAssertEqual(diagnostics.remuxSeekLatencyText, "125 ms")
+        XCTAssertEqual(diagnostics.remuxStallsText, "2")
+        XCTAssertEqual(diagnostics.remuxSegmentsText, "18")
+        XCTAssertEqual(diagnostics.remuxBytesText, "1.00 GB")
+        XCTAssertEqual(diagnostics.remuxUsageText, "RAM 64 MB · Disk 500 MB")
+        XCTAssertEqual(diagnostics.remuxHarnessText, "Failed · Seek near EOF timed out")
     }
 }
 

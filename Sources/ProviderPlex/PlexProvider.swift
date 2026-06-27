@@ -208,6 +208,18 @@ public struct PlexProvider: MediaProvider {
         let streams = part.Stream ?? []
         let audio = streams.filter { $0.streamType == 2 }.map(map(stream:))
         let subs = streams.filter { $0.streamType == 3 }.map(map(stream:))
+        let localRemuxSource = Self.localRemuxSourceDescriptor(
+            itemID: itemID,
+            mediaSourceID: media.id.map(String.init),
+            client: client,
+            part: part,
+            referencePlaybackURL: client.transcodeURL(ratingKey: itemID, sessionID: transcodeSessionID) ?? resolved.url,
+            durationSeconds: mappedItem.runtime,
+            container: media.container ?? part.container,
+            streams: streams,
+            mediaAudioProfile: media.audioProfile,
+            mediaVideoDisplayTitle: media.videoStreamDisplayTitle
+        )
 
         return PlaybackRequest(
             item: mappedItem,
@@ -225,6 +237,7 @@ public struct PlexProvider: MediaProvider {
                 mediaAudioProfile: media.audioProfile,
                 mediaVideoDisplayTitle: media.videoStreamDisplayTitle
             ),
+            localRemuxSource: localRemuxSource,
             scrubPreview: scrubPreview(for: part)
         )
     }
@@ -379,7 +392,8 @@ public struct PlexProvider: MediaProvider {
                 frameRate: v.frameRate,
                 videoRange: videoRangeToken(for: rangeType),
                 videoRangeType: rangeType,
-                colorTransfer: v.colorTrc
+                colorTransfer: v.colorTrc,
+                dolbyVisionProfile: v.DOVIProfile
             )
         }
         let audioStream = audio.map { a in
@@ -412,6 +426,40 @@ public struct PlexProvider: MediaProvider {
             subtitle: subtitleStream
         )
         return metadata.isEmpty ? nil : metadata
+    }
+
+    static func localRemuxSourceDescriptor(
+        itemID: String,
+        mediaSourceID: String?,
+        client: PlexClient,
+        part: PlexPart,
+        referencePlaybackURL: URL?,
+        durationSeconds: TimeInterval?,
+        container: String?,
+        streams: [PlexStream],
+        mediaAudioProfile: String?,
+        mediaVideoDisplayTitle: String?
+    ) -> LocalRemuxSourceDescriptor? {
+        guard let key = part.key,
+              let originalURL = client.downloadURL(forPartKey: key),
+              let metadata = sourceMetadata(
+                container: container,
+                streams: streams,
+                mediaAudioProfile: mediaAudioProfile,
+                mediaVideoDisplayTitle: mediaVideoDisplayTitle
+              ) else {
+            return nil
+        }
+        return LocalRemuxSourceDescriptor(
+            itemID: itemID,
+            mediaSourceID: mediaSourceID,
+            provider: .plex,
+            originalURL: originalURL,
+            referencePlaybackURL: referencePlaybackURL,
+            durationSeconds: durationSeconds,
+            byteRangeSupported: true,
+            sourceMetadata: metadata
+        )
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {

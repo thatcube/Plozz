@@ -19,6 +19,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         /// Server repackages the original video/audio bitstream into a new
         /// container (e.g. MKV → fMP4 HLS) with no re-encode. Lossless.
         case remux
+        /// Plozz intercepted the original bytes locally and synthesized its own
+        /// AVPlayer-facing stream (e.g. localhost/custom-scheme HLS).
+        case localRemux
         /// Server re-encodes the video and/or audio.
         case transcode
         case unknown
@@ -27,9 +30,89 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
             switch self {
             case .directPlay: return "Direct Play"
             case .remux: return "Remux (server, lossless)"
+            case .localRemux: return "Local Remux"
             case .transcode: return "Transcode (server)"
             case .unknown: return "Unknown"
             }
+        }
+    }
+
+    /// Shared comparison-harness metrics for a local-remux attempt.
+    public struct RemuxDiagnostics: Equatable, Sendable {
+        public enum HarnessState: String, Equatable, Sendable {
+            case idle
+            case running
+            case passed
+            case failed
+
+            public var displayName: String {
+                switch self {
+                case .idle: return "Idle"
+                case .running: return "Running"
+                case .passed: return "Passed"
+                case .failed: return "Failed"
+                }
+            }
+        }
+
+        public struct HarnessResult: Equatable, Sendable {
+            public var state: HarnessState
+            public var summary: String
+            public var startedAt: Date
+            public var finishedAt: Date
+
+            public init(
+                state: HarnessState,
+                summary: String,
+                startedAt: Date,
+                finishedAt: Date
+            ) {
+                self.state = state
+                self.summary = summary
+                self.startedAt = startedAt
+                self.finishedAt = finishedAt
+            }
+        }
+
+        public var strategyID: String
+        public var strategyName: String
+        public var timeToFirstFrameMs: Int?
+        public var lastSeekLatencyMs: Int?
+        public var stallCount: Int?
+        public var segmentCount: Int?
+        public var bytesPulled: Int64?
+        public var cacheDiskBytes: Int64?
+        public var cacheMemoryBytes: Int64?
+        public var harnessState: HarnessState
+        public var harnessStep: String?
+        public var lastHarnessResult: HarnessResult?
+
+        public init(
+            strategyID: String,
+            strategyName: String,
+            timeToFirstFrameMs: Int? = nil,
+            lastSeekLatencyMs: Int? = nil,
+            stallCount: Int? = nil,
+            segmentCount: Int? = nil,
+            bytesPulled: Int64? = nil,
+            cacheDiskBytes: Int64? = nil,
+            cacheMemoryBytes: Int64? = nil,
+            harnessState: HarnessState = .idle,
+            harnessStep: String? = nil,
+            lastHarnessResult: HarnessResult? = nil
+        ) {
+            self.strategyID = strategyID
+            self.strategyName = strategyName
+            self.timeToFirstFrameMs = timeToFirstFrameMs
+            self.lastSeekLatencyMs = lastSeekLatencyMs
+            self.stallCount = stallCount
+            self.segmentCount = segmentCount
+            self.bytesPulled = bytesPulled
+            self.cacheDiskBytes = cacheDiskBytes
+            self.cacheMemoryBytes = cacheMemoryBytes
+            self.harnessState = harnessState
+            self.harnessStep = harnessStep
+            self.lastHarnessResult = lastHarnessResult
         }
     }
 
@@ -138,6 +221,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var audioSampleRate: Int?
     /// Source-declared audio bitrate, in bits/sec.
     public var audioBitrate: Double?
+    /// Expected output handling for the current audio route, e.g. Atmos passthrough
+    /// vs. a route that may collapse to channel-bed audio.
+    public var audioOutputDescription: String?
     /// One-line subtitle description, e.g. `SubRip · English`.
     public var subtitleDescription: String?
     public var container: String?
@@ -173,6 +259,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var liveNativeEngines: Int?
     /// Live `MPVVideoEngine` (libmpv) instances. See `liveViewModels`.
     public var liveMPVEngines: Int?
+    /// Local-remux comparison-harness metrics, when the active playback path is
+    /// routed through the shared remux seam.
+    public var remux: RemuxDiagnostics?
 
     public init(
         resolution: VideoResolution? = nil,
@@ -187,6 +276,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         audioChannelLayout: String? = nil,
         audioSampleRate: Int? = nil,
         audioBitrate: Double? = nil,
+        audioOutputDescription: String? = nil,
         subtitleDescription: String? = nil,
         container: String? = nil,
         mode: PlaybackMode = .unknown,
@@ -203,7 +293,8 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         thermalState: ThermalLevel? = nil,
         liveViewModels: Int? = nil,
         liveNativeEngines: Int? = nil,
-        liveMPVEngines: Int? = nil
+        liveMPVEngines: Int? = nil,
+        remux: RemuxDiagnostics? = nil
     ) {
         self.resolution = resolution
         self.indicatedBitrate = indicatedBitrate
@@ -217,6 +308,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.audioChannelLayout = audioChannelLayout
         self.audioSampleRate = audioSampleRate
         self.audioBitrate = audioBitrate
+        self.audioOutputDescription = audioOutputDescription
         self.subtitleDescription = subtitleDescription
         self.container = container
         self.mode = mode
@@ -234,6 +326,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.liveViewModels = liveViewModels
         self.liveNativeEngines = liveNativeEngines
         self.liveMPVEngines = liveMPVEngines
+        self.remux = remux
     }
 }
 
@@ -368,6 +461,42 @@ public extension PlaybackDiagnostics {
         return friendlyCodecName(codec)
     }
 
+    /// Human-readable expectation for what leaves the Apple TV on the active
+    /// route. This is intentionally explicit for Atmos so diagnostics can show the
+    /// difference between "Atmos bitstream is present" and "the current route is
+    /// likely only receiving the 5.1 channel bed".
+    static func audioOutputDescription(
+        codec: String?,
+        profile: String?,
+        channels: Int?,
+        capabilities: MediaCapabilities
+    ) -> String? {
+        let token = (codec ?? "").lowercased().replacingOccurrences(of: "_", with: "-")
+        let profileText = (profile ?? "").lowercased()
+        let isAtmos = profileText.contains("atmos")
+        switch token {
+        case "eac3", "ec3", "ec-3", "e-ac-3":
+            if isAtmos {
+                return capabilities.supportsAtmos
+                    ? "E-AC-3 JOC Atmos passthrough expected"
+                    : "Atmos present; route may fall back to \(channelDescription(layout: nil, channels: channels) ?? "channel-bed audio")"
+            }
+            return "E-AC-3 passthrough"
+        case "ac3", "ac-3":
+            return "AC-3 passthrough"
+        case "truehd", "mlp":
+            return isAtmos ? "TrueHD Atmos is not AVPlayer-compatible" : "TrueHD is not AVPlayer-compatible"
+        case "dts", "dca":
+            return capabilities.supportsDTSPassthrough ? "DTS passthrough" : "DTS requires mpv decode or a passthrough route"
+        case "dts-hd", "dtshd", "dca-ma":
+            return capabilities.supportsDTSPassthrough ? "DTS-HD passthrough" : "DTS-HD requires mpv decode or a passthrough route"
+        case "aac", "mp4a", "alac", "mp3", "flac", "pcm", "lpcm":
+            return "Decoded by Apple TV"
+        default:
+            return token.isEmpty ? nil : nil
+        }
+    }
+
     /// Friendly channel layout from an explicit layout label and/or a raw
     /// channel count, e.g. `5.1`, `7.1`, `Stereo`.
     static func channelDescription(layout: String?, channels: Int?) -> String? {
@@ -458,6 +587,12 @@ public extension PlaybackDiagnostics {
     static func formatFrameRate(_ fps: Double?) -> String {
         guard let fps, fps > 0, fps.isFinite else { return placeholder }
         return String(format: "%.2f fps", fps)
+    }
+
+    /// Formats a millisecond latency value, e.g. `423 ms`.
+    static func formatLatencyMs(_ milliseconds: Int?) -> String {
+        guard let milliseconds, milliseconds >= 0 else { return placeholder }
+        return "\(milliseconds) ms"
     }
 
     /// Formats a resolution with an optional quality label, e.g.
@@ -565,6 +700,10 @@ public extension PlaybackDiagnostics {
         ])
     }
 
+    var audioOutputText: String {
+        audioOutputDescription ?? Self.placeholder
+    }
+
     /// Subtitle line, e.g. `SubRip · English`, or a placeholder when none.
     var subtitleText: String { subtitleDescription ?? Self.placeholder }
 
@@ -595,6 +734,65 @@ public extension PlaybackDiagnostics {
         Self.formatBytes(memoryFootprintBytes) ?? Self.placeholder
     }
 
+    var remuxStrategyText: String {
+        remux?.strategyName ?? Self.placeholder
+    }
+
+    var remuxTransportText: String {
+        guard let remux else { return Self.placeholder }
+        if remux.strategyID == LocalRemuxStrategyChoice.referenceServerRemuxID {
+            return "Server-owned HLS · seek still depends on provider"
+        }
+        return "App-owned local stream"
+    }
+
+    var remuxTimeToFirstFrameText: String {
+        Self.formatLatencyMs(remux?.timeToFirstFrameMs)
+    }
+
+    var remuxSeekLatencyText: String {
+        Self.formatLatencyMs(remux?.lastSeekLatencyMs)
+    }
+
+    var remuxStallsText: String {
+        remux?.stallCount.map(String.init) ?? Self.placeholder
+    }
+
+    var remuxSegmentsText: String {
+        remux?.segmentCount.map(String.init) ?? Self.placeholder
+    }
+
+    var remuxBytesText: String {
+        Self.formatBytes(remux?.bytesPulled) ?? Self.placeholder
+    }
+
+    var remuxUsageText: String {
+        guard let remux else { return Self.placeholder }
+        let disk = Self.formatBytes(remux.cacheDiskBytes)
+        let memory = Self.formatBytes(remux.cacheMemoryBytes)
+        if disk == nil && memory == nil { return Self.placeholder }
+        return Self.joinParts([
+            memory.map { "RAM \($0)" },
+            disk.map { "Disk \($0)" }
+        ])
+    }
+
+    var remuxHarnessText: String {
+        guard let remux else { return Self.placeholder }
+        let status = remux.harnessState.displayName
+        switch remux.harnessState {
+        case .running:
+            return Self.joinParts([status, remux.harnessStep])
+        case .passed, .failed:
+            if let summary = remux.lastHarnessResult?.summary, summary.hasPrefix(status) {
+                return summary
+            }
+            return Self.joinParts([status, remux.lastHarnessResult?.summary])
+        case .idle:
+            return status
+        }
+    }
+
     /// System thermal pressure, e.g. `Serious (throttling)`.
     var thermalText: String {
         thermalState?.displayName ?? Self.placeholder
@@ -622,7 +820,11 @@ public extension PlaybackDiagnostics {
     /// Builds the authoritative baseline snapshot from a provider's source
     /// metadata. The platform sampler layers live values (observed bitrate,
     /// buffer, dropped frames) and device/disk info on top of this.
-    static func base(from metadata: MediaSourceMetadata?, mode: PlaybackMode) -> PlaybackDiagnostics {
+    static func base(
+        from metadata: MediaSourceMetadata?,
+        mode: PlaybackMode,
+        capabilities: MediaCapabilities = .default
+    ) -> PlaybackDiagnostics {
         var d = PlaybackDiagnostics(mode: mode)
         guard let metadata else { return d }
 
@@ -650,6 +852,12 @@ public extension PlaybackDiagnostics {
             d.audioChannelLayout = a.channelLayout
             if let rate = a.sampleRate, rate > 0 { d.audioSampleRate = rate }
             if let bitrate = a.bitrate, bitrate > 0 { d.audioBitrate = Double(bitrate) }
+            d.audioOutputDescription = audioOutputDescription(
+                codec: a.codec,
+                profile: a.profile,
+                channels: a.channels,
+                capabilities: capabilities
+            )
         }
 
         if let s = metadata.subtitle {

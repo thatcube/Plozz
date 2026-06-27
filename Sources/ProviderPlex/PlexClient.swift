@@ -547,6 +547,19 @@ public struct PlexClient: Sendable {
         absoluteURL(serverPath: key, extraQuery: [URLQueryItem(name: "X-Plex-Token", value: token)])
     }
 
+    /// Builds the absolute raw-file URL for a part `key`, explicitly asking Plex
+    /// for the original file bytes (`download=1`). Used by the local-remux seam,
+    /// which needs stable range-readable access to the untouched MKV.
+    func downloadURL(forPartKey key: String) -> URL? {
+        absoluteURL(
+            serverPath: key,
+            extraQuery: [
+                URLQueryItem(name: "download", value: "1"),
+                URLQueryItem(name: "X-Plex-Token", value: token)
+            ]
+        )
+    }
+
     /// Absolute, token-bearing URL of a part's **BIF** trickplay index file
     /// (`GET /library/parts/{partID}/indexes/{quality}`). The whole BIF blob is
     /// downloaded and parsed client-side for scrubbing previews; the token rides

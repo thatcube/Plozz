@@ -144,6 +144,50 @@ void plozz_remux_set_normalize_dovi_level(plozz_remux_session *s, int enabled);
 void plozz_remux_set_derive_eac3_frame_dur(plozz_remux_session *s, int enabled);
 
 /*
+ * Opt into rebuilding the segment table from REAL keyframe boundaries discovered
+ * by seek-probing the source (default OFF). When OFF the table built at open is
+ * used unchanged: for sources whose container carries a keyframe index (Matroska
+ * Cues) that is already keyframe-aligned, but for sources WITHOUT a usable index
+ * the open-time table falls back to a FIXED 6s cadence whose declared EXTINF does
+ * not match what `-c copy` actually muxes — the per-segment BACKWARD-seek snaps
+ * the start to an earlier keyframe and the boundary scan overshoots to the next
+ * keyframe, so the real muxed span (~12s median, observed) is ~2x the declared 6s
+ * and consecutive segments OVERLAP. AVPlayer advances its clock by the declared
+ * EXTINF while each segment carries roughly double that much overlapping media →
+ * progressive audio desync + video stutter + cut-outs that compound over time.
+ *
+ * When ON (and the open-time table is the fixed-cadence fallback, i.e. no usable
+ * index), this discovers the file's real keyframe times with a bounded series of
+ * cheap BACKWARD seek-probes (the same seek primitive the muxer already uses, so
+ * no full-file read), then rebuilds the table on those real boundaries via the
+ * exact grouping the keyframe-index path uses — making each segment start AND end
+ * on a real IDR with EXTINF == the true keyframe-to-keyframe span (no overlap).
+ * A no-op when the table was already keyframe-index-built or the source has no
+ * duration. Must be called AFTER plozz_remux_open and BEFORE reading the segment
+ * count / generating segments, since it can change segment_count.
+ *
+ * Callers gate this on the `com.plozz.playback.remuxKeyframeScan` debug flag.
+ * Ignored when `s` is NULL or `enabled` is 0.
+ */
+void plozz_remux_set_keyframe_scan(plozz_remux_session *s, int enabled);
+
+/*
+ * Pure test/diagnostic helper: group a sorted list of real keyframe times (in
+ * seconds, 0-based) into non-overlapping segments of at least `target_seconds`
+ * each, snapping every boundary to a real keyframe and stamping each segment's
+ * duration as the true keyframe-to-keyframe span (the invariant that keeps the
+ * playlist EXTINF equal to the muxed media span). The final tail segment runs to
+ * `duration` (or the last keyframe when duration is unknown/<= last keyframe).
+ * Writes up to `max_out` segments into `out_starts` / `out_durations` and returns
+ * the number written (0 when fewer than two keyframes are supplied). No session
+ * state; safe to call from tests.
+ */
+int plozz_remux_plan_segments(const double *keyframe_times, int count,
+                              double duration, double target_seconds,
+                              double *out_starts, double *out_durations,
+                              int max_out);
+
+/*
  * Pure test/diagnostic helper: parse the first (E-)AC-3 syncframe in `data` and
  * return the PCM sample count it represents (256/512/768/1536), or 0 if no
  * syncword is found or the leading frame is a dependent substream. Pass

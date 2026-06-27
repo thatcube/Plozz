@@ -143,9 +143,17 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // time (candidate fix for progressive audio desync). The open-time probe
         // always runs + logs; this flag only selects whether the muxer consumes it.
         let deriveEac3 = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxEac3FrameDur")
+        // Flag `com.plozz.playback.remuxKeyframeScan` (DEFAULT OFF): for sources with
+        // no usable keyframe index (the fixed-cadence fallback, which logs "no usable
+        // index"), rebuild the segment table on REAL keyframe boundaries discovered by
+        // seek-probe so EXTINF == muxed span and segments don't overlap — eliminating
+        // the progressive A/V desync + stutter those titles exhibit. No-op otherwise.
+        let keyframeScan = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeScan")
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
-                                           deriveEac3FrameDur: deriveEac3)
+                                           deriveEac3FrameDur: deriveEac3,
+                                           keyframeScan: keyframeScan)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
+        if keyframeScan { RemuxLog.info("Session: remuxKeyframeScan ON — real-keyframe segment table for no-index sources") }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only

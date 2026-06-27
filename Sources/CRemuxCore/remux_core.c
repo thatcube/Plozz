@@ -74,6 +74,16 @@ struct plozz_remux_session {
      * stamps this true value instead of the historical fixed 1536 fallback. */
     int eac3_frame_samples;
     int derive_eac3_frame_dur;
+
+    /* Effective per-segment target (seconds) used to build the table at open,
+     * stored so the post-open keyframe-scan rebuild (set_keyframe_scan, gated by
+     * com.plozz.playback.remuxKeyframeScan) groups to the same cadence. */
+    double target_segment_seconds;
+
+    /* 1 when build_segment_table fell back to fixed cadence (no usable index),
+     * so the keyframe-scan rebuild knows it should engage; 0 when the table was
+     * built from a real keyframe index (already keyframe-aligned, never rebuilt). */
+    int used_fixed_cadence;
 };
 
 /* ----- AVIO callback adapters ------------------------------------------- */
@@ -195,6 +205,54 @@ static void probe_eac3_frame_samples(plozz_remux_session *s) {
 /* ----- segment table ----------------------------------------------------- */
 
 /*
+ * Group a sorted list of real keyframe times (seconds, 0-based) into
+ * non-overlapping segments of at least `target_seconds` each. Every boundary is
+ * one of the supplied keyframe times and each segment's duration is the true
+ * keyframe-to-keyframe span, so the declared EXTINF equals what a `-c copy` mux
+ * actually produces. The final tail runs to `duration` (or the last keyframe when
+ * duration is unknown / <= the last keyframe). Allocates `*out_segs` (caller frees)
+ * and returns the segment count, or 0 (with *out_segs left NULL) when fewer than
+ * two keyframes are supplied or allocation fails.
+ *
+ * This is the single grouping implementation shared by the keyframe-INDEX path
+ * and the keyframe-SCAN rebuild, and is mirrored exactly by the pure, testable
+ * plozz_remux_plan_segments().
+ */
+static int build_segments_from_keyframes(const double *kf, int kf_count,
+                                         double duration, double target_seconds,
+                                         plozz_remux_segment **out_segs) {
+    if (out_segs) *out_segs = NULL;
+    if (!kf || kf_count <= 1 || !out_segs) return 0;
+    if (target_seconds < 1.0) target_seconds = 6.0;
+
+    plozz_remux_segment *segs =
+        (plozz_remux_segment *)malloc(sizeof(plozz_remux_segment) * (size_t)kf_count);
+    if (!segs) return 0;
+
+    int count = 0;
+    double seg_start = kf[0] > 0.001 ? 0.0 : kf[0];
+    for (int i = 1; i < kf_count && count < PLOZZ_MAX_SEGMENTS; i++) {
+        if (kf[i] - seg_start >= target_seconds - 0.001) {
+            segs[count].start_seconds = seg_start;
+            segs[count].duration_seconds = kf[i] - seg_start;
+            count++;
+            seg_start = kf[i];
+        }
+    }
+    /* Final tail segment up to the end of the file. */
+    double tail_end = (duration > seg_start) ? duration : (kf[kf_count - 1]);
+    if (tail_end > seg_start + 0.001 && count < PLOZZ_MAX_SEGMENTS) {
+        segs[count].start_seconds = seg_start;
+        segs[count].duration_seconds = tail_end - seg_start;
+        count++;
+    }
+
+    if (count <= 0) { free(segs); return 0; }
+    *out_segs = segs;
+    return count;
+}
+
+/*
  * Build the keyframe-aligned segment table from the video stream's libavformat
  * index. For Matroska this index is populated from the Cues at open time, so the
  * boundaries are the file's real IDR keyframes. Falls back to a fixed cadence
@@ -231,28 +289,16 @@ static void build_segment_table(plozz_remux_session *s, double target_seconds) {
     int count = 0;
 
     if (kf_count > 1) {
-        segs = (plozz_remux_segment *)malloc(sizeof(plozz_remux_segment) * (size_t)kf_count);
-        double seg_start = kf[0] > 0.001 ? 0.0 : kf[0];
-        for (int i = 1; i < kf_count && count < PLOZZ_MAX_SEGMENTS; i++) {
-            if (kf[i] - seg_start >= target_seconds - 0.001) {
-                segs[count].start_seconds = seg_start;
-                segs[count].duration_seconds = kf[i] - seg_start;
-                count++;
-                seg_start = kf[i];
-            }
-        }
-        /* Final tail segment up to the end of the file. */
-        double tail_end = (duration > seg_start) ? duration : (kf[kf_count - 1]);
-        if (tail_end > seg_start + 0.001 && count < PLOZZ_MAX_SEGMENTS) {
-            segs[count].start_seconds = seg_start;
-            segs[count].duration_seconds = tail_end - seg_start;
-            count++;
-        }
+        count = build_segments_from_keyframes(kf, kf_count, duration, target_seconds, &segs);
     }
 
     free(kf);
 
-    /* Fallback: fixed cadence (BACKWARD seek snaps each to a real keyframe). */
+    /* Fallback: fixed cadence (BACKWARD seek snaps each to a real keyframe). NB:
+     * the declared per-segment duration here is the *target*, which does NOT match
+     * what `-c copy` muxes when keyframes are sparser/denser than the cadence — the
+     * source of the progressive A/V desync on no-index titles. The post-open
+     * keyframe-scan rebuild (set_keyframe_scan) replaces this with real boundaries. */
     if (count == 0 && duration > 0) {
         int n = (int)(duration / target_seconds) + 1;
         if (n > PLOZZ_MAX_SEGMENTS) n = PLOZZ_MAX_SEGMENTS;
@@ -266,11 +312,136 @@ static void build_segment_table(plozz_remux_session *s, double target_seconds) {
             count++;
             t += target_seconds;
         }
+        s->used_fixed_cadence = 1;
         remux_log(1, "remux: no usable index; using %d fixed-cadence segments", count);
+    } else {
+        s->used_fixed_cadence = 0;
     }
 
     s->segments = segs;
     s->segment_count = count;
+}
+
+/*
+ * Read forward from the current demux position (just after a BACKWARD seek) and
+ * return the 0-based seconds timestamp of the first VIDEO keyframe encountered,
+ * or -1.0 if none is found within a bounded number of packets. A BACKWARD seek
+ * lands the video stream on a keyframe, so the first video packet is normally that
+ * keyframe; we still prefer an explicit AV_PKT_FLAG_KEY packet and fall back to
+ * the first video packet's timestamp. Cheap: reads only a handful of packets, not
+ * the whole file.
+ */
+static double read_seek_keyframe_pts(plozz_remux_session *s, AVPacket *pkt, double file_start) {
+    AVStream *vst = s->ic->streams[s->video_index];
+    int tries = 0;
+    double first_v = -1.0;
+    while (tries < 512 && av_read_frame(s->ic, pkt) >= 0) {
+        tries++;
+        if (pkt->stream_index == s->video_index) {
+            int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
+            double t = (ts != AV_NOPTS_VALUE) ? ts * av_q2d(vst->time_base) - file_start : -1.0;
+            if (t < 0 && t > -0.001) t = 0.0;
+            int is_key = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
+            av_packet_unref(pkt);
+            if (is_key) return (t < 0) ? 0.0 : t;
+            if (first_v < 0 && t >= 0) first_v = t;
+            continue;
+        }
+        av_packet_unref(pkt);
+    }
+    return first_v;
+}
+
+/*
+ * Discover the source's real keyframe times (seconds, 0-based) by seek-probing,
+ * for files whose container exposes no usable keyframe index. Starting from t=0,
+ * each step BACKWARD-seeks to (last + k*target) for growing k until the seek lands
+ * on a keyframe strictly after `last`, records it, and advances. This snaps every
+ * collected time to a real IDR while keeping spacing ~>= target, using only the
+ * cheap BACKWARD seek the muxer already relies on (no full-file read). Allocates
+ * `*out_kf` (caller frees) and returns the count (>=1 includes the synthetic t=0
+ * start), or 0 on failure.
+ */
+static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seconds,
+                                      double **out_kf) {
+    if (out_kf) *out_kf = NULL;
+    if (!s || !out_kf || s->video_index < 0) return 0;
+    double duration = s->duration_seconds;
+    if (duration <= 0) return 0;
+    if (target_seconds < 1.0) target_seconds = 6.0;
+
+    AVStream *vst = s->ic->streams[s->video_index];
+    double file_start = (s->ic->start_time != AV_NOPTS_VALUE)
+        ? (double)s->ic->start_time / AV_TIME_BASE : 0.0;
+
+    double *kf = (double *)malloc(sizeof(double) * (size_t)PLOZZ_MAX_SEGMENTS);
+    if (!kf) return 0;
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) { free(kf); return 0; }
+
+    int n = 0;
+    kf[n++] = 0.0;            /* first segment always starts at the timeline origin */
+    double last = 0.0;
+
+    while (last < duration - 0.001 && n < PLOZZ_MAX_SEGMENTS) {
+        double found = -1.0;
+        for (double mult = 1.0; ; mult += 1.0) {
+            double tgt = last + target_seconds * mult;
+            int at_end = 0;
+            if (tgt >= duration) { tgt = duration - 0.05; at_end = 1; }
+            if (tgt <= last) break;
+            int64_t seek_ts = (int64_t)((tgt + file_start) / av_q2d(vst->time_base));
+            if (avformat_seek_file(s->ic, s->video_index, INT64_MIN, seek_ts, seek_ts,
+                                   AVSEEK_FLAG_BACKWARD) < 0) {
+                break;
+            }
+            double kpts = read_seek_keyframe_pts(s, pkt, file_start);
+            if (kpts > last + 0.05) { found = kpts; break; }
+            if (at_end) break;          /* probed the tail, no further keyframe */
+            if (mult > 4096.0) break;   /* safety against pathological sparsity */
+        }
+        if (found < 0.0) break;         /* no more keyframes; grouping tail covers rest */
+        kf[n++] = found;
+        last = found;
+    }
+
+    av_packet_free(&pkt);
+    *out_kf = kf;
+    return n;
+}
+
+/*
+ * Replace the segment table with one built on the source's real keyframe boundaries
+ * (discovered by seek-probe), so EXTINF matches the muxed span and segments do not
+ * overlap. Returns the new segment count, or 0 (table left unchanged) when the scan
+ * could not improve on the existing table.
+ */
+static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
+    if (!s) return 0;
+    double target = (s->target_segment_seconds < 1.0) ? 6.0 : s->target_segment_seconds;
+
+    double *kf = NULL;
+    int kf_count = discover_keyframes_by_seek(s, target, &kf);
+    if (kf_count <= 1) { free(kf); return 0; }
+
+    plozz_remux_segment *segs = NULL;
+    int count = build_segments_from_keyframes(kf, kf_count, s->duration_seconds, target, &segs);
+    free(kf);
+    if (count <= 0) { free(segs); return 0; }
+
+    int old = s->segment_count;
+    free(s->segments);
+    s->segments = segs;
+    s->segment_count = count;
+    s->used_fixed_cadence = 0;
+
+    /* Rewind so the first segment's mux begins from a clean t=0 BACKWARD seek. */
+    AVStream *vst = s->ic->streams[s->video_index];
+    avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
+
+    remux_log(1, "remux: keyframe-scan rebuilt %d segments (was %d fixed-cadence) "
+              "from %d discovered keyframes", count, old, kf_count);
+    return count;
 }
 
 /* ----- open -------------------------------------------------------------- */
@@ -367,6 +538,7 @@ plozz_remux_session *plozz_remux_open(void *opaque,
     s->duration_seconds = (s->ic->duration != AV_NOPTS_VALUE)
         ? (double)s->ic->duration / AV_TIME_BASE : 0.0;
 
+    s->target_segment_seconds = target_segment_seconds;
     build_segment_table(s, target_segment_seconds);
     if (s->segment_count <= 0) {
         remux_log(2, "remux: empty segment table");
@@ -448,6 +620,35 @@ void plozz_remux_set_normalize_dovi_level(plozz_remux_session *s, int enabled) {
 void plozz_remux_set_derive_eac3_frame_dur(plozz_remux_session *s, int enabled) {
     if (!s) return;
     s->derive_eac3_frame_dur = enabled ? 1 : 0;
+}
+
+void plozz_remux_set_keyframe_scan(plozz_remux_session *s, int enabled) {
+    if (!s || !enabled) return;
+    /* Only engage when the open-time table was the fixed-cadence fallback; a real
+     * keyframe-index table is already aligned and must not be disturbed. */
+    if (!s->used_fixed_cadence) {
+        remux_log(0, "remux: keyframe-scan flag ON but table is index-built; no rebuild");
+        return;
+    }
+    build_segment_table_keyframe_scan(s);
+}
+
+int plozz_remux_plan_segments(const double *keyframe_times, int count,
+                              double duration, double target_seconds,
+                              double *out_starts, double *out_durations,
+                              int max_out) {
+    if (!keyframe_times || count <= 1 || max_out <= 0) return 0;
+    plozz_remux_segment *segs = NULL;
+    int n = build_segments_from_keyframes(keyframe_times, count, duration,
+                                          target_seconds, &segs);
+    if (n <= 0) { free(segs); return 0; }
+    if (n > max_out) n = max_out;
+    for (int i = 0; i < n; i++) {
+        if (out_starts) out_starts[i] = segs[i].start_seconds;
+        if (out_durations) out_durations[i] = segs[i].duration_seconds;
+    }
+    free(segs);
+    return n;
 }
 
 int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segment *out) {

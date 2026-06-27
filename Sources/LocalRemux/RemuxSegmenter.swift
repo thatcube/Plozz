@@ -128,7 +128,7 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// when the file can't be demuxed, so the caller's fallback path can report
     /// exactly why (vs an opaque failure).
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
-         deriveEac3FrameDur: Bool = false) throws {
+         deriveEac3FrameDur: Bool = false, keyframeScan: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -151,6 +151,15 @@ final class RemuxSegmenter: @unchecked Sendable {
         // E-AC-3 frame sample count instead of the fixed 1536 fallback. The probe
         // already ran inside open(); this only selects whether the muxer consumes it.
         plozz_remux_set_derive_eac3_frame_dur(session, deriveEac3FrameDur ? 1 : 0)
+
+        // Flag-gated (com.plozz.playback.remuxKeyframeScan): when the open-time table
+        // is the FIXED-CADENCE fallback (source has no usable keyframe index), rebuild
+        // it on the file's REAL keyframe boundaries — discovered via cheap BACKWARD
+        // seek-probes — so each segment's EXTINF equals the muxed span and consecutive
+        // segments don't overlap (the fix for the progressive desync/stutter on
+        // no-index titles). Must run BEFORE reading the segment count below, since it
+        // can change segment_count. A no-op for index-built tables and when OFF.
+        plozz_remux_set_keyframe_scan(session, keyframeScan ? 1 : 0)
 
         var durations: [Double] = []
         let count = Int(plozz_remux_segment_count(session))

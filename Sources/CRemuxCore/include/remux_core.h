@@ -152,6 +152,34 @@ void plozz_remux_set_derive_eac3_frame_dur(plozz_remux_session *s, int enabled);
  */
 int plozz_remux_eac3_frame_samples(const uint8_t *data, int size, int is_eac3);
 
+/*
+ * Re-segment on REAL keyframes when the container had no usable index (default
+ * OFF; callers gate on `com.plozz.playback.remuxKeyframeSegments`). At open,
+ * a missing/degenerate Cues index forces a fixed-cadence fallback whose 6 s
+ * boundaries do not land on keyframes: the muxer's BACKWARD seek then snaps each
+ * segment to the GOP keyframe at/before its start and runs to the next keyframe,
+ * so long-GOP streams emit overlapping ~2x-target segments whose true duration
+ * differs from the declared EXTINF — desyncing AVPlayer. This call does a
+ * one-time keyframe scan (sequential read of the source) and rebuilds the table
+ * so each segment is bounded by real keyframes with its declared duration equal
+ * to the true keyframe-to-keyframe delta. It is a no-op (returns the current
+ * count) when the index was already usable or `s` is NULL, so it is safe and
+ * cheap to call unconditionally once the flag is on. Must be called after open
+ * and before reading the segment table. Returns the (possibly new) segment count.
+ */
+int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_seconds);
+
+/*
+ * Pure test/diagnostic helper: group a sorted list of keyframe times (seconds,
+ * 0-based) into segments at least `target_seconds` apart, each carrying its true
+ * keyframe-to-keyframe duration; the tail runs to `duration` (or the last
+ * keyframe if duration <= 0). Writes up to `max_out` segments to `out` and
+ * returns the count. No session state; safe to call from tests.
+ */
+int plozz_remux_plan_segments_from_keyframes(const double *kf, int kf_count,
+                                             double target_seconds, double duration,
+                                             plozz_remux_segment *out, int max_out);
+
 /* Copy the segment table entry at `index` into `out`. Returns 1 on success. */
 int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segment *out);
 

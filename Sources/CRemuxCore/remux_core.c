@@ -558,21 +558,23 @@ static AVFormatContext *make_output(plozz_remux_session *s, int *out_audio_index
             dst_a->codecpar->codec_tag = 0; /* let movenc pick eac3 -> dec3 */
             dst_a->time_base = src_a->time_base;
             /* movenc needs the audio frame size to compute per-sample durations;
-             * the Matroska demuxer often leaves it 0 for (E-)AC-3 ("track 1: codec
-             * frame size is not set"), which makes the audio track's sample timing
-             * wrong and stalls A/V. AC-3 and E-AC-3 are nominally 1536 samples/
-             * frame, but an E-AC-3 syncframe with fewer blocks (numblkscod<3) is
-             * shorter; when the derive flag is on and the open-time probe parsed a
-             * real value, stamp that instead so the audio frame duration matches
-             * real time and the A/V timeline can't accumulate desync. */
-            if ((dst_a->codecpar->codec_id == AV_CODEC_ID_AC3 ||
-                 dst_a->codecpar->codec_id == AV_CODEC_ID_EAC3) &&
-                dst_a->codecpar->frame_size <= 0) {
-                int fs = 1536;
+             * for constant-frame (E-)AC-3 it stamps a UNIFORM sample duration =
+             * frame_size, so a wrong value drifts the whole audio track. The
+             * Matroska demuxer often leaves frame_size 0 ("codec frame size is not
+             * set") and historically we filled 1536. AC-3 is always 1536 (6 blocks
+             * × 256); E-AC-3 is numblkscod-dependent (256/512/768/1536) and DD+/JOC
+             * Atmos frequently uses <6 blocks. When the derive flag is on and the
+             * open-time probe parsed the real count, stamp THAT — overriding even a
+             * value the demuxer supplied, since that may itself be a wrong 1536 (so
+             * the A/B can't silently no-op). Flag off keeps the historical 1536
+             * fallback, applied only when the demuxer left it unset. */
+            if (dst_a->codecpar->codec_id == AV_CODEC_ID_AC3 ||
+                dst_a->codecpar->codec_id == AV_CODEC_ID_EAC3) {
                 if (s->derive_eac3_frame_dur && s->eac3_frame_samples > 0) {
-                    fs = s->eac3_frame_samples;
+                    dst_a->codecpar->frame_size = s->eac3_frame_samples;
+                } else if (dst_a->codecpar->frame_size <= 0) {
+                    dst_a->codecpar->frame_size = 1536;
                 }
-                dst_a->codecpar->frame_size = fs;
             }
             *out_audio_index = dst_a->index;
         }
@@ -734,6 +736,13 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
     int64_t tel_last_v_pts = AV_NOPTS_VALUE, tel_last_v_dts = AV_NOPTS_VALUE;
     int64_t tel_first_a_pts = AV_NOPTS_VALUE, tel_last_a_pts = AV_NOPTS_VALUE;
     int tel_v_count = 0, tel_a_count = 0;
+    /* Sum of the SOURCE audio packet durations (in source audio ticks) so the
+     * telemetry can report the demuxer's real per-frame duration — the metric
+     * that exposes the (E-)AC-3 CBR-sample-duration bug, which the PTS-based
+     * spans above cannot see (PTS comes from the container and is correct even
+     * when movenc stamps a wrong uniform frame_size duration). */
+    int64_t tel_a_dur_sum = 0;
+    int tel_a_dur_n = 0;
     while (av_read_frame(s->ic, pkt) >= 0) {
         int is_video = (pkt->stream_index == s->video_index);
         int is_audio = (ast && pkt->stream_index == s->audio_index);
@@ -779,6 +788,8 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
                 av_packet_unref(pkt);
                 continue;
             }
+            /* Capture the demuxer-provided duration BEFORE rescale clobbers it. */
+            if (pkt->duration > 0) { tel_a_dur_sum += pkt->duration; tel_a_dur_n++; }
             int64_t a_shift = (int64_t)(file_start / av_q2d(ast->time_base));
             av_packet_rescale_ts(pkt, ast->time_base, out_a->time_base);
             if (pkt->pts != AV_NOPTS_VALUE) pkt->pts -= av_rescale_q(a_shift, ast->time_base, out_a->time_base);
@@ -829,11 +840,30 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
             double aspan = (tel_first_a_pts != AV_NOPTS_VALUE && tel_last_a_pts != AV_NOPTS_VALUE)
                 ? (tel_last_a_pts - tel_first_a_pts) * atb : -1.0;
             double skew = (a0 >= 0 && v0 >= 0) ? (a0 - v0) : 0.0;
+            /* CBR-audio duration check: movenc stamps a UNIFORM sample duration =
+             * frame_size for constant-frame (E-)AC-3, so the audio track's real
+             * playout length is acov = n * frame_size / sample_rate REGARDLESS of
+             * the (correct) PTS span. If frame_size is wrong (1536 stamped for a
+             * <6-block E-AC-3 frame) acov diverges from aspan and audio drifts:
+             *   acov ~= aspan (+1 frame)  → frame_size correct, no drift
+             *   acov ~= k*aspan           → frame_size is k× too big → progressive
+             *                               "more-and-more-behind" desync.
+             * srcdur = the demuxer's real mean samples/frame (ground truth); fs =
+             * what we stamped. srcdur != fs with the flag OFF is the bug fingerprint;
+             * with the flag ON they should match. */
+            int afs = out_a->codecpar->frame_size;
+            int asr = out_a->codecpar->sample_rate;
+            double acov = (asr > 0) ? ((double)tel_a_count * (double)afs / (double)asr) : -1.0;
+            /* tel_a_dur_sum is in SOURCE audio ticks (captured pre-rescale), so it
+             * converts with the source stream's time_base, not the output's. */
+            double astb = av_q2d(ast->time_base);
+            double srcdur = (tel_a_dur_n > 0 && asr > 0)
+                ? ((double)tel_a_dur_sum / (double)tel_a_dur_n) * astb * (double)asr : -1.0;
             remux_log(1,
                 "remux-av: seg=%d decl=%.3f v[n=%d 0=%.3f 1=%.3f span=%.3f dts0=%.3f] "
-                "a[n=%d 0=%.3f 1=%.3f span=%.3f] skew=%+.3f",
+                "a[n=%d 0=%.3f 1=%.3f span=%.3f] skew=%+.3f acov=%.3f fs=%d sr=%d srcdur=%.0f",
                 index, decl, tel_v_count, v0, v1, vspan, vdts0,
-                tel_a_count, a0, a1, aspan, skew);
+                tel_a_count, a0, a1, aspan, skew, acov, afs, asr, srcdur);
         } else {
             remux_log(1,
                 "remux-av: seg=%d decl=%.3f v[n=%d 0=%.3f 1=%.3f span=%.3f dts0=%.3f] a[none]",

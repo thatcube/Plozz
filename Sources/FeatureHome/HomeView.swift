@@ -32,12 +32,13 @@ public struct HomeView: View {
         ContentStateView(
             state: viewModel.state,
             emptyMessage: "Your libraries are empty. Add media on your media server to see it here.",
-            onRetry: { Task { await viewModel.load() } }
+            onRetry: { Task { await viewModel.load() } },
+            loadingContent: { HomeSkeletonView(layout: viewModel.skeletonLayout) }
         ) { content in
             // The screen is a data-driven list of rows. Both this loaded view and
-            // (later) a skeleton/streaming view render from the same ordered
-            // `HomeRow` array, which keeps them 1:1 and makes the order the single
-            // thing a future row-customization feature edits.
+            // the skeleton render from the same ordered `HomeRow`/`HomeRowKind`
+            // structure, which keeps them 1:1 and makes the order the single thing
+            // a future row-customization feature edits.
             let rows = HomeRow.rows(for: content) { visibility.isVisible($0) }
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
@@ -49,6 +50,9 @@ public struct HomeView: View {
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
+            // Remember the structure we actually rendered (post-visibility) so the
+            // next launch's skeleton matches this exact set of rows.
+            .task(id: rows.map(\.kind)) { viewModel.rememberLayout(rows.map(\.kind)) }
         }
         .task { if viewModel.state.value == nil { await viewModel.load() } }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in

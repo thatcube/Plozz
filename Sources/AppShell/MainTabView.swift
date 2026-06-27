@@ -46,6 +46,10 @@ struct MainTabView: View {
     /// subtree rebuild (this view is re-created with a new `.id` on profile switch).
     let audioController: AudioPlaybackController
     let homeVisibility: HomeLibraryVisibilityModel
+    /// Per-profile store for the last-rendered Home row structure, used to seed
+    /// the loading skeleton so it matches the user's real Home before content
+    /// arrives. Constructed with the active profile's namespace by `RootView`.
+    let homeLayoutStore: HomeLayoutStoring
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
     let mediaItemActionHandler: any MediaItemActionHandling
@@ -92,6 +96,7 @@ struct MainTabView: View {
             HomeTab(
                 accounts: accounts,
                 homeVisibility: homeVisibility,
+                homeLayoutStore: homeLayoutStore,
                 captionSettings: captionModel.settings,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
@@ -520,6 +525,7 @@ private struct PlayerPresentation: View {
 private struct HomeTab: View {
     let accounts: [ResolvedAccount]
     let homeVisibility: HomeLibraryVisibilityModel
+    let homeLayoutStore: HomeLayoutStoring
     let captionSettings: CaptionSettings
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
@@ -538,7 +544,7 @@ private struct HomeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             HomeView(
-                viewModel: HomeViewModel(accounts: accounts, identitySources: identitySources),
+                viewModel: HomeViewModel(accounts: accounts, layoutStore: homeLayoutStore, identitySources: identitySources),
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
                 onSelectItem: { navigate($0) },

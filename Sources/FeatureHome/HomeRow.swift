@@ -20,6 +20,11 @@ public enum HomeRowKind: String, Hashable, Sendable, CaseIterable {
         case .libraries: return "Libraries"
         }
     }
+
+    /// Fallback skeleton structure used only on the very first launch (before any
+    /// real layout has been persisted). A sensible "most users have these" guess;
+    /// once a real load completes, the persisted layout replaces it.
+    public static let defaultSkeletonLayout: [HomeRowKind] = [.continueWatching, .recentlyAdded, .libraries]
 }
 
 /// The poster aspect a media row renders with. Mirrors `PosterCardView.Style`

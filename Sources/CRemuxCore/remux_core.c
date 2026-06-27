@@ -344,6 +344,11 @@ static int scan_keyframes(plozz_remux_session *s, double **out_kf, int *out_coun
             if (ts != AV_NOPTS_VALUE) {
                 double t = ts * av_q2d(vst->time_base) - start_time;
                 if (t < 0) t = 0;
+                /* Keep the keyframe list strictly increasing: av_read_frame yields
+                 * decode order and GENPTS-reconstructed timestamps, so guard
+                 * against a duplicate/backward PTS that would make the planner emit
+                 * a zero/negative-duration segment or the muxer mis-seek. */
+                if (n > 0 && t <= kf[n - 1] + 1e-6) { av_packet_unref(pkt); continue; }
                 if (n >= cap) {
                     int ncap = cap * 2;
                     double *nk = (double *)realloc(kf, sizeof(double) * (size_t)ncap);

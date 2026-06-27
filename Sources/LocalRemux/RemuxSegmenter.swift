@@ -159,6 +159,12 @@ final class RemuxSegmenter: @unchecked Sendable {
         // EXTINF, desyncing AVPlayer. This rescans real keyframes and rebuilds the
         // table so declared == actual. No-op when the index was already usable.
         if keyframeSegments {
+            // The rescan does a one-time SEQUENTIAL read of the whole source to
+            // find real keyframes. Boost the range reader's per-round-trip window
+            // first so that scan (and subsequent segment fetches) pulls large
+            // chunks instead of many small requests — cuts the open-time cost on
+            // high-bitrate 4K. boostReadAhead only ever raises the value.
+            reader.boostReadAhead(8 << 20)
             _ = plozz_remux_rescan_keyframe_segments(session, targetSegmentSeconds)
         }
 

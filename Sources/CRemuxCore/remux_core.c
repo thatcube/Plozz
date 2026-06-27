@@ -224,7 +224,13 @@ plozz_remux_session *plozz_remux_open(void *opaque,
         return NULL;
     }
     s->ic->pb = s->avio;
-    s->ic->flags |= AVFMT_FLAG_CUSTOM_IO;
+    /* GENPTS: the Matroska demuxer stores only one timecode per block and leaves
+     * DTS unset for reordered (B-frame) HEVC. movenc then warns "Timestamps are
+     * unset in a packet for stream 0" and writes broken decode times, so AVPlayer
+     * stalls at the first segment boundary. GENPTS makes libavformat reconstruct
+     * the missing PTS/DTS during av_read_frame so every copied packet carries a
+     * valid, monotonic DTS. */
+    s->ic->flags |= AVFMT_FLAG_CUSTOM_IO | AVFMT_FLAG_GENPTS;
 
     int rc = avformat_open_input(&s->ic, NULL, NULL, NULL);
     if (rc < 0) {
@@ -342,6 +348,11 @@ static AVFormatContext *make_output(plozz_remux_session *s, int *out_audio_index
     AVFormatContext *oc = NULL;
     if (avformat_alloc_output_context2(&oc, NULL, "mp4", NULL) < 0 || !oc) return NULL;
 
+    /* Permit movenc to emit the Dolby Vision dvcC/dvvC configuration box. movenc
+     * gates these "unofficial" boxes behind strict_std_compliance; at the default
+     * (NORMAL) it silently drops them and the stream loses its DoVi signal. */
+    oc->strict_std_compliance = FF_COMPLIANCE_UNOFFICIAL;
+
     AVStream *src_v = s->ic->streams[s->video_index];
     AVStream *dst_v = avformat_new_stream(oc, NULL);
     if (!dst_v) { avformat_free_context(oc); return NULL; }
@@ -360,6 +371,15 @@ static AVFormatContext *make_output(plozz_remux_session *s, int *out_audio_index
         if (dst_a && avcodec_parameters_copy(dst_a->codecpar, src_a->codecpar) >= 0) {
             dst_a->codecpar->codec_tag = 0; /* let movenc pick eac3 -> dec3 */
             dst_a->time_base = src_a->time_base;
+            /* movenc needs the audio frame size to compute per-sample durations;
+             * the Matroska demuxer often leaves it 0 for (E-)AC-3 ("track 1: codec
+             * frame size is not set"), which makes the audio track's sample timing
+             * wrong and stalls A/V. AC-3 and E-AC-3 are both 1536 samples/frame. */
+            if ((dst_a->codecpar->codec_id == AV_CODEC_ID_AC3 ||
+                 dst_a->codecpar->codec_id == AV_CODEC_ID_EAC3) &&
+                dst_a->codecpar->frame_size <= 0) {
+                dst_a->codecpar->frame_size = 1536;
+            }
             *out_audio_index = dst_a->index;
         }
     }
@@ -369,11 +389,31 @@ static AVFormatContext *make_output(plozz_remux_session *s, int *out_audio_index
 static AVDictionary *fmp4_options(void) {
     AVDictionary *opts = NULL;
     /* empty_moov + default_base_moof + frag_keyframe = CMAF-style fMP4 with a
-     * standalone moov init and one moof+mdat fragment per keyframe. */
+     * standalone moov init and one moof+mdat fragment per keyframe.
+     *
+     * delay_moov defers writing the moov until the first packet is muxed, so codec
+     * parameters that are only known from the bitstream — notably E-AC-3's dec3
+     * (Atmos/JOC) box — are populated before the moov is emitted. Without it,
+     * write_header fails with "Cannot write moov atom before EAC3 packets parsed"
+     * and every init/segment mux returns empty (→ 404 for AVPlayer). */
+    /* frag_discont: each segment is muxed by an INDEPENDENT output context, so by
+     * default movenc writes every fragment's tfdt baseMediaDecodeTime starting at
+     * 0. With a shared EXT-X-MAP init that makes every segment claim to begin at
+     * t=0; AVPlayer plays the first segment then sees the next one's decode time
+     * jump backward and freezes (buffer full but stuck). frag_discont tells movenc
+     * to seed the fragment start from the first packet's real DTS, so each segment
+     * carries its true absolute position on the timeline. */
     av_dict_set(&opts, "movflags",
-                "frag_keyframe+empty_moov+default_base_moof+write_colr", 0);
+                "frag_keyframe+empty_moov+delay_moov+default_base_moof+frag_discont+write_colr", 0);
     return opts;
 }
+
+/* Forward declarations: the init/segment writers below share one full-fragment
+ * muxer and the box scanner that splits its output into init (ftyp+moov) and
+ * media (moof+mdat). */
+static int media_offset_after_init(const uint8_t *buf, int len);
+static int mux_segment_full(plozz_remux_session *s, int index,
+                            uint8_t **out_buf, int *out_len);
 
 /* ----- init segment ------------------------------------------------------ */
 
@@ -381,38 +421,28 @@ int plozz_remux_init_segment(plozz_remux_session *s, uint8_t **out_data, int *ou
     if (!s || !out_data || !out_len) return 0;
     *out_data = NULL;
     *out_len = 0;
+    if (s->segment_count <= 0) return 0;
 
-    int dummy_audio = -1;
-    AVFormatContext *oc = make_output(s, &dummy_audio);
-    if (!oc) return 0;
+    /* Derive the shared CMAF init (ftyp + moov) from a real fragment of the first
+     * segment. With delay_moov the moov is only complete — EAC3 dec3 box, DoVi
+     * dvcC/dvvC — after packets are muxed, so a packet-less write_header can't
+     * produce a usable init. The empty_moov moov describes the tracks only (no
+     * samples), so it is identical for every segment and valid as the EXT-X-MAP. */
+    uint8_t *full = NULL;
+    int full_len = 0;
+    if (!mux_segment_full(s, 0, &full, &full_len)) return 0;
 
-    if (avio_open_dyn_buf(&oc->pb) < 0) { avformat_free_context(oc); return 0; }
+    int media_off = media_offset_after_init(full, full_len);
+    if (media_off <= 0) { free(full); return 0; } /* no ftyp+moov prefix → fail */
 
-    AVDictionary *opts = fmp4_options();
-    int rc = avformat_write_header(oc, &opts);
-    av_dict_free(&opts);
-    if (rc < 0) {
-        uint8_t *tmp = NULL; avio_close_dyn_buf(oc->pb, &tmp); av_free(tmp);
-        oc->pb = NULL; avformat_free_context(oc);
-        return 0;
-    }
-    /* write_header with empty_moov has emitted ftyp + moov: that's the init. */
-    avio_flush(oc->pb);
-    uint8_t *buf = NULL;
-    int len = avio_close_dyn_buf(oc->pb, &buf);
-    oc->pb = NULL;
-    avformat_free_context(oc);
-
-    if (len <= 0 || !buf) { av_free(buf); return 0; }
-
-    uint8_t *copy = (uint8_t *)malloc((size_t)len);
-    if (!copy) { av_free(buf); return 0; }
-    memcpy(copy, buf, (size_t)len);
-    av_free(buf);
+    uint8_t *copy = (uint8_t *)malloc((size_t)media_off);
+    if (!copy) { free(full); return 0; }
+    memcpy(copy, full, (size_t)media_off);
+    free(full);
 
     *out_data = copy;
-    *out_len = len;
-    remux_log(0, "remux: init segment %d bytes", len);
+    *out_len = media_off;
+    remux_log(0, "remux: init segment %d bytes", media_off);
     return 1;
 }
 
@@ -439,7 +469,7 @@ static int media_offset_after_init(const uint8_t *buf, int len) {
     return 0; /* no init prefix found: emit the whole buffer */
 }
 
-int plozz_remux_media_segment(plozz_remux_session *s, int index, uint8_t **out_data, int *out_len) {
+static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_data, int *out_len) {
     if (!s || !out_data || !out_len || index < 0 || index >= s->segment_count) return 0;
     *out_data = NULL;
     *out_len = 0;
@@ -492,6 +522,12 @@ int plozz_remux_media_segment(plozz_remux_session *s, int index, uint8_t **out_d
 
     int wrote_any = 0;
     double end_limit = end_s + file_start;
+    /* Defensive monotonic-DTS belt: av_read_frame returns packets in decode order,
+     * so DTS must be strictly increasing and PTS >= DTS. GENPTS fixes the common
+     * case, but guard here so movenc never receives an unset/backward DTS (which
+     * would corrupt the fragment's decode timeline and the frag_discont start). */
+    int64_t last_v_dts = AV_NOPTS_VALUE;
+    int64_t last_a_dts = AV_NOPTS_VALUE;
     while (av_read_frame(s->ic, pkt) >= 0) {
         int is_video = (pkt->stream_index == s->video_index);
         int is_audio = (ast && pkt->stream_index == s->audio_index);
@@ -507,6 +543,17 @@ int plozz_remux_media_segment(plozz_remux_session *s, int index, uint8_t **out_d
             av_packet_rescale_ts(pkt, vst->time_base, out_v->time_base);
             if (pkt->pts != AV_NOPTS_VALUE) pkt->pts -= v_shift;
             if (pkt->dts != AV_NOPTS_VALUE) pkt->dts -= v_shift;
+            if (pkt->dts == AV_NOPTS_VALUE) {
+                pkt->dts = (last_v_dts == AV_NOPTS_VALUE)
+                    ? (pkt->pts != AV_NOPTS_VALUE ? pkt->pts : 0) : last_v_dts + 1;
+            }
+            if (last_v_dts != AV_NOPTS_VALUE && pkt->dts <= last_v_dts) {
+                pkt->dts = last_v_dts + 1;
+            }
+            last_v_dts = pkt->dts;
+            if (pkt->pts == AV_NOPTS_VALUE || pkt->pts < pkt->dts) {
+                pkt->pts = pkt->dts;
+            }
             pkt->stream_index = out_v->index;
             pkt->pos = -1;
             if (av_interleaved_write_frame(oc, pkt) >= 0) wrote_any = 1;
@@ -523,6 +570,17 @@ int plozz_remux_media_segment(plozz_remux_session *s, int index, uint8_t **out_d
             av_packet_rescale_ts(pkt, ast->time_base, out_a->time_base);
             if (pkt->pts != AV_NOPTS_VALUE) pkt->pts -= av_rescale_q(a_shift, ast->time_base, out_a->time_base);
             if (pkt->dts != AV_NOPTS_VALUE) pkt->dts -= av_rescale_q(a_shift, ast->time_base, out_a->time_base);
+            if (pkt->dts == AV_NOPTS_VALUE) {
+                pkt->dts = (last_a_dts == AV_NOPTS_VALUE)
+                    ? (pkt->pts != AV_NOPTS_VALUE ? pkt->pts : 0) : last_a_dts + 1;
+            }
+            if (last_a_dts != AV_NOPTS_VALUE && pkt->dts <= last_a_dts) {
+                pkt->dts = last_a_dts + 1;
+            }
+            last_a_dts = pkt->dts;
+            if (pkt->pts == AV_NOPTS_VALUE || pkt->pts < pkt->dts) {
+                pkt->pts = pkt->dts;
+            }
             pkt->stream_index = out_a->index;
             pkt->pos = -1;
             av_interleaved_write_frame(oc, pkt);
@@ -543,21 +601,43 @@ int plozz_remux_media_segment(plozz_remux_session *s, int index, uint8_t **out_d
 
     if (!wrote_any || len <= 0 || !buf) { av_free(buf); return 0; }
 
-    /* Strip the leading ftyp + moov so the media segment is moof+mdat referencing
-     * the shared EXT-X-MAP init. */
-    int media_off = media_offset_after_init(buf, len);
-    int media_len = len - media_off;
-    if (media_len <= 0) { av_free(buf); return 0; }
-
-    uint8_t *copy = (uint8_t *)malloc((size_t)media_len);
+    /* Hand back the FULL ftyp+moov+moof+mdat fragment; callers slice it into the
+     * init prefix (ftyp+moov) or media suffix (moof+mdat). Copy out of the av_*
+     * allocation so plozz_remux_free_buffer (plain free) releases it uniformly. */
+    uint8_t *copy = (uint8_t *)malloc((size_t)len);
     if (!copy) { av_free(buf); return 0; }
-    memcpy(copy, buf + media_off, (size_t)media_len);
+    memcpy(copy, buf, (size_t)len);
     av_free(buf);
 
     *out_data = copy;
+    *out_len = len;
+    (void)start_s;
+    return 1;
+}
+
+int plozz_remux_media_segment(plozz_remux_session *s, int index, uint8_t **out_data, int *out_len) {
+    if (!s || !out_data || !out_len || index < 0 || index >= s->segment_count) return 0;
+    *out_data = NULL;
+    *out_len = 0;
+
+    uint8_t *full = NULL;
+    int full_len = 0;
+    if (!mux_segment_full(s, index, &full, &full_len)) return 0;
+
+    /* Strip the leading ftyp + moov so the media segment is moof+mdat referencing
+     * the shared EXT-X-MAP init. */
+    int media_off = media_offset_after_init(full, full_len);
+    int media_len = full_len - media_off;
+    if (media_len <= 0) { free(full); return 0; }
+
+    uint8_t *copy = (uint8_t *)malloc((size_t)media_len);
+    if (!copy) { free(full); return 0; }
+    memcpy(copy, full + media_off, (size_t)media_len);
+    free(full);
+
+    *out_data = copy;
     *out_len = media_len;
-    remux_log(0, "remux: segment %d -> %d bytes (start=%.2fs dur=%.2fs)",
-              index, media_len, start_s, s->segments[index].duration_seconds);
+    remux_log(0, "remux: segment %d -> %d bytes", index, media_len);
     return 1;
 }
 

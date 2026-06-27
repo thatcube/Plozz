@@ -1,10 +1,13 @@
 #if canImport(SwiftUI)
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// A non-interactive placeholder that mirrors `PosterCardView`'s outer geometry
 /// exactly (same glass surface, paddings, artwork aspect/corner radii and the
-/// two text lines beneath) but renders redacted, shimmering content instead of a
-/// real `MediaItem`.
+/// two text lines beneath) but renders soft neutral fills instead of a real
+/// `MediaItem`.
 ///
 /// Keeping this in lock-step with `PosterCardView` — via the shared
 /// `PlozzTheme.Metrics` and the same layout structure — is what makes a skeleton
@@ -21,9 +24,6 @@ public struct SkeletonCardView: View {
         self.style = style
     }
 
-    /// Adapts to light/dark like the real card's artwork placeholder.
-    private var artFill: some ShapeStyle { .quaternary }
-
     public var body: some View {
         switch style {
         case .poster: posterCard
@@ -39,12 +39,16 @@ public struct SkeletonCardView: View {
                 .frame(maxWidth: .infinity)
                 .overlay {
                     RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous)
-                        .fill(artFill)
+                        .fill(Color.plozzSkeletonFill)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
 
-            textLines(titleFont: .subheadline.weight(.semibold), subtitleFont: .system(size: 20), spacing: 2)
+            // Match PosterCardView's caption: VStack(spacing: 2), subheadline +
+            // size-20 fonts. Reusing the same fonts (via hidden sizing text) keeps
+            // the caption block the exact same height, so the row never shifts
+            // vertically when real content swaps in.
+            textLines(contentWidth: PlozzTheme.Metrics.posterWidth - 28, spacing: 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
                 .padding(.bottom, 4)
@@ -58,12 +62,13 @@ public struct SkeletonCardView: View {
     private var landscapeCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous)
-                .fill(artFill)
+                .fill(Color.plozzSkeletonFill)
                 .frame(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
-            textLines(titleFont: .subheadline.weight(.semibold), subtitleFont: .system(size: 20), spacing: 4)
+            // PosterCardView's landscape caption uses VStack(spacing: 4).
+            textLines(contentWidth: PlozzTheme.Metrics.landscapeWidth - 2 * PlozzTheme.Metrics.mediumCardInset, spacing: 4)
                 .frame(width: PlozzTheme.Metrics.landscapeWidth, alignment: .leading)
         }
         .padding(PlozzTheme.Metrics.mediumCardInset)
@@ -71,19 +76,50 @@ public struct SkeletonCardView: View {
         .shimmering()
     }
 
-    /// Two redacted text lines sized by the same fonts the real card uses, so the
-    /// caption block has identical height. `.redacted` keeps the bars' metrics
-    /// tied to the font rather than hard-coded sizes.
-    private func textLines(titleFont: Font, subtitleFont: Font, spacing: CGFloat) -> some View {
+    /// Two fully-rounded placeholder pills standing in for the card's title and
+    /// subtitle. Each pill is laid inside a hidden sizing `Text` using the *same*
+    /// font the real card uses, so the line reserves the identical height — the
+    /// capsule is just a shorter shape leading-aligned within it. This keeps the
+    /// caption block height pixel-identical to `PosterCardView` (no vertical shift
+    /// on load) while giving the placeholders soft, fully-rounded edges.
+    private func textLines(contentWidth: CGFloat, spacing: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: spacing) {
-            Text("Placeholder title")
-                .font(titleFont)
-                .lineLimit(1)
-            Text("Placeholder subtitle")
-                .font(subtitleFont)
-                .lineLimit(1)
+            capsuleLine(font: .subheadline.weight(.semibold), width: max(contentWidth * 0.7, 1), height: 16)
+            capsuleLine(font: .system(size: 20), width: max(contentWidth * 0.45, 1), height: 13)
         }
-        .redacted(reason: .placeholder)
+    }
+
+    private func capsuleLine(font: Font, width: CGFloat, height: CGFloat) -> some View {
+        // The hidden text drives the line's height to match the real caption's
+        // font metrics exactly; the capsule (shorter) is overlaid, leading-aligned.
+        Text(" ")
+            .font(font)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .hidden()
+            .overlay(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(Color.plozzSkeletonFill)
+                    .frame(width: width, height: height)
+            }
+    }
+}
+
+public extension Color {
+    /// Adaptive neutral fill for skeleton placeholders: a light gray on dark/OLED
+    /// backgrounds (so cards read clearly against pure black) and a darker gray in
+    /// light mode. Kept low-opacity so it stays a quiet placeholder, not a solid
+    /// block.
+    static var plozzSkeletonFill: Color {
+        #if canImport(UIKit)
+        return Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 1.0, alpha: 0.11)
+                : UIColor(white: 0.0, alpha: 0.12)
+        })
+        #else
+        return Color.gray.opacity(0.12)
+        #endif
     }
 }
 

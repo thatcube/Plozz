@@ -1,20 +1,33 @@
 #if canImport(SwiftUI)
 import SwiftUI
 
-/// A reusable shimmer overlay for placeholder/skeleton content: a soft highlight
-/// sweeps horizontally across the view to signal "loading" without a spinner.
+/// A reusable shimmer overlay for placeholder/skeleton content: a soft, slow
+/// sheen drifts across the view to gently signal "loading" — deliberately
+/// understated (low intensity, wide feathered band, eased timing with an
+/// off-screen pause between passes) so it reads as modern and calm rather than a
+/// bright sweeping flash.
 ///
 /// Accessibility: respects **Reduce Motion** — when set, the sweep is replaced by
 /// a static dim so the placeholder still reads as inactive but nothing animates.
 private struct ShimmerModifier: ViewModifier {
     var active: Bool
-    /// One full sweep duration.
-    var duration: Double = 1.25
-    /// Highlight strength.
-    var intensity: Double = 0.35
+    /// One full sweep duration (slower = calmer).
+    var duration: Double = 2.3
+    /// Highlight strength in light mode — the card placeholders are a light gray
+    /// on a light background, so a white plusLighter sheen needs more punch to be
+    /// visible at all.
+    var lightIntensity: Double = 0.45
+    /// Highlight strength in dark/OLED mode — on near-black the same sheen reads
+    /// strongly, so it's kept very low to stay barely-there.
+    var darkIntensity: Double = 0.035
 
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: CGFloat = -1
+
+    private var intensity: Double {
+        colorScheme == .dark ? darkIntensity : lightIntensity
+    }
 
     func body(content: Content) -> some View {
         guard active else { return AnyView(content) }
@@ -27,14 +40,20 @@ private struct ShimmerModifier: ViewModifier {
                     GeometryReader { geo in
                         let width = geo.size.width
                         LinearGradient(
-                            colors: [.clear, .white.opacity(intensity), .clear],
+                            stops: [
+                                .init(color: .clear, location: 0.0),
+                                .init(color: .white.opacity(intensity), location: 0.5),
+                                .init(color: .clear, location: 1.0)
+                            ],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
-                        // Sweep a band ~60% of the width across and a little past
-                        // each edge so the highlight enters and exits cleanly.
-                        .frame(width: max(width, 1) * 0.6)
-                        .offset(x: phase * max(width, 1) * 1.6)
+                        // A wide, soft band that travels well past both edges, so
+                        // it's off-screen for part of each cycle — that gap is what
+                        // gives the calm "breathe in / pause / breathe in" feel
+                        // instead of a relentless strobe.
+                        .frame(width: max(width, 1) * 0.95)
+                        .offset(x: phase * max(width, 1) * 2.0)
                         .blendMode(.plusLighter)
                         .allowsHitTesting(false)
                     }
@@ -42,7 +61,7 @@ private struct ShimmerModifier: ViewModifier {
                 }
                 .onAppear {
                     phase = -1
-                    withAnimation(.linear(duration: duration).repeatForever(autoreverses: false)) {
+                    withAnimation(.easeInOut(duration: duration).repeatForever(autoreverses: false)) {
                         phase = 1
                     }
                 }

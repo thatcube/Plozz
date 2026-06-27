@@ -51,12 +51,23 @@ struct HomeSkeletonView: View {
         // Mirrors MediaRowView's title + horizontal rail layout and paddings so
         // the skeleton occupies the same vertical space as the real row.
         VStack(alignment: .leading, spacing: 16) {
-            Text(kind.title)
+            // Reserve the *exact* height of MediaRowView's title — a hidden Text in
+            // the real font (system 32 bold) — with the placeholder pill overlaid.
+            // Matching the title height is load-bearing: a shorter title bar makes
+            // the cards sit higher, so the whole row drops when the real (taller)
+            // title loads in.
+            Text(" ")
                 .font(.system(size: 32, weight: .bold))
-                .padding(.leading, PlozzTheme.Metrics.screenPadding)
-                .redacted(reason: .placeholder)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .hidden()
+                .overlay(alignment: .leading) {
+                    Capsule(style: .continuous)
+                        .fill(Color.plozzSkeletonFill)
+                        .frame(width: 220, height: 26)
+                        .padding(.leading, PlozzTheme.Metrics.screenPadding)
+                }
                 .shimmering()
-
+            
             // Mirror MediaRowView exactly: the cards live in a *horizontal*
             // ScrollView (scrolling disabled here). This is load-bearing — a plain
             // HStack of oversized cards has an ideal width wider than the screen, so

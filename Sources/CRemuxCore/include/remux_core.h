@@ -63,6 +63,7 @@ typedef struct {
     int segment_count;
     int width;
     int height;
+    double frame_rate;       /* video frames/sec (avg, then r_frame_rate); 0 if unknown */
     int audio_channels;
     char video_codec[32];    /* e.g. "hevc" */
     char video_tag[8];       /* container tag, e.g. "dvh1"/"hvc1" (best-effort) */

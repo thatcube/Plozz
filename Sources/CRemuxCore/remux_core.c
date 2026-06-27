@@ -238,6 +238,10 @@ plozz_remux_session *plozz_remux_open(void *opaque,
         out_result->segment_count = s->segment_count;
         out_result->width = vp->width;
         out_result->height = vp->height;
+        double fr = av_q2d(vst->avg_frame_rate);
+        if (!(fr > 0.0)) { fr = av_q2d(vst->r_frame_rate); }
+        if (!(fr > 0.0)) { fr = 0.0; }
+        out_result->frame_rate = fr;
 
         const char *vname = avcodec_get_name(vp->codec_id);
         if (vname) { strncpy(out_result->video_codec, vname, sizeof(out_result->video_codec) - 1); }

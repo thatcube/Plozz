@@ -53,6 +53,7 @@ final class RemuxSegmenter: @unchecked Sendable {
     struct Facts: Sendable {
         var width: Int
         var height: Int
+        var frameRate: Double
         var durationSeconds: Double
         var videoCodec: String
         var videoTag: String
@@ -108,6 +109,7 @@ final class RemuxSegmenter: @unchecked Sendable {
         self.facts = Facts(
             width: Int(result.width),
             height: Int(result.height),
+            frameRate: result.frame_rate,
             durationSeconds: result.duration_seconds,
             videoCodec: Self.cString(&result.video_codec.0),
             videoTag: Self.cString(&result.video_tag.0),
@@ -119,7 +121,7 @@ final class RemuxSegmenter: @unchecked Sendable {
             dolbyVisionELPresent: result.dovi_el_present == 1,
             segmentDurations: durations
         )
-        RemuxLog.info("RemuxSegmenter: opened \(facts.width)x\(facts.height) \(facts.videoCodec)/\(facts.audioCodec) "
+        RemuxLog.info("RemuxSegmenter: opened \(facts.width)x\(facts.height)@\(String(format: "%.3f", facts.frameRate)) \(facts.videoCodec)/\(facts.audioCodec) "
             + "DoVi p\(facts.dolbyVisionProfile) L\(facts.dolbyVisionLevel) EL=\(facts.dolbyVisionELPresent) segs=\(durations.count)")
     }
 

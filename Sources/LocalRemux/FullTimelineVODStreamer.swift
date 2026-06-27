@@ -163,12 +163,14 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
             : (source.normalizedDolbyVisionProfile ?? 5)
         let width = facts.width > 0 ? facts.width : (source.sourceMetadata.video?.width ?? 0)
         let height = facts.height > 0 ? facts.height : (source.sourceMetadata.video?.height ?? 0)
+        let frameRate = facts.frameRate > 0 ? facts.frameRate : (source.sourceMetadata.video?.frameRate ?? 0)
         let bandwidth = estimatedBandwidth(source: source)
         return RemuxSegmentPlanner.StreamInfo(
             width: width,
             height: height,
             dolbyVisionProfile: profile,
-            dolbyVisionLevel: dolbyVisionLevel(probedLevel: facts.dolbyVisionLevel, width: width, height: height),
+            dolbyVisionLevel: dolbyVisionLevel(probedLevel: facts.dolbyVisionLevel,
+                                               width: width, height: height, frameRate: frameRate),
             audioIsEAC3: facts.audioIsEAC3,
             bandwidth: bandwidth
         )
@@ -176,13 +178,46 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
 
     /// The Dolby Vision level for the HLS `CODECS` token (`dvh1.PP.LL`). A wrong
     /// level can make AVPlayer refuse the variant, so prefer the value libavformat
-    /// read straight from the title's dvcC/dvvC configuration record; only fall
-    /// back to a UHD-vs-HD heuristic (Dolby level ~6 for 4K, ~4 below) when the
-    /// record didn't expose one (level 0/unknown).
-    nonisolated static func dolbyVisionLevel(probedLevel: Int, width: Int, height: Int) -> Int {
+    /// read straight from the title's dvcC/dvvC configuration record (authoritative,
+    /// and the SAME value movenc copies into the emitted dvcC/dvvC box, so the box
+    /// and the manifest can never disagree). Only when the record didn't expose a
+    /// level (0/unknown) do we estimate it from the luma sample rate.
+    nonisolated static func dolbyVisionLevel(probedLevel: Int, width: Int, height: Int, frameRate: Double) -> Int {
         if probedLevel > 0 { return probedLevel }
-        let pixels = width * height
-        return pixels >= 3840 * 2160 ? 6 : 4
+        return estimatedDolbyVisionLevel(width: width, height: height, frameRate: frameRate)
+    }
+
+    /// Estimates the Dolby Vision level from the luma sample rate (W×H×fps) using
+    /// the canonical Dolby tier ladder. Used ONLY as a fallback when no real
+    /// `dv_level` is available. The old resolution-only guess (UHD→6 / HD→4) was
+    /// wrong for 4K30 (→7), 4K60 (→9) and 1080p30/60 (→4/5); deriving from the
+    /// frame rate fixes those. When the frame rate is unknown we keep the coarse
+    /// resolution tier so we never compute a bogus low level.
+    nonisolated static func estimatedDolbyVisionLevel(width: Int, height: Int, frameRate: Double) -> Int {
+        guard width > 0, height > 0 else { return 6 }
+        guard frameRate > 0, frameRate.isFinite else {
+            return width * height >= 3840 * 2160 ? 6 : 4
+        }
+        let rate = Double(width * height) * frameRate
+        // (max luma sample rate, level) ascending — the canonical Dolby ceilings.
+        // Pick the lowest level whose ceiling covers this stream (1% tolerance so
+        // 23.976 / 29.97 / 59.94 NTSC rates round to their nominal tier).
+        let ladder: [(Double, Int)] = [
+            (1280 * 720 * 24, 1),
+            (1280 * 720 * 30, 2),
+            (1920 * 1080 * 24, 3),
+            (1920 * 1080 * 30, 4),
+            (1920 * 1080 * 60, 5),
+            (3840 * 2160 * 24, 6),
+            (3840 * 2160 * 30, 7),
+            (3840 * 2160 * 48, 8),
+            (3840 * 2160 * 60, 9),
+            (3840 * 2160 * 120, 10),
+        ]
+        for (ceiling, level) in ladder where rate <= ceiling * 1.01 {
+            return level
+        }
+        return ladder.last!.1
     }
 
     nonisolated static func estimatedBandwidth(source: LocalRemuxSourceDescriptor) -> Int {

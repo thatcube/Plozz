@@ -35,8 +35,53 @@ public struct LocalRemuxStrategyChoice: Hashable, Sendable, Codable, Identifiabl
         .referenceServerRemux
     ]
 
+    /// Thread-safe holder for strategy choices contributed at launch by engine
+    /// modules (e.g. the cue-driven localhost-HLS remux in EngineMPV). Keeping the
+    /// *choice* registry in CoreModels — separate from FeaturePlayback's *factory*
+    /// registry — lets persistence (`PlaybackPreferencesStore`) and display-name
+    /// resolution (`choice(for:)`) recognise dynamic ids everywhere, without
+    /// CoreModels needing to know how to build a streamer.
+    private final class DynamicChoiceRegistry: @unchecked Sendable {
+        static let shared = DynamicChoiceRegistry()
+        private let lock = NSLock()
+        private var choices: [LocalRemuxStrategyChoice] = []
+
+        func register(_ choice: LocalRemuxStrategyChoice) {
+            lock.lock(); defer { lock.unlock() }
+            choices.removeAll { $0.id == choice.id }
+            choices.append(choice)
+        }
+
+        var all: [LocalRemuxStrategyChoice] {
+            lock.lock(); defer { lock.unlock() }
+            return choices
+        }
+    }
+
+    /// Register (or replace, by id) a dynamically-contributed strategy choice.
+    /// Idempotent: re-registering the same id updates its metadata in place.
+    public static func registerDynamic(_ choice: LocalRemuxStrategyChoice) {
+        DynamicChoiceRegistry.shared.register(choice)
+    }
+
+    /// The dynamically-contributed choices only (no built-ins).
+    public static var dynamicChoices: [LocalRemuxStrategyChoice] {
+        DynamicChoiceRegistry.shared.all
+    }
+
+    /// Built-in choices followed by any dynamically-registered ones, de-duplicated
+    /// by id (built-ins win). This is the canonical list the Remux overlay picker
+    /// should present.
+    public static var allChoices: [LocalRemuxStrategyChoice] {
+        var result = builtInChoices
+        for choice in DynamicChoiceRegistry.shared.all where !result.contains(where: { $0.id == choice.id }) {
+            result.append(choice)
+        }
+        return result
+    }
+
     public static func choice(for id: String) -> LocalRemuxStrategyChoice {
-        builtInChoices.first(where: { $0.id == id }) ?? .disabled
+        allChoices.first(where: { $0.id == id }) ?? .disabled
     }
 }
 

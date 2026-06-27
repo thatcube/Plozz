@@ -50,14 +50,20 @@ public struct HomeAggregator: Sendable {
         visibility: HomeLibraryVisibility = .default,
         identitySources: @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) async -> Content {
+        let clock = ContinuousClock()
+        let started = clock.now
         let perAccount = await Self.loadPerAccount(accounts) { resolved in
-            await Self.load(
+            let accountStarted = clock.now
+            let result = await Self.load(
                 from: resolved,
                 continueWatchingLimit: continueWatchingLimit,
                 latestLimit: latestLimit,
                 visibility: visibility
             )
+            PlozzLog.boot("HomeAgg.account id=\(resolved.account.id) provider=\(resolved.account.server.provider) ms=\(Self.elapsedMS(from: accountStarted, to: clock.now)) cw=\(result.continueWatching.count) latest=\(result.latest.count) libs=\(result.libraries.count)")
+            return result
         }
+        PlozzLog.boot("HomeAgg.fanout accounts=\(accounts.count) ms=\(Self.elapsedMS(from: started, to: clock.now))")
 
         // Collapse the same title living on several servers into one card on the
         // aggregated rows, sharing the exact identity/merge core Search uses. Each
@@ -274,5 +280,13 @@ public struct HomeAggregator: Sendable {
             }
         }
         return result
+    }
+
+    /// Whole milliseconds between two `ContinuousClock` instants, for PLZBOOT
+    /// timing. Env-gated logging only — never on a user-visible path.
+    private static func elapsedMS(from start: ContinuousClock.Instant, to end: ContinuousClock.Instant) -> Int {
+        let comps = (end - start).components
+        // 1 ms = 1e15 attoseconds.
+        return Int(comps.seconds * 1000 + comps.attoseconds / 1_000_000_000_000_000)
     }
 }

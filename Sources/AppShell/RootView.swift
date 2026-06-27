@@ -8,6 +8,7 @@ import CoreNetworking
 import CoreUI
 import FeatureAuth
 import FeatureDiscovery
+import FeatureHome
 import FeaturePlayback
 
 /// Top-level view that renders one screen per `SessionState`.
@@ -89,6 +90,7 @@ public struct RootView: View {
                         musicPlayerModel: appState.musicPlayerModel,
                         audioController: appState.audioController,
                         homeVisibility: appState.homeLibraryVisibilityModel,
+                        homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,
                         mediaItemActionHandler: appState.mediaItemActionHandler,

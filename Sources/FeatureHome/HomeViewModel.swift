@@ -26,8 +26,14 @@ public final class HomeViewModel {
 
     public private(set) var state: LoadState<Content> = .idle
 
+    /// The row structure to render as a skeleton while loading: the layout
+    /// persisted from the previous successful load (so the placeholder matches the
+    /// user's real Home), falling back to a default on a first-ever launch.
+    public private(set) var skeletonLayout: [HomeRowKind]
+
     private let accounts: [ResolvedAccount]
     private let aggregator: HomeAggregator
+    private let layoutStore: HomeLayoutStoring
     /// The shared identity-index lookup folded into every merged row so a card
     /// surfaced by one server still carries its full cross-server source set.
     private let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
@@ -51,13 +57,17 @@ public final class HomeViewModel {
     public init(
         accounts: [ResolvedAccount],
         aggregator: HomeAggregator = HomeAggregator(),
+        layoutStore: HomeLayoutStoring = HomeLayoutStore(),
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
         currentVisibility: @escaping () -> HomeLibraryVisibility = { .default }
     ) {
         self.accounts = accounts
         self.aggregator = aggregator
+        self.layoutStore = layoutStore
         self.identitySources = identitySources
         self.currentVisibility = currentVisibility
+        let persisted = layoutStore.load()
+        self.skeletonLayout = persisted.isEmpty ? HomeRowKind.defaultSkeletonLayout : persisted
     }
 
     deinit {
@@ -67,6 +77,17 @@ public final class HomeViewModel {
 
     /// User-facing name for the greeting header — the primary (first) account.
     public var userName: String { accounts.first?.account.userName ?? "" }
+
+    /// Records the row structure the view actually rendered so the next launch's
+    /// skeleton matches it. Driven by the view (not derived here) because true
+    /// visibility — e.g. whether the Libraries row survives the user's
+    /// per-library Home-visibility choices — is only known at render time. Saves
+    /// only on change to avoid redundant `UserDefaults` writes.
+    public func rememberLayout(_ kinds: [HomeRowKind]) {
+        guard kinds != skeletonLayout else { return }
+        skeletonLayout = kinds
+        layoutStore.save(kinds)
+    }
 
     public func load() async {
         PlozzLog.boot("HomeVM.load START vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) accounts=\(accounts.count) state=\(String(describing: state))")

@@ -70,7 +70,8 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
             item: item,
             played: played,
             primaryAccountID: appState.primaryActiveAccount?.id,
-            additionalSources: appState.identitySnapshot.sourceRefs(for: item)
+            additionalSources: appState.identitySnapshot.sourceRefs(for: item),
+            crossServerSync: appState.playbackModel.settings.syncWatchAcrossServers
         ) else { return }
 
         var ids = Set(mutation.targets.map(\.itemID))

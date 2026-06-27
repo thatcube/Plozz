@@ -166,4 +166,98 @@ struct SpoilersDetailView: View {
         .scrollClipDisabled()
     }
 }
+struct PlaybackDetailView: View {
+    @Bindable var playback: PlaybackSettingsModel
+
+    private var syncExplanation: String {
+        playback.settings.syncWatchAcrossServers
+            ? "When you finish, resume, or mark a title, Plozz updates every server that has it — so your progress follows you no matter which server you watch on next."
+            : "Plozz only updates the server you actually watched on. Other servers that have the same title are left untouched."
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                Text("Playback").font(.largeTitle.bold())
+
+                SettingsPanel(
+                    title: "Captions",
+                    footer: "Adjust caption font, size and colours. These settings are also available from the player while you watch."
+                ) {
+                    NavigationLink(value: SettingsRoute.captions) {
+                        HStack(spacing: 16) {
+                            Image(systemName: "captions.bubble")
+                                .font(.title3)
+                                .frame(width: 44)
+                            Text("Caption style").font(.callout.weight(.medium))
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(SettingsFocusButtonStyle())
+                }
+
+                SettingsPanel(
+                    title: "Skip Intros & Credits",
+                    footer: "When your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin."
+                ) {
+                    VStack(spacing: 4) {
+                        ForEach(SkipIntrosMode.allCases, id: \.self) { mode in
+                            Button {
+                                playback.settings.skipIntros = mode
+                            } label: {
+                                HStack(spacing: 16) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(mode.title).font(.callout.weight(.medium))
+                                        Text(mode.detail)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .font(.callout.weight(.semibold))
+                                        .opacity(playback.settings.skipIntros == mode ? 1 : 0)
+                                }
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(SettingsFocusButtonStyle())
+                            .accessibilityValue(playback.settings.skipIntros == mode ? "Selected" : "")
+                        }
+                    }
+                }
+
+                SettingsPanel(
+                    title: "Watch Status Sync",
+                    footer: "Applies to this profile only and takes effect immediately — no need to restart. Trakt scrobbling is unaffected either way."
+                ) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Toggle("Sync watch status across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
+
+                        HStack(alignment: .top, spacing: 14) {
+                            Image(systemName: playback.settings.syncWatchAcrossServers ? "arrow.triangle.2.circlepath" : "externaldrive")
+                                .font(.title3)
+                                .foregroundStyle(playback.settings.syncWatchAcrossServers ? Color.accentColor : .secondary)
+                                .frame(width: 36)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(playback.settings.syncWatchAcrossServers ? "All servers" : "This server only")
+                                    .font(.callout.weight(.semibold))
+                                Text(syncExplanation)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
+            .padding(.vertical, 24)
+        }
+        .scrollClipDisabled()
+    }
+}
 #endif

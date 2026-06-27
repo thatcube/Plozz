@@ -106,6 +106,33 @@ public struct PlexProvider: MediaProvider {
         try await client.children(ratingKey: itemID).map(map(metadata:))
     }
 
+    public func mediaSegments(for itemID: String) async throws -> [MediaSegment] {
+        // Best-effort: marker-less servers/items return [] rather than failing.
+        let markers = (try? await client.mediaSegments(ratingKey: itemID)) ?? []
+        return markers.compactMap(Self.map(marker:))
+    }
+
+    /// Maps a Plex marker onto the provider-agnostic `MediaSegment`. Plex marker
+    /// offsets are milliseconds; Plex names the closing segment `credits`.
+    private static func map(marker dto: PlexMarker) -> MediaSegment? {
+        guard let start = dto.startTimeOffset, let end = dto.endTimeOffset, end > start else {
+            return nil
+        }
+        let kind: MediaSegment.Kind
+        switch dto.type?.lowercased() {
+        case "intro": kind = .intro
+        case "credits", "outro": kind = .credits
+        case "commercial": kind = .commercial
+        default: kind = .unknown
+        }
+        return MediaSegment(
+            id: "\(dto.type ?? "marker")-\(start)",
+            kind: kind,
+            start: Double(start) / 1000.0,
+            end: Double(end) / 1000.0
+        )
+    }
+
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {
         let type = Self.sectionType(forContainerKind: kind)
         PlozzLog.networking.info(

@@ -23,8 +23,20 @@ struct WatchOutboxBridge: Sendable {
     let beginLiveSession: @Sendable (_ accountID: String, _ itemID: String) -> Void
     /// End the live session for `(accountID, itemID)` and enqueue the optional
     /// final convergence `mutation`, in that order, so the just-played server is
-    /// no longer deferred and its resume/played write goes out.
-    let finishPlayback: @Sendable (_ accountID: String?, _ itemID: String, _ mutation: WatchMutation?) -> Void
+    /// no longer deferred and its resume/played write goes out. `watchedPercent`
+    /// (0...100) is the fraction watched at stop, used to drive the optimistic
+    /// in-UI progress update (the resume bar on the surface the user returns to).
+    let finishPlayback: @Sendable (_ accountID: String?, _ itemID: String, _ watchedPercent: Double, _ mutation: WatchMutation?) -> Void
+    /// Durably enqueue a mid-play convergence `mutation` without ending the live
+    /// session, so progress fans out to the **other** servers (the launch server
+    /// stays deferred while it plays). Pure local enqueue + drain — no network on
+    /// the caller's path.
+    let checkpoint: @Sendable (_ mutation: WatchMutation) -> Void
+    /// Live, off-main read of the active profile's "sync watch state across
+    /// servers" preference, evaluated at stop/checkpoint time (not captured at
+    /// player start) so flipping the toggle mid-playback takes effect on the next
+    /// convergence. Backed by a thread-safe UserDefaults read.
+    let crossServerSync: @Sendable () -> Bool
 }
 
 /// The signed-in experience: Home, Search and Settings tabs, with item-detail
@@ -39,6 +51,7 @@ struct MainTabView: View {
     let accounts: [ResolvedAccount]
     let captionModel: CaptionSettingsModel
     let spoilerModel: SpoilerSettingsModel
+    let playbackModel: PlaybackSettingsModel
     let themeModel: ThemeSettingsModel
     let diagnosticsModel: DiagnosticsSettingsModel
     let musicPlayerModel: MusicPlayerSettingsModel
@@ -98,6 +111,7 @@ struct MainTabView: View {
                 homeVisibility: homeVisibility,
                 homeLayoutStore: homeLayoutStore,
                 captionSettings: captionModel.settings,
+                playbackSettings: playbackModel.settings,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
                 themePalette: resolvedPalette,
@@ -113,6 +127,7 @@ struct MainTabView: View {
             SearchTab(
                 accounts: accounts,
                 captionSettings: captionModel.settings,
+                playbackSettings: playbackModel.settings,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
                 themePalette: resolvedPalette,
@@ -141,6 +156,7 @@ struct MainTabView: View {
             SettingsView(
                 captions: captionModel,
                 spoilers: spoilerModel,
+                playback: playbackModel,
                 theme: themeModel,
                 homeVisibility: homeVisibility,
                 trakt: trakt,
@@ -365,6 +381,7 @@ private func makePlayerViewModel(
     for request: PlayRequest,
     accounts: [ResolvedAccount],
     captionSettings: CaptionSettings,
+    playbackSettings: PlaybackSettings,
     scrobbler: any TraktScrobbling,
     watchBridge: WatchOutboxBridge,
     identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
@@ -393,6 +410,7 @@ private func makePlayerViewModel(
             ),
             itemID: videoID,
             captionSettings: captionSettings,
+            playbackSettings: playbackSettings,
             startPosition: request.startPosition,
             scrobbler: scrobbler,
             engineFactory: engineFactory,
@@ -416,6 +434,7 @@ private func makePlayerViewModel(
         itemID: request.item.id,
         mediaSourceID: request.item.selectedVersionID,
         captionSettings: captionSettings,
+        playbackSettings: playbackSettings,
         startPosition: request.startPosition,
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(),
@@ -433,8 +452,54 @@ private func makePlayerViewModel(
             if let liveAccountID {
                 watchBridge.beginLiveSession(liveAccountID, liveItemID)
             }
-        }
+        },
+        onPlaybackCheckpoint: makePlaybackCheckpointHandler(
+            convergingItem: convergingItem,
+            primaryAccountID: primaryAccountID,
+            watchBridge: watchBridge,
+            identitySources: identitySources
+        )
     )
+}
+
+/// Builds the periodic mid-play convergence hook. Mirrors
+/// ``makePlaybackStoppedHandler`` but **enqueue-only**: it does NOT end the live
+/// session (the launch server keeps playing/deferred) and does NOT publish an
+/// optimistic UI flip (the user is in the fullscreen player). Its sole job is to
+/// fan the latest position out to the **other** servers so a "walk away" mid-movie
+/// converges within ~60s without pressing Back.
+func makePlaybackCheckpointHandler(
+    convergingItem: MediaItem,
+    primaryAccountID: String?,
+    watchBridge: WatchOutboxBridge,
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+) -> @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void {
+    { position, percent in
+        let union = identitySources(convergingItem)
+        let mutation = WatchMutationFactory.playbackStop(
+            item: convergingItem,
+            position: position,
+            watchedPercent: percent,
+            primaryAccountID: primaryAccountID,
+            additionalSources: union,
+            crossServerSync: watchBridge.crossServerSync()
+        )
+        guard let mutation else { return }
+        FanoutDiagnostics.emit(FanoutDiagnostics.stopLine(
+            title: convergingItem.title,
+            kind: convergingItem.kind,
+            itemID: convergingItem.id,
+            originAccountID: convergingItem.sourceAccountID ?? primaryAccountID,
+            identities: MediaItemIdentity.identities(for: convergingItem),
+            indexUnion: union,
+            mutationTargets: mutation.targets,
+            played: mutation.played,
+            resumePosition: mutation.resumePosition,
+            watchedPercent: percent,
+            phase: "checkpoint"
+        ))
+        watchBridge.checkpoint(mutation)
+    }
 }
 
 func makePlaybackStoppedHandler(
@@ -452,7 +517,8 @@ func makePlaybackStoppedHandler(
             position: position,
             watchedPercent: percent,
             primaryAccountID: primaryAccountID,
-            additionalSources: union
+            additionalSources: union,
+            crossServerSync: watchBridge.crossServerSync()
         )
         // (b)+(c) Make the stop event visible: the played item's resolved identity,
         // the index union found for it, and the final mutation target set. Pure
@@ -470,8 +536,9 @@ func makePlaybackStoppedHandler(
             watchedPercent: percent
         ))
         // End the live session (so the just-played server is no longer deferred)
-        // and enqueue the final convergence write, in that order.
-        watchBridge.finishPlayback(liveAccountID, liveItemID, mutation)
+        // and enqueue the final convergence write, in that order. `percent` rides
+        // along so the surface the user returns to can flip its resume bar in place.
+        watchBridge.finishPlayback(liveAccountID, liveItemID, percent, mutation)
     }
 }
 
@@ -527,6 +594,7 @@ private struct HomeTab: View {
     let homeVisibility: HomeLibraryVisibilityModel
     let homeLayoutStore: HomeLayoutStoring
     let captionSettings: CaptionSettings
+    let playbackSettings: PlaybackSettings
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
     let themePalette: ThemePalette
@@ -640,6 +708,7 @@ private struct HomeTab: View {
                         for: $0,
                         accounts: accounts,
                         captionSettings: captionSettings,
+                        playbackSettings: playbackSettings,
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
                         identitySources: identitySources
@@ -813,6 +882,7 @@ private extension View {
 private struct SearchTab: View {
     let accounts: [ResolvedAccount]
     let captionSettings: CaptionSettings
+    let playbackSettings: PlaybackSettings
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
     let themePalette: ThemePalette
@@ -916,6 +986,7 @@ private struct SearchTab: View {
                         for: $0,
                         accounts: accounts,
                         captionSettings: captionSettings,
+                        playbackSettings: playbackSettings,
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
                         identitySources: identitySources

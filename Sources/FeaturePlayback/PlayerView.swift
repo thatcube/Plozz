@@ -21,6 +21,7 @@ public struct PlayerView: View {
     /// around it (with a timeout so it can never strand on black).
     @State private var hdrTransition = HDRTransitionModel()
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     /// The app-root window veil (injected by `RootView`). On HDR/DV exit the player
     /// engages it so black survives the dismiss into Home and covers the TV's slow
     /// physical panel switch. Optional so previews/tests without it fall back to the
@@ -61,6 +62,9 @@ public struct PlayerView: View {
                         setAudioDelay: { viewModel.setAudioDelay($0) },
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
+                        skipSegment: { viewModel.skipActiveSegment() },
+                        autoSkipSegment: { viewModel.autoSkipActiveSegment() },
+                        dismissSkip: { viewModel.dismissActiveSkipSegment() },
                         dismiss: { dismissSmoothly() }
                     ),
                     scrubPreview: viewModel.scrubPreview,
@@ -71,6 +75,14 @@ public struct PlayerView: View {
                                 palette: themePalette,
                                 actions: actions,
                                 onExitToSurface: onExitToSurface
+                            ))
+                        },
+                        makeSkipButton: { model, onSkip, onDismiss in
+                            AnyView(SkipSegmentButton(
+                                model: model,
+                                palette: themePalette,
+                                onSkip: onSkip,
+                                onDismiss: onDismiss
                             ))
                         }
                     )
@@ -139,6 +151,17 @@ public struct PlayerView: View {
             hdrTransition.beginTransition(from: oldMode, to: newMode)
         }
         .modifier(DisplaySettleObserver { hdrTransition.displayDidSettle() })
+        .onChange(of: scenePhase) { _, phase in
+            // The TV Home button / sleep / app suspension never fires the view's
+            // onDisappear, so stop() (and its final convergence write) would never
+            // run on that path — and the engine would keep decoding audio behind the
+            // Home screen until the OS suspends us. Take a durable checkpoint at the
+            // live position AND pause playback as we leave active, so the latest
+            // position is captured and audio doesn't keep playing in the background.
+            if phase != .active {
+                viewModel.suspendForBackground()
+            }
+        }
         .onDisappear {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }

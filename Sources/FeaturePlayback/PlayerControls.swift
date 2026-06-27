@@ -171,7 +171,6 @@ struct PlayerControls: View {
                     toggle(category)
                 } label: {
                     Label(category.title, systemImage: category.icon)
-                        .font(.headline)
                 }
                 .playerGlassButton(prominent: openPanel == category)
                 .focused($focus, equals: .button(category))
@@ -184,7 +183,6 @@ struct PlayerControls: View {
                     "Diagnostics",
                     systemImage: model.diagnosticsEnabled ? "waveform.circle.fill" : "waveform.circle"
                 )
-                .font(.headline)
             }
             .playerGlassButton(prominent: model.diagnosticsEnabled)
             .focused($focus, equals: .diagnostics)

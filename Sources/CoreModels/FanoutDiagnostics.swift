@@ -92,7 +92,8 @@ public enum FanoutDiagnostics {
         mutationTargets: [WatchMutationTarget]?,
         played: Bool?,
         resumePosition: TimeInterval?,
-        watchedPercent: Double
+        watchedPercent: Double,
+        phase: String = "stop"
     ) -> String {
         let identityDesc = identities.isEmpty ? "none" : "[\(identities.map(describe).joined(separator: ", "))]"
         let unionDesc = describeSources(indexUnion)
@@ -104,7 +105,7 @@ public enum FanoutDiagnostics {
         } else {
             mutationDesc = "mutation=nil (nothing to converge — no targets or barely started)"
         }
-        return "stop: item=\"\(title)\" kind=\(kind) id=\(itemID) origin=\(originAccountID ?? "nil") "
+        return "\(phase): item=\"\(title)\" kind=\(kind) id=\(itemID) origin=\(originAccountID ?? "nil") "
             + "watched=\(String(format: "%.1f", watchedPercent))% "
             + "identity=\(identityDesc) "
             + "indexUnion=\(indexUnion.count) \(unionDesc) | \(mutationDesc)"

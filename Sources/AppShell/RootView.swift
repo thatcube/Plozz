@@ -85,6 +85,7 @@ public struct RootView: View {
                         accounts: accounts,
                         captionModel: appState.captionModel,
                         spoilerModel: appState.spoilerModel,
+                        playbackModel: appState.playbackModel,
                         themeModel: appState.themeModel,
                         diagnosticsModel: appState.diagnosticsModel,
                         musicPlayerModel: appState.musicPlayerModel,
@@ -99,8 +100,14 @@ public struct RootView: View {
                             beginLiveSession: { accountID, itemID in
                                 appState.beginLiveWatchSession(accountID: accountID, itemID: itemID)
                             },
-                            finishPlayback: { accountID, itemID, mutation in
-                                appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, mutation: mutation)
+                            finishPlayback: { accountID, itemID, watchedPercent, mutation in
+                                appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, watchedPercent: watchedPercent, mutation: mutation)
+                            },
+                            checkpoint: { mutation in
+                                appState.checkpointWatchState(mutation: mutation)
+                            },
+                            crossServerSync: { [namespace = appState.profilesModel.activeNamespace] in
+                                PlaybackSettingsStore.currentSyncAcrossServers(namespace: namespace)
                             }
                         ),
                         displayAccounts: appState.accounts,

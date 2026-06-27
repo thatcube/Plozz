@@ -162,8 +162,7 @@ struct SeriesDetailView: View {
             .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
                 guard let mutation = MediaItemMutation.from(note),
                       mutation.itemIDs.contains(heroItem.id) else { return }
-                if let played = mutation.played { heroItem.isPlayed = played }
-                if let favorite = mutation.favorite { heroItem.isFavorite = favorite }
+                heroItem = mutation.applied(to: heroItem)
             }
     }
 

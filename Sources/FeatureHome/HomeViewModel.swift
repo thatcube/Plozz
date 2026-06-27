@@ -197,10 +197,6 @@ public final class HomeViewModel {
     }
 
     private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {
-        guard mutation.itemIDs.contains(item.id) else { return item }
-        var copy = item
-        if let played = mutation.played { copy.isPlayed = played }
-        if let favorite = mutation.favorite { copy.isFavorite = favorite }
-        return copy
+        mutation.applied(to: item)
     }
 }

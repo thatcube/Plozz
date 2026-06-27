@@ -74,6 +74,14 @@ public final class PlayerViewModel {
     /// to play when the title has multiple versions; `nil` plays the default.
     private let mediaSourceID: String?
     private let captionSettings: CaptionSettings
+    /// Per-profile playback prefs. Today: whether to offer the Skip Intro/Credits
+    /// button. When `skipIntros` is off, segments are never fetched or shown.
+    private let playbackSettings: PlaybackSettings
+    /// Loads server-detected skip segments once playback is ready; cancelled on
+    /// stop. Best-effort — a failure leaves the skip button simply unavailable.
+    private var segmentsTask: Task<Void, Never>?
+    /// Clears the transient "Skipping…" auto-skip notice after a short delay.
+    private var autoSkipNoticeTask: Task<Void, Never>?
     /// Best-effort Trakt scrobbler. Receives the same start/pause/stop lifecycle
     /// as the in-app progress report so watches sync to Trakt. A no-op when Trakt
     /// is unconfigured or disconnected.
@@ -163,6 +171,31 @@ public final class PlayerViewModel {
     /// the now-playing session. Idempotent on the receiver. Defaults to a no-op.
     private let onPlaybackStarted: @Sendable () -> Void
 
+    /// Periodic mid-playback convergence hook, called roughly every
+    /// ``checkpointInterval`` seconds of continuous play with the current position
+    /// and watched percentage. The AppShell wires this to enqueue a ``WatchMutation``
+    /// into the durable outbox so progress fans out to **other** servers within a
+    /// minute *without* the user pressing Back (a "walk away" mid-movie still
+    /// converges). The launch server stays deferred by the live-session guard until
+    /// `stop()`, so its now-playing session is never disturbed. Enqueue is a local
+    /// actor + small disk write — never a network round-trip on this path. Defaults
+    /// to a no-op so the player is usable standalone / in tests.
+    private let onPlaybackCheckpoint: @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void
+
+    /// How often (seconds) the periodic convergence checkpoint fires during
+    /// continuous play. ~60s is the agreed compromise: a casual "walk away"
+    /// propagates to other servers within a minute, while servers and their Trakt
+    /// plugins aren't spammed. Tunable; `0` (or non-positive) disables the loop.
+    private let checkpointInterval: TimeInterval
+
+    /// Drives the periodic checkpoint; cancelled on `stop()`.
+    private var checkpointTask: Task<Void, Never>?
+
+    /// The position reported by the last checkpoint, so a stalled/paused player
+    /// doesn't re-enqueue the same position and a checkpoint only fires on real
+    /// forward progress.
+    private var lastCheckpointPosition: TimeInterval = 0
+
     /// Optional playback bring-up started eagerly in `init` so the (network-bound)
     /// `playbackInfo` resolution and engine warm-up overlap the SwiftUI fullscreen
     /// navigation transition instead of starting only once the view appears. The
@@ -176,6 +209,7 @@ public final class PlayerViewModel {
         itemID: String,
         mediaSourceID: String? = nil,
         captionSettings: CaptionSettings = .default,
+        playbackSettings: PlaybackSettings = .default,
         startPosition: TimeInterval? = nil,
         scrobbler: any TraktScrobbling = DisabledTraktScrobbler(),
         engineFactory: EngineFactory = .native,
@@ -183,12 +217,15 @@ public final class PlayerViewModel {
         preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore(),
         autoDismissOnEnd: Bool = false,
         onPlaybackStopped: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
-        onPlaybackStarted: @escaping @Sendable () -> Void = {}
+        onPlaybackStarted: @escaping @Sendable () -> Void = {},
+        onPlaybackCheckpoint: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
+        checkpointInterval: TimeInterval = 60
     ) {
         self.provider = provider
         self.itemID = itemID
         self.mediaSourceID = mediaSourceID
         self.captionSettings = captionSettings
+        self.playbackSettings = playbackSettings
         self.startPositionOverride = startPosition
         self.scrobbler = scrobbler
         self.engineFactory = engineFactory
@@ -197,6 +234,8 @@ public final class PlayerViewModel {
         self.autoDismissOnEnd = autoDismissOnEnd
         self.onPlaybackStopped = onPlaybackStopped
         self.onPlaybackStarted = onPlaybackStarted
+        self.onPlaybackCheckpoint = onPlaybackCheckpoint
+        self.checkpointInterval = checkpointInterval
         self.engine = engineFactory.makeNative(captionSettings)
         self.currentEngineKind = .native
         PlaybackInstrumentation.increment(.viewModel)
@@ -425,6 +464,10 @@ public final class PlayerViewModel {
         // now-playing session, so convergence writes against this server defer
         // until stop() ends it.
         onPlaybackStarted()
+        // Begin periodic mid-play convergence checkpoints from the resumed point so
+        // progress fans out to other servers without waiting for Back. Seeded so the
+        // first checkpoint only fires after real forward progress past the resume.
+        startCheckpointLoop(seedPosition: startPosition)
 
         // Seed the in-player track menu from the engine's track lists (the
         // engine has already applied the user's default subtitle selection).
@@ -447,6 +490,60 @@ public final class PlayerViewModel {
         engine.setAudioDelay(0)
         engine.setSubtitleDelay(0)
         engine.setDialogEnhanceEnabled(false)
+
+        // Load skip markers once playback is live (opt-in, best-effort).
+        loadSkipSegmentsIfEnabled()
+    }
+
+    // MARK: - Skip intros/credits
+
+    /// Fetches server-detected skip segments when the per-profile Skip Intros
+    /// setting is on, publishing them to the controls model so the overlay can
+    /// offer a Skip button. No-op when disabled; failures degrade silently to no
+    /// button (older/marker-less servers). Runs once per load.
+    private func loadSkipSegmentsIfEnabled() {
+        guard playbackSettings.skipIntros.fetchesMarkers else { return }
+        controls.skipMode = playbackSettings.skipIntros
+        segmentsTask?.cancel()
+        let provider = provider
+        let itemID = itemID
+        segmentsTask = Task { @MainActor [weak self] in
+            let segments = (try? await provider.mediaSegments(for: itemID)) ?? []
+            guard let self, !Task.isCancelled else { return }
+            self.controls.skippableSegments = segments.filter(\.isSkippable)
+        }
+    }
+
+    /// Seeks past the currently-active skip segment (intro/credits) to its end,
+    /// then clears it so the button dismisses. Invoked by the in-player Skip
+    /// button. No-op when no segment is active.
+    public func skipActiveSegment() {
+        guard let segment = controls.activeSkipSegment else { return }
+        controls.dismissedSegmentID = segment.id
+        requestSeek(to: segment.end)
+    }
+
+    /// Dismisses the skip button for the active segment without seeking (Menu /
+    /// swipe-away), so it won't keep stealing focus for the rest of the window.
+    public func dismissActiveSkipSegment() {
+        controls.dismissedSegmentID = controls.activeSkipSegment?.id
+    }
+
+    /// Auto-skips the active segment when the per-profile Auto-skip setting is on:
+    /// seeks past it (like the Skip button) and flashes a brief "Skipping…"
+    /// notice so the jump isn't jarring. Marks the segment dismissed first so the
+    /// per-tick evaluation fires this exactly once per segment.
+    public func autoSkipActiveSegment() {
+        guard let segment = controls.activeSkipSegment else { return }
+        controls.dismissedSegmentID = segment.id
+        controls.autoSkipNotice = AutoSkipNotice(label: segment.kind.autoSkippedLabel)
+        requestSeek(to: segment.end)
+        autoSkipNoticeTask?.cancel()
+        autoSkipNoticeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.controls.autoSkipNotice = nil
+        }
     }
 
     // MARK: - Stall watchdog
@@ -573,6 +670,64 @@ public final class PlayerViewModel {
         return min(max(position / duration * 100, 0), 100)
     }
 
+    // MARK: - Convergence checkpoints
+
+    /// Starts the periodic mid-play convergence loop. Each tick fires a checkpoint
+    /// (see ``emitCheckpoint``) so progress fans out to other servers roughly every
+    /// ``checkpointInterval`` seconds without the user pressing Back. Cancelled and
+    /// restarted defensively; `stop()` tears it down. A non-positive interval (or a
+    /// default no-op hook) leaves the loop off so standalone/test players are
+    /// unaffected.
+    private func startCheckpointLoop(seedPosition: TimeInterval) {
+        lastCheckpointPosition = max(0, seedPosition)
+        checkpointTask?.cancel()
+        guard checkpointInterval > 0 else { return }
+        let interval = checkpointInterval
+        checkpointTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                if Task.isCancelled { return }
+                self?.emitCheckpoint()
+            }
+        }
+    }
+
+    /// Enqueues a convergence checkpoint for the current position **iff** the player
+    /// has made real forward progress since the last one and isn't paused/stalled —
+    /// so a paused or stuck player never re-writes the same position to N servers.
+    /// Pure enqueue (no network on this path); safe to call from the timer or, on
+    /// app background, from `checkpointNow()`.
+    private func emitCheckpoint() {
+        guard request != nil, !engine.isPaused else { return }
+        let position = max(engine.furthestObservedPosition, engine.currentTime)
+        guard position > 1, position - lastCheckpointPosition >= 1 else { return }
+        lastCheckpointPosition = position
+        onPlaybackCheckpoint(position, watchedPercent(at: position))
+    }
+
+    /// Forces an immediate convergence checkpoint regardless of the timer — used
+    /// when the app is about to be backgrounded/suspended (the TV Home button or
+    /// sleep path, which never fires the view's `onDisappear`/`stop()`), so the
+    /// latest position is durably captured before the process can be killed.
+    public func checkpointNow() {
+        emitCheckpoint()
+    }
+
+    /// Handles the app leaving the foreground (TV Home button, sleep, or app
+    /// switcher) — a path that never fires the view's `onDisappear`/`stop()`. It
+    /// first takes a durable checkpoint at the **live** position (while still
+    /// playing, so the checkpoint guard passes), then **pauses** the engine so audio
+    /// doesn't keep decoding/playing in the background until the OS suspends the
+    /// process. Deliberately one-way: returning to the foreground leaves playback
+    /// paused so the user resumes intentionally, rather than audio springing back
+    /// to life on its own.
+    public func suspendForBackground() {
+        emitCheckpoint()
+        if !engine.isPaused {
+            setPaused(true)
+        }
+    }
+
     // MARK: - Transport
 
     /// Requests a committed seek. Coalesces rapid presses: while one seek is
@@ -682,6 +837,12 @@ public final class PlayerViewModel {
         didStop = true
         prefetchTask?.cancel()
         prefetchTask = nil
+        checkpointTask?.cancel()
+        checkpointTask = nil
+        segmentsTask?.cancel()
+        segmentsTask = nil
+        autoSkipNoticeTask?.cancel()
+        autoSkipNoticeTask = nil
         cancelWatchdog()
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = nil

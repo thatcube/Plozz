@@ -109,6 +109,9 @@ struct PlexMetadata: Decodable {
     let Guid: [PlexGuid]?
     let Genre: [PlexTag]?
     let Media: [PlexMedia]?
+    /// Plex Pass intro/credits markers, present only when the metadata request
+    /// passes `includeMarkers=1`. Offsets are in milliseconds.
+    let Marker: [PlexMarker]?
 }
 
 /// One Plex external-id GUID, e.g. `{ "id": "imdb://tt0111161" }`.
@@ -168,6 +171,26 @@ struct PlexMedia: Decodable {
     private enum CodingKeys: String, CodingKey {
         case id, duration, container, videoCodec, audioCodec, videoResolution
         case width, height, audioChannels, videoProfile, audioProfile, videoStreamDisplayTitle, Part
+    }
+}
+
+/// A Plex Pass structural marker (`<Marker type="intro|credits" ...>`). Offsets
+/// are milliseconds from the start of the item. Decoded flexibly because Plex
+/// occasionally serialises numeric attributes as strings.
+struct PlexMarker: Decodable {
+    let type: String?
+    let startTimeOffset: Int?
+    let endTimeOffset: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case type, startTimeOffset, endTimeOffset
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = c.flexibleString(.type)
+        startTimeOffset = c.flexibleInt(.startTimeOffset)
+        endTimeOffset = c.flexibleInt(.endTimeOffset)
     }
 }
 

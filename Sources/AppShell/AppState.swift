@@ -44,6 +44,7 @@ public final class AppState {
     /// as-is and not rebuilt.
     public private(set) var captionModel: CaptionSettingsModel
     public private(set) var spoilerModel: SpoilerSettingsModel
+    public private(set) var playbackModel: PlaybackSettingsModel
     public private(set) var themeModel: ThemeSettingsModel
     public private(set) var diagnosticsModel: DiagnosticsSettingsModel
     /// The full-screen music player's per-profile look + "show extra info"
@@ -197,6 +198,21 @@ public final class AppState {
         }
     }
 
+    /// Durably records a **mid-play convergence checkpoint** without ending the live
+    /// session: it enqueues + drains so progress fans out to the **other** servers
+    /// (the launch server stays deferred by its still-active live session and is
+    /// caught up by the final `finishLiveWatchSession`). Pure local enqueue + drain
+    /// — no optimistic UI flip (the user is in the fullscreen player). Coalesces
+    /// cleanly with later checkpoints and the final stop via the reconciler's
+    /// newest-wins `capturedAt` clock.
+    public func checkpointWatchState(mutation: WatchMutation) {
+        let reconciler = watchReconciler
+        Task {
+            await reconciler.enqueue(mutation)
+            await reconciler.drain()
+        }
+    }
+
     /// Registers `(accountID, itemID)` as the live in-app playback session so the
     /// reconciler defers convergence writes against that exact server while it is
     /// playing — a mid-play drain can never disturb/zero the now-playing session.
@@ -210,13 +226,13 @@ public final class AppState {
     /// is no longer deferred and its final resume/played write goes out. Sequenced
     /// in a single task so the end always precedes the enqueue's drain. `accountID`
     /// is optional so a barely-started/untargeted stop still flushes deferred work.
-    public func finishLiveWatchSession(accountID: String?, itemID: String, mutation: WatchMutation?) {
+    public func finishLiveWatchSession(accountID: String?, itemID: String, watchedPercent: Double, mutation: WatchMutation?) {
         let reconciler = watchReconciler
         // (a) Index state captured at the moment of stop — the value the fan-out
         // actually saw. If crossServer=0 here, the index never warmed a union for
         // any title, so the stop's targets could only be origin-only.
         FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(identitySnapshotStore.current, phase: "stop-index"))
-        publishOptimisticWatchedFlip(itemID: itemID, mutation: mutation)
+        publishOptimisticWatchState(itemID: itemID, mutation: mutation, watchedPercent: watchedPercent)
         Task {
             if let accountID {
                 await reconciler.endLiveSession(accountID: accountID, itemID: itemID)
@@ -228,22 +244,33 @@ public final class AppState {
         }
     }
 
-    /// On a real *finish* — the convergence `mutation` marks the title played —
-    /// optimistically flip its watched badge across every visible surface the
-    /// instant the player dismisses, fixing the "tile still reads unwatched after
-    /// Back" bug that previously required a full reload. The id set is every
-    /// server's own item id in the shared source of truth (the mutation's
-    /// `targets`, already unioned from the eager identity index when the stop
-    /// mutation was built) plus the played item id itself. Routed through the same
-    /// optimistic ``MediaItemMutation`` path press-and-hold "Mark watched" uses, so
-    /// Home/Detail/Search all flip immediately. Purely additive: it never blocks or
-    /// replaces the durable fan-out enqueued above. A mid-watch resume (no `played`)
-    /// leaves the badge alone — resume tiles refresh on the next Home load.
-    private func publishOptimisticWatchedFlip(itemID: String, mutation: WatchMutation?) {
-        guard let mutation, mutation.played == true else { return }
+    /// Optimistically reflect the just-ended playback across every visible surface
+    /// the instant the player dismisses, so the user never sees a stale card after
+    /// Back. The id set is every server's own item id in the shared source of truth
+    /// (the mutation's `targets`, already unioned from the eager identity index when
+    /// the stop mutation was built) plus the played item id itself. Routed through
+    /// the same optimistic ``MediaItemMutation`` path press-and-hold "Mark watched"
+    /// uses, so Home/Detail/Search all update immediately. Purely additive: it never
+    /// blocks or replaces the durable fan-out enqueued alongside.
+    ///
+    /// Two cases:
+    ///  - **Finish** (`played == true`): flip the watched badge everywhere and clear
+    ///    the resume bar (`resumePosition 0`, `playedPercentage 1`).
+    ///  - **Partial watch** (a resume position, no `played`): surface the new resume
+    ///    position + fraction so the detail "Resume" affordance and the row tile's
+    ///    progress bar update in place — the "watched 4 min, pressed Back, page still
+    ///    looks untouched" bug. `watchedPercent` (0...100) becomes the `0...1`
+    ///    fraction `PosterCardView` reads.
+    private func publishOptimisticWatchState(itemID: String, mutation: WatchMutation?, watchedPercent: Double) {
+        guard let mutation else { return }
         var ids = Set(mutation.targets.map(\.itemID))
         ids.insert(itemID)
-        MediaItemMutation(itemIDs: ids, played: true).post()
+        if mutation.played == true {
+            MediaItemMutation(itemIDs: ids, played: true, resumePosition: 0, playedPercentage: 1).post()
+        } else if let resume = mutation.resumePosition {
+            let fraction = max(0, min(watchedPercent / 100, 1))
+            MediaItemMutation(itemIDs: ids, resumePosition: resume, playedPercentage: fraction).post()
+        }
     }
 
     // MARK: - Eager identity index (single source of truth for cross-server sources)
@@ -255,6 +282,24 @@ public final class AppState {
     /// active profile changes so one profile's catalogue never leaks into another.
     @ObservationIgnored
     private var _identityIndex = IdentityIndex()
+
+    /// Profile-scoped disk store for the index membership, so cross-server unions
+    /// survive relaunch and are known at t=0 (the cold-boot convergence fix). Built
+    /// lazily for the active namespace; dropped on profile switch.
+    @ObservationIgnored
+    private var _identityIndexStore: (any IdentityIndexStoring)?
+    private var identityIndexStore: any IdentityIndexStoring {
+        if let store = _identityIndexStore { return store }
+        let store = FileIdentityIndexStore(namespace: profilesModel.activeNamespace)
+        _identityIndexStore = store
+        return store
+    }
+
+    /// Whether the persisted membership has been reloaded yet this launch / profile.
+    /// Restore runs exactly once so a later warm never re-seeds stale disk data over
+    /// fresher live scans.
+    @ObservationIgnored
+    private var didRestorePersistedIndex = false
 
     /// In-flight warming task, cancelled and replaced when the active accounts /
     /// profile change so a stale scan can't clobber a newer one.
@@ -301,40 +346,101 @@ public final class AppState {
         let ttl = identityIndexTTL
         let chunkSize = identityChunkSize
         let maxPerLibrary = identityMaxItemsPerLibrary
+        let store = identityIndexStore
 
         identityWarmTask?.cancel()
         identityWarmTask = Task { [weak self] in
+            // B2: On the first warm this launch, seed the index from the persisted
+            // membership and publish immediately, so cross-server unions are known
+            // at t=0 — the first post-boot stop fans out to every server instead of
+            // origin-only while the live scan below refreshes things. Pruned to the
+            // active accounts inside `restore` (B3) so a removed server / switched
+            // profile is never resurrected.
+            if let self, await self.consumePendingRestore() {
+                let persisted = store.load()
+                if !persisted.isEmpty, await index.restore(from: persisted, retaining: activeIDs) {
+                    let snapshot = await index.snapshot()
+                    await MainActor.run {
+                        self.identitySnapshot = snapshot
+                        self.identitySnapshotStore.update(snapshot)
+                        self.drainWatchOutbox()
+                    }
+                    FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "restore"))
+                }
+            }
             await index.retainAccounts(activeIDs)
             let stale = await index.staleAccounts(olderThan: ttl)
+
+            // Select the accounts that actually need a (re)scan: warm & fresh ones
+            // are skipped unless `force`. Resolved up front so the concurrent warm
+            // below only spawns real work.
+            var accountsToWarm: [ResolvedAccount] = []
             for resolvedAccount in resolved {
                 if Task.isCancelled { break }
-                let accountID = resolvedAccount.account.id
-                let warm = await index.isWarm(accountID)
-                if warm && !force && !stale.contains(accountID) { continue }
-                await Self.indexAccount(
-                    resolvedAccount,
-                    into: index,
-                    serverInfo: serverInfo[accountID],
-                    chunkSize: chunkSize,
-                    maxPerLibrary: maxPerLibrary
-                )
-                // Publish progressively so surfaces see each warmed account.
-                let snapshot = await index.snapshot()
-                await MainActor.run {
-                    self?.identitySnapshot = snapshot
-                    self?.identitySnapshotStore.update(snapshot)
-                    // Re-drain the watch outbox now that another account is indexed:
-                    // a movie / series mutation stopped before the index finished
-                    // warming re-expands against the larger union and fans out to the
-                    // newly-known servers. No-op when the outbox is empty.
-                    self?.drainWatchOutbox()
+                let warm = await index.isWarm(resolvedAccount.account.id)
+                if warm && !force && !stale.contains(resolvedAccount.account.id) { continue }
+                accountsToWarm.append(resolvedAccount)
+            }
+
+            // Warm every account CONCURRENTLY. Cold-boot warm time used to be the
+            // *sum* of each server's scan (a sequential loop), which is the visible
+            // "takes a while to warm up on first boot" cost. The identity index is an
+            // `actor` keyed by accountID, so concurrent per-account begin/ingest/
+            // finish never race, and the wall-clock collapses to ≈ the slowest single
+            // server. Each account still publishes its snapshot, persists, and
+            // re-drains the outbox the moment IT finishes, so surfaces and fan-out see
+            // progress incrementally instead of only after the slowest server.
+            await withTaskGroup(of: Void.self) { group in
+                for resolvedAccount in accountsToWarm {
+                    let accountID = resolvedAccount.account.id
+                    group.addTask {
+                        if Task.isCancelled { return }
+                        await Self.indexAccount(
+                            resolvedAccount,
+                            into: index,
+                            serverInfo: serverInfo[accountID],
+                            chunkSize: chunkSize,
+                            maxPerLibrary: maxPerLibrary
+                        )
+                        if Task.isCancelled { return }
+                        // Publish progressively so surfaces see each warmed account.
+                        let snapshot = await index.snapshot()
+                        await MainActor.run {
+                            self?.identitySnapshot = snapshot
+                            self?.identitySnapshotStore.update(snapshot)
+                            // Re-drain the watch outbox now that another account is
+                            // indexed: a movie / series mutation stopped before the
+                            // index finished warming re-expands against the larger
+                            // union and fans out to the newly-known servers. No-op
+                            // when the outbox is empty.
+                            self?.drainWatchOutbox()
+                        }
+                        // B1: persist the freshly-warmed membership so the next cold
+                        // boot can seed it at t=0. Only warm accounts are exported, so
+                        // a half-scan is never frozen as authoritative. The store is
+                        // NSLock-guarded with atomic writes, so the concurrent saves
+                        // from sibling warm tasks are safe and monotonic.
+                        let persisted = await index.export()
+                        try? store.save(persisted)
+                        // Make warm progress visible: each publish shows how many
+                        // identities and cross-server unions the index now holds.
+                        // crossServer staying 0 as accounts warm is the H1 signal
+                        // (no union ⇒ nothing fans out).
+                        FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "warm"))
+                    }
                 }
-                // Make warm progress visible: each publish shows how many identities
-                // and cross-server unions the index now holds. crossServer staying 0
-                // as accounts warm is the H1 signal (no union ⇒ nothing fans out).
-                FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "warm"))
             }
         }
+    }
+
+    /// Returns `true` exactly once per launch / profile so the persisted-index
+    /// restore runs a single time even though `warmIdentityIndex` is invoked on
+    /// every account-set change.
+    @MainActor
+    private func consumePendingRestore() -> Bool {
+        guard !didRestorePersistedIndex else { return false }
+        didRestorePersistedIndex = true
+        return true
     }
 
     /// Scans one account's movie + series libraries in bounded pages and ingests
@@ -393,6 +499,8 @@ public final class AppState {
         identityWarmTask?.cancel()
         identityWarmTask = nil
         _identityIndex = IdentityIndex()
+        _identityIndexStore = nil
+        didRestorePersistedIndex = false
         identitySnapshot = .empty
         identitySnapshotStore.update(.empty)
     }
@@ -470,6 +578,7 @@ public final class AppState {
         systemBridge: SystemProfileBridging? = nil,
         captionModel: CaptionSettingsModel? = nil,
         spoilerModel: SpoilerSettingsModel? = nil,
+        playbackModel: PlaybackSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         musicPlayerModel: MusicPlayerSettingsModel? = nil,
@@ -488,6 +597,7 @@ public final class AppState {
         // (test path) and don't rebuild them on profile switch. Otherwise build
         // them scoped to the active profile's namespace.
         let injected = captionModel != nil || spoilerModel != nil
+            || playbackModel != nil
             || themeModel != nil || diagnosticsModel != nil
             || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
         self.usesInjectedModels = injected
@@ -497,6 +607,7 @@ public final class AppState {
         self.traktService = traktService ?? TraktServiceFactory.make(namespace: ns)
         self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
+        self.playbackModel = playbackModel ?? PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
         self.themeModel = themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         self.musicPlayerModel = musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
@@ -1129,6 +1240,7 @@ public final class AppState {
         let ns = profilesModel.activeNamespace
         captionModel = CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         spoilerModel = SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
+        playbackModel = PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
         themeModel = ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         musicPlayerModel = MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))

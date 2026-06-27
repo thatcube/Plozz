@@ -32,25 +32,66 @@ public extension Notification.Name {
 /// yanked back to the top of the screen after a menu action.
 ///
 /// A mutation can carry a watched-state change (`played`), a watchlist change
-/// (`favorite`), or both; an absent (`nil`) field means "unchanged", so a screen
-/// only touches the fields that actually changed.
+/// (`favorite`), a resume-progress change (`resumePosition` / `playedPercentage`),
+/// or any combination; an absent (`nil`) field means "unchanged", so a screen only
+/// touches the fields that actually changed.
+///
+/// **Why progress is here:** a partial watch (e.g. 4 minutes of a movie) is saved
+/// to the server when the player stops, but the surface you return to holds an
+/// in-memory ``MediaItem`` that still reflects the *old* progress until a full
+/// reload. Carrying the new resume position + fraction lets the detail page and
+/// row tiles update their progress bar in place, instantly, the same way the
+/// watched badge already flips — no refetch, focus preserved.
 public struct MediaItemMutation: Sendable, Equatable {
     public let itemIDs: Set<String>
     /// New watched/played state, or `nil` if this mutation doesn't change it.
     public let played: Bool?
     /// New watchlist/favourite state, or `nil` if this mutation doesn't change it.
     public let favorite: Bool?
+    /// New saved resume position (seconds), or `nil` if unchanged. A value of `0`
+    /// clears the resume point (title finished / start over) — surfaces drop the
+    /// progress bar and the detail "Resume" affordance.
+    public let resumePosition: TimeInterval?
+    /// New fractional watched progress in `0...1`, or `nil` if unchanged. Drives the
+    /// poster-card progress bar directly (`PosterCardView` reads `playedPercentage`).
+    public let playedPercentage: Double?
 
-    public init(itemIDs: Set<String>, played: Bool? = nil, favorite: Bool? = nil) {
+    public init(
+        itemIDs: Set<String>,
+        played: Bool? = nil,
+        favorite: Bool? = nil,
+        resumePosition: TimeInterval? = nil,
+        playedPercentage: Double? = nil
+    ) {
         self.itemIDs = itemIDs
         self.played = played
         self.favorite = favorite
+        self.resumePosition = resumePosition
+        self.playedPercentage = playedPercentage
     }
 
     private enum Key {
         static let itemIDs = "itemIDs"
         static let played = "played"
         static let favorite = "favorite"
+        static let resumePosition = "resumePosition"
+        static let playedPercentage = "playedPercentage"
+    }
+
+    /// Applies this mutation to `item` in place, returning the updated copy. Only
+    /// the fields the mutation actually carries are touched, so a screen can fold a
+    /// mutation over every visible card without disturbing unrelated state. Items
+    /// the mutation doesn't target are returned unchanged. A `resumePosition` of `0`
+    /// is normalised to `nil` (no resume point) so finished/restarted titles drop
+    /// their progress bar.
+    public func applied(to item: MediaItem) -> MediaItem {
+        guard itemIDs.contains(item.id) else { return item }
+        var copy = item
+        if let played { copy.isPlayed = played }
+        if let favorite { copy.isFavorite = favorite }
+        if let resumePosition { copy.resumePosition = resumePosition > 0 ? resumePosition : nil }
+        if let playedPercentage { copy.playedPercentage = playedPercentage }
+        return copy
     }
 
     /// Posts a `.mediaItemDidMutate` notification carrying this mutation.
@@ -58,6 +99,8 @@ public struct MediaItemMutation: Sendable, Equatable {
         var userInfo: [String: Any] = [Key.itemIDs: Array(itemIDs)]
         if let played { userInfo[Key.played] = played }
         if let favorite { userInfo[Key.favorite] = favorite }
+        if let resumePosition { userInfo[Key.resumePosition] = resumePosition }
+        if let playedPercentage { userInfo[Key.playedPercentage] = playedPercentage }
         NotificationCenter.default.post(
             name: .mediaItemDidMutate,
             object: nil,
@@ -71,7 +114,17 @@ public struct MediaItemMutation: Sendable, Equatable {
         guard let ids = notification.userInfo?[Key.itemIDs] as? [String] else { return nil }
         let played = notification.userInfo?[Key.played] as? Bool
         let favorite = notification.userInfo?[Key.favorite] as? Bool
-        guard played != nil || favorite != nil else { return nil }
-        return MediaItemMutation(itemIDs: Set(ids), played: played, favorite: favorite)
+        let resumePosition = notification.userInfo?[Key.resumePosition] as? TimeInterval
+        let playedPercentage = notification.userInfo?[Key.playedPercentage] as? Double
+        guard played != nil || favorite != nil || resumePosition != nil || playedPercentage != nil else {
+            return nil
+        }
+        return MediaItemMutation(
+            itemIDs: Set(ids),
+            played: played,
+            favorite: favorite,
+            resumePosition: resumePosition,
+            playedPercentage: playedPercentage
+        )
     }
 }

@@ -100,6 +100,15 @@ public final class PlayerControlsModel {
     /// the in-player control bar; seeded from the caller's initial preference.
     public var diagnosticsEnabled: Bool = false
 
+    // MARK: Skip intros/credits
+    /// Server-detected skippable segments (intros/credits) for the playing item.
+    /// Populated by the view model only when the per-profile Skip Intros setting
+    /// is on; empty otherwise, so no skip button is ever offered.
+    public var skippableSegments: [MediaSegment] = []
+    /// True while the user has dismissed the skip button for the *current*
+    /// segment, so it doesn't keep re-grabbing focus for the rest of that window.
+    public var dismissedSegmentID: String?
+
     public init() {}
 
     /// Where the transport playhead should render: the scrub target while
@@ -118,5 +127,41 @@ public final class PlayerControlsModel {
 
     public var hasSelectableAudio: Bool { audioOptions.count > 1 }
     public var hasSelectableSubtitles: Bool { !subtitleOptions.isEmpty }
+
+    /// The skippable segment whose window currently contains the live position,
+    /// unless the user already dismissed that segment's button. Drives whether
+    /// the in-player Skip Intro/Credits button is shown and focusable.
+    public var activeSkipSegment: MediaSegment? {
+        guard let segment = skippableSegments.activeSkippable(at: currentSeconds) else { return nil }
+        return segment.id == dismissedSegmentID ? nil : segment
+    }
+
+    /// How intros/credits are handled (Off / On / Auto (delay) / Auto (instant)).
+    /// Mirrors the per-profile setting; set when markers load. Drives whether the
+    /// Skip button is surfaced, auto-skipped after a delay, or skipped instantly.
+    public var skipMode: SkipIntrosMode = .off
+
+    /// In `.autoDelay`, the playback position (seconds) at which the active
+    /// segment auto-skips. Set while the button counts down; `nil` otherwise.
+    /// The button's ring depletes toward this so the wait is visible.
+    public var autoSkipAtSeconds: TimeInterval?
+
+    /// A transient, non-interactive confirmation shown briefly after a segment is
+    /// auto-skipped instantly (e.g. "Skipping Intro"). Set by the view model and
+    /// cleared on a short timer; `nil` the rest of the time.
+    public var autoSkipNotice: AutoSkipNotice?
+}
+
+/// A brief on-screen confirmation that an intro/credits segment was skipped
+/// automatically. A fresh `id` per occurrence re-triggers the reveal animation
+/// even when consecutive notices share the same `label`.
+public struct AutoSkipNotice: Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let label: String
+
+    public init(label: String) {
+        self.id = UUID()
+        self.label = label
+    }
 }
 #endif

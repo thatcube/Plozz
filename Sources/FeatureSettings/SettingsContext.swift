@@ -11,6 +11,7 @@ import FeatureProfiles
 struct SettingsContext {
     let captions: CaptionSettingsModel
     let spoilers: SpoilerSettingsModel
+    let playback: PlaybackSettingsModel
     let theme: ThemeSettingsModel
     let homeVisibility: HomeLibraryVisibilityModel
     let discoveredLibraries: LoadState<[AggregatedLibrary]>
@@ -45,6 +46,7 @@ enum SettingsRoute: Hashable {
     case profile
     case servers
     case appearance
+    case playback
     case captions
     case spoilers
     case integrations

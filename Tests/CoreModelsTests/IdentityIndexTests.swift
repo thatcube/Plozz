@@ -227,6 +227,107 @@ final class IdentityIndexTests: XCTestCase {
         XCTAssertEqual(stale, ["jf"])
     }
 
+    // MARK: Persistence (cold-boot convergence)
+
+    func testExportThenRestoreRoundTripsCrossServerUnion() async {
+        var clock = Date(timeIntervalSince1970: 10_000)
+        let source = IdentityIndex(now: { clock })
+        let info = SourceServerInfo(providerKind: .jellyfin, serverName: "JF", accountName: "me")
+        await source.ingest([movie("j1", account: "jf", tmdb: "42")], accountID: "jf", serverInfo: info)
+        await source.ingest([movie("p1", account: "plex", tmdb: "42")], accountID: "plex",
+                            serverInfo: SourceServerInfo(providerKind: .plex))
+        await source.finishRebuild(for: "jf")
+        await source.finishRebuild(for: "plex")
+
+        let exported = await source.export()
+        // Survive a JSON round-trip exactly as the file store will encode it.
+        let data = try! JSONEncoder().encode(exported)
+        let decoded = try! JSONDecoder().decode(PersistedIdentityIndex.self, from: data)
+
+        // A fresh, cold index seeded from disk must expose the full union at t=0.
+        clock = clock.addingTimeInterval(5)
+        let restored = IdentityIndex(now: { clock })
+        let didRestore = await restored.restore(from: decoded, retaining: ["jf", "plex"])
+        XCTAssertTrue(didRestore)
+
+        let snapshot = await restored.snapshot()
+        let refs = snapshot.sourceRefs(for: movie("probe", account: "jf", tmdb: "42"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:j1", "plex:p1"],
+                       "A restored index must expose the same cross-server union it persisted")
+        XCTAssertEqual(snapshot.crossServerIdentityCount, 1)
+        // Restored accounts are warm so the first post-boot stop fans out immediately.
+        let jfWarm = await restored.isWarm("jf")
+        XCTAssertTrue(jfWarm)
+    }
+
+    func testRestorePrunesAccountsNoLongerActive() async {
+        let source = IdentityIndex()
+        await source.ingest([movie("j1", account: "jf", tmdb: "42")], accountID: "jf")
+        await source.ingest([movie("p1", account: "plex", tmdb: "42")], accountID: "plex")
+        await source.finishRebuild(for: "jf")
+        await source.finishRebuild(for: "plex")
+        let exported = await source.export()
+
+        // Plex was signed out between launches: it must not be resurrected from disk.
+        let restored = IdentityIndex()
+        await restored.restore(from: exported, retaining: ["jf"])
+
+        let snapshot = await restored.snapshot()
+        XCTAssertEqual(Set(snapshot.sourceRefs(for: movie("x", account: "jf", tmdb: "42")).map(\.id)), ["jf:j1"])
+        let plexWarm = await restored.isWarm("plex")
+        XCTAssertFalse(plexWarm, "A pruned account is never marked warm from disk")
+    }
+
+    func testRestoreDoesNotClobberAFreshLiveScan() async {
+        // A live scan already warmed "jf" with its current ids; a stale disk entry
+        // for the same account must not overwrite it.
+        let index = IdentityIndex()
+        await index.ingest([movie("fresh", account: "jf", tmdb: "42")], accountID: "jf")
+        await index.finishRebuild(for: "jf")
+
+        let stale = PersistedIdentityIndex(
+            entriesByAccount: ["jf": [
+                .init(identity: .external(source: "tmdb", value: "42"),
+                      source: indexed("jf", "stale-old-id"))
+            ]],
+            builtAtByAccount: ["jf": Date(timeIntervalSince1970: 1)]
+        )
+        let didRestore = await index.restore(from: stale, retaining: ["jf"])
+        XCTAssertFalse(didRestore, "Disk must never clobber a fresher live scan")
+
+        let snapshot = await index.snapshot()
+        XCTAssertEqual(Set(snapshot.sourceRefs(for: movie("x", account: "jf", tmdb: "42")).map(\.id)), ["jf:fresh"])
+    }
+
+    func testRestorePreservesBuiltAtSoStalenessStillReWarms() async {
+        let clock = Date(timeIntervalSince1970: 100_000)
+        let index = IdentityIndex(now: { clock })
+        let persisted = PersistedIdentityIndex(
+            entriesByAccount: ["jf": [
+                .init(identity: .external(source: "tmdb", value: "42"), source: indexed("jf", "j1"))
+            ]],
+            // Built well over the TTL ago, so the restored account is immediately
+            // stale and the background warm refreshes it.
+            builtAtByAccount: ["jf": clock.addingTimeInterval(-10_000)]
+        )
+        await index.restore(from: persisted, retaining: ["jf"])
+
+        let stale = await index.staleAccounts(olderThan: 600)
+        XCTAssertEqual(stale, ["jf"], "A restored-but-old account must re-warm on the normal TTL path")
+    }
+
+    func testExportOnlyIncludesWarmAccounts() async {
+        let index = IdentityIndex()
+        await index.ingest([movie("j1", account: "jf", tmdb: "42")], accountID: "jf")
+        await index.finishRebuild(for: "jf")
+        // "plex" ingested but never finished (inconclusive scan) — must not persist.
+        await index.ingest([movie("p1", account: "plex", tmdb: "42")], accountID: "plex")
+
+        let exported = await index.export()
+        XCTAssertEqual(Set(exported.entriesByAccount.keys), ["jf"],
+                       "Only conclusively-warmed accounts are persisted")
+    }
+
     // MARK: Population-time enrichment (Plex guid-less completeness)
 
     /// Build a Plex series hit as it arrives from a list endpoint that OMITTED the
@@ -324,6 +425,62 @@ final class IdentityIndexTests: XCTestCase {
         XCTAssertEqual(Set(snapshot.targets(for: fromPlex).map(\.id)), ["jf:j1", "plex:p1"])
         // The series sources carry the kind so episode expansion can use them.
         XCTAssertTrue(snapshot.sources(for: fromPlex).allSatisfy { $0.kind == .series })
+    }
+
+    // MARK: Enrichment concurrency (bounded, order-independent batch)
+
+    func testEnrichmentProcessesMixedPageConcurrently() async {
+        // A realistic page: one already-identified series (no fetch), two guid-less
+        // that enrich to real ids, one whose fetch fails (inconclusive), and one
+        // that fetches but stays id-less (conclusive skip). Results arrive in any
+        // order from the task group — the partition is by identity, not order.
+        let identified = series("j1", account: "jf", tvdb: "100")
+        let willEnrichA = guidlessPlexSeries("p1", account: "plex")
+        let willEnrichB = guidlessPlexSeries("p2", account: "plex")
+        let willFail = guidlessPlexSeries("p3", account: "plex")
+        let unmatchable = guidlessPlexSeries("p4", account: "plex")
+
+        let result = await IdentityEnrichment.prepare(
+            [identified, willEnrichA, willEnrichB, willFail, unmatchable]
+        ) { item in
+            switch item.id {
+            case "p1": var f = item; f.providerIDs = ["Tvdb": "201"]; return f
+            case "p2": var f = item; f.providerIDs = ["Tvdb": "202"]; return f
+            case "p3": return nil               // fetch failed → inconclusive
+            default:   return item              // p4: fetched, still id-less
+            }
+        }
+
+        XCTAssertTrue(result.inconclusive, "p3's failed fetch must mark the page inconclusive")
+        XCTAssertEqual(
+            Set(result.indexable.map(\.id)), ["j1", "p1", "p2"],
+            "identified + both enriched survive; failed and unmatchable are excluded")
+    }
+
+    func testEnrichmentBoundsConcurrency() async {
+        // With a cap of 2, no more than 2 enrichment fetches may be in flight at
+        // once even on a large guid-less page — the bound is what keeps a cold-boot
+        // scan from flooding the connection pool. Every item is still processed.
+        actor Gauge {
+            private var inFlight = 0
+            private(set) var peak = 0
+            func enter() { inFlight += 1; peak = max(peak, inFlight) }
+            func leave() { inFlight -= 1 }
+        }
+        let gauge = Gauge()
+        let items = (0..<12).map { guidlessPlexSeries("p\($0)", account: "plex") }
+
+        let result = await IdentityEnrichment.prepare(items, concurrency: 2) { item in
+            await gauge.enter()
+            try? await Task.sleep(nanoseconds: 5_000_000) // 5ms so overlap is observable
+            await gauge.leave()
+            var f = item; f.providerIDs = ["Tvdb": item.id]; return f
+        }
+
+        let peak = await gauge.peak
+        XCTAssertLessThanOrEqual(peak, 2, "concurrency cap must bound in-flight enrichment fetches")
+        XCTAssertEqual(result.indexable.count, 12, "every item still enriched")
+        XCTAssertFalse(result.inconclusive)
     }
 
     // MARK: Snapshot store (the @Sendable bridge)

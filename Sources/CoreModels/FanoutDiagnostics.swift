@@ -39,6 +39,16 @@ public enum FanoutDiagnostics {
     private static let logger = Logger(subsystem: "com.plozz.app", category: "fanout")
     #endif
 
+    /// When the process is launched with `PLZXFAN_STDOUT=1` in its environment,
+    /// each telemetry line is ALSO written to stdout. `os_log` (above) only reaches
+    /// the unified logging system, which a remote driver can't read on this macOS
+    /// toolchain; stdout, however, is forwarded by `devicectl device process launch
+    /// --console`. This lets the maintainer's agent stream telemetry off the Apple TV
+    /// live instead of copy-pasting Console.app. Opt-in (read once at startup) so
+    /// normal runs and unit tests stay silent.
+    private static let mirrorsStandardOut: Bool =
+        ProcessInfo.processInfo.environment["PLZXFAN_STDOUT"] == "1"
+
     /// Emits one already-formatted telemetry line (the `PLZXFAN ` prefix is added).
     /// No-op when disabled. Public so the AppShell seams (stop handler, applier) can
     /// emit the lines they alone have the data for.
@@ -51,6 +61,10 @@ public enum FanoutDiagnostics {
         // hidden by default and were invisible on device.
         logger.notice("PLZXFAN \(line, privacy: .public)")
         #endif
+        if mirrorsStandardOut {
+            // Unbuffered write so `devicectl --console` sees each line immediately.
+            try? FileHandle.standardOutput.write(contentsOf: Data(("PLZXFAN " + line + "\n").utf8))
+        }
     }
 
     // MARK: - Pure line builders (testable, no OSLog dependency)

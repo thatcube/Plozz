@@ -53,7 +53,11 @@ final class LocalRemuxModelsTests: XCTestCase {
         defaults.removePersistentDomain(forName: "PlaybackPreferencesStore.localRemux")
         let store = PlaybackPreferencesStore(defaults: defaults)
 
-        XCTAssertEqual(store.loadLocalRemuxStrategyID(), LocalRemuxStrategyChoice.referenceServerRemuxID)
+        // With nothing persisted the active strategy is the built-in default, which
+        // is now the production full-timeline localhost VOD remux engine (it owns
+        // the whole stream so AVPlayer seek-ahead never 404s) for eligible titles.
+        XCTAssertEqual(store.loadLocalRemuxStrategyID(), LocalRemuxStrategyChoice.fullTimelineVODID)
+        XCTAssertEqual(LocalRemuxStrategyChoice.defaultID, LocalRemuxStrategyChoice.fullTimelineVODID)
 
         store.saveLocalRemuxStrategyID(LocalRemuxStrategyChoice.referenceServerRemuxID)
         XCTAssertEqual(store.loadLocalRemuxStrategyID(), LocalRemuxStrategyChoice.referenceServerRemuxID)

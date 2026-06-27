@@ -16,7 +16,10 @@ public struct LocalRemuxStrategyChoice: Hashable, Sendable, Codable, Identifiabl
 
     public static let disabledID = "disabled"
     public static let referenceServerRemuxID = "reference.server-remux"
-    public static let defaultID = referenceServerRemuxID
+    /// The production full-timeline localhost VOD remux engine (this branch). It
+    /// is the default for eligible single-layer DoVi P5/8 + AC-3/E-AC-3 MKVs.
+    public static let fullTimelineVODID = "fulltimeline.localhost-vod"
+    public static let defaultID = fullTimelineVODID
 
     public static let disabled = LocalRemuxStrategyChoice(
         id: disabledID,
@@ -30,13 +33,61 @@ public struct LocalRemuxStrategyChoice: Hashable, Sendable, Codable, Identifiabl
         detail: "Diagnostic baseline: force an AVPlayer HLS manifest so the Remux overlay and seek torture test actually run. Real local engines replace this."
     )
 
+    public static let fullTimelineVOD = LocalRemuxStrategyChoice(
+        id: fullTimelineVODID,
+        displayName: "Full-timeline localhost VOD",
+        detail: "App owns the stream: a loopback HTTP origin serves a full-timeline VOD HLS playlist (every segment declared up front) whose fMP4 segments are -c copy remuxed from the original MKV (dvh1 + dvcC/dvvC Dolby Vision, dec3 E-AC-3 Atmos, no re-encode). Every far seek resolves locally, so AVPlayer seek-ahead never 404s."
+    )
+
     public static let builtInChoices: [LocalRemuxStrategyChoice] = [
         .disabled,
+        .fullTimelineVOD,
         .referenceServerRemux
     ]
 
+    /// Thread-safe holder for strategy choices contributed at launch by engine
+    /// modules that link FFmpeg (e.g. the full-timeline VOD remux in LocalRemux).
+    /// Keeping the *choice* registry in CoreModels — separate from
+    /// FeaturePlayback's *factory* registry — lets persistence
+    /// (`PlaybackPreferencesStore`) and display-name resolution (`choice(for:)`)
+    /// recognise dynamic ids everywhere, without CoreModels knowing how to build a
+    /// streamer.
+    private final class DynamicChoiceRegistry: @unchecked Sendable {
+        static let shared = DynamicChoiceRegistry()
+        private let lock = NSLock()
+        private var choices: [LocalRemuxStrategyChoice] = []
+
+        func register(_ choice: LocalRemuxStrategyChoice) {
+            lock.lock(); defer { lock.unlock() }
+            choices.removeAll { $0.id == choice.id }
+            choices.append(choice)
+        }
+
+        var all: [LocalRemuxStrategyChoice] {
+            lock.lock(); defer { lock.unlock() }
+            return choices
+        }
+    }
+
+    /// Register (or replace, by id) a dynamically-contributed strategy choice.
+    /// Idempotent: re-registering the same id updates its metadata in place.
+    public static func registerDynamic(_ choice: LocalRemuxStrategyChoice) {
+        DynamicChoiceRegistry.shared.register(choice)
+    }
+
+    /// Built-in choices followed by any dynamically-registered ones, de-duplicated
+    /// by id (built-ins win). This is the canonical list the Remux overlay picker
+    /// should present.
+    public static var allChoices: [LocalRemuxStrategyChoice] {
+        var result = builtInChoices
+        for choice in DynamicChoiceRegistry.shared.all where !result.contains(where: { $0.id == choice.id }) {
+            result.append(choice)
+        }
+        return result
+    }
+
     public static func choice(for id: String) -> LocalRemuxStrategyChoice {
-        builtInChoices.first(where: { $0.id == id }) ?? .disabled
+        allChoices.first(where: { $0.id == id }) ?? .disabled
     }
 }
 

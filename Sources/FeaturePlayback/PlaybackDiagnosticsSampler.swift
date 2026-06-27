@@ -28,6 +28,7 @@ public final class PlaybackDiagnosticsSampler {
     /// Immutable per-stream facts (codec/HDR/fps/mode/container/device) merged
     /// into every dynamic sample.
     private var staticDiagnostics = PlaybackDiagnostics()
+    private var remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)?
     private var timerTask: Task<Void, Never>?
 
     public init() {}
@@ -49,9 +50,16 @@ public final class PlaybackDiagnosticsSampler {
     /// presentation size) are skipped, but the authoritative baseline from
     /// `metadata` — container, codecs, HDR, mode, and the engine name — is still
     /// published so the overlay works on every engine.
-    public func start(player: AVPlayer?, mode: PlaybackDiagnostics.PlaybackMode, metadata: MediaSourceMetadata? = nil, engineName: String? = nil) {
+    public func start(
+        player: AVPlayer?,
+        mode: PlaybackDiagnostics.PlaybackMode,
+        metadata: MediaSourceMetadata? = nil,
+        engineName: String? = nil,
+        remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)? = nil
+    ) {
         stop()
         self.player = player
+        self.remuxSnapshot = remuxSnapshot
         var base = PlaybackDiagnostics.base(from: metadata, mode: mode)
         base.engineName = engineName
         Self.fillDeviceInfo(into: &base)
@@ -78,6 +86,7 @@ public final class PlaybackDiagnosticsSampler {
         timerTask?.cancel()
         timerTask = nil
         player = nil
+        remuxSnapshot = nil
     }
 
     // MARK: Dynamic (per-tick) sampling
@@ -102,9 +111,17 @@ public final class PlaybackDiagnosticsSampler {
                 if event.numberOfDroppedVideoFrames >= 0 {
                     diagnostics.droppedVideoFrames = event.numberOfDroppedVideoFrames
                 }
+                if var remux = remuxSnapshot?(), event.numberOfStalls >= 0 {
+                    remux.stallCount = max(remux.stallCount ?? 0, event.numberOfStalls)
+                    diagnostics.remux = remux
+                }
             }
 
             diagnostics.bufferedSecondsAhead = bufferedSecondsAhead(in: item)
+        }
+
+        if diagnostics.remux == nil {
+            diagnostics.remux = remuxSnapshot?()
         }
 
         // System metrics refresh on every engine so a leak is visible on the

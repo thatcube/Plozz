@@ -890,6 +890,11 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertTrue(url.contains("protocol=hls"), url)
         XCTAssertTrue(url.contains("path=/library/metadata/77"), url)
         XCTAssertTrue(url.contains("X-Plex-Token=TOKEN"), url)
+        let localRemux = try XCTUnwrap(request.localRemuxSource)
+        let original = localRemux.originalURL.absoluteString
+        XCTAssertTrue(original.hasPrefix("https://plex.host:32400/library/parts/2/16000/file.mkv"), original)
+        XCTAssertTrue(original.contains("download=1"), original)
+        XCTAssertTrue(original.contains("X-Plex-Token=TOKEN"), original)
     }
 
     func testPlaybackInfoDirectPlaysSupportedContainer() async throws {

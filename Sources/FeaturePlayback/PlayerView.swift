@@ -62,6 +62,8 @@ public struct PlayerView: View {
                         setAudioDelay: { viewModel.setAudioDelay($0) },
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
+                        selectLocalRemuxStrategy: { viewModel.selectLocalRemuxStrategy($0) },
+                        runRemuxSeekTortureTest: { viewModel.runLocalRemuxSeekTortureTest() },
                         skipSegment: { viewModel.skipActiveSegment() },
                         autoSkipSegment: { viewModel.autoSkipActiveSegment() },
                         dismissSkip: { viewModel.dismissActiveSkipSegment() },
@@ -225,7 +227,8 @@ public struct PlayerView: View {
             player: viewModel.player,
             mode: viewModel.deliveryMode,
             metadata: viewModel.sourceMetadata,
-            engineName: viewModel.engineDisplayName
+            engineName: viewModel.engineDisplayName,
+            remuxSnapshot: { viewModel.localRemuxDiagnostics }
         )
     }
 }

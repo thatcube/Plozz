@@ -77,6 +77,10 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
         public var videoRangeType: String?
         /// Color transfer characteristics, e.g. `smpte2084`, `arib-std-b67`.
         public var colorTransfer: String?
+        /// Explicit Dolby Vision profile number when the provider reports it. Plex
+        /// exposes this directly; Jellyfin-backed callers may derive it from
+        /// `videoRangeType` when only the single-layer token is known.
+        public var dolbyVisionProfile: Int?
 
         public init(
             codec: String? = nil,
@@ -90,7 +94,8 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
             frameRate: Double? = nil,
             videoRange: String? = nil,
             videoRangeType: String? = nil,
-            colorTransfer: String? = nil
+            colorTransfer: String? = nil,
+            dolbyVisionProfile: Int? = nil
         ) {
             self.codec = codec
             self.codecTag = codecTag
@@ -104,6 +109,7 @@ public struct MediaSourceMetadata: Hashable, Sendable, Codable {
             self.videoRange = videoRange
             self.videoRangeType = videoRangeType
             self.colorTransfer = colorTransfer
+            self.dolbyVisionProfile = dolbyVisionProfile
         }
     }
 
@@ -211,11 +217,18 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// from the provider, used to populate the playback-diagnostics overlay even
     /// when the streamed (transcoded) asset exposes no track metadata.
     public var sourceMetadata: MediaSourceMetadata?
+    /// The original authenticated/range-readable bytes plus enough source facts for
+    /// a local-remux strategy to synthesize its own AVPlayer-safe stream.
+    public var localRemuxSource: LocalRemuxSourceDescriptor?
     /// Scrubbing-preview thumbnails for this item, when the server has generated
     /// them (Jellyfin trickplay tiles or a Plex BIF index). `nil` (or an unusable
     /// source) means the custom player simply shows no scrub preview — it never
     /// blocks playback.
     public var scrubPreview: ScrubPreviewSource?
+    /// Whether the resolved `streamURL` is already a manifest/playlist-style stream
+    /// (server HLS or a local-remux HLS facade) and therefore should be fed
+    /// straight to AVPlayer rather than wrapped for subtitle injection.
+    public var isManifestStream: Bool
 
     public init(
         item: MediaItem,
@@ -228,6 +241,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         isTranscoding: Bool = false,
         deliveryMode: PlaybackDiagnostics.PlaybackMode? = nil,
         sourceMetadata: MediaSourceMetadata? = nil,
+        localRemuxSource: LocalRemuxSourceDescriptor? = nil,
         scrubPreview: ScrubPreviewSource? = nil
     ) {
         self.item = item
@@ -240,7 +254,9 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.isTranscoding = isTranscoding
         self.deliveryMode = deliveryMode ?? (isTranscoding ? .transcode : .directPlay)
         self.sourceMetadata = sourceMetadata
+        self.localRemuxSource = localRemuxSource
         self.scrubPreview = scrubPreview
+        self.isManifestStream = isTranscoding || streamURL.pathExtension.lowercased() == "m3u8"
     }
 }
 

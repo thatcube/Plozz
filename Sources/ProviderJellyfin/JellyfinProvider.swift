@@ -299,6 +299,7 @@ public struct JellyfinProvider: MediaProvider {
         // BEFORE any remux swap below, so diagnostics and the native engine's
         // Dolby Vision display switch see the real source even if the server's
         // remux response describes the output container instead.
+        let originalSource = source
         let originalContainer = source.Container
         let originalStreams = source.MediaStreams ?? detail.MediaStreams ?? []
 
@@ -342,6 +343,15 @@ public struct JellyfinProvider: MediaProvider {
         let subs = streams.filter { $0.`Type` == "Subtitle" }.map { stream in
             map(subtitleStream: stream, itemID: itemID, sourceID: sourceID)
         }
+        let localRemuxSource = try? localRemuxSourceDescriptor(
+            itemID: itemID,
+            source: originalSource,
+            originalContainer: originalContainer,
+            originalStreams: originalStreams,
+            playSessionID: info.PlaySessionId,
+            referencePlaybackURL: streamURL,
+            durationSeconds: mappedItem.runtime
+        )
 
         return PlaybackRequest(
             item: mappedItem,
@@ -353,6 +363,7 @@ public struct JellyfinProvider: MediaProvider {
             isTranscoding: source.TranscodingUrl != nil,
             deliveryMode: Self.deliveryMode(transcoding: source.TranscodingUrl != nil, didRemux: didRemux),
             sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
+            localRemuxSource: localRemuxSource,
             scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled)
         )
     }
@@ -552,7 +563,8 @@ public struct JellyfinProvider: MediaProvider {
                 frameRate: v.RealFrameRate ?? v.AverageFrameRate,
                 videoRange: v.VideoRange,
                 videoRangeType: v.VideoRangeType,
-                colorTransfer: v.ColorTransfer
+                colorTransfer: v.ColorTransfer,
+                dolbyVisionProfile: Self.dolbyVisionProfile(for: v.VideoRangeType)
             )
         }
         let audioStream = audio.map { a in
@@ -581,6 +593,17 @@ public struct JellyfinProvider: MediaProvider {
             subtitle: subtitleStream
         )
         return metadata.isEmpty ? nil : metadata
+    }
+
+    static func dolbyVisionProfile(for videoRangeType: String?) -> Int? {
+        switch (videoRangeType ?? "").uppercased() {
+        case "DOVIWITHHDR10", "DOVIWITHHLG", "DOVIWITHSDR":
+            return 8
+        case "DOVI":
+            return 5
+        default:
+            return nil
+        }
     }
 
     public func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {
@@ -618,6 +641,10 @@ public struct JellyfinProvider: MediaProvider {
         }
         // DirectPlay: stream the original container as-is. Preferred for local
         // servers (no transcode, best quality).
+        return try staticStreamURL(itemID: itemID, source: source, playSessionID: playSessionID)
+    }
+
+    private func staticStreamURL(itemID: String, source: MediaSourceInfo, playSessionID: String?) throws -> URL {
         let container = source.Container ?? "mp4"
         let sourceID = source.Id ?? itemID
         guard var components = URLComponents(url: session.server.baseURL, resolvingAgainstBaseURL: false) else {
@@ -639,6 +666,31 @@ public struct JellyfinProvider: MediaProvider {
         components.queryItems = query
         guard let url = components.url else { throw AppError.invalidResponse }
         return url
+    }
+
+    private func localRemuxSourceDescriptor(
+        itemID: String,
+        source: MediaSourceInfo,
+        originalContainer: String?,
+        originalStreams: [MediaStreamDto],
+        playSessionID: String?,
+        referencePlaybackURL: URL?,
+        durationSeconds: TimeInterval?
+    ) throws -> LocalRemuxSourceDescriptor? {
+        guard let metadata = Self.sourceMetadata(container: originalContainer, streams: originalStreams) else {
+            return nil
+        }
+        let originalURL = try staticStreamURL(itemID: itemID, source: source, playSessionID: playSessionID)
+        return LocalRemuxSourceDescriptor(
+            itemID: itemID,
+            mediaSourceID: source.Id,
+            provider: .jellyfin,
+            originalURL: originalURL,
+            referencePlaybackURL: referencePlaybackURL,
+            durationSeconds: durationSeconds,
+            byteRangeSupported: true,
+            sourceMetadata: metadata
+        )
     }
 
     private func absoluteURL(fromServerPath path: String) -> URL? {

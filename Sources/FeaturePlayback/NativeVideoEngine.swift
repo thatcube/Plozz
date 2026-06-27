@@ -259,7 +259,7 @@ public final class NativeVideoEngine: VideoEngine {
     /// URL directly (transcoded HLS already carries subtitles in its manifest).
     private func makeAsset(for request: PlaybackRequest) -> AVURLAsset {
         subtitleLoader = nil
-        guard !request.isTranscoding else {
+        guard !request.isManifestStream else {
             return AVURLAsset(url: request.streamURL)
         }
         let injectables: [InjectableSubtitle] = request.subtitleTracks.compactMap { track in

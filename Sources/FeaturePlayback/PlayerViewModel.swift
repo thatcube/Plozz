@@ -147,6 +147,11 @@ public final class PlayerViewModel {
     /// final target without overlapping engine seeks racing each other.
     private var latestSeekTarget: TimeInterval?
     private var seekTask: Task<Void, Never>?
+    /// The active local-remux session, when this playback chose the shared remux
+    /// seam over the standard native/mpv routing.
+    private var localRemuxSession: (any LocalRemuxStreamingSession)?
+    /// Optional long-running scripted seek benchmark.
+    private var remuxSeekTestTask: Task<Void, Never>?
 
     /// Persisted player preferences (e.g. last-used playback speed).
     private let preferencesStore: PlaybackPreferencesStoring
@@ -241,6 +246,8 @@ public final class PlayerViewModel {
         PlaybackInstrumentation.increment(.viewModel)
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
+        self.controls.localRemuxStrategies = LocalRemuxStrategyRegistry.availableChoices
+        self.controls.selectedLocalRemuxStrategyID = preferencesStore.loadLocalRemuxStrategyID()
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
@@ -363,11 +370,13 @@ public final class PlayerViewModel {
     private func startPlayback(forceTranscode: Bool, resumeOverride: TimeInterval?) async {
         phase = .loading
         do {
-            let request = try await provider.playbackInfo(for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
+            await teardownLocalRemuxSession()
+            var request = try await provider.playbackInfo(for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
             // A user-initiated Back during playbackInfo resolution should NOT
             // proceed to bring up an engine that will immediately be torn down —
             // short-circuit cleanly without going through the failure path.
             try Task.checkCancellation()
+            request = await applyLocalRemuxIfNeeded(to: request, forceTranscode: forceTranscode)
             self.request = request
             configureControls(for: request)
 
@@ -376,12 +385,17 @@ public final class PlayerViewModel {
             let startPosition = resumeOverride ?? startPositionOverride ?? request.startPosition
 
             // Pick the engine from the resolved source facts (pure decision).
-            var kind = EngineRouter.selectEngine(
-                source: request.sourceMetadata,
-                capabilities: capabilities,
-                isTranscoding: request.isTranscoding,
-                hybridAvailable: engineFactory.hybridAvailable
-            )
+            var kind: PlaybackEngineKind
+            if request.deliveryMode == .localRemux {
+                kind = .native
+            } else {
+                kind = EngineRouter.selectEngine(
+                    source: request.sourceMetadata,
+                    capabilities: capabilities,
+                    isTranscoding: request.isTranscoding,
+                    hybridAvailable: engineFactory.hybridAvailable
+                )
+            }
 
             // An adaptive source carries its audio as a *separate* track (e.g. a
             // high-resolution YouTube DASH trailer). Only the hybrid (mpv) engine
@@ -452,6 +466,7 @@ public final class PlayerViewModel {
         await Self.yieldToRunLoop()
         await engine.load(request: request, startPosition: startPosition)
         phase = .ready
+        localRemuxSession?.metricsController.recordFirstFrameIfNeeded()
         // Publish diagnostics after the engine load attempt returns, so the
         // diagnostics sampler doesn't churn SwiftUI layout during mpv init.
         diagnosticsToken = UUID()
@@ -493,6 +508,48 @@ public final class PlayerViewModel {
 
         // Load skip markers once playback is live (opt-in, best-effort).
         loadSkipSegmentsIfEnabled()
+    }
+
+    // MARK: - Local remux seam
+
+    private func applyLocalRemuxIfNeeded(
+        to request: PlaybackRequest,
+        forceTranscode: Bool
+    ) async -> PlaybackRequest {
+        guard !forceTranscode else { return request }
+        guard let descriptor = request.localRemuxSource else { return request }
+        guard descriptor.shouldPreferLocalRemux(capabilities: capabilities) else { return request }
+
+        let selectedStrategyID = preferencesStore.loadLocalRemuxStrategyID()
+        controls.selectedLocalRemuxStrategyID = selectedStrategyID
+        guard selectedStrategyID != LocalRemuxStrategyChoice.disabledID,
+              let streamer = LocalRemuxStrategyRegistry.makeStreamer(for: selectedStrategyID) else {
+            return request
+        }
+
+        do {
+            let session = try await streamer.openSession(source: descriptor)
+            let prepared = try await session.preparePlayback()
+            localRemuxSession = session
+            var remuxed = request
+            remuxed.streamURL = prepared.playbackURL
+            remuxed.isManifestStream = prepared.isManifestStream
+            remuxed.deliveryMode = prepared.deliveryMode
+            return remuxed
+        } catch {
+            await teardownLocalRemuxSession()
+            PlozzLog.playback.debug("Local remux strategy failed; falling back to standard routing")
+            return request
+        }
+    }
+
+    private func teardownLocalRemuxSession() async {
+        remuxSeekTestTask?.cancel()
+        remuxSeekTestTask = nil
+        if let localRemuxSession {
+            await localRemuxSession.teardown()
+        }
+        self.localRemuxSession = nil
     }
 
     // MARK: - Skip intros/credits
@@ -728,6 +785,125 @@ public final class PlayerViewModel {
         }
     }
 
+    // MARK: - Local-remux seek torture harness
+
+    private func executeLocalRemuxSeekTortureTest() async {
+        guard let session = localRemuxSession else {
+            controls.remuxHarnessStatus = "Seek torture test requires an active local-remux strategy."
+            return
+        }
+        let metrics = session.metricsController
+        controls.remuxHarnessRunning = true
+        metrics.resetHarnessState()
+
+        do {
+            let duration = max(engine.duration, request?.item.runtime ?? 0)
+            guard duration > 120 else {
+                throw NSError(
+                    domain: "LocalRemuxHarness",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Title is too short for the scripted seek torture test."]
+                )
+            }
+
+            let initialPaused = engine.isPaused
+            let current = max(engine.currentTime, 0)
+            let jumpForward = min(max(current + 600, 30), max(30, duration - 30))
+            let jumpBack = max(0, min(current + 30, jumpForward - 30))
+            let eofTarget = max(0, duration - 15)
+
+            try await runTortureSeekStep("Jump +10m", target: jumpForward)
+            try await runTortureSeekStep("Jump back", target: jumpBack)
+            try await runRapidScrubBurst(duration: duration)
+            try await runTortureSeekStep("Seek near EOF", target: eofTarget)
+
+            metrics.setHarnessRunning(step: "Pause 60s")
+            controls.remuxHarnessStatus = "Seek torture test: Pause 60s"
+            setPaused(true)
+            try await Task.sleep(nanoseconds: 60_000_000_000)
+            if !initialPaused {
+                setPaused(false)
+            }
+
+            let summary = PlaybackDiagnostics.joinParts([
+                "Passed",
+                metrics.snapshot.timeToFirstFrameMs.map { "TTFF \($0) ms" },
+                metrics.snapshot.lastSeekLatencyMs.map { "Last seek \($0) ms" },
+                metrics.snapshot.stallCount.map { "Stalls \($0)" }
+            ])
+            metrics.finishHarness(success: true, summary: summary)
+            controls.remuxHarnessStatus = summary
+        } catch is CancellationError {
+            metrics.resetHarnessState()
+            controls.remuxHarnessStatus = "Seek torture test cancelled."
+        } catch {
+            let message = (error as NSError).localizedDescription
+            let summary = "Failed · \(message)"
+            metrics.finishHarness(success: false, summary: summary)
+            controls.remuxHarnessStatus = summary
+        }
+
+        controls.remuxHarnessRunning = false
+    }
+
+    private func runTortureSeekStep(_ label: String, target: TimeInterval) async throws {
+        localRemuxSession?.metricsController.setHarnessRunning(step: label)
+        controls.remuxHarnessStatus = "Seek torture test: \(label)"
+        await seek(to: target)
+        try await waitForPlaybackPosition(near: target)
+    }
+
+    private func runRapidScrubBurst(duration: TimeInterval) async throws {
+        let targets = [
+            max(15, duration * 0.20),
+            max(30, duration * 0.55),
+            max(45, duration * 0.33),
+            max(60, duration * 0.72)
+        ]
+        localRemuxSession?.metricsController.setHarnessRunning(step: "Rapid scrub burst")
+        controls.remuxHarnessStatus = "Seek torture test: Rapid scrub burst"
+        for target in targets {
+            requestSeek(to: target)
+            try await Task.sleep(nanoseconds: 120_000_000)
+        }
+        try await waitForSeekLoopToDrain()
+        if let final = targets.last {
+            try await waitForPlaybackPosition(near: final)
+        }
+    }
+
+    private func waitForSeekLoopToDrain(timeout: TimeInterval = 20) async throws {
+        let started = Date()
+        while controls.isSeeking || seekTask != nil {
+            if Date().timeIntervalSince(started) > timeout {
+                throw NSError(
+                    domain: "LocalRemuxHarness",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Seek burst did not settle before the timeout."]
+                )
+            }
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+    }
+
+    private func waitForPlaybackPosition(
+        near target: TimeInterval,
+        tolerance: TimeInterval = 2,
+        timeout: TimeInterval = 20
+    ) async throws {
+        let started = Date()
+        while abs(engine.currentTime - target) > tolerance {
+            if Date().timeIntervalSince(started) > timeout {
+                throw NSError(
+                    domain: "LocalRemuxHarness",
+                    code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "Player never settled near \(Int(target.rounded()))s."]
+                )
+            }
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+    }
+
     // MARK: - Transport
 
     /// Requests a committed seek. Coalesces rapid presses: while one seek is
@@ -757,7 +933,9 @@ public final class PlayerViewModel {
                 // can be cheap here — only the LAST one needs to be precise.
                 let isFinal = (self.latestSeekTarget == nil)
                 let kind: VideoSeekKind = isFinal ? .exact : .fast
+                self.localRemuxSession?.metricsController.beginSeek()
                 await self.engine.seek(to: next, kind: kind)
+                self.localRemuxSession?.metricsController.endSeek()
             }
             self.seekTask = nil
             self.controls.isSeeking = false
@@ -779,7 +957,9 @@ public final class PlayerViewModel {
         controls.isSeeking = true
         controls.currentSeconds = max(0, seconds)
         controls.pendingSeekTarget = max(0, seconds)
+        localRemuxSession?.metricsController.beginSeek()
         await engine.seek(to: seconds, kind: .exact)
+        localRemuxSession?.metricsController.endSeek()
         controls.isSeeking = false
     }
 
@@ -839,6 +1019,8 @@ public final class PlayerViewModel {
         prefetchTask = nil
         checkpointTask?.cancel()
         checkpointTask = nil
+        remuxSeekTestTask?.cancel()
+        remuxSeekTestTask = nil
         segmentsTask?.cancel()
         segmentsTask = nil
         autoSkipNoticeTask?.cancel()
@@ -853,6 +1035,7 @@ public final class PlayerViewModel {
         let finalPosition = max(engine.furthestObservedPosition, engine.currentTime)
         let percent = watchedPercent(at: finalPosition)
         engine.stop()
+        await teardownLocalRemuxSession()
         await report(event: .stop, isPaused: true, positionOverride: finalPosition)
         onPlaybackStopped(finalPosition, percent)
     }
@@ -886,6 +1069,12 @@ public final class PlayerViewModel {
     /// to populate the playback diagnostics overlay.
     public var sourceMetadata: MediaSourceMetadata? { request?.sourceMetadata }
 
+    /// Local-remux comparison-harness snapshot, when the current playback is using
+    /// the shared remux seam.
+    public var localRemuxDiagnostics: PlaybackDiagnostics.RemuxDiagnostics? {
+        localRemuxSession?.metricsController.snapshot
+    }
+
     /// Scrubbing-preview source for the playing item, if the server has previews.
     public var scrubPreview: ScrubPreviewSource? { request?.scrubPreview }
 
@@ -897,6 +1086,23 @@ public final class PlayerViewModel {
     /// A short, human-readable name for the active engine (e.g. `AVPlayer`,
     /// `VLCKit`), surfaced in the diagnostics overlay.
     public var engineDisplayName: String { engine.displayName }
+
+    public func selectLocalRemuxStrategy(_ strategyID: String) {
+        let resolved = LocalRemuxStrategyChoice.choice(for: strategyID)
+        controls.selectedLocalRemuxStrategyID = resolved.id
+        preferencesStore.saveLocalRemuxStrategyID(resolved.id)
+        if request?.deliveryMode == .localRemux, localRemuxSession?.strategy.id != resolved.id {
+            controls.remuxHarnessStatus = "Saved \(resolved.displayName). Reload playback to compare it against the current strategy."
+        }
+    }
+
+    public func runLocalRemuxSeekTortureTest() {
+        guard remuxSeekTestTask == nil else { return }
+        remuxSeekTestTask = Task { @MainActor [weak self] in
+            await self?.executeLocalRemuxSeekTortureTest()
+            self?.remuxSeekTestTask = nil
+        }
+    }
 
     // MARK: - Custom transport configuration
 
@@ -912,6 +1118,25 @@ public final class PlayerViewModel {
         controls.isScrubbing = false
         controls.previewImage = nil
         controls.isPaused = false
+        controls.localRemuxStrategies = LocalRemuxStrategyRegistry.availableChoices
+        controls.selectedLocalRemuxStrategyID = preferencesStore.loadLocalRemuxStrategyID()
+        if let descriptor = request.localRemuxSource {
+            switch descriptor.eligibility(capabilities: capabilities) {
+            case .eligible:
+                controls.localRemuxEligible = true
+                controls.localRemuxEligibilityMessage = "Eligible: single-layer Dolby Vision MKV with AC-3/E-AC-3 audio."
+            case .ineligible(let reason):
+                controls.localRemuxEligible = false
+                controls.localRemuxEligibilityMessage = reason
+            }
+        } else {
+            controls.localRemuxEligible = false
+            controls.localRemuxEligibilityMessage = "Provider did not expose an original-file local-remux source for this title."
+        }
+        controls.localRemuxActive = request.deliveryMode == .localRemux
+        controls.activeLocalRemuxStrategyName = localRemuxSession?.strategy.displayName
+        controls.remuxHarnessRunning = false
+        controls.remuxHarnessStatus = localRemuxSession?.metricsController.snapshot.lastHarnessResult?.summary ?? ""
     }
 
     /// A short secondary line for the transport bar (series · SxEx for episodes).

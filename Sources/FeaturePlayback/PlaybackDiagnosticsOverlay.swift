@@ -46,6 +46,16 @@ struct PlaybackDiagnosticsOverlay: View {
             optionalRow("Audio", d.audioLineText)
             optionalRow("Subtitles", d.subtitleText)
             row("Source", sourceText(d))
+            if d.mode == .localRemux {
+                optionalRow("Remux Strategy", d.remuxStrategyText)
+                optionalRow("Remux TTFF", d.remuxTimeToFirstFrameText)
+                optionalRow("Remux Seek", d.remuxSeekLatencyText)
+                optionalRow("Remux Stalls", d.remuxStallsText)
+                optionalRow("Remux Segments", d.remuxSegmentsText)
+                optionalRow("Remux Bytes", d.remuxBytesText)
+                optionalRow("Remux Cache", d.remuxUsageText)
+                optionalRow("Remux Harness", d.remuxHarnessText)
+            }
             row("Buffer", d.bufferStatusText)
             row("Network", d.observedBitrateText)
             row("Dropped", "\(d.droppedFramesText) frames")

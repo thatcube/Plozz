@@ -19,6 +19,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         /// Server repackages the original video/audio bitstream into a new
         /// container (e.g. MKV → fMP4 HLS) with no re-encode. Lossless.
         case remux
+        /// Plozz intercepted the original bytes locally and synthesized its own
+        /// AVPlayer-facing stream (e.g. localhost/custom-scheme HLS).
+        case localRemux
         /// Server re-encodes the video and/or audio.
         case transcode
         case unknown
@@ -27,9 +30,89 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
             switch self {
             case .directPlay: return "Direct Play"
             case .remux: return "Remux (server, lossless)"
+            case .localRemux: return "Local Remux"
             case .transcode: return "Transcode (server)"
             case .unknown: return "Unknown"
             }
+        }
+    }
+
+    /// Shared comparison-harness metrics for a local-remux attempt.
+    public struct RemuxDiagnostics: Equatable, Sendable {
+        public enum HarnessState: String, Equatable, Sendable {
+            case idle
+            case running
+            case passed
+            case failed
+
+            public var displayName: String {
+                switch self {
+                case .idle: return "Idle"
+                case .running: return "Running"
+                case .passed: return "Passed"
+                case .failed: return "Failed"
+                }
+            }
+        }
+
+        public struct HarnessResult: Equatable, Sendable {
+            public var state: HarnessState
+            public var summary: String
+            public var startedAt: Date
+            public var finishedAt: Date
+
+            public init(
+                state: HarnessState,
+                summary: String,
+                startedAt: Date,
+                finishedAt: Date
+            ) {
+                self.state = state
+                self.summary = summary
+                self.startedAt = startedAt
+                self.finishedAt = finishedAt
+            }
+        }
+
+        public var strategyID: String
+        public var strategyName: String
+        public var timeToFirstFrameMs: Int?
+        public var lastSeekLatencyMs: Int?
+        public var stallCount: Int?
+        public var segmentCount: Int?
+        public var bytesPulled: Int64?
+        public var cacheDiskBytes: Int64?
+        public var cacheMemoryBytes: Int64?
+        public var harnessState: HarnessState
+        public var harnessStep: String?
+        public var lastHarnessResult: HarnessResult?
+
+        public init(
+            strategyID: String,
+            strategyName: String,
+            timeToFirstFrameMs: Int? = nil,
+            lastSeekLatencyMs: Int? = nil,
+            stallCount: Int? = nil,
+            segmentCount: Int? = nil,
+            bytesPulled: Int64? = nil,
+            cacheDiskBytes: Int64? = nil,
+            cacheMemoryBytes: Int64? = nil,
+            harnessState: HarnessState = .idle,
+            harnessStep: String? = nil,
+            lastHarnessResult: HarnessResult? = nil
+        ) {
+            self.strategyID = strategyID
+            self.strategyName = strategyName
+            self.timeToFirstFrameMs = timeToFirstFrameMs
+            self.lastSeekLatencyMs = lastSeekLatencyMs
+            self.stallCount = stallCount
+            self.segmentCount = segmentCount
+            self.bytesPulled = bytesPulled
+            self.cacheDiskBytes = cacheDiskBytes
+            self.cacheMemoryBytes = cacheMemoryBytes
+            self.harnessState = harnessState
+            self.harnessStep = harnessStep
+            self.lastHarnessResult = lastHarnessResult
         }
     }
 
@@ -173,6 +256,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var liveNativeEngines: Int?
     /// Live `MPVVideoEngine` (libmpv) instances. See `liveViewModels`.
     public var liveMPVEngines: Int?
+    /// Local-remux comparison-harness metrics, when the active playback path is
+    /// routed through the shared remux seam.
+    public var remux: RemuxDiagnostics?
 
     public init(
         resolution: VideoResolution? = nil,
@@ -203,7 +289,8 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         thermalState: ThermalLevel? = nil,
         liveViewModels: Int? = nil,
         liveNativeEngines: Int? = nil,
-        liveMPVEngines: Int? = nil
+        liveMPVEngines: Int? = nil,
+        remux: RemuxDiagnostics? = nil
     ) {
         self.resolution = resolution
         self.indicatedBitrate = indicatedBitrate
@@ -234,6 +321,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.liveViewModels = liveViewModels
         self.liveNativeEngines = liveNativeEngines
         self.liveMPVEngines = liveMPVEngines
+        self.remux = remux
     }
 }
 
@@ -460,6 +548,12 @@ public extension PlaybackDiagnostics {
         return String(format: "%.2f fps", fps)
     }
 
+    /// Formats a millisecond latency value, e.g. `423 ms`.
+    static func formatLatencyMs(_ milliseconds: Int?) -> String {
+        guard let milliseconds, milliseconds >= 0 else { return placeholder }
+        return "\(milliseconds) ms"
+    }
+
     /// Formats a resolution with an optional quality label, e.g.
     /// `3840×2160 (4K)`.
     static func formatResolution(_ resolution: VideoResolution?) -> String {
@@ -593,6 +687,57 @@ public extension PlaybackDiagnostics {
     /// climb that never falls back is the signature of a leak.
     var memoryText: String {
         Self.formatBytes(memoryFootprintBytes) ?? Self.placeholder
+    }
+
+    var remuxStrategyText: String {
+        remux?.strategyName ?? Self.placeholder
+    }
+
+    var remuxTimeToFirstFrameText: String {
+        Self.formatLatencyMs(remux?.timeToFirstFrameMs)
+    }
+
+    var remuxSeekLatencyText: String {
+        Self.formatLatencyMs(remux?.lastSeekLatencyMs)
+    }
+
+    var remuxStallsText: String {
+        remux?.stallCount.map(String.init) ?? Self.placeholder
+    }
+
+    var remuxSegmentsText: String {
+        remux?.segmentCount.map(String.init) ?? Self.placeholder
+    }
+
+    var remuxBytesText: String {
+        Self.formatBytes(remux?.bytesPulled) ?? Self.placeholder
+    }
+
+    var remuxUsageText: String {
+        guard let remux else { return Self.placeholder }
+        let disk = Self.formatBytes(remux.cacheDiskBytes)
+        let memory = Self.formatBytes(remux.cacheMemoryBytes)
+        if disk == nil && memory == nil { return Self.placeholder }
+        return Self.joinParts([
+            memory.map { "RAM \($0)" },
+            disk.map { "Disk \($0)" }
+        ])
+    }
+
+    var remuxHarnessText: String {
+        guard let remux else { return Self.placeholder }
+        let status = remux.harnessState.displayName
+        switch remux.harnessState {
+        case .running:
+            return Self.joinParts([status, remux.harnessStep])
+        case .passed, .failed:
+            if let summary = remux.lastHarnessResult?.summary, summary.hasPrefix(status) {
+                return summary
+            }
+            return Self.joinParts([status, remux.lastHarnessResult?.summary])
+        case .idle:
+            return status
+        }
     }
 
     /// System thermal pressure, e.g. `Serious (throttling)`.

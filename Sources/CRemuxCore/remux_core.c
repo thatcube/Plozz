@@ -355,16 +355,20 @@ static double read_seek_keyframe_pts(plozz_remux_session *s, AVPacket *pkt, doub
 /*
  * Discover the source's real keyframe times (seconds, 0-based) by seek-probing,
  * for files whose container exposes no usable keyframe index. Starting from t=0,
- * each step BACKWARD-seeks to (last + k*target) for growing k until the seek lands
- * on a keyframe strictly after `last`, records it, and advances. This snaps every
- * collected time to a real IDR while keeping spacing ~>= target, using only the
- * cheap BACKWARD seek the muxer already relies on (no full-file read). Allocates
- * `*out_kf` (caller frees) and returns the count (>=1 includes the synthetic t=0
- * start), or 0 on failure.
+ * each step BACKWARD-seeks ahead by an ADAPTIVE window and reads the keyframe it
+ * lands on; the window tracks the observed keyframe cadence so a regular GOP costs
+ * ~1 seek per boundary (vs ceil(gap/target) for a fixed step), and widens on demand
+ * when keyframes are sparser than expected. Uses only the cheap byte-addressable
+ * BACKWARD seek the muxer already relies on — it reads O(segments) small ranges,
+ * NEVER the whole file (the open-latency win over a full av_read_frame-to-EOF scan,
+ * which transfers every byte and stalls on multi-GB 4K titles). Allocates `*out_kf`
+ * (caller frees) and returns the count (>=1 includes the synthetic t=0 start), or 0
+ * on failure. `*out_probes` (optional) receives the number of seek-probes performed.
  */
 static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seconds,
-                                      double **out_kf) {
+                                      double **out_kf, int *out_probes) {
     if (out_kf) *out_kf = NULL;
+    if (out_probes) *out_probes = 0;
     if (!s || !out_kf || s->video_index < 0) return 0;
     double duration = s->duration_seconds;
     if (duration <= 0) return 0;
@@ -382,15 +386,23 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
     int n = 0;
     kf[n++] = 0.0;            /* first segment always starts at the timeline origin */
     double last = 0.0;
+    /* Adaptive probe window: start at the target cadence, then follow the real
+     * keyframe gap so regular GOP structures cost ~1 seek per boundary. Never
+     * shrinks below `target` (we want >= target-sized segments; grouping merges
+     * any that still come out short). */
+    double step = target_seconds;
+    int probes = 0;
 
     while (last < duration - 0.001 && n < PLOZZ_MAX_SEGMENTS) {
         double found = -1.0;
-        for (double mult = 1.0; ; mult += 1.0) {
-            double tgt = last + target_seconds * mult;
+        double window = step;
+        for (int attempt = 0; attempt < 4096; attempt++) {
+            double tgt = last + window;
             int at_end = 0;
             if (tgt >= duration) { tgt = duration - 0.05; at_end = 1; }
-            if (tgt <= last) break;
+            if (tgt <= last + 0.001) break;
             int64_t seek_ts = (int64_t)((tgt + file_start) / av_q2d(vst->time_base));
+            probes++;
             if (avformat_seek_file(s->ic, s->video_index, INT64_MIN, seek_ts, seek_ts,
                                    AVSEEK_FLAG_BACKWARD) < 0) {
                 break;
@@ -398,14 +410,19 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
             double kpts = read_seek_keyframe_pts(s, pkt, file_start);
             if (kpts > last + 0.05) { found = kpts; break; }
             if (at_end) break;          /* probed the tail, no further keyframe */
-            if (mult > 4096.0) break;   /* safety against pathological sparsity */
+            /* Landed on/<= the previous boundary: keyframes are sparser than the
+             * current window, so widen and retry. */
+            window += (step > target_seconds) ? step : target_seconds;
         }
         if (found < 0.0) break;         /* no more keyframes; grouping tail covers rest */
+        double gap = found - last;
+        step = (gap > target_seconds) ? gap : target_seconds;
         kf[n++] = found;
         last = found;
     }
 
     av_packet_free(&pkt);
+    if (out_probes) *out_probes = probes;
     *out_kf = kf;
     return n;
 }
@@ -421,7 +438,8 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
     double target = (s->target_segment_seconds < 1.0) ? 6.0 : s->target_segment_seconds;
 
     double *kf = NULL;
-    int kf_count = discover_keyframes_by_seek(s, target, &kf);
+    int probes = 0;
+    int kf_count = discover_keyframes_by_seek(s, target, &kf, &probes);
     if (kf_count <= 1) { free(kf); return 0; }
 
     plozz_remux_segment *segs = NULL;
@@ -439,8 +457,11 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
     AVStream *vst = s->ic->streams[s->video_index];
     avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
 
+    /* Telemetry: the seek-probe count is the open-latency footprint — O(segments),
+     * not O(filesize). The coordinator's A/B reads this against the sibling's
+     * full-file scan to confirm the startup-speed win. */
     remux_log(1, "remux: keyframe-scan rebuilt %d segments (was %d fixed-cadence) "
-              "from %d discovered keyframes", count, old, kf_count);
+              "from %d keyframes via %d seek-probes", count, old, kf_count, probes);
     return count;
 }
 

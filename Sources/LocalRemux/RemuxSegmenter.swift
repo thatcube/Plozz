@@ -159,7 +159,22 @@ final class RemuxSegmenter: @unchecked Sendable {
         // segments don't overlap (the fix for the progressive desync/stutter on
         // no-index titles). Must run BEFORE reading the segment count below, since it
         // can change segment_count. A no-op for index-built tables and when OFF.
-        plozz_remux_set_keyframe_scan(session, keyframeScan ? 1 : 0)
+        if keyframeScan {
+            // Bracket the rebuild with the reader's byte/fetch counters so the cost of
+            // seek-sampled discovery is visible in the log: it must be O(segments) tiny
+            // ranged reads, NOT O(filesize) — the open-latency advantage over a full
+            // av_read_frame-to-EOF keyframe scan that stalls on multi-GB 4K titles.
+            let before = reader.networkSnapshot()
+            let total = reader.size()
+            plozz_remux_set_keyframe_scan(session, 1)
+            let after = reader.networkSnapshot()
+            let scanBytes = after.bytesFetched - before.bytesFetched
+            let scanFetches = after.fetchCount - before.fetchCount
+            let pct = total > 0 ? Double(scanBytes) / Double(total) * 100 : 0
+            RemuxLog.info(String(format:
+                "RemuxSegmenter: keyframe-scan discovery read %lld bytes (%.1f%% of %lld) in %d fetches",
+                scanBytes, pct, total, scanFetches))
+        }
 
         var durations: [Double] = []
         let count = Int(plozz_remux_segment_count(session))

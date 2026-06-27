@@ -143,11 +143,12 @@ public struct PlayerView: View {
         .onChange(of: scenePhase) { _, phase in
             // The TV Home button / sleep / app suspension never fires the view's
             // onDisappear, so stop() (and its final convergence write) would never
-            // run on that path. Force an immediate durable checkpoint as we leave
-            // active, so the latest position is captured before the process can be
-            // suspended or jetsam-killed mid-movie.
+            // run on that path — and the engine would keep decoding audio behind the
+            // Home screen until the OS suspends us. Take a durable checkpoint at the
+            // live position AND pause playback as we leave active, so the latest
+            // position is captured and audio doesn't keep playing in the background.
             if phase != .active {
-                viewModel.checkpointNow()
+                viewModel.suspendForBackground()
             }
         }
         .onDisappear {

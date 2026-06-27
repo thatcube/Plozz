@@ -649,6 +649,21 @@ public final class PlayerViewModel {
         emitCheckpoint()
     }
 
+    /// Handles the app leaving the foreground (TV Home button, sleep, or app
+    /// switcher) — a path that never fires the view's `onDisappear`/`stop()`. It
+    /// first takes a durable checkpoint at the **live** position (while still
+    /// playing, so the checkpoint guard passes), then **pauses** the engine so audio
+    /// doesn't keep decoding/playing in the background until the OS suspends the
+    /// process. Deliberately one-way: returning to the foreground leaves playback
+    /// paused so the user resumes intentionally, rather than audio springing back
+    /// to life on its own.
+    public func suspendForBackground() {
+        emitCheckpoint()
+        if !engine.isPaused {
+            setPaused(true)
+        }
+    }
+
     // MARK: - Transport
 
     /// Requests a committed seek. Coalesces rapid presses: while one seek is

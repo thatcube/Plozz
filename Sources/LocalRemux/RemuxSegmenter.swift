@@ -127,7 +127,8 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// carrying the precise failing libavformat stage + AVERROR + network reason
     /// when the file can't be demuxed, so the caller's fallback path can report
     /// exactly why (vs an opaque failure).
-    init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0) throws {
+    init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
+         deriveEac3FrameDur: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -146,6 +147,10 @@ final class RemuxSegmenter: @unchecked Sendable {
             throw error
         }
         self.session = session
+        // Flag-gated (com.plozz.playback.remuxEac3FrameDur): use the bitstream-probed
+        // E-AC-3 frame sample count instead of the fixed 1536 fallback. The probe
+        // already ran inside open(); this only selects whether the muxer consumes it.
+        plozz_remux_set_derive_eac3_frame_dur(session, deriveEac3FrameDur ? 1 : 0)
 
         var durations: [Double] = []
         let count = Int(plozz_remux_segment_count(session))

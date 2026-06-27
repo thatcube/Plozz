@@ -135,7 +135,17 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // Throws a RemuxOpenError carrying the precise failing libavformat stage +
         // AVERROR + HTTP/transport reason, so a cold device play's captured error
         // string pinpoints the cause (e.g. "...avformat_open_input (HTTP 401)").
-        let segmenter = try RemuxSegmenter(sourceURL: source.originalURL)
+        //
+        // Flag `com.plozz.playback.remuxEac3FrameDur` (DEFAULT OFF): when the muxer
+        // has to synthesize a missing (E-)AC-3 frame_size, derive the true syncframe
+        // sample count from the bitstream instead of assuming 1536, so a DD+/Atmos
+        // stream with non-6-block frames gets an audio duration that matches real
+        // time (candidate fix for progressive audio desync). The open-time probe
+        // always runs + logs; this flag only selects whether the muxer consumes it.
+        let deriveEac3 = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxEac3FrameDur")
+        let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
+                                           deriveEac3FrameDur: deriveEac3)
+        if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only

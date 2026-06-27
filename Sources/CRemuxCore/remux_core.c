@@ -67,6 +67,13 @@ struct plozz_remux_session {
     /* B3: when set, raise a too-low/missing dvcC dv_level to the resolution
      * floor before muxing (gated by the com.plozz.playback.remuxHev1Mp4 flag). */
     int normalize_dovi_level;
+
+    /* Real (E-)AC-3 samples-per-frame parsed from the first audio packet's
+     * bitstream at open (0 = couldn't parse). `derive_eac3_frame_dur` (set from
+     * the com.plozz.playback.remuxEac3FrameDur flag) selects whether make_output
+     * stamps this true value instead of the historical fixed 1536 fallback. */
+    int eac3_frame_samples;
+    int derive_eac3_frame_dur;
 };
 
 /* ----- AVIO callback adapters ------------------------------------------- */
@@ -87,6 +94,102 @@ static int64_t avio_seek_adapter(void *opaque, int64_t offset, int whence) {
     /* Strip the AVSEEK_FORCE bit; pass the bare whence (SEEK_SET/CUR/END). */
     int base = whence & ~AVSEEK_FORCE;
     return s->seek_cb(s->opaque, offset, base);
+}
+
+/* ----- (E-)AC-3 frame-duration probe ------------------------------------- */
+
+/* Minimal MSB-first bit reader over a byte buffer (reads past the end as 0). */
+typedef struct { const uint8_t *p; int size; int bitpos; } eac3_bits;
+
+static unsigned eac3_read_bits(eac3_bits *b, int n) {
+    unsigned v = 0;
+    for (int i = 0; i < n; i++) {
+        int byte = b->bitpos >> 3;
+        int bit = 7 - (b->bitpos & 7);
+        unsigned one = (byte < b->size) ? ((b->p[byte] >> bit) & 1u) : 0u;
+        v = (v << 1) | one;
+        b->bitpos++;
+    }
+    return v;
+}
+
+/*
+ * Parse the first (E-)AC-3 syncframe in a stream-copied audio packet and return
+ * the number of PCM samples it represents, or 0 if it can't be parsed.
+ *
+ * E-AC-3 carries the block count in the BSI right after the syncword:
+ *   syncword(16)=0x0B77, strmtyp(2), substreamid(3), frmsiz(11), fscod(2),
+ *   then numblkscod(2) — unless fscod==3 (half sample-rate) which spends 2 bits
+ *   on fscod2 and implies 6 blocks. numblkscod 0..3 → {1,2,3,6} blocks × 256
+ *   samples. Only the INDEPENDENT substream (strmtyp 0/2) defines the frame's
+ *   sample count; a JOC Atmos packet's trailing dependent substreams (strmtyp 1)
+ *   overlay the same period and add no samples, so the first syncframe is the
+ *   one to read. Plain AC-3 is always 6 blocks (1536 samples).
+ */
+static int eac3_samples_from_packet(const uint8_t *data, int size, enum AVCodecID id) {
+    if (!data || size < 6) return 0;
+    int off = -1;
+    for (int i = 0; i + 1 < size; i++) {
+        if (data[i] == 0x0B && data[i + 1] == 0x77) { off = i; break; }
+    }
+    if (off < 0) return 0;
+    if (id == AV_CODEC_ID_AC3) return 1536; /* AC-3: always 6 blocks */
+
+    eac3_bits b = { data + off + 2, size - off - 2, 0 };
+    unsigned strmtyp = eac3_read_bits(&b, 2);
+    (void)eac3_read_bits(&b, 3);   /* substreamid */
+    (void)eac3_read_bits(&b, 11);  /* frmsiz */
+    unsigned fscod = eac3_read_bits(&b, 2);
+    unsigned numblkscod;
+    if (fscod == 3) { (void)eac3_read_bits(&b, 2); numblkscod = 3; } /* fscod2; half-rate */
+    else { numblkscod = eac3_read_bits(&b, 2); }
+
+    if (strmtyp == 1) return 0; /* leading frame is dependent — unexpected, bail */
+    static const int blocks[4] = { 1, 2, 3, 6 };
+    return blocks[numblkscod & 3] * 256;
+}
+
+/* Public pure wrapper (see remux_core.h) so the parser is unit-testable without a
+ * live session / network source. */
+int plozz_remux_eac3_frame_samples(const uint8_t *data, int size, int is_eac3) {
+    return eac3_samples_from_packet(data, size,
+                                    is_eac3 ? AV_CODEC_ID_EAC3 : AV_CODEC_ID_AC3);
+}
+
+/*
+ * One-time probe at open: read forward to the first audio packet and decode its
+ * real (E-)AC-3 frame sample count into s->eac3_frame_samples, then rewind so
+ * segment muxing starts clean (every segment seeks explicitly anyway). Always
+ * logs the derived value vs the 1536 default so the difference is visible even
+ * when the use-it flag is OFF.
+ */
+static void probe_eac3_frame_samples(plozz_remux_session *s) {
+    if (!s || s->audio_index < 0) return;
+    enum AVCodecID aid = s->ic->streams[s->audio_index]->codecpar->codec_id;
+    if (aid != AV_CODEC_ID_EAC3 && aid != AV_CODEC_ID_AC3) return;
+
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) return;
+    int tries = 0;
+    while (tries < 256 && av_read_frame(s->ic, pkt) >= 0) {
+        tries++;
+        if (pkt->stream_index == s->audio_index && pkt->size > 0) {
+            int n = eac3_samples_from_packet(pkt->data, pkt->size, aid);
+            if (n > 0) {
+                s->eac3_frame_samples = n;
+                remux_log(0, "remux: eac3 frame_samples probe=%d (default=1536)%s",
+                          n, n != 1536 ? " <-- DIFFERS from 1536" : "");
+            } else {
+                remux_log(1, "remux: eac3 frame_samples probe failed to parse — using 1536");
+            }
+            av_packet_unref(pkt);
+            break;
+        }
+        av_packet_unref(pkt);
+    }
+    av_packet_free(&pkt);
+    /* Rewind to the start so the first segment's BACKWARD seek begins from t=0. */
+    avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
 }
 
 /* ----- segment table ----------------------------------------------------- */
@@ -272,6 +375,11 @@ plozz_remux_session *plozz_remux_open(void *opaque,
         return NULL;
     }
 
+    /* Decode the true (E-)AC-3 frame sample count now (uses the index-built table
+     * above; it reads a few packets then rewinds). Always logged for diagnostics;
+     * only consumed by make_output when the derive flag is set. */
+    probe_eac3_frame_samples(s);
+
     if (out_result) {
         AVStream *vst = s->ic->streams[s->video_index];
         AVCodecParameters *vp = vst->codecpar;
@@ -335,6 +443,11 @@ int plozz_remux_segment_count(plozz_remux_session *s) {
 void plozz_remux_set_normalize_dovi_level(plozz_remux_session *s, int enabled) {
     if (!s) return;
     s->normalize_dovi_level = enabled ? 1 : 0;
+}
+
+void plozz_remux_set_derive_eac3_frame_dur(plozz_remux_session *s, int enabled) {
+    if (!s) return;
+    s->derive_eac3_frame_dur = enabled ? 1 : 0;
 }
 
 int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segment *out) {
@@ -447,11 +560,19 @@ static AVFormatContext *make_output(plozz_remux_session *s, int *out_audio_index
             /* movenc needs the audio frame size to compute per-sample durations;
              * the Matroska demuxer often leaves it 0 for (E-)AC-3 ("track 1: codec
              * frame size is not set"), which makes the audio track's sample timing
-             * wrong and stalls A/V. AC-3 and E-AC-3 are both 1536 samples/frame. */
+             * wrong and stalls A/V. AC-3 and E-AC-3 are nominally 1536 samples/
+             * frame, but an E-AC-3 syncframe with fewer blocks (numblkscod<3) is
+             * shorter; when the derive flag is on and the open-time probe parsed a
+             * real value, stamp that instead so the audio frame duration matches
+             * real time and the A/V timeline can't accumulate desync. */
             if ((dst_a->codecpar->codec_id == AV_CODEC_ID_AC3 ||
                  dst_a->codecpar->codec_id == AV_CODEC_ID_EAC3) &&
                 dst_a->codecpar->frame_size <= 0) {
-                dst_a->codecpar->frame_size = 1536;
+                int fs = 1536;
+                if (s->derive_eac3_frame_dur && s->eac3_frame_samples > 0) {
+                    fs = s->eac3_frame_samples;
+                }
+                dst_a->codecpar->frame_size = fs;
             }
             *out_audio_index = dst_a->index;
         }

@@ -125,6 +125,33 @@ int plozz_remux_segment_count(plozz_remux_session *s);
  */
 void plozz_remux_set_normalize_dovi_level(plozz_remux_session *s, int enabled);
 
+/*
+ * Opt into deriving the real (E-)AC-3 frame sample count from the bitstream
+ * (default OFF). When OFF the muxer stamps the historical fixed 1536 samples as
+ * the audio frame_size whenever the demuxer leaves it unset. When ON, and the
+ * open-time bitstream probe successfully decoded the independent E-AC-3
+ * syncframe's `numblkscod` (→ 256/512/768/1536 samples), that true value is used
+ * instead, so an Atmos/JOC DD+ stream whose syncframes are not 6 blocks gets a
+ * per-frame audio duration that matches real time (eliminating the progressive
+ * audio-vs-video desync that a wrong 1536 assumption would accumulate). Falls
+ * back to 1536 when the probe couldn't parse a frame. The probe itself always
+ * runs and logs the derived value, so the comparison is visible even with the
+ * flag OFF.
+ *
+ * Callers gate this on the `com.plozz.playback.remuxEac3FrameDur` debug flag.
+ * Safe to call before generating segments; ignored when `s` is NULL.
+ */
+void plozz_remux_set_derive_eac3_frame_dur(plozz_remux_session *s, int enabled);
+
+/*
+ * Pure test/diagnostic helper: parse the first (E-)AC-3 syncframe in `data` and
+ * return the PCM sample count it represents (256/512/768/1536), or 0 if no
+ * syncword is found or the leading frame is a dependent substream. Pass
+ * is_eac3 != 0 for E-AC-3 (reads numblkscod), 0 for AC-3 (always 1536). No
+ * session state; safe to call from tests.
+ */
+int plozz_remux_eac3_frame_samples(const uint8_t *data, int size, int is_eac3);
+
 /* Copy the segment table entry at `index` into `out`. Returns 1 on success. */
 int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segment *out);
 

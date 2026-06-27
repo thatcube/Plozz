@@ -969,3 +969,37 @@ final class JellyfinRemoteTrailersTests: XCTestCase {
         XCTAssertTrue(trailers.isEmpty)
     }
 }
+
+/// Regression coverage for the cross-server "Continue Watching" surfacing bug:
+/// the session-less resume write (`POST /UserItems/{id}/UserData`) used for
+/// fan-out convergence must stamp `LastPlayedDate` so the title lands in
+/// Jellyfin's date-ordered Resume row — not just become resumable when opened
+/// directly. Build 690 omitted it, so fan-out targets stored the position but
+/// never appeared in the row.
+final class JellyfinResumeWriteTests: XCTestCase {
+    private func makeSession() -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: "http://host:8096")!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testSetResumePositionStampsLastPlayedDate() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/UserItems/i1/UserData", json: "{}")
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        try await provider.setResumePosition(123, itemID: "i1")
+
+        guard let body = stub.sentBodies["/UserItems/i1/UserData"] else {
+            return XCTFail("UserData write was not sent")
+        }
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual((json["PlaybackPositionTicks"] as? NSNumber)?.int64Value,
+                       JellyfinTicks.ticks(fromSeconds: 123))
+        let lastPlayed = try XCTUnwrap(json["LastPlayedDate"] as? String,
+                                       "LastPlayedDate must be present so the item surfaces in Continue Watching")
+        XCTAssertNotNil(ISO8601DateFormatter().date(from: String(lastPlayed.prefix(19) + "Z")),
+                        "LastPlayedDate should be a valid ISO 8601 timestamp")
+    }
+}

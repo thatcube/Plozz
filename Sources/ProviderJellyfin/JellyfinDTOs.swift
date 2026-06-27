@@ -266,6 +266,23 @@ enum JellyfinTicks {
     }
 }
 
+/// Encodes dates for Jellyfin request bodies (e.g. `UserData.LastPlayedDate`).
+/// Jellyfin accepts ISO 8601 with a `Z` zone; we emit fractional seconds to match
+/// the server's own `DateTime` precision. Kept separate from the *decoding*
+/// formatters in `JellyfinProvider` (which must also tolerate .NET 7-digit
+/// fractional seconds) because encoding only needs one canonical form.
+enum JellyfinDate {
+    private static let iso8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static func iso8601(from date: Date) -> String {
+        iso8601.string(from: date)
+    }
+}
+
 // MARK: - Lyrics
 
 /// `GET /Audio/{itemId}/Lyrics` response. `Lyrics` carries one entry per line;

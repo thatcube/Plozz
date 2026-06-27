@@ -416,7 +416,8 @@ public struct JellyfinClient: Sendable {
             headers: authHeaders
         )
         endpoint = try endpoint.jsonBody(UpdateUserItemDataBody(
-            PlaybackPositionTicks: JellyfinTicks.ticks(fromSeconds: max(seconds, 0))
+            PlaybackPositionTicks: JellyfinTicks.ticks(fromSeconds: max(seconds, 0)),
+            LastPlayedDate: JellyfinDate.iso8601(from: Date())
         ))
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
@@ -727,8 +728,15 @@ private struct PlaybackProgressBody: Encodable {
     let IsPaused: Bool
 }
 
-/// Body for `POST /UserItems/{itemId}/UserData`. Only the position is sent so the
-/// server's field-by-field merge preserves played/favorite/play-count state.
+/// Body for `POST /UserItems/{itemId}/UserData`. Sends the position **and** a
+/// `LastPlayedDate` recency stamp so the item surfaces in Jellyfin's "Continue
+/// Watching" / Resume home row — that row is ordered/filtered by `LastPlayedDate`,
+/// so a position-only write (the previous behaviour) made the title *resumable*
+/// when opened directly but invisible in the row. The server still merges
+/// field-by-field, so played/favorite/play-count state is preserved. `LastPlayedDate`
+/// is optional and omitted (via `encodeIfPresent`) when nil so other callers can
+/// write a bare position if ever needed.
 private struct UpdateUserItemDataBody: Encodable {
     let PlaybackPositionTicks: Int64
+    var LastPlayedDate: String?
 }

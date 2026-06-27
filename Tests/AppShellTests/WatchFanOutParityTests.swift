@@ -130,4 +130,58 @@ final class WatchFanOutParityTests: XCTestCase {
                        "Plex-origin and Jellyfin-origin finishes must converge on the same servers")
         XCTAssertEqual(fromPlex, ["jf:jf-9", "plex:px-9"])
     }
+
+    /// Regression for the live origin-drop bug (Brandon, build 684): a Continue-
+    /// Watching tile carries no `item.sources`, and a COLD / partially-warm index
+    /// knew the title only on a DIFFERENT account than the one actually played.
+    /// The factory must STILL include the origin server (you watched it there) —
+    /// never let a partial index silently replace it.
+    func testOriginAlwaysTargetedEvenWhenIndexKnowsOnlyAnotherAccount() {
+        let origin = MediaItem(
+            id: "420",
+            title: "The Super Mario Bros. Movie",
+            kind: .movie,
+            productionYear: 2023,
+            providerIDs: ["Imdb": "tt6718170"],
+            sourceAccountID: "remote-plex"
+        )
+        // Partial index union: title known ONLY on a different account.
+        let additional = [MediaSourceRef(accountID: "local-plex", itemID: "6950", providerKind: .plex)]
+        let targets = Set(
+            WatchMutationFactory.targets(
+                for: origin,
+                primaryAccountID: "remote-plex",
+                additionalSources: additional
+            ).map(\.id)
+        )
+        XCTAssertTrue(
+            targets.contains("remote-plex:420"),
+            "Origin server must always be a target, even when a partial index knows only another account"
+        )
+        XCTAssertTrue(targets.contains("local-plex:6950"))
+    }
+
+    /// A movie / series mutation persists the title's identities and is marked
+    /// `expansionPending`, so a drain re-resolves the index union as it warms (the
+    /// warm-race fix). A genuinely id-less, year-less title carries no identities
+    /// and stays non-pending (nothing to index-match), preserving single-source
+    /// convergence.
+    func testMovieMutationCarriesIdentitiesAndExpansionPending() {
+        let strong = MediaItem(
+            id: "420", title: "Mario", kind: .movie, productionYear: 2023,
+            providerIDs: ["Imdb": "tt6718170"], sourceAccountID: "a"
+        )
+        let m = WatchMutationFactory.playbackStop(
+            item: strong, position: 1647, watchedPercent: 29.7, primaryAccountID: "a"
+        )
+        XCTAssertEqual(m?.expansionPending, true)
+        XCTAssertEqual(m?.identities, [.external(source: "imdb", value: "tt6718170")])
+
+        let idless = MediaItem(id: "x", title: "Family Clip", kind: .movie, sourceAccountID: "a")
+        let m2 = WatchMutationFactory.playbackStop(
+            item: idless, position: 50, watchedPercent: 10, primaryAccountID: "a"
+        )
+        XCTAssertEqual(m2?.expansionPending, false)
+        XCTAssertEqual(m2?.identities, [])
+    }
 }

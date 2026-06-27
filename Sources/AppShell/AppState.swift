@@ -159,6 +159,12 @@ public final class AppState {
             },
             indexedSeriesSources: { [identitySnapshotStore] originSeries in
                 identitySnapshotStore.current.sources(for: originSeries).filter { $0.kind == .series }
+            },
+            indexedSources: { [identitySnapshotStore] identities in
+                identitySnapshotStore.current.sources(forIdentities: identities)
+            },
+            indexedAccountIDs: { [identitySnapshotStore] in
+                identitySnapshotStore.current.indexedAccountIDs
             }
         )
         return WatchStateReconciler(store: store, applier: applier)
@@ -317,6 +323,11 @@ public final class AppState {
                 await MainActor.run {
                     self?.identitySnapshot = snapshot
                     self?.identitySnapshotStore.update(snapshot)
+                    // Re-drain the watch outbox now that another account is indexed:
+                    // a movie / series mutation stopped before the index finished
+                    // warming re-expands against the larger union and fans out to the
+                    // newly-known servers. No-op when the outbox is empty.
+                    self?.drainWatchOutbox()
                 }
                 // Make warm progress visible: each publish shows how many identities
                 // and cross-server unions the index now holds. crossServer staying 0

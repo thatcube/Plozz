@@ -11,15 +11,21 @@ enum WatchMutationFactory {
     static let finishedThreshold: Double = 90
 
     /// Every server target this title should converge on, addressed by *that
-    /// server's* own item id. One per cross-server source, or the primary owner for
-    /// a single-source / untagged item. Providers are resolved live at drain time,
-    /// so a momentarily-unreachable server is still recorded.
+    /// server's* own item id. The **origin** (where the user actually watched it)
+    /// is always present, plus the item's own `sources` and any `additionalSources`
+    /// the eager identity index knows for the title.
     ///
     /// `additionalSources` are the eager identity index's known servers for the
-    /// title (the shared source of truth). They're unioned with the item's own
-    /// `sources` so the fan-out is **origin-agnostic and N-account complete** even
-    /// when the item was reached from a Home row that only one server populated.
-    /// Empty (cold index) ⇒ behaviour is exactly the item's own sources.
+    /// title (the shared source of truth). They're unioned with the origin and the
+    /// item's own `sources` so the fan-out is **origin-agnostic and N-account
+    /// complete** even when the item was reached from a Home row that only one
+    /// server populated.
+    ///
+    /// The origin is unioned **unconditionally** (not merely as an empty-result
+    /// fallback): a partial / cold index can know the title on a *different* account
+    /// than the one played, and dropping the origin there would skip the resume /
+    /// played write on the very server the user watched on. Dedup keeps it to one
+    /// entry when the origin is already among the sources.
     static func targets(
         for item: MediaItem,
         primaryAccountID: String?,
@@ -27,19 +33,22 @@ enum WatchMutationFactory {
     ) -> [WatchMutationTarget] {
         var seen = Set<String>()
         var result: [WatchMutationTarget] = []
-        func add(_ ref: MediaSourceRef) {
-            guard seen.insert(ref.id).inserted else { return }
+        func append(accountID: String, itemID: String, providerKind: ProviderKind?) {
+            guard seen.insert("\(accountID):\(itemID)").inserted else { return }
             result.append(WatchMutationTarget(
-                accountID: ref.accountID,
-                itemID: ref.itemID,
-                providerKind: ref.providerKind
+                accountID: accountID,
+                itemID: itemID,
+                providerKind: providerKind
             ))
         }
-        item.sources.forEach(add)
-        additionalSources.forEach(add)
-        if !result.isEmpty { return result }
-        guard let accountID = item.sourceAccountID ?? primaryAccountID else { return [] }
-        return [WatchMutationTarget(accountID: accountID, itemID: item.id)]
+        // Origin first and always: you watched it there, so it must converge
+        // regardless of how warm (or which-account-warm) the index is.
+        if let originAccountID = item.sourceAccountID ?? primaryAccountID {
+            append(accountID: originAccountID, itemID: item.id, providerKind: nil)
+        }
+        item.sources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }
+        additionalSources.forEach { append(accountID: $0.accountID, itemID: $0.itemID, providerKind: $0.providerKind) }
+        return result
     }
 
     private static func canonicalID(for item: MediaItem) -> String {
@@ -78,13 +87,28 @@ enum WatchMutationFactory {
         return (EpisodeOrigin(accountID: accountID, itemID: item.id), true)
     }
 
+    /// The persisted identity set + expansion flag for a **non-episode** title
+    /// (movie or whole series), so the reconciler can fan its watch out to every
+    /// server the eager identity index knows for the title — including servers that
+    /// hadn't finished indexing when the user stopped. Empty / not-pending for
+    /// episodes (they use ``episodeExpansion``) and for items with no strong
+    /// identity (nothing to index-match), so single-server convergence is unchanged.
+    private static func identityExpansion(
+        for item: MediaItem
+    ) -> (identities: [MediaIdentity], pending: Bool) {
+        guard item.kind != .episode else { return ([], false) }
+        let identities = MediaItemIdentity.identities(for: item)
+        return (identities, !identities.isEmpty)
+    }
+
     /// A mark-watched / mark-unwatched mutation. Marking watched clears resume
     /// everywhere and mirrors to Trakt (write-if-missing); unwatch never touches
     /// Trakt (no deletes) and leaves resume alone.
     static func playedToggle(item: MediaItem, played: Bool, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], capturedAt: Date = Date()) -> WatchMutation? {
         let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources)
         guard !targets.isEmpty else { return nil }
-        let expansion = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
+        let episode = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
+        let identity = identityExpansion(for: item)
         return WatchMutation(
             capturedAt: capturedAt,
             canonicalMediaID: canonicalID(for: item),
@@ -94,8 +118,9 @@ enum WatchMutationFactory {
             clearResume: played,
             targets: targets,
             trakt: played ? traktIntent(for: item, progress: 100) : nil,
-            episodeOrigin: expansion.origin,
-            expansionPending: expansion.pending
+            episodeOrigin: episode.origin,
+            expansionPending: episode.pending || identity.pending,
+            identities: identity.identities
         )
     }
 
@@ -108,7 +133,8 @@ enum WatchMutationFactory {
     static func playbackStop(item: MediaItem, position: TimeInterval, watchedPercent: Double, primaryAccountID: String?, additionalSources: [MediaSourceRef] = [], capturedAt: Date = Date()) -> WatchMutation? {
         let targets = targets(for: item, primaryAccountID: primaryAccountID, additionalSources: additionalSources)
         guard !targets.isEmpty else { return nil }
-        let expansion = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
+        let episode = episodeExpansion(for: item, primaryAccountID: primaryAccountID)
+        let identity = identityExpansion(for: item)
 
         if watchedPercent >= finishedThreshold {
             return WatchMutation(
@@ -120,8 +146,9 @@ enum WatchMutationFactory {
                 clearResume: true,
                 targets: targets,
                 trakt: traktIntent(for: item, progress: 100),
-                episodeOrigin: expansion.origin,
-                expansionPending: expansion.pending
+                episodeOrigin: episode.origin,
+                expansionPending: episode.pending || identity.pending,
+                identities: identity.identities
             )
         }
 
@@ -134,8 +161,9 @@ enum WatchMutationFactory {
             episodeNumber: item.episodeNumber,
             resumePosition: position,
             targets: targets,
-            episodeOrigin: expansion.origin,
-            expansionPending: expansion.pending
+            episodeOrigin: episode.origin,
+            expansionPending: episode.pending || identity.pending,
+            identities: identity.identities
         )
     }
 }

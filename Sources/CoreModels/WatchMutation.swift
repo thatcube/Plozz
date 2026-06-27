@@ -127,6 +127,17 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     /// non-episode mutations, so movie / single-target convergence is unaffected.
     public var expansionPending: Bool
 
+    /// The played title's cross-server ``MediaIdentity`` set, persisted so a drain
+    /// can re-resolve the **identity index**'s full server set for the title — even
+    /// after relaunch — and fan a movie / series watch out to every server as the
+    /// eager index warms (the index is built progressively at launch, so a title
+    /// stopped before it finished must pick up the rest later). Empty for items
+    /// with no strong identity (they can't index-match) and for mutations enqueued
+    /// before this field existed. Reuses ``expansionPending`` as its keep-alive
+    /// gate; the applier branches on `episodeOrigin != nil` (episode twins) vs
+    /// these identities (movie / series index union).
+    public var identities: [MediaIdentity]
+
     public init(
         id: UUID = UUID(),
         capturedAt: Date,
@@ -140,7 +151,8 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         trakt: TraktScrobbleIntent? = nil,
         attempts: Int = 0,
         episodeOrigin: EpisodeOrigin? = nil,
-        expansionPending: Bool = false
+        expansionPending: Bool = false,
+        identities: [MediaIdentity] = []
     ) {
         self.id = id
         self.capturedAt = capturedAt
@@ -156,6 +168,7 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         self.attempts = attempts
         self.episodeOrigin = episodeOrigin
         self.expansionPending = expansionPending
+        self.identities = identities
     }
 
     // MARK: - Codable (back-compatible)
@@ -163,12 +176,13 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case id, capturedAt, canonicalMediaID, seasonNumber, episodeNumber
         case resumePosition, played, clearResume, targets, trakt, traktPending
-        case attempts, episodeOrigin, expansionPending
+        case attempts, episodeOrigin, expansionPending, identities
     }
 
     /// Decodes tolerating outbox files written before `episodeOrigin` /
-    /// `expansionPending` existed (they decode to `nil` / `false`), so an in-app
-    /// upgrade never drops a queued watch. `encode(to:)` is synthesized.
+    /// `expansionPending` / `identities` existed (they decode to `nil` / `false` /
+    /// `[]`), so an in-app upgrade never drops a queued watch. `encode(to:)` is
+    /// synthesized.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -185,6 +199,7 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         attempts = try container.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
         episodeOrigin = try container.decodeIfPresent(EpisodeOrigin.self, forKey: .episodeOrigin)
         expansionPending = try container.decodeIfPresent(Bool.self, forKey: .expansionPending) ?? false
+        identities = try container.decodeIfPresent([MediaIdentity].self, forKey: .identities) ?? []
     }
 
     /// Title-level key used to COALESCE queued mutations (latest wins, targets

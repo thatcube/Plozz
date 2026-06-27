@@ -30,6 +30,23 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     /// server) ⇒ that server falls back to the existing search probe, so a write is
     /// never dropped while the index warms.
     var indexedSeriesSources: @Sendable (MediaItem) -> [IndexedSource] = { _ in [] }
+    /// The eager identity index's full known sources for a set of ``MediaIdentity``
+    /// — the SSOT cross-server set used to fan a **movie / series** watch out to
+    /// every server as the index warms. Read live off the published snapshot so a
+    /// queued mutation re-resolves against ever-more-complete data on each drain.
+    /// Empty (cold index / no match) ⇒ no extra targets that pass, so a watch is
+    /// never dropped while the index warms.
+    var indexedSources: @Sendable ([MediaIdentity]) -> [IndexedSource] = { _ in [] }
+    /// Every `Account.id` the identity index has indexed at least once. A movie /
+    /// series identity expansion is **conclusive** only once every active account
+    /// appears here (the union can still grow until then), so a mutation stopped
+    /// mid-warm stays queued and picks up the rest on later drains.
+    var indexedAccountIDs: @Sendable () -> Set<String> = { [] }
+    /// Safety cap on identity-expansion retries so a permanently-unreachable
+    /// (never-indexing) account can't keep a mutation queued forever: once a
+    /// mutation has been drained this many times, its identity expansion is treated
+    /// as conclusive with whatever the index currently knows.
+    var maxIdentityExpansionAttempts: Int = 6
     /// Per-server bounded series search. Mirrors the cross-server detail resolver's
     /// `searchWithDeadline` so a slow/asleep server can't stall convergence.
     var searchDeadline: TimeInterval = 4
@@ -67,12 +84,49 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
         )
     }
 
+    /// Resolves the cross-server twins for a queued mutation. Branches on the
+    /// mutation shape: an **episode** (carries `episodeOrigin`) is resolved by
+    /// walking each other server's matching series → episode; a **movie / series**
+    /// (carries `identities`) is resolved by unioning the eager identity index's
+    /// known servers for those identities. Both are best-effort and confidence-/
+    /// warmth-gated via ``WatchTargetExpansion/inconclusiveAccountIDs`` so the
+    /// reconciler retries rather than dropping or guessing.
+    func expandTargets(for mutation: WatchMutation) async -> WatchTargetExpansion {
+        if mutation.episodeOrigin != nil {
+            return await expandEpisodeTargets(for: mutation)
+        }
+        return await expandIdentityTargets(for: mutation)
+    }
+
+    /// Fans a **movie / series** watch out to every server the eager identity index
+    /// knows for the title's ``MediaIdentity`` set. Because the index warms
+    /// progressively at launch, the union grows over successive drains; the
+    /// expansion is reported **inconclusive** for every active account not yet
+    /// indexed so the mutation stays queued and re-resolves as the index warms
+    /// (drains are kicked after each warm publish). Bounded by
+    /// ``maxIdentityExpansionAttempts`` so a never-indexing account can't keep it
+    /// pending forever. Never throws — an unwarmed server is inconclusive, not an
+    /// error, and the origin target is written regardless.
+    private func expandIdentityTargets(for mutation: WatchMutation) async -> WatchTargetExpansion {
+        guard !mutation.identities.isEmpty else { return .none }
+        let targets = indexedSources(mutation.identities).map(\.target)
+        let everyAccount = Set(await allAccountIDs())
+        // Conclusive only once every active account has been indexed at least once
+        // (the union can still grow until then), unless we've exhausted the attempt
+        // budget so a never-indexing account can't keep the mutation queued forever.
+        let indexed = indexedAccountIDs()
+        let notYetIndexed = everyAccount.subtracting(indexed)
+        let exhausted = mutation.attempts >= maxIdentityExpansionAttempts
+        let inconclusive = exhausted ? [] : Array(notYetIndexed)
+        return WatchTargetExpansion(targets: targets, inconclusiveAccountIDs: inconclusive)
+    }
+
     /// Resolves the episode's cross-server twins: discovers the origin series'
     /// identity (origin episode → its series) and hands it to the pure
     /// ``EpisodeTwinResolver`` to find the same `(season, episode)` on every other
     /// signed-in server. Bounded and best-effort; the origin server being down is
     /// reported inconclusive so the reconciler retries rather than giving up.
-    func expandTargets(for mutation: WatchMutation) async -> WatchTargetExpansion {
+    private func expandEpisodeTargets(for mutation: WatchMutation) async -> WatchTargetExpansion {
         guard let season = mutation.seasonNumber,
               let episode = mutation.episodeNumber,
               let origin = mutation.episodeOrigin

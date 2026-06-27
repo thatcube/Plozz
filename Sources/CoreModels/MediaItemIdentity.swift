@@ -14,7 +14,7 @@ import Foundation
 /// This was lifted out of `FeatureSearch.SearchDeduplicator` so that Home, Search
 /// and any future surface share **one** well-tested identity definition instead
 /// of duplicating the rules (and their subtle safety carve-outs).
-public enum MediaIdentity: Hashable, Sendable {
+public enum MediaIdentity: Hashable, Sendable, Codable {
     case external(source: String, value: String)
     case title(normalizedTitle: String, year: Int?, kind: MediaItemKind)
 }

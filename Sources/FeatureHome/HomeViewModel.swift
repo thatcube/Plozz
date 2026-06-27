@@ -26,11 +26,23 @@ public final class HomeViewModel {
 
     public private(set) var state: LoadState<Content> = .idle
 
+    /// The row structure to render as a skeleton while loading: the layout
+    /// persisted from the previous successful load (so the placeholder matches the
+    /// user's real Home), falling back to a default on a first-ever launch.
+    public private(set) var skeletonLayout: [HomeRowKind]
+
     private let accounts: [ResolvedAccount]
     private let aggregator: HomeAggregator
+    private let layoutStore: HomeLayoutStoring
     /// The shared identity-index lookup folded into every merged row so a card
     /// surfaced by one server still carries its full cross-server source set.
     private let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
+    /// Reads the user's *current* per-library Home-visibility at load time, so a
+    /// reload (e.g. after a library is hidden) re-aggregates against the latest
+    /// choices. Drives the provider's library-scoped fetch for hidden-aware
+    /// accounts; the per-item row filter still lives in the view so toggles that
+    /// need no re-fetch (Plex, already-tagged items) apply instantly.
+    private let currentVisibility: () -> HomeLibraryVisibility
 
     /// In-flight content aggregation (run off the main actor) and the fire-and-
     /// forget Top Shelf publish. Tracked so ``deinit`` can cancel them — otherwise
@@ -45,11 +57,17 @@ public final class HomeViewModel {
     public init(
         accounts: [ResolvedAccount],
         aggregator: HomeAggregator = HomeAggregator(),
-        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
+        layoutStore: HomeLayoutStoring = HomeLayoutStore(),
+        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
+        currentVisibility: @escaping () -> HomeLibraryVisibility = { .default }
     ) {
         self.accounts = accounts
         self.aggregator = aggregator
+        self.layoutStore = layoutStore
         self.identitySources = identitySources
+        self.currentVisibility = currentVisibility
+        let persisted = layoutStore.load()
+        self.skeletonLayout = persisted.isEmpty ? HomeRowKind.defaultSkeletonLayout : persisted
     }
 
     deinit {
@@ -60,6 +78,17 @@ public final class HomeViewModel {
     /// User-facing name for the greeting header — the primary (first) account.
     public var userName: String { accounts.first?.account.userName ?? "" }
 
+    /// Records the row structure the view actually rendered so the next launch's
+    /// skeleton matches it. Driven by the view (not derived here) because true
+    /// visibility — e.g. whether the Libraries row survives the user's
+    /// per-library Home-visibility choices — is only known at render time. Saves
+    /// only on change to avoid redundant `UserDefaults` writes.
+    public func rememberLayout(_ kinds: [HomeRowKind]) {
+        guard kinds != skeletonLayout else { return }
+        skeletonLayout = kinds
+        layoutStore.save(kinds)
+    }
+
     public func load() async {
         PlozzLog.boot("HomeVM.load START vm=\(UInt(bitPattern: ObjectIdentifier(self).hashValue)) accounts=\(accounts.count) state=\(String(describing: state))")
         state = .loading
@@ -67,8 +96,9 @@ public final class HomeViewModel {
         let aggregator = self.aggregator
         let accounts = self.accounts
         let identitySources = self.identitySources
+        let visibility = currentVisibility()
         let aggregationTask = Task.detached(priority: .userInitiated) {
-            await aggregator.content(from: accounts, identitySources: identitySources)
+            await aggregator.content(from: accounts, visibility: visibility, identitySources: identitySources)
         }
         self.aggregationTask = aggregationTask
         let merged = await aggregationTask.value
@@ -85,8 +115,11 @@ public final class HomeViewModel {
 
         // Publish the playable rows to the App Group so the Top Shelf extension
         // can render them while the app is closed. Tracked so teardown cancels it.
-        let continueWatching = content.continueWatching
-        let latest = content.latest
+        // Apply the same Home-visibility filter so a hidden library's items don't
+        // leak into Top Shelf.
+        let isLibraryVisible: (String) -> Bool = { visibility.isVisible($0) }
+        let continueWatching = content.continueWatching.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
+        let latest = content.latest.filter { $0.isVisibleOnHome(isLibraryVisible: isLibraryVisible) }
         topShelfPublishTask = Task.detached(priority: .utility) {
             TopShelfPublisher.publish(continueWatching: continueWatching, latest: latest)
         }

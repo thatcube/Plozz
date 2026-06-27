@@ -167,6 +167,19 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// non-merged items.
     public var additionalSourceAccountIDs: [String]
 
+    /// The owning library's **provider-local** id on `sourceAccountID`'s server
+    /// (matches `MediaLibrary.id`), stamped by the provider/aggregator so Home
+    /// can suppress an item when the user hides its library. Combined with
+    /// `sourceAccountID` it yields the `AggregatedLibrary.key`
+    /// (`"accountID:libraryID"`) the visibility model is keyed on.
+    ///
+    /// `nil` when the provider/endpoint didn't report it (older cached items,
+    /// un-attributed feeds). Home-visibility filtering treats `nil` as
+    /// **fail-open** — an item whose library can't be determined stays visible.
+    /// For merged cross-server cards each server's own library lives on its
+    /// `MediaSourceRef.libraryID`; this field holds the primary source's.
+    public var libraryID: String?
+
     /// Every account this item can be played from, primary first. Derived from
     /// the richer `sources` when the cross-server merge populated them (so the
     /// order matches the server picker), falling back to the legacy
@@ -258,6 +271,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         mediaInfo: MediaSourceMetadata? = nil,
         sourceAccountID: String? = nil,
         additionalSourceAccountIDs: [String] = [],
+        libraryID: String? = nil,
         versions: [MediaVersion] = [],
         isFavorite: Bool = false,
         selectedVersionID: String? = nil,
@@ -297,6 +311,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.mediaInfo = mediaInfo
         self.sourceAccountID = sourceAccountID
         self.additionalSourceAccountIDs = additionalSourceAccountIDs
+        self.libraryID = libraryID
         self.versions = versions
         self.isFavorite = isFavorite
         self.selectedVersionID = selectedVersionID
@@ -317,7 +332,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         case posterURL, seriesPosterURL, backdropURL, heroBackdropURL
         case fallbackArtworkURL, logoURL, ratings, providerIDs, mediaInfo
         case sourceAccountID, additionalSourceAccountIDs, versions, isFavorite
-        case sources, lastPlayedAt
+        case sources, lastPlayedAt, libraryID
     }
 
     /// Custom decoding so `additionalSourceAccountIDs` (added after items were
@@ -357,6 +372,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         mediaInfo = try container.decodeIfPresent(MediaSourceMetadata.self, forKey: .mediaInfo)
         sourceAccountID = try container.decodeIfPresent(String.self, forKey: .sourceAccountID)
         additionalSourceAccountIDs = try container.decodeIfPresent([String].self, forKey: .additionalSourceAccountIDs) ?? []
+        libraryID = try container.decodeIfPresent(String.self, forKey: .libraryID)
         versions = try container.decodeIfPresent([MediaVersion].self, forKey: .versions) ?? []
         isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
         sources = try container.decodeIfPresent([MediaSourceRef].self, forKey: .sources) ?? []
@@ -371,6 +387,53 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         var copy = self
         copy.sourceAccountID = accountID
         return copy
+    }
+
+    /// Returns a copy of this item stamped with the provider-local `libraryID`
+    /// it was fetched from, so Home-visibility can map it back to an
+    /// `AggregatedLibrary.key`. Providers/aggregators call this when (and only
+    /// when) they can positively attribute the owning library; leaving it unset
+    /// keeps the item fail-open (always visible).
+    public func taggingLibrary(_ libraryID: String?) -> MediaItem {
+        guard let libraryID else { return self }
+        var copy = self
+        copy.libraryID = libraryID
+        return copy
+    }
+
+    /// The `AggregatedLibrary.key`s (`"accountID:libraryID"`) this item can be
+    /// attributed to, used by Home-visibility filtering.
+    ///
+    /// For a single-server item this is at most one key (its
+    /// `sourceAccountID` + `libraryID`). For a merged cross-server card it is the
+    /// union over every `MediaSourceRef` that carries a `libraryID`, so the
+    /// "visible if ANY contributing library is visible" rule can be applied.
+    /// Returns an **empty** set when no library can be determined — callers
+    /// treat that as fail-open (visible).
+    public var homeVisibilityLibraryKeys: Set<String> {
+        var keys = Set<String>()
+        for source in sources {
+            if let libraryID = source.libraryID {
+                keys.insert("\(source.accountID):\(libraryID)")
+            }
+        }
+        if let libraryID, let accountID = sourceAccountID {
+            keys.insert("\(accountID):\(libraryID)")
+        }
+        return keys
+    }
+
+    /// Whether this item should appear on Home given `isLibraryVisible`, which is
+    /// asked about each `AggregatedLibrary.key` the item belongs to.
+    ///
+    /// Rules: **fail-open** when the item carries no resolvable library
+    /// provenance (empty key set ⇒ visible); otherwise visible when **any** of
+    /// its contributing libraries is visible (so a merged card surfacing a hidden
+    /// and a visible server still shows).
+    public func isVisibleOnHome(isLibraryVisible: (String) -> Bool) -> Bool {
+        let keys = homeVisibilityLibraryKeys
+        if keys.isEmpty { return true }
+        return keys.contains { isLibraryVisible($0) }
     }
 
     /// Returns a copy of this item with `selectedVersionID` set, so a `Play`

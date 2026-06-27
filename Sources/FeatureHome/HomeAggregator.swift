@@ -47,15 +47,23 @@ public struct HomeAggregator: Sendable {
         continueWatchingLimit: Int = 20,
         latestLimit: Int = 20,
         watchlistLimit: Int = 20,
+        visibility: HomeLibraryVisibility = .default,
         identitySources: @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] }
     ) async -> Content {
+        let clock = ContinuousClock()
+        let started = clock.now
         let perAccount = await Self.loadPerAccount(accounts) { resolved in
-            await Self.load(
+            let accountStarted = clock.now
+            let result = await Self.load(
                 from: resolved,
                 continueWatchingLimit: continueWatchingLimit,
-                latestLimit: latestLimit
+                latestLimit: latestLimit,
+                visibility: visibility
             )
+            PlozzLog.boot("HomeAgg.account id=\(resolved.account.id) provider=\(resolved.account.server.provider) ms=\(Self.elapsedMS(from: accountStarted, to: clock.now)) cw=\(result.continueWatching.count) latest=\(result.latest.count) libs=\(result.libraries.count)")
+            return result
         }
+        PlozzLog.boot("HomeAgg.fanout accounts=\(accounts.count) ms=\(Self.elapsedMS(from: started, to: clock.now))")
 
         // Collapse the same title living on several servers into one card on the
         // aggregated rows, sharing the exact identity/merge core Search uses. Each
@@ -155,22 +163,49 @@ public struct HomeAggregator: Sendable {
     private static func load(
         from resolved: ResolvedAccount,
         continueWatchingLimit: Int,
-        latestLimit: Int
+        latestLimit: Int,
+        visibility: HomeLibraryVisibility
     ) async -> AccountContent {
         let accountID = resolved.account.id
         let provider = resolved.provider
 
-        // Each call is independent so a single failing endpoint still yields the
-        // account's other rows.
-        async let resume = try? provider.continueWatching(limit: continueWatchingLimit)
-        async let recent = try? provider.latest(limit: latestLimit)
+        // Only accounts with at least one hidden library pay for the
+        // library-scoped fetch path. When nothing is hidden we keep the original
+        // single-shot, fully-concurrent fetch — zero behaviour/performance change.
+        let accountHasHidden = visibility.excludedKeys.contains { $0.hasPrefix("\(accountID):") }
+
+        // Libraries and watchlist load independently of the row strategy.
         async let libs = try? provider.libraries()
-        // Only providers that advertise a watchlist contribute to that row.
         async let saved = Self.watchlist(from: provider)
 
-        let cw = (await resume) ?? []
-        let lt = (await recent) ?? []
-        let rawLibs = (await libs) ?? []
+        let cw: [MediaItem]
+        let lt: [MediaItem]
+        let rawLibs: [MediaLibrary]
+
+        if accountHasHidden {
+            // Resolve the library list first so the row fetches can be scoped to
+            // the *visible* libraries. For providers that can only learn an item's
+            // owning library by scoping the fetch (Jellyfin — an episode's
+            // ParentId is its season, not its library), this both excludes hidden
+            // content at the source and stamps each item's `libraryID`. Providers
+            // that tag items by other means (Plex) inherit the unscoped default
+            // and rely on the row-level filter.
+            rawLibs = (await libs) ?? []
+            let visibleLibraryIDs = rawLibs
+                .map(\.id)
+                .filter { visibility.isVisible("\(accountID):\($0)") }
+            async let resume = try? provider.continueWatching(limit: continueWatchingLimit, inLibraries: visibleLibraryIDs)
+            async let recent = try? provider.latest(limit: latestLimit, inLibraries: visibleLibraryIDs)
+            cw = (await resume) ?? []
+            lt = (await recent) ?? []
+        } else {
+            async let resume = try? provider.continueWatching(limit: continueWatchingLimit)
+            async let recent = try? provider.latest(limit: latestLimit)
+            cw = (await resume) ?? []
+            lt = (await recent) ?? []
+            rawLibs = (await libs) ?? []
+        }
+
         let wl = await saved
 
         if cw.isEmpty && lt.isEmpty && rawLibs.isEmpty {
@@ -245,5 +280,13 @@ public struct HomeAggregator: Sendable {
             }
         }
         return result
+    }
+
+    /// Whole milliseconds between two `ContinuousClock` instants, for PLZBOOT
+    /// timing. Env-gated logging only — never on a user-visible path.
+    private static func elapsedMS(from start: ContinuousClock.Instant, to end: ContinuousClock.Instant) -> Int {
+        let comps = (end - start).components
+        // 1 ms = 1e15 attoseconds.
+        return Int(comps.seconds * 1000 + comps.attoseconds / 1_000_000_000_000_000)
     }
 }

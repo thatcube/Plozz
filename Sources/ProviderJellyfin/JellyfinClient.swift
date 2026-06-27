@@ -138,14 +138,18 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(UserViewsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
-    func resumeItems(userID: String, limit: Int) async throws -> [BaseItemDto] {
+    func resumeItems(userID: String, limit: Int, parentID: String? = nil) async throws -> [BaseItemDto] {
+        var queryItems = [
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "MediaTypes", value: "Video"),
+            URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,PrimaryImageAspectRatio,ProviderIds")
+        ]
+        if let parentID {
+            queryItems.append(URLQueryItem(name: "ParentId", value: parentID))
+        }
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/Resume",
-            queryItems: [
-                URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "MediaTypes", value: "Video"),
-                URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,PrimaryImageAspectRatio,ProviderIds")
-            ],
+            queryItems: queryItems,
             headers: authHeaders
         )
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
@@ -162,29 +166,37 @@ public struct JellyfinClient: Sendable {
     /// in-progress episodes already come back from `/Items/Resume`, so NextUp is
     /// scoped to the next-after-completed episode. `EnableRewatching=false` avoids
     /// resurfacing fully-watched series.
-    func nextUpItems(userID: String, limit: Int) async throws -> [BaseItemDto] {
+    func nextUpItems(userID: String, limit: Int, parentID: String? = nil) async throws -> [BaseItemDto] {
+        var queryItems = [
+            URLQueryItem(name: "UserId", value: userID),
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "MediaTypes", value: "Video"),
+            URLQueryItem(name: "EnableResumable", value: "false"),
+            URLQueryItem(name: "EnableRewatching", value: "false"),
+            URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,ProviderIds")
+        ]
+        if let parentID {
+            queryItems.append(URLQueryItem(name: "ParentId", value: parentID))
+        }
         let endpoint = Endpoint(
             path: "/Shows/NextUp",
-            queryItems: [
-                URLQueryItem(name: "UserId", value: userID),
-                URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "MediaTypes", value: "Video"),
-                URLQueryItem(name: "EnableResumable", value: "false"),
-                URLQueryItem(name: "EnableRewatching", value: "false"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,ProviderIds")
-            ],
+            queryItems: queryItems,
             headers: authHeaders
         )
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
-    func latestItems(userID: String, limit: Int) async throws -> [BaseItemDto] {
+    func latestItems(userID: String, limit: Int, parentID: String? = nil) async throws -> [BaseItemDto] {
+        var queryItems = [
+            URLQueryItem(name: "Limit", value: String(limit)),
+            URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,ProviderIds")
+        ]
+        if let parentID {
+            queryItems.append(URLQueryItem(name: "ParentId", value: parentID))
+        }
         let endpoint = Endpoint(
             path: "/Users/\(userID)/Items/Latest",
-            queryItems: [
-                URLQueryItem(name: "Limit", value: String(limit)),
-                URLQueryItem(name: "Fields", value: "Overview,OriginalTitle,ProviderIds")
-            ],
+            queryItems: queryItems,
             headers: authHeaders
         )
         // /Items/Latest returns a bare array, not an Items envelope.

@@ -221,6 +221,7 @@ public enum MediaItemMerger {
         return MediaSourceRef(
             accountID: accountID,
             itemID: item.id,
+            libraryID: item.libraryID,
             providerKind: info?.providerKind,
             serverName: info?.serverName,
             accountName: info?.accountName,

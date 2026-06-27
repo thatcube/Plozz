@@ -32,33 +32,69 @@ public struct HomeView: View {
         ContentStateView(
             state: viewModel.state,
             emptyMessage: "Your libraries are empty. Add media on your media server to see it here.",
-            onRetry: { Task { await viewModel.load() } }
+            onRetry: { Task { await viewModel.load() } },
+            loadingContent: { HomeSkeletonView(layout: viewModel.skeletonLayout) }
         ) { content in
-            let visibleLibraries = content.libraries.filter { visibility.isVisible($0.key) }
+            // The screen is a data-driven list of rows. Both this loaded view and
+            // the skeleton render from the same ordered `HomeRow`/`HomeRowKind`
+            // structure, which keeps them 1:1 and makes the order the single thing
+            // a future row-customization feature edits. `HomeRow.rows` also applies
+            // per-library Home-visibility to *every* row's items (not just the
+            // Libraries tiles), so a hidden library's content is suppressed
+            // app-wide; passing the reactive `isVisible` here keeps toggles taking
+            // effect on the next render even before any re-fetch settles.
+            let rows = HomeRow.rows(for: content) { visibility.isVisible($0) }
             ScrollView {
                 VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
-                    MediaRowView(title: "Continue Watching", items: content.continueWatching, style: .landscape, spoilerSettings: spoilerSettings, onSelect: onPlayItem)
-                    if !content.watchlist.isEmpty {
-                        MediaRowView(title: "Watchlist", items: content.watchlist, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
-                    }
-                    MediaRowView(title: "Recently Added", items: content.latest, spoilerSettings: spoilerSettings, onSelect: onSelectItem)
-
-                    if !visibleLibraries.isEmpty {
-                        librariesRow(visibleLibraries)
+                    ForEach(rows) { row in
+                        rowView(row)
                     }
                 }
                 .padding(.vertical, 40)
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
+            // Remember the structure we actually rendered (post-visibility) so the
+            // next launch's skeleton matches this exact set of rows.
+            .task(id: rows.map(\.kind)) { viewModel.rememberLayout(rows.map(\.kind)) }
         }
-        .task { if viewModel.state.value == nil { await viewModel.load() } }
+        .task(id: visibility.visibility.excludedKeys) {
+            // First appearance loads; thereafter a change to the hidden-library set
+            // re-aggregates so library-scoped providers (Jellyfin) re-fetch with the
+            // new visible set. Providers that tag items inline (Plex) are also
+            // filtered live above, so their toggles feel instant even before the
+            // reload settles.
+            await viewModel.load()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
             if let mutation = MediaItemMutation.from(note) {
                 viewModel.applyWatchedState(mutation)
             } else {
                 Task { await viewModel.load() }
             }
+        }
+    }
+
+    /// Renders one resolved `HomeRow`. The per-kind wiring (card style, and
+    /// whether selecting a card plays it or opens its detail) is exactly what the
+    /// view used inline before the row model existed.
+    @ViewBuilder
+    private func rowView(_ row: HomeRow) -> some View {
+        switch row.kind {
+        case .continueWatching:
+            MediaRowView(title: row.title, items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, onSelect: onPlayItem)
+        case .watchlist, .recentlyAdded:
+            MediaRowView(title: row.title, items: row.items, style: posterStyle(row.style), spoilerSettings: spoilerSettings, onSelect: onSelectItem)
+        case .libraries:
+            librariesRow(row.libraries)
+        }
+    }
+
+    /// Maps the SwiftUI-free `HomeRowStyle` back to the concrete card style.
+    private func posterStyle(_ style: HomeRowStyle) -> PosterCardView.Style {
+        switch style {
+        case .poster: return .poster
+        case .landscape: return .landscape
         }
     }
 

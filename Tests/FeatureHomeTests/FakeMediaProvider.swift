@@ -44,7 +44,13 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
         )
     }
 
-    func libraries() async throws -> [MediaLibrary] { [] }
+    func libraries() async throws -> [MediaLibrary] {
+        librariesCallCount += 1
+        return []
+    }
+    /// How many times `libraries()` was called — lets a test prove whether the
+    /// Home aggregator re-ran (e.g. that a redundant reload was skipped).
+    private(set) var librariesCallCount = 0
     func continueWatching(limit: Int) async throws -> [MediaItem] { [] }
     func latest(limit: Int) async throws -> [MediaItem] { [] }
     func item(id: String) async throws -> MediaItem {

@@ -268,6 +268,19 @@ struct DetailHeroView: View {
         let hideText = spoilerSettings.shouldHideText(for: item)
         let hideThumbnail = spoilerSettings.shouldHideThumbnail(for: item)
         let heroHeight = Self.screenHeight * heroHeightFraction
+        // When the hero fills the screen (a movie, with no children rail below to
+        // provide separation) its content is pinned to the very bottom edge, which
+        // on tvOS sits inside the unprotected overscan region — so the action row
+        // ends up far closer to the bottom than the content is to the leading edge
+        // (the leading edge is protected by the horizontal overscan safe area on
+        // top of `heroLeadingPadding`). Mirror that leading distance on the bottom
+        // so the buttons sit the same visible distance from the bottom as from the
+        // left. A non-full-height hero (a show) has rows beneath it and keeps the
+        // plain inter-section `screenPadding`.
+        let isFullScreenHero = heroHeightFraction >= 1.0
+        let bottomInset = isFullScreenHero
+            ? Self.horizontalSafeAreaInset + PlozzTheme.Metrics.heroLeadingPadding
+            : PlozzTheme.Metrics.screenPadding
         // The leading-aligned content column. It is the ONLY thing that sizes the
         // hero, so the hero always reports the safe viewport width — never the
         // full panel — keeping its title/logo/Play on-screen and focusable.
@@ -384,7 +397,8 @@ struct DetailHeroView: View {
                 .focusSection()
             }
         }
-        .padding(.vertical, PlozzTheme.Metrics.screenPadding)
+        .padding(.top, PlozzTheme.Metrics.screenPadding)
+        .padding(.bottom, bottomInset)
         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
         .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
         // Occupy the backdrop's height and pin the content to the bottom-leading
@@ -810,6 +824,27 @@ struct DetailHeroView: View {
         return UIScreen.main.bounds.height
         #else
         return 1080
+        #endif
+    }
+
+    /// The leading (horizontal) overscan safe-area inset for the current screen.
+    /// On tvOS the title-safe overscan margin is wider horizontally than the hero
+    /// content's own `heroLeadingPadding`, so the content sits this much further
+    /// from the *physical* left edge. The full-screen movie hero mirrors this on
+    /// its bottom inset so the action row is the same visible distance from the
+    /// bottom as from the left. Read live so it stays correct across devices /
+    /// future overscan changes; falls back to the standard 1080p margin where
+    /// UIKit (or a key window) isn't available.
+    private static var horizontalSafeAreaInset: CGFloat {
+        #if canImport(UIKit)
+        let inset = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.left
+        return inset ?? 90
+        #else
+        return 90
         #endif
     }
 

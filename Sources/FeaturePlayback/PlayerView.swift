@@ -230,6 +230,10 @@ public struct PlayerView: View {
             metadata: viewModel.sourceMetadata,
             engineName: viewModel.engineDisplayName,
             capabilities: viewModel.mediaCapabilities,
+            sourceProvider: viewModel.sourceProvider,
+            streamURL: viewModel.diagnosticsStreamURL,
+            remuxEligible: viewModel.remuxEligibilitySummary?.eligible,
+            remuxEligibilityDetail: viewModel.remuxEligibilitySummary?.detail,
             remuxSnapshot: { viewModel.localRemuxDiagnostics }
         )
     }

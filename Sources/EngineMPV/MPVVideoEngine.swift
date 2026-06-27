@@ -261,6 +261,19 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         // explicitly selected later by the view model.
         client.setOptionString("subs-match-os-language", "yes")
         client.setOptionString("subs-fallback", "yes")
+
+        // B1 safety net (default OFF): force a stereo downmix so the only bundled
+        // audio output (`audiounit`) never negotiates a multichannel layout, which
+        // SIGSEGVs on this device for any 5.1/6ch stream (codec-independent). Gated
+        // behind `-com.plozz.playback.mpvSafeAudio YES`. See `MPVSafeAudio`.
+        let safeAudioOptions = MPVSafeAudio.options()
+        if !safeAudioOptions.isEmpty {
+            log.notice("mpv: safe-audio downmix ENABLED (\(MPVSafeAudio.flagKey, privacy: .public)) — forcing stereo to avoid multichannel ao SIGSEGV")
+            for (key, value) in safeAudioOptions {
+                client.setOptionString(key, value)
+            }
+        }
+
         for (key, value) in extraOptions {
             client.setOptionString(key, value)
         }

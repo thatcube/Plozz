@@ -45,8 +45,13 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     /// Safety cap on identity-expansion retries so a permanently-unreachable
     /// (never-indexing) account can't keep a mutation queued forever: once a
     /// mutation has been drained this many times, its identity expansion is treated
-    /// as conclusive with whatever the index currently knows.
-    var maxIdentityExpansionAttempts: Int = 6
+    /// as conclusive with whatever the index currently knows. Deliberately
+    /// generous: a normal multi-account warm concludes via the *all-indexed*
+    /// success path within its warm window (a handful of drains), so this budget
+    /// only trips for a mutation that has survived many natural drains (warm
+    /// cycles / foregrounds / replays across launches) without the index ever
+    /// covering every active account — i.e. a genuinely dead destination.
+    var maxIdentityExpansionAttempts: Int = 12
     /// Per-server bounded series search. Mirrors the cross-server detail resolver's
     /// `searchWithDeadline` so a slow/asleep server can't stall convergence.
     var searchDeadline: TimeInterval = 4

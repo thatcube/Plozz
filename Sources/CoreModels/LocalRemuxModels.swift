@@ -16,17 +16,18 @@ public struct LocalRemuxStrategyChoice: Hashable, Sendable, Codable, Identifiabl
 
     public static let disabledID = "disabled"
     public static let referenceServerRemuxID = "reference.server-remux"
+    public static let defaultID = referenceServerRemuxID
 
     public static let disabled = LocalRemuxStrategyChoice(
         id: disabledID,
-        displayName: "Disabled",
-        detail: "Use the existing native/mpv routing with no local-remux interception."
+        displayName: "Off",
+        detail: "Use normal routing. Eligible MKV Dolby Vision titles will stay on mpv."
     )
 
     public static let referenceServerRemux = LocalRemuxStrategyChoice(
         id: referenceServerRemuxID,
-        displayName: "Reference · Provider AVPlayer URL",
-        detail: "Shared seam only: keep the provider's current AVPlayer-safe URL so diagnostics and the seek harness can land before a true local-remux engine does."
+        displayName: "Server HLS baseline",
+        detail: "Diagnostic baseline: force an AVPlayer HLS manifest so the Remux overlay and seek torture test actually run. Real local engines replace this."
     )
 
     public static let builtInChoices: [LocalRemuxStrategyChoice] = [

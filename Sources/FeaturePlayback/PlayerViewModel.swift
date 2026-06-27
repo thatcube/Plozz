@@ -152,6 +152,8 @@ public final class PlayerViewModel {
     private var localRemuxSession: (any LocalRemuxStreamingSession)?
     /// Optional long-running scripted seek benchmark.
     private var remuxSeekTestTask: Task<Void, Never>?
+    /// User-facing reason for the remux harness state on the current load.
+    private var localRemuxActivationMessage: String?
 
     /// Persisted player preferences (e.g. last-used playback speed).
     private let preferencesStore: PlaybackPreferencesStoring
@@ -370,6 +372,7 @@ public final class PlayerViewModel {
     private func startPlayback(forceTranscode: Bool, resumeOverride: TimeInterval?) async {
         phase = .loading
         do {
+            localRemuxActivationMessage = nil
             await teardownLocalRemuxSession()
             var request = try await provider.playbackInfo(for: itemID, mediaSourceID: mediaSourceID, forceTranscode: forceTranscode)
             // A user-initiated Back during playbackInfo resolution should NOT
@@ -516,14 +519,30 @@ public final class PlayerViewModel {
         to request: PlaybackRequest,
         forceTranscode: Bool
     ) async -> PlaybackRequest {
-        guard !forceTranscode else { return request }
-        guard let descriptor = request.localRemuxSource else { return request }
-        guard descriptor.shouldPreferLocalRemux(capabilities: capabilities) else { return request }
+        guard !forceTranscode else {
+            localRemuxActivationMessage = "Server fallback transcode is active; remux testing is skipped for this load."
+            return request
+        }
+        guard let descriptor = request.localRemuxSource else {
+            localRemuxActivationMessage = "This provider did not expose original-file bytes for remux testing."
+            return request
+        }
+        switch descriptor.eligibility(capabilities: capabilities) {
+        case .eligible:
+            break
+        case .ineligible(let reason):
+            localRemuxActivationMessage = reason
+            return request
+        }
 
         let selectedStrategyID = preferencesStore.loadLocalRemuxStrategyID()
         controls.selectedLocalRemuxStrategyID = selectedStrategyID
-        guard selectedStrategyID != LocalRemuxStrategyChoice.disabledID,
-              let streamer = LocalRemuxStrategyRegistry.makeStreamer(for: selectedStrategyID) else {
+        guard selectedStrategyID != LocalRemuxStrategyChoice.disabledID else {
+            localRemuxActivationMessage = "Remux testing is off. Choose Server HLS baseline, then reload."
+            return request
+        }
+        guard let streamer = LocalRemuxStrategyRegistry.makeStreamer(for: selectedStrategyID) else {
+            localRemuxActivationMessage = "Selected remux mode is not installed in this build."
             return request
         }
 
@@ -535,10 +554,12 @@ public final class PlayerViewModel {
             remuxed.streamURL = prepared.playbackURL
             remuxed.isManifestStream = prepared.isManifestStream
             remuxed.deliveryMode = prepared.deliveryMode
+            localRemuxActivationMessage = "Active now: \(session.strategy.displayName)"
             return remuxed
         } catch {
             await teardownLocalRemuxSession()
             PlozzLog.playback.debug("Local remux strategy failed; falling back to standard routing")
+            localRemuxActivationMessage = "\(streamer.strategy.displayName) could not prepare this title; normal routing is playing instead."
             return request
         }
     }
@@ -1091,8 +1112,24 @@ public final class PlayerViewModel {
         let resolved = LocalRemuxStrategyChoice.choice(for: strategyID)
         controls.selectedLocalRemuxStrategyID = resolved.id
         preferencesStore.saveLocalRemuxStrategyID(resolved.id)
+        controls.localRemuxReloadAvailable = controls.localRemuxEligible
+            && resolved.id != LocalRemuxStrategyChoice.disabledID
         if request?.deliveryMode == .localRemux, localRemuxSession?.strategy.id != resolved.id {
-            controls.remuxHarnessStatus = "Saved \(resolved.displayName). Reload playback to compare it against the current strategy."
+            controls.localRemuxEligibilityMessage = "Saved \(resolved.displayName). Reload to apply it to this playback."
+            controls.remuxHarnessStatus = "Saved \(resolved.displayName). Reload to compare it against the current strategy."
+        } else if controls.localRemuxEligible, resolved.id != LocalRemuxStrategyChoice.disabledID, !controls.localRemuxActive {
+            controls.localRemuxEligibilityMessage = "Saved \(resolved.displayName). Use Reload now so this title stops playing through mpv."
+        } else if resolved.id == LocalRemuxStrategyChoice.disabledID {
+            controls.localRemuxEligibilityMessage = "Remux testing is off. This title will use normal routing."
+        }
+    }
+
+    public func reloadWithSelectedLocalRemuxStrategy() {
+        guard controls.localRemuxEligible else { return }
+        controls.localRemuxEligibilityMessage = "Reloading with \(LocalRemuxStrategyChoice.choice(for: controls.selectedLocalRemuxStrategyID).displayName)…"
+        let resume = max(engine.currentTime, controls.currentSeconds)
+        Task { @MainActor [weak self] in
+            await self?.startPlayback(forceTranscode: false, resumeOverride: resume > 1 ? resume : nil)
         }
     }
 
@@ -1119,22 +1156,27 @@ public final class PlayerViewModel {
         controls.previewImage = nil
         controls.isPaused = false
         controls.localRemuxStrategies = LocalRemuxStrategyRegistry.availableChoices
-        controls.selectedLocalRemuxStrategyID = preferencesStore.loadLocalRemuxStrategyID()
+        let selectedRemuxStrategyID = preferencesStore.loadLocalRemuxStrategyID()
+        controls.selectedLocalRemuxStrategyID = selectedRemuxStrategyID
         if let descriptor = request.localRemuxSource {
             switch descriptor.eligibility(capabilities: capabilities) {
             case .eligible:
                 controls.localRemuxEligible = true
-                controls.localRemuxEligibilityMessage = "Eligible: single-layer Dolby Vision MKV with AC-3/E-AC-3 audio."
+                controls.localRemuxEligibilityMessage = localRemuxActivationMessage
+                    ?? "Eligible: single-layer Dolby Vision MKV with AC-3/E-AC-3 audio."
             case .ineligible(let reason):
                 controls.localRemuxEligible = false
-                controls.localRemuxEligibilityMessage = reason
+                controls.localRemuxEligibilityMessage = localRemuxActivationMessage ?? reason
             }
         } else {
             controls.localRemuxEligible = false
-            controls.localRemuxEligibilityMessage = "Provider did not expose an original-file local-remux source for this title."
+            controls.localRemuxEligibilityMessage = localRemuxActivationMessage
+                ?? "Provider did not expose an original-file remux source for this title."
         }
         controls.localRemuxActive = request.deliveryMode == .localRemux
         controls.activeLocalRemuxStrategyName = localRemuxSession?.strategy.displayName
+        controls.localRemuxReloadAvailable = controls.localRemuxEligible
+            && selectedRemuxStrategyID != LocalRemuxStrategyChoice.disabledID
         controls.remuxHarnessRunning = false
         controls.remuxHarnessStatus = localRemuxSession?.metricsController.snapshot.lastHarnessResult?.summary ?? ""
     }

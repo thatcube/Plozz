@@ -213,7 +213,7 @@ public struct PlexProvider: MediaProvider {
             mediaSourceID: media.id.map(String.init),
             client: client,
             part: part,
-            referencePlaybackURL: resolved.url,
+            referencePlaybackURL: client.transcodeURL(ratingKey: itemID, sessionID: transcodeSessionID) ?? resolved.url,
             durationSeconds: mappedItem.runtime,
             container: media.container ?? part.container,
             streams: streams,

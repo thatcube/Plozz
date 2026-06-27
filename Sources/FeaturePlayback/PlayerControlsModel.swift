@@ -121,6 +121,9 @@ public final class PlayerControlsModel {
     public var remuxHarnessRunning: Bool = false
     /// Live status / last result for the scripted seek torture-test.
     public var remuxHarnessStatus: String = ""
+    /// True when the selected remux mode is not what is currently playing, so the
+    /// player can offer an explicit reload instead of making the user guess.
+    public var localRemuxReloadAvailable: Bool = false
 
     // MARK: Skip intros/credits
     /// Server-detected skippable segments (intros/credits) for the playing item.

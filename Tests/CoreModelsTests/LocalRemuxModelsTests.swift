@@ -53,7 +53,7 @@ final class LocalRemuxModelsTests: XCTestCase {
         defaults.removePersistentDomain(forName: "PlaybackPreferencesStore.localRemux")
         let store = PlaybackPreferencesStore(defaults: defaults)
 
-        XCTAssertEqual(store.loadLocalRemuxStrategyID(), LocalRemuxStrategyChoice.disabledID)
+        XCTAssertEqual(store.loadLocalRemuxStrategyID(), LocalRemuxStrategyChoice.referenceServerRemuxID)
 
         store.saveLocalRemuxStrategyID(LocalRemuxStrategyChoice.referenceServerRemuxID)
         XCTAssertEqual(store.loadLocalRemuxStrategyID(), LocalRemuxStrategyChoice.referenceServerRemuxID)

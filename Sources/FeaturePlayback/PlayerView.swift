@@ -63,6 +63,7 @@ public struct PlayerView: View {
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
                         selectLocalRemuxStrategy: { viewModel.selectLocalRemuxStrategy($0) },
+                        reloadLocalRemuxPlayback: { viewModel.reloadWithSelectedLocalRemuxStrategy() },
                         runRemuxSeekTortureTest: { viewModel.runLocalRemuxSeekTortureTest() },
                         skipSegment: { viewModel.skipActiveSegment() },
                         autoSkipSegment: { viewModel.autoSkipActiveSegment() },

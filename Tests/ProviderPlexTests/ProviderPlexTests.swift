@@ -895,6 +895,9 @@ final class PlexProviderMappingTests: XCTestCase {
         XCTAssertTrue(original.hasPrefix("https://plex.host:32400/library/parts/2/16000/file.mkv"), original)
         XCTAssertTrue(original.contains("download=1"), original)
         XCTAssertTrue(original.contains("X-Plex-Token=TOKEN"), original)
+        let reference = try XCTUnwrap(localRemux.referencePlaybackURL?.absoluteString)
+        XCTAssertTrue(reference.hasPrefix("https://plex.host:32400/video/:/transcode/universal/start.m3u8"), reference)
+        XCTAssertTrue(reference.contains("directStream=1"), reference)
     }
 
     func testPlaybackInfoDirectPlaysSupportedContainer() async throws {

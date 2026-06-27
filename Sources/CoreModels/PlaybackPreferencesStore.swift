@@ -39,7 +39,7 @@ public final class PlaybackPreferencesStore: PlaybackPreferencesStoring, @unchec
     }
 
     public func loadLocalRemuxStrategyID() -> String {
-        let raw = defaults.string(forKey: localRemuxStrategyKey) ?? LocalRemuxStrategyChoice.disabledID
+        let raw = defaults.string(forKey: localRemuxStrategyKey) ?? LocalRemuxStrategyChoice.defaultID
         return LocalRemuxStrategyChoice.choice(for: raw).id
     }
 

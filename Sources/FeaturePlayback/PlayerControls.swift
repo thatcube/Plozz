@@ -14,13 +14,14 @@ struct PlayerOptionsActions {
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
     var selectLocalRemuxStrategy: (String) -> Void = { _ in }
+    var reloadLocalRemuxPlayback: () -> Void = {}
     var runRemuxSeekTortureTest: () -> Void = {}
 }
 
 /// The complete custom-player transport: a title bar, the scrub bar (with
 /// buffered/played fill + floating trickplay thumbnail), and — directly beneath
 /// the scrubber — a **focusable row of native tvOS buttons** (Audio & Subtitles ·
-/// Speed · A/V Sync · Local Remux · Diagnostics), modelled on Netflix / the Apple
+/// Speed · A/V Sync · Remux Test · Diagnostics), modelled on Netflix / the Apple
 /// TV app.
 ///
 ///  * The button row is **visible whenever the transport is** so viewers can see
@@ -51,7 +52,7 @@ struct PlayerControls: View {
             case .audioSubtitles: return "Audio & Subtitles"
             case .speed: return "Speed"
             case .sync: return "A/V Sync"
-            case .remux: return "Local Remux"
+            case .remux: return "Remux Test"
             }
         }
 
@@ -60,7 +61,7 @@ struct PlayerControls: View {
             case .audioSubtitles: return "captions.bubble"
             case .speed: return "speedometer"
             case .sync: return "slider.horizontal.below.square.and.square.filled"
-            case .remux: return "bolt.horizontal.circle"
+            case .remux: return "waveform.path.ecg.rectangle"
             }
         }
     }
@@ -307,8 +308,26 @@ struct PlayerControls: View {
     @ViewBuilder
     private var remuxPane: some View {
         VStack(alignment: .leading, spacing: 18) {
+            sectionHeader("Status")
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.localRemuxActive
+                     ? "Active now: \(model.activeLocalRemuxStrategyName ?? "Remux strategy")"
+                     : (model.localRemuxEligibilityMessage.isEmpty ? "Not active for this playback." : model.localRemuxEligibilityMessage))
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.92))
+                Text(model.localRemuxActive
+                     ? "Diagnostics are measuring this playback through the remux harness."
+                     : "If you change the mode while video is already playing, use Reload below so the engine actually changes.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 28)
+
+            Divider().background(.white.opacity(0.15))
+                .padding(.horizontal, 28)
+
             if !model.localRemuxStrategies.isEmpty {
-                sectionHeader("Strategy")
+                sectionHeader("Mode")
                 ForEach(remuxStrategyRows) { row in
                     toggleRow(
                         title: row.title,
@@ -320,24 +339,19 @@ struct PlayerControls: View {
                 }
             }
 
-            Divider().background(.white.opacity(0.15))
-                .padding(.horizontal, 28)
+            if model.localRemuxReloadAvailable {
+                Divider().background(.white.opacity(0.15))
+                    .padding(.horizontal, 28)
 
-            sectionHeader("Current Title")
-            VStack(alignment: .leading, spacing: 8) {
-                Text(model.localRemuxEligible || model.localRemuxActive
-                     ? (model.activeLocalRemuxStrategyName.map { "Active now: \($0)" } ?? "Eligible for local remux")
-                     : (model.localRemuxEligibilityMessage.isEmpty ? "This title is not eligible for local remux." : model.localRemuxEligibilityMessage))
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.9))
-                Text("Strategy changes persist immediately and apply the next time this title is loaded.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                sectionHeader("Apply")
+                selectableRow(
+                    title: model.localRemuxActive ? "Reload remux test now" : "Reload now with selected remux mode",
+                    isSelected: false,
+                    index: remuxReloadRowID
+                ) {
+                    actions.reloadLocalRemuxPlayback()
+                }
             }
-            .padding(.horizontal, 28)
-
-            Divider().background(.white.opacity(0.15))
-                .padding(.horizontal, 28)
 
             sectionHeader("Seek Harness")
             selectableRow(
@@ -561,6 +575,10 @@ struct PlayerControls: View {
 
     private var remuxHarnessRowID: Int {
         max(remuxStrategyRows.count, 1) + 100
+    }
+
+    private var remuxReloadRowID: Int {
+        max(remuxStrategyRows.count, 1) + 50
     }
 
     private func selectedRowIndex(for category: Category) -> Int {

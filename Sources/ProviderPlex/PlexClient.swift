@@ -118,6 +118,37 @@ public struct PlexClient: Sendable {
         }
     }
 
+    /// Sends a list / `/children` request with Plex's `includeElements=Stream`
+    /// flag — which inlines each item's `<Stream>` array so list and season cards
+    /// can show DoVi/HDR badges — and transparently retries **once without** the
+    /// flag if the server rejects the enriched request.
+    ///
+    /// Some PMS versions return HTTP 500 on `includeElements=Stream`, which would
+    /// otherwise break library browsing and season views outright and silently
+    /// empty the onDeck / recentlyAdded rails (their errors get swallowed into an
+    /// empty rail). The flag only feeds list-card badges — detail and playback
+    /// re-fetch the full Media/Part/Stream per item via `metadata()` — so the lean
+    /// fallback costs nothing but those cosmetic badges, while capable servers pay
+    /// zero overhead (the first, enriched request simply succeeds).
+    private func decodeStreamEnriched<T: Decodable>(
+        _ type: T.Type,
+        path: String,
+        query: [URLQueryItem]
+    ) async throws -> T {
+        let enriched = Endpoint(
+            path: path,
+            queryItems: query + [URLQueryItem(name: "includeElements", value: "Stream")],
+            headers: headers
+        )
+        do {
+            return try await decode(T.self, enriched)
+        } catch AppError.invalidResponse {
+            PlozzLog.networking.error("Plex rejected includeElements=Stream on \(path); retrying lean")
+            let lean = Endpoint(path: path, queryItems: query, headers: headers)
+            return try await decode(T.self, lean)
+        }
+    }
+
     // MARK: Browsing
 
     /// `GET /library/sections` — top-level libraries.
@@ -129,24 +160,20 @@ public struct PlexClient: Sendable {
 
     /// `GET /library/onDeck` — Continue Watching.
     func onDeck(limit: Int) async throws -> [PlexMetadata] {
-        let endpoint = Endpoint(
+        try await decodeStreamEnriched(
+            PlexMediaContainerResponse.self,
             path: "/library/onDeck",
-            queryItems: containerQuery(start: 0, size: limit),
-            headers: headers
-        )
-        return try await decode(PlexMediaContainerResponse.self, endpoint)
-            .MediaContainer.Metadata ?? []
+            query: containerQuery(start: 0, size: limit)
+        ).MediaContainer.Metadata ?? []
     }
 
     /// `GET /library/recentlyAdded` — newest items across libraries.
     func recentlyAdded(limit: Int) async throws -> [PlexMetadata] {
-        let endpoint = Endpoint(
+        try await decodeStreamEnriched(
+            PlexMediaContainerResponse.self,
             path: "/library/recentlyAdded",
-            queryItems: containerQuery(start: 0, size: limit),
-            headers: headers
-        )
-        return try await decode(PlexMediaContainerResponse.self, endpoint)
-            .MediaContainer.Metadata ?? []
+            query: containerQuery(start: 0, size: limit)
+        ).MediaContainer.Metadata ?? []
     }
 
     /// `GET /library/metadata/{ratingKey}` — full detail for one item.
@@ -164,30 +191,21 @@ public struct PlexClient: Sendable {
     /// `GET /library/metadata/{ratingKey}/children` — seasons of a show,
     /// episodes of a season, …
     ///
-    /// **`includeElements=Stream` is REQUIRED** for episode rails / season
-    /// views. By default Plex's /children response returns ZERO `<Stream>`
-    /// elements — only the parent `<Media>` — so DOVI* / colorTrc fields never
-    /// reach the parser and DoVi/HDR badges silently disappear. (Atmos still
-    /// works without it because it's a Media attribute, not a Stream field.)
-    /// The commonly-suggested `includeStreams=1` is a no-op here; the correct
-    /// flag is `includeElements=Stream`, verified against a live PMS.
+    /// Requests `includeElements=Stream` so each child carries its `<Stream>`
+    /// array (DoVi* / colorTrc → DoVi/HDR badges), with a transparent lean retry
+    /// if the server rejects that flag (see ``decodeStreamEnriched``). By default
+    /// Plex's /children response returns ZERO `<Stream>` elements — only the
+    /// parent `<Media>` — so without the flag DoVi/HDR badges silently disappear
+    /// (Atmos still works without it because it's a Media attribute, not a Stream
+    /// field). `includeGuids=1` additionally inlines each child's external `Guid`
+    /// array (imdb://, tmdb://, tvdb://) so the cross-server episode-twin step can
+    /// match by id, not ordinal alone.
     func children(ratingKey: String) async throws -> [PlexMetadata] {
-        let endpoint = Endpoint(
+        try await decodeStreamEnriched(
+            PlexMediaContainerResponse.self,
             path: "/library/metadata/\(ratingKey)/children",
-            queryItems: [
-                URLQueryItem(name: "includeElements", value: "Stream"),
-                // Inline each child's external `Guid` array so episodes/seasons
-                // walked here carry their imdb://, tmdb://, tvdb:// ids. Without
-                // it Plex omits guids on /children, leaving the cross-server
-                // episode-twin step to match by ordinal alone — fine for the
-                // (season,episode) walk, but the ids make identity resolution
-                // robust and mirror metadata()/section listings.
-                URLQueryItem(name: "includeGuids", value: "1")
-            ],
-            headers: headers
-        )
-        return try await decode(PlexMediaContainerResponse.self, endpoint)
-            .MediaContainer.Metadata ?? []
+            query: [URLQueryItem(name: "includeGuids", value: "1")]
+        ).MediaContainer.Metadata ?? []
     }
 
     /// `GET /library/metadata/{ratingKey}/extras` — trailers and other extras
@@ -214,8 +232,11 @@ public struct PlexClient: Sendable {
             query.append(URLQueryItem(name: "type", value: String(type)))
         }
         query.append(URLQueryItem(name: "sort", value: Self.sortQuery(for: sort)))
-        let endpoint = Endpoint(path: "/library/sections/\(sectionID)/all", queryItems: query, headers: headers)
-        return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer
+        return try await decodeStreamEnriched(
+            PlexMediaContainerResponse.self,
+            path: "/library/sections/\(sectionID)/all",
+            query: query
+        ).MediaContainer
     }
 
     /// `GET /search?query=…` — global server search across libraries. Returns a
@@ -223,9 +244,11 @@ public struct PlexClient: Sendable {
     func search(query: String, limit: Int) async throws -> [PlexMetadata] {
         var items = containerQuery(start: 0, size: limit)
         items.append(URLQueryItem(name: "query", value: query))
-        let endpoint = Endpoint(path: "/search", queryItems: items, headers: headers)
-        return try await decode(PlexMediaContainerResponse.self, endpoint)
-            .MediaContainer.Metadata ?? []
+        return try await decodeStreamEnriched(
+            PlexMediaContainerResponse.self,
+            path: "/search",
+            query: items
+        ).MediaContainer.Metadata ?? []
     }
 
     // MARK: Music browsing
@@ -817,13 +840,13 @@ public struct PlexClient: Sendable {
             // tmdb://, anidb://, …) on list responses too — without this flag
             // list endpoints omit it, so rail/grid items would reach the
             // metadata router with no external ids to match (or detect anime) by.
-            URLQueryItem(name: "includeGuids", value: "1"),
-            // List endpoints (section /all, onDeck, recentlyAdded) strip the
-            // per-Stream array by default, so rail cards lose DOVI/HDR signal.
-            // `includeStreams=1` is a well-known no-op on Plex; the verified
-            // correct flag is `includeElements=Stream` (asks Plex to inline the
-            // named child elements, here the `<Stream>` array under each Part).
-            URLQueryItem(name: "includeElements", value: "Stream")
+            URLQueryItem(name: "includeGuids", value: "1")
+            // NOTE: `includeElements=Stream` (which inlines the per-`<Stream>`
+            // array for DoVi/HDR badges) is intentionally NOT added here. It is
+            // appended per-request by `decodeStreamEnriched`, which retries
+            // without it when a server rejects the flag (some PMS versions 500 on
+            // it). Baking it into the shared query would make that single point of
+            // failure poison every list endpoint with no fallback.
         ]
     }
 

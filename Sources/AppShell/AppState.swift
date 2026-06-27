@@ -415,6 +415,26 @@ public final class AppState {
             .homeUsers(authToken: adminToken)
     }
 
+    /// Resolves the **server-scoped** access token for `serverID` from a Plex
+    /// account/Home-user token, by asking plex.tv (`/api/v2/resources`) for that
+    /// user's access to the server. Injectable for tests; defaults to a live
+    /// `PlexAuthClient` call. Returns `nil` when the user has no access to the
+    /// server (or the lookup fails), so callers can fall back to the raw token.
+    ///
+    /// Why this exists: `switchHomeUser` returns the Home user's *account-level*
+    /// plex.tv token, **not** a per-server token. A PMS authorizes browsing with
+    /// the user's *server* access token (the same kind the owner account was
+    /// built from at sign-in). Sending the bare account token can yield an
+    /// unauthorized/empty `/library/sections`, so a switched Home user sees no
+    /// libraries. Re-resolving the per-server token here mirrors how every owner
+    /// account is built and works for any switched user / any number of accounts.
+    @ObservationIgnored
+    var plexServerTokenResolve: @Sendable (_ serverID: String, _ userToken: String, _ deviceID: String) async -> String? = { serverID, userToken, deviceID in
+        let client = PlexAuthClient(deviceProfile: PlexDeviceProfile(clientIdentifier: deviceID))
+        let servers = try? await client.servers(authToken: userToken)
+        return servers?.first { $0.id == serverID }?.accessToken
+    }
+
     public init(
         accountStore: AccountPersisting? = nil,
         registry: ProviderRegistry? = nil,
@@ -750,7 +770,17 @@ public final class AppState {
         do {
             let token = try await plexHomeUserSwitch(homeUserID, pin, adminToken, deviceID)
             PlozzLog.auth.debug("Plex Home-user switch OK — clearing pendingPlexPINRequest")
-            plexTokenOverrides[accountID] = token
+            // `token` is the Home user's account-level plex.tv token. Re-resolve
+            // it to THIS server's access token (the kind PMS authorizes browsing
+            // with), mirroring how the owner account was built at sign-in. Falls
+            // back to the account token if the per-server lookup fails so the
+            // switch never silently dead-ends. See `plexServerTokenResolve`.
+            var resolvedToken = token
+            if let serverID = accounts.first(where: { $0.id == accountID })?.server.id,
+               let serverToken = await plexServerTokenResolve(serverID, token, deviceID) {
+                resolvedToken = serverToken
+            }
+            plexTokenOverrides[accountID] = resolvedToken
             plexResolvedHomeUser[accountID] = homeUserID
             pendingPlexPINRequest = nil
             plexPINError = nil

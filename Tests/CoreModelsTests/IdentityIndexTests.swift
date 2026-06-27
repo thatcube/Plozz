@@ -427,6 +427,62 @@ final class IdentityIndexTests: XCTestCase {
         XCTAssertTrue(snapshot.sources(for: fromPlex).allSatisfy { $0.kind == .series })
     }
 
+    // MARK: Enrichment concurrency (bounded, order-independent batch)
+
+    func testEnrichmentProcessesMixedPageConcurrently() async {
+        // A realistic page: one already-identified series (no fetch), two guid-less
+        // that enrich to real ids, one whose fetch fails (inconclusive), and one
+        // that fetches but stays id-less (conclusive skip). Results arrive in any
+        // order from the task group — the partition is by identity, not order.
+        let identified = series("j1", account: "jf", tvdb: "100")
+        let willEnrichA = guidlessPlexSeries("p1", account: "plex")
+        let willEnrichB = guidlessPlexSeries("p2", account: "plex")
+        let willFail = guidlessPlexSeries("p3", account: "plex")
+        let unmatchable = guidlessPlexSeries("p4", account: "plex")
+
+        let result = await IdentityEnrichment.prepare(
+            [identified, willEnrichA, willEnrichB, willFail, unmatchable]
+        ) { item in
+            switch item.id {
+            case "p1": var f = item; f.providerIDs = ["Tvdb": "201"]; return f
+            case "p2": var f = item; f.providerIDs = ["Tvdb": "202"]; return f
+            case "p3": return nil               // fetch failed → inconclusive
+            default:   return item              // p4: fetched, still id-less
+            }
+        }
+
+        XCTAssertTrue(result.inconclusive, "p3's failed fetch must mark the page inconclusive")
+        XCTAssertEqual(
+            Set(result.indexable.map(\.id)), ["j1", "p1", "p2"],
+            "identified + both enriched survive; failed and unmatchable are excluded")
+    }
+
+    func testEnrichmentBoundsConcurrency() async {
+        // With a cap of 2, no more than 2 enrichment fetches may be in flight at
+        // once even on a large guid-less page — the bound is what keeps a cold-boot
+        // scan from flooding the connection pool. Every item is still processed.
+        actor Gauge {
+            private var inFlight = 0
+            private(set) var peak = 0
+            func enter() { inFlight += 1; peak = max(peak, inFlight) }
+            func leave() { inFlight -= 1 }
+        }
+        let gauge = Gauge()
+        let items = (0..<12).map { guidlessPlexSeries("p\($0)", account: "plex") }
+
+        let result = await IdentityEnrichment.prepare(items, concurrency: 2) { item in
+            await gauge.enter()
+            try? await Task.sleep(nanoseconds: 5_000_000) // 5ms so overlap is observable
+            await gauge.leave()
+            var f = item; f.providerIDs = ["Tvdb": item.id]; return f
+        }
+
+        let peak = await gauge.peak
+        XCTAssertLessThanOrEqual(peak, 2, "concurrency cap must bound in-flight enrichment fetches")
+        XCTAssertEqual(result.indexable.count, 12, "every item still enriched")
+        XCTAssertFalse(result.inconclusive)
+    }
+
     // MARK: Snapshot store (the @Sendable bridge)
 
     func testSnapshotStoreProviderReflectsUpdates() {

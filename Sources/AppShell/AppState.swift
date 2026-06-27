@@ -369,38 +369,65 @@ public final class AppState {
             }
             await index.retainAccounts(activeIDs)
             let stale = await index.staleAccounts(olderThan: ttl)
+
+            // Select the accounts that actually need a (re)scan: warm & fresh ones
+            // are skipped unless `force`. Resolved up front so the concurrent warm
+            // below only spawns real work.
+            var accountsToWarm: [ResolvedAccount] = []
             for resolvedAccount in resolved {
                 if Task.isCancelled { break }
-                let accountID = resolvedAccount.account.id
-                let warm = await index.isWarm(accountID)
-                if warm && !force && !stale.contains(accountID) { continue }
-                await Self.indexAccount(
-                    resolvedAccount,
-                    into: index,
-                    serverInfo: serverInfo[accountID],
-                    chunkSize: chunkSize,
-                    maxPerLibrary: maxPerLibrary
-                )
-                // Publish progressively so surfaces see each warmed account.
-                let snapshot = await index.snapshot()
-                await MainActor.run {
-                    self?.identitySnapshot = snapshot
-                    self?.identitySnapshotStore.update(snapshot)
-                    // Re-drain the watch outbox now that another account is indexed:
-                    // a movie / series mutation stopped before the index finished
-                    // warming re-expands against the larger union and fans out to the
-                    // newly-known servers. No-op when the outbox is empty.
-                    self?.drainWatchOutbox()
+                let warm = await index.isWarm(resolvedAccount.account.id)
+                if warm && !force && !stale.contains(resolvedAccount.account.id) { continue }
+                accountsToWarm.append(resolvedAccount)
+            }
+
+            // Warm every account CONCURRENTLY. Cold-boot warm time used to be the
+            // *sum* of each server's scan (a sequential loop), which is the visible
+            // "takes a while to warm up on first boot" cost. The identity index is an
+            // `actor` keyed by accountID, so concurrent per-account begin/ingest/
+            // finish never race, and the wall-clock collapses to ≈ the slowest single
+            // server. Each account still publishes its snapshot, persists, and
+            // re-drains the outbox the moment IT finishes, so surfaces and fan-out see
+            // progress incrementally instead of only after the slowest server.
+            await withTaskGroup(of: Void.self) { group in
+                for resolvedAccount in accountsToWarm {
+                    let accountID = resolvedAccount.account.id
+                    group.addTask {
+                        if Task.isCancelled { return }
+                        await Self.indexAccount(
+                            resolvedAccount,
+                            into: index,
+                            serverInfo: serverInfo[accountID],
+                            chunkSize: chunkSize,
+                            maxPerLibrary: maxPerLibrary
+                        )
+                        if Task.isCancelled { return }
+                        // Publish progressively so surfaces see each warmed account.
+                        let snapshot = await index.snapshot()
+                        await MainActor.run {
+                            self?.identitySnapshot = snapshot
+                            self?.identitySnapshotStore.update(snapshot)
+                            // Re-drain the watch outbox now that another account is
+                            // indexed: a movie / series mutation stopped before the
+                            // index finished warming re-expands against the larger
+                            // union and fans out to the newly-known servers. No-op
+                            // when the outbox is empty.
+                            self?.drainWatchOutbox()
+                        }
+                        // B1: persist the freshly-warmed membership so the next cold
+                        // boot can seed it at t=0. Only warm accounts are exported, so
+                        // a half-scan is never frozen as authoritative. The store is
+                        // NSLock-guarded with atomic writes, so the concurrent saves
+                        // from sibling warm tasks are safe and monotonic.
+                        let persisted = await index.export()
+                        try? store.save(persisted)
+                        // Make warm progress visible: each publish shows how many
+                        // identities and cross-server unions the index now holds.
+                        // crossServer staying 0 as accounts warm is the H1 signal
+                        // (no union ⇒ nothing fans out).
+                        FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "warm"))
+                    }
                 }
-                // B1: persist the freshly-warmed membership so the next cold boot can
-                // seed it at t=0. Only warm accounts are exported, so a half-scan is
-                // never frozen as authoritative.
-                let persisted = await index.export()
-                try? store.save(persisted)
-                // Make warm progress visible: each publish shows how many identities
-                // and cross-server unions the index now holds. crossServer staying 0
-                // as accounts warm is the H1 signal (no union ⇒ nothing fans out).
-                FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "warm"))
             }
         }
     }

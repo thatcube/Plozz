@@ -361,29 +361,60 @@ public enum IdentityEnrichment {
     /// - Parameters:
     ///   - items: a freshly fetched catalogue page (any kinds; only movies/series
     ///     are considered — others are dropped, mirroring the index's own rule).
+    ///   - concurrency: how many enrichment fetches may be in flight at once. For
+    ///     Plex a whole page can be guid-less, so enriching them one-by-one made the
+    ///     per-page latency N sequential round-trips — a dominant cold-boot warm
+    ///     cost. Bounded so it speeds up the scan without flooding the connection
+    ///     pool or the small tvOS cooperative thread pool.
     ///   - fetchFull: fetches the fuller per-item record for an item that lacks a
     ///     strong id. Return `nil` to signal the fetch **failed** (inconclusive);
     ///     return the enriched item (ideally now carrying external ids) on success.
     public static func prepare(
         _ items: [MediaItem],
-        fetchFull: @Sendable (MediaItem) async -> MediaItem?
+        concurrency: Int = 5,
+        fetchFull: @Sendable @escaping (MediaItem) async -> MediaItem?
     ) async -> Result {
+        // Partition without any network work: movies/series that already carry a
+        // strong identity are ingestable as-is; the rest each need one enrichment
+        // round-trip. Order is irrelevant downstream (the index keys by identity /
+        // source id), so the enriched results can come back in any order.
         var indexable: [MediaItem] = []
-        var inconclusive = false
+        var needsFetch: [MediaItem] = []
         for item in items where item.kind == .movie || item.kind == .series {
-            if !MediaItemIdentity.identities(for: item).isEmpty {
+            if MediaItemIdentity.identities(for: item).isEmpty {
+                needsFetch.append(item)
+            } else {
                 indexable.append(item)
-                continue
             }
-            guard let full = await fetchFull(item) else {
-                inconclusive = true
-                continue
+        }
+        guard !needsFetch.isEmpty else { return Result(indexable: indexable, inconclusive: false) }
+
+        // Enrich the guid-less items concurrently, capped by a permit gate. Each
+        // result carries (enrichedItem?, inconclusive): a nil fetch ⇒ inconclusive
+        // (retry the account on a later warm); a fetch that returns but still lacks
+        // a strong id ⇒ skipped conclusively (don't re-scan it forever).
+        let limiter = ConcurrencyLimiter(limit: concurrency)
+        let results: [(item: MediaItem?, inconclusive: Bool)] = await withTaskGroup(
+            of: (MediaItem?, Bool).self
+        ) { group in
+            for item in needsFetch {
+                group.addTask {
+                    guard let full = await limiter.run({ await fetchFull(item) }) else {
+                        return (nil, true)
+                    }
+                    if MediaItemIdentity.identities(for: full).isEmpty { return (nil, false) }
+                    return (full, false)
+                }
             }
-            if !MediaItemIdentity.identities(for: full).isEmpty {
-                indexable.append(full)
-            }
-            // Fetched fine but still no strong id ⇒ genuinely unmatchable: skip
-            // conclusively (don't set inconclusive, so we don't re-scan forever).
+            var collected: [(MediaItem?, Bool)] = []
+            for await result in group { collected.append(result) }
+            return collected
+        }
+
+        var inconclusive = false
+        for result in results {
+            if let item = result.item { indexable.append(item) }
+            if result.inconclusive { inconclusive = true }
         }
         return Result(indexable: indexable, inconclusive: inconclusive)
     }

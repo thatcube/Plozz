@@ -74,6 +74,14 @@ public final class PlayerViewModel {
     /// to play when the title has multiple versions; `nil` plays the default.
     private let mediaSourceID: String?
     private let captionSettings: CaptionSettings
+    /// Per-profile playback prefs. Today: whether to offer the Skip Intro/Credits
+    /// button. When `skipIntros` is off, segments are never fetched or shown.
+    private let playbackSettings: PlaybackSettings
+    /// Loads server-detected skip segments once playback is ready; cancelled on
+    /// stop. Best-effort — a failure leaves the skip button simply unavailable.
+    private var segmentsTask: Task<Void, Never>?
+    /// Clears the transient "Skipping…" auto-skip notice after a short delay.
+    private var autoSkipNoticeTask: Task<Void, Never>?
     /// Best-effort Trakt scrobbler. Receives the same start/pause/stop lifecycle
     /// as the in-app progress report so watches sync to Trakt. A no-op when Trakt
     /// is unconfigured or disconnected.
@@ -201,6 +209,7 @@ public final class PlayerViewModel {
         itemID: String,
         mediaSourceID: String? = nil,
         captionSettings: CaptionSettings = .default,
+        playbackSettings: PlaybackSettings = .default,
         startPosition: TimeInterval? = nil,
         scrobbler: any TraktScrobbling = DisabledTraktScrobbler(),
         engineFactory: EngineFactory = .native,
@@ -216,6 +225,7 @@ public final class PlayerViewModel {
         self.itemID = itemID
         self.mediaSourceID = mediaSourceID
         self.captionSettings = captionSettings
+        self.playbackSettings = playbackSettings
         self.startPositionOverride = startPosition
         self.scrobbler = scrobbler
         self.engineFactory = engineFactory
@@ -480,6 +490,60 @@ public final class PlayerViewModel {
         engine.setAudioDelay(0)
         engine.setSubtitleDelay(0)
         engine.setDialogEnhanceEnabled(false)
+
+        // Load skip markers once playback is live (opt-in, best-effort).
+        loadSkipSegmentsIfEnabled()
+    }
+
+    // MARK: - Skip intros/credits
+
+    /// Fetches server-detected skip segments when the per-profile Skip Intros
+    /// setting is on, publishing them to the controls model so the overlay can
+    /// offer a Skip button. No-op when disabled; failures degrade silently to no
+    /// button (older/marker-less servers). Runs once per load.
+    private func loadSkipSegmentsIfEnabled() {
+        guard playbackSettings.skipIntros.fetchesMarkers else { return }
+        controls.skipMode = playbackSettings.skipIntros
+        segmentsTask?.cancel()
+        let provider = provider
+        let itemID = itemID
+        segmentsTask = Task { @MainActor [weak self] in
+            let segments = (try? await provider.mediaSegments(for: itemID)) ?? []
+            guard let self, !Task.isCancelled else { return }
+            self.controls.skippableSegments = segments.filter(\.isSkippable)
+        }
+    }
+
+    /// Seeks past the currently-active skip segment (intro/credits) to its end,
+    /// then clears it so the button dismisses. Invoked by the in-player Skip
+    /// button. No-op when no segment is active.
+    public func skipActiveSegment() {
+        guard let segment = controls.activeSkipSegment else { return }
+        controls.dismissedSegmentID = segment.id
+        requestSeek(to: segment.end)
+    }
+
+    /// Dismisses the skip button for the active segment without seeking (Menu /
+    /// swipe-away), so it won't keep stealing focus for the rest of the window.
+    public func dismissActiveSkipSegment() {
+        controls.dismissedSegmentID = controls.activeSkipSegment?.id
+    }
+
+    /// Auto-skips the active segment when the per-profile Auto-skip setting is on:
+    /// seeks past it (like the Skip button) and flashes a brief "Skipping…"
+    /// notice so the jump isn't jarring. Marks the segment dismissed first so the
+    /// per-tick evaluation fires this exactly once per segment.
+    public func autoSkipActiveSegment() {
+        guard let segment = controls.activeSkipSegment else { return }
+        controls.dismissedSegmentID = segment.id
+        controls.autoSkipNotice = AutoSkipNotice(label: segment.kind.autoSkippedLabel)
+        requestSeek(to: segment.end)
+        autoSkipNoticeTask?.cancel()
+        autoSkipNoticeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.controls.autoSkipNotice = nil
+        }
     }
 
     // MARK: - Stall watchdog
@@ -775,6 +839,10 @@ public final class PlayerViewModel {
         prefetchTask = nil
         checkpointTask?.cancel()
         checkpointTask = nil
+        segmentsTask?.cancel()
+        segmentsTask = nil
+        autoSkipNoticeTask?.cancel()
+        autoSkipNoticeTask = nil
         cancelWatchdog()
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = nil

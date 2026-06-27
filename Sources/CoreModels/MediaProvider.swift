@@ -28,6 +28,22 @@ public protocol MediaProvider: Sendable {
     /// Recently added items across the user's libraries.
     func latest(limit: Int) async throws -> [MediaItem]
 
+    /// "Continue Watching" restricted to the given libraries, used by the Home
+    /// aggregator to honour the user's per-library Home-visibility *at fetch
+    /// time* — and, crucially, to stamp each returned item's `libraryID` so
+    /// providers whose feeds don't otherwise report the owning library (Jellyfin
+    /// episodes) can still be attributed and filtered everywhere on Home.
+    ///
+    /// `libraryIDs == nil` means "no restriction" — identical to
+    /// ``continueWatching(limit:)``. Providers that already tag items with their
+    /// library (Plex, via `librarySectionID`) inherit the default below, which
+    /// ignores the restriction and lets the row-level filter do the work.
+    func continueWatching(limit: Int, inLibraries libraryIDs: [String]?) async throws -> [MediaItem]
+
+    /// Recently added items restricted to the given libraries. See
+    /// ``continueWatching(limit:inLibraries:)`` for the scoping/tagging contract.
+    func latest(limit: Int, inLibraries libraryIDs: [String]?) async throws -> [MediaItem]
+
     /// Full detail for a single item.
     func item(id: String) async throws -> MediaItem
 
@@ -107,6 +123,14 @@ public protocol MediaProvider: Sendable {
     /// attach it to the item, so every client sees it.
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws
 
+    // MARK: Skip segments
+
+    /// Server-detected structural segments (intro, credits, …) for an item, used
+    /// to offer the in-player Skip Intro/Credits button. Jellyfin exposes these
+    /// via `/MediaSegments`, Plex via metadata markers. Best-effort: a provider
+    /// or server without marker support returns an empty array.
+    func mediaSegments(for itemID: String) async throws -> [MediaSegment]
+
     // MARK: Images
 
     /// Absolute URL for an item's artwork, or `nil` if unavailable.
@@ -121,6 +145,25 @@ public protocol MediaProvider: Sendable {
 public extension MediaProvider {
     func remoteSubtitleSearch(itemID: String, language: String) async throws -> [RemoteSubtitle] { [] }
     func downloadRemoteSubtitle(itemID: String, subtitleID: String) async throws {}
+
+    /// Default: no skip segments. Providers backed by a server marker source
+    /// (Jellyfin `/MediaSegments`, Plex metadata markers) override this; test
+    /// doubles and marker-less servers inherit the safe empty result.
+    func mediaSegments(for itemID: String) async throws -> [MediaSegment] { [] }
+
+    /// Default: ignore the library restriction and resolve the unscoped feed.
+    /// Providers that surface the owning library by other means (Plex tags items
+    /// with `librarySectionID`) inherit this; only providers that must scope the
+    /// fetch to learn provenance (Jellyfin) override it.
+    func continueWatching(limit: Int, inLibraries libraryIDs: [String]?) async throws -> [MediaItem] {
+        try await continueWatching(limit: limit)
+    }
+
+    /// Default: ignore the library restriction. See
+    /// ``continueWatching(limit:inLibraries:)``.
+    func latest(limit: Int, inLibraries libraryIDs: [String]?) async throws -> [MediaItem] {
+        try await latest(limit: limit)
+    }
 
     /// Default: no trailers. Providers that can surface them (Jellyfin local
     /// trailers, Plex extras) override this; test doubles and other conformers

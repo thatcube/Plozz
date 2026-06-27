@@ -12,6 +12,10 @@ public struct ContentStateView<Value: Sendable, Content: View>: View {
     private let onRetry: () -> Void
     private let content: (Value) -> Content
     private let emptyMessage: String
+    /// Optional custom view for the `.idle`/`.loading` states. When `nil` the
+    /// default `LoadingMessagesView` (spinner → playful messages) is shown; Home
+    /// passes a 1:1 skeleton here so the loading state matches the loaded layout.
+    private let loadingContent: (() -> AnyView)?
 
     public init(
         state: LoadState<Value>,
@@ -23,13 +27,34 @@ public struct ContentStateView<Value: Sendable, Content: View>: View {
         self.emptyMessage = emptyMessage
         self.onRetry = onRetry
         self.content = content
+        self.loadingContent = nil
+    }
+
+    /// Variant that renders a caller-supplied view while loading (e.g. a skeleton)
+    /// instead of the default spinner. Empty/error/loaded handling is unchanged.
+    public init<Loading: View>(
+        state: LoadState<Value>,
+        emptyMessage: String = "Nothing here yet.",
+        onRetry: @escaping () -> Void,
+        @ViewBuilder loadingContent: @escaping () -> Loading,
+        @ViewBuilder content: @escaping (Value) -> Content
+    ) {
+        self.state = state
+        self.emptyMessage = emptyMessage
+        self.onRetry = onRetry
+        self.content = content
+        self.loadingContent = { AnyView(loadingContent()) }
     }
 
     public var body: some View {
         switch state {
         case .idle, .loading:
-            LoadingMessagesView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let loadingContent {
+                loadingContent()
+            } else {
+                LoadingMessagesView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
 
         case let .loaded(value):
             content(value)

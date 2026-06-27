@@ -46,6 +46,7 @@ struct MainTabView: View {
     let accounts: [ResolvedAccount]
     let captionModel: CaptionSettingsModel
     let spoilerModel: SpoilerSettingsModel
+    let playbackModel: PlaybackSettingsModel
     let themeModel: ThemeSettingsModel
     let diagnosticsModel: DiagnosticsSettingsModel
     let musicPlayerModel: MusicPlayerSettingsModel
@@ -53,6 +54,10 @@ struct MainTabView: View {
     /// subtree rebuild (this view is re-created with a new `.id` on profile switch).
     let audioController: AudioPlaybackController
     let homeVisibility: HomeLibraryVisibilityModel
+    /// Per-profile store for the last-rendered Home row structure, used to seed
+    /// the loading skeleton so it matches the user's real Home before content
+    /// arrives. Constructed with the active profile's namespace by `RootView`.
+    let homeLayoutStore: HomeLayoutStoring
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
     let mediaItemActionHandler: any MediaItemActionHandling
@@ -99,7 +104,9 @@ struct MainTabView: View {
             HomeTab(
                 accounts: accounts,
                 homeVisibility: homeVisibility,
+                homeLayoutStore: homeLayoutStore,
                 captionSettings: captionModel.settings,
+                playbackSettings: playbackModel.settings,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
                 themePalette: resolvedPalette,
@@ -115,6 +122,7 @@ struct MainTabView: View {
             SearchTab(
                 accounts: accounts,
                 captionSettings: captionModel.settings,
+                playbackSettings: playbackModel.settings,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
                 themePalette: resolvedPalette,
@@ -143,6 +151,7 @@ struct MainTabView: View {
             SettingsView(
                 captions: captionModel,
                 spoilers: spoilerModel,
+                playback: playbackModel,
                 theme: themeModel,
                 homeVisibility: homeVisibility,
                 trakt: trakt,
@@ -367,6 +376,7 @@ private func makePlayerViewModel(
     for request: PlayRequest,
     accounts: [ResolvedAccount],
     captionSettings: CaptionSettings,
+    playbackSettings: PlaybackSettings,
     scrobbler: any TraktScrobbling,
     watchBridge: WatchOutboxBridge,
     identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
@@ -395,6 +405,7 @@ private func makePlayerViewModel(
             ),
             itemID: videoID,
             captionSettings: captionSettings,
+            playbackSettings: playbackSettings,
             startPosition: request.startPosition,
             scrobbler: scrobbler,
             engineFactory: engineFactory,
@@ -418,6 +429,7 @@ private func makePlayerViewModel(
         itemID: request.item.id,
         mediaSourceID: request.item.selectedVersionID,
         captionSettings: captionSettings,
+        playbackSettings: playbackSettings,
         startPosition: request.startPosition,
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(),
@@ -573,7 +585,9 @@ private struct PlayerPresentation: View {
 private struct HomeTab: View {
     let accounts: [ResolvedAccount]
     let homeVisibility: HomeLibraryVisibilityModel
+    let homeLayoutStore: HomeLayoutStoring
     let captionSettings: CaptionSettings
+    let playbackSettings: PlaybackSettings
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
     let themePalette: ThemePalette
@@ -591,7 +605,12 @@ private struct HomeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             HomeView(
-                viewModel: HomeViewModel(accounts: accounts, identitySources: identitySources),
+                viewModel: HomeViewModel(
+                    accounts: accounts,
+                    layoutStore: homeLayoutStore,
+                    identitySources: identitySources,
+                    currentVisibility: { homeVisibility.visibility }
+                ),
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
                 onSelectItem: { navigate($0) },
@@ -682,6 +701,7 @@ private struct HomeTab: View {
                         for: $0,
                         accounts: accounts,
                         captionSettings: captionSettings,
+                        playbackSettings: playbackSettings,
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
                         identitySources: identitySources
@@ -855,6 +875,7 @@ private extension View {
 private struct SearchTab: View {
     let accounts: [ResolvedAccount]
     let captionSettings: CaptionSettings
+    let playbackSettings: PlaybackSettings
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
     let themePalette: ThemePalette
@@ -958,6 +979,7 @@ private struct SearchTab: View {
                         for: $0,
                         accounts: accounts,
                         captionSettings: captionSettings,
+                        playbackSettings: playbackSettings,
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
                         identitySources: identitySources

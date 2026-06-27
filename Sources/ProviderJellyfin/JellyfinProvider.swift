@@ -76,6 +76,74 @@ public struct JellyfinProvider: MediaProvider {
         try await client.latestItems(userID: session.userID, limit: limit).map(map(item:))
     }
 
+    /// Library-scoped Continue Watching. Jellyfin's Resume/NextUp feeds don't
+    /// report each item's owning library (an episode's `ParentId` is its season),
+    /// so the only reliable way to attribute — and therefore Home-filter — items
+    /// is to fetch them **scoped to each visible library** via `ParentId` and
+    /// stamp the result. `nil` keeps the fast unscoped feed (used when the user
+    /// has hidden nothing on this account).
+    public func continueWatching(limit: Int, inLibraries libraryIDs: [String]?) async throws -> [MediaItem] {
+        guard let libraryIDs else { return try await continueWatching(limit: limit) }
+        guard !libraryIDs.isEmpty else { return [] }
+
+        let userID = session.userID
+        let client = self.client
+        let perLibrary: [[BaseItemDto]] = await withTaskGroup(of: (Int, [BaseItemDto]).self) { group in
+            for (index, libraryID) in libraryIDs.enumerated() {
+                group.addTask {
+                    async let resumeTask = try? client.resumeItems(userID: userID, limit: limit, parentID: libraryID)
+                    let nextUp = (try? await client.nextUpItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
+                    let resume = (await resumeTask) ?? []
+                    var seen = Set<String>()
+                    let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
+                    return (index, Array(merged.prefix(limit)))
+                }
+            }
+            var byIndex: [Int: [BaseItemDto]] = [:]
+            for await (index, items) in group { byIndex[index] = items }
+            return libraryIDs.indices.compactMap { byIndex[$0] }
+        }
+
+        var seen = Set<String>()
+        var result: [MediaItem] = []
+        for (libraryID, dtos) in zip(libraryIDs, perLibrary) {
+            for dto in dtos where seen.insert(dto.Id).inserted {
+                result.append(map(item: dto).taggingLibrary(libraryID))
+            }
+        }
+        return Array(result.prefix(limit))
+    }
+
+    /// Library-scoped Recently Added — see ``continueWatching(limit:inLibraries:)``
+    /// for why Jellyfin must scope the fetch to attribute each item's library.
+    public func latest(limit: Int, inLibraries libraryIDs: [String]?) async throws -> [MediaItem] {
+        guard let libraryIDs else { return try await latest(limit: limit) }
+        guard !libraryIDs.isEmpty else { return [] }
+
+        let userID = session.userID
+        let client = self.client
+        let perLibrary: [[BaseItemDto]] = await withTaskGroup(of: (Int, [BaseItemDto]).self) { group in
+            for (index, libraryID) in libraryIDs.enumerated() {
+                group.addTask {
+                    let items = (try? await client.latestItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
+                    return (index, items)
+                }
+            }
+            var byIndex: [Int: [BaseItemDto]] = [:]
+            for await (index, items) in group { byIndex[index] = items }
+            return libraryIDs.indices.compactMap { byIndex[$0] }
+        }
+
+        var seen = Set<String>()
+        var result: [MediaItem] = []
+        for (libraryID, dtos) in zip(libraryIDs, perLibrary) {
+            for dto in dtos where seen.insert(dto.Id).inserted {
+                result.append(map(item: dto).taggingLibrary(libraryID))
+            }
+        }
+        return Array(result.prefix(limit))
+    }
+
     public func item(id: String) async throws -> MediaItem {
         let dto = try await client.item(userID: session.userID, id: id)
         return map(item: dto)
@@ -99,6 +167,38 @@ public struct JellyfinProvider: MediaProvider {
 
     public func children(of itemID: String) async throws -> [MediaItem] {
         try await client.children(userID: session.userID, parentID: itemID).map(map(item:))
+    }
+
+    public func mediaSegments(for itemID: String) async throws -> [MediaSegment] {
+        // Best-effort: servers without a media-segment provider 404 here, which
+        // should degrade to "no skip markers" rather than failing playback.
+        let dtos = (try? await client.mediaSegments(itemID: itemID)) ?? []
+        return dtos.compactMap(Self.map(segment:))
+    }
+
+    /// Maps a Jellyfin media-segment DTO onto the provider-agnostic
+    /// `MediaSegment`. Jellyfin calls the closing-credits segment `Outro`; Plozz
+    /// normalises that to `.credits`. Ticks are 100-nanosecond units.
+    private static func map(segment dto: MediaSegmentDto) -> MediaSegment? {
+        guard let startTicks = dto.StartTicks, let endTicks = dto.EndTicks, endTicks > startTicks else {
+            return nil
+        }
+        let kind: MediaSegment.Kind
+        switch dto.segmentType?.lowercased() {
+        case "intro": kind = .intro
+        case "outro", "credits": kind = .credits
+        case "recap": kind = .recap
+        case "preview": kind = .preview
+        case "commercial": kind = .commercial
+        default: kind = .unknown
+        }
+        let ticksPerSecond = 10_000_000.0
+        return MediaSegment(
+            id: dto.Id ?? "\(dto.segmentType ?? "segment")-\(startTicks)",
+            kind: kind,
+            start: Double(startTicks) / ticksPerSecond,
+            end: Double(endTicks) / ticksPerSecond
+        )
     }
 
     public func items(in containerID: String, kind: MediaItemKind, page: PageRequest) async throws -> MediaPage {

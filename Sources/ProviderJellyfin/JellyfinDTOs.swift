@@ -13,6 +13,28 @@ struct PublicSystemInfo: Decodable {
     let ProductName: String?
 }
 
+// MARK: Media segments
+
+/// `GET /MediaSegments/{itemId}` response envelope. Each item is a structural
+/// segment (intro, outro, recap, …) the server detected. Times are 100-ns ticks.
+struct MediaSegmentsResponse: Decodable {
+    let Items: [MediaSegmentDto]?
+}
+
+struct MediaSegmentDto: Decodable {
+    let Id: String?
+    let segmentType: String?
+    let StartTicks: Int64?
+    let EndTicks: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case Id
+        case segmentType = "Type"
+        case StartTicks
+        case EndTicks
+    }
+}
+
 struct QuickConnectResultDTO: Decodable {
     let Authenticated: Bool
     let Secret: String

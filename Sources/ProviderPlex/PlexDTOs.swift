@@ -41,6 +41,12 @@ struct PlexDirectory: Decodable {
 struct PlexMetadata: Decodable {
     let ratingKey: String?
     let key: String?
+    /// The owning library section's numeric id (present on hub/onDeck/
+    /// recentlyAdded item feeds). Equals the `/library/sections` `key`, so
+    /// stringified it matches `MediaLibrary.id` and lets Home suppress an item
+    /// whose library the user hid. Absent on surfaces that don't report it
+    /// (e.g. account-level Watchlist) — then the item stays fail-open.
+    let librarySectionID: Int?
     /// The item's canonical **global** Plex guid (`plex://movie/<id>`,
     /// `plex://show/<id>`, …) — distinct from the per-server `ratingKey`. The
     /// account-level Watchlist (Discover) service keys on this, so it's stashed
@@ -103,6 +109,9 @@ struct PlexMetadata: Decodable {
     let Guid: [PlexGuid]?
     let Genre: [PlexTag]?
     let Media: [PlexMedia]?
+    /// Plex Pass intro/credits markers, present only when the metadata request
+    /// passes `includeMarkers=1`. Offsets are in milliseconds.
+    let Marker: [PlexMarker]?
 }
 
 /// One Plex external-id GUID, e.g. `{ "id": "imdb://tt0111161" }`.
@@ -162,6 +171,26 @@ struct PlexMedia: Decodable {
     private enum CodingKeys: String, CodingKey {
         case id, duration, container, videoCodec, audioCodec, videoResolution
         case width, height, audioChannels, videoProfile, audioProfile, videoStreamDisplayTitle, Part
+    }
+}
+
+/// A Plex Pass structural marker (`<Marker type="intro|credits" ...>`). Offsets
+/// are milliseconds from the start of the item. Decoded flexibly because Plex
+/// occasionally serialises numeric attributes as strings.
+struct PlexMarker: Decodable {
+    let type: String?
+    let startTimeOffset: Int?
+    let endTimeOffset: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case type, startTimeOffset, endTimeOffset
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = c.flexibleString(.type)
+        startTimeOffset = c.flexibleInt(.startTimeOffset)
+        endTimeOffset = c.flexibleInt(.endTimeOffset)
     }
 }
 

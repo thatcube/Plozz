@@ -44,6 +44,7 @@ public final class AppState {
     /// as-is and not rebuilt.
     public private(set) var captionModel: CaptionSettingsModel
     public private(set) var spoilerModel: SpoilerSettingsModel
+    public private(set) var playbackModel: PlaybackSettingsModel
     public private(set) var themeModel: ThemeSettingsModel
     public private(set) var diagnosticsModel: DiagnosticsSettingsModel
     /// The full-screen music player's per-profile look + "show extra info"
@@ -577,6 +578,7 @@ public final class AppState {
         systemBridge: SystemProfileBridging? = nil,
         captionModel: CaptionSettingsModel? = nil,
         spoilerModel: SpoilerSettingsModel? = nil,
+        playbackModel: PlaybackSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         musicPlayerModel: MusicPlayerSettingsModel? = nil,
@@ -595,6 +597,7 @@ public final class AppState {
         // (test path) and don't rebuild them on profile switch. Otherwise build
         // them scoped to the active profile's namespace.
         let injected = captionModel != nil || spoilerModel != nil
+            || playbackModel != nil
             || themeModel != nil || diagnosticsModel != nil
             || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
         self.usesInjectedModels = injected
@@ -604,6 +607,7 @@ public final class AppState {
         self.traktService = traktService ?? TraktServiceFactory.make(namespace: ns)
         self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
+        self.playbackModel = playbackModel ?? PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
         self.themeModel = themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         self.musicPlayerModel = musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
@@ -1236,6 +1240,7 @@ public final class AppState {
         let ns = profilesModel.activeNamespace
         captionModel = CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         spoilerModel = SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
+        playbackModel = PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
         themeModel = ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         musicPlayerModel = MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))

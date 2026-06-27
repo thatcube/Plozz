@@ -188,6 +188,19 @@ public struct PlexClient: Sendable {
         return item
     }
 
+    /// `GET /library/metadata/{ratingKey}?includeMarkers=1` — fetches the item's
+    /// Plex Pass intro/credits markers. Returns an empty array on servers/items
+    /// without markers (non-Plex-Pass, unanalysed, or movies without credits).
+    func mediaSegments(ratingKey: String) async throws -> [PlexMarker] {
+        let endpoint = Endpoint(
+            path: "/library/metadata/\(ratingKey)",
+            queryItems: [URLQueryItem(name: "includeMarkers", value: "1")],
+            headers: headers
+        )
+        let container = try await decode(PlexMediaContainerResponse.self, endpoint, using: interactiveHTTP).MediaContainer
+        return container.Metadata?.first?.Marker ?? []
+    }
+
     /// `GET /library/metadata/{ratingKey}/children` — seasons of a show,
     /// episodes of a season, …
     ///

@@ -22,6 +22,12 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
     /// **This server's** local id for the title (Jellyfin item id / Plex
     /// ratingKey). The id playback and watch-state writes must use for this source.
     public var itemID: String
+    /// This server's owning library id for the title (matches `MediaLibrary.id`),
+    /// when the provider/aggregator could attribute it. Lets a merged card test
+    /// each server's library against Home-visibility independently (so the card
+    /// shows if *any* contributing library is visible). `nil` ⇒ this source is
+    /// fail-open (not attributable to a hidden library).
+    public var libraryID: String?
     /// The backend this source lives on — drives the server-picker icon/label.
     /// Optional because the merge core can run without an account→kind resolver
     /// (e.g. Search), in which case the picker falls back to a neutral label.
@@ -53,6 +59,7 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
     public init(
         accountID: String,
         itemID: String,
+        libraryID: String? = nil,
         providerKind: ProviderKind? = nil,
         serverName: String? = nil,
         accountName: String? = nil,
@@ -65,6 +72,7 @@ public struct MediaSourceRef: Codable, Hashable, Identifiable, Sendable {
     ) {
         self.accountID = accountID
         self.itemID = itemID
+        self.libraryID = libraryID
         self.providerKind = providerKind
         self.serverName = serverName
         self.accountName = accountName

@@ -886,12 +886,58 @@ int plozz_remux_uses_fixed_cadence(plozz_remux_session *s) {
 }
 
 /*
- * B7 full-VOD mode: publish the existing full 0->duration fixed-cadence table as the
- * playlist (so the WHOLE scrub bar is seekable at open — instant launch, full seek),
- * but mux each segment with FORWARD-snapped contiguous boundaries (resolve_forward_kf
- * + per-mux stop-keyframe caching) so adjacent segments never overlap/duplicate (the
- * desync root). decl/EXTINF stays the provisional cadence; the real muxed span is
- * reported in remux-av so the coordinator can confirm AVPlayer holds A/V sync.
+ * B7 full-VOD cadence estimate: measure the source's average GOP length by walking
+ * the first few real keyframes from t=0 with the cheap cluster-header probe (B6) —
+ * which ALSO primes that probe's calibration for the later on-demand resolves. The
+ * declared EXTINF cadence MUST track the real GOP: too small and forward-snap
+ * over-consumes media (a segment can't be shorter than one GOP), so the back half of
+ * the timeline runs past EOF -> empty -> 404; matching it keeps declared ~= real so
+ * far-seek lands at the right spot. This was the drift in the fixed-6/12s table on
+ * the 20-25s-GOP 4K titles. Reads ~4-8 keyframes (the calibration tax is a few MB
+ * worst case on big clusters, cheap thereafter). Returns the average GOP seconds,
+ * clamped to a sane HLS segment range, or `fallback` when too few keyframes sample.
+ */
+static double estimate_gop_cadence(plozz_remux_session *s, double fallback) {
+    if (s->duration_seconds <= 0) return fallback;
+    double file_start = (s->ic->start_time != AV_NOPTS_VALUE)
+        ? (double)s->ic->start_time / AV_TIME_BASE : 0.0;
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) return fallback;
+    double last = 0.0;          /* the first keyframe is the file head (pts 0) */
+    double step = 0.0;
+    double sum = 0.0;
+    int n = 0;
+    int probes = 0;
+    const int want = 8;         /* average up to 8 GOPs from the prefix */
+    for (int i = 0; i < want; i++) {
+        double kf = probe_next_keyframe(s, pkt, file_start, s->duration_seconds,
+                                        fallback, last, &step, &probes);
+        if (kf < 0) break;      /* no further keyframe before EOF */
+        double gap = kf - last;
+        if (gap > 0.05) { sum += gap; n++; }
+        last = kf;
+        if (last >= s->duration_seconds - 0.1) break;
+    }
+    av_packet_free(&pkt);
+    if (n < 1) return fallback;
+    double avg = sum / (double)n;
+    if (avg < 4.0) avg = 4.0;       /* floor: avoid an over-segmented playlist */
+    if (avg > 30.0) avg = 30.0;     /* ceil: keep seek granularity reasonable */
+    remux_log(1, "remux: full-vod cadence estimate avg-gop=%.2fs from %d gaps (%d probes)",
+              avg, n, probes);
+    return avg;
+}
+
+/*
+ * B7 full-VOD mode: publish the full 0->duration table as the playlist (so the WHOLE
+ * scrub bar is seekable at open — instant launch, full seek), but mux each segment
+ * with FORWARD-snapped contiguous boundaries (resolve_forward_kf + per-mux stop-
+ * keyframe caching) so adjacent segments never overlap/duplicate (the desync root).
+ * The cadence is the MEASURED average GOP (estimate_gop_cadence), so the declared
+ * EXTINF tracks the real keyframe spacing — a too-small fixed cadence would make
+ * forward-snap over-consume media and 404 the timeline tail. decl/EXTINF stays the
+ * provisional cadence; the real muxed span is reported in remux-av so the coordinator
+ * can confirm AVPlayer holds A/V sync.
  *
  * Engages ONLY when the table fell back to fixed cadence (no usable keyframe index):
  * for Cues/DoVi titles the index boundaries are already exact, so this is a no-op and
@@ -904,14 +950,22 @@ int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
         remux_log(0, "remux: full-vod requested but source has a real keyframe index — no-op");
         return 0;
     }
-    /* Fixed cadence >= a typical GOP so every provisional window contains ~1 keyframe
-     * (vspan ~= decl, no empty windows). No open-time GOP measurement: that costs a
-     * forward read to the 2nd keyframe (~1 GOP) and would defeat instant open. */
-    double cadence = (s->target_segment_seconds > 12.0) ? s->target_segment_seconds : 12.0;
-    if (cadence != s->target_segment_seconds) {
-        s->target_segment_seconds = cadence;
-        build_segment_table(s, cadence);
-    }
+
+    /* Enable + init B6's cheap cluster-header probe so cadence estimation (and the
+     * later on-demand resolves) read ~16KB headers instead of full IDRs once the
+     * scale calibrates. video_track is the Matroska track number (AVStream.id);
+     * self-validation falls back to av_read_frame on any mismatch. */
+    s->keyframe_index_mode = 1;
+    memset(&s->kf_ix, 0, sizeof(s->kf_ix));
+    s->kf_ix.enabled = 1;
+    s->kf_ix.video_track = (int64_t)s->ic->streams[s->video_index]->id;
+    if (s->kf_ix.video_track <= 0) s->kf_ix.enabled = 0;
+
+    /* Declare the cadence from the measured average GOP so EXTINF ~= real span. */
+    double fallback = (s->target_segment_seconds < 1.0) ? 6.0 : s->target_segment_seconds;
+    double cadence = estimate_gop_cadence(s, fallback);
+    s->target_segment_seconds = cadence;
+    build_segment_table(s, cadence);
 
     free(s->resolved_kf);
     s->resolved_kf_count = s->segment_count + 1;
@@ -922,8 +976,8 @@ int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
     s->full_vod_mode = 1;
     s->full_vod_resolves = 0;
 
-    /* Rewind the shared demux cursor to the head so the first served segment starts
-     * cleanly (the table build / any probing may have left it mid-file). */
+    /* Rewind the shared demux cursor to the head (estimation walked it forward) so
+     * the first served segment starts cleanly. */
     avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
 
     remux_log(0, "remux: full-vod engaged cadence=%.1fs segs=%d duration=%.1fs",
@@ -1639,6 +1693,14 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
     double provisional_end = end_s;
     if (s->full_vod_mode) {
         double b_start = fullvod_resolve_start(s, index);
+        /* Tail-overrun guard: if a published segment's resolved start landed at/after
+         * EOF (local GOP variance let earlier segments over-consume slightly), pull it
+         * back to the final ~cadence of media so it serves valid non-empty content
+         * instead of an empty fragment -> 404. Benign: AVPlayer stops at duration. */
+        if (b_start >= s->duration_seconds - 0.05) {
+            double back = s->duration_seconds - s->target_segment_seconds;
+            b_start = (back > 0.0) ? back : 0.0;
+        }
         start_s = b_start;
         /* Empty-window guard (GOP > cadence): make sure the loop reads at least to
          * the next keyframe after the start, so a degenerate window can't yield a

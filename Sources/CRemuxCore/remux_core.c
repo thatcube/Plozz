@@ -862,6 +862,85 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
     return n;
 }
 
+/* ----- standalone per-window keyframe probe -----------------------------------
+ *
+ * Public wrapper exposing the cheap header-parse discovery for a lazy/windowed
+ * indexer (e.g. B7's EVENT-playlist background fill). It reuses probe_keyframe_pts
+ * (the same self-calibrating / self-falling-back core the full-at-open scan uses);
+ * the single-boundary widening here mirrors the inner loop of
+ * discover_keyframes_by_seek, but WITHOUT that function's open-thread byte/time
+ * budget — a windowed caller owns its own budget, cancellation, and frontier cursor.
+ */
+struct plozz_remux_kf_probe {
+    plozz_remux_session *s;
+    kf_index_ctx ix;
+    AVPacket *pkt;
+    double file_start;
+};
+
+plozz_remux_kf_probe *plozz_remux_kf_probe_create(plozz_remux_session *s,
+                                                  int enable_header_parse) {
+    if (!s || s->video_index < 0) return NULL;
+    plozz_remux_kf_probe *ctx =
+        (plozz_remux_kf_probe *)calloc(1, sizeof(plozz_remux_kf_probe));
+    if (!ctx) return NULL;
+    ctx->pkt = av_packet_alloc();
+    if (!ctx->pkt) { free(ctx); return NULL; }
+    ctx->s = s;
+    AVStream *vst = s->ic->streams[s->video_index];
+    ctx->file_start = (s->ic->start_time != AV_NOPTS_VALUE)
+        ? (double)s->ic->start_time / AV_TIME_BASE : 0.0;
+    /* Same context init as discover_keyframes_by_seek: video_track is the Matroska
+     * track number (AVStream.id); self-validation falls back if it's wrong, so an
+     * unexpected id never corrupts a boundary. */
+    ctx->ix.enabled = enable_header_parse ? 1 : 0;
+    ctx->ix.video_track = (int64_t)vst->id;
+    if (ctx->ix.enabled && ctx->ix.video_track <= 0) ctx->ix.enabled = 0;
+    return ctx;
+}
+
+int plozz_remux_kf_probe_next(plozz_remux_kf_probe *ctx, double after_seconds,
+                              double target_gap, double *out_pts) {
+    if (!ctx || !ctx->s || !out_pts) return 0;
+    plozz_remux_session *s = ctx->s;
+    if (s->video_index < 0) return 0;
+    AVStream *vst = s->ic->streams[s->video_index];
+    double duration = s->duration_seconds;
+    if (target_gap < 0.001) target_gap = 6.0;
+    if (after_seconds < 0.0) after_seconds = 0.0;
+
+    double last = after_seconds;
+    double window = target_gap;
+    for (int attempt = 0; attempt < 4096; attempt++) {
+        double tgt = last + window;
+        int at_end = 0;
+        if (duration > 0.0 && tgt >= duration) { tgt = duration - 0.05; at_end = 1; }
+        if (tgt <= last + 0.001) return 0;
+        int64_t seek_ts = (int64_t)((tgt + ctx->file_start) / av_q2d(vst->time_base));
+        if (avformat_seek_file(s->ic, s->video_index, INT64_MIN, seek_ts, seek_ts,
+                               AVSEEK_FLAG_BACKWARD) < 0) {
+            return 0;
+        }
+        double kpts = probe_keyframe_pts(s, ctx->pkt, ctx->file_start, last, &ctx->ix);
+        if (kpts > last + 0.05) { *out_pts = kpts; return 1; }
+        if (at_end) return 0;       /* probed the tail, no further keyframe */
+        /* Landed on/<= the previous boundary: keyframes are sparser than the current
+         * window — widen and retry (mirrors discover_keyframes_by_seek). */
+        window += target_gap;
+    }
+    return 0;
+}
+
+int plozz_remux_kf_probe_header_reads(const plozz_remux_kf_probe *ctx) {
+    return ctx ? ctx->ix.header_reads : 0;
+}
+
+void plozz_remux_kf_probe_free(plozz_remux_kf_probe *ctx) {
+    if (!ctx) return;
+    if (ctx->pkt) av_packet_free(&ctx->pkt);
+    free(ctx);
+}
+
 /*
  * Replace the segment table with one built on the source's real keyframe boundaries
  * (discovered by seek-probe), so EXTINF matches the muxed span and segments do not

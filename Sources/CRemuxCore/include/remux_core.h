@@ -184,6 +184,53 @@ void plozz_remux_set_keyframe_scan(plozz_remux_session *s, int enabled);
  */
 void plozz_remux_set_keyframe_index_mode(plozz_remux_session *s, int enabled);
 
+/* ----- standalone per-window keyframe probe (for a lazy/windowed indexer) -----
+ *
+ * The cheap exact keyframe-discovery primitive extracted as a self-contained,
+ * stateful probe so a lazy/windowed segment indexer (e.g. an EVENT-playlist server
+ * that fills its timeline window-by-window in the background) can resolve ONE real
+ * keyframe boundary at a time using only a ~64KB cluster-header read — instead of
+ * demuxing a whole ~MB IDR per boundary (the cost that makes background fill pull
+ * hundreds of MB and starve playback). It shares the exact self-calibrating /
+ * self-falling-back header-parse core used by the full-at-open scan.
+ *
+ * Lifecycle: create once per open session, call _next repeatedly to walk boundaries
+ * forward (each call advances from the previous boundary), free at the end. The probe
+ * borrows the session's demuxer + byte-range reader; do not run it concurrently with
+ * the muxer on the same session (single demux cursor). Bytes read are counted into
+ * the session so the caller can budget/telemeter via its own bytes accounting.
+ */
+typedef struct plozz_remux_kf_probe plozz_remux_kf_probe;
+
+/*
+ * Create a keyframe probe bound to an open session. `enable_header_parse` selects the
+ * ~64KB cluster-header path (self-calibrates against av_read_frame on the first few
+ * boundaries, then engages; falls back per-boundary on any uncertainty). When 0, every
+ * boundary uses the authoritative av_read_frame path (correct but ~MB/probe). Returns
+ * NULL on failure (no video stream / OOM). Free with plozz_remux_kf_probe_free.
+ */
+plozz_remux_kf_probe *plozz_remux_kf_probe_create(plozz_remux_session *s,
+                                                  int enable_header_parse);
+
+/*
+ * Resolve the next real keyframe boundary AFTER `after_seconds` (0-based seconds).
+ * Seeks BACKWARD to about `after_seconds + target_gap` and returns the keyframe the
+ * demuxer lands on, widening the search forward until it finds a keyframe strictly
+ * after `after_seconds` (so regular GOPs cost one seek; sparse keyframes cost a few).
+ * On success returns 1 and writes the keyframe PTS (> after_seconds) to *out_pts. On
+ * end-of-file / no further keyframe / seek failure returns 0. Cheap once calibrated
+ * (~64KB); the caller owns any time/byte budget and cancellation around the loop.
+ */
+int plozz_remux_kf_probe_next(plozz_remux_kf_probe *ctx, double after_seconds,
+                              double target_gap, double *out_pts);
+
+/* Telemetry: number of boundaries this probe served purely from a cluster-header
+ * read (vs an av_read_frame fallback). 0 when `ctx` is NULL. */
+int plozz_remux_kf_probe_header_reads(const plozz_remux_kf_probe *ctx);
+
+/* Release a keyframe probe. Safe on NULL. Does not close the session. */
+void plozz_remux_kf_probe_free(plozz_remux_kf_probe *ctx);
+
 /*
  * Pure test/diagnostic helper: parse a Matroska Cluster at `buf[0..len)` and return,
  * via *out_raw, the raw (TimestampScale-unit) timestamp of the first keyframe block

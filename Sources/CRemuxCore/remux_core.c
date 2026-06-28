@@ -382,15 +382,24 @@ static int scan_keyframes(plozz_remux_session *s, double **out_kf, int *out_coun
  * full multi-GB transfer. Boundaries are exact keyframe PTSs, identical in kind
  * to scan_keyframes, so correctness is unchanged.
  *
+ * Hard-bounded so it can never hang or over-read no matter how large the source
+ * (must scale to 30–40 GB remux files): a single step's forward read is capped
+ * (MAX_FWD_PKTS) and the WHOLE pass is capped by a wall-clock budget
+ * (MAX_WALL_SECONDS). If a forward seek degenerates into per-GOP reads on a
+ * particular container, the wall-clock cap trips and we return failure rather
+ * than quietly transferring the entire file — the caller then keeps the
+ * fixed-cadence table (so playback still STARTS) instead of doing an unbounded
+ * scan. *out_pkts gets the total packets demuxed (telemetry: proves sparseness).
+ *
  * Returns 0 with an increasing list in *out_kf / *out_count (caller frees) when
- * it covered the stream; returns -1 when a forward seek stops making progress
- * even after a bounded forward-read (the caller then falls back to the full
- * scan, which is slower but always correct). Rewinds to the start when done.
+ * it covered the stream; returns -1 when it couldn't (seek won't advance, or the
+ * budget tripped). Rewinds to the start when done.
  */
 static int sample_keyframes_by_seek(plozz_remux_session *s, double target_seconds,
-                                    double **out_kf, int *out_count) {
+                                    double **out_kf, int *out_count, long *out_pkts) {
     *out_kf = NULL;
     *out_count = 0;
+    if (out_pkts) *out_pkts = 0;
     if (target_seconds < 1.0) target_seconds = 6.0;
     AVStream *vst = s->ic->streams[s->video_index];
     double file_start = (s->ic->start_time != AV_NOPTS_VALUE)
@@ -407,13 +416,22 @@ static int sample_keyframes_by_seek(plozz_remux_session *s, double target_second
 
     int failed = 0;
     double prev = 0.0;
+    long total_pkts = 0;
+    int64_t wall_start = av_gettime();
     /* Bound on how many packets a single step may read forward (when a seek
-     * undershoots) before we declare the sparse path unreliable and bail to the
-     * full scan — keeps a misbehaving forward seek from quietly reading the whole
-     * file one GOP at a time. */
-    const int MAX_FWD_PKTS = 4000;
+     * undershoots) before we declare the sparse path unreliable — covers one
+     * generous GOP, not a runaway read. */
+    const int MAX_FWD_PKTS = 1200;
+    /* Whole-pass wall-clock ceiling. If sparse seeking can't build the table
+     * within this, it isn't actually sparse on this container — bail so a huge
+     * file can never block open() or get the app watchdog-killed. */
+    const double MAX_WALL_SECONDS = 8.0;
 
     while (n < PLOZZ_MAX_SEGMENTS) {
+        if ((double)(av_gettime() - wall_start) / 1e6 > MAX_WALL_SECONDS) {
+            failed = 1;  /* over budget: not sparse on this source */
+            break;
+        }
         double tgt = prev + target_seconds;
         if (duration > 0 && tgt >= duration - 0.001) break;  /* tail handled by the planner */
 
@@ -426,6 +444,7 @@ static int sample_keyframes_by_seek(plozz_remux_session *s, double target_second
         int tries = 0;
         while (tries < MAX_FWD_PKTS && av_read_frame(s->ic, pkt) >= 0) {
             tries++;
+            total_pkts++;
             if (pkt->stream_index == s->video_index && (pkt->flags & AV_PKT_FLAG_KEY)) {
                 int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
                 if (ts != AV_NOPTS_VALUE) {
@@ -456,11 +475,12 @@ static int sample_keyframes_by_seek(plozz_remux_session *s, double target_second
     }
 
     av_packet_free(&pkt);
+    if (out_pkts) *out_pkts = total_pkts;
     /* Rewind so the first muxed segment's BACKWARD seek begins from t=0. */
     avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
 
     /* Reject a run that bailed early (covered far less than the file) so the
-     * caller falls back to the exhaustive scan rather than shipping a short table. */
+     * caller can fall back rather than shipping a short table. */
     if (failed || n < 2 ||
         (duration > 0 && kf[n - 1] < duration * 0.5)) {
         free(kf);
@@ -664,15 +684,40 @@ int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_s
     int64_t t0 = av_gettime();
     double *kf = NULL;
     int kf_count = 0;
+    long pkts = 0;
     const char *method = "seek-sample";
 
+    /* The exhaustive O(filesize) scan reads the source to EOF. That's fine for a
+     * short episode but it MUST NOT run on a large file — at multi-GB it never
+     * finishes at open and can get the app watchdog-killed. So only permit the
+     * full scan (as a fallback or when forced) for short-duration sources; for
+     * anything large, sparse seek-sampling is the only path and if it can't cover
+     * the stream we keep the fixed-cadence table (playback still starts) rather
+     * than block. ~30 min ≈ a TV episode like Family Guy (works today). */
+    const double FULL_SCAN_MAX_DURATION = 1800.0;
+    int full_scan_ok = force_full_scan ||
+                       (s->duration_seconds > 0 && s->duration_seconds <= FULL_SCAN_MAX_DURATION);
+
     /* Fast path: sparse seek-sampling builds the boundary table without reading
-     * the whole file. Fall back to the exhaustive scan if it's forced off or it
-     * couldn't cover the stream (a forward seek that wouldn't advance), so a
-     * misbehaving seek degrades to slow-but-correct, never wrong. */
-    if (force_full_scan ||
-        sample_keyframes_by_seek(s, target_seconds, &kf, &kf_count) < 0) {
+     * the whole file (O(segment_count) seeks, hard wall-clock bounded). */
+    int sampled = 0;
+    if (!force_full_scan) {
+        sampled = (sample_keyframes_by_seek(s, target_seconds, &kf, &kf_count, &pkts) == 0);
+    }
+
+    if (!sampled) {
         free(kf); kf = NULL; kf_count = 0;
+        if (!full_scan_ok) {
+            /* Large file + sparse path didn't cover it: don't risk an unbounded
+             * read. Keep the (imperfect) fixed-cadence table so the title still
+             * opens; the log tells us seek-sampling needs work for this source. */
+            double el = (double)(av_gettime() - t0) / 1e6;
+            remux_log(1, "remux: seek-sample didn't cover %.0fs source in %.2fs "
+                         "(%ld pkts); full scan skipped (too large) — keeping %d "
+                         "fixed-cadence segments",
+                      s->duration_seconds, el, pkts, s->segment_count);
+            return s->segment_count;
+        }
         method = force_full_scan ? "full-scan(forced)" : "full-scan(fallback)";
         if (scan_keyframes(s, &kf, &kf_count) < 0 || kf_count < 2) {
             free(kf);
@@ -701,8 +746,8 @@ int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_s
 
     double elapsed = (double)(av_gettime() - t0) / 1e6;
     remux_log(0, "remux: keyframe-scan rebuilt %d->%d segments from %d boundaries "
-                 "in %.2fs via %s (declared durations now match real GOPs)",
-              old, count, kf_count, elapsed, method);
+                 "in %.2fs via %s (%ld pkts read; declared durations now match real GOPs)",
+              old, count, kf_count, elapsed, method, pkts);
     return count;
 }
 

@@ -13,11 +13,19 @@ struct IntegrationsDetailView: View {
     let anilist: AniListService
     let mal: MALService
     @Bindable var playback: PlaybackSettingsModel
+    let serverCount: Int
+    @Namespace private var trackerFocus
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                Text("Trackers").font(.largeTitle.bold())
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Trackers").font(.largeTitle.bold())
+                    Text("Connected per profile. Watches are tracked no matter which server you're on.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 // Unified tracker card — all services in one dense panel
                 VStack(alignment: .leading, spacing: 0) {
@@ -31,6 +39,7 @@ struct IntegrationsDetailView: View {
                         sectionDivider
                     }
                     .padding(.bottom, 24)
+                    .prefersDefaultFocus(true, in: trackerFocus)
                     .focusSection()
 
                     // Simkl
@@ -78,20 +87,19 @@ struct IntegrationsDetailView: View {
                         .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                 )
 
-                Text("Each profile connects to its own accounts. Watches are tracked regardless of which server you're using.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
                 SettingsPanel(
                     title: "Watch Status",
-                    footer: playback.settings.syncWatchAcrossServers
-                        ? "Marking or resuming a title updates every server that has it."
-                        : "Only the server you watched on is updated."
+                    footer: canSyncAcrossServers
+                        ? (playback.settings.syncWatchAcrossServers
+                            ? "Marking or resuming a title updates every server that has it."
+                            : "Only the server you watched on is updated.")
+                        : "Add another server to sync watch status across servers."
                 ) {
                     Toggle("Sync across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
+                        .disabled(!canSyncAcrossServers)
                 }
             }
+            .focusScope(trackerFocus)
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
         }
@@ -99,6 +107,8 @@ struct IntegrationsDetailView: View {
     }
 
     // MARK: - Row phase mapping
+
+    private var canSyncAcrossServers: Bool { serverCount >= 2 }
 
     private var traktRowPhase: TrackerRowPhase {
         switch trakt.phase {

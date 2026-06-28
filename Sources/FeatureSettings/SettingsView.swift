@@ -370,7 +370,7 @@ public struct SettingsView: View {
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
-            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, playback: playback)
+            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, playback: playback, serverCount: activeProfileServerCount)
         case .attributions:
             AttributionsDetailView()
         case let .plexUser(accountID):
@@ -611,6 +611,16 @@ public struct SettingsView: View {
             return "\(included) of \(accounts.count)"
         }
         return accounts.count == 1 ? "1 account" : "\(accounts.count) accounts"
+    }
+
+    /// Number of distinct servers the active profile can watch from. Cross-server
+    /// watch-status sync is only meaningful when this is 2+ (otherwise there's
+    /// nowhere to fan out to), so the Trackers page uses it to gate that toggle.
+    private var activeProfileServerCount: Int {
+        let relevant = profilesEnabled
+            ? accounts.filter { isAccountIncludedInActiveProfile($0.id) }
+            : accounts
+        return Set(relevant.map { $0.server.id }).count
     }
 
     /// Shared leading icon for every Settings row. Explicit point size +

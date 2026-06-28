@@ -175,13 +175,18 @@ final class RemuxSegmenter: @unchecked Sendable {
         if keyframeSegments {
             // The rescan builds the boundary table by sparse seek-sampling
             // (O(segment_count) seeks) by default, falling back to a full
-            // sequential scan only if seeking can't cover the stream. Boost the
-            // range reader's per-round-trip window first so any reads it does
-            // pull large chunks instead of many small requests — cuts the
-            // open-time cost on high-bitrate 4K. boostReadAhead only ever raises
-            // the value. `keyframeFullScan` (com.plozz.playback.remuxKeyframeFullScan)
-            // forces the exhaustive scan as a safety override.
-            reader.boostReadAhead(8 << 20)
+            // sequential scan only if seeking can't cover the stream.
+            //
+            // CRITICAL: keep the range reader at its DEFAULT read-ahead during this
+            // sparse scan. Each boundary seek lands near a keyframe, reads ~one
+            // I-frame, then re-seeks to the next target — so a large per-round-trip
+            // read-ahead OVER-FETCHES megabytes past each I-frame that we immediately
+            // throw away by seeking. At 8 MiB that multiplies the open-time network
+            // read (the very cost the user feels as a "brutal" startup on 4K) several
+            // times over. The boost IS right for on-demand segment muxing (big
+            // sequential 4K segments), so it's restored *after* discovery, below.
+            // `keyframeFullScan` (com.plozz.playback.remuxKeyframeFullScan) forces the
+            // exhaustive scan as a safety override.
 
             // Persistent keyframe-index cache (flag com.plozz.playback.remuxKeyframeCache):
             // discovering real keyframe boundaries on a no-Cues source is the
@@ -211,8 +216,26 @@ final class RemuxSegmenter: @unchecked Sendable {
             }
 
             if !appliedCache {
+                // Measure exactly how many bytes the keyframe-boundary discovery
+                // pulls over the network (and in how many ranged GETs) so the open
+                // cost is directly comparable to other approaches (e.g. a full
+                // I-frame-read seek-probe) — this is the number that decides whether
+                // sparse seeking is actually low-byte on a high-bitrate 4K source.
+                let netBefore = reader.networkSnapshot()
                 _ = plozz_remux_rescan_keyframe_segments(session, targetSegmentSeconds,
                                                          keyframeFullScan ? 1 : 0)
+                if wasFixedCadence {
+                    let netAfter = reader.networkSnapshot()
+                    let readBytes = max(0, netAfter.bytesFetched - netBefore.bytesFetched)
+                    let fileSize = sourceSize > 0 ? sourceSize : reader.size()
+                    let pct = fileSize > 0 ? Double(readBytes) / Double(fileSize) * 100 : 0
+                    let fetches = netAfter.fetchCount - netBefore.fetchCount
+                    RemuxLog.info(String(format:
+                        "remux-discovery: read %.2fMB = %.2f%% of %.2fMB in %d ranged GETs "
+                            + "(keyframe boundary discovery)",
+                        Double(readBytes) / 1_048_576, pct,
+                        Double(fileSize) / 1_048_576, fetches))
+                }
             }
 
             // Persist a freshly-rebuilt table for next time: only when we actually
@@ -225,6 +248,12 @@ final class RemuxSegmenter: @unchecked Sendable {
                                                  size: sourceSize, duration: sourceDuration,
                                                  target: targetSegmentSeconds)
             }
+
+            // Discovery is done — now raise the per-round-trip read-ahead so the
+            // on-demand fMP4 SEGMENT muxing fetches high-bitrate 4K segments in few
+            // large ranged GETs (keeps AVPlayer's buffer fed). boostReadAhead only
+            // ever raises the value, so a prior cache-hit path (no scan) gets it too.
+            reader.boostReadAhead(8 << 20)
         }
 
         var durations: [Double] = []

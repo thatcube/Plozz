@@ -71,60 +71,29 @@ public final class AniListService {
         phase = .awaitingToken(authorizationURL: url)
     }
 
-    /// Completes the connection with user input (auth code or token).
+    /// Completes the connection with the access token from AniList's PIN page.
     ///
     /// Handles multiple input formats:
-    /// - A short authorization code (code grant — exchanged for a token)
-    /// - A full access token (implicit grant fallback)
-    /// - A full redirect URL containing the token/code (auto-extracted)
+    /// - The raw access token (copied from the PIN page)
+    /// - A full URL containing `access_token=...` (if user copies the whole URL)
     public func submitToken(_ input: String) async {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            phase = .error("Code cannot be empty")
+            phase = .error("Token cannot be empty")
             return
         }
 
+        let accessToken = Self.extractToken(from: trimmed)
         let client = AniListClient(config: config, http: http)
-        var accessToken: String?
 
-        // Strategy 1: If we have a secret, try auth code exchange first
-        if config.supportsCodeGrant {
-            let code = Self.extractCode(from: trimmed)
-            accessToken = try? await client.exchangeCode(code)
-        }
-
-        // Strategy 2: Try using input directly as an access token (implicit grant
-        // or if user pasted a token even though we expected a code)
-        if accessToken == nil {
-            let candidate = Self.extractToken(from: trimmed)
-            // Verify it works as a token before accepting
-            if let _ = try? await client.viewer(accessToken: candidate) {
-                accessToken = candidate
-            }
-        }
-
-        guard let token = accessToken else {
-            phase = .error("Invalid code or token — please try again")
-            return
-        }
-
-        let tokens = AniListTokens(accessToken: token)
         do {
-            let user = try await client.viewer(accessToken: token)
+            let user = try await client.viewer(accessToken: accessToken)
+            let tokens = AniListTokens(accessToken: accessToken)
             try? tokenStore.save(tokens)
             phase = .connected(username: user.name)
         } catch {
-            phase = .error("Connection failed — please try again")
+            phase = .error("Invalid token — please try again")
         }
-    }
-
-    /// Extracts an auth code from a redirect URL like `http://localhost?code=XYZ`
-    private static func extractCode(from input: String) -> String {
-        if let url = URLComponents(string: input),
-           let code = url.queryItems?.first(where: { $0.name == "code" })?.value {
-            return code
-        }
-        return input
     }
 
     /// Extracts an access token from a redirect URL fragment like

@@ -32,13 +32,10 @@ public struct AniListConfig: Sendable, Equatable {
         clientID != nil && clientSecret != nil
     }
 
-    /// The authorization URL the user visits. Uses code grant if secret is
-    /// available (shorter code to type), otherwise implicit grant (full token).
+    /// The authorization URL the user visits. AniList's PIN page only supports
+    /// implicit grant (displays the full access token for the user to copy).
     public var authorizationURL: String? {
         guard let clientID else { return nil }
-        if clientSecret != nil {
-            return "\(authBaseURL)/api/v2/oauth/authorize?client_id=\(clientID)&response_type=code&redirect_uri=https://anilist.co/api/v2/oauth/pin"
-        }
         return "\(authBaseURL)/api/v2/oauth/authorize?client_id=\(clientID)&response_type=token"
     }
 

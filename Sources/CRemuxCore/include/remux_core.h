@@ -204,6 +204,35 @@ int plozz_remux_lazy_extend(plozz_remux_session *s, double until_seconds,
                             int *out_complete, int *out_probes);
 
 /*
+ * Enable the cheap Matroska cluster-header keyframe probe for progressive discovery
+ * (ported from B6, gated by the caller on com.plozz.playback.remuxLazyIndex). When
+ * on, each boundary keyframe's PTS is read from the cluster header (~16KB) instead
+ * of av_read_frame'ing the whole keyframe packet (~1.4MB) — ~20-40x fewer bytes per
+ * probe, which is the dominant open-latency/scrub cost. Must be called BEFORE
+ * plozz_remux_lazy_begin (which snapshots it into the per-session probe context).
+ * Self-calibrates against av_read_frame on the first few boundaries and falls back
+ * on any mismatch, so output is byte-identical to the proven path.
+ */
+void plozz_remux_set_keyframe_index_mode(plozz_remux_session *s, int enabled);
+
+/*
+ * Pure test shim for the cluster-header parser (no session/I/O): parse buf[0..len)
+ * as a Matroska Cluster and write the raw (TimestampScale-unit) timestamp of the
+ * first keyframe block of `video_track` to *out_raw. Returns 1 on success, 0 if buf
+ * isn't a Cluster or has no qualifying keyframe block in the window. For unit tests.
+ */
+int plozz_remux_test_parse_cluster_keyframe(const uint8_t *buf, int len,
+                                            int64_t video_track, int64_t *out_raw);
+
+/*
+ * Telemetry: number of discovery boundaries resolved purely by the cheap cluster-
+ * header parse (vs the av_read_frame fallback) so far this session. 0 when keyframe-
+ * index mode is off or calibration hasn't engaged. Lets the Swift layer report how
+ * much of discovery was served by the cheap path.
+ */
+int plozz_remux_lazy_header_reads(plozz_remux_session *s);
+
+/*
  * 1 when the open-time segment table is the fixed-cadence fallback (the source has
  * no usable keyframe index) — the only case the keyframe-SCAN and lazy/windowed
  * paths engage. 0 for an index-built (Matroska Cues) table, which is already

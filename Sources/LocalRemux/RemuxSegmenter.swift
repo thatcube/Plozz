@@ -132,10 +132,15 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// B7 per-phase read-ahead (bytes) for the shared range reader, switched inside
     /// the demuxer `lock` so seek-heavy keyframe PROBING never inherits the large
     /// segment-MUXING read-ahead (which would over-fetch megabytes past each probed
-    /// keyframe). `muxReadAhead` tracks the boosted muxing granularity; the probe cap
-    /// is the AVIO buffer size — going lower buys nothing (libavformat refills in
-    /// AVIO-buffer-sized reads) while staying at/above it prevents the over-read.
-    private let probeReadAhead = 1 << 20
+    /// keyframe). `muxReadAhead` tracks the boosted muxing granularity.
+    ///
+    /// Sized at 64KB to make B6's cheap cluster-header probe actually cheap: a header
+    /// parse issues a single ~16KB direct `read_raw_at` (count < read-ahead), so a
+    /// 64KB floor caps each header probe at one 64KB fetch instead of a 1 MiB refill
+    /// (~16x fewer bytes/probe on the background fill). The av_read_frame fallback /
+    /// calibration path is NOT hurt: libavformat refills its 1 MiB avio buffer with
+    /// large `count` reads, which dominate the 64KB floor, so those stay full-size.
+    private let probeReadAhead = 1 << 16
     private var muxReadAhead = 1 << 20
 
     /// Progress of one `extendLazyIndex` batch.
@@ -188,6 +193,12 @@ final class RemuxSegmenter: @unchecked Sendable {
         if keyframeLazy, plozz_remux_uses_fixed_cadence(session) == 1 {
             let openStart = DispatchTime.now().uptimeNanoseconds
             let netBefore = reader.networkSnapshot()
+            // Enable B6's cheap cluster-header keyframe probe BEFORE lazy_begin (it
+            // snapshots the mode into the per-session probe context). Each boundary's
+            // PTS then comes from a ~16KB header read instead of av_read_frame'ing the
+            // whole ~1.4MB IDR — the dominant open-latency/scrub byte cost. Self-
+            // calibrates and falls back to av_read_frame on any mismatch.
+            plozz_remux_set_keyframe_index_mode(session, 1)
             if plozz_remux_lazy_begin(session) == 1 {
                 lazyEngaged = true
                 // Probe just enough to publish the first couple of segments so
@@ -364,6 +375,15 @@ final class RemuxSegmenter: @unchecked Sendable {
         defer { lock.unlock() }
         guard let session else { return 0 }
         return Int(plozz_remux_segment_count(session))
+    }
+
+    /// B7: discovery boundaries resolved by the cheap cluster-header parse so far
+    /// (vs the av_read_frame fallback). Confirms the cheap probe engaged.
+    func lazyHeaderReads() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let session else { return 0 }
+        return Int(plozz_remux_lazy_header_reads(session))
     }
 
     /// Raise the range reader's per-round-trip read-ahead (one-time, before the

@@ -214,9 +214,10 @@ final class RemuxContentSource: @unchecked Sendable {
                 let net = segmenter.networkSnapshot()
                 let fillBytes = max(0, net.bytesFetched - fillNetStart.bytesFetched)
                 RemuxLog.info(String(format:
-                    "remux-lazy: fill ready=%d complete=%@ probes=%d elapsed=%.0fms fill-bytes=%.2fMB playhead=%d window=%d",
+                    "remux-lazy: fill ready=%d complete=%@ probes=%d elapsed=%.0fms fill-bytes=%.2fMB playhead=%d window=%d header-reads=%d",
                     durations.count, progress.complete ? "YES" : "no", totalProbes, elapsedMs,
-                    Double(fillBytes) / 1_048_576.0, playhead, lazyWindowAhead))
+                    Double(fillBytes) / 1_048_576.0, playhead, lazyWindowAhead,
+                    segmenter.lazyHeaderReads()))
             }
             if progress.complete { break }
             // No progress and not complete (e.g. transient seek failure): avoid a

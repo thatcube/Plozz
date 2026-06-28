@@ -177,12 +177,12 @@ private struct LibraryCardView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(aggregated.library.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 Text(subtitle.isEmpty ? " " : subtitle)
-                    .font(.system(size: 20))
+                    .font(.system(size: metrics.cardSubtitleFontSize))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .opacity(subtitle.isEmpty ? 0 : 1)

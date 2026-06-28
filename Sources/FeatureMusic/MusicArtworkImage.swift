@@ -143,11 +143,11 @@ struct MusicCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
                 Text(subtitle ?? " ")
-                    .font(.system(size: 20))
+                    .font(.system(size: metrics.cardSubtitleFontSize))
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitle == nil ? 0 : 1)

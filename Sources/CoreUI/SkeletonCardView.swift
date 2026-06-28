@@ -86,8 +86,8 @@ public struct SkeletonCardView: View {
     /// on load) while giving the placeholders soft, fully-rounded edges.
     private func textLines(contentWidth: CGFloat, spacing: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: spacing) {
-            capsuleLine(font: .subheadline.weight(.semibold), width: max(contentWidth * 0.7, 1), height: 16)
-            capsuleLine(font: .system(size: 20), width: max(contentWidth * 0.45, 1), height: 13)
+            capsuleLine(font: .system(size: metrics.cardTitleFontSize, weight: .semibold), width: max(contentWidth * 0.7, 1), height: (16 * metrics.scale).rounded())
+            capsuleLine(font: .system(size: metrics.cardSubtitleFontSize), width: max(contentWidth * 0.45, 1), height: (13 * metrics.scale).rounded())
         }
     }
 

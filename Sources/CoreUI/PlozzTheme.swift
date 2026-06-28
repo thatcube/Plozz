@@ -134,6 +134,13 @@ public enum PlozzTheme {
         /// (the artwork is), so the title needs less added space there than the
         /// sides — ~half reads balanced. Applied in `PlozzMetrics`.
         public static let captionTopClearanceFactor: CGFloat = 0.5
+        /// Base (standard-density) point size for a card's subtitle/metadata line.
+        /// Density-scaled in `PlozzMetrics` so caption text grows with the card.
+        public static let cardSubtitleFontSize: CGFloat = 20
+        /// Fallback base point size for a card's title when the platform's live
+        /// `.subheadline` metric is unavailable (non-UIKit builds). On tvOS the
+        /// real `.subheadline` size is used so standard density is unchanged.
+        public static let cardTitleFontSizeFallback: CGFloat = 29
 
         // MARK: Focus
 

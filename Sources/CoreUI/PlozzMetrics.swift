@@ -1,6 +1,9 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The live, density-scaled spacing + sizing tokens, resolved from the active
 /// profile's `UIDensity` and injected into the SwiftUI environment at the app
@@ -52,6 +55,15 @@ public struct PlozzMetrics: Equatable, Sendable {
 
     /// Column count for the shared dense poster wall (library + search).
     public let posterGridColumns: Int
+
+    // MARK: Caption fonts (scaled)
+
+    /// Point size for a media card's title line, scaled with density so the text
+    /// grows/shrinks with the card instead of staying fixed. At standard density
+    /// this matches the platform `.subheadline` size, so standard looks unchanged.
+    public let cardTitleFontSize: CGFloat
+    /// Point size for a media card's subtitle/metadata line, scaled with density.
+    public let cardSubtitleFontSize: CGFloat
 
     /// The poster wall's columns, carrying the scaled gutter. Library and Search
     /// both use this so they share an identical column count and spacing.
@@ -138,6 +150,17 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.railVerticalPadding = step(PlozzTheme.Metrics.railVerticalPadding)
 
         self.posterGridColumns = density.posterGridColumns
+
+        // Caption fonts scale with density too. The title's base is the live
+        // platform `.subheadline` size so standard density is unchanged; the
+        // subtitle's base is the shared `cardSubtitleFontSize` constant.
+        #if canImport(UIKit)
+        let baseTitleFontSize = UIFont.preferredFont(forTextStyle: .subheadline).pointSize
+        #else
+        let baseTitleFontSize = PlozzTheme.Metrics.cardTitleFontSizeFallback
+        #endif
+        self.cardTitleFontSize = (baseTitleFontSize * s).rounded()
+        self.cardSubtitleFontSize = step(PlozzTheme.Metrics.cardSubtitleFontSize)
     }
 
     /// The standard-density snapshot, used as the environment default so any view

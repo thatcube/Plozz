@@ -96,11 +96,11 @@ public struct PosterCardView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(primaryText)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
                 Text(subtitleText ?? " ")
-                    .font(.system(size: 20))
+                    .font(.system(size: metrics.cardSubtitleFontSize))
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitleText == nil ? 0 : 1)
@@ -130,12 +130,12 @@ public struct PosterCardView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(primaryText)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 Text(subtitleText ?? " ")
-                    .font(.system(size: 20))
+                    .font(.system(size: metrics.cardSubtitleFontSize))
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitleText == nil ? 0 : 1)

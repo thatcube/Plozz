@@ -23,100 +23,46 @@ struct AppearanceDetailView: View {
             VStack(alignment: .leading, spacing: 28) {
                 Text("Appearance").font(.largeTitle.bold())
 
-                VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 24) {
                     // Theme
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Theme").font(.headline.weight(.semibold))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(AppTheme.allCases) { option in
-                                    Button {
-                                        theme.theme = option
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: option.symbolName)
-                                            Text(option.displayName)
-                                            if theme.theme == option {
-                                                Image(systemName: "checkmark.circle.fill")
-                                            }
-                                        }
-                                        .font(.headline)
-                                        .padding(.horizontal, 4)
-                                    }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
-                                    .accessibilityValue(theme.theme == option ? "Selected" : "")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 6)
-                        }
-                        .scrollClipDisabled()
+                    LabeledSettingRow("Theme", labelWidth: 300) {
+                        SettingsOptionPicker(
+                            options: AppTheme.allCases,
+                            selection: $theme.theme,
+                            icon: { $0.symbolName },
+                            title: { $0.displayName }
+                        )
                     }
 
                     sectionDivider
 
                     // Display Size
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Display Size").font(.headline.weight(.semibold))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(UIDensity.allCases) { option in
-                                    Button {
-                                        density.density = option
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: option.symbolName)
-                                            Text(option.displayName)
-                                            if density.density == option {
-                                                Image(systemName: "checkmark.circle.fill")
-                                            }
-                                        }
-                                        .font(.headline)
-                                        .padding(.horizontal, 4)
-                                    }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: density.density == option))
-                                    .accessibilityValue(density.density == option ? "Selected" : "")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 6)
-                        }
-                        .scrollClipDisabled()
-                        Text("Scales card size, columns and spacing.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    LabeledSettingRow(
+                        "Display Size",
+                        subtitle: "Scales card size, columns and spacing.",
+                        labelWidth: 300
+                    ) {
+                        SettingsOptionPicker(
+                            options: UIDensity.allCases,
+                            selection: $density.density,
+                            icon: { $0.symbolName },
+                            title: { $0.displayName }
+                        )
                     }
 
                     sectionDivider
 
                     // Transparency
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Transparency (liquid glass)").font(.headline.weight(.semibold))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(TransparencyPreference.allCases) { option in
-                                    Button {
-                                        transparencyPreferenceRaw = option.rawValue
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: option.symbolName)
-                                            Text(option.displayName)
-                                            if transparencyPreference == option {
-                                                Image(systemName: "checkmark.circle.fill")
-                                            }
-                                        }
-                                        .font(.headline)
-                                        .padding(.horizontal, 4)
-                                    }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: transparencyPreference == option))
-                                    .accessibilityValue(transparencyPreference == option ? "Selected" : "")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 6)
-                        }
-                        .scrollClipDisabled()
+                    LabeledSettingRow("Transparency", subtitle: "Liquid glass", labelWidth: 300) {
+                        SettingsOptionPicker(
+                            options: TransparencyPreference.allCases,
+                            selection: Binding(
+                                get: { transparencyPreference },
+                                set: { transparencyPreferenceRaw = $0.rawValue }
+                            ),
+                            icon: { $0.symbolName },
+                            title: { $0.displayName }
+                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -134,30 +80,14 @@ struct AppearanceDetailView: View {
                     title: "Music Player"
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(MusicPlayerAppearance.allCases) { option in
-                                    Button {
-                                        musicPlayer.appearance = option
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: option.symbolName)
-                                            Text(option.displayName)
-                                            if musicPlayer.appearance == option {
-                                                Image(systemName: "checkmark.circle.fill")
-                                            }
-                                        }
-                                        .font(.headline)
-                                        .padding(.horizontal, 4)
-                                    }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: musicPlayer.appearance == option))
-                                    .accessibilityValue(musicPlayer.appearance == option ? "Selected" : "")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 6)
+                        LabeledSettingRow("Style", labelWidth: 300) {
+                            SettingsOptionPicker(
+                                options: MusicPlayerAppearance.allCases,
+                                selection: $musicPlayer.appearance,
+                                icon: { $0.symbolName },
+                                title: { $0.displayName }
+                            )
                         }
-                        .scrollClipDisabled()
 
                         Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
                     }
@@ -225,13 +155,12 @@ struct SpoilersDetailView: View {
                         Toggle("Hide spoilers for unwatched episodes", isOn: $spoilers.settings.isEnabled)
 
                         if spoilers.settings.isEnabled {
-                            OptionCardRow(
-                                options: SpoilerSettings.Mode.allCases,
-                                selection: $spoilers.settings.mode
-                            ) { mode in
-                                Text(mode.displayName)
-                                    .font(.headline)
-                                    .multilineTextAlignment(.center)
+                            LabeledSettingRow("Mode", labelWidth: 220) {
+                                SettingsOptionPicker(
+                                    options: SpoilerSettings.Mode.allCases,
+                                    selection: $spoilers.settings.mode,
+                                    title: { $0.displayName }
+                                )
                             }
 
                             Text(modeExplanation)
@@ -294,29 +223,18 @@ struct PlaybackDetailView: View {
                     title: "Skip Intros & Credits",
                     footer: "When your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin."
                 ) {
-                    VStack(spacing: 4) {
-                        ForEach(SkipIntrosMode.allCases, id: \.self) { mode in
-                            Button {
-                                playback.settings.skipIntros = mode
-                            } label: {
-                                HStack(spacing: 16) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(mode.title).font(.callout.weight(.medium))
-                                        Text(mode.detail)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "checkmark")
-                                        .font(.callout.weight(.semibold))
-                                        .opacity(playback.settings.skipIntros == mode ? 1 : 0)
-                                }
-                                .padding(.vertical, 8)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(SettingsFocusButtonStyle())
-                            .accessibilityValue(playback.settings.skipIntros == mode ? "Selected" : "")
+                    VStack(alignment: .leading, spacing: 8) {
+                        LabeledSettingRow("Skip Intros", labelWidth: 220) {
+                            SettingsOptionPicker(
+                                options: SkipIntrosMode.allCases,
+                                selection: $playback.settings.skipIntros,
+                                title: { $0.title }
+                            )
                         }
+
+                        Text(playback.settings.skipIntros.detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 

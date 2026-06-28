@@ -113,6 +113,14 @@ struct DetailHeroView: View {
     /// initial focus that Play should have when the page opens.
     @FocusState private var moreMenuFocused: Bool
 
+    /// Scopes the hero action row (Play, Trailer, …) so the Play button can be its
+    /// preferred default focus. When focus moves UP into this section from a season
+    /// chip parked far to the right, tvOS would otherwise land on the geometrically
+    /// nearest (right-most) control — the "…" menu — instead of Play. Marking Play
+    /// as the scope's preferred default makes "up" from any season reliably land on
+    /// Play, matching the page's contract that Play is the action row's home.
+    @Namespace private var heroActionsScope
+
     /// Set the instant the user taps a server row in the "…" menu, and consumed by
     /// the `selectedSourceAccountID` `onChange` below. It gates the focus re-assert
     /// so we only park focus back on "…" after a *user-initiated* server switch —
@@ -394,6 +402,7 @@ struct DetailHeroView: View {
                 // remain leading via the HStack's content, so widening only the
                 // section's frame adds no over-wide *focusable* geometry.
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .focusScope(heroActionsScope)
                 .focusSection()
             }
         }
@@ -558,9 +567,12 @@ struct DetailHeroView: View {
         }
 
         if let playButtonFocus {
-            button.focused(playButtonFocus, equals: true)
+            button
+                .focused(playButtonFocus, equals: true)
+                .prefersDefaultFocus(true, in: heroActionsScope)
         } else {
             button
+                .prefersDefaultFocus(true, in: heroActionsScope)
         }
     }
 

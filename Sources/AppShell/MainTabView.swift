@@ -58,6 +58,10 @@ struct MainTabView: View {
     /// Per-profile UI density, injected into the environment below so the
     /// Settings ▸ Appearance picker can edit it.
     let uiDensityModel: UIDensitySettingsModel
+    /// Per-profile Night Shift settings, edited in Settings ▸ Night Shift. Its
+    /// overlay is installed at the app root (RootView); here it's only threaded
+    /// into Settings for editing.
+    let nightShiftModel: NightShiftSettingsModel
     /// App-scoped audio engine, owned by `AppState` so it survives the per-profile
     /// subtree rebuild (this view is re-created with a new `.id` on profile switch).
     let audioController: AudioPlaybackController
@@ -161,6 +165,7 @@ struct MainTabView: View {
                 spoilers: spoilerModel,
                 playback: playbackModel,
                 theme: themeModel,
+                nightShift: nightShiftModel,
                 homeVisibility: homeVisibility,
                 trakt: trakt,
                 discoveredLibraries: discovery.state,

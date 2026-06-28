@@ -149,20 +149,37 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // seek-probe so EXTINF == muxed span and segments don't overlap — eliminating
         // the progressive A/V desync + stutter those titles exhibit. No-op otherwise.
         let keyframeScan = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeScan")
-        // Flag `com.plozz.playback.remuxKeyframeIndex` (DEFAULT OFF): pure open-latency
-        // optimization of the keyframe-scan — read each boundary keyframe's PTS from the
-        // Matroska cluster header (a few KB) instead of demuxing the whole keyframe
-        // packet, cutting discovery byte-cost ~10x on multi-GB no-Cues 4K titles. It
-        // self-validates against the av_read_frame path and falls back on any mismatch,
-        // so it only matters when keyframeScan is also ON.
-        let keyframeIndex = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeIndex")
+        // Flag `com.plozz.playback.remuxKeyframeIndex`: open-latency optimization of the
+        // keyframe-scan — read each boundary keyframe's PTS from the Matroska cluster
+        // header (a few KB) instead of demuxing the whole keyframe packet (~0.8MB IDR),
+        // cutting discovery byte-cost ~10x on multi-GB no-Cues 4K titles so far more of
+        // the timeline resolves inside the scan budget. It self-validates against the
+        // av_read_frame path and falls back on any mismatch, so it can only ever match
+        // or beat the demux path's correctness.
+        //
+        // DEFAULTS TO keyframeScan: when keyframeScan is ON and this flag is UNSET, the
+        // cheap header-parse path is used automatically — there is no slow-probe variant
+        // to forget. Set the flag explicitly to NO to force the av_read_frame demux path
+        // (diagnostics/A-B of the two probe costs); set YES (or leave unset) for cheap
+        // probes. When keyframeScan is OFF this is inert, so default behavior is
+        // byte-identical.
+        let keyframeIndex: Bool = {
+            if UserDefaults.standard.object(forKey: "com.plozz.playback.remuxKeyframeIndex") != nil {
+                return UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeIndex")
+            }
+            return keyframeScan
+        }()
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
                                            keyframeScan: keyframeScan,
                                            keyframeIndex: keyframeIndex)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
         if keyframeScan { RemuxLog.info("Session: remuxKeyframeScan ON — real-keyframe segment table for no-index sources") }
-        if keyframeIndex { RemuxLog.info("Session: remuxKeyframeIndex ON — cluster-header keyframe PTS (low open-latency)") }
+        if keyframeScan {
+            RemuxLog.info(keyframeIndex
+                ? "Session: keyframe-scan probes via cluster-header parse (low open-latency, ~64KB/probe)"
+                : "Session: keyframe-scan probes via av_read_frame demux (~0.8MB/probe; remuxKeyframeIndex forced OFF)")
+        }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only

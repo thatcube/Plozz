@@ -322,6 +322,37 @@ static int build_segments_from_keyframes(const double *kf, int kf_count,
 }
 
 /*
+ * Tile a pre-grouped, pre-gated boundary list VERBATIM into segments: segment i =
+ * [b[i], b[i+1]] for i in [0, count-1). This is the CUE FAST-PATH consume builder —
+ * the Swift producer (B5 CuesVODPlan / Track A) has ALREADY grouped the real Cues
+ * keyframes to the target cadence and oracle-gated them, so unlike
+ * build_segments_from_keyframes this does NOT re-group (no coarsening / double-group),
+ * does NOT force a 0 start (an arbitrary resume anchor b[0] > 0 is preserved), and does
+ * NOT append a tail (the producer includes the programme end as the final boundary).
+ * Boundaries must be STRICTLY INCREASING — on any violation it returns 0 so the caller
+ * falls back to the fixed-cadence path rather than emit a non-contiguous table.
+ * Allocates *out_segs (caller frees); returns the segment count (count-1) or 0.
+ */
+static int build_segments_verbatim(const double *b, int count,
+                                   plozz_remux_segment **out_segs) {
+    if (out_segs) *out_segs = NULL;
+    if (!b || count < 2 || !out_segs) return 0;
+    for (int i = 1; i < count; i++)
+        if (b[i] <= b[i - 1] + 1e-9) return 0;   /* contract: strictly increasing */
+    int n = count - 1;
+    if (n > PLOZZ_MAX_SEGMENTS) n = PLOZZ_MAX_SEGMENTS;
+    plozz_remux_segment *segs =
+        (plozz_remux_segment *)malloc(sizeof(plozz_remux_segment) * (size_t)n);
+    if (!segs) return 0;
+    for (int i = 0; i < n; i++) {
+        segs[i].start_seconds = b[i];
+        segs[i].duration_seconds = b[i + 1] - b[i];
+    }
+    *out_segs = segs;
+    return n;
+}
+
+/*
  * Core grouping shared by every segment-table path (keyframe-INDEX, keyframe-SCAN,
  * and the B7 progressive/lazy rebuild). Greedily groups the sorted keyframe times
  * into >= target_seconds segments, each boundary a real keyframe and each duration
@@ -1147,21 +1178,31 @@ int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
      * under full-vod, so the build-time flag's post-engage value is inert here. */
     int cue_built = 0;
     if (s->has_cue_table && s->cue_count >= 2) {
-        double cue_dur = (s->cue_duration > 0.0) ? s->cue_duration : s->duration_seconds;
-        plozz_remux_segment *cue_segs = NULL;
-        int cue_n = build_segments_from_keyframes(s->cue_times, s->cue_count,
-                                                  cue_dur, fixed_cadence, &cue_segs);
-        if (cue_n > 0 && cue_segs) {
-            free(s->segments);
-            s->segments = cue_segs;
-            s->segment_count = cue_n;
-            cue_built = 1;
-            remux_log(1, "remux: full-vod CUE short-circuit segs=%d exact-boundaries "
-                         "(cadence estimate skipped)", cue_n);
-        } else {
-            free(cue_segs);
-            remux_log(0, "remux: cue table present but produced no segments — "
-                         "falling back to fixed cadence");
+        /* The producer hands grouped, oracle-gated boundaries in SOURCE seconds. Build
+         * the boundary list verbatim; if a separate declared end extends past the last
+         * supplied boundary (producer passed keyframe STARTS + a separate programme end
+         * rather than appending it), close the final segment at that end. */
+        double end = (s->cue_duration > 0.0) ? s->cue_duration : s->duration_seconds;
+        int nb = s->cue_count;
+        double *bounds = (double *)malloc(sizeof(double) * (size_t)(nb + 1));
+        if (bounds) {
+            memcpy(bounds, s->cue_times, sizeof(double) * (size_t)nb);
+            if (end > bounds[nb - 1] + 0.05) { bounds[nb] = end; nb++; }
+            plozz_remux_segment *cue_segs = NULL;
+            int cue_n = build_segments_verbatim(bounds, nb, &cue_segs);
+            free(bounds);
+            if (cue_n > 0 && cue_segs) {
+                free(s->segments);
+                s->segments = cue_segs;
+                s->segment_count = cue_n;
+                cue_built = 1;
+                remux_log(1, "remux: full-vod CUE short-circuit segs=%d verbatim "
+                             "exact-boundaries (cadence estimate skipped)", cue_n);
+            } else {
+                free(cue_segs);
+                remux_log(0, "remux: cue table present but not strictly increasing — "
+                             "falling back to fixed cadence");
+            }
         }
     }
     if (!cue_built) {
@@ -1513,6 +1554,22 @@ int plozz_remux_plan_segments(const double *keyframe_times, int count,
     plozz_remux_segment *segs = NULL;
     int n = build_segments_from_keyframes(keyframe_times, count, duration,
                                           target_seconds, &segs);
+    if (n <= 0) { free(segs); return 0; }
+    if (n > max_out) n = max_out;
+    for (int i = 0; i < n; i++) {
+        if (out_starts) out_starts[i] = segs[i].start_seconds;
+        if (out_durations) out_durations[i] = segs[i].duration_seconds;
+    }
+    free(segs);
+    return n;
+}
+
+int plozz_remux_test_build_segments_verbatim(const double *boundaries, int count,
+                                             double *out_starts, double *out_durations,
+                                             int max_out) {
+    if (!boundaries || count <= 1 || max_out <= 0) return 0;
+    plozz_remux_segment *segs = NULL;
+    int n = build_segments_verbatim(boundaries, count, &segs);
     if (n <= 0) { free(segs); return 0; }
     if (n > max_out) n = max_out;
     for (int i = 0; i < n; i++) {

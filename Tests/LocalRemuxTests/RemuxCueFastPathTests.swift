@@ -2,91 +2,105 @@
 import XCTest
 import CRemuxCore
 
-/// Pure-logic tests for the B7 CUE FAST-PATH pre-seed contract. When the Swift
-/// provider (Track A) hands `plozz_remux_set_cue_table` the real keyframe times it
-/// parsed directly from the container Cues (libav left the title index-less),
-/// full-vod engage builds the segment table from those exact boundaries and
-/// PRE-SEEDS the entire `resolved_kf[]` ladder so every forward-snap resolve is a
-/// cached no-op (zero probe reads, real-keyframe STARTS, exact EXTINF).
-///
-/// The session-level setter + engage need a live demux, but the load-bearing
-/// invariant is purely a function of the supplied cue times: the resolved_kf ladder
-/// is `[seg0.start, seg1.start, …, segN-1.start, segN-1.end]`, every interior entry
-/// is a real cue keyframe (a subset of the supplied times), the ladder is strictly
-/// increasing and contiguous, and the final entry equals the declared timeline end.
-/// These tests drive that ladder from the same `plozz_remux_plan_segments` grouping
-/// the C consume uses, so a regression in the boundary math is caught without demux.
+/// Pure-logic tests for the B7 CUE FAST-PATH VERBATIM tiler — the C consume behind
+/// `plozz_remux_set_cue_table`. The Swift producer (B5 `CuesVODPlan.boundaryPTS` /
+/// Track A) hands the muxer real Cues keyframe boundaries it has ALREADY grouped to
+/// the target cadence and oracle-gated (every interior boundary a real keyframe,
+/// strictly increasing, the final element the programme end). The C side must tile
+/// them VERBATIM — segment i = [b[i], b[i+1]], count-1 segments — without re-grouping
+/// (no coarsening / double-group), without forcing a 0 start (so a non-zero resume
+/// anchor is preserved), and without appending a tail (the end is already supplied).
+/// These drive `plozz_remux_test_build_segments_verbatim` directly so the boundary
+/// math is locked without a live demux.
 final class RemuxCueFastPathTests: XCTestCase {
 
-    /// Build the resolved_kf ladder the C consume pre-seeds from a cue table.
-    private func resolvedLadder(cues: [Double], duration: Double, cadence: Double,
-                                maxOut: Int = 4096) -> [Double] {
+    private struct Tiled {
+        var starts: [Double]
+        var durations: [Double]
+        var count: Int
+    }
+
+    private func tile(_ boundaries: [Double], maxOut: Int = 4096) -> Tiled {
         var starts = [Double](repeating: -999, count: maxOut)
         var durs = [Double](repeating: -999, count: maxOut)
-        let n = cues.withUnsafeBufferPointer { kf in
+        let n = boundaries.withUnsafeBufferPointer { b in
             starts.withUnsafeMutableBufferPointer { s in
                 durs.withUnsafeMutableBufferPointer { d in
-                    Int(plozz_remux_plan_segments(kf.baseAddress, Int32(kf.count),
-                                                  duration, cadence,
-                                                  s.baseAddress, d.baseAddress,
-                                                  Int32(maxOut)))
+                    Int(plozz_remux_test_build_segments_verbatim(
+                        b.baseAddress, Int32(b.count),
+                        s.baseAddress, d.baseAddress, Int32(maxOut)))
                 }
             }
         }
-        guard n > 0 else { return [] }
-        var ladder = Array(starts.prefix(n))                       // seg starts
-        ladder.append(starts[n - 1] + durs[n - 1])                 // final end edge
-        return ladder
+        return Tiled(starts: Array(starts.prefix(n)),
+                     durations: Array(durs.prefix(n)), count: n)
     }
 
-    /// The ladder is strictly increasing and contiguous with the segment plan: this
-    /// is what makes every `fullvod_resolve_start` a cached no-op.
-    func testLadderIsStrictlyIncreasingAndContiguous() {
-        let cues = stride(from: 0.0, through: 120.0, by: 2.5).map { $0 }  // 2.5s GOPs
-        let ladder = resolvedLadder(cues: cues, duration: 120.0, cadence: 15.0)
-        XCTAssertGreaterThan(ladder.count, 1)
-        for i in 1..<ladder.count {
-            XCTAssertGreaterThan(ladder[i], ladder[i - 1],
-                                 "ladder[\(i)] not increasing: \(ladder[i]) <= \(ladder[i-1])")
-        }
-        XCTAssertEqual(ladder[0], 0.0, accuracy: 1e-6, "B_0 must be the file head")
-        XCTAssertEqual(ladder[ladder.count - 1], 120.0, accuracy: 1e-6,
-                       "final edge must reach duration")
-    }
-
-    /// Every INTERIOR ladder boundary is one of the supplied cue keyframes — the
-    /// property that guarantees the muxer's backward-seek lands exactly (no probe).
-    /// The first edge (0.0) and the tail end are timeline anchors, not cue subset.
-    func testInteriorBoundariesAreRealCueKeyframes() {
-        let cues = [0.0, 3.1, 6.7, 9.9, 13.2, 17.8, 21.0, 24.4, 30.0]
-        let ladder = resolvedLadder(cues: cues, duration: 30.0, cadence: 6.0)
-        XCTAssertGreaterThan(ladder.count, 2)
-        // interior edges: ladder[1 ..< count-1] must each be a supplied cue time.
-        for i in 1..<(ladder.count - 1) {
-            let isCue = cues.contains { abs($0 - ladder[i]) < 1e-6 }
-            XCTAssertTrue(isCue, "interior boundary \(ladder[i]) is not a real cue keyframe")
+    /// Verbatim: N boundaries -> N-1 segments, each segment exactly [b[i], b[i+1]].
+    /// No grouping, no interpolation — the producer's boundaries are authoritative.
+    func testTilesBoundariesVerbatim() {
+        let b = [0.0, 4.0, 8.1, 12.3, 17.9, 21.0]    // grouped real-kf boundaries
+        let t = tile(b)
+        XCTAssertEqual(t.count, b.count - 1)
+        for i in 0..<t.count {
+            XCTAssertEqual(t.starts[i], b[i], accuracy: 1e-9, "seg\(i) start")
+            XCTAssertEqual(t.durations[i], b[i + 1] - b[i], accuracy: 1e-9, "seg\(i) dur")
         }
     }
 
-    /// Grouping honors the cadence floor: with a 15s cadence over 2.5s cues, each
-    /// resolved span is >= cadence (until the tail), so we publish far fewer, fuller
-    /// segments rather than one-per-cue.
-    func testCadenceFloorGroupsCues() {
-        let cues = stride(from: 0.0, through: 90.0, by: 2.5).map { $0 }
-        let ladder = resolvedLadder(cues: cues, duration: 90.0, cadence: 15.0)
-        // interior spans (exclude the possibly-short tail).
-        for i in 1..<(ladder.count - 1) {
-            let span = ladder[i] - ladder[i - 1]
-            XCTAssertGreaterThanOrEqual(span, 15.0 - 0.01,
-                                        "span \(span) below cadence floor")
+    /// Contiguous + non-overlapping: every segment starts where the previous ended,
+    /// and the ladder of starts + final end reconstructs the input boundaries exactly.
+    /// This is what guarantees playlist EXTINF == muxed span (no desync).
+    func testContiguousAndReconstructsBoundaries() {
+        let b = [0.0, 6.0, 12.0, 18.0, 24.0, 30.0]
+        let t = tile(b)
+        for i in 1..<t.count {
+            let prevEnd = t.starts[i - 1] + t.durations[i - 1]
+            XCTAssertEqual(t.starts[i], prevEnd, accuracy: 1e-9, "seg\(i) not contiguous")
+        }
+        var ladder = t.starts
+        ladder.append(t.starts[t.count - 1] + t.durations[t.count - 1])
+        XCTAssertEqual(ladder.count, b.count)
+        for i in 0..<b.count {
+            XCTAssertEqual(ladder[i], b[i], accuracy: 1e-9, "ladder[\(i)] != boundary")
         }
     }
 
-    /// A degenerate table (< 2 cues) yields no ladder — the C setter rejects it and
-    /// engage falls through to the fixed-cadence path (default-OFF safety).
-    func testSingleCueProducesNoLadder() {
-        XCTAssertTrue(resolvedLadder(cues: [0.0], duration: 30.0, cadence: 6.0).isEmpty)
-        XCTAssertTrue(resolvedLadder(cues: [], duration: 30.0, cadence: 6.0).isEmpty)
+    /// A non-zero start anchor (resume into the middle of a title) is PRESERVED, not
+    /// forced to 0 — the bug that re-grouping via build_segments_from_keyframes would
+    /// introduce (it forces seg_start=0 when kf[0] > 0, fabricating a [0, b0] segment).
+    func testNonZeroResumeAnchorPreserved() {
+        let b = [45.0, 49.0, 53.5, 60.0]    // resume at 45s
+        let t = tile(b)
+        XCTAssertEqual(t.count, 3)
+        XCTAssertEqual(t.starts[0], 45.0, accuracy: 1e-9,
+                       "resume anchor must be preserved, not zeroed")
+        XCTAssertEqual(t.durations[0], 4.0, accuracy: 1e-9)
+    }
+
+    /// Long-GOP boundaries (already grouped to large spans) tile verbatim with NO cap
+    /// or re-split here — span policy lives in the muxer, not the table builder.
+    func testLongSpansTileVerbatim() {
+        let b = [0.0, 77.0, 232.0, 300.0]
+        let t = tile(b)
+        XCTAssertEqual(t.count, 3)
+        XCTAssertEqual(t.durations[0], 77.0, accuracy: 1e-9)
+        XCTAssertEqual(t.durations[1], 155.0, accuracy: 1e-9)
+        XCTAssertEqual(t.durations[2], 68.0, accuracy: 1e-9)
+    }
+
+    /// Contract violation (non-strictly-increasing boundaries) returns 0 so the consume
+    /// falls back to the fixed-cadence path rather than emit a non-contiguous table.
+    func testNonIncreasingRejected() {
+        XCTAssertEqual(tile([0.0, 6.0, 6.0, 12.0]).count, 0, "equal boundary must reject")
+        XCTAssertEqual(tile([0.0, 12.0, 6.0, 18.0]).count, 0, "decreasing must reject")
+    }
+
+    /// Degenerate tables (< 2 boundaries) produce no segments — the setter rejects
+    /// these and engage falls through to fixed cadence (default-OFF safety).
+    func testDegenerateProducesNothing() {
+        XCTAssertEqual(tile([0.0]).count, 0)
+        XCTAssertEqual(tile([]).count, 0)
     }
 }
 #endif

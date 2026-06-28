@@ -266,6 +266,18 @@ int plozz_remux_plan_segments(const double *keyframe_times, int count,
                               int max_out);
 
 /*
+ * Pure test/diagnostic helper for the CUE FAST-PATH verbatim tiler. Tiles a
+ * pre-grouped, pre-gated boundary list into count-1 segments [b[i], b[i+1]] WITHOUT
+ * re-grouping, 0-start forcing, or tail append — the exact transform the cue consume
+ * applies to a producer's grouped boundaries. Returns 0 when the boundaries are not
+ * strictly increasing (the contract violation that makes the consume fall back). No
+ * session state; safe to call from tests.
+ */
+int plozz_remux_test_build_segments_verbatim(const double *boundaries, int count,
+                                             double *out_starts, double *out_durations,
+                                             int max_out);
+
+/*
  * Pure test/diagnostic helper for the B7 PROGRESSIVE planner. Groups the keyframes
  * discovered SO FAR exactly as the lazy rebuild does: when `complete` == 0 only the
  * fully-closed segments are emitted (the still-growing trailing group is withheld so

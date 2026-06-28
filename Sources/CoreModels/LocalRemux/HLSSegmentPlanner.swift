@@ -152,6 +152,79 @@ public enum HLSSegmentPlanner {
 
     // MARK: - Helpers
 
+    /// Plans directly from the shared ``KeyframeTable`` currency (time-only) — the
+    /// convergent feed shared by the Cues provider, cache, background scan, and
+    /// server index. Because the segment muxer seeks by time (`make_segment` takes
+    /// `start`/`end` seconds and `-c copy`s the window), no source byte offsets are
+    /// needed; `byteStart`/`byteEnd` are left 0 here (they back only the byte-aware
+    /// `plan(cues:)` overload).
+    ///
+    /// Boundary math matches `plan(cues:)`: each segment begins on a keyframe and
+    /// runs to the first later keyframe at least `targetDuration` away, with the
+    /// final segment running to the title duration.
+    public static func plan(
+        keyframeTable table: KeyframeTable,
+        targetDuration: Double = 6.0
+    ) -> RemuxSegmentTimeline {
+        let target = max(1.0, targetDuration)
+        let times = table.times
+        guard !times.isEmpty else {
+            return RemuxSegmentTimeline(
+                segments: [],
+                targetDuration: Int(target.rounded(.up)),
+                totalDuration: table.duration
+            )
+        }
+
+        // `KeyframeTable.normalized` guarantees duration >= last keyframe; when the
+        // duration is strictly past the last keyframe use it, otherwise extend one
+        // target window so the final segment is non-empty (mirrors resolveEndTime).
+        let lastKeyframe = times[times.count - 1]
+        let endTime = table.duration > lastKeyframe ? table.duration : lastKeyframe + target
+
+        var segments: [RemuxSegmentPlan] = []
+        var index = 0
+        var i = 0
+        while i < times.count {
+            let start = times[i]
+            var j = i + 1
+            while j < times.count && times[j] - start < target {
+                j += 1
+            }
+            if j < times.count {
+                segments.append(
+                    RemuxSegmentPlan(
+                        index: index,
+                        startTime: start,
+                        duration: max(0, times[j] - start),
+                        byteStart: 0,
+                        byteEnd: 0
+                    )
+                )
+                i = j
+            } else {
+                segments.append(
+                    RemuxSegmentPlan(
+                        index: index,
+                        startTime: start,
+                        duration: max(0, endTime - start),
+                        byteStart: 0,
+                        byteEnd: 0
+                    )
+                )
+                break
+            }
+            index += 1
+        }
+
+        let maxSegment = segments.map(\.duration).max() ?? target
+        return RemuxSegmentTimeline(
+            segments: segments,
+            targetDuration: max(1, Int(maxSegment.rounded(.up))),
+            totalDuration: endTime
+        )
+    }
+
     private static func dedupeByOffset(_ boundaries: [(time: Double, offset: Int64)]) -> [(time: Double, offset: Int64)] {
         var result: [(time: Double, offset: Int64)] = []
         result.reserveCapacity(boundaries.count)

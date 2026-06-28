@@ -156,4 +156,53 @@ final class CueDrivenVODIntegrationTests: XCTestCase {
         XCTAssertEqual(timeline.totalDuration, 24, accuracy: 1e-6)
         XCTAssertEqual(playlist.split(separator: "\n").map(String.init).last, "#EXT-X-ENDLIST")
     }
+
+    /// The production path after the KeyframeTable adoption: Cues are converted to
+    /// the shared currency by `CuesKeyframeProvider`, then the planner is fed the
+    /// `KeyframeTable` (time-only) exactly as the cache/scan/server providers will.
+    /// Asserts the same load-bearing guarantees as the byte-aware path: EXTINF is
+    /// derived from the Cue PTS deltas, the playlist is a complete VOD with
+    /// ENDLIST, and the durations are monotonic and sum to the title duration.
+    func testKeyframeTableProviderPathProducesSameCueDrivenVOD() {
+        let fixture = MKVFixtureBuilder.make()
+        let summary = parseLikeBackend(fixture)
+
+        let table = CuesKeyframeProvider(
+            summary: summary,
+            durationHint: summary.durationSeconds
+        ).keyframeTable()
+
+        // The currency carries the Cue PTS in seconds and satisfies its invariants.
+        XCTAssertEqual(table.times, [0, 6, 12, 18.5])
+        XCTAssertEqual(table.duration, 7200, accuracy: 1e-9)
+        XCTAssertEqual(table.times, table.times.sorted())
+        XCTAssertLessThanOrEqual(table.times.last ?? 0, table.duration)
+
+        let timeline = HLSSegmentPlanner.plan(keyframeTable: table, targetDuration: 6)
+        XCTAssertFalse(timeline.isEmpty)
+
+        let playlist = LocalRemuxPlaylistBuilder.makeMediaPlaylist(timeline: timeline)
+        let lines = playlist.split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines.first, "#EXTM3U")
+        XCTAssertTrue(lines.contains("#EXT-X-PLAYLIST-TYPE:VOD"))
+        XCTAssertTrue(lines.contains { $0.hasPrefix("#EXT-X-MAP:URI=") })
+        XCTAssertEqual(lines.last, "#EXT-X-ENDLIST")
+
+        // EXTINF equals the Cue-PTS-derived per-boundary deltas (tail to the end).
+        let extinf = extinfDurations(in: playlist)
+        var expected: [Double] = []
+        for i in 0..<table.times.count {
+            let next = (i + 1 < table.times.count) ? table.times[i + 1] : table.duration
+            expected.append(next - table.times[i])
+        }
+        XCTAssertEqual(extinf.count, expected.count)
+        for (got, want) in zip(extinf, expected) {
+            XCTAssertEqual(got, want, accuracy: 1e-6)
+        }
+
+        // Monotonic start times; durations sum to the title duration.
+        let starts = timeline.segments.map(\.startTime)
+        XCTAssertEqual(starts, starts.sorted())
+        XCTAssertEqual(extinf.reduce(0, +), table.duration, accuracy: 1e-6)
+    }
 }

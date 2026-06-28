@@ -81,14 +81,14 @@ final class CueDrivenRemuxBackend: @unchecked Sendable {
         }
         guard summary.hasCues else { throw BuildError.noCues }
 
-        // 3. Compute the full keyframe-aligned timeline up front (pure math).
+        // 3. Convert the parsed Cues into the shared KeyframeTable currency, then
+        //    compute the full keyframe-aligned VOD timeline up front (pure math).
+        //    Feeding the planner via KeyframeTable keeps the Cues fast-path on the
+        //    same planner seam as the cache/scan/server providers (no divergence).
         let duration = source.durationSeconds ?? summary.durationSeconds
+        let keyframeTable = CuesKeyframeProvider(summary: summary, durationHint: duration).keyframeTable()
         let timeline = HLSSegmentPlanner.plan(
-            cues: summary.cues,
-            segmentDataOffset: summary.segmentDataOffset,
-            timestampScaleNs: summary.timestampScaleNs,
-            totalDuration: duration,
-            fileSize: totalSize,
+            keyframeTable: keyframeTable,
             targetDuration: 6.0
         )
         guard !timeline.isEmpty else { throw BuildError.emptyTimeline }

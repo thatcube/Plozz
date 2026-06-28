@@ -56,6 +56,9 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
 
     private let components: Components
     private var isTornDown = false
+    /// Background lazy/windowed keyframe discovery loop (only when the lazy flag is
+    /// on and the source fell back to a prefix). Cancelled on teardown.
+    private var discoveryTask: Task<Void, Never>?
 
     /// The off-main-actor build product: everything is `Sendable` so it crosses
     /// back to the MainActor session cleanly.
@@ -65,6 +68,9 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         let server: FullTimelineVODServer
         let baseURL: URL
         let planner: RemuxSegmentPlanner
+        /// Present only in lazy/windowed mode — the growing EVENT segment table the
+        /// background discovery loop publishes into.
+        let liveTable: LiveSegmentTable?
     }
 
     init(prepared: Components, strategy: LocalRemuxStrategyChoice) {
@@ -85,6 +91,23 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
             }
         }
         RemuxLog.info("Session: ready, \(prepared.planner.segmentDurations.count) segments, base=\(prepared.baseURL.absoluteString)")
+
+        // Lazy/windowed mode: drive background keyframe discovery that extends the
+        // EVENT segment table window-by-window around the playhead. Each window does
+        // a bounded sparse seek-sample under the segmenter lock (serialised with
+        // segment muxing) then yields so muxing can interleave. Loop ends at EOF
+        // (table marked complete → playlist gets ENDLIST) or on teardown cancel.
+        if let liveTable = prepared.liveTable, prepared.segmenter.isLazyActive {
+            let segmenter = prepared.segmenter
+            discoveryTask = Task.detached(priority: .utility) {
+                while !Task.isCancelled {
+                    guard let result = segmenter.discoverNextWindow() else { break }
+                    liveTable.update(durations: result.durations, complete: result.complete)
+                    if result.complete { break }
+                    await Task.yield()
+                }
+            }
+        }
     }
 
     public func preparePlayback() async throws -> LocalRemuxPreparedStream {
@@ -117,10 +140,15 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
     public func teardown() async {
         guard !isTornDown else { return }
         isTornDown = true
+        discoveryTask?.cancel()
+        discoveryTask = nil
         components.source.onMetrics = nil
         components.server.stop()
         components.source.stop()
-        components.segmenter.close()
+        // Close off the main actor: a background discovery window may briefly hold
+        // the segmenter lock, and close() must wait for it — don't block MainActor.
+        let segmenter = components.segmenter
+        await Task.detached { segmenter.close() }.value
         RemuxLog.info("Session: torn down")
     }
 
@@ -166,13 +194,24 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // remuxKeyframeSegments (it caches that rebuild's output); strict no-op
         // for real-Cues titles, which never scan.
         let keyframeCache = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeCache")
+        // Flag `com.plozz.playback.remuxLazyKeyframes` (DEFAULT OFF): for large /
+        // feature-length no-Cues sources, discovering the WHOLE keyframe table at
+        // open is too slow (a 4K / 40 GB file reads enough of itself to make the
+        // user wait seconds, or get watchdog-killed mid-scan). Lazy mode instead
+        // discovers only a short PREFIX synchronously (playback starts in a couple
+        // seconds) and extends the keyframe-aligned table window-by-window in the
+        // BACKGROUND, served as a growing HLS EVENT playlist. Gated under
+        // remuxKeyframeSegments; strict no-op for real-Cues titles. Composes with
+        // remuxKeyframeCache (first watch = lazy; later resume = instant cache).
+        let lazyKeyframes = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxLazyKeyframes")
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
                                            keyframeSegments: keyframeSegments,
                                            keyframeFullScan: keyframeFullScan,
-                                           keyframeCache: keyframeCache)
+                                           keyframeCache: keyframeCache,
+                                           lazyKeyframes: lazyKeyframes)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
-        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")\(keyframeCache ? " (cache ON)" : "")") }
+        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")\(keyframeCache ? " (cache ON)" : "")\(lazyKeyframes ? " (lazy ON)" : "")") }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only
@@ -210,10 +249,28 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
             RemuxLog.info("Session: remuxPrefetch ON — readAhead=4MiB prefetchDepth=3")
         }
 
+        // Lazy/windowed EVENT mode: when the segmenter only discovered a prefix and
+        // a background loop will keep extending the table, serve a GROWING EVENT
+        // playlist instead of a static VOD one. TARGETDURATION must be a constant
+        // that covers every segment for the whole title (HLS forbids it changing),
+        // so pick a value comfortably above the largest segment seen in the prefix
+        // (long-GOP keyframe-aligned segments can run ~2x the 6 s target).
+        let liveTable: LiveSegmentTable?
+        if segmenter.isLazyActive {
+            let maxPrefix = facts.segmentDurations.max() ?? 6
+            let targetDur = max(30, Int(maxPrefix.rounded(.up)) + 5)
+            liveTable = LiveSegmentTable(durations: facts.segmentDurations,
+                                         complete: false, targetDuration: targetDur)
+            RemuxLog.info("Session: remuxLazyKeyframes ON — EVENT playlist, prefix \(facts.segmentDurations.count) segments, TARGETDURATION=\(targetDur)s, background discovery running")
+        } else {
+            liveTable = nil
+        }
+
         let contentSource = RemuxContentSource(
             segmenter: segmenter,
             planner: planner,
-            prefetchDepth: prefetchEnabled ? 3 : 0
+            prefetchDepth: prefetchEnabled ? 3 : 0,
+            liveTable: liveTable
         )
         let server = FullTimelineVODServer { path in contentSource.response(forPath: path) }
         guard let baseURL = server.start() else {
@@ -225,7 +282,8 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
             source: contentSource,
             server: server,
             baseURL: baseURL,
-            planner: planner
+            planner: planner,
+            liveTable: liveTable
         )
     }
 

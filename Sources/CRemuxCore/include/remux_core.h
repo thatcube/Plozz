@@ -199,6 +199,39 @@ int plozz_remux_apply_keyframe_boundaries(plozz_remux_session *s, const double *
                                           int kf_count, double target_seconds);
 
 /*
+ * Like plozz_remux_apply_keyframe_boundaries, but `add_tail` controls the final
+ * segment. With add_tail != 0 (the default behaviour) the last segment runs to
+ * the source duration — the COMPLETE table. With add_tail == 0 the last segment
+ * ends exactly on the last supplied boundary (no tail to EOF) — a PARTIAL,
+ * still-growing table for lazy/windowed discovery, where more boundaries will be
+ * appended later. Because the planner is prefix-stable, re-applying a superset of
+ * boundaries reproduces every earlier segment identically and only appends new
+ * ones, so AVPlayer never sees a published segment's duration change. Returns the
+ * new segment count (current count unchanged on bad input).
+ */
+int plozz_remux_apply_keyframe_boundaries_ex(plozz_remux_session *s, const double *kf,
+                                             int kf_count, double target_seconds,
+                                             int add_tail);
+
+/*
+ * Lazy/windowed keyframe discovery: sparse seek-sample the REAL video keyframes
+ * whose time is in (from_seconds, to_seconds], writing up to `max_out` keyframe
+ * times (seconds, 0-based) to `out_kf` and the count to `out_count`. This reads
+ * only ~one I-frame per ~target_seconds boundary (O(window/target) small ranged
+ * reads), never the whole file, so it can run incrementally in the background to
+ * grow the segment table around the playhead without a full-timeline scan at open.
+ * Sets *out_reached_eof to 1 when the scan hit the source duration / EOF within
+ * this window (no more keyframes past it), and *out_pkts to the demux packets
+ * read (telemetry). A short internal wall-clock budget bounds a single call so it
+ * can never hang the caller. Returns 0 on success (possibly with out_count == 0
+ * at EOF), -1 on a hard demux error. `out_pkts`/`out_reached_eof` may be NULL.
+ */
+int plozz_remux_discover_range(plozz_remux_session *s, double from_seconds,
+                               double to_seconds, double target_seconds,
+                               double *out_kf, int max_out, int *out_count,
+                               int *out_reached_eof, long *out_pkts);
+
+/*
  * Pure test/diagnostic helper: group a sorted list of keyframe times (seconds,
  * 0-based) into segments at least `target_seconds` apart, each carrying its true
  * keyframe-to-keyframe duration; the tail runs to `duration` (or the last
@@ -208,6 +241,19 @@ int plozz_remux_apply_keyframe_boundaries(plozz_remux_session *s, const double *
 int plozz_remux_plan_segments_from_keyframes(const double *kf, int kf_count,
                                              double target_seconds, double duration,
                                              plozz_remux_segment *out, int max_out);
+
+/*
+ * Like plozz_remux_plan_segments_from_keyframes, but `add_tail` controls the
+ * trailing remainder. With add_tail != 0 a final segment runs to `duration` (the
+ * complete table, identical to the function above). With add_tail == 0 ONLY
+ * fully-closed boundaries (each >= target_seconds) are emitted and the sub-target
+ * remainder is dropped — the prefix-stable PARTIAL table the lazy/windowed EVENT
+ * path serves while discovery is still growing. Pure; safe to call from tests.
+ */
+int plozz_remux_plan_segments_from_keyframes_ex(const double *kf, int kf_count,
+                                                double target_seconds, double duration,
+                                                int add_tail,
+                                                plozz_remux_segment *out, int max_out);
 
 /* Copy the segment table entry at `index` into `out`. Returns 1 on success. */
 int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segment *out);

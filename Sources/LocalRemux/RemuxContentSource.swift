@@ -75,13 +75,22 @@ final class RemuxContentSource: @unchecked Sendable {
 
     let segmentCount: Int
 
+    /// Lazy/windowed mode (flag `com.plozz.playback.remuxLazyKeyframes`): when set,
+    /// the media playlist is an EVENT list that GROWS as background discovery
+    /// extends the table, so it is regenerated per request from this shared table
+    /// (never pinned) and the valid segment range follows `liveTable.count` instead
+    /// of the fixed prefix `segmentCount`. nil = the original static-VOD behaviour.
+    private let liveTable: LiveSegmentTable?
+
     init(segmenter: RemuxSegmenter, planner: RemuxSegmentPlanner,
-         segmentCacheLimitBytes: Int = 96 << 20, prefetchDepth: Int = 0) {
+         segmentCacheLimitBytes: Int = 96 << 20, prefetchDepth: Int = 0,
+         liveTable: LiveSegmentTable? = nil) {
         self.segmenter = segmenter
         self.planner = planner
         self.segmentCacheLimitBytes = segmentCacheLimitBytes
         self.prefetchDepth = max(0, prefetchDepth)
         self.segmentCount = planner.segmentDurations.count
+        self.liveTable = liveTable
     }
 
     /// Stops background prefetch. Called on session teardown BEFORE the segmenter
@@ -112,12 +121,26 @@ final class RemuxContentSource: @unchecked Sendable {
         case .master:
             return pinnedBytes(route.resourceName) { self.planner.masterPlaylist().data(using: .utf8) ?? Data() }
         case .media:
+            // Lazy/EVENT: regenerate the (growing) playlist each request from the
+            // shared live table — it must NOT be pinned because new segments are
+            // appended as background discovery progresses, and the final reload adds
+            // ENDLIST. Static-VOD: pin the one-and-done media playlist as before.
+            if let liveTable {
+                let snap = liveTable.snapshot()
+                let m3u8 = planner.eventMediaPlaylist(durations: snap.durations,
+                                                      isComplete: snap.complete,
+                                                      targetDuration: liveTable.targetDuration)
+                return m3u8.data(using: .utf8)
+            }
             return pinnedBytes(route.resourceName) { self.planner.mediaPlaylist().data(using: .utf8) ?? Data() }
         case .initSegment:
             return pinnedBytes(route.resourceName) { self.segmenter.initSegment() }
         case .segment(let index):
-            guard index >= 0, index < segmentCount else {
-                RemuxLog.error("Origin: segment \(index) out of range (count=\(segmentCount))")
+            // In lazy mode the valid range follows the table as it grows; otherwise
+            // it is the fixed prefix/VOD count.
+            let maxSegments = liveTable?.count ?? segmentCount
+            guard index >= 0, index < maxSegments else {
+                RemuxLog.error("Origin: segment \(index) out of range (count=\(maxSegments))")
                 return nil
             }
             return segmentBytes(index)

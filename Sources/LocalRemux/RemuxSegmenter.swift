@@ -123,6 +123,23 @@ final class RemuxSegmenter: @unchecked Sendable {
     private let lock = NSLock()
     let facts: Facts
 
+    /// Target segment length (seconds) captured at open, reused by lazy/windowed
+    /// background discovery to keep the same grouping the prefix used.
+    private let targetSeconds: Double
+
+    // MARK: Lazy/windowed discovery state (guarded by `lock`)
+    /// Accumulated real keyframe times (0-based seconds, ascending, starting at 0)
+    /// discovered so far. Grows as background windows complete; re-applied as the
+    /// (prefix-stable) segment table.
+    private var lazyKf: [Double] = []
+    /// True while a background task should keep extending the table.
+    private var lazyActive = false
+    /// True once discovery reached EOF (or a fixed-cadence tail finished it).
+    private var lazyComplete = false
+    /// Deferred cache write performed once lazy discovery completes (so resume /
+    /// re-watch restores the full index instantly).
+    private var lazyPending: PendingCacheStore? = nil
+
     /// Deferred persistent-cache write: set during init when a fresh keyframe scan
     /// rebuilt the table (so it's worth saving), consumed once the rebuilt segment
     /// durations have been read. nil when there's nothing to persist.
@@ -140,10 +157,12 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// exactly why (vs an opaque failure).
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
          deriveEac3FrameDur: Bool = false, keyframeSegments: Bool = false,
-         keyframeFullScan: Bool = false, keyframeCache: Bool = false) throws {
+         keyframeFullScan: Bool = false, keyframeCache: Bool = false,
+         lazyKeyframes: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
+        self.targetSeconds = targetSegmentSeconds
 
         var result = plozz_remux_open_result()
         let opaque = Unmanaged.passUnretained(reader).toOpaque()
@@ -198,6 +217,7 @@ final class RemuxSegmenter: @unchecked Sendable {
             // keyframe-aligned and skips all of this.
             let wasFixedCadence = plozz_remux_used_fixed_cadence(session) == 1
             var appliedCache = false
+            var lazyStarted = false
             let cache = keyframeCache ? KeyframeIndexCache.makeDefault() : nil
             let sourceSize = (keyframeCache && wasFixedCadence) ? reader.size() : -1
             let sourceDuration = result.duration_seconds
@@ -215,7 +235,54 @@ final class RemuxSegmenter: @unchecked Sendable {
                 appliedCache = true
             }
 
-            if !appliedCache {
+            // Flag-gated (com.plozz.playback.remuxLazyKeyframes): instead of
+            // discovering the WHOLE keyframe table at open (O(filesize) full scan,
+            // or even a bounded sparse scan over the entire timeline — both of which
+            // still read enough of a 4K / feature-length no-Cues file to make the
+            // user wait, or get watchdog-killed), discover only a short PREFIX
+            // synchronously so playback starts in a couple seconds, then extend the
+            // table window-by-window in the BACKGROUND (see discoverNextWindow). The
+            // planner is prefix-stable, so appending later boundaries never changes
+            // an already-published segment — safe to serve as an HLS EVENT playlist.
+            if !appliedCache && lazyKeyframes && wasFixedCadence {
+                let prefixSeconds = 90.0
+                let netBefore = reader.networkSnapshot()
+                let prefix = Self.discoverRange(session, from: 0, to: prefixSeconds,
+                                                target: targetSegmentSeconds)
+                var kf: [Double] = [0.0]
+                kf.append(contentsOf: prefix.kf)
+                if kf.count >= 2 {
+                    let complete = prefix.reachedEof
+                    kf.withUnsafeBufferPointer { buf in
+                        _ = plozz_remux_apply_keyframe_boundaries_ex(session, buf.baseAddress,
+                            Int32(buf.count), targetSegmentSeconds, complete ? 1 : 0)
+                    }
+                    self.lazyKf = kf
+                    self.lazyActive = !complete
+                    self.lazyComplete = complete
+                    lazyStarted = true
+                    if let cache, let cacheKey {
+                        self.lazyPending = PendingCacheStore(cache: cache, key: cacheKey,
+                            size: sourceSize, duration: sourceDuration, target: targetSegmentSeconds)
+                    }
+                    let netAfter = reader.networkSnapshot()
+                    let readBytes = max(0, netAfter.bytesFetched - netBefore.bytesFetched)
+                    let fileSize = sourceSize > 0 ? sourceSize : reader.size()
+                    let pct = fileSize > 0 ? Double(readBytes) / Double(fileSize) * 100 : 0
+                    RemuxLog.info(String(format:
+                        "remux-discovery: read %.2fMB = %.2f%% of %.2fMB in %d ranged GETs "
+                            + "(lazy prefix %d keyframes [0,%.0fs], %d pkts)",
+                        Double(readBytes) / 1_048_576, pct, Double(fileSize) / 1_048_576,
+                        netAfter.fetchCount - netBefore.fetchCount, kf.count - 1,
+                        prefixSeconds, prefix.pkts))
+                    RemuxLog.info("remux: lazy keyframe discovery started — "
+                        + "\(complete ? "prefix covered whole source (complete)" : "background extending window-by-window")")
+                }
+                // kf.count < 2 → prefix found no keyframes; fall through to the
+                // bounded full/sparse rescan below as a safety net.
+            }
+
+            if !appliedCache && !lazyStarted {
                 // Measure exactly how many bytes the keyframe-boundary discovery
                 // pulls over the network (and in how many ranged GETs) so the open
                 // cost is directly comparable to other approaches (e.g. a full
@@ -242,7 +309,7 @@ final class RemuxSegmenter: @unchecked Sendable {
             // scanned (not a cache hit) AND the rescan replaced the fixed-cadence
             // table with a real keyframe one. Derive the boundary list from the
             // rebuilt durations after they're read below.
-            if let cache, let cacheKey, !appliedCache, wasFixedCadence,
+            if let cache, let cacheKey, !appliedCache, !lazyStarted, wasFixedCadence,
                plozz_remux_used_fixed_cadence(session) == 0 {
                 pendingStore = PendingCacheStore(cache: cache, key: cacheKey,
                                                  size: sourceSize, duration: sourceDuration,
@@ -253,7 +320,15 @@ final class RemuxSegmenter: @unchecked Sendable {
             // on-demand fMP4 SEGMENT muxing fetches high-bitrate 4K segments in few
             // large ranged GETs (keeps AVPlayer's buffer fed). boostReadAhead only
             // ever raises the value, so a prior cache-hit path (no scan) gets it too.
-            reader.boostReadAhead(8 << 20)
+            //
+            // EXCEPTION: in lazy mode discovery is NOT done — background windows keep
+            // sparse-seeking while playback runs, and an 8 MiB read-ahead would make
+            // every per-boundary seek over-fetch ~one extra I-frame's worth of bytes
+            // we immediately discard. Keep the default read-ahead so background
+            // discovery stays low-byte; muxing still fetches sequentially.
+            if !lazyStarted {
+                reader.boostReadAhead(8 << 20)
+            }
         }
 
         var durations: [Double] = []
@@ -328,6 +403,107 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// origin serves) so high-bitrate 4K segments fetch in fewer round-trips.
     func boostReadAhead(_ bytes: Int) {
         reader.boostReadAhead(bytes)
+    }
+
+    // MARK: - Lazy/windowed discovery (background extension)
+
+    /// True while lazy discovery is active and the background loop should keep
+    /// extending the table. False in eager / cache-hit / non-lazy modes.
+    var isLazyActive: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return lazyActive && !lazyComplete
+    }
+
+    /// Lazy mode only: discover the next window of real keyframes after the current
+    /// frontier and grow the segment table. Runs the bounded sparse seek-sample
+    /// under the segmenter lock (serialized with segment muxing on the single
+    /// demuxer), appends exact keyframe boundaries, re-applies the prefix-stable
+    /// table, and returns the grown durations plus whether discovery is now
+    /// complete (EOF reached, or a graceful fixed-cadence tail finished a stalled
+    /// region). Returns nil when not in lazy mode or already complete.
+    func discoverNextWindow(windowSeconds: Double = 30.0) -> (durations: [Double], complete: Bool)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let session, lazyActive, !lazyComplete else { return nil }
+
+        let frontier = lazyKf.last ?? 0.0
+        let result = Self.discoverRange(session, from: frontier,
+                                        to: frontier + windowSeconds, target: targetSeconds)
+        var complete = result.reachedEof
+        if result.kf.isEmpty && !complete {
+            // Stall: sparse seeking can't advance past the frontier (a degenerate
+            // no-Cues region). Rather than spin forever, finish the title with a
+            // fixed-cadence tail from the frontier to the source duration. The
+            // already-published prefix segments are real keyframes and stay
+            // unchanged (prefix-stable); only this tail may slightly overlap —
+            // acceptable, and the title remains fully playable to the end.
+            let dur = facts.durationSeconds
+            var t = frontier + targetSeconds
+            while t < dur - 0.001 { lazyKf.append(t); t += targetSeconds }
+            complete = true
+            RemuxLog.info("remux: lazy discovery stalled at "
+                + "\(String(format: "%.1f", frontier))s — fixed-cadence tail to "
+                + "\(String(format: "%.1f", dur))s")
+        } else {
+            lazyKf.append(contentsOf: result.kf)
+        }
+
+        lazyKf.withUnsafeBufferPointer { buf in
+            _ = plozz_remux_apply_keyframe_boundaries_ex(session, buf.baseAddress,
+                Int32(buf.count), targetSeconds, complete ? 1 : 0)
+        }
+
+        var durations: [Double] = []
+        let count = Int(plozz_remux_segment_count(session))
+        durations.reserveCapacity(count)
+        for i in 0..<count {
+            var seg = plozz_remux_segment()
+            if plozz_remux_segment_at(session, Int32(i), &seg) == 1 {
+                durations.append(seg.duration_seconds)
+            }
+        }
+
+        if complete {
+            lazyComplete = true
+            lazyActive = false
+            if let pending = lazyPending {
+                let boundaries = KeyframeIndexCache.boundaries(fromDurations: durations)
+                pending.cache.store(key: pending.key, size: pending.size,
+                                    duration: pending.duration, target: pending.target,
+                                    boundaries: boundaries)
+                RemuxLog.info("remux: lazy discovery complete (\(durations.count) segments) — "
+                    + "persisted keyframe-index (\(boundaries.count) boundaries) for fast resume")
+                lazyPending = nil
+            } else {
+                RemuxLog.info("remux: lazy discovery complete (\(durations.count) segments)")
+            }
+            // Lazy discovery is finished; on-demand 4K segment muxing now benefits
+            // from a larger per-round-trip read-ahead (no more sparse seeks to
+            // over-fetch). Safe now that no background window will run again.
+            reader.boostReadAhead(8 << 20)
+        }
+        return (durations, complete)
+    }
+
+    /// Calls the C bounded sparse seek-sample over `(from, to]` and marshals the
+    /// discovered keyframe times. Static so it can run during init (before `self`
+    /// is fully formed) and from `discoverNextWindow` under the lock.
+    private static func discoverRange(_ session: OpaquePointer, from: Double, to: Double,
+                                      target: Double, maxOut: Int = 512)
+        -> (kf: [Double], reachedEof: Bool, pkts: Int) {
+        let buf = UnsafeMutablePointer<Double>.allocate(capacity: maxOut)
+        defer { buf.deallocate() }
+        var outCount: Int32 = 0
+        var reachedEof: Int32 = 0
+        var pkts: Int = 0
+        let rc = plozz_remux_discover_range(session, from, to, target, buf, Int32(maxOut),
+                                            &outCount, &reachedEof, &pkts)
+        if rc < 0 { return ([], false, pkts) }
+        let n = max(0, Int(outCount))
+        var kf: [Double] = []
+        kf.reserveCapacity(n)
+        for i in 0..<n { kf.append(buf[i]) }
+        return (kf, reachedEof == 1, pkts)
     }
 
     /// Scans an fMP4 init segment for the box four-cc atoms that matter for the

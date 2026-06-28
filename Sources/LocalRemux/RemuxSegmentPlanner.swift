@@ -125,4 +125,42 @@ public struct RemuxSegmentPlanner: Equatable, Sendable {
     static func formatDuration(_ seconds: Double) -> String {
         String(format: "%.6f", max(0, seconds))
     }
+
+    // MARK: - Lazy / windowed (EVENT) media playlist
+
+    /// A media playlist for **lazy/windowed** discovery, where the segment table
+    /// grows in the background as keyframes are discovered around the playhead.
+    ///
+    /// While `isComplete == false` it is an `EXT-X-PLAYLIST-TYPE:EVENT` list with
+    /// **no** `EXT-X-ENDLIST`: AVPlayer reloads it periodically and sees newly
+    /// discovered segments appended (segments are only ever added to the end and
+    /// keep identical durations — the planner is prefix-stable — so EVENT's "append
+    /// only" contract holds). When discovery reaches EOF the caller re-renders with
+    /// `isComplete == true`, which appends `EXT-X-ENDLIST` so AVPlayer treats it as
+    /// a finished, fully-seekable timeline.
+    ///
+    /// `targetDuration` must be a constant `>=` every segment's duration across the
+    /// whole title (the HLS spec forbids it changing), so the caller passes a value
+    /// that comfortably exceeds the longest GOP rather than recomputing it per
+    /// reload.
+    public func eventMediaPlaylist(durations: [Double], isComplete: Bool,
+                                   targetDuration: Int) -> String {
+        var lines = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:7",
+            "#EXT-X-TARGETDURATION:\(max(1, targetDuration))",
+            "#EXT-X-MEDIA-SEQUENCE:0",
+            "#EXT-X-PLAYLIST-TYPE:EVENT",
+            "#EXT-X-INDEPENDENT-SEGMENTS",
+            "#EXT-X-MAP:URI=\"\(Self.initName)\""
+        ]
+        for (index, duration) in durations.enumerated() {
+            lines.append("#EXTINF:\(Self.formatDuration(duration)),")
+            lines.append(Self.segmentName(index))
+        }
+        if isComplete {
+            lines.append("#EXT-X-ENDLIST")
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
 }

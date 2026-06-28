@@ -214,9 +214,42 @@ static void probe_eac3_frame_samples(plozz_remux_session *s) {
  * up to `max_out` segments and returns the count. Exposed (see remux_core.h) so
  * the grouping math is unit-testable without a live demux.
  */
+static int plan_segments_core(const double *kf, int kf_count, double target_seconds,
+                              double duration, int add_tail,
+                              plozz_remux_segment *out, int max_out);
+
 int plozz_remux_plan_segments_from_keyframes(const double *kf, int kf_count,
                                              double target_seconds, double duration,
                                              plozz_remux_segment *out, int max_out) {
+    return plan_segments_core(kf, kf_count, target_seconds, duration, 1, out, max_out);
+}
+
+int plozz_remux_plan_segments_from_keyframes_ex(const double *kf, int kf_count,
+                                                double target_seconds, double duration,
+                                                int add_tail,
+                                                plozz_remux_segment *out, int max_out) {
+    return plan_segments_core(kf, kf_count, target_seconds, duration, add_tail, out, max_out);
+}
+
+/*
+ * Core grouping. `add_tail` controls the trailing remainder:
+ *   add_tail != 0  -> COMPLETE table: a final segment runs from the last closed
+ *                     boundary to `duration` (or the last keyframe). Used for a
+ *                     finished title.
+ *   add_tail == 0  -> PARTIAL/growing table: emit ONLY fully-closed boundaries
+ *                     (each >= target_seconds). The sub-target remainder after the
+ *                     last boundary is deliberately NOT emitted, because appending
+ *                     more keyframes later would change its duration — which would
+ *                     break the HLS EVENT contract (a published segment's EXTINF
+ *                     must never change). Those leftover keyframes stay buffered by
+ *                     the caller and close into a real segment on a later window.
+ * Because the fold is a deterministic left-to-right pass, re-running it over a
+ * superset of keyframes reproduces every earlier closed boundary identically and
+ * only appends new ones — the prefix-stability the lazy/windowed path relies on.
+ */
+static int plan_segments_core(const double *kf, int kf_count, double target_seconds,
+                              double duration, int add_tail,
+                              plozz_remux_segment *out, int max_out) {
     if (!kf || kf_count < 2 || !out || max_out <= 0) return 0;
     if (target_seconds < 1.0) target_seconds = 6.0;
 
@@ -230,12 +263,14 @@ int plozz_remux_plan_segments_from_keyframes(const double *kf, int kf_count,
             seg_start = kf[i];
         }
     }
-    /* Final tail segment up to the end of the file. */
-    double tail_end = (duration > seg_start) ? duration : kf[kf_count - 1];
-    if (tail_end > seg_start + 0.001 && count < max_out) {
-        out[count].start_seconds = seg_start;
-        out[count].duration_seconds = tail_end - seg_start;
-        count++;
+    if (add_tail) {
+        /* Final tail segment up to the end of the file. */
+        double tail_end = (duration > seg_start) ? duration : kf[kf_count - 1];
+        if (tail_end > seg_start + 0.001 && count < max_out) {
+            out[count].start_seconds = seg_start;
+            out[count].duration_seconds = tail_end - seg_start;
+            count++;
+        }
     }
     return count;
 }
@@ -757,6 +792,12 @@ int plozz_remux_used_fixed_cadence(plozz_remux_session *s) {
 
 int plozz_remux_apply_keyframe_boundaries(plozz_remux_session *s, const double *kf,
                                           int kf_count, double target_seconds) {
+    return plozz_remux_apply_keyframe_boundaries_ex(s, kf, kf_count, target_seconds, 1);
+}
+
+int plozz_remux_apply_keyframe_boundaries_ex(plozz_remux_session *s, const double *kf,
+                                             int kf_count, double target_seconds,
+                                             int add_tail) {
     if (!s) return 0;
     if (!kf || kf_count < 2) return s->segment_count;
     if (target_seconds < 1.0) target_seconds = 6.0;
@@ -767,8 +808,12 @@ int plozz_remux_apply_keyframe_boundaries(plozz_remux_session *s, const double *
         (plozz_remux_segment *)malloc(sizeof(plozz_remux_segment) * (size_t)cap);
     if (!segs) return s->segment_count;
 
-    int count = plozz_remux_plan_segments_from_keyframes(kf, kf_count, target_seconds,
-                                                         s->duration_seconds, segs, cap);
+    /* add_tail: run the final segment to the source duration (complete table).
+     * Otherwise emit only fully-closed boundaries (no sub-target tail) so the
+     * partial table is prefix-stable as more keyframes are appended later. */
+    double plan_duration = add_tail ? s->duration_seconds : 0.0;
+    int count = plan_segments_core(kf, kf_count, target_seconds,
+                                   plan_duration, add_tail, segs, cap);
     if (count <= 0) { free(segs); return s->segment_count; }
 
     int old = s->segment_count;
@@ -777,10 +822,84 @@ int plozz_remux_apply_keyframe_boundaries(plozz_remux_session *s, const double *
     s->segment_count = count;
     s->used_fixed_cadence = 0;
 
-    remux_log(0, "remux: keyframe-index cache applied %d->%d segments from %d cached "
-                 "boundaries (no scan — instant exact table)",
-              old, count, kf_count);
+    remux_log(0, "remux: keyframe-index %s applied %d->%d segments from %d boundaries "
+                 "(no scan%s)",
+              add_tail ? "cache" : "window", old, count, kf_count,
+              add_tail ? " — instant exact table" : " — partial, growing");
     return count;
+}
+
+/*
+ * Sparse seek-sample the real video keyframes in (from_seconds, to_seconds].
+ * Mirrors sample_keyframes_by_seek's forward-seek-per-target logic but bounded to
+ * a window (and without prepending t=0), so it can extend the table incrementally
+ * in the background. Short wall-clock budget so a single call can't hang.
+ */
+int plozz_remux_discover_range(plozz_remux_session *s, double from_seconds,
+                               double to_seconds, double target_seconds,
+                               double *out_kf, int max_out, int *out_count,
+                               int *out_reached_eof, long *out_pkts) {
+    if (out_count) *out_count = 0;
+    if (out_reached_eof) *out_reached_eof = 0;
+    if (out_pkts) *out_pkts = 0;
+    if (!s || !out_kf || max_out <= 0) return -1;
+    if (target_seconds < 1.0) target_seconds = 6.0;
+
+    AVStream *vst = s->ic->streams[s->video_index];
+    double file_start = (s->ic->start_time != AV_NOPTS_VALUE)
+        ? (double)s->ic->start_time / AV_TIME_BASE : 0.0;
+    double duration = s->duration_seconds;
+
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) return -1;
+
+    int n = 0;
+    long total_pkts = 0;
+    int reached_eof = 0;
+    double prev = from_seconds > 0.0 ? from_seconds : 0.0;
+    int64_t wall_start = av_gettime();
+    const int MAX_FWD_PKTS = 1200;
+    const double MAX_WALL_SECONDS = 2.0;  /* per-call ceiling — keep lock-hold short
+                                             so background windows don't stall an
+                                             on-demand segment mux during playback */
+
+    while (n < max_out) {
+        if ((double)(av_gettime() - wall_start) / 1e6 > MAX_WALL_SECONDS) break;
+        double tgt = prev + target_seconds;
+        if (to_seconds > 0 && tgt > to_seconds + 0.001) break;  /* window done */
+        if (duration > 0 && tgt >= duration - 0.001) { reached_eof = 1; break; }
+
+        int64_t seek_ts = (int64_t)((tgt + file_start) / av_q2d(vst->time_base));
+        int rc = avformat_seek_file(s->ic, s->video_index, seek_ts, seek_ts, INT64_MAX, 0);
+
+        double k = -1.0;
+        int tries = 0;
+        while (tries < MAX_FWD_PKTS && av_read_frame(s->ic, pkt) >= 0) {
+            tries++;
+            total_pkts++;
+            if (pkt->stream_index == s->video_index && (pkt->flags & AV_PKT_FLAG_KEY)) {
+                int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
+                if (ts != AV_NOPTS_VALUE) {
+                    double t = ts * av_q2d(vst->time_base) - file_start;
+                    if (t > prev + 0.001) { k = t; av_packet_unref(pkt); break; }
+                }
+            }
+            av_packet_unref(pkt);
+        }
+        if (k < 0) {
+            /* No keyframe past prev: either at/near EOF (tail) or a read error. */
+            if (rc < 0 || (duration > 0 && prev >= duration * 0.95)) reached_eof = 1;
+            break;
+        }
+        out_kf[n++] = k;
+        prev = k;
+    }
+
+    av_packet_free(&pkt);
+    if (out_count) *out_count = n;
+    if (out_reached_eof) *out_reached_eof = reached_eof;
+    if (out_pkts) *out_pkts = total_pkts;
+    return 0;
 }
 
 int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segment *out) {

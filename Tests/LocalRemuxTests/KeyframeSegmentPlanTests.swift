@@ -105,5 +105,82 @@ final class KeyframeSegmentPlanTests: XCTestCase {
         XCTAssertEqual(segs.map { $0.dur }, [7, 13, 15, 5])
         assertContiguous(segs, expectedEnd: 40)
     }
+
+    // MARK: - Partial (lazy/windowed) planning — add_tail = 0
+
+    /// Runs the partial planner (add_tail = 0) the lazy/windowed EVENT path uses
+    /// while discovery is still growing.
+    private func planPartial(_ kf: [Double], target: Double,
+                             maxOut: Int? = nil) -> [(start: Double, dur: Double)] {
+        let cap = maxOut ?? (kf.count + 1)
+        var out = [plozz_remux_segment](repeating: plozz_remux_segment(), count: max(cap, 1))
+        let n = kf.withUnsafeBufferPointer { kfp -> Int in
+            Int(plozz_remux_plan_segments_from_keyframes_ex(
+                kfp.baseAddress, Int32(kf.count), target, 0, 0, &out, Int32(out.count)))
+        }
+        return (0..<n).map { (out[$0].start_seconds, out[$0].duration_seconds) }
+    }
+
+    /// The partial table drops the sub-target remainder: only fully-closed
+    /// boundaries are emitted, so nothing the EVENT playlist publishes can later
+    /// change duration.
+    func testPartial_dropsSubTargetTail() {
+        // 0,12,24 close two segments [0,12],[12,24]; the leftover after 24 (none
+        // here, but the final kf 24 is a boundary) — verify no tail-to-EOF is added.
+        let segs = planPartial([0, 12, 24], target: 6)
+        XCTAssertEqual(segs.map { $0.dur }, [12, 12])
+        XCTAssertEqual(segs.last!.start + segs.last!.dur, 24, accuracy: 1e-6,
+                       "partial table must end exactly on the last closed boundary")
+    }
+
+    /// A trailing keyframe closer than `target` to the last boundary is NOT emitted
+    /// (it would change duration once more keyframes arrive).
+    func testPartial_trailingShortRemainderNotEmitted() {
+        // [0,7] closes (7>=6). Then 9-7=2 <6 → remainder dropped.
+        let segs = planPartial([0, 7, 9], target: 6)
+        XCTAssertEqual(segs.map { $0.dur }, [7])
+    }
+
+    /// PREFIX STABILITY — the EVENT correctness foundation. Re-planning the partial
+    /// table over a SUPERSET of keyframes must reproduce every earlier segment
+    /// identically and only append, so AVPlayer never sees a published segment's
+    /// duration change as discovery grows.
+    func testPartial_prefixStableAsKeyframesAppend() {
+        let window1: [Double] = [0, 7, 14]
+        let window2: [Double] = [0, 7, 14, 16, 23, 30]      // window1 + more
+        let window3: [Double] = [0, 7, 14, 16, 23, 30, 42]  // window2 + more
+
+        let p1 = planPartial(window1, target: 6)
+        let p2 = planPartial(window2, target: 6)
+        let p3 = planPartial(window3, target: 6)
+
+        // Each later plan is a strict prefix-superset of the earlier one.
+        for (i, seg) in p1.enumerated() {
+            XCTAssertEqual(seg.start, p2[i].start, accuracy: 1e-6)
+            XCTAssertEqual(seg.dur, p2[i].dur, accuracy: 1e-6)
+        }
+        for (i, seg) in p2.enumerated() {
+            XCTAssertEqual(seg.start, p3[i].start, accuracy: 1e-6)
+            XCTAssertEqual(seg.dur, p3[i].dur, accuracy: 1e-6)
+        }
+        XCTAssertGreaterThanOrEqual(p2.count, p1.count)
+        XCTAssertGreaterThanOrEqual(p3.count, p2.count)
+    }
+
+    /// The completed table (add_tail = 1) over the same keyframes equals the
+    /// partial prefix plus a final tail to the source duration — proving the
+    /// hand-off from growing EVENT to finished VOD only appends.
+    func testPartial_completionAppendsTailToDuration() {
+        let kf: [Double] = [0, 7, 14, 16]
+        let partial = planPartial(kf, target: 6)             // [0,7],[7,14]
+        let complete = plan(kf, target: 6, duration: 30)     // partial + [14,30]
+        XCTAssertEqual(partial.count, 2)
+        for (i, seg) in partial.enumerated() {
+            XCTAssertEqual(seg.start, complete[i].start, accuracy: 1e-6)
+            XCTAssertEqual(seg.dur, complete[i].dur, accuracy: 1e-6)
+        }
+        XCTAssertEqual(complete.last!.start + complete.last!.dur, 30, accuracy: 1e-6)
+    }
 }
 #endif
+

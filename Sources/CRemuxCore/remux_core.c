@@ -942,6 +942,74 @@ void plozz_remux_kf_probe_free(plozz_remux_kf_probe *ctx) {
 }
 
 /*
+ * Install a segment table from an EXTERNALLY discovered + merged keyframe-time array
+ * (seconds, 0-based, sorted ascending, kf[0] ~ 0). This is the apply step for the
+ * bounded-PARALLEL keyframe scan (com.plozz.playback.remuxParallelScan): the Swift
+ * driver opens K probe sessions over their OWN byte readers, discovers disjoint time
+ * slices concurrently with the same cheap kf_probe primitive, merges the slices into
+ * one sorted keyframe list, and hands it here. The MAIN session's reader/demux cursor
+ * is never used for discovery, so it is undisturbed; we only rebuild the table and
+ * rewind to t=0 so the first segment muxes from a clean BACKWARD seek — exactly like
+ * the in-process keyframe-scan rebuild, but with the discovery cost parallelised off
+ * this session.
+ *
+ * The boundaries are real keyframes and each EXTINF is stamped as the true
+ * keyframe-to-keyframe span, so the table is in sync BY CONSTRUCTION even if the
+ * supplied list is sparse in places (a region with few sampled keyframes just yields
+ * a longer in-sync segment — never the EXTINF-vs-span mismatch that causes desync).
+ *
+ * Only acts when the open-time table was the fixed-cadence fallback (used_fixed_cadence);
+ * a real keyframe-index table is already aligned and must not be disturbed. Returns the
+ * new segment count, or 0 (table left unchanged) when fewer than two usable keyframes
+ * are supplied or the grouping fails.
+ */
+int plozz_remux_apply_keyframes(plozz_remux_session *s, const double *kf, int count) {
+    if (!s || !kf || count < 2) return 0;
+    if (!s->used_fixed_cadence) {
+        remux_log(0, "remux: parallel-scan apply skipped; table is index-built");
+        return 0;
+    }
+    double target = (s->target_segment_seconds < 1.0) ? 6.0 : s->target_segment_seconds;
+    double eff_target = target;
+    if (s->duration_seconds > 0.0) {
+        double cap_target = s->duration_seconds / (double)PLOZZ_MAX_SCAN_SEGMENTS;
+        if (cap_target > eff_target) eff_target = cap_target;
+    }
+
+    plozz_remux_segment *segs = NULL;
+    int n = build_segments_from_keyframes(kf, count, s->duration_seconds, eff_target, &segs);
+    if (n <= 0) { free(segs); return 0; }
+
+    int old = s->segment_count;
+    free(s->segments);
+    s->segments = segs;
+    s->segment_count = n;
+    s->used_fixed_cadence = 0;
+
+    /* Rewind so the first segment's mux begins from a clean t=0 BACKWARD seek. */
+    if (s->video_index >= 0) {
+        avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
+    }
+
+    remux_log(1, "remux: parallel-scan applied %d real-keyframe segments (was %d "
+              "fixed-cadence) from %d merged keyframes (target=%.2fs eff=%.2fs) — "
+              "in-sync, native full-timeline seek preserved",
+              n, old, count, target, eff_target);
+    return n;
+}
+
+/*
+ * 1 when the open-time segment table is the FIXED-CADENCE fallback (source has no
+ * usable keyframe index), i.e. the case the keyframe-scan / parallel-scan rebuild is
+ * meant to fix; 0 when the table was built from a real keyframe index (already aligned).
+ * Lets a Swift parallel-discovery driver skip its K probe-session opens entirely on
+ * index titles, so they stay byte-identical even with the parallel flag on.
+ */
+int plozz_remux_used_fixed_cadence(plozz_remux_session *s) {
+    return s ? s->used_fixed_cadence : 0;
+}
+
+/*
  * Replace the segment table with one built on the source's real keyframe boundaries
  * (discovered by seek-probe), so EXTINF matches the muxed span and segments do not
  * overlap. Returns the new segment count, or 0 (table left unchanged) when the scan

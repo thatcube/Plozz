@@ -232,6 +232,32 @@ int plozz_remux_kf_probe_header_reads(const plozz_remux_kf_probe *ctx);
 void plozz_remux_kf_probe_free(plozz_remux_kf_probe *ctx);
 
 /*
+ * Install a segment table from an externally discovered + merged keyframe-time array
+ * (seconds, 0-based, sorted ascending, kf[0] ~ 0). This is the apply step for the
+ * bounded-PARALLEL keyframe scan (com.plozz.playback.remuxParallelScan): a driver
+ * discovers disjoint time slices CONCURRENTLY on its own probe sessions/readers (each
+ * using plozz_remux_kf_probe_next), merges them into one sorted list, and hands it
+ * here to rebuild THIS session's table — collapsing the serialized seek-probe RTTs of
+ * the in-process scan into ~N/K wall-clock while keeping the VOD+ENDLIST playlist (so
+ * native full-timeline seek is preserved). Boundaries are real keyframes with EXTINF
+ * stamped as the true keyframe-to-keyframe span, so the table is in sync by
+ * construction even where the supplied list is sparse (sparse => coarser segments,
+ * never desync). Only acts when the open-time table is the fixed-cadence fallback;
+ * a real keyframe-index table is left untouched. Returns the new segment count, or 0
+ * (table unchanged) when fewer than two usable keyframes are supplied or grouping fails.
+ * Must be called AFTER plozz_remux_open and BEFORE reading the segment count.
+ */
+int plozz_remux_apply_keyframes(plozz_remux_session *s, const double *kf, int count);
+
+/*
+ * 1 when the open-time segment table is the fixed-cadence fallback (no usable keyframe
+ * index) — the case the keyframe-scan / parallel-scan rebuild targets; 0 when the table
+ * was built from a real keyframe index (already aligned). Lets a parallel-discovery
+ * driver skip its probe-session opens on index titles so they stay byte-identical.
+ */
+int plozz_remux_used_fixed_cadence(plozz_remux_session *s);
+
+/*
  * Pure test/diagnostic helper: parse a Matroska Cluster at `buf[0..len)` and return,
  * via *out_raw, the raw (TimestampScale-unit) timestamp of the first keyframe block
  * of `video_track` (clusterTimestamp + block relative ts). Returns 1 on success, 0

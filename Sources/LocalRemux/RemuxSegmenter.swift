@@ -129,7 +129,8 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// exactly why (vs an opaque failure).
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
          deriveEac3FrameDur: Bool = false, keyframeScan: Bool = false,
-         keyframeIndex: Bool = false) throws {
+         keyframeIndex: Bool = false, parallelScan: Bool = false,
+         parallelConcurrency: Int = 8) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -161,32 +162,69 @@ final class RemuxSegmenter: @unchecked Sendable {
         // no-index titles). Must run BEFORE reading the segment count below, since it
         // can change segment_count. A no-op for index-built tables and when OFF.
         if keyframeScan {
+            // Flag-gated (com.plozz.playback.remuxParallelScan): collapse the in-process
+            // scan's serialized seek-probe RTTs by discovering K disjoint timeline slices
+            // CONCURRENTLY, each on its own probe session + byte reader, then applying the
+            // merged real-keyframe boundaries to this session. Only attempted when the
+            // open-time table is the fixed-cadence fallback (no usable index), so index
+            // titles never pay the K probe-opens — they stay byte-identical. Falls back to
+            // the in-process sequential scan when discovery yields nothing.
+            var appliedParallel = false
+            if parallelScan, plozz_remux_used_fixed_cadence(session) == 1 {
+                let total = reader.size()
+                if let pr = ParallelKeyframeDiscovery.discover(
+                        sourceURL: sourceURL, headers: headers,
+                        durationSeconds: result.duration_seconds,
+                        targetSeconds: targetSegmentSeconds,
+                        concurrency: parallelConcurrency, keyframeIndex: keyframeIndex) {
+                    let applied = pr.keyframes.withUnsafeBufferPointer { buf in
+                        Int(plozz_remux_apply_keyframes(session, buf.baseAddress, Int32(buf.count)))
+                    }
+                    if applied > 0 {
+                        appliedParallel = true
+                        let pct = total > 0 ? Double(pr.bytesRead) / Double(total) * 100 : 0
+                        RemuxLog.info(String(format:
+                            "RemuxSegmenter: PARALLEL keyframe-scan rebuilt %d segments from %d keyframes "
+                            + "across %d slices (%d complete) — read %lld bytes (%.1f%% of %lld) in %d fetches, "
+                            + "%.2fs wall [index=%@]",
+                            applied, pr.keyframes.count, pr.sliceCount, pr.completeSlices,
+                            pr.bytesRead, pct, total, pr.fetchCount, pr.elapsedSeconds,
+                            keyframeIndex ? "on" : "off"))
+                    }
+                }
+                if !appliedParallel {
+                    RemuxLog.info("RemuxSegmenter: parallel keyframe-scan produced no table — falling back to sequential scan")
+                }
+            }
+
             // Flag-gated (com.plozz.playback.remuxKeyframeIndex): cut discovery's
             // per-probe byte cost by reading each boundary keyframe's PTS from the
             // Matroska cluster HEADER (a few KB) instead of demuxing the whole keyframe
             // packet (~one 4K IDR ≈ 1+ MiB). Shrink the reader's read-ahead so the
             // direct header reads don't over-fetch, then restore it for muxing. The C
             // side self-validates against av_read_frame and falls back on any mismatch.
-            let restoreReadAhead = reader.currentReadAhead
-            if keyframeIndex {
-                plozz_remux_set_keyframe_index_mode(session, 1)
-                reader.setReadAhead(64 * 1024)
+            if !appliedParallel {
+                let restoreReadAhead = reader.currentReadAhead
+                if keyframeIndex {
+                    plozz_remux_set_keyframe_index_mode(session, 1)
+                    reader.setReadAhead(64 * 1024)
+                }
+                // Bracket the rebuild with the reader's byte/fetch counters so the cost of
+                // seek-sampled discovery is visible in the log: it must be O(segments) tiny
+                // ranged reads, NOT O(filesize) — the open-latency advantage over a full
+                // av_read_frame-to-EOF keyframe scan that stalls on multi-GB 4K titles.
+                let before = reader.networkSnapshot()
+                let total = reader.size()
+                plozz_remux_set_keyframe_scan(session, 1)
+                let after = reader.networkSnapshot()
+                if keyframeIndex { reader.setReadAhead(restoreReadAhead) }
+                let scanBytes = after.bytesFetched - before.bytesFetched
+                let scanFetches = after.fetchCount - before.fetchCount
+                let pct = total > 0 ? Double(scanBytes) / Double(total) * 100 : 0
+                RemuxLog.info(String(format:
+                    "RemuxSegmenter: keyframe-scan discovery read %lld bytes (%.1f%% of %lld) in %d fetches [index=%@]",
+                    scanBytes, pct, total, scanFetches, keyframeIndex ? "on" : "off"))
             }
-            // Bracket the rebuild with the reader's byte/fetch counters so the cost of
-            // seek-sampled discovery is visible in the log: it must be O(segments) tiny
-            // ranged reads, NOT O(filesize) — the open-latency advantage over a full
-            // av_read_frame-to-EOF keyframe scan that stalls on multi-GB 4K titles.
-            let before = reader.networkSnapshot()
-            let total = reader.size()
-            plozz_remux_set_keyframe_scan(session, 1)
-            let after = reader.networkSnapshot()
-            if keyframeIndex { reader.setReadAhead(restoreReadAhead) }
-            let scanBytes = after.bytesFetched - before.bytesFetched
-            let scanFetches = after.fetchCount - before.fetchCount
-            let pct = total > 0 ? Double(scanBytes) / Double(total) * 100 : 0
-            RemuxLog.info(String(format:
-                "RemuxSegmenter: keyframe-scan discovery read %lld bytes (%.1f%% of %lld) in %d fetches [index=%@]",
-                scanBytes, pct, total, scanFetches, keyframeIndex ? "on" : "off"))
         }
 
         var durations: [Double] = []
@@ -324,3 +362,147 @@ final class RemuxSegmenter: @unchecked Sendable {
         String(cString: ptr)
     }
 }
+
+// MARK: - Parallel keyframe discovery
+
+/// Bounded-parallel keyframe discovery for the full-at-open keyframe scan
+/// (`com.plozz.playback.remuxParallelScan`, default OFF).
+///
+/// The in-process scan is wall-clock-bound by N serialized `avformat_seek_file`
+/// BACKWARD probes on a single libav cursor — at feature length that is seconds of
+/// RTT even with the cheap 64 KB cluster-header probe (which cut BYTES, not the
+/// serialized round-trips). This splits the timeline into K disjoint slices and
+/// discovers each slice's real keyframe boundaries CONCURRENTLY, each on its own
+/// probe session + `HTTPRangeReader` (separate URLSession connection + demux cursor),
+/// using the same self-calibrating `plozz_remux_kf_probe_next` primitive. That
+/// collapses the serialized RTTs to ~N/K, so a multi-GB / 2.5 h no-Cues title can
+/// rebuild its WHOLE timeline near the couple-second bar.
+///
+/// Crucially the merged boundaries are all real keyframes and `apply_keyframes` stamps
+/// each EXTINF as the true span, so the table stays on the VOD+ENDLIST playlist —
+/// native full-timeline seek is preserved (the differentiator vs a windowed EVENT
+/// design). And it is IN SYNC BY CONSTRUCTION even if a slice is capped early: a region
+/// with few sampled keyframes just yields a longer in-sync segment, never the
+/// EXTINF-vs-span mismatch that causes the progressive desync.
+enum ParallelKeyframeDiscovery {
+
+    /// Telemetry + the merged keyframe list returned to the caller.
+    struct Result {
+        var keyframes: [Double]   // merged, sorted, 0-based, keyframes[0] == 0
+        var sliceCount: Int
+        var completeSlices: Int   // slices that reached their end before the probe cap
+        var bytesRead: Int64
+        var fetchCount: Int
+        var elapsedSeconds: Double
+    }
+
+    /// Merge K per-slice keyframe arrays into one sorted, strictly-increasing list with a
+    /// t=0 origin. Pure (no I/O) so it is unit-tested directly. `epsilon` collapses the
+    /// duplicate boundary keyframe adjacent slices both discover at their shared seam, and
+    /// drops any out-of-range sample. Slice order is irrelevant (it sorts globally).
+    static func mergeKeyframes(_ slices: [[Double]], duration: Double,
+                               epsilon: Double = 0.05) -> [Double] {
+        var all: [Double] = [0.0]
+        for slice in slices { all.append(contentsOf: slice) }
+        all.sort()
+        var out: [Double] = []
+        out.reserveCapacity(all.count)
+        for t in all {
+            if t < 0 { continue }
+            if duration > 0, t > duration + 0.001 { continue }
+            if let last = out.last, t <= last + epsilon { continue }
+            out.append(t)
+        }
+        return out
+    }
+
+    /// One slice's discovery outcome, collected under a lock (K is small and each slice
+    /// is network-bound, so the lock is negligible and avoids concurrent Array mutation).
+    private struct SliceOut {
+        var keyframes: [Double]
+        var complete: Bool
+        var bytes: Int64
+        var fetches: Int
+    }
+
+    /// Run the parallel discovery over `sourceURL`. Returns nil when it cannot improve on
+    /// the in-process scan (no duration, nothing discovered) so the caller falls back to
+    /// the sequential `plozz_remux_set_keyframe_scan`.
+    static func discover(sourceURL: URL, headers: [String: String],
+                         durationSeconds: Double, targetSeconds: Double,
+                         concurrency: Int, keyframeIndex: Bool) -> Result? {
+        guard durationSeconds > targetSeconds else { return nil }
+        let k = max(1, min(concurrency, 32))
+        let sliceLen = durationSeconds / Double(k)
+        let target = targetSeconds < 1.0 ? 6.0 : targetSeconds
+
+        let lock = NSLock()
+        var outs: [SliceOut] = []
+        outs.reserveCapacity(k)
+
+        let started = DispatchTime.now()
+        DispatchQueue.concurrentPerform(iterations: k) { i in
+            let sliceStart = Double(i) * sliceLen
+            let sliceEnd = (i == k - 1) ? durationSeconds : Double(i + 1) * sliceLen
+            // Generous per-slice probe cap: ~slice/target boundaries, ×3 + slack for
+            // sparse keyframes. Bounds a pathological slice without blocking the others;
+            // a capped slice degrades to coarser-but-in-sync, never desync.
+            let maxProbes = Int((sliceEnd - sliceStart) / target) * 3 + 16
+
+            let reader = HTTPRangeReader(url: sourceURL, headers: headers)
+            if keyframeIndex { reader.setReadAhead(64 * 1024) }
+
+            func record(_ keyframes: [Double], complete: Bool) {
+                let snap = reader.networkSnapshot()
+                lock.lock()
+                outs.append(SliceOut(keyframes: keyframes, complete: complete,
+                                     bytes: snap.bytesFetched, fetches: snap.fetchCount))
+                lock.unlock()
+            }
+
+            var result = plozz_remux_open_result()
+            let opaque = Unmanaged.passUnretained(reader).toOpaque()
+            guard let session = plozz_remux_open(opaque, remuxReadAdapter, remuxSeekAdapter,
+                                                 target, &result), result.ok == 1 else {
+                record([], complete: false)
+                return
+            }
+            defer { plozz_remux_close(session) }
+            if keyframeIndex { plozz_remux_set_keyframe_index_mode(session, 1) }
+            guard let probe = plozz_remux_kf_probe_create(session, keyframeIndex ? 1 : 0) else {
+                record([], complete: false)
+                return
+            }
+            defer { plozz_remux_kf_probe_free(probe) }
+
+            var found: [Double] = []
+            var after = sliceStart
+            var probes = 0
+            var pts: Double = 0
+            while after < sliceEnd && probes < maxProbes {
+                probes += 1
+                let ok = withUnsafeMutablePointer(to: &pts) {
+                    plozz_remux_kf_probe_next(probe, after, target, $0)
+                }
+                if ok != 1 || pts <= after { break }   // EOF / seek fail / no progress
+                found.append(pts)
+                after = pts
+            }
+            // Incomplete only when the probe cap tripped before reaching the slice end;
+            // a natural stop (EOF) with room to spare is "complete" for this slice.
+            let hitCap = probes >= maxProbes && after < sliceEnd
+            record(found, complete: !hitCap)
+        }
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds &- started.uptimeNanoseconds) / 1e9
+
+        let merged = mergeKeyframes(outs.map { $0.keyframes }, duration: durationSeconds)
+        guard merged.count >= 2 else { return nil }
+        return Result(keyframes: merged,
+                      sliceCount: k,
+                      completeSlices: outs.filter { $0.complete }.count,
+                      bytesRead: outs.reduce(0) { $0 + $1.bytes },
+                      fetchCount: outs.reduce(0) { $0 + $1.fetches },
+                      elapsedSeconds: elapsed)
+    }
+}
+

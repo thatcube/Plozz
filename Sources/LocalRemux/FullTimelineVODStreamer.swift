@@ -169,16 +169,35 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
             }
             return keyframeScan
         }()
+        // Flag `com.plozz.playback.remuxParallelScan` (DEFAULT OFF): discover the keyframe
+        // table for a no-index title by probing K disjoint timeline slices CONCURRENTLY
+        // (each on its own connection + demux cursor) instead of one serialized seek-probe
+        // walk — collapsing the open-latency RTT wall to ~N/K so a feature-length / multi-GB
+        // title can rebuild its WHOLE timeline in sync near the couple-second bar, while
+        // keeping the VOD+ENDLIST playlist (native full-timeline seek preserved). Inert
+        // unless keyframeScan is ON and the source is the fixed-cadence fallback, so default
+        // behavior is byte-identical. Optional integer `remuxParallelScanK` tunes the slice
+        // count on-device (default 8) without a rebuild.
+        let parallelScan = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxParallelScan")
+        let parallelK: Int = {
+            let v = UserDefaults.standard.integer(forKey: "com.plozz.playback.remuxParallelScanK")
+            return v > 0 ? v : 8
+        }()
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
                                            keyframeScan: keyframeScan,
-                                           keyframeIndex: keyframeIndex)
+                                           keyframeIndex: keyframeIndex,
+                                           parallelScan: parallelScan,
+                                           parallelConcurrency: parallelK)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
         if keyframeScan { RemuxLog.info("Session: remuxKeyframeScan ON — real-keyframe segment table for no-index sources") }
         if keyframeScan {
             RemuxLog.info(keyframeIndex
                 ? "Session: keyframe-scan probes via cluster-header parse (low open-latency, ~64KB/probe)"
                 : "Session: keyframe-scan probes via av_read_frame demux (~0.8MB/probe; remuxKeyframeIndex forced OFF)")
+            if parallelScan {
+                RemuxLog.info("Session: remuxParallelScan ON — discovering keyframe table across \(parallelK) concurrent slices (native full-timeline seek preserved)")
+            }
         }
         let facts = segmenter.facts
 

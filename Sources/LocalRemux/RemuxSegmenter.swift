@@ -285,12 +285,24 @@ final class RemuxSegmenter: @unchecked Sendable {
                         }
                         let fileSize = sourceSize > 0 ? sourceSize : reader.size()
                         let pct = fileSize > 0 ? Double(sampler.stats.bytesRead) / Double(fileSize) * 100 : 0
+                        let perCluster = sampler.stats.clustersWalked > 0
+                            ? sampler.stats.bytesRead / sampler.stats.clustersWalked : 0
                         RemuxLog.info(String(format:
                             "remux-discovery: matroska sampler read %.3fMB = %.3f%% of %.2fMB "
-                                + "(%d clusters, lazy prefix %d keyframes [0,%.0fs])",
+                                + "(%d clusters, %d syncScans, %dB/cluster, lazy prefix %d keyframes [0,%.0fs])",
                             Double(sampler.stats.bytesRead) / 1_048_576, pct,
                             Double(fileSize) / 1_048_576, sampler.stats.clustersWalked,
-                            kf.count - 1, prefixSeconds))
+                            sampler.stats.syncScans, perCluster, kf.count - 1, prefixSeconds))
+                        // Engaged-vs-fallback verdict the capture can read directly:
+                        // syncScans counts ONLY clusters whose size was the unknown-size
+                        // sentinel (so the next-cluster offset had to be found by a body
+                        // scan instead of a size skip). 0 ⇒ all known-size, header-only
+                        // cheap; >0 ⇒ that many unknown-size clusters forced body scans.
+                        if sampler.stats.syncScans == 0 {
+                            RemuxLog.info("remux: matroska cluster sizing — all \(sampler.stats.clustersWalked) prefix clusters KNOWN-SIZE (header-only skip, no body scan)")
+                        } else {
+                            RemuxLog.info("remux: matroska cluster sizing — \(sampler.stats.syncScans) of \(sampler.stats.clustersWalked) prefix clusters UNKNOWN-SIZE (forced body sync-scan; byte cost inflates here)")
+                        }
                         RemuxLog.info("remux: matroska keyframe sampler started — "
                             + "\(complete ? "covered whole source (complete)" : "background extending window-by-window")")
                     } else {
@@ -560,9 +572,16 @@ final class RemuxSegmenter: @unchecked Sendable {
 
         // I/O outside the lock: independent reader, no demuxer-cursor contention.
         var fresh: [Double] = []
+        let bytesBefore = sampler.stats.bytesRead
+        let syncBefore = sampler.stats.syncScans
         _ = sampler.walkClusters(info, state: &walk,
                                  untilSeconds: frontier + windowSeconds, into: &fresh)
         let newKf = fresh.filter { $0 > frontier + 1e-6 }
+        let windowBytes = sampler.stats.bytesRead - bytesBefore
+        let windowSyncs = sampler.stats.syncScans - syncBefore
+        RemuxLog.info(String(format:
+            "remux-discovery: matroska window [%.0f,+%.0fs] read %.3fMB, %d syncScans, %d keyframes",
+            frontier, windowSeconds, Double(windowBytes) / 1_048_576, windowSyncs, newKf.count))
 
         lock.lock()
         defer { lock.unlock() }

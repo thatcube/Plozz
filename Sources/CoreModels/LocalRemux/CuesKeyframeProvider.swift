@@ -24,12 +24,16 @@ public struct CuesKeyframeProvider {
     }
 
     /// Maps each Cue's presentation time (ticks → seconds via TimestampScale) into
-    /// the shared keyframe currency, enforcing the table invariants.
+    /// the shared keyframe currency, enforcing the table invariants. Because Cues
+    /// carry the backing Cluster's byte position, this is a byte-offset-bearing
+    /// source: `byteOffsets` is populated (absolute file offset = segment data
+    /// offset + the cue's Segment-relative cluster position).
     public func keyframeTable() -> KeyframeTable {
         let times = summary.cues.map { $0.timeSeconds(timestampScaleNs: summary.timestampScaleNs) }
+        let offsets = summary.cues.map { Int64(summary.segmentDataOffset + $0.clusterPosition) }
         let duration = durationHint
             ?? summary.durationSeconds
             ?? (times.max() ?? 0)
-        return KeyframeTable.normalized(times: times, duration: duration)
+        return KeyframeTable.normalized(times: times, byteOffsets: offsets, duration: duration)
     }
 }

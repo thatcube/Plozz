@@ -36,6 +36,49 @@ final class KeyframeTableTests: XCTestCase {
         XCTAssertTrue(table.isEmpty)
         XCTAssertEqual(table.count, 0)
         XCTAssertEqual(table.duration, 42)
+        XCTAssertNil(table.byteOffsets)
+        XCTAssertFalse(table.hasByteOffsets)
+    }
+
+    // MARK: - byteOffsets pairing
+
+    func testNormalizedKeepsByteOffsetsParallelThroughSortAndDedupe() {
+        // Times out of order with a duplicate; offsets must follow their time.
+        let table = KeyframeTable.normalized(
+            times: [12, 0, 6, 6, 18.5],
+            byteOffsets: [800, 100, 400, 400, 1250],
+            duration: 20
+        )
+        XCTAssertEqual(table.times, [0, 6, 12, 18.5])
+        XCTAssertEqual(table.byteOffsets, [100, 400, 800, 1250])
+        XCTAssertTrue(table.hasByteOffsets)
+    }
+
+    func testNormalizedDropsByteOffsetsPairedWithInvalidTimes() {
+        let table = KeyframeTable.normalized(
+            times: [-1, 0, .nan, 4, 8],
+            byteOffsets: [10, 100, 200, 400, 800],
+            duration: 12
+        )
+        XCTAssertEqual(table.times, [0, 4, 8])
+        XCTAssertEqual(table.byteOffsets, [100, 400, 800])
+    }
+
+    func testNormalizedTreatsMismatchedByteOffsetsAsAbsent() {
+        // A length mismatch must NOT misalign offsets — drop them entirely.
+        let table = KeyframeTable.normalized(
+            times: [0, 4, 8],
+            byteOffsets: [100, 400], // wrong count
+            duration: 12
+        )
+        XCTAssertEqual(table.times, [0, 4, 8])
+        XCTAssertNil(table.byteOffsets)
+    }
+
+    func testNormalizedNilByteOffsetsStaysNil() {
+        let table = KeyframeTable.normalized(times: [0, 4, 8], duration: 12)
+        XCTAssertNil(table.byteOffsets)
+        XCTAssertFalse(table.hasByteOffsets)
     }
 
     func testNormalizedInvariantsHoldOnArbitraryInput() {
@@ -71,6 +114,9 @@ final class KeyframeTableTests: XCTestCase {
         let table = CuesKeyframeProvider(summary: summary).keyframeTable()
         XCTAssertEqual(table.times, [0, 6, 12, 18.5])
         XCTAssertEqual(table.duration, 7200, accuracy: 1e-9)
+        // Live-Cues source carries absolute Cluster byte offsets (segmentDataOffset
+        // is 0 here, so offsets equal the cue cluster positions).
+        XCTAssertEqual(table.byteOffsets, [5_000, 4_000_000, 8_000_000, 12_500_000])
     }
 
     func testProviderHonorsNonDefaultTimestampScale() {

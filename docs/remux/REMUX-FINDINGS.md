@@ -178,6 +178,21 @@ struct KeyframeTable { var duration: Double; var times: [Double]; var byteOffset
 >   uses it); exact-Cues = `add_tail=0`, fixed-cadence replacement gated on
 >   `used_fixed_cadence==1`. The 0-base rebase + `add_tail` stay in C; the Swift marshal only
 >   feeds `zeroBasedTimes`. `set_full_vod_mode` keeps window/cadence setup only.
+>
+> **B5 final-report integration gotchas (bank these — non-obvious, costly to rediscover):**
+> - **Cache call-site merge break (B5 ↔ Track C):** B5's branch still has the PRE-donation
+>   `KeyframeIndexCache` + 3 `RemuxSegmenter` call-sites (~lines 533/534/722) behind default-OFF
+>   `remuxKeyframeCache` using the OLD API (`store(boundaries:)`, `boundaries(fromDurations:)`).
+>   Track C (`a5fd88e9`) owns the EVOLVED cache (renamed `times:`, v2, deleted the baked-cadence
+>   helper). At cache-merge: **Track C's file wins**; re-point B5's 3 sites to `store(times:)` with
+>   RAW keyframe times (sampler path `self.lazyKf`; C-table path `seg.start_seconds` — NEVER
+>   re-derive from durations). Self-consistent on each branch now; breaks only at merge.
+> - **`add_tail` & serve gate:** exact-Cues tables use `add_tail=0` (`add_tail=1` → tail-404 drift);
+>   serve gate is `plozz_remux_used_fixed_cadence(s)==1`, NOT a count comparison (under hypothesis-B
+>   libav's index is empty).
+> - **Sparse mis-index probe edge:** the `remuxCuesProbe` is instrumented to catch `fixedCadence=no`
+>   + `hasCues=YES` with B5's count ≠ libav's index count = a SPARSE (non-empty) mis-index that the
+>   `used_fixed_cadence` gate would MISS. Unlikely, but the gating capture will reveal it.
 
 ---
 

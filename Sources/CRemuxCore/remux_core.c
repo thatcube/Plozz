@@ -163,6 +163,20 @@ struct plozz_remux_session {
     double *resolved_kf;     /* resolved forward-snap boundaries, -1 = unresolved */
     int resolved_kf_count;   /* == segment_count + 1 (one boundary per edge) */
     int full_vod_resolves;   /* telemetry: boundaries resolved on-demand so far */
+
+    /* CUE FAST-PATH (Track A producer / B7 consume). When the Swift layer has parsed
+     * the container Cues itself (libav left the title index-less) it hands the exact
+     * keyframe times here via plozz_remux_set_cue_table BEFORE set_full_vod_mode. The
+     * full-vod engage then SHORT-CIRCUITS the fixed-cadence estimate: the segment table
+     * is built from these real boundaries and every forward-snap resolve is pre-seeded
+     * (a no-op), so segment STARTS land on real keyframes with zero probe reads. The
+     * parallel byte offsets are stored for a future direct cluster byte-seek; nil ->
+     * the muxer backward-seeks by time (boundary is already a real keyframe). */
+    double *cue_times;          /* sorted, ~0-based real keyframe times; NULL when unset */
+    int cue_count;              /* number of cue_times (need >= 2 to form a segment) */
+    int64_t *cue_byte_offsets;  /* parallel to cue_times; NULL when not supplied */
+    double cue_duration;        /* table's declared duration (<=0 -> use duration_seconds) */
+    int has_cue_table;          /* 1 once a usable table is set */
 };
 
 /* ----- AVIO callback adapters ------------------------------------------- */
@@ -1030,6 +1044,47 @@ static double estimate_gop_cadence(plozz_remux_session *s, double fallback) {
  * output stays byte-identical. Must be called BEFORE Swift reads segment durations.
  * Returns 1 if full-VOD engaged, 0 if it no-op'd (indexed source or no session).
  */
+/*
+ * CUE FAST-PATH setter. The Swift provider (Track A) calls this with the real
+ * keyframe times it parsed directly from the container Cues when libav produced no
+ * usable index. Stores a private copy of the table on the session; consumed by the
+ * next plozz_remux_set_full_vod_mode. Pass count < 2 (or NULL times) to clear it.
+ * byte_offsets is optional (NULL = muxer backward-seeks by time). A no-op on a NULL
+ * session. Safe to call repeatedly (replaces any prior table).
+ */
+void plozz_remux_set_cue_table(plozz_remux_session *s, double duration,
+                               const double *times, int count,
+                               const int64_t *byte_offsets) {
+    if (!s) return;
+    free(s->cue_times);
+    free(s->cue_byte_offsets);
+    s->cue_times = NULL;
+    s->cue_byte_offsets = NULL;
+    s->cue_count = 0;
+    s->cue_duration = 0.0;
+    s->has_cue_table = 0;
+    if (!times || count < 2) return;
+
+    s->cue_times = (double *)malloc(sizeof(double) * (size_t)count);
+    if (!s->cue_times) return;
+    memcpy(s->cue_times, times, sizeof(double) * (size_t)count);
+    if (byte_offsets) {
+        s->cue_byte_offsets = (int64_t *)malloc(sizeof(int64_t) * (size_t)count);
+        if (s->cue_byte_offsets)
+            memcpy(s->cue_byte_offsets, byte_offsets, sizeof(int64_t) * (size_t)count);
+    }
+    s->cue_count = count;
+    s->cue_duration = (duration > 0.0) ? duration : 0.0;
+    s->has_cue_table = 1;
+    remux_log(0, "remux: cue table set count=%d duration=%.2f offsets=%s",
+              count, duration, byte_offsets ? "yes" : "no");
+}
+
+/* Telemetry/guard: 1 if a usable cue table is currently set, else 0. */
+int plozz_remux_has_cue_table(plozz_remux_session *s) {
+    return (s && s->has_cue_table) ? 1 : 0;
+}
+
 int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
     if (!s || !enabled) return 0;
     if (!s->used_fixed_cadence) {
@@ -1083,7 +1138,35 @@ int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
               (env_cad && *env_cad) ? "env" : "default");
     double cadence = fixed_cadence;
     s->target_segment_seconds = fixed_cadence;
-    build_segment_table(s, fixed_cadence);
+
+    /* CUE FAST-PATH: if the Swift layer supplied exact container-parsed keyframe times
+     * (libav was index-blind but the title HAS Cues), short-circuit the fixed-cadence
+     * fallback — build the segment table from the real boundaries so EXTINF is exact and
+     * every segment START is a real keyframe. We deliberately leave used_fixed_cadence
+     * untouched: the Swift engage gate already passed, and keyframe-scan is guarded off
+     * under full-vod, so the build-time flag's post-engage value is inert here. */
+    int cue_built = 0;
+    if (s->has_cue_table && s->cue_count >= 2) {
+        double cue_dur = (s->cue_duration > 0.0) ? s->cue_duration : s->duration_seconds;
+        plozz_remux_segment *cue_segs = NULL;
+        int cue_n = build_segments_from_keyframes(s->cue_times, s->cue_count,
+                                                  cue_dur, fixed_cadence, &cue_segs);
+        if (cue_n > 0 && cue_segs) {
+            free(s->segments);
+            s->segments = cue_segs;
+            s->segment_count = cue_n;
+            cue_built = 1;
+            remux_log(1, "remux: full-vod CUE short-circuit segs=%d exact-boundaries "
+                         "(cadence estimate skipped)", cue_n);
+        } else {
+            free(cue_segs);
+            remux_log(0, "remux: cue table present but produced no segments — "
+                         "falling back to fixed cadence");
+        }
+    }
+    if (!cue_built) {
+        build_segment_table(s, fixed_cadence);
+    }
 
     free(s->resolved_kf);
     s->resolved_kf_count = s->segment_count + 1;
@@ -1091,6 +1174,18 @@ int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
     if (!s->resolved_kf) { s->resolved_kf_count = 0; return 0; }
     for (int i = 0; i < s->resolved_kf_count; i++) s->resolved_kf[i] = -1.0;
     s->resolved_kf[0] = 0.0;   /* B_0 is always the file head */
+    if (cue_built) {
+        /* Every segment boundary is already a real container keyframe, so PRE-SEED the
+         * whole resolved_kf[] ladder: each fullvod_resolve_start becomes a cached no-op
+         * (zero probe reads, exact contiguous STARTS). The mux END still stops on the
+         * first KEY >= window end (the always-on span cap nets any libav flag-blind
+         * over-walk); exact END/EXTINF is the shared layer-2 stop-by-PTS follow-up. */
+        for (int i = 0; i < s->segment_count; i++)
+            s->resolved_kf[i] = s->segments[i].start_seconds;
+        s->resolved_kf[s->segment_count] =
+            s->segments[s->segment_count - 1].start_seconds +
+            s->segments[s->segment_count - 1].duration_seconds;
+    }
     s->full_vod_mode = 1;
     s->full_vod_resolves = 0;
 
@@ -2161,6 +2256,8 @@ void plozz_remux_close(plozz_remux_session *s) {
     free(s->segments);
     free(s->lazy_kf);
     free(s->resolved_kf);
+    free(s->cue_times);
+    free(s->cue_byte_offsets);
     if (s->lazy_pkt) av_packet_free(&s->lazy_pkt);
     if (s->ic) {
         /* avformat_close_input frees ic; our custom pb is freed separately. */

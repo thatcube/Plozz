@@ -281,6 +281,25 @@ int plozz_remux_plan_segments_progressive(const double *keyframe_times, int coun
                                           double *out_durations, int max_out);
 
 /*
+ * CUE FAST-PATH (Track A producer -> B7 consume). Supply the exact keyframe times
+ * parsed directly from the container Cues when libav left the title without a usable
+ * index. Call BEFORE plozz_remux_set_full_vod_mode: the full-vod engage then builds the
+ * segment table from these real boundaries (exact EXTINF, real-keyframe STARTS, every
+ * forward-snap resolve pre-seeded to a no-op) instead of the fixed-cadence fallback.
+ *  - times:        sorted, ~0-based keyframe times in seconds (count >= 2 to take effect)
+ *  - duration:     declared timeline duration (<= 0 -> the session's probed duration)
+ *  - byte_offsets: OPTIONAL parallel cluster byte offsets (NULL -> mux backward-seeks by
+ *                  time; reserved for a future direct byte-seek optimization)
+ * Stores a private copy; pass count < 2 or times == NULL to clear. No-op on NULL session.
+ */
+void plozz_remux_set_cue_table(plozz_remux_session *s, double duration,
+                               const double *times, int count,
+                               const int64_t *byte_offsets);
+
+/* 1 if a usable cue table is currently set on the session, else 0. */
+int plozz_remux_has_cue_table(plozz_remux_session *s);
+
+/*
  * Enable the B7 FULL-VOD provisional-timeline mode. The playlist publishes the full
  * 0->duration fixed-cadence table (so the entire scrub bar is seekable at open —
  * instant launch + full-timeline seek), but every segment is muxed with FORWARD-

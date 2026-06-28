@@ -310,6 +310,11 @@ public final class PlayerViewModel {
                 return makeHybrid(captionSettings)
             }
             return engineFactory.makeNative(captionSettings)
+        case .plozzigen:
+            if let makePlozzigen = engineFactory.makePlozzigen, let engine = makePlozzigen() {
+                return engine
+            }
+            return engineFactory.makeNative(captionSettings)
         case .native:
             return engineFactory.makeNative(captionSettings)
         }
@@ -352,6 +357,9 @@ public final class PlayerViewModel {
         case .native:
             return engineFactory.hybridAvailable ? .hybrid : nil
         case .hybrid:
+            return .native
+        case .plozzigen:
+            // Plozzigen failed — fall back to native (server transcode safety net).
             return .native
         }
     }
@@ -404,6 +412,14 @@ public final class PlayerViewModel {
             var kind: PlaybackEngineKind
             if isLocalRemux {
                 kind = .native
+            } else if !forceTranscode, engineFactory.plozzigenAvailable,
+                      let descriptor = request.localRemuxSource,
+                      case .eligible = descriptor.plozzigenEligibility {
+                // Plozzigen handles the full pipeline: FFmpeg demux → HLS-fMP4 →
+                // localhost → AVPlayer. Covers HEVC/H.264/VP9/AV1 video with any
+                // audio (stream-copy or lossless bridge). Skip LocalRemux; the
+                // engine reads localRemuxSource.originalURL directly.
+                kind = .plozzigen
             } else {
                 kind = EngineRouter.selectEngine(
                     source: request.sourceMetadata,
@@ -425,8 +441,9 @@ public final class PlayerViewModel {
             // (PGS/VOBSUB), AVPlayer can't render it — route to the hybrid engine
             // so it appears, but only when we're direct-playing and a hybrid
             // engine is available. (A file with a text-subtitle equivalent stays
-            // native; see `defaultSubtitleNeedsHybridEngine`.)
-            if !isLocalRemux, kind == .native, !request.isTranscoding, engineFactory.hybridAvailable,
+            // native; see `defaultSubtitleNeedsHybridEngine`.) Plozzigen also
+            // can't render bitmap subtitles, so it overrides too.
+            if !isLocalRemux, (kind == .native || kind == .plozzigen), !request.isTranscoding, engineFactory.hybridAvailable,
                request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
                    mode: captionSettings.subtitleMode,
                    preferredLanguage: captionSettings.resolvedPreferredLanguage) {
@@ -1097,8 +1114,12 @@ public final class PlayerViewModel {
     public var isTranscoding: Bool { request?.isTranscoding ?? false }
 
     /// How the server is delivering the active stream (direct play / remux /
-    /// transcode). Read by the playback diagnostics overlay's Source row.
-    public var deliveryMode: PlaybackDiagnostics.PlaybackMode { request?.deliveryMode ?? .unknown }
+    /// transcode). When Plozzigen is the active engine, it overrides the provider's
+    /// mode since Plozzigen reads original bytes directly (not a server transcode).
+    public var deliveryMode: PlaybackDiagnostics.PlaybackMode {
+        if currentEngineKind == .plozzigen { return .plozzigen }
+        return request?.deliveryMode ?? .unknown
+    }
 
     /// Provider source facts (codec/HDR/channels/…) for the playing item, used
     /// to populate the playback diagnostics overlay.
@@ -1106,6 +1127,7 @@ public final class PlayerViewModel {
 
     /// Which backend (Plex / Jellyfin) resolved the active playback.
     public var sourceProvider: ProviderKind? { request?.sourceProvider }
+    public var serverName: String? { request?.serverName }
 
     /// The URL AVPlayer is actually playing (after any local-remux swap), used for
     /// the diagnostics "Stream" transport row.

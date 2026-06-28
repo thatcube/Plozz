@@ -42,56 +42,53 @@ public struct CastRowView: View {
                     }
                     .padding(.leading, leadingInset)
                     .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                    .padding(.top, PlozzTheme.Spacing.small)
-                    .padding(.bottom, PlozzTheme.Spacing.large)
+                    // Keep the rail clipping (no `scrollClipDisabled`) so the focus
+                    // engine holds the first/last card at its inset, and reserve room
+                    // *inside* the clip for the focused card's lift + shadow. The
+                    // negative outer padding restores the original 12/24 insets, so
+                    // the row's height is unchanged — only the clip grows.
+                    .padding(.vertical, metrics.railShadowClearance)
                 }
-                .scrollClipDisabled()
+                .padding(.top, metrics.railClearanceOffset(for: PlozzTheme.Spacing.small))
+                .padding(.bottom, metrics.railClearanceOffset(for: PlozzTheme.Spacing.large))
             }
         }
     }
 }
 
-/// A single cast member: a circular avatar that lifts on focus, with the
-/// person's name and role beneath.
+/// A single cast member: a circular avatar that lifts on focus with the shared
+/// circular glass halo, and the person's name and role beneath. A deliberately
+/// smaller, density-aware variant of the artist/profile circular style.
 private struct CastMemberCard: View {
     let person: MediaPerson
 
-    @FocusState private var isFocused: Bool
-
-    private static let avatarSize: CGFloat = 160
+    @Environment(\.plozzMetrics) private var metrics
 
     var body: some View {
-        VStack(spacing: 12) {
-            avatar
-                .frame(width: Self.avatarSize, height: Self.avatarSize)
-                .clipShape(Circle())
-                .overlay(
-                    Circle().strokeBorder(
-                        isFocused ? Color.white : Color.white.opacity(0.12),
-                        lineWidth: isFocused ? 4 : 1
-                    )
-                )
-                .scaleEffect(isFocused ? 1.1 : 1.0)
-                .shadow(color: .black.opacity(isFocused ? 0.5 : 0), radius: 18, y: 10)
-
-            VStack(spacing: 2) {
-                Text(person.name)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                if let role = person.role {
-                    Text(role)
-                        .font(.system(size: 19))
-                        .foregroundStyle(.secondary)
+        let diameter = metrics.castTileDiameter
+        let slot = diameter + metrics.circleFocusPadding * 2
+        CircularFocusTile(
+            diameter: diameter,
+            focusPadding: metrics.circleFocusPadding,
+            action: {},
+            avatar: { avatar },
+            caption: { _ in
+                VStack(spacing: 2) {
+                    Text(person.name)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
+                    if let role = person.role {
+                        Text(role)
+                            .font(.system(size: 19))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
+                .frame(width: slot)
+                .multilineTextAlignment(.center)
             }
-            .frame(width: Self.avatarSize + 40)
-            .multilineTextAlignment(.center)
-        }
-        .focusable(true)
-        .focused($isFocused)
-        .animation(.easeInOut(duration: 0.18), value: isFocused)
+        )
     }
 
     @ViewBuilder

@@ -3,6 +3,7 @@ import CoreModels
 import FeaturePlayback
 #if canImport(UIKit)
 import EngineMPV
+import EnginePlozzigen
 import LocalRemux
 #endif
 
@@ -59,7 +60,10 @@ enum HybridPlayback {
         #if canImport(UIKit)
         switch preferredEngine {
         case .mpv:
-            return EngineFactory(makeHybrid: { _ in MPVVideoEngineFactory.makeEngine() })
+            return EngineFactory(
+                makeHybrid: { _ in MPVVideoEngineFactory.makeEngine() },
+                makePlozzigen: { PlozzigenVideoEngineFactory.makeEngine() }
+            )
         }
         #else
         return .native

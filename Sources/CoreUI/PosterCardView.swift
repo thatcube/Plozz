@@ -107,7 +107,8 @@ public struct PosterCardView: View {
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: isFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.posterCardCornerRadius, action: action)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.focusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
@@ -141,7 +142,8 @@ public struct PosterCardView: View {
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
@@ -320,16 +322,18 @@ public struct PosterCardView: View {
 
     /// Neutral, theme-agnostic placeholder showing the (series) title. Carries no
     /// episode-number text — the `S· · E·` subtitle already conveys that.
+    /// Uses the shared caption colors so icon/text flip on focus and respect
+    /// reduced-transparency.
     private var neutralPlaceholder: some View {
         ZStack {
-            Color.primary.opacity(0.08)
+            titleColor.opacity(0.08)
             VStack(spacing: 10) {
                 Image(systemName: "play.rectangle")
                     .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(subtitleColor)
                 Text(primaryText)
                     .font(.headline)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(titleColor)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 16)

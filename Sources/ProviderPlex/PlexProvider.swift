@@ -239,7 +239,8 @@ public struct PlexProvider: MediaProvider {
             ),
             localRemuxSource: localRemuxSource,
             scrubPreview: scrubPreview(for: part),
-            sourceProvider: .plex
+            sourceProvider: .plex,
+            serverName: session.server.name
         )
     }
 

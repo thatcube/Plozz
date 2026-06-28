@@ -17,6 +17,9 @@ import Foundation
 public enum MediaIdentity: Hashable, Sendable, Codable {
     case external(source: String, value: String)
     case title(normalizedTitle: String, year: Int?, kind: MediaItemKind)
+    /// Same raw item ID — catches duplicates from the same server seen through
+    /// different user accounts (Jellyfin IDs are server-global, not per-user).
+    case sameItemID(String)
 }
 
 /// Pure, provider-agnostic identity resolution shared by every cross-server
@@ -47,6 +50,10 @@ public enum MediaItemIdentity {
     ///    rely on external ids alone.
     public static func identities(for item: MediaItem) -> [MediaIdentity] {
         var result: [MediaIdentity] = []
+
+        // Always emit the raw item ID so same-server items seen through
+        // different user accounts (same Jellyfin ID) merge unconditionally.
+        result.append(.sameItemID(item.id))
 
         let normalizedIDs = Dictionary(
             item.providerIDs.compactMap { key, value -> (String, String)? in

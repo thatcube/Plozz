@@ -50,7 +50,20 @@ let package = Package(
         // a natively-playable progressive stream URL we feed straight to AVPlayer
         // (the same approach Infuse uses). It includes an optional remote fallback
         // so extraction keeps working when YouTube changes its internal API.
-        .package(url: "https://github.com/alexeichhorn/YouTubeKit.git", from: "0.4.8")
+        .package(url: "https://github.com/alexeichhorn/YouTubeKit.git", from: "0.4.8"),
+
+        // AetherEngine — production media player engine for Apple platforms.
+        // FFmpeg demuxes, VideoToolbox decodes, AVPlayer handles Dolby Atmos.
+        // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", from: "4.6.3"),
+        // AetherEngine's FFmpeg build (n8.1.2, minimal LGPL decode-only). Shared
+        // by AetherEngine, CRemuxCore, EngineMPV, and LocalRemux — replaces the
+        // locally-staged Frameworks/mpv/Libav*.xcframework set (same n8.1 ABI).
+        .package(url: "https://github.com/superuser404notfound/FFmpegBuild", from: "1.0.1"),
+        // Dolby Vision RPU parser/converter (prebuilt xcframework, no Rust at
+        // build time). Used by AetherEngine for DV P7→8.1 NAL surgery; also
+        // satisfies libmpv's dovi symbol references.
+        .package(url: "https://github.com/superuser404notfound/LibDovi", from: "1.0.2"),
     ],
     targets: [
         // MARK: Core
@@ -103,15 +116,25 @@ let package = Package(
             dependencies: [
                 "CoreModels",
                 "FeaturePlayback",
-                // LGPL-clean, locally-built FFmpeg + libmpv (local-path binaries).
-                "Libmpv", "Libavcodec", "Libavdevice", "Libavfilter",
-                "Libavformat", "Libavutil", "Libswresample", "Libswscale",
+                // libmpv (local binary, LGPL-clean decode-only).
+                "Libmpv",
+                // FFmpeg libraries from the shared FFmpegBuild package (n8.1.x ABI).
+                .product(name: "Libavcodec", package: "FFmpegBuild"),
+                "Libavdevice",
+                .product(name: "Libavfilter", package: "FFmpegBuild"),
+                .product(name: "Libavformat", package: "FFmpegBuild"),
+                .product(name: "Libavutil", package: "FFmpegBuild"),
+                .product(name: "Libswresample", package: "FFmpegBuild"),
+                .product(name: "Libswscale", package: "FFmpegBuild"),
+                // libdovi from AetherEngine's LibDovi package.
+                .product(name: "Dovi", package: "LibDovi"),
                 // Prebuilt dependency xcframeworks (MPVKit-published, hosted).
                 "Libssl", "Libcrypto", "Libass", "Libfreetype", "Libfribidi",
                 "Libharfbuzz", "MoltenVK", "Libshaderc_combined", "lcms2",
-                "Libplacebo", "Libdovi", "Libunibreak", "gmp", "nettle",
-                "hogweed", "gnutls", "Libdav1d", "Libuavs3d", "Libuchardet",
-                "Libbluray"
+                "Libplacebo", "Libunibreak", "gmp", "nettle",
+                "hogweed", "gnutls",
+                .product(name: "Libdav1d", package: "FFmpegBuild"),
+                "Libuavs3d", "Libuchardet", "Libbluray"
             ],
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
@@ -147,7 +170,10 @@ let package = Package(
         .target(
             name: "CRemuxCore",
             dependencies: [
-                "Libavformat", "Libavcodec", "Libavutil", "Libswresample"
+                .product(name: "Libavformat", package: "FFmpegBuild"),
+                .product(name: "Libavcodec", package: "FFmpegBuild"),
+                .product(name: "Libavutil", package: "FFmpegBuild"),
+                .product(name: "Libswresample", package: "FFmpegBuild"),
             ],
             cSettings: [
                 // Compile the FFmpeg `#include`s TEXTUALLY rather than as implicit
@@ -177,19 +203,21 @@ let package = Package(
             name: "LocalRemux",
             dependencies: [
                 "CoreModels", "FeaturePlayback", "CRemuxCore",
-                // The FFmpeg static frameworks cross-reference each other and the
-                // third-party decoders, so a standalone link of this module (e.g.
-                // the LocalRemuxProbe gate / LocalRemuxTests) needs the SAME full
-                // set EngineMPV links. In the shipping app these are already pulled
-                // in via EngineMPV; listing them here makes LocalRemux self-
-                // sufficient.
-                "Libavcodec", "Libavdevice", "Libavfilter",
-                "Libavformat", "Libavutil", "Libswresample", "Libswscale",
+                // FFmpeg from the shared FFmpegBuild package.
+                .product(name: "Libavcodec", package: "FFmpegBuild"),
+                "Libavdevice",
+                .product(name: "Libavfilter", package: "FFmpegBuild"),
+                .product(name: "Libavformat", package: "FFmpegBuild"),
+                .product(name: "Libavutil", package: "FFmpegBuild"),
+                .product(name: "Libswresample", package: "FFmpegBuild"),
+                .product(name: "Libswscale", package: "FFmpegBuild"),
+                .product(name: "Dovi", package: "LibDovi"),
                 "Libssl", "Libcrypto", "Libass", "Libfreetype", "Libfribidi",
                 "Libharfbuzz", "MoltenVK", "Libshaderc_combined", "lcms2",
-                "Libplacebo", "Libdovi", "Libunibreak", "gmp", "nettle",
-                "hogweed", "gnutls", "Libdav1d", "Libuavs3d", "Libuchardet",
-                "Libbluray"
+                "Libplacebo", "Libunibreak", "gmp", "nettle",
+                "hogweed", "gnutls",
+                .product(name: "Libdav1d", package: "FFmpegBuild"),
+                "Libuavs3d", "Libuchardet", "Libbluray"
             ],
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
@@ -314,6 +342,24 @@ let package = Package(
             dependencies: ["CoreModels"]
         ),
 
+        // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
+        //
+        // Wraps AetherEngine (the upstream media-player library) behind Plozz's
+        // `VideoEngine` protocol. AetherEngine handles: FFmpeg demux → on-device
+        // copy-remux → localhost HLS-fMP4 → AVPlayer, with bounded segment cache,
+        // backpressure, producer-restart seek, Dolby Vision signaling, and Atmos
+        // passthrough. This module is the integration adapter — all Plozz-specific
+        // orchestration (server progress, subtitles, routing) stays in
+        // FeaturePlayback / PlayerViewModel.
+        .target(
+            name: "EnginePlozzigen",
+            dependencies: [
+                "CoreModels",
+                "FeaturePlayback",
+                .product(name: "AetherEngine", package: "AetherEngine"),
+            ]
+        ),
+
         // MARK: App composition root
         .target(
             name: "AppShell",
@@ -322,6 +368,7 @@ let package = Package(
                 "CoreNetworking",
                 "CoreUI",
                 "EngineMPV",
+                "EnginePlozzigen",
                 "LocalRemux",
                 "FeatureDiscovery",
                 "FeatureAuth",
@@ -434,19 +481,13 @@ let package = Package(
 
         // MARK: - EngineMPV binary dependencies
         //
-        // Locally-built, LGPLv3 / decode-only FFmpeg + libmpv xcframeworks. Built
-        // by tools/build-mpv-tvos.sh (MPVKit 0.41.0-n8.1, `--disable-nonfree`, no
-        // `--enable-gpl`; verified FFMPEG_LICENSE == "LGPL version 3 or later").
-        // Staged under Frameworks/mpv/ (gitignored) by tools/stage-mpv-frameworks.sh.
-        // NOT committed — regenerate locally before building EngineMPV.
+        // libmpv + Libavdevice are kept as local binary targets (not provided by
+        // FFmpegBuild). All other FFmpeg libraries come from the shared FFmpegBuild
+        // package. Staged under Frameworks/mpv/ (gitignored) by
+        // tools/stage-mpv-frameworks.sh. NOT committed — regenerate locally before
+        // building EngineMPV.
         .binaryTarget(name: "Libmpv", path: "Frameworks/mpv/Libmpv.xcframework"),
-        .binaryTarget(name: "Libavcodec", path: "Frameworks/mpv/Libavcodec.xcframework"),
         .binaryTarget(name: "Libavdevice", path: "Frameworks/mpv/Libavdevice.xcframework"),
-        .binaryTarget(name: "Libavfilter", path: "Frameworks/mpv/Libavfilter.xcframework"),
-        .binaryTarget(name: "Libavformat", path: "Frameworks/mpv/Libavformat.xcframework"),
-        .binaryTarget(name: "Libavutil", path: "Frameworks/mpv/Libavutil.xcframework"),
-        .binaryTarget(name: "Libswresample", path: "Frameworks/mpv/Libswresample.xcframework"),
-        .binaryTarget(name: "Libswscale", path: "Frameworks/mpv/Libswscale.xcframework"),
 
         // Prebuilt dependency xcframeworks — MPVKit's published, checksummed
         // binaries (independent libraries whose licenses are unaffected by the
@@ -517,11 +558,6 @@ let package = Package(
             checksum: "1e69250279be9334cd2f6849abdc884c8e4bb29212467b6f071fdc1ac2010b6b"
         ),
         .binaryTarget(
-            name: "Libdovi",
-            url: "https://github.com/mpvkit/libdovi-build/releases/download/3.3.2/Libdovi.xcframework.zip",
-            checksum: "e693e239808350868e79c5448ef9f02e2716bc822dd8632a41a368a1eae5ca7d"
-        ),
-        .binaryTarget(
             name: "MoltenVK",
             url: "https://github.com/mpvkit/moltenvk-build/releases/download/1.4.1/MoltenVK.xcframework.zip",
             checksum: "9bd1ca1e4563bacd25d6e55d37b10341d50b2601bc2684bc332188e79daa2b79"
@@ -540,11 +576,6 @@ let package = Package(
             name: "Libplacebo",
             url: "https://github.com/mpvkit/libplacebo-build/releases/download/7.351.0-fix/Libplacebo.xcframework.zip",
             checksum: "99ca0b86e2a5a99c445d3e41df6f2fc08294e1a004b03f6a5645f299f06bf378"
-        ),
-        .binaryTarget(
-            name: "Libdav1d",
-            url: "https://github.com/mpvkit/libdav1d-build/releases/download/1.5.2-xcode/Libdav1d.xcframework.zip",
-            checksum: "8a8b78e23e28ecc213232805f3c1936141fc9befe113e87234f4f897f430a532"
         ),
         .binaryTarget(
             name: "Libuchardet",

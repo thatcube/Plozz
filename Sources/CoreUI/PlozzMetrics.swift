@@ -36,6 +36,15 @@ public struct PlozzMetrics: Equatable, Sendable {
     /// poster *and* landscape cards so the glass border is a uniform thickness.
     public let cardInset: CGFloat
 
+    // MARK: Circular tile sizes (scaled)
+
+    /// Diameter of an artist's circular focus tile (density-scaled).
+    public let artistTileDiameter: CGFloat
+    /// Diameter of a cast member's circular focus tile (density-scaled).
+    public let castTileDiameter: CGFloat
+    /// Clearance between a circular avatar and its focus glass halo (scaled).
+    public let circleFocusPadding: CGFloat
+
     // MARK: Media spacing (scaled)
 
     /// Gap between adjacent media cards in a rail and gutter in a poster grid —
@@ -50,6 +59,25 @@ public struct PlozzMetrics: Equatable, Sendable {
     public let railTopPadding: CGFloat
     /// Room below a rail for a focused card's lift + drop shadow.
     public let railVerticalPadding: CGFloat
+    /// Vertical room reserved *inside* a clipping rail for a focused card's lift +
+    /// drop shadow (see `PlozzTheme.Metrics.railShadowClearance`). The rail pads
+    /// its content by this on top and bottom, then negates it in layout via
+    /// `railTopClearanceOffset` / `railBottomClearanceOffset` so the row keeps its
+    /// real height and the clip simply grows to clear the shadow.
+    public let railShadowClearance: CGFloat
+    /// Negative top padding applied to a rail's scroll view to cancel the extra
+    /// `railShadowClearance` headroom, restoring the intended `railTopPadding`.
+    public var railTopClearanceOffset: CGFloat { railClearanceOffset(for: railTopPadding) }
+    /// Negative bottom padding applied to a rail's scroll view to cancel the extra
+    /// `railShadowClearance` room, restoring the intended `railVerticalPadding`.
+    public var railBottomClearanceOffset: CGFloat { railClearanceOffset(for: railVerticalPadding) }
+    /// Negative outer padding that cancels `railShadowClearance` down to an
+    /// arbitrary `desired` rail inset, for rails whose top/bottom insets aren't the
+    /// standard `railTopPadding`/`railVerticalPadding` (e.g. cast or music rails).
+    /// Pairs with a `.padding(.vertical, railShadowClearance)` *inside* the clip:
+    /// the net inset is exactly `desired`, so the row keeps its design height while
+    /// the clip still grows enough to clear the focused card's shadow.
+    public func railClearanceOffset(for desired: CGFloat) -> CGFloat { desired - railShadowClearance }
 
     // MARK: Poster grid
 
@@ -153,6 +181,10 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.landscapeHeight = step(PlozzTheme.Metrics.landscapeHeight)
         self.cardInset = step(PlozzTheme.Metrics.cardInset)
 
+        self.artistTileDiameter = step(PlozzTheme.Metrics.artistTileDiameter)
+        self.castTileDiameter = step(PlozzTheme.Metrics.castTileDiameter)
+        self.circleFocusPadding = step(PlozzTheme.Metrics.circleFocusPadding)
+
         self.cardSpacing = step(PlozzTheme.Metrics.cardSpacing)
         self.gridSpacing = step(PlozzTheme.Metrics.gridSpacing)
         // Inter-row dead space is dampened so it doesn't grow 1:1 with the cards
@@ -163,6 +195,11 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.sectionTitleSpacing = damped(PlozzTheme.Metrics.sectionTitleSpacing, PlozzTheme.Metrics.headerScaleDamping)
         self.railTopPadding = step(PlozzTheme.Metrics.railTopPadding)
         self.railVerticalPadding = step(PlozzTheme.Metrics.railVerticalPadding)
+        // The lift portion scales with the card; the shadow's own reach is a fixed
+        // pixel size (radius 20 + y 10) that must NOT shrink at low density or it
+        // would clip, so it's added unscaled.
+        self.railShadowClearance = step(PlozzTheme.Metrics.railShadowLiftAllowance)
+            + PlozzTheme.Metrics.railShadowFixedExtent
 
         self.posterGridColumns = density.posterGridColumns
 

@@ -121,10 +121,14 @@ struct MusicLandingView: View {
                     EntryTile(title: "Genres", icon: "guitars") { onSelectRoute(.grid(.genre)) }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, PlozzTheme.Spacing.small)
+                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
+                // engine holds the first/last tile at its inset, and reserve room
+                // *inside* the clip for the focused tile's lift + shadow. The
+                // negative outer padding restores the original inset, so the row's
+                // height is unchanged — only the clip grows.
+                .padding(.vertical, metrics.railShadowClearance)
             }
-            // Never clip a focused tile's lift, shadow or border.
-            .scrollClipDisabled()
+            .padding(.vertical, metrics.railClearanceOffset(for: PlozzTheme.Spacing.small))
         }
     }
 }
@@ -134,17 +138,37 @@ private struct EntryTile: View {
     let icon: String
     let action: () -> Void
 
+    @FocusState private var isFocused: Bool
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzMetrics) private var metrics
+
+    private var titleColor: Color {
+        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+    }
+
+    /// Scale the tile size with the density setting so it grows/shrinks alongside
+    /// media cards when appearance is changed.
+    private var tileWidth: CGFloat { (260 * metrics.scale).rounded() }
+    private var tileHeight: CGFloat { (150 * metrics.scale).rounded() }
+    private var iconSize: CGFloat { (40 * metrics.scale).rounded() }
+
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 44))
-                    .foregroundStyle(Color.accentColor.gradient)
-                Text(title).font(.headline)
-            }
-            .frame(width: 280, height: 160)
+        VStack(spacing: (12 * metrics.scale).rounded()) {
+            Image(systemName: icon)
+                .font(.system(size: iconSize))
+                .foregroundStyle(isFocused ? titleColor : Color.accentColor)
+            Text(title)
+                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+                .foregroundStyle(titleColor)
         }
-        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
+        .frame(width: tileWidth, height: tileHeight)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
+        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 
@@ -182,10 +206,14 @@ private struct MusicRow<Content: View>: View {
                     content()
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, metrics.railVerticalPadding)
+                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
+                // engine holds the first/last card at its inset, and reserve room
+                // *inside* the clip for the focused card's lift + shadow. The
+                // negative outer padding restores the original vertical inset, so
+                // the row's height is unchanged — only the clip grows.
+                .padding(.vertical, metrics.railShadowClearance)
             }
-            // Never clip a focused card's lift, shadow or border.
-            .scrollClipDisabled()
+            .padding(.vertical, metrics.railBottomClearanceOffset)
         }
     }
 }

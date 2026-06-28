@@ -234,6 +234,8 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// whether a given title is being served from Plex or Jellyfin. `nil` for
     /// sources without a first-class provider (e.g. YouTube trailers).
     public var sourceProvider: ProviderKind?
+    /// Friendly name of the media server (e.g. "Allie's Jellyfin", "Living Room").
+    public var serverName: String?
 
     public init(
         item: MediaItem,
@@ -248,7 +250,8 @@ public struct PlaybackRequest: Hashable, Sendable {
         sourceMetadata: MediaSourceMetadata? = nil,
         localRemuxSource: LocalRemuxSourceDescriptor? = nil,
         scrubPreview: ScrubPreviewSource? = nil,
-        sourceProvider: ProviderKind? = nil
+        sourceProvider: ProviderKind? = nil,
+        serverName: String? = nil
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -264,6 +267,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.scrubPreview = scrubPreview
         self.isManifestStream = isTranscoding || streamURL.pathExtension.lowercased() == "m3u8"
         self.sourceProvider = sourceProvider
+        self.serverName = serverName
     }
 }
 

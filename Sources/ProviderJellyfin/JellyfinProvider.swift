@@ -365,7 +365,8 @@ public struct JellyfinProvider: MediaProvider {
             sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
             localRemuxSource: localRemuxSource,
             scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled),
-            sourceProvider: .jellyfin
+            sourceProvider: .jellyfin,
+            serverName: session.server.name
         )
     }
 

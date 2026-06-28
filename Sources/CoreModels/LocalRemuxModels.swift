@@ -259,4 +259,42 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
             return nil
         }
     }
+
+    // MARK: - Plozzigen (wide) eligibility
+
+    /// Video codecs AetherEngine can handle — either via its native HLS-fMP4 →
+    /// AVPlayer path (HEVC/H.264/VP9) or its software decode path (AV1/dav1d).
+    private static let plozzigenVideoCodecs: Set<String> = [
+        "hevc", "h265", "h264", "avc", "avc1", "vp9", "av1", "av01"
+    ]
+
+    /// Wide eligibility gate for the Plozzigen engine (AetherEngine). Unlike the
+    /// narrow `eligibility()` (which requires HEVC + AC3/EAC3 only), Plozzigen
+    /// accepts any video/audio combination AetherEngine can process:
+    ///
+    /// - **Video**: HEVC, H.264, VP9, AV1 (software decode on tvOS)
+    /// - **Audio**: anything — fMP4-legal codecs (AAC, AC3, EAC3, FLAC, ALAC, MP3,
+    ///   Opus) are stream-copied; incompatible ones (TrueHD, DTS) are bridged to
+    ///   lossless FLAC internally.
+    /// - **Container**: MKV/Matroska (the primary use case; MP4 direct-play stays native)
+    ///
+    /// Only excludes DV Profile 7 dual-layer (unsupported everywhere except the
+    /// original mastering decoder) and non-range-readable sources (can't seek).
+    public var plozzigenEligibility: Eligibility {
+        guard byteRangeSupported else {
+            return .ineligible("Source bytes are not range-readable")
+        }
+        guard isMatroskaContainer else {
+            return .ineligible("Not a Matroska container (MP4/MOV direct-play stays native)")
+        }
+        let videoCodec = (sourceMetadata.video?.codec ?? "").lowercased()
+        guard Self.plozzigenVideoCodecs.contains(videoCodec) else {
+            return .ineligible("Video codec '\(videoCodec)' not supported by Plozzigen")
+        }
+        // DV Profile 7 (dual-layer BL+EL+RPU) can't be remuxed to single-layer.
+        if normalizedDolbyVisionProfile == 7 {
+            return .ineligible("Dolby Vision Profile 7 (dual-layer) requires hybrid engine")
+        }
+        return .eligible
+    }
 }

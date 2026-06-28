@@ -83,7 +83,7 @@ Two distinct failure shapes were seen on-device, and only one is solved:
 
 | | Symptom | Root cause | Status |
 |---|---|---|---|
-| **A** | Far-seek (e.g. resume @22min) on a 4K title builds a **single ~198s segment** in one buffer → `signal 9` (jetsam) | `mux_segment_full` read loop only stopped on `pts >= end_limit && KEY`, **no upper bound** → a far jump into a sparse-keyframe region ran ~198s of 4K into one `dyn_buf` | **Fixed for the first 4K title** by the span-cap (b382cad → ccad89b → 879a5a3). seg=44/103/105 now bounded & in-sync, no crash. |
+| **A** | Far-seek (e.g. resume @22min) on a 4K title builds a **single ~198s segment** in one buffer → `signal 9` (jetsam) | `mux_segment_full` read loop only stopped on `pts >= end_limit && KEY`, **no upper bound** → a far jump into a sparse-keyframe region ran ~198s of 4K into one `dyn_buf` | **Fixed for the first 4K title** by the span-cap. seg=44/103/105 now bounded & in-sync, no crash. |
 | **B** | **Cold RESUME** of a *different* 2.48h DoVi-P8 / DD+ title still **crashes (jetsam)** even with the span cap | Memory pressure on cold resume — believed to be **concurrent prefetch of several far segments**, each muxing up to the cap, spiking RSS past the tvOS jetsam limit | **OPEN.** Span-cap cannot fix it. |
 
 **The span-cap is a proven dead-end as a stability lever.** Tonight's sweep on title B:
@@ -232,13 +232,19 @@ All experimental engines are reachable forever via these annotated tags (branche
 |---|---|
 | `preserve/remux-b5-cues-777fde4` | B5 Cues fast-path — Swift `readCues` on `MatroskaKeyframeSampler`, 152 tests |
 | `preserve/remux-b6-cues-83e2120` | B6 direct-EBML Cues fast-path — C `read_cues_table`, in-muxer apply, 153 tests |
-| `preserve/remux-b7-fullvod-879a5a3` | B7 full-vod engine + span-cap + `PLOZZ_SEGMENT_SPAN_CAP` (build 759) |
-| `preserve/remux-trackA-cues-vod-fb0e34c` | Track A provider/marshal + `MatroskaCueParser` |
+| `preserve/remux-b7-fullvod-879a5a3` | B7 full-vod engine + span-cap + `PLOZZ_SEGMENT_SPAN_CAP` (build 759) — **the merge baseline** |
+| `preserve/remux-trackA-cues-vod-92a440f` | Track A provider lane: `KeyframeTableSource`/provider/`FullVODKeyframeSink`/coordinator + `zeroBasedTimes` (678 tests) |
 | `preserve/remux-trackB-fmp4-bb497a5` | Track B `AVAssetResourceLoaderDelegate` fMP4+sidx + `FragmentSizeEstimator` crash fix |
 | `preserve/remux-trackC-nocues-b572cbf` | Track C no-Cues cache + background populator |
 
 Inspect any with `git show <tag>` or `git checkout <tag>`. To resurrect work:
 `git switch -c <new-branch> <tag>`.
+
+**Merge-base lineage note (B7 engine):** `879a5a3` = `b382cad` (cap = `max(2×cadence, 8)`,
+= 60 at cadence 30, **no ceiling** — correct) **+ the `PLOZZ_SEGMENT_SPAN_CAP` knob**. The
+intermediate `ccad89b` added a 30s ceiling that **clipped legit ~33s segments — a regression**,
+and `879a5a3` already reverts it. So `879a5a3` is byte-identical to `b382cad` on default behavior
+plus an optional override; **merge `879a5a3`, never `ccad89b` standalone.**
 
 ---
 

@@ -53,7 +53,6 @@ public struct SkeletonCardView: View {
             textLines(contentWidth: metrics.posterWidth - 2 * metrics.posterCaptionHorizontalPadding, spacing: 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, metrics.posterCaptionHorizontalPadding)
-                .padding(.bottom, 14)
         }
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: false)

@@ -176,7 +176,7 @@ final class RemuxSegmenter: @unchecked Sendable {
          deriveEac3FrameDur: Bool = false, keyframeSegments: Bool = false,
          keyframeFullScan: Bool = false, keyframeCache: Bool = false,
          lazyKeyframes: Bool = false, matroskaSampler: Bool = false,
-         provisionalVOD: Bool = false) throws {
+         provisionalVOD: Bool = false, cuesProbe: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -202,6 +202,37 @@ final class RemuxSegmenter: @unchecked Sendable {
         plozz_remux_set_derive_eac3_frame_dur(session, deriveEac3FrameDur ? 1 : 0)
 
         var pendingStore: PendingCacheStore? = nil
+
+        // Flag-gated (com.plozz.playback.remuxCuesProbe, DEFAULT OFF): the CRITICAL
+        // EXPERIMENT. Independently of the discovery flags, parse the Matroska Cues
+        // index DIRECTLY (SeekHead→Cues ranged reads, BYPASSING libavformat's
+        // avformat_index) and log how many CuePoints it finds. This settles whether a
+        // title libavformat reports as "no usable index" (fixed-cadence fallback)
+        // ACTUALLY carries a Cues keyframe index ffmpeg simply wasn't following over
+        // our VOD range reader. PURE MEASUREMENT: the table is logged and DISCARDED;
+        // it changes NO playback behavior. Run on the suspect titles (Family Guy
+        // 43681, Jupiter 1438) and read the `cues-probe:` marker in the capture.
+        if cuesProbe {
+            let probeFixed = plozz_remux_used_fixed_cadence(session) == 1
+            let probeReader = HTTPRangeReader(url: sourceURL, headers: headers)
+            let probeSampler = MatroskaKeyframeSampler(source: HTTPRangeByteSource(probeReader))
+            if let table = probeSampler.keyframeTableFromCues() {
+                let n = table.times.count
+                var maxGap = 0.0, k = 1
+                while k < n { let g = table.times[k] - table.times[k - 1]; if g > maxGap { maxGap = g }; k += 1 }
+                let trustworthy = n >= 2 && maxGap <= 30.0
+                RemuxLog.info(String(format:
+                    "cues-probe: %@ — libav fixedCadence=%@; direct-EBML Cues FOUND N=%d CuePoints "
+                        + "(duration=%.2fs, maxGap=%.2fs, byteOffsets=yes, trustworthy=%@)",
+                    sourceURL.lastPathComponent, probeFixed ? "YES" : "no",
+                    n, table.duration, maxGap, trustworthy ? "YES" : "no"))
+            } else {
+                RemuxLog.info(String(format:
+                    "cues-probe: %@ — libav fixedCadence=%@; direct-EBML Cues NONE "
+                        + "(no usable Cues element; routes to no-Cues walk)",
+                    sourceURL.lastPathComponent, probeFixed ? "YES" : "no"))
+            }
+        }
 
         // Flag-gated (com.plozz.playback.remuxKeyframeSegments): when the source
         // had no usable keyframe index, open() built a fixed-cadence table whose

@@ -766,6 +766,58 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         XCTAssertNil(sampler.cueKeyframe(atOrBefore: 2.0))
     }
 
+    // MARK: - Unified KeyframeTable (Cues + walk discovery output)
+
+    /// Cues path → unified KeyframeTable: exact PTS `times`, populated absolute
+    /// `byteOffsets` (from CueClusterPosition, so B7 can no-op its forward resolve),
+    /// and the programme `duration` from Info/Duration.
+    func testKeyframeTableFromCues_populatesTimesOffsetsAndDuration() {
+        let times = [0, 6006, 12012, 18018, 24024] // 1ms ticks
+        let built = buildFileWithCues(timecodeScale: 1_000_000, durationTicks: 30030,
+                                      clusterTimes: times)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        guard let table = sampler.keyframeTableFromCues() else { return XCTFail("table nil") }
+        XCTAssertEqual(table.times, built.keyframeSeconds)
+        XCTAssertEqual(table.duration, 30.030, accuracy: 1e-6)
+        let expectedAbs = built.clusterRelOffsets.map { info.segmentDataOffset + Int64($0) }
+        XCTAssertEqual(table.byteOffsets, expectedAbs, "Cues path must populate byteOffsets")
+    }
+
+    /// No usable Cues → nil (caller routes to the no-Cues walk producer).
+    func testKeyframeTableFromCues_noCuesNil() {
+        let noCues = buildFile(durationTicks: 4000,
+                               clusters: [cluster(timecode: 0, blocks: [simpleBlock(track: 1, rel: 0, keyframe: true)])])
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(noCues))
+        XCTAssertNil(sampler.keyframeTableFromCues())
+    }
+
+    /// No-Cues walk producer → SAME struct shape, but byteOffsets == nil (re-derived
+    /// at mux via a BACKWARD seek). Lets downstream consumers be source-agnostic.
+    func testKeyframeTableFromWalk_sameStructNilOffsets() {
+        let sampler = MatroskaKeyframeSampler(source: MemorySource([0x18, 0x53, 0x80, 0x67]))
+        let table = sampler.keyframeTable(fromWalkedTimes: [0, 4, 8, 12], duration: 16)
+        XCTAssertEqual(table.times, [0, 4, 8, 12])
+        XCTAssertEqual(table.duration, 16)
+        XCTAssertNil(table.byteOffsets, "no-Cues walk leaves byteOffsets nil")
+    }
+
+    /// Cross-check: the Cues KeyframeTable must be PTS-correct per the oracle, and
+    /// its byteOffsets must actually land on real Cluster IDs in the file.
+    func testKeyframeTableFromCues_oracleValidAndOffsetsLandOnClusters() {
+        let times = [0, 4000, 8000, 12000, 16000]
+        let built = buildFileWithCues(durationTicks: 20000, clusterTimes: times)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard let table = sampler.keyframeTableFromCues() else { return XCTFail("table nil") }
+        // PTS table is monotonic, finite, within duration (oracle structural check).
+        XCTAssertTrue(KeyframeCutOracle.validateTable(times: table.times, duration: table.duration).isEmpty)
+        // Each byte offset points at a real Cluster ID (0x1F43B675).
+        for abs in table.byteOffsets ?? [] {
+            let id = Array(built.file[Int(abs)..<Int(abs) + 4])
+            XCTAssertEqual(id, [0x1F, 0x43, 0xB6, 0x75], "byteOffset must point at a Cluster")
+        }
+    }
+
     func testReadCues_appliesTimecodeScale() {
         // 100us ticks: 10 ticks = 1ms; times below are in those ticks.
         let times = [0, 60_060, 120_120]

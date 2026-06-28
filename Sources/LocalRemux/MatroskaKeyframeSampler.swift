@@ -842,6 +842,52 @@ final class MatroskaKeyframeSampler {
         return cueAtOrBefore(targetSeconds, in: points)
     }
 
+    // MARK: - Unified open-time discovery output (Cues + no-Cues walk)
+
+    /// The unified open-time DISCOVERY table shared by the Cues fast-path, the
+    /// no-Cues cluster walk, and the persistence cache. One struct, two producers:
+    ///
+    ///  * `duration` — the programme length from the container `Info/Duration`
+    ///    (the EXTINF / `EXT-X-ENDLIST` total), independent of keyframe spacing.
+    ///  * `times` — keyframe presentation seconds, 0-based, sorted ascending.
+    ///  * `byteOffsets` — when present, the ABSOLUTE Cluster byte offset of each
+    ///    keyframe, so a consumer can `avio`-seek straight to the keyframe cluster
+    ///    and NO-OP its forward-GOP resolve. The Cues path POPULATES this (the
+    ///    `CueClusterPosition` IS the keyframe cluster); the no-Cues walk leaves it
+    ///    nil (offsets re-derived at mux via a BACKWARD seek).
+    ///
+    /// `byteOffsets`, when non-nil, is element-aligned with `times` (same count).
+    struct KeyframeTable: Equatable {
+        var duration: Double
+        var times: [Double]
+        var byteOffsets: [Int64]?
+    }
+
+    /// Build the unified `KeyframeTable` from the Cues index — the EXACT, bounded,
+    /// ~2-read fast path. `byteOffsets` is POPULATED from each CuePoint's
+    /// `CueClusterPosition` so a consumer (B7) can NO-OP its forward-snap resolve.
+    /// Returns nil when there is no usable Cues element; the caller then drives the
+    /// no-Cues walk, which emits the SAME struct with `byteOffsets == nil`.
+    ///
+    /// PURE + cursor-safe: reads only the SeekHead + Cues element body via positioned
+    /// ranged reads; never demuxes frames, holds no libav cursor. Independent of file
+    /// size / bitrate.
+    func keyframeTableFromCues(maxCuesBytes: Int = 8 * 1024 * 1024) -> KeyframeTable? {
+        guard let points = readCues(maxCuesBytes: maxCuesBytes), !points.isEmpty else { return nil }
+        let duration = cachedInitInfo()?.durationSeconds ?? (points.last?.seconds ?? 0)
+        return KeyframeTable(duration: duration,
+                             times: points.map(\.seconds),
+                             byteOffsets: points.map(\.clusterOffset))
+    }
+
+    /// Wrap no-Cues cluster-walk keyframe times into the unified `KeyframeTable`
+    /// (`byteOffsets == nil` — the muxer re-derives each offset via a BACKWARD seek).
+    /// Lets the no-Cues path hand B7 / the persistence cache the SAME struct the Cues
+    /// path produces, so downstream consumers are source-agnostic.
+    func keyframeTable(fromWalkedTimes times: [Double], duration: Double) -> KeyframeTable {
+        KeyframeTable(duration: duration, times: times, byteOffsets: nil)
+    }
+
     /// Parses one CuePoint: CueTime (ticks) + the CueTrackPositions for the video
     /// track (or the first one if no track filter matches), yielding the absolute
     /// cluster offset. Returns nil if the CuePoint lacks a time or a cluster pos.

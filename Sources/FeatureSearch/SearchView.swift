@@ -74,7 +74,7 @@ public struct SearchView: View {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
                         Text(section.title)
-                            .font(.system(size: 32, weight: .bold))
+                            .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                             .padding(.leading, PlozzTheme.Metrics.screenPadding)
 
                         LazyVGrid(columns: columns, alignment: .leading, spacing: metrics.gridSpacing) {

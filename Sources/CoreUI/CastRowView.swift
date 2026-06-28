@@ -30,7 +30,7 @@ public struct CastRowView: View {
             VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
                 if !title.isEmpty {
                     Text(title)
-                        .font(.system(size: 32, weight: .bold))
+                        .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                         .padding(.leading, leadingInset)
                 }
 

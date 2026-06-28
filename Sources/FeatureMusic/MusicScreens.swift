@@ -105,7 +105,7 @@ struct MusicLandingView: View {
         VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             HStack {
                 Text("Browse")
-                    .font(.system(size: 32, weight: .bold))
+                    .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 Spacer()
                 if let trailing { trailing }
             }
@@ -162,7 +162,7 @@ private struct MusicRow<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 24) {
-                Text(title).font(.system(size: 32, weight: .bold))
+                Text(title).font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 Spacer()
                 if let seeAll {
                     Button("See All", action: seeAll)
@@ -342,7 +342,7 @@ struct ArtistDetailView: View {
                 // even when it's far to the right (off the album's vertical axis).
                 .focusSection()
 
-                Text("Albums").font(.system(size: 32, weight: .bold))
+                Text("Albums").font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                     .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
 
                 LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {

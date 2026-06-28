@@ -64,6 +64,9 @@ public struct PlozzMetrics: Equatable, Sendable {
     public let cardTitleFontSize: CGFloat
     /// Point size for a media card's subtitle/metadata line, scaled with density.
     public let cardSubtitleFontSize: CGFloat
+    /// Point size for a section/row header, scaled with density but *dampened*
+    /// (see `PlozzTheme.Metrics.headerScaleDamping`) so headers stay anchored.
+    public let sectionHeaderFontSize: CGFloat
 
     /// The poster wall's columns, carrying the scaled gutter. Library and Search
     /// both use this so they share an identical column count and spacing.
@@ -134,6 +137,14 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.scale = s
 
         func step(_ base: CGFloat) -> CGFloat { (base * s).rounded() }
+        /// Like `step`, but only applies `damping` of the density deviation from
+        /// 1.0 — so `damping: 1` behaves exactly like `step`, `damping: 0` stays
+        /// fixed at the base, and values between let an element nod to density
+        /// without scaling 1:1 with the cards.
+        func damped(_ base: CGFloat, _ damping: CGFloat) -> CGFloat {
+            let effectiveScale = 1 + (s - 1) * damping
+            return (base * effectiveScale).rounded()
+        }
 
         // Card sizes derive from the standard-density constants in PlozzTheme.
         self.posterWidth = step(PlozzTheme.Metrics.posterWidth)
@@ -144,8 +155,12 @@ public struct PlozzMetrics: Equatable, Sendable {
 
         self.cardSpacing = step(PlozzTheme.Metrics.cardSpacing)
         self.gridSpacing = step(PlozzTheme.Metrics.gridSpacing)
-        self.rowSpacing = step(PlozzTheme.Metrics.rowSpacing)
-        self.sectionTitleSpacing = step(PlozzTheme.Metrics.sectionTitleSpacing)
+        // Inter-row dead space is dampened so it doesn't grow 1:1 with the cards
+        // — that's what keeps the next row peeking into view at high densities.
+        self.rowSpacing = damped(PlozzTheme.Metrics.rowSpacing, PlozzTheme.Metrics.rowSpacingDamping)
+        // The header-to-row gap follows the (dampened) header type so each header
+        // keeps hugging its own row at every density.
+        self.sectionTitleSpacing = damped(PlozzTheme.Metrics.sectionTitleSpacing, PlozzTheme.Metrics.headerScaleDamping)
         self.railTopPadding = step(PlozzTheme.Metrics.railTopPadding)
         self.railVerticalPadding = step(PlozzTheme.Metrics.railVerticalPadding)
 
@@ -161,6 +176,9 @@ public struct PlozzMetrics: Equatable, Sendable {
         #endif
         self.cardTitleFontSize = (baseTitleFontSize * s).rounded()
         self.cardSubtitleFontSize = step(PlozzTheme.Metrics.cardSubtitleFontSize)
+        // Section headers scale with density but dampened, so they anchor the page
+        // hierarchy instead of ballooning/shrinking 1:1 with the cards.
+        self.sectionHeaderFontSize = damped(PlozzTheme.Metrics.sectionHeaderFontSize, PlozzTheme.Metrics.headerScaleDamping)
     }
 
     /// The standard-density snapshot, used as the environment default so any view

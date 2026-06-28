@@ -141,6 +141,23 @@ public enum PlozzTheme {
         /// `.subheadline` metric is unavailable (non-UIKit builds). On tvOS the
         /// real `.subheadline` size is used so standard density is unchanged.
         public static let cardTitleFontSizeFallback: CGFloat = 29
+        /// Base (standard-density) point size for a section/row header ("Continue
+        /// Watching", "Libraries", a search group title…). Density-scaled in
+        /// `PlozzMetrics`, but *dampened* (see `headerScaleDamping`) so headers
+        /// anchor the page hierarchy instead of ballooning with the cards.
+        public static let sectionHeaderFontSize: CGFloat = 32
+        /// How strongly structural type — the section headers and the gap that
+        /// ties each header to its row — follows the density scale. `1` = full
+        /// 1:1 response (grows/shrinks exactly with the cards), `0` = fixed. A
+        /// value near `0.5` lets headers nod to density while keeping the app's
+        /// hierarchy stable across every size. Applied in `PlozzMetrics`.
+        public static let headerScaleDamping: CGFloat = 0.5
+        /// How strongly the *vertical gap between stacked rows* follows the density
+        /// scale. Lower than `headerScaleDamping` on purpose: the cards already
+        /// grow with density, so letting this dead space grow linearly too would
+        /// push the next row off-screen. Damping it keeps rows close enough that
+        /// the following row still peeks at high densities. Applied in `PlozzMetrics`.
+        public static let rowSpacingDamping: CGFloat = 0.35
 
         // MARK: Focus
 

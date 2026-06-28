@@ -54,12 +54,12 @@ struct HomeSkeletonView: View {
         // the skeleton occupies the same vertical space as the real row.
         VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             // Reserve the *exact* height of MediaRowView's title — a hidden Text in
-            // the real font (system 32 bold) — with the placeholder pill overlaid.
-            // Matching the title height is load-bearing: a shorter title bar makes
-            // the cards sit higher, so the whole row drops when the real (taller)
-            // title loads in.
+            // the real (density-scaled) header font — with the placeholder pill
+            // overlaid. Matching the title height is load-bearing: a shorter title
+            // bar makes the cards sit higher, so the whole row drops when the real
+            // (taller) title loads in.
             Text(" ")
-                .font(.system(size: 32, weight: .bold))
+                .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .hidden()
                 .overlay(alignment: .leading) {

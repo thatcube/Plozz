@@ -105,7 +105,7 @@ public struct HomeView: View {
     private func librariesRow(_ libraries: [AggregatedLibrary]) -> some View {
         VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             Text("Libraries")
-                .font(.system(size: 32, weight: .bold))
+                .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 .padding(.leading, PlozzTheme.Metrics.screenPadding)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: metrics.cardSpacing) {

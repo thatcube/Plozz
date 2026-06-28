@@ -277,9 +277,17 @@ final class RemuxSegmenter: @unchecked Sendable {
                         prefixSeconds, prefix.pkts))
                     RemuxLog.info("remux: lazy keyframe discovery started — "
                         + "\(complete ? "prefix covered whole source (complete)" : "background extending window-by-window")")
+                } else {
+                    // Prefix found no usable keyframe in the first 90s within the
+                    // bounded wall budget. Do NOT fall through to a whole-timeline
+                    // scan — at feature length that scan is exactly what watchdog-
+                    // kills. Keep the fixed-cadence table built at open: degraded
+                    // (may desync) but PLAYABLE and crash-proof. lazyStarted stays
+                    // true so the rescan below is skipped entirely.
+                    lazyStarted = true
+                    RemuxLog.info("remux: lazy keyframe discovery — prefix found no "
+                        + "keyframe in [0,90s] within budget; keeping fixed-cadence (no timeline scan)")
                 }
-                // kf.count < 2 → prefix found no keyframes; fall through to the
-                // bounded full/sparse rescan below as a safety net.
             }
 
             if !appliedCache && !lazyStarted {
@@ -321,12 +329,14 @@ final class RemuxSegmenter: @unchecked Sendable {
             // large ranged GETs (keeps AVPlayer's buffer fed). boostReadAhead only
             // ever raises the value, so a prior cache-hit path (no scan) gets it too.
             //
-            // EXCEPTION: in lazy mode discovery is NOT done — background windows keep
-            // sparse-seeking while playback runs, and an 8 MiB read-ahead would make
+            // EXCEPTION: while lazy background discovery is ACTIVE, windows keep
+            // sparse-seeking as playback runs, and an 8 MiB read-ahead would make
             // every per-boundary seek over-fetch ~one extra I-frame's worth of bytes
             // we immediately discard. Keep the default read-ahead so background
-            // discovery stays low-byte; muxing still fetches sequentially.
-            if !lazyStarted {
+            // discovery stays low-byte; muxing still fetches sequentially. When lazy
+            // is NOT active (cache hit, completed prefix, or prefix-failure fixed-
+            // cadence fallback) there is no background seeking, so boost for muxing.
+            if !lazyActive {
                 reader.boostReadAhead(8 << 20)
             }
         }

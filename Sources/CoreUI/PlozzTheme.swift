@@ -115,6 +115,13 @@ public enum PlozzTheme {
         /// player) — surfaces that don't nest inset artwork, so they aren't bound
         /// by the concentric rule above and keep a fixed radius.
         public static let mediumCardCornerRadius: CGFloat = 22
+        /// Optical clearance factor for a media card's caption: the title/metadata
+        /// text is inset horizontally from the glass edge by this fraction of the
+        /// card's *outer* corner radius, so left-aligned text clears the rounded
+        /// corner instead of crowding it. ~0.8 keeps text off the curve while
+        /// staying visually tied to the artwork's edge. Applied per-card in
+        /// `PlozzMetrics` (artwork itself is unaffected).
+        public static let captionCornerClearanceFactor: CGFloat = 0.8
 
         // MARK: Focus
 

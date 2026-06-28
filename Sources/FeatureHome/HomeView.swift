@@ -187,6 +187,7 @@ private struct LibraryCardView: View {
                     .lineLimit(1)
                     .opacity(subtitle.isEmpty ? 0 : 1)
             }
+            .padding(.horizontal, metrics.landscapeCaptionHorizontalPadding)
             .frame(width: metrics.landscapeWidth, alignment: .leading)
         }
         .padding(metrics.cardInset)

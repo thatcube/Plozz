@@ -152,6 +152,7 @@ struct MusicCard: View {
                     .lineLimit(1)
                     .opacity(subtitle == nil ? 0 : 1)
             }
+            .padding(.horizontal, metrics.landscapeCaptionHorizontalPadding)
             .frame(width: scaledWidth, alignment: .leading)
         }
         .padding(metrics.cardInset)

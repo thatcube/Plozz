@@ -106,7 +106,7 @@ public struct PosterCardView: View {
                     .opacity(subtitleText == nil ? 0 : 1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, metrics.posterCaptionHorizontalPadding)
             .padding(.bottom, 14)
         }
         .padding(metrics.cardInset)
@@ -141,6 +141,7 @@ public struct PosterCardView: View {
                     .lineLimit(1)
                     .opacity(subtitleText == nil ? 0 : 1)
             }
+            .padding(.horizontal, metrics.landscapeCaptionHorizontalPadding)
             .frame(width: size.width, alignment: .leading)
         }
         .padding(metrics.cardInset)

@@ -861,14 +861,44 @@ final class MatroskaKeyframeSampler {
                 off = el.dataOffset + el.dataSize
             case MKV.cluster:
                 // Reached media. Cues, if present, is indexed by the SeekHead (it
-                // usually trails the clusters); return what the SeekHead told us.
-                return seekHeadCues.flatMap { verifyCues(at: $0) }
+                // usually trails the clusters); return what the SeekHead told us, else
+                // try the tail (rare: trailing Cues with no SeekHead pointer).
+                return seekHeadCues.flatMap { verifyCues(at: $0) } ?? findCuesInTail(info)
             default:
-                if el.dataSize < 0 { return seekHeadCues.flatMap { verifyCues(at: $0) } }
+                if el.dataSize < 0 { return seekHeadCues.flatMap { verifyCues(at: $0) } ?? findCuesInTail(info) }
                 off = el.dataOffset + el.dataSize
             }
         }
-        return seekHeadCues.flatMap { verifyCues(at: $0) }
+        return seekHeadCues.flatMap { verifyCues(at: $0) } ?? findCuesInTail(info)
+    }
+
+    /// Edge fallback for the rare file that stores Cues at the TAIL with no SeekHead
+    /// pointer to them: read the last `tailBytes` and scan for the Cues element ID,
+    /// returning the last offset that verifies as a real Cues element sitting after
+    /// the clusters and within the file. Bounded (one ranged read of `tailBytes`),
+    /// never a payload walk; downstream `readCues` re-verifies so a spurious match is
+    /// harmless. Returns nil when no Cues lives in the tail window.
+    private func findCuesInTail(_ info: InitInfo, tailBytes: Int = 1 * 1024 * 1024) -> Int64? {
+        let total = source.totalSize
+        guard total > 0 else { return nil }
+        let window = min(Int64(tailBytes), total)
+        let base = total - window
+        let buf = bytes(at: base, count: Int(window))
+        guard buf.count >= 4 else { return nil }
+        var found: Int64?
+        var k = 0
+        while k + 4 <= buf.count {
+            if buf[k] == 0x1C && buf[k + 1] == 0x53 && buf[k + 2] == 0xBB && buf[k + 3] == 0x6B {
+                let abs = base + Int64(k)
+                if abs >= info.firstClusterOffset,
+                   let el = readElementHeader(at: abs), el.id == MKV.cues,
+                   el.dataSize >= 0, el.dataOffset + el.dataSize <= total {
+                    found = abs // keep the latest verifying match (Cues trails the clusters)
+                }
+            }
+            k += 1
+        }
+        return found
     }
 
     /// Confirms a SeekHead-derived offset actually lands on a Cues element before we

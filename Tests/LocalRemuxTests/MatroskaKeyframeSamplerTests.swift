@@ -146,7 +146,7 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
     /// both PTS and absolute byte offsets end-to-end.
     private func buildFileWithCues(timecodeScale: Int = 1_000_000, durationTicks: Int? = nil,
                                    videoTrack: Int = 1, clusterTimes: [Int],
-                                   payloadBytes: Int = 2,
+                                   payloadBytes: Int = 2, includeSeekHead: Bool = true,
                                    extraPositions: [(track: Int, pos: Int)] = []) ->
         (file: [UInt8], keyframeSeconds: [Double], clusterRelOffsets: [Int]) {
         var infoData = el(idTimecodeScale, uintBytes(UInt64(timecodeScale)))
@@ -161,7 +161,7 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         let clusterEls = clusterTimes.map {
             cluster(timecode: $0, blocks: [simpleBlock(track: videoTrack, rel: 0, keyframe: true, payload: pad)])
         }
-        let shLen = seekHead(cuesPos: 0).count // fixed-width SeekPosition → stable length
+        let shLen = includeSeekHead ? seekHead(cuesPos: 0).count : 0 // fixed-width SeekPosition → stable length
         let infoOff = shLen
         let tracksOff = infoOff + infoEl.count
         var clusterRelOffsets: [Int] = []
@@ -171,8 +171,8 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         let entries = zip(clusterTimes, clusterRelOffsets).map { t, off in
             (time: t, positions: [(track: videoTrack, pos: off)] + extraPositions)
         }
-        let sh = seekHead(cuesPos: UInt64(cuesRelOff))
-        XCTAssertEqual(sh.count, shLen, "SeekHead width must be stable")
+        let sh = includeSeekHead ? seekHead(cuesPos: UInt64(cuesRelOff)) : []
+        if includeSeekHead { XCTAssertEqual(sh.count, shLen, "SeekHead width must be stable") }
         var segBody = sh + infoEl + tracksEl
         for c in clusterEls { segBody += c }
         segBody += cues(entries)
@@ -683,8 +683,7 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         }
     }
 
-    func testHasCues_trueWithIndex_falseWithout() {
-        let withCues = buildFileWithCues(clusterTimes: [0, 1000, 2000])
+    func testHasCues_trueWithIndex_falseWithout() {        let withCues = buildFileWithCues(clusterTimes: [0, 1000, 2000])
         XCTAssertTrue(MatroskaKeyframeSampler(source: MemorySource(withCues.file)).hasCues())
         // bigSeekFile / buildFile produce no SeekHead and no Cues.
         let noCues = buildFile(durationTicks: 4000,
@@ -692,6 +691,21 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         let s = MatroskaKeyframeSampler(source: MemorySource(noCues))
         XCTAssertFalse(s.hasCues())
         XCTAssertNil(s.readCues())
+    }
+
+    /// EDGE FALLBACK: a file with TRAILING Cues but NO SeekHead pointer must still be
+    /// found via the bounded tail scan (the rare muxer that omits the SeekHead entry).
+    func testReadCues_tailFallback_noSeekHead() {
+        let times = [0, 4000, 8000, 12000]
+        let built = buildFileWithCues(durationTicks: 16000, clusterTimes: times,
+                                      includeSeekHead: false)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        XCTAssertTrue(sampler.hasCues(), "tail scan must find Cues without a SeekHead")
+        guard let cues = sampler.readCues() else { return XCTFail("readCues nil via tail") }
+        XCTAssertEqual(cues.map(\.seconds), built.keyframeSeconds)
+        let expectedAbs = built.clusterRelOffsets.map { info.segmentDataOffset + Int64($0) }
+        XCTAssertEqual(cues.map(\.clusterOffset), expectedAbs)
     }
 
     /// Non-1ms TimecodeScale must be applied to CueTime exactly (the PTS the muxer

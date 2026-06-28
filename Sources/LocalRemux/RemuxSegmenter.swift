@@ -192,17 +192,25 @@ final class RemuxSegmenter: @unchecked Sendable {
                 lazyEngaged = true
                 // Probe just enough to publish the first couple of segments so
                 // AVPlayer can start immediately; the rest fills in the background.
+                // Small per-call batches (not one big 24-probe call) so we STOP the
+                // instant ready>=2, keeping the open footprint a handful of probes —
+                // and HARD-CAPPED independent of total runtime (the 2.5h/40GB title
+                // must open as cheaply as a 20min one; B6 crashed scanning the whole
+                // timeline here). The remainder is discovered in the background.
                 reader.setReadAhead(probeReadAhead)
+                let openProbeBatch: Int32 = 2   // probes per call (re-check ready often)
+                let openProbeMaxLoops = 24      // hard cap: <= 48 probes at open, ever
                 var ready: Int32 = 0
                 var complete: Int32 = 0
                 var totalProbes = 0
                 var guardLoops = 0
                 repeat {
                     var p: Int32 = 0
-                    _ = plozz_remux_lazy_extend(session, 0, 24, &ready, &complete, &p)
+                    _ = plozz_remux_lazy_extend(session, 0, openProbeBatch, &ready, &complete, &p)
                     totalProbes += Int(p)
                     guardLoops += 1
-                } while ready < 2 && complete == 0 && guardLoops < 32
+                    if p == 0 { break }   // no forward progress (e.g. seek failure) — bail
+                } while ready < 2 && complete == 0 && guardLoops < openProbeMaxLoops
                 let openMs = Double(DispatchTime.now().uptimeNanoseconds &- openStart) / 1_000_000
                 // Bytes-read at open is the head-to-head score vs B6's upfront scan
                 // (which reads ~11% / 584 MB before first frame). The windowed index

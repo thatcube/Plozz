@@ -81,6 +81,26 @@ final class KeyframeTableTests: XCTestCase {
         XCTAssertFalse(table.hasByteOffsets)
     }
 
+    // MARK: - zeroBasedTimes (C boundary-ingest rebasing)
+
+    func testZeroBasedTimesRebasesNonZeroFirstToZero() {
+        // First cue at 0.5s must be rebased so plan_segments_core doesn't clamp it
+        // and fold the offset into an over-long segment 0.
+        let table = KeyframeTable.normalized(times: [0.5, 6.5, 12.5], duration: 20)
+        XCTAssertEqual(table.zeroBasedTimes, [0, 6, 12])
+        XCTAssertEqual(table.duration, 20) // duration is the programme total, untouched
+    }
+
+    func testZeroBasedTimesIsIdentityWhenAlreadyZeroBased() {
+        let table = KeyframeTable.normalized(times: [0, 6, 12], duration: 20)
+        XCTAssertEqual(table.zeroBasedTimes, [0, 6, 12])
+    }
+
+    func testZeroBasedTimesEmptyIsEmpty() {
+        let table = KeyframeTable.normalized(times: [], duration: 20)
+        XCTAssertEqual(table.zeroBasedTimes, [])
+    }
+
     func testNormalizedInvariantsHoldOnArbitraryInput() {
         let table = KeyframeTable.normalized(
             times: [3.5, 3.5, 1.0, 0.0, 9.9, 2.2, 2.2],

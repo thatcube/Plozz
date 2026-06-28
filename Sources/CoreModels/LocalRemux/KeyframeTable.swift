@@ -39,6 +39,18 @@ public struct KeyframeTable: Equatable, Sendable {
     /// serving path could read one forward range per segment.
     public var hasByteOffsets: Bool { byteOffsets != nil }
 
+    /// `times` rebased so the first keyframe sits at exactly 0, i.e. each entry
+    /// minus `times.first`. This is the form the C boundary ingest
+    /// (`plan_segments_core`) requires: it clamps a non-zero first boundary to
+    /// 0.0 and folds the start offset into segment 0, yielding an over-long first
+    /// segment and A/V desync. The Swift→C marshal feeds THIS, not raw `times`.
+    /// `duration` is intentionally left untouched — it is the programme length
+    /// (EXTINF / ENDLIST total), not a boundary.
+    public var zeroBasedTimes: [Double] {
+        guard let first = times.first else { return [] }
+        return times.map { $0 - first }
+    }
+
     /// Builds a table that satisfies the invariants from arbitrary raw inputs:
     /// drops non-finite/negative times (and their paired offsets), sorts by time,
     /// collapses non-increasing duplicates, and raises `duration` to the last

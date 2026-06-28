@@ -291,10 +291,12 @@ public final class PlayerViewModel {
     }
 
     /// Called when the active engine reports a clean playthrough to the end of the
-    /// stream. For auto-dismiss players (trailers) this asks the view to close;
-    /// for everything else it's a no-op so the finished frame stays on screen.
+    /// stream. Every playback now closes when it finishes so the player never
+    /// freezes on the final frame: trailers and movies return to the detail screen,
+    /// episodes return to the series page (with the next-up episode focused) so the
+    /// user is one click from continuing. `autoDismissOnEnd` is kept only as a hint
+    /// that this is a transient (trailer) player.
     private func handlePlaybackEnded() {
-        guard autoDismissOnEnd else { return }
         shouldDismiss = true
     }
 

@@ -169,7 +169,7 @@ private struct LibraryCardView: View {
     @Environment(\.plozzMetrics) private var metrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: PlozzTheme.Metrics.cardCaptionSpacing) {
             artwork
                 .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))

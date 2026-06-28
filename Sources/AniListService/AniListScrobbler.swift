@@ -1,0 +1,110 @@
+import Foundation
+import CoreModels
+import CoreNetworking
+
+/// Sends anime watch progress to AniList. Only fires for anime content
+/// (items with an `anilist` or `mal` provider ID, indicating anime).
+public protocol AniListScrobbling: Sendable {
+    func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async
+    func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws
+}
+
+public extension AniListScrobbling {
+    func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws {
+        await scrobble(item: item, progress: progress, event: event)
+    }
+}
+
+/// No-op scrobbler when AniList is unconfigured/disconnected.
+public struct DisabledAniListScrobbler: AniListScrobbling {
+    public init() {}
+    public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {}
+}
+
+/// Live AniList scrobbler. Updates the user's anime list when an episode finishes.
+public actor AniListScrobbler: AniListScrobbling {
+    private let client: AniListClient
+    private let tokenStore: AniListTokenStoring
+
+    public init(config: AniListConfig, http: HTTPClient, tokenStore: AniListTokenStoring) {
+        self.client = AniListClient(config: config, http: http)
+        self.tokenStore = tokenStore
+    }
+
+    public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {
+        guard event == .stop, progress >= 80 else { return }
+        guard isAnime(item) else { return }
+        guard let token = tokenStore.load()?.accessToken else { return }
+
+        do {
+            try await updateList(item: item, accessToken: token)
+            PlozzLog.playback.debug("AniList scrobble succeeded")
+        } catch {
+            PlozzLog.playback.debug("AniList scrobble failed (non-fatal)")
+        }
+    }
+
+    public func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws {
+        guard event == .stop, progress >= 80 else { return }
+        guard isAnime(item) else { return }
+        guard let token = tokenStore.load()?.accessToken else { return }
+        try await updateList(item: item, accessToken: token)
+    }
+
+    // MARK: - Internal
+
+    private func updateList(item: MediaItem, accessToken: String) async throws {
+        let ids = extractIDs(from: item.providerIDs)
+        guard let mediaId = try await client.findAnime(
+            anilistID: ids.anilist,
+            malID: ids.mal,
+            title: item.parentTitle ?? item.title,
+            accessToken: accessToken
+        ) else { return }
+
+        let episodeProgress = item.episodeNumber
+        let status: AniListMediaListStatus = .current
+
+        try await client.saveMediaListEntry(
+            mediaId: mediaId,
+            status: status,
+            progress: episodeProgress,
+            accessToken: accessToken
+        )
+    }
+
+    /// Determines if a media item is anime by checking for anime-specific provider IDs.
+    private func isAnime(_ item: MediaItem) -> Bool {
+        let ids = item.providerIDs
+        for (key, value) in ids {
+            let k = key.lowercased()
+            if (k == "anilist" || k == "mal" || k == "myanimelist" || k == "anidb" || k == "kitsu"),
+               !value.trimmingCharacters(in: .whitespaces).isEmpty {
+                return true
+            }
+        }
+        return false
+    }
+
+    private struct AnimeIDs {
+        var anilist: Int?
+        var mal: Int?
+    }
+
+    private func extractIDs(from providerIDs: [String: String]) -> AnimeIDs {
+        var ids = AnimeIDs()
+        for (key, rawValue) in providerIDs {
+            let value = rawValue.trimmingCharacters(in: .whitespaces)
+            guard !value.isEmpty else { continue }
+            switch key.lowercased() {
+            case "anilist":
+                ids.anilist = Int(value)
+            case "mal", "myanimelist":
+                ids.mal = Int(value)
+            default:
+                continue
+            }
+        }
+        return ids
+    }
+}

@@ -4,6 +4,9 @@ import CoreModels
 import CoreUI
 import FeatureProfiles
 import TraktService
+import SimklService
+import AniListService
+import MALService
 
 /// Settings root — a hierarchical list of top-level rows that each push a
 /// dedicated detail page.
@@ -33,6 +36,9 @@ public struct SettingsView: View {
     private let nightShift: NightShiftSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
     private let trakt: TraktService
+    private let simkl: SimklService
+    private let anilist: AniListService
+    private let mal: MALService
     private let discoveredLibraries: LoadState<[AggregatedLibrary]>
     private let reloadLibraries: () async -> Void
     private let accounts: [Account]
@@ -66,6 +72,9 @@ public struct SettingsView: View {
         nightShift: NightShiftSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
         trakt: TraktService,
+        simkl: SimklService,
+        anilist: AniListService,
+        mal: MALService,
         discoveredLibraries: LoadState<[AggregatedLibrary]>,
         reloadLibraries: @escaping () async -> Void,
         accounts: [Account],
@@ -98,6 +107,9 @@ public struct SettingsView: View {
         self.nightShift = nightShift
         self.homeVisibility = homeVisibility
         self.trakt = trakt
+        self.simkl = simkl
+        self.anilist = anilist
+        self.mal = mal
         self.discoveredLibraries = discoveredLibraries
         self.reloadLibraries = reloadLibraries
         self.accounts = accounts
@@ -358,7 +370,7 @@ public struct SettingsView: View {
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
-            IntegrationsDetailView(trakt: trakt)
+            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal)
         case .attributions:
             AttributionsDetailView()
         case let .plexUser(accountID):
@@ -602,13 +614,20 @@ public struct SettingsView: View {
     }
 
     private var traktSummary: String? {
+        var connected: [String] = []
+        if case .connected = trakt.phase { connected.append("Trakt") }
+        if case .connected = simkl.phase { connected.append("Simkl") }
+        if case .connected = anilist.phase { connected.append("AniList") }
+        if case .connected = mal.phase { connected.append("MAL") }
+        if !connected.isEmpty { return connected.joined(separator: ", ") }
+        // Fall back to individual status
         switch trakt.phase {
-        case let .connected(name): return name
         case .connecting: return "Connecting…"
         case .disconnected: return "Off"
-        case .unavailable: return "Unavailable"
+        case .unavailable: return "Off"
         case .error: return "Error"
         case .unknown: return nil
+        case .connected: return nil // handled above
         }
     }
 

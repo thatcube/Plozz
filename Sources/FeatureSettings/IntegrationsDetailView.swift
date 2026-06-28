@@ -3,25 +3,35 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import TraktService
+import SimklService
+import AniListService
+import MALService
 
 struct IntegrationsDetailView: View {
     let trakt: TraktService
-
-    private var traktFooter: String? {
-        switch trakt.phase {
-        case .connecting, .connected:
-            return nil
-        default:
-            return "Connect Trakt to automatically scrobble what you watch to your Trakt.tv history. Each profile connects to its own Trakt account."
-        }
-    }
+    let simkl: SimklService
+    let anilist: AniListService
+    let mal: MALService
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 Text("Integrations").font(.largeTitle.bold())
+
                 SettingsPanel(title: "Trakt", footer: traktFooter) {
                     TraktConnectionView(trakt: trakt)
+                }
+
+                SettingsPanel(title: "Simkl", footer: simklFooter) {
+                    SimklConnectionView(simkl: simkl)
+                }
+
+                SettingsPanel(title: "AniList", footer: anilistFooter) {
+                    AniListConnectionView(anilist: anilist)
+                }
+
+                SettingsPanel(title: "MyAnimeList", footer: malFooter) {
+                    MALConnectionView(mal: mal)
                 }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
@@ -29,14 +39,39 @@ struct IntegrationsDetailView: View {
         }
         .scrollClipDisabled()
     }
+
+    private var traktFooter: String? {
+        switch trakt.phase {
+        case .connecting, .connected: return nil
+        default: return "Connect Trakt to automatically scrobble what you watch to your Trakt.tv history. Each profile connects to its own Trakt account."
+        }
+    }
+
+    private var simklFooter: String? {
+        switch simkl.phase {
+        case .connecting, .connected: return nil
+        default: return "Connect Simkl to sync movies, shows, and anime to your Simkl watchlist."
+        }
+    }
+
+    private var anilistFooter: String? {
+        switch anilist.phase {
+        case .awaitingToken, .connected: return nil
+        default: return "Connect AniList to automatically track your anime progress. Only anime with AniList/MAL metadata will be tracked."
+        }
+    }
+
+    private var malFooter: String? {
+        switch mal.phase {
+        case .connecting, .connected: return nil
+        default: return "Connect MyAnimeList to automatically update your anime list. Only anime with MAL metadata will be tracked."
+        }
+    }
 }
 
+// MARK: - Trakt Connection View
+
 /// The Trakt connect/disconnect flow rendered inside the Integrations panel.
-///
-/// Driven entirely by the observable `TraktService.phase`, so connecting in
-/// one place and the live device-code prompt stay in sync. The device-code
-/// flow is the TV-friendly OAuth grant: we show a short code and the user
-/// approves it at `trakt.tv/activate` on a phone or computer.
 struct TraktConnectionView: View {
     let trakt: TraktService
 
@@ -66,10 +101,6 @@ struct TraktConnectionView: View {
                 }
 
             case .unavailable:
-                // tvOS requires at least one focusable element on a pushed
-                // view, otherwise focus is unanchored and Menu/Back falls
-                // through to the system and exits the app. An enabled but
-                // inert button keeps focus inside this view so Back pops.
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Trakt sync isn't configured in this build. Add a Trakt client id and secret to enable it.")
                         .foregroundStyle(.secondary)
@@ -87,10 +118,19 @@ struct TraktConnectionView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             case let .connecting(userCode, verificationURL, expiresAt):
-                connectingView(userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt)
+                DeviceCodeConnectingView(
+                    serviceName: "Trakt",
+                    userCode: userCode,
+                    verificationURL: verificationURL,
+                    expiresAt: expiresAt,
+                    codeLifetime: trakt.codeLifetime,
+                    onCancel: { trakt.cancelConnect() }
+                )
 
             case let .connected(username):
-                connectedView(username: username)
+                TrackerConnectedView(username: username, serviceName: "Trakt") {
+                    Task { await trakt.disconnect() }
+                }
 
             case let .error(message):
                 VStack(alignment: .leading, spacing: 12) {
@@ -115,10 +155,186 @@ struct TraktConnectionView: View {
             }
         }
     }
+}
 
-    private func connectingView(userCode: String, verificationURL: String, expiresAt: Date) -> some View {
+// MARK: - Simkl Connection View
+
+struct SimklConnectionView: View {
+    let simkl: SimklService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            switch simkl.phase {
+            case .unknown:
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Checking Simkl connection…").foregroundStyle(.secondary)
+                }
+            case .unavailable:
+                Text("Simkl sync isn't configured in this build. Add a Simkl client id and secret to enable it.")
+                    .foregroundStyle(.secondary)
+            case .disconnected:
+                Button(action: { simkl.connect() }) {
+                    Label("Connect to Simkl", systemImage: "link")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            case let .connecting(userCode, verificationURL, expiresAt):
+                DeviceCodeConnectingView(
+                    serviceName: "Simkl",
+                    userCode: userCode,
+                    verificationURL: verificationURL,
+                    expiresAt: expiresAt,
+                    codeLifetime: simkl.codeLifetime,
+                    onCancel: { simkl.cancelConnect() }
+                )
+            case let .connected(username):
+                TrackerConnectedView(username: username, serviceName: "Simkl") {
+                    Task { await simkl.disconnect() }
+                }
+            case let .error(message):
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.secondary)
+                    Button(action: { simkl.connect() }) {
+                        Label("Try Again", systemImage: "arrow.clockwise")
+                    }
+                }
+            }
+        }
+        .task { await simkl.refreshStatus() }
+    }
+}
+
+// MARK: - AniList Connection View
+
+struct AniListConnectionView: View {
+    let anilist: AniListService
+    @State private var tokenInput: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            switch anilist.phase {
+            case .unknown:
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Checking AniList connection…").foregroundStyle(.secondary)
+                }
+            case .unavailable:
+                Text("AniList sync isn't configured in this build. Add an AniList client id to enable it.")
+                    .foregroundStyle(.secondary)
+            case .disconnected:
+                Button(action: { anilist.connect() }) {
+                    Label("Connect to AniList", systemImage: "link")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            case let .awaitingToken(authorizationURL):
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Visit this URL on your phone or computer, authorize Plozz, then paste the token below:")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    HStack(alignment: .center, spacing: 32) {
+                        QRCodeView(authorizationURL)
+                            .frame(width: 160, height: 160)
+                            .padding(10)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 14))
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("anilist.co/api/v2/oauth/authorize")
+                                .font(.title3.weight(.semibold))
+                            TextField("Paste access token here", text: $tokenInput)
+                            HStack(spacing: 16) {
+                                Button("Submit Token") {
+                                    Task { await anilist.submitToken(tokenInput) }
+                                }
+                                .disabled(tokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                                Button("Cancel", role: .cancel) {
+                                    anilist.cancelConnect()
+                                }
+                            }
+                        }
+                    }
+                }
+            case let .connected(username):
+                TrackerConnectedView(username: username, serviceName: "AniList") {
+                    Task { await anilist.disconnect() }
+                }
+            case let .error(message):
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.secondary)
+                    Button(action: { anilist.connect() }) {
+                        Label("Try Again", systemImage: "arrow.clockwise")
+                    }
+                }
+            }
+        }
+        .task { await anilist.refreshStatus() }
+    }
+}
+
+// MARK: - MAL Connection View
+
+struct MALConnectionView: View {
+    let mal: MALService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            switch mal.phase {
+            case .unknown:
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Checking MyAnimeList connection…").foregroundStyle(.secondary)
+                }
+            case .unavailable:
+                Text("MyAnimeList sync isn't configured in this build. Add a MAL client id to enable it.")
+                    .foregroundStyle(.secondary)
+            case .disconnected:
+                Button(action: { mal.connect() }) {
+                    Label("Connect to MyAnimeList", systemImage: "link")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            case let .connecting(userCode, verificationURL, expiresAt):
+                DeviceCodeConnectingView(
+                    serviceName: "MyAnimeList",
+                    userCode: userCode,
+                    verificationURL: verificationURL,
+                    expiresAt: expiresAt,
+                    codeLifetime: mal.codeLifetime,
+                    onCancel: { mal.cancelConnect() }
+                )
+            case let .connected(username):
+                TrackerConnectedView(username: username, serviceName: "MyAnimeList") {
+                    Task { await mal.disconnect() }
+                }
+            case let .error(message):
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.secondary)
+                    Button(action: { mal.connect() }) {
+                        Label("Try Again", systemImage: "arrow.clockwise")
+                    }
+                }
+            }
+        }
+        .task { await mal.refreshStatus() }
+    }
+}
+
+// MARK: - Shared Components
+
+/// Reusable device-code connecting view (QR + code + countdown) for Trakt/Simkl/MAL.
+struct DeviceCodeConnectingView: View {
+    let serviceName: String
+    let userCode: String
+    let verificationURL: String
+    let expiresAt: Date
+    let codeLifetime: TimeInterval
+    let onCancel: () -> Void
+
+    var body: some View {
         HStack(alignment: .center, spacing: 32) {
-            QRCodeView(activationURL(userCode: userCode, verificationURL: verificationURL))
+            QRCodeView(activationURL)
                 .frame(width: 180, height: 180)
                 .padding(12)
                 .background(.white, in: RoundedRectangle(cornerRadius: 16))
@@ -128,7 +344,7 @@ struct TraktConnectionView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 12) {
-                Text(displayURL(verificationURL))
+                Text(displayURL)
                     .font(.title2.weight(.semibold))
                 Text(userCode)
                     .font(.plozzCode(size: 52))
@@ -137,16 +353,15 @@ struct TraktConnectionView: View {
                     .padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
                 HStack(spacing: 14) {
-                    TraktExpiryCountdown(expiresAt: expiresAt, lifetime: trakt.codeLifetime)
+                    TraktExpiryCountdown(expiresAt: expiresAt, lifetime: codeLifetime)
                         .frame(width: 64, height: 64)
                     Text("Waiting for approval…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-                Button(role: .cancel, action: { trakt.cancelConnect() }) {
+                Button(role: .cancel, action: onCancel) {
                     Text("Cancel")
                 }
-                .focused($focus, equals: .cancel)
                 .padding(.top, 16)
             }
 
@@ -154,34 +369,13 @@ struct TraktConnectionView: View {
         }
     }
 
-    private func activationURL(userCode: String, verificationURL: String) -> String {
+    private var activationURL: String {
         let encoded = userCode.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userCode
         return "\(verificationURL)?code=\(encoded)"
     }
 
-    private func connectedView(username: String) -> some View {
-        HStack(spacing: 16) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.title)
-                .foregroundStyle(.green)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(username).font(.headline)
-                Text("Your watches sync to Trakt")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button(role: .destructive) {
-                Task { await trakt.disconnect() }
-            } label: {
-                Label("Disconnect", systemImage: "xmark.circle")
-            }
-            .focused($focus, equals: .disconnect)
-        }
-    }
-
-    private func displayURL(_ url: String) -> String {
-        var trimmed = url
+    private var displayURL: String {
+        var trimmed = verificationURL
         for prefix in ["https://", "http://"] where trimmed.hasPrefix(prefix) {
             trimmed.removeFirst(prefix.count)
         }
@@ -189,9 +383,32 @@ struct TraktConnectionView: View {
     }
 }
 
-/// Compact ring that depletes over the life of the current Trakt device code,
-/// with the seconds remaining at its centre, shifting to a warning tint as
-/// the deadline nears. The code auto-refreshes on expiry, so this just resets.
+/// Shared connected-state view showing username + disconnect button.
+struct TrackerConnectedView: View {
+    let username: String
+    let serviceName: String
+    let onDisconnect: () -> Void
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.title)
+                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(username).font(.headline)
+                Text("Your watches sync to \(serviceName)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive, action: onDisconnect) {
+                Label("Disconnect", systemImage: "xmark.circle")
+            }
+        }
+    }
+}
+
+/// Compact ring that depletes over the life of a device code.
 struct TraktExpiryCountdown: View {
     let expiresAt: Date
     let lifetime: TimeInterval
@@ -227,10 +444,7 @@ struct TraktExpiryCountdown: View {
     }
 }
 
-/// Open-source credits & licensing — the one acceptable level deeper from the
-/// inline About section on the main Settings page. Each credit is a focusable
-/// inverted-card so the page is reachable on the 10-foot UI and Menu/Back pops
-/// reliably (a fully non-interactive page can trap focus and quit the app).
+/// Open-source credits & licensing.
 struct AttributionsDetailView: View {
     var body: some View {
         ScrollView {
@@ -255,8 +469,8 @@ struct AttributionsDetailView: View {
                     "Playback is powered by mpv and libmpv (GPL/LGPL), together with the FFmpeg-family libraries (libass, dav1d, libplacebo, libbluray, and related components) packaged by the mpvkit project."
                 )
                 attribution(
-                    "Metadata",
-                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Additional ratings and metadata are supplied by your media server and by TMDB, OMDb, and AniList."
+                    "Metadata & Tracking",
+                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Additional ratings and metadata are supplied by your media server and by TMDB, OMDb, and AniList. Watch tracking integrations (Trakt, Simkl, AniList, MyAnimeList) use their respective APIs but are not affiliated with those services."
                 )
                 attribution(
                     "Swift packages",
@@ -275,7 +489,7 @@ struct AttributionsDetailView: View {
     }
 }
 
-/// A single focusable credit card with the shared inverted-card focus look.
+/// A single focusable credit card.
 private struct AttributionCard: View {
     let title: String
     let text: String

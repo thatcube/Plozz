@@ -12,6 +12,9 @@ import FeatureProfiles
 import ProviderTrailers
 import RatingsService
 import TraktService
+import SimklService
+import AniListService
+import MALService
 
 /// Bundles the watch-outbox interactions the full-screen player needs: live-
 /// session registration (so the convergence reconciler defers writes against the
@@ -72,6 +75,9 @@ struct MainTabView: View {
     let homeLayoutStore: HomeLayoutStoring
     let ratingsProvider: any ExternalRatingsProviding
     let trakt: TraktService
+    let simkl: SimklService
+    let anilist: AniListService
+    let mal: MALService
     let mediaItemActionHandler: any MediaItemActionHandling
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
@@ -168,6 +174,9 @@ struct MainTabView: View {
                 nightShift: nightShiftModel,
                 homeVisibility: homeVisibility,
                 trakt: trakt,
+                simkl: simkl,
+                anilist: anilist,
+                mal: mal,
                 discoveredLibraries: discovery.state,
                 reloadLibraries: { await discovery.load(from: accounts) },
                 accounts: displayAccounts,

@@ -111,6 +111,12 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     public var trakt: TraktScrobbleIntent?
     /// Whether the Trakt mirror still needs writing (cleared on success).
     public var traktPending: Bool
+    /// Whether the Simkl mirror still needs writing (cleared on success).
+    public var simklPending: Bool
+    /// Whether the AniList mirror still needs writing (cleared on success).
+    public var anilistPending: Bool
+    /// Whether the MAL mirror still needs writing (cleared on success).
+    public var malPending: Bool
     /// Retry counter for backoff / give-up diagnostics.
     public var attempts: Int
 
@@ -152,7 +158,10 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         attempts: Int = 0,
         episodeOrigin: EpisodeOrigin? = nil,
         expansionPending: Bool = false,
-        identities: [MediaIdentity] = []
+        identities: [MediaIdentity] = [],
+        simklPending: Bool? = nil,
+        anilistPending: Bool? = nil,
+        malPending: Bool? = nil
     ) {
         self.id = id
         self.capturedAt = capturedAt
@@ -165,6 +174,9 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         self.targets = targets
         self.trakt = trakt
         self.traktPending = trakt != nil
+        self.simklPending = simklPending ?? (trakt != nil)
+        self.anilistPending = anilistPending ?? (trakt != nil)
+        self.malPending = malPending ?? (trakt != nil)
         self.attempts = attempts
         self.episodeOrigin = episodeOrigin
         self.expansionPending = expansionPending
@@ -176,13 +188,14 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case id, capturedAt, canonicalMediaID, seasonNumber, episodeNumber
         case resumePosition, played, clearResume, targets, trakt, traktPending
+        case simklPending, anilistPending, malPending
         case attempts, episodeOrigin, expansionPending, identities
     }
 
     /// Decodes tolerating outbox files written before `episodeOrigin` /
-    /// `expansionPending` / `identities` existed (they decode to `nil` / `false` /
-    /// `[]`), so an in-app upgrade never drops a queued watch. `encode(to:)` is
-    /// synthesized.
+    /// `expansionPending` / `identities` / tracker pending flags existed (they
+    /// decode to `nil` / `false` / `[]`), so an in-app upgrade never drops a
+    /// queued watch. `encode(to:)` is synthesized.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -196,6 +209,9 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         targets = try container.decodeIfPresent([WatchMutationTarget].self, forKey: .targets) ?? []
         trakt = try container.decodeIfPresent(TraktScrobbleIntent.self, forKey: .trakt)
         traktPending = try container.decodeIfPresent(Bool.self, forKey: .traktPending) ?? (trakt != nil)
+        simklPending = try container.decodeIfPresent(Bool.self, forKey: .simklPending) ?? false
+        anilistPending = try container.decodeIfPresent(Bool.self, forKey: .anilistPending) ?? false
+        malPending = try container.decodeIfPresent(Bool.self, forKey: .malPending) ?? false
         attempts = try container.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
         episodeOrigin = try container.decodeIfPresent(EpisodeOrigin.self, forKey: .episodeOrigin)
         expansionPending = try container.decodeIfPresent(Bool.self, forKey: .expansionPending) ?? false
@@ -217,12 +233,10 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         "\(coalesceKey)|\(dayBucket)"
     }
 
-    /// Whether every server target AND the Trakt mirror are done **and** no
-    /// cross-server twin expansion is still owed — safe to prune. Keeping a
-    /// mutation alive while `expansionPending` ensures an episode whose twin server
-    /// was asleep at the first drain still fans out on a later one.
+    /// Whether every server target AND all tracker mirrors are done **and** no
+    /// cross-server twin expansion is still owed — safe to prune.
     public var isFullyApplied: Bool {
-        targets.isEmpty && !traktPending && !expansionPending
+        targets.isEmpty && !traktPending && !simklPending && !anilistPending && !malPending && !expansionPending
     }
 
     // MARK: - Canonical id

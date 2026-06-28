@@ -294,6 +294,18 @@ final class RemuxSegmenter: @unchecked Sendable {
             // full-size. Restore the prior read-ahead for muxing afterward.
             let restoreReadAhead = reader.currentReadAhead
             reader.setReadAhead(probeReadAhead)
+            // Cues FAST-PATH: when the source is a Matroska that ships a trustworthy
+            // Cues index (the ~90–95% common case) but libavformat opened index-blind
+            // (uses_fixed_cadence==1), parse the EXACT (keyframe PTS, cluster offset)
+            // table in ~2 ranged reads and feed it as the cue table. set_full_vod_mode's
+            // consume then short-circuits the fixed-cadence estimate and cuts every
+            // segment on a real keyframe. Self-gating: a non-MKV / no-Cues / sparse
+            // source returns nil and we fall through to the fixed-cadence fallback. Uses
+            // a DEDICATED reader so its positioned reads never disturb the C session's
+            // shared AVIO cursor.
+            RemuxSegmenter.applyCueTableIfAvailable(session: session,
+                                                    sourceURL: sourceURL,
+                                                    headers: headers)
             let fullVodResult = plozz_remux_set_full_vod_mode(session, 1)
             reader.setReadAhead(restoreReadAhead)
             if fullVodResult == 1 {
@@ -441,6 +453,50 @@ final class RemuxSegmenter: @unchecked Sendable {
     func boostReadAhead(_ bytes: Int) {
         muxReadAhead = max(muxReadAhead, bytes)
         reader.boostReadAhead(bytes)
+    }
+
+    /// Cues FAST-PATH marshaller. Parses the Matroska Cues index with a dedicated
+    /// `HTTPRangeReader` (isolated from the C session's AVIO cursor) and, when it
+    /// yields a trustworthy keyframe table, feeds the EXACT source-domain segment
+    /// boundaries to the C core via `plozz_remux_set_cue_table` so the subsequent
+    /// `set_full_vod_mode` cuts on real keyframes instead of estimating a fixed
+    /// cadence. A no-op (logs `cues: hasCues=0`) for non-MKV / no-Cues / sparse or
+    /// untrustworthy sources — the caller then falls through to fixed cadence.
+    ///
+    /// Domain contract (findings §8.2): hands `boundaryPTS` in RAW SOURCE seconds
+    /// (the same domain as the Cues PTS, trailing programme-end kept) and
+    /// `duration = endPTS`. The C consume normalizes 0-based itself by subtracting
+    /// the container start_time — so we DO NOT pre-zero here. `byte_offsets` is left
+    /// NULL: every boundary is a real keyframe, so the muxer's backward-seek-by-time
+    /// lands exactly on it (a no-op).
+    private static func applyCueTableIfAvailable(session: OpaquePointer,
+                                                 sourceURL: URL,
+                                                 headers: [String: String]) {
+        let probeReader = HTTPRangeReader(url: sourceURL, headers: headers)
+        let sampler = MatroskaKeyframeSampler(source: probeReader)
+        switch sampler.keyframePlanFromCues() {
+        case .absent:
+            RemuxLog.info("cues: hasCues=0 (no usable Cues element — fixed-cadence fallback)")
+        case let .untrustworthy(reason):
+            RemuxLog.info("cues: hasCues=0 untrustworthy=\(reason) — fixed-cadence fallback")
+        case let .trustworthy(points, maxGap):
+            let total = sampler.cachedInitInfo()?.durationSeconds ?? (points.last?.seconds ?? 0)
+            let plan = CuesVODPlan(keyframes: points.map { ($0.seconds, $0.clusterOffset) },
+                                   totalDuration: total,
+                                   targetSeconds: 4.0)
+            let bounds = plan.boundaryPTS
+            guard bounds.count >= 2 else {
+                RemuxLog.info("cues: hasCues=1 but boundaryPTS<2 — fixed-cadence fallback")
+                return
+            }
+            bounds.withUnsafeBufferPointer { buf in
+                plozz_remux_set_cue_table(session, plan.endPTS,
+                                          buf.baseAddress, Int32(buf.count), nil)
+            }
+            RemuxLog.info(String(format:
+                "cues: hasCues=1 points=%d maxGap=%.2fs segs=%d start=%.3f end=%.3f",
+                points.count, maxGap, plan.segmentDurations.count, plan.startPTS, plan.endPTS))
+        }
     }
 
     /// Scans an fMP4 init segment for the box four-cc atoms that matter for the

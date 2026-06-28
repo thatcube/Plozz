@@ -101,9 +101,13 @@ struct PlaybackDiagnosticsOverlay: View {
     @ViewBuilder
     private func videoSection(_ d: PlaybackDiagnostics) -> some View {
         section("VIDEO") {
-            optionalRow("Codec", d.videoLineText)
-            optionalRow("Color", d.colorText)
+            optionalRow("Codec", d.videoCodecText)
+            optionalRow("Resolution", d.resolutionWithQualityText)
+            optionalRow("Frame Rate", d.frameRateText)
+            optionalRow("Bitrate", d.indicatedBitrateText)
+            optionalRow("HDR", d.hdrText)
             optionalRow("Dolby Vision", d.dolbyVisionText)
+            optionalRow("Color", d.colorText)
             optionalRow("Codec Tag", d.videoCodecTagText)
         }
     }
@@ -111,7 +115,10 @@ struct PlaybackDiagnosticsOverlay: View {
     @ViewBuilder
     private func audioSection(_ d: PlaybackDiagnostics) -> some View {
         section("AUDIO") {
-            optionalRow("Codec", d.audioLineText)
+            optionalRow("Codec", d.audioCodecText)
+            optionalRow("Channels", d.audioChannelsText)
+            optionalRow("Sample Rate", d.audioSampleRateText)
+            optionalRow("Bitrate", d.audioBitrateText)
             optionalRow("Output", d.audioOutputText)
         }
     }
@@ -181,14 +188,10 @@ struct PlaybackDiagnosticsOverlay: View {
     // MARK: - Rows
 
     private func sourceText(_ d: PlaybackDiagnostics) -> String {
-        let mode: String
         if d.mode == .localRemux, d.remux?.strategyID == LocalRemuxStrategyChoice.referenceServerRemuxID {
-            mode = "Server HLS baseline"
-        } else {
-            mode = d.mode.displayName
+            return "Server HLS baseline"
         }
-        guard let label = PlaybackDiagnostics.containerLabel(d.container) else { return mode }
-        return "\(mode) · \(label)"
+        return d.mode.displayName
     }
 
     @ViewBuilder

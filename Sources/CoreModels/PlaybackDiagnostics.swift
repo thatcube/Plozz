@@ -746,25 +746,16 @@ public extension PlaybackDiagnostics {
     static func streamTransportSummary(url: URL?) -> String? {
         guard let url else { return nil }
         let host = (url.host ?? "").lowercased()
-        let ext = url.pathExtension.lowercased()
-        let kind: String
-        switch ext {
-        case "m3u8": kind = "HLS"
-        case "mp4", "m4v": kind = "fMP4/MP4"
-        case "mov": kind = "QuickTime"
-        case "mkv": kind = "Matroska"
-        case "ts", "m2ts": kind = "MPEG-TS"
-        default: kind = (url.scheme ?? "").uppercased()
-        }
+        let scheme = (url.scheme ?? "").uppercased()
         let isLocal = host == "127.0.0.1" || host == "localhost" || host == "::1"
         if isLocal {
             let port = url.port.map { ":\($0)" } ?? ""
-            return "App-local \(host)\(port) · \(kind)"
+            return "App-local \(host)\(port)"
         }
         if host.isEmpty {
-            return kind.isEmpty ? nil : kind
+            return scheme.isEmpty ? nil : scheme
         }
-        return "\(host) · \(kind)"
+        return "\(host) · \(scheme)"
     }
 
     /// Formats a resolution with an optional quality label, e.g.
@@ -836,10 +827,19 @@ public extension PlaybackDiagnostics {
     // MARK: Instance convenience (used by the overlay)
 
     var resolutionText: String { Self.formatResolution(resolution) }
+    /// e.g. `3840×2160 (4K)` or `1920×1080 (1080p)`.
+    var resolutionWithQualityText: String {
+        guard let resolution, resolution.width > 0, resolution.height > 0 else { return Self.placeholder }
+        if let label = resolution.qualityLabel {
+            return "\(resolution.displayString) (\(label))"
+        }
+        return resolution.displayString
+    }
     var indicatedBitrateText: String { Self.formatBitrate(indicatedBitrate) }
     var observedBitrateText: String { Self.formatBitrate(observedBitrate) }
     var bufferText: String { Self.formatBuffer(bufferedSecondsAhead) }
     var frameRateText: String { Self.formatFrameRate(frameRate) }
+    var hdrText: String { hdr == .unknown ? Self.placeholder : hdr.displayName }
     var videoCodecText: String { videoCodec ?? Self.placeholder }
     var audioCodecText: String { audioCodec ?? Self.placeholder }
     var droppedFramesText: String { droppedVideoFrames.map(String.init) ?? Self.placeholder }
@@ -874,6 +874,19 @@ public extension PlaybackDiagnostics {
 
     var audioOutputText: String {
         audioOutputDescription ?? Self.placeholder
+    }
+
+    var audioChannelsText: String {
+        Self.channelDescription(layout: audioChannelLayout, channels: audioChannels) ?? Self.placeholder
+    }
+
+    var audioSampleRateText: String {
+        Self.formatSampleRate(audioSampleRate) ?? Self.placeholder
+    }
+
+    var audioBitrateText: String {
+        guard let br = audioBitrate, br > 0 else { return Self.placeholder }
+        return Self.formatBitrate(br)
     }
 
     /// Backend that resolved the stream, e.g. `Plex` / `Jellyfin`.

@@ -146,13 +146,15 @@ struct AppearanceDetailView: View {
 
     /// Hairline rule between the joined Appearance sections so they read as one
     /// grouped container rather than separate cards. The negative horizontal
-    /// padding cancels the container's 28 pt content inset so the rule spans the
-    /// full width edge-to-edge.
+    /// padding cancels the container's 28 pt content inset *minus* the 1 pt
+    /// border stroke, so the rule meets the inner edge of the border exactly
+    /// without overlapping it (overlapping would stack the two translucent
+    /// fills into a darker dot at each end).
     private var sectionDivider: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.1))
             .frame(height: 1)
-            .padding(.horizontal, -28)
+            .padding(.horizontal, -27)
     }
 }
 

@@ -27,22 +27,22 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .extraCompact: return "Extra Compact"
-        case .compact: return "Compact"
-        case .standard: return "Standard"
-        case .spacious: return "Spacious"
-        case .extraLarge: return "Extra Large"
+        case .extraCompact: return "Tiny"
+        case .compact: return "Small"
+        case .standard: return "Medium"
+        case .spacious: return "Large"
+        case .extraLarge: return "Huge"
         }
     }
 
     /// Short helper line shown under each option in Settings.
     public var detail: String {
         switch self {
-        case .extraCompact: return "Maximum on screen, tightest spacing"
-        case .compact: return "More on screen, tighter spacing"
-        case .standard: return "The balanced default"
-        case .spacious: return "Larger cards, more breathing room"
-        case .extraLarge: return "Biggest cards — easiest to see"
+        case .extraCompact: return "Most cards, smallest"
+        case .compact: return "More cards, smaller"
+        case .standard: return "Default size"
+        case .spacious: return "Fewer cards, bigger"
+        case .extraLarge: return "Fewest cards, biggest"
         }
     }
 

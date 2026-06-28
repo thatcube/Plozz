@@ -294,12 +294,17 @@ struct SeriesDetailView: View {
                             .frame(width: seasonBarViewportWidth)
                     }
                 }
-                .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
                 .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                 // Headroom for the focused chip's lift so it is never clipped.
                 .padding(.vertical, 12)
             }
-            // Measure the bar's viewport width to size the trailing spacer above.
+            // Inset the whole scroll VIEWPORT to the hero keyline (rather than
+            // padding the content), so a chip scrolled to `.leading` aligns to the
+            // keyline — where "S·E"/Play start — instead of the column edge. Padding
+            // the content instead let `scrollTo(.leading)` pin the chip to the
+            // scrollview's own leading edge, clipping it left of the keyline.
+            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+            // Measure the (inset) viewport width to size the trailing spacer above.
             .background(
                 GeometryReader { geo in
                     Color.clear
@@ -334,23 +339,18 @@ struct SeriesDetailView: View {
                 // keeps the page on the episode you were last viewing, so going up and
                 // back down stays anchored to that episode rather than the season.
             }
-            // Keep the ACTIVE season chip scrolled into view whenever focus is *not*
-            // inside the bar, so pressing DOWN from the hero Play row always has the
-            // active season sitting directly below to land on — even when it's a high
-            // season (e.g. S12) parked off-screen to the right. Without this the chip
-            // stays off-screen and tvOS's downward search skips the whole bar and
-            // drops focus straight into the on-screen episode rail, making the season
-            // row unreachable. While focus *is* in the bar, tvOS owns scrolling as the
-            // user moves left/right, so we stand back (guarded by `seasonBarEngaged`).
+            // Position the active season chip ONCE on arrival (and on an external
+            // re-selection such as a cross-server switch) so a high season parked
+            // off-screen right is brought into view, leading-aligned to the keyline,
+            // and is reachable by a down-press from Play. We deliberately do NOT
+            // re-anchor when focus merely leaves the bar (e.g. moving down into the
+            // episodes): once the user has scrolled the bar it stays where they left
+            // it rather than snapping back. Guarded by `seasonBarEngaged` so it never
+            // fights tvOS's own scrolling while focus is inside the bar.
             .onAppear { scrollActiveSeasonIntoView(using: proxy) }
             .onChange(of: selectedSeasonID) { _, _ in
                 guard !seasonBarEngaged else { return }
                 scrollActiveSeasonIntoView(using: proxy)
-            }
-            .onChange(of: seasonBarEngaged) { _, engaged in
-                // Focus just left the bar: re-anchor the (now settled) active season
-                // to the leading edge so the next down-press from Play lands on it.
-                if !engaged { scrollActiveSeasonIntoView(using: proxy) }
             }
         }
     }

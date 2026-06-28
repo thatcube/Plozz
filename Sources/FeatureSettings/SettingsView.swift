@@ -30,6 +30,7 @@ public struct SettingsView: View {
     private let spoilers: SpoilerSettingsModel
     private let playback: PlaybackSettingsModel
     private let theme: ThemeSettingsModel
+    private let nightShift: NightShiftSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
     private let trakt: TraktService
     private let discoveredLibraries: LoadState<[AggregatedLibrary]>
@@ -62,6 +63,7 @@ public struct SettingsView: View {
         spoilers: SpoilerSettingsModel,
         playback: PlaybackSettingsModel,
         theme: ThemeSettingsModel,
+        nightShift: NightShiftSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
         trakt: TraktService,
         discoveredLibraries: LoadState<[AggregatedLibrary]>,
@@ -93,6 +95,7 @@ public struct SettingsView: View {
         self.spoilers = spoilers
         self.playback = playback
         self.theme = theme
+        self.nightShift = nightShift
         self.homeVisibility = homeVisibility
         self.trakt = trakt
         self.discoveredLibraries = discoveredLibraries
@@ -264,6 +267,9 @@ public struct SettingsView: View {
             navRow("Appearance", icon: "paintpalette",
                    value: theme.theme.displayName,
                    route: .appearance)
+            navRow("Night Shift", icon: "moon.stars",
+                   value: nightShift.settings.isEnabled ? "On" : "Off",
+                   route: .nightShift)
             navRow("Playback", icon: "play.rectangle",
                    value: playback.settings.skipIntros == .off ? nil : "Skip: \(playback.settings.skipIntros.title)",
                    route: .playback)
@@ -343,6 +349,8 @@ public struct SettingsView: View {
             ServersAndLibrariesDetailView(context: context)
         case .appearance:
             AppearanceDetailView(theme: theme)
+        case .nightShift:
+            NightShiftDetailView(model: nightShift)
         case .playback:
             PlaybackDetailView(playback: playback)
         case .captions:

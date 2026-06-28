@@ -46,6 +46,7 @@ enum SettingsRoute: Hashable {
     case profile
     case servers
     case appearance
+    case nightShift
     case playback
     case captions
     case spoilers

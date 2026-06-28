@@ -90,6 +90,7 @@ public struct RootView: View {
                         diagnosticsModel: appState.diagnosticsModel,
                         musicPlayerModel: appState.musicPlayerModel,
                         uiDensityModel: appState.uiDensityModel,
+                        nightShiftModel: appState.nightShiftModel,
                         audioController: appState.audioController,
                         homeVisibility: appState.homeLibraryVisibilityModel,
                         homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
@@ -194,6 +195,12 @@ public struct RootView: View {
                            value: displayVeil.veilOpacity)
         }
         .modifier(RootDisplaySettleObserver { displayVeil.displayDidSettle() })
+        // Per-profile Night Shift: a warm/dim screen tint that multiplies the
+        // whole app (player included) on the active profile's schedule. Installed
+        // at the app root so it floats above every screen and modal cover. The
+        // model is rebuilt on profile switch by AppState, so each profile gets its
+        // own tint without re-architecting this call site.
+        .installNightShiftOverlay(appState.nightShiftModel)
     }
 }
 

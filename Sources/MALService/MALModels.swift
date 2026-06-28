@@ -20,22 +20,18 @@ public struct MALTokens: Codable, Sendable, Equatable {
     }
 }
 
-// MARK: - OAuth device-code DTOs
+// MARK: - OAuth authorization-code DTOs
 
-/// Response to `POST /v1/oauth2/device/code` (MAL's device authorization endpoint).
-public struct MALDeviceCode: Sendable, Equatable {
-    public let deviceCode: String
-    public let userCode: String
-    public let verificationURL: String
-    public let expiresIn: TimeInterval
-    public let interval: TimeInterval
+/// State needed to complete a PKCE authorization-code flow.
+public struct MALAuthorizationRequest: Sendable, Equatable {
+    public let authorizationURL: String
+    public let codeVerifier: String
+    public let redirectURI: String
 
-    public init(deviceCode: String, userCode: String, verificationURL: String, expiresIn: TimeInterval, interval: TimeInterval) {
-        self.deviceCode = deviceCode
-        self.userCode = userCode
-        self.verificationURL = verificationURL
-        self.expiresIn = expiresIn
-        self.interval = interval
+    public init(authorizationURL: String, codeVerifier: String, redirectURI: String) {
+        self.authorizationURL = authorizationURL
+        self.codeVerifier = codeVerifier
+        self.redirectURI = redirectURI
     }
 }
 

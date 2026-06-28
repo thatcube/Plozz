@@ -17,65 +17,84 @@ struct MALClient: Sendable {
     private var authBaseURL: URL { config.authBaseURL }
     private var apiBaseURL: URL { config.apiBaseURL }
 
-    // MARK: - OAuth (device code)
+    // MARK: - OAuth (authorization code + PKCE)
 
-    /// `POST /v1/oauth2/device/code` — begins the device-code flow.
-    /// MAL returns a form-like response; we parse JSON from it.
-    func requestDeviceCode() async throws -> MALDeviceCode {
-        let body = "client_id=\(config.clientID ?? "")"
-        let endpoint = Endpoint(
-            method: .post,
-            path: "/v1/oauth2/device_authorization",
-            headers: ["Content-Type": "application/x-www-form-urlencoded"]
-        )
-        let data = try await sendForm(endpoint: endpoint, body: body, baseURL: authBaseURL)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        guard let deviceCode = json["device_code"] as? String,
-              let userCode = json["user_code"] as? String,
-              let verificationURL = json["verification_uri"] as? String ?? json["verification_url"] as? String
-        else {
-            throw AppError.unknown("MAL: invalid device code response")
+    func beginAuthorization(codeVerifier: String) throws -> MALAuthorizationRequest {
+        guard let clientID = config.clientID else {
+            throw AppError.unknown("MAL: missing client id")
         }
-        let expiresIn = (json["expires_in"] as? Double) ?? 600
-        let interval = (json["interval"] as? Double) ?? 5
-        return MALDeviceCode(
-            deviceCode: deviceCode,
-            userCode: userCode,
-            verificationURL: verificationURL,
-            expiresIn: expiresIn,
-            interval: interval
+
+        guard var components = URLComponents(
+            url: authBaseURL.appendingPathComponent("/v1/oauth2/authorize"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw AppError.unknown("MAL: invalid authorization URL")
+        }
+
+        components.queryItems = [
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "client_id", value: clientID),
+            URLQueryItem(name: "redirect_uri", value: config.redirectURI),
+            URLQueryItem(name: "code_challenge", value: codeVerifier),
+            URLQueryItem(name: "code_challenge_method", value: "plain")
+        ]
+
+        guard let authorizationURL = components.url?.absoluteString else {
+            throw AppError.unknown("MAL: invalid authorization URL")
+        }
+
+        return MALAuthorizationRequest(
+            authorizationURL: authorizationURL,
+            codeVerifier: codeVerifier,
+            redirectURI: config.redirectURI
         )
     }
 
-    /// `POST /v1/oauth2/token` — exchanges device code for tokens.
-    func requestToken(deviceCode: String) async throws -> MALTokenResponse {
-        let body = [
-            "client_id=\(config.clientID ?? "")",
-            "grant_type=urn:ietf:params:oauth:grant-type:device_code",
-            "device_code=\(deviceCode)"
-        ].joined(separator: "&")
+    /// `POST /v1/oauth2/token` — exchanges the short authorization code for tokens.
+    func requestToken(authorizationCode: String, codeVerifier: String) async throws -> MALTokenResponse {
+        guard let clientID = config.clientID else {
+            throw AppError.unknown("MAL: missing client id")
+        }
+
         let endpoint = Endpoint(
             method: .post,
             path: "/v1/oauth2/token",
             headers: ["Content-Type": "application/x-www-form-urlencoded"]
         )
-        let data = try await sendForm(endpoint: endpoint, body: body, baseURL: authBaseURL)
+        let data = try await sendForm(
+            endpoint: endpoint,
+            parameters: [
+                "client_id": clientID,
+                "grant_type": "authorization_code",
+                "code": authorizationCode,
+                "code_verifier": codeVerifier,
+                "redirect_uri": config.redirectURI
+            ],
+            baseURL: authBaseURL
+        )
         return try JSONDecoder().decode(MALTokenResponse.self, from: data)
     }
 
     /// `POST /v1/oauth2/token` — refreshes an expired access token.
     func refreshToken(_ refreshToken: String) async throws -> MALTokenResponse {
-        let body = [
-            "client_id=\(config.clientID ?? "")",
-            "grant_type=refresh_token",
-            "refresh_token=\(refreshToken)"
-        ].joined(separator: "&")
+        guard let clientID = config.clientID else {
+            throw AppError.unknown("MAL: missing client id")
+        }
+
         let endpoint = Endpoint(
             method: .post,
             path: "/v1/oauth2/token",
             headers: ["Content-Type": "application/x-www-form-urlencoded"]
         )
-        let data = try await sendForm(endpoint: endpoint, body: body, baseURL: authBaseURL)
+        let data = try await sendForm(
+            endpoint: endpoint,
+            parameters: [
+                "client_id": clientID,
+                "grant_type": "refresh_token",
+                "refresh_token": refreshToken
+            ],
+            baseURL: authBaseURL
+        )
         return try JSONDecoder().decode(MALTokenResponse.self, from: data)
     }
 
@@ -100,10 +119,9 @@ struct MALClient: Sendable {
         numWatchedEpisodes: Int?,
         accessToken: String
     ) async throws {
-        var parts: [String] = []
-        if let status { parts.append("status=\(status.rawValue)") }
-        if let numWatchedEpisodes { parts.append("num_watched_episodes=\(numWatchedEpisodes)") }
-        let body = parts.joined(separator: "&")
+        var parameters: [String: String] = [:]
+        if let status { parameters["status"] = status.rawValue }
+        if let numWatchedEpisodes { parameters["num_watched_episodes"] = String(numWatchedEpisodes) }
 
         let endpoint = Endpoint(
             method: .patch,
@@ -113,15 +131,19 @@ struct MALClient: Sendable {
                 "Content-Type": "application/x-www-form-urlencoded"
             ]
         )
-        _ = try await sendForm(endpoint: endpoint, body: body, baseURL: apiBaseURL)
+        _ = try await sendForm(
+            endpoint: endpoint,
+            parameters: parameters,
+            baseURL: apiBaseURL
+        )
     }
 
     // MARK: - Helpers
 
-    private func sendForm(endpoint: Endpoint, body: String, baseURL: URL) async throws -> Data {
+    private func sendForm(endpoint: Endpoint, parameters: [String: String], baseURL: URL) async throws -> Data {
         var request = URLRequest(url: baseURL.appendingPathComponent(endpoint.path))
         request.httpMethod = endpoint.method.rawValue
-        request.httpBody = body.data(using: .utf8)
+        request.httpBody = formBody(parameters)
         for (key, value) in endpoint.headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
@@ -130,12 +152,25 @@ struct MALClient: Sendable {
             throw AppError.unknown("MAL: non-HTTP response")
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            if httpResponse.statusCode == 400 {
-                // 400 during device-code polling means "authorization_pending"
-                throw AppError.serverUnreachable
+            switch httpResponse.statusCode {
+            case 400:
+                throw AppError.invalidResponse
+            case 401, 403:
+                throw AppError.unauthorized
+            case 404:
+                throw AppError.notFound
+            default:
+                throw AppError.unknown("MAL: HTTP \(httpResponse.statusCode)")
             }
-            throw AppError.unknown("MAL: HTTP \(httpResponse.statusCode)")
         }
         return data
+    }
+
+    private func formBody(_ parameters: [String: String]) -> Data? {
+        var components = URLComponents()
+        components.queryItems = parameters
+            .sorted(by: { $0.key < $1.key })
+            .map { URLQueryItem(name: $0.key, value: $0.value) }
+        return components.percentEncodedQuery?.data(using: .utf8)
     }
 }

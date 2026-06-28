@@ -3,12 +3,12 @@ import Observation
 import CoreModels
 import CoreNetworking
 
-/// Connection phase for MAL (device-code flow like Trakt).
+/// Connection phase for MAL.
 public enum MALConnectionPhase: Equatable, Sendable {
     case unknown
     case unavailable
     case disconnected
-    case connecting(userCode: String, verificationURL: String, expiresAt: Date)
+    case awaitingAuthorizationCode(authorizationURL: String)
     case connected(username: String)
     case error(String)
 }
@@ -18,7 +18,6 @@ public enum MALConnectionPhase: Equatable, Sendable {
 @Observable
 public final class MALService {
     public private(set) var phase: MALConnectionPhase
-    public private(set) var codeLifetime: TimeInterval = 600
 
     @ObservationIgnored public let scrobbler: any MALScrobbling
 
@@ -26,6 +25,7 @@ public final class MALService {
     @ObservationIgnored private let auth: MALAuthService
     @ObservationIgnored private let tokenStore: MALTokenStoring
     @ObservationIgnored private var connectTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingAuthorization: MALAuthorizationRequest?
 
     public init(config: MALConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: MALTokenStoring) {
         self.config = config
@@ -45,6 +45,7 @@ public final class MALService {
     public func setActiveProfile(namespace: String?) async {
         connectTask?.cancel()
         connectTask = nil
+        pendingAuthorization = nil
         tokenStore.setNamespace(namespace)
         phase = config.isConfigured ? .unknown : .unavailable
         await refreshStatus()
@@ -66,37 +67,51 @@ public final class MALService {
     public func connect() {
         guard config.isConfigured else { phase = .unavailable; return }
         connectTask?.cancel()
+        connectTask = nil
+        do {
+            let authorization = try auth.beginAuthorization()
+            pendingAuthorization = authorization
+            phase = .awaitingAuthorizationCode(authorizationURL: authorization.authorizationURL)
+        } catch let error as AppError {
+            phase = .error(error.userMessage)
+        } catch {
+            phase = .error(AppError.unknown("").userMessage)
+        }
+    }
+
+    public func submitAuthorizationCode(_ input: String) {
+        guard config.isConfigured else { phase = .unavailable; return }
+        guard let pendingAuthorization else {
+            phase = .error("Start a new MyAnimeList connection and try again")
+            return
+        }
+
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            phase = .error("Authorization code cannot be empty")
+            return
+        }
+
+        let authorizationCode = Self.extractAuthorizationCode(from: trimmed)
+        connectTask?.cancel()
         connectTask = Task { [weak self] in
             guard let self else { return }
             do {
-                while true {
-                    try Task.checkCancellation()
-                    let code = try await self.auth.beginDeviceCode()
-                    try Task.checkCancellation()
-                    self.codeLifetime = code.expiresIn
-                    self.phase = .connecting(
-                        userCode: code.userCode,
-                        verificationURL: code.verificationURL,
-                        expiresAt: Date().addingTimeInterval(code.expiresIn)
-                    )
-                    do {
-                        let tokens = try await self.auth.awaitToken(for: code)
-                        try Task.checkCancellation()
-                        try? self.tokenStore.save(tokens)
-                        let user = try? await self.auth.userInfo(accessToken: tokens.accessToken)
-                        self.phase = .connected(username: user?.name ?? "MyAnimeList")
-                        return
-                    } catch let error as AppError where error == .quickConnectExpired {
-                        continue
-                    }
-                }
+                let tokens = try await self.auth.exchangeAuthorizationCode(
+                    authorizationCode,
+                    codeVerifier: pendingAuthorization.codeVerifier
+                )
+                try Task.checkCancellation()
+                try? self.tokenStore.save(tokens)
+                let user = try? await self.auth.userInfo(accessToken: tokens.accessToken)
+                self.pendingAuthorization = nil
+                self.connectTask = nil
+                self.phase = .connected(username: user?.name ?? "MyAnimeList")
             } catch is CancellationError {
-                // Cancelled by user.
-            } catch let error as AppError {
-                if error == .cancelled { return }
-                self.phase = .error(error.userMessage)
+                self.connectTask = nil
             } catch {
-                self.phase = .error(AppError.unknown("").userMessage)
+                self.connectTask = nil
+                self.phase = .error("Invalid authorization code — please try again")
             }
         }
     }
@@ -104,12 +119,14 @@ public final class MALService {
     public func cancelConnect() {
         connectTask?.cancel()
         connectTask = nil
+        pendingAuthorization = nil
         phase = config.isConfigured ? .disconnected : .unavailable
     }
 
     public func disconnect() async {
         connectTask?.cancel()
         connectTask = nil
+        pendingAuthorization = nil
         try? tokenStore.clear()
         phase = config.isConfigured ? .disconnected : .unavailable
     }
@@ -119,6 +136,21 @@ public final class MALService {
         let refreshed = try await auth.refresh(tokens.refreshToken)
         try? tokenStore.save(refreshed)
         return refreshed.accessToken
+    }
+
+    private static func extractAuthorizationCode(from input: String) -> String {
+        if let components = URLComponents(string: input),
+           let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
+           !code.isEmpty {
+            return code
+        }
+
+        if let range = input.range(of: "code=") {
+            let remainder = input[range.upperBound...]
+            return remainder.split(separator: "&", maxSplits: 1).first.map(String.init) ?? input
+        }
+
+        return input
     }
 }
 

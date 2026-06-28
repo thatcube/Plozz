@@ -22,7 +22,7 @@ struct IntegrationsDetailView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // Trakt
                     VStack(alignment: .leading, spacing: 24) {
-                        TrackerRow(name: "Trakt", phase: traktRowPhase, onConnect: { trakt.connect() }, onDisconnect: { Task { await trakt.disconnect() } })
+                        TrackerRow(name: "Trakt", phase: traktRowPhase, onConnect: { trakt.connect() }, onCancel: { trakt.cancelConnect() }, onDisconnect: { Task { await trakt.disconnect() } })
                             .task { await trakt.refreshStatus() }
                         if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
                             DeviceCodeConnectingView(serviceName: "Trakt", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: trakt.codeLifetime, onCancel: { trakt.cancelConnect() })
@@ -34,7 +34,7 @@ struct IntegrationsDetailView: View {
 
                     // Simkl
                     VStack(alignment: .leading, spacing: 24) {
-                        TrackerRow(name: "Simkl", phase: simklRowPhase, onConnect: { simkl.connect() }, onDisconnect: { Task { await simkl.disconnect() } })
+                        TrackerRow(name: "Simkl", phase: simklRowPhase, onConnect: { simkl.connect() }, onCancel: { simkl.cancelConnect() }, onDisconnect: { Task { await simkl.disconnect() } })
                             .task { await simkl.refreshStatus() }
                         if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
                             DeviceCodeConnectingView(serviceName: "Simkl", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: simkl.codeLifetime, onCancel: { simkl.cancelConnect() })
@@ -46,7 +46,7 @@ struct IntegrationsDetailView: View {
 
                     // AniList
                     VStack(alignment: .leading, spacing: 24) {
-                        TrackerRow(name: "AniList", phase: anilistRowPhase, onConnect: { anilist.connect() }, onDisconnect: { Task { await anilist.disconnect() } })
+                        TrackerRow(name: "AniList", phase: anilistRowPhase, onConnect: { anilist.connect() }, onCancel: { anilist.cancelConnect() }, onDisconnect: { Task { await anilist.disconnect() } })
                             .task { await anilist.refreshStatus() }
                         if case .awaitingToken = anilist.phase {
                             AniListTokenEntryView(anilist: anilist)
@@ -58,10 +58,10 @@ struct IntegrationsDetailView: View {
 
                     // MyAnimeList
                     VStack(alignment: .leading, spacing: 24) {
-                        TrackerRow(name: "MyAnimeList", phase: malRowPhase, onConnect: { mal.connect() }, onDisconnect: { Task { await mal.disconnect() } })
+                        TrackerRow(name: "MyAnimeList", phase: malRowPhase, onConnect: { mal.connect() }, onCancel: { mal.cancelConnect() }, onDisconnect: { Task { await mal.disconnect() } })
                             .task { await mal.refreshStatus() }
-                        if case let .connecting(userCode, verificationURL, expiresAt) = mal.phase {
-                            DeviceCodeConnectingView(serviceName: "MyAnimeList", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: mal.codeLifetime, onCancel: { mal.cancelConnect() })
+                        if case .awaitingAuthorizationCode = mal.phase {
+                            MALAuthorizationCodeEntryView(mal: mal)
                         }
                     }
                     .focusSection()
@@ -128,7 +128,7 @@ struct IntegrationsDetailView: View {
         case .unknown: .loading
         case .unavailable: .unavailable
         case .disconnected: .disconnected
-        case .connecting: .connecting
+        case .awaitingAuthorizationCode: .connecting
         case let .connected(name): .connected(name)
         case .error: .error
         }
@@ -161,6 +161,7 @@ struct TrackerRow: View {
     let name: String
     let phase: TrackerRowPhase
     let onConnect: () -> Void
+    let onCancel: () -> Void
     let onDisconnect: () -> Void
 
     var body: some View {
@@ -195,7 +196,7 @@ struct TrackerRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(role: .cancel, action: onConnect) {
+                Button(role: .cancel, action: onCancel) {
                     Text("Cancel")
                         .font(.subheadline)
                 }
@@ -271,9 +272,46 @@ struct AniListTokenEntryView: View {
     }
 }
 
+struct MALAuthorizationCodeEntryView: View {
+    let mal: MALService
+    @State private var codeInput: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Scan the QR code or visit the URL, approve Plozz in MyAnimeList, then paste the short code shown in the redirect URL:")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if case let .awaitingAuthorizationCode(authorizationURL) = mal.phase {
+                HStack(alignment: .center, spacing: 32) {
+                    QRCodeView(authorizationURL)
+                        .frame(width: 160, height: 160)
+                        .padding(10)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("myanimelist.net/v1/oauth2/authorize")
+                            .font(.title3.weight(.semibold))
+                        TextField("Paste authorization code or redirect URL", text: $codeInput)
+                        HStack(spacing: 16) {
+                            Button("Connect") {
+                                mal.submitAuthorizationCode(codeInput)
+                            }
+                            .disabled(codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            Button("Cancel", role: .cancel) {
+                                mal.cancelConnect()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Shared Components
 
-/// Reusable device-code connecting view (QR + code + countdown) for Trakt/Simkl/MAL.
+/// Reusable device-code connecting view (QR + code + countdown) for Trakt/Simkl.
 struct DeviceCodeConnectingView: View {
     let serviceName: String
     let userCode: String

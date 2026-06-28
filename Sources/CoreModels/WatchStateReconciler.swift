@@ -307,13 +307,16 @@ public actor WatchStateReconciler {
             let key = mutation.traktIdempotencyKey(dayBucket: WatchMutation.dayBucket(for: mutation.capturedAt))
             if state.appliedTrakt[key] != nil {
                 mutation.traktPending = false
+                FanoutDiagnostics.emit("drain.trakt canonical=\(mutation.canonicalMediaID) -> skip(already applied this day)")
             } else {
                 do {
                     try await applier.scrobbleTrakt(intent)
                     state.appliedTrakt[key] = now()
                     mutation.traktPending = false
+                    FanoutDiagnostics.emit("drain.trakt canonical=\(mutation.canonicalMediaID) -> applied")
                 } catch {
                     // keep pending; retry next drain
+                    FanoutDiagnostics.emit("drain.trakt canonical=\(mutation.canonicalMediaID) -> THROW(\(error)) -> still pending")
                 }
             }
         }
@@ -323,13 +326,16 @@ public actor WatchStateReconciler {
             let key = mutation.traktIdempotencyKey(dayBucket: WatchMutation.dayBucket(for: mutation.capturedAt))
             if state.appliedSimkl[key] != nil {
                 mutation.simklPending = false
+                FanoutDiagnostics.emit("drain.simkl canonical=\(mutation.canonicalMediaID) -> skip(already applied this day)")
             } else {
                 do {
                     try await applier.scrobbleSimkl(intent)
                     state.appliedSimkl[key] = now()
                     mutation.simklPending = false
+                    FanoutDiagnostics.emit("drain.simkl canonical=\(mutation.canonicalMediaID) -> applied")
                 } catch {
                     // keep pending; retry next drain
+                    FanoutDiagnostics.emit("drain.simkl canonical=\(mutation.canonicalMediaID) -> THROW(\(error)) -> still pending")
                 }
             }
         }
@@ -339,13 +345,16 @@ public actor WatchStateReconciler {
             let key = mutation.traktIdempotencyKey(dayBucket: WatchMutation.dayBucket(for: mutation.capturedAt))
             if state.appliedAniList[key] != nil {
                 mutation.anilistPending = false
+                FanoutDiagnostics.emit("drain.anilist canonical=\(mutation.canonicalMediaID) -> skip(already applied this day)")
             } else {
                 do {
                     try await applier.scrobbleAniList(intent)
                     state.appliedAniList[key] = now()
                     mutation.anilistPending = false
+                    FanoutDiagnostics.emit("drain.anilist canonical=\(mutation.canonicalMediaID) -> applied")
                 } catch {
                     // keep pending; retry next drain
+                    FanoutDiagnostics.emit("drain.anilist canonical=\(mutation.canonicalMediaID) -> THROW(\(error)) -> still pending")
                 }
             }
         }
@@ -355,13 +364,16 @@ public actor WatchStateReconciler {
             let key = mutation.traktIdempotencyKey(dayBucket: WatchMutation.dayBucket(for: mutation.capturedAt))
             if state.appliedMAL[key] != nil {
                 mutation.malPending = false
+                FanoutDiagnostics.emit("drain.mal canonical=\(mutation.canonicalMediaID) -> skip(already applied this day)")
             } else {
                 do {
                     try await applier.scrobbleMAL(intent)
                     state.appliedMAL[key] = now()
                     mutation.malPending = false
+                    FanoutDiagnostics.emit("drain.mal canonical=\(mutation.canonicalMediaID) -> applied")
                 } catch {
                     // keep pending; retry next drain
+                    FanoutDiagnostics.emit("drain.mal canonical=\(mutation.canonicalMediaID) -> THROW(\(error)) -> still pending")
                 }
             }
         }
@@ -370,7 +382,10 @@ public actor WatchStateReconciler {
             canonicalMediaID: mutation.canonicalMediaID,
             remainingTargets: mutation.targets.count,
             fullyApplied: mutation.isFullyApplied,
-            traktPending: mutation.traktPending))
+            traktPending: mutation.traktPending,
+            simklPending: mutation.simklPending,
+            anilistPending: mutation.anilistPending,
+            malPending: mutation.malPending))
     }
 
     // MARK: - Housekeeping

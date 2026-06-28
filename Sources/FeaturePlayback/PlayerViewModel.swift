@@ -755,7 +755,12 @@ public final class PlayerViewModel {
         } catch {
             PlozzLog.playback.debug("Progress report failed (non-fatal)")
         }
-        await scrobbler.scrobble(item: request.item, progress: watchedPercent(), event: event)
+        // Compute the scrobble percent from the SAME position the report used. At
+        // stop() the engine is already torn down, so `engine.currentTime` reads 0 —
+        // honoring `positionOverride` keeps the live stop-scrobble's percent honest
+        // (otherwise Trakt would see 0% and never mark the title watched).
+        let scrobblePercent = positionOverride.map { watchedPercent(at: $0) } ?? watchedPercent()
+        await scrobbler.scrobble(item: request.item, progress: scrobblePercent, event: event)
     }
 
     /// Watched percentage (0...100) from the engine's current position over the

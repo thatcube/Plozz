@@ -45,10 +45,25 @@ public actor SimklScrobbler: SimklScrobbling {
     }
 
     public func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws {
-        guard event == .stop, progress >= 80 else { return }
-        guard let body = Self.historyBody(for: item) else { return }
-        guard let token = tokenStore.load()?.accessToken else { return }
-        try await client.addToHistory(body: body, accessToken: token)
+        guard event == .stop, progress >= 80 else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "skip(gate event=\(event) progress=\(Int(progress)))"))
+            return
+        }
+        guard let body = Self.historyBody(for: item) else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "skip(no usable ids)"))
+            return
+        }
+        guard let token = tokenStore.load()?.accessToken else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "skip(not connected)"))
+            return
+        }
+        do {
+            try await client.addToHistory(body: body, accessToken: token)
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "OK"))
+        } catch {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "THROW(\(error))"))
+            throw error
+        }
     }
 
     // MARK: - Mapping

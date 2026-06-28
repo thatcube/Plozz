@@ -66,10 +66,25 @@ public actor TraktScrobbler: TraktScrobbling {
     /// success inside ``TraktClient/scrobble`` and an unidentifiable / not-connected
     /// item is a no-op success.
     public func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws {
-        guard let action = Self.action(for: event) else { return }
-        guard let body = Self.scrobbleBody(for: item, progress: progress) else { return }
-        guard let token = await validAccessToken() else { return }
-        try await client.scrobble(action: action, body: body, accessToken: token)
+        guard let action = Self.action(for: event) else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "trakt", item: item, outcome: "skip(event=\(event) not scrobbled)"))
+            return
+        }
+        guard let body = Self.scrobbleBody(for: item, progress: progress) else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "trakt", item: item, outcome: "skip(no usable ids)"))
+            return
+        }
+        guard let token = await validAccessToken() else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "trakt", item: item, outcome: "skip(not connected)"))
+            return
+        }
+        do {
+            try await client.scrobble(action: action, body: body, accessToken: token)
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "trakt", item: item, outcome: "OK(\(action))"))
+        } catch {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "trakt", item: item, outcome: "THROW(\(error))"))
+            throw error
+        }
     }
 
     /// Returns a usable access token, refreshing (and persisting) an expired one.

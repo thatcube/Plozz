@@ -45,10 +45,25 @@ public actor AniListScrobbler: AniListScrobbling {
     }
 
     public func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws {
-        guard event == .stop, progress >= 80 else { return }
-        guard isAnime(item) else { return }
-        guard let token = tokenStore.load()?.accessToken else { return }
-        try await updateList(item: item, accessToken: token)
+        guard event == .stop, progress >= 80 else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "anilist", item: item, outcome: "skip(gate event=\(event) progress=\(Int(progress)))"))
+            return
+        }
+        guard isAnime(item) else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "anilist", item: item, outcome: "skip(not anime)"))
+            return
+        }
+        guard let token = tokenStore.load()?.accessToken else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "anilist", item: item, outcome: "skip(not connected)"))
+            return
+        }
+        do {
+            try await updateList(item: item, accessToken: token)
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "anilist", item: item, outcome: "OK"))
+        } catch {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "anilist", item: item, outcome: "THROW(\(error))"))
+            throw error
+        }
     }
 
     // MARK: - Internal

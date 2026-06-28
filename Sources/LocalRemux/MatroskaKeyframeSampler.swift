@@ -358,7 +358,9 @@ final class MatroskaKeyframeSampler {
     /// cluster-header reads (a few small ranged GETs, no frame payloads). Returns
     /// the boundary's start time and the byte offset of its Cluster element so the
     /// caller can seek the muxer straight there — making a far-seek snap to a
-    /// keyframe in well under 64 KB instead of an av_read_frame scan over the GOP.
+    /// keyframe in a bounded, file-size-independent read instead of an
+    /// av_read_frame scan over the GOP.
+    ///
     /// Returns nil if the source isn't byte-seekable (unknown total size / no
     /// duration) or no cluster brackets the target within the bounded search.
     ///
@@ -407,6 +409,26 @@ final class MatroskaKeyframeSampler {
             retries += 1
         }
         return nil
+    }
+
+    /// A resolved keyframe seek target: the real keyframe presentation time and the
+    /// byte offset of the Matroska Cluster that begins it, so a caller can seek
+    /// straight to it.
+    struct KeyframeHit: Equatable {
+        let startSeconds: Double
+        let clusterOffset: Int64
+    }
+
+    /// Phase-2 façade over `keyframeBoundary(near:)`, named for the lazy
+    /// full-duration-VOD engine's on-demand seek call: given a scrub target,
+    /// resolve the real keyframe at/just-before it. Pure discovery — it performs
+    /// no muxing and mutates no session state, so the engine can call it freely on
+    /// any far-seek to learn where the in-sync segment must start. Returns nil only
+    /// when the source isn't byte-seekable or no cluster brackets the target.
+    func discoverKeyframe(at targetSeconds: Double, info: InitInfo) -> KeyframeHit? {
+        keyframeBoundary(near: targetSeconds, info: info).map {
+            KeyframeHit(startSeconds: $0.startSeconds, clusterOffset: $0.clusterOffset)
+        }
     }
 
     /// Offset of the Cluster element at or after `offset`: `offset` itself when it

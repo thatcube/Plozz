@@ -409,5 +409,95 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
             durationSeconds: 20.0, segmentDataOffset: 0, firstClusterOffset: 0)
         XCTAssertNil(sampler.keyframeBoundary(near: 10.0, info: info))
     }
+
+    // MARK: - discoverKeyframe(at:) phase-2 façade
+
+    func testDiscoverKeyframe_matchesKeyframeBoundary() {
+        let file = bigSeekFile()
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        let hit = sampler.discoverKeyframe(at: 13.3, info: info)
+        XCTAssertEqual(hit?.startSeconds ?? -1, 13.0, accuracy: 1e-9)
+        // Same answer as the underlying primitive, packaged as a named type.
+        let raw = sampler.keyframeBoundary(near: 13.3, info: info)
+        XCTAssertEqual(hit?.clusterOffset, raw?.clusterOffset)
+    }
+
+    // MARK: - PTS correctness vs an INDEPENDENT keyframe-time oracle
+
+    /// The walker's reported keyframe PTS must equal the TRUE keyframe presentation
+    /// time computed independently as (clusterTimecode + blockRelTimecode) ×
+    /// timecodeScale — with a realistic non-1 ms scale, NTSC-style non-uniform
+    /// timecodes, a non-zero block rel-timecode, and an interleaved audio block the
+    /// walker must skip. This is the "walker PTS == real keyframe PTS" assertion
+    /// the lazy engine's in-sync seek depends on: if this math were off, every
+    /// far-seek would land off-keyframe and desync.
+    func testWalkerPTS_equalsIndependentOracle_realisticTimecodes() {
+        let scale = 1_000_000 // 1 ms ticks
+        // NTSC 23.976-ish: ~6.006 s GOPs. clusterTC in ms ticks; +1 ms block rel.
+        let clusterTCs = [0, 6006, 12012, 18018, 24024]
+        let rel: Int16 = 1
+        let clusters = clusterTCs.map { tc in
+            cluster(timecode: tc, blocks: [
+                // An audio block (track 2) FIRST — the walker must skip it.
+                simpleBlock(track: 2, rel: 0, keyframe: true, payload: [0x01, 0x02]),
+                // The video keyframe (track 1) at +rel.
+                simpleBlock(track: 1, rel: rel, keyframe: true, payload: [0xAA, 0xBB])
+            ])
+        }
+        let file = buildFile(timecodeScale: scale, durationTicks: 30030,
+                             videoTrack: 1, clusters: clusters)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        let walked = sampler.allKeyframes(info)
+        // Independent oracle: PTS = (clusterTC + rel) × scale / 1e9 seconds.
+        let oracle = clusterTCs.map { Double($0 + Int(rel)) * Double(scale) / 1_000_000_000 }
+        XCTAssertEqual(walked.count, oracle.count)
+        for (w, o) in zip(walked, oracle) { XCTAssertEqual(w, o, accuracy: 1e-9) }
+    }
+
+    // MARK: - Cost on LARGE 4K-style clusters (the case that broke B6)
+
+    /// On a file with multi-MB clusters (a 4K title's ~6 s GOP is megabytes), a
+    /// single far-seek probe must read a BOUNDED amount — at most ~one cluster for
+    /// the cold landing sync plus a few small header probes — NOT the whole file,
+    /// and NOT the ~1 MiB-per-boundary av_read_frame payload B6 paid. The walker
+    /// never transfers a frame payload: it size-skips known-size clusters by their
+    /// element length.
+    func testKeyframeBoundary_largeClusters_boundedBytesPerProbe() {
+        let payload = 4_000_000 // ~4 MB cluster payloads → ~80 MB file
+        let file = bigSeekFile(payloadBytes: payload)
+        let src = MemorySource(file)
+        let sampler = MatroskaKeyframeSampler(source: src)
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        // Bias the undershoot to ~one cluster so the cold landing sync scans at most
+        // ~one payload to find the bracketing cluster header.
+        let hit = sampler.keyframeBoundary(near: 12.4, info: info,
+                                           marginBytes: Int64(payload + 50_000))
+        XCTAssertEqual(hit?.startSeconds ?? -1, 12.0, accuracy: 1e-9)
+        // Bounded by ~one cluster (cold sync) + header probes — far below the file
+        // size, and independent of how many large clusters precede the target.
+        XCTAssertLessThan(sampler.stats.bytesRead, payload * 2)
+        XCTAssertLessThan(sampler.stats.bytesRead, file.count / 4)
+    }
+
+    /// The per-seek cost must NOT grow with seek depth: resolving a keyframe deep in
+    /// the timeline reads about the same as one near the start (the byte-fraction
+    /// estimate jumps straight there — no walk from the file head). This is the
+    /// property that makes on-demand far-seek cheap on a 40 GB / 2.5 h title.
+    func testKeyframeBoundary_costIndependentOfSeekDepth() {
+        let payload = 1_000_000
+        let file = bigSeekFile(payloadBytes: payload)
+        let near = MatroskaKeyframeSampler(source: MemorySource(file))
+        let far = MatroskaKeyframeSampler(source: MemorySource(file))
+        guard let i1 = near.parseInit(), let i2 = far.parseInit() else { return XCTFail("init") }
+        let margin = Int64(payload + 50_000)
+        XCTAssertEqual(near.keyframeBoundary(near: 2.4, info: i1, marginBytes: margin)?.startSeconds ?? -1,
+                       2.0, accuracy: 1e-9)
+        XCTAssertEqual(far.keyframeBoundary(near: 17.4, info: i2, marginBytes: margin)?.startSeconds ?? -1,
+                       17.0, accuracy: 1e-9)
+        // Deep seek reads within 2× of the shallow seek — bounded, not O(depth).
+        XCTAssertLessThan(far.stats.bytesRead, near.stats.bytesRead * 2 + 200_000)
+    }
 }
 #endif

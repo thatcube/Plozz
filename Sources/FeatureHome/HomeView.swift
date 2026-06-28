@@ -110,29 +110,11 @@ public struct HomeView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: metrics.cardSpacing) {
                     ForEach(libraries) { aggregated in
-                        Button { onSelectLibrary(aggregated.library) } label: {
-                            ZStack(alignment: .bottomLeading) {
-                                AsyncImage(url: aggregated.library.imageURL) { image in
-                                    image.resizable().aspectRatio(contentMode: .fill)
-                                } placeholder: {
-                                    Rectangle().fill(.tertiary)
-                                }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(aggregated.library.title)
-                                        .font(.title3).bold()
-                                    Text(Self.librarySubtitle(for: aggregated, in: libraries))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(8)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                                .padding(12)
-                            }
-                            .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
-                            .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
-                            .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.cornerRadius)
-                        }
-                        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
+                        LibraryCardView(
+                            aggregated: aggregated,
+                            subtitle: Self.librarySubtitle(for: aggregated, in: libraries),
+                            action: { onSelectLibrary(aggregated.library) }
+                        )
                     }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
@@ -164,6 +146,100 @@ public struct HomeView: View {
             return "\(server) · \(account)"
         }
         return server
+    }
+}
+
+/// A Home "Libraries" tile. Mirrors `PosterCardView`'s landscape (medium-card)
+/// chrome exactly — same glass surface, media inset, corner radii and focus
+/// lift — so a library tile sits flush with the Continue Watching / Latest cards
+/// and with the loading skeleton (which renders the same medium card). This is
+/// what makes a library's corner radius match every other card on Home.
+///
+/// Libraries frequently ship **no** artwork (notably Plex sections, which return
+/// a bare gray box), so the empty state is a themed accent→surface gradient with
+/// a large, low-contrast per-kind glyph rather than a flat fill — an imageless
+/// library still reads as an intentional, on-brand tile.
+private struct LibraryCardView: View {
+    let aggregated: AggregatedLibrary
+    let subtitle: String
+    let action: () -> Void
+
+    @FocusState private var isFocused: Bool
+    @Environment(\.themePalette) private var palette
+    @Environment(\.plozzMetrics) private var metrics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            artwork
+                .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
+                .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
+                .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(aggregated.library.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(subtitle.isEmpty ? " " : subtitle)
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .opacity(subtitle.isEmpty ? 0 : 1)
+            }
+            .frame(width: metrics.landscapeWidth, alignment: .leading)
+        }
+        .padding(metrics.mediumCardInset)
+        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, action: action)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
+    }
+
+    @ViewBuilder
+    private var artwork: some View {
+        if let url = aggregated.library.imageURL {
+            AsyncImage(url: url) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                placeholder
+            }
+        } else {
+            placeholder
+        }
+    }
+
+    /// Themed empty-state for an imageless library: a soft accent→surface gradient
+    /// behind a large, low-contrast per-kind glyph. Tracks the active theme so it
+    /// never reads as a dead gray box on any palette.
+    private var placeholder: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    palette.accent.opacity(palette.isLight ? 0.22 : 0.32),
+                    palette.cardSurface.opacity(0.45)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Image(systemName: librarySymbol)
+                .font(.system(size: 64, weight: .semibold))
+                .foregroundStyle(palette.primaryText.opacity(0.28))
+        }
+    }
+
+    /// A per-kind SF Symbol for the empty-state watermark. Plex/Jellyfin map
+    /// movie and TV sections to `.movie`/`.series`; music and other sections come
+    /// through as `.folder`, so the default covers music libraries too.
+    private var librarySymbol: String {
+        switch aggregated.library.kind {
+        case .movie: return "film.stack.fill"
+        case .series: return "tv.fill"
+        case .collection: return "rectangle.stack.fill"
+        default: return "square.stack.3d.up.fill"
+        }
     }
 }
 

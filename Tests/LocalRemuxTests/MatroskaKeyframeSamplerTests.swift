@@ -499,5 +499,88 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         // Deep seek reads within 2× of the shallow seek — bounded, not O(depth).
         XCTAssertLessThan(far.stats.bytesRead, near.stats.bytesRead * 2 + 200_000)
     }
+
+    // MARK: - discoverKeyframeAtOrAfter contract (B7's open-time cadence probe)
+
+    func testAtOrAfter_returnsFirstKeyframeAtOrAfter() {
+        let file = bigSeekFile() // keyframes at 0,1,…,19s
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        let m: Int64 = 250_000
+        // Exactly on a boundary → that keyframe.
+        XCTAssertEqual(sampler.keyframeSeconds(atOrAfter: 5.0, info: info, marginBytes: m) ?? -1, 5.0, accuracy: 1e-9)
+        // Between boundaries → the NEXT keyframe (at/after semantics, vs at/before).
+        XCTAssertEqual(sampler.keyframeSeconds(atOrAfter: 5.4, info: info, marginBytes: m) ?? -1, 6.0, accuracy: 1e-9)
+        XCTAssertEqual(sampler.keyframeSeconds(atOrAfter: 12.01, info: info, marginBytes: m) ?? -1, 13.0, accuracy: 1e-9)
+        // Before the first keyframe → the first keyframe.
+        XCTAssertEqual(sampler.keyframeSeconds(atOrAfter: 0.0, info: info, marginBytes: m) ?? -1, 0.0, accuracy: 1e-9)
+    }
+
+    /// B7's GOP-cadence estimate walks the first ~8 keyframes at open. From t≈0 the
+    /// estimate lands at the file head and forward-steps header-only — a handful of
+    /// KB total, NOT B6's ~1 MiB/keyframe av_read_frame payload reads.
+    func testAtOrAfter_cadenceWalk_isCheap() {
+        let payload = 1_000_000 // 1 MB clusters → reads must stay far below one payload
+        let file = bigSeekFile(payloadBytes: payload)
+        let src = MemorySource(file)
+        let sampler = MatroskaKeyframeSampler(source: src)
+        // Walk the first 8 keyframes the way an open-time cadence estimate would.
+        var t = -0.0001
+        var seen: [Double] = []
+        for _ in 0..<8 {
+            guard let k = sampler.discoverKeyframeAtOrAfter(t + 0.0001) else { break }
+            seen.append(k)
+            t = k
+        }
+        XCTAssertEqual(seen, [0,1,2,3,4,5,6,7].map(Double.init))
+        // Whole 8-keyframe cadence walk reads less than ONE 1 MB cluster payload:
+        // proves it size-skips structurally instead of reading frame data.
+        XCTAssertLessThan(sampler.stats.bytesRead, payload)
+    }
+
+    /// Cursor-safety / statelessness: repeated calls are pure — same answer every
+    /// time, and the only mutation is the byte counter. There is no shared demux
+    /// cursor for the contract to disturb (it reads via positioned ranged GETs).
+    func testAtOrAfter_isPureAndRepeatable() {
+        let file = bigSeekFile()
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(file))
+        let a = sampler.discoverKeyframeAtOrAfter(9.3)
+        let b = sampler.discoverKeyframeAtOrAfter(9.3)
+        let c = sampler.discoverKeyframeAtOrAfter(9.3)
+        XCTAssertEqual(a ?? -1, 10.0, accuracy: 1e-9)
+        XCTAssertEqual(a, b)
+        XCTAssertEqual(b, c)
+    }
+
+    /// The contract memoizes parseInit: the second call must not re-read the header
+    /// region, so a from-head cadence walk's per-call cost stays flat.
+    func testAtOrAfter_memoizesInit() {
+        let file = bigSeekFile()
+        let src = MemorySource(file)
+        let sampler = MatroskaKeyframeSampler(source: src)
+        _ = sampler.discoverKeyframeAtOrAfter(0.0)
+        let afterFirst = src.fetches
+        _ = sampler.discoverKeyframeAtOrAfter(0.0)
+        let secondCallFetches = src.fetches - afterFirst
+        // Second identical call re-walks clusters but must NOT re-parse the header;
+        // it issues strictly fewer fetches than the first (which paid init parsing).
+        XCTAssertLessThan(secondCallFetches, afterFirst)
+    }
+
+    /// Unknown total size (server didn't advertise length) → contract returns nil so
+    /// the caller keeps its existing estimate rather than guessing.
+    func testAtOrAfter_unknownSizeReturnsNil() {
+        final class UnsizedSource: ByteRangeSource {
+            let data: [UInt8]
+            init(_ d: [UInt8]) { data = d }
+            var totalSize: Int64 { -1 }
+            func readRange(at offset: Int64, count: Int) -> Data {
+                guard offset >= 0, offset < Int64(data.count), count > 0 else { return Data() }
+                return Data(data[Int(offset)..<min(data.count, Int(offset) + count)])
+            }
+        }
+        let sampler = MatroskaKeyframeSampler(source: UnsizedSource(bigSeekFile()))
+        XCTAssertNil(sampler.discoverKeyframeAtOrAfter(5.0))
+    }
 }
 #endif

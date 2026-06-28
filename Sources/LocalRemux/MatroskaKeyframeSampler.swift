@@ -176,6 +176,13 @@ final class MatroskaKeyframeSampler {
 
     private(set) var stats = Stats()
 
+    /// Memoized `parseInit()` so B7 can call the per-seek contract repeatedly
+    /// (e.g. ~8 times to estimate GOP cadence at open) without re-parsing the
+    /// header each call. `initComputed` distinguishes "not yet parsed" from
+    /// "parsed, not a Matroska source".
+    private var initComputed = false
+    private var cachedInfo: InitInfo?
+
     init(source: ByteRangeSource, headerProbe: Int = 4096, scanChunk: Int = 64 * 1024) {
         self.source = source
         self.headerProbe = max(64, headerProbe)
@@ -429,6 +436,74 @@ final class MatroskaKeyframeSampler {
         keyframeBoundary(near: targetSeconds, info: info).map {
             KeyframeHit(startSeconds: $0.startSeconds, clusterOffset: $0.clusterOffset)
         }
+    }
+
+    /// Memoized init parse — see `cachedInfo`. Lets the per-seek contract be called
+    /// many times cheaply.
+    func cachedInitInfo() -> InitInfo? {
+        if !initComputed { cachedInfo = parseInit(); initComputed = true }
+        return cachedInfo
+    }
+
+    /// The contract B7's open-time GOP-cadence estimator (and any on-demand
+    /// far-seek) drops in for B6's `av_read_frame` seek-probe.
+    ///
+    /// Given a 0-based source time, returns the source PTS in seconds of the first
+    /// real keyframe AT OR AFTER `targetSeconds`, or nil when the source isn't a
+    /// byte-seekable Matroska (caller should then keep its existing estimate).
+    ///
+    /// CURSOR-SAFE BY CONSTRUCTION: this performs only positioned, ranged reads
+    /// through `ByteRangeSource` at explicit byte offsets. It holds NO libav
+    /// `AVFormatContext` and shares NO demux cursor with the muxer, so it cannot
+    /// disturb the reader position — there is no sequential file cursor to save or
+    /// restore. The only state it mutates is its own `stats` byte counter and the
+    /// memoized init. Safe to call before or during playback setup.
+    func discoverKeyframeAtOrAfter(_ targetSeconds: Double) -> Double? {
+        guard let info = cachedInitInfo() else { return nil }
+        return keyframeSeconds(atOrAfter: targetSeconds, info: info)
+    }
+
+    /// Forward-walking variant of `keyframeBoundary`: returns the time of the first
+    /// keyframe whose PTS is >= `targetSeconds`. Used for cadence estimation (walk
+    /// consecutive keyframes from 0) and for snapping a seek up to the next
+    /// keyframe. Header-only, payload-free; cost is bounded like the at/before
+    /// primitive (one cold sync landing ~one cluster, then size-skip steps).
+    func keyframeSeconds(atOrAfter targetSeconds: Double, info: InitInfo,
+                         marginBytes: Int64 = 8 * 1024 * 1024,
+                         maxSteps: Int = 128, maxRetries: Int = 8) -> Double? {
+        let total = source.totalSize
+        guard total > 0, info.durationSeconds > 0 else { return nil }
+        let clamped = max(0, min(targetSeconds, info.durationSeconds))
+
+        var estimate = Int64((clamped / info.durationSeconds) * Double(total)) - marginBytes
+        if estimate < info.firstClusterOffset { estimate = info.firstClusterOffset }
+
+        var retries = 0
+        while retries <= maxRetries {
+            guard let firstOff = clusterAtOrAfter(estimate, info: info) else { return nil }
+            var clusterOff = firstOff
+            var steps = 0
+            var atHead = clusterOff <= info.firstClusterOffset
+            while steps < maxSteps {
+                steps += 1
+                guard let cl = readClusterKeyframe(at: clusterOff, info: info),
+                      let t = cl.keyframeSeconds else { break }
+                if t >= clamped - 1e-6 {
+                    // First keyframe at/after target. If we LANDED past the target on
+                    // our very first read and we're not at the file head, an earlier
+                    // keyframe may also satisfy ">= target" — back off to find it.
+                    if steps == 1 && !atHead && t > clamped + 1e-6 { break }
+                    return t
+                }
+                atHead = false
+                if cl.nextClusterOffset < 0 || cl.nextClusterOffset <= clusterOff { return nil }
+                clusterOff = cl.nextClusterOffset
+            }
+            if estimate <= info.firstClusterOffset { return nil }
+            estimate = max(info.firstClusterOffset, estimate - marginBytes * 2)
+            retries += 1
+        }
+        return nil
     }
 
     /// Offset of the Cluster element at or after `offset`: `offset` itself when it

@@ -68,6 +68,18 @@ static void remux_log(int level, const char *fmt, ...) {
  */
 #define PLOZZ_KEYFRAME_SCAN_BUDGET_US (8 * 1000000LL)
 /*
+ * HARD byte budget for the whole keyframe-scan discovery. A feature-length no-Cues
+ * title (e.g. 2.5h 4K → ~1500 fixed-cadence segments) discovered upfront with the
+ * av_read_frame probe transfers one keyframe IDR (~1+ MiB) per probe — hundreds of
+ * MB before playback, enough to stall/OOM-kill the app during open. Independent of
+ * the wall-clock budget (a single slow read can't be caught by a between-probe time
+ * check), this caps total discovery transfer: once exceeded, discovery aborts to the
+ * fixed-cadence table (playable, possibly desynced) rather than ever crashing. The
+ * cheap header-parse path (remuxKeyframeIndex) reads only a few KB/probe, so it stays
+ * far under this ceiling; the budget is the safety net for the expensive fallback.
+ */
+#define PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET (96LL * 1024 * 1024)
+/*
  * Keyframe-index (header-parse) mode constants. When enabled (flag
  * com.plozz.playback.remuxKeyframeIndex) discovery reads each boundary keyframe's
  * PTS from the Matroska cluster/Block HEADER instead of av_read_frame'ing the whole
@@ -124,6 +136,12 @@ struct plozz_remux_session {
      * the whole keyframe packet (~one IDR). Gated by com.plozz.playback.remuxKeyframeIndex.
      * Self-calibrating + self-validating: falls back to av_read_frame on any mismatch. */
     int keyframe_index_mode;
+
+    /* Monotonic count of payload bytes pulled through the read callbacks (avio +
+     * direct header reads). Discovery delta-measures this to enforce a HARD byte
+     * budget so a feature-length no-Cues title can never read enough to OOM/stall
+     * the open thread — it aborts to the fixed-cadence table (playable) instead. */
+    int64_t bytes_read;
 };
 
 /* ----- AVIO callback adapters ------------------------------------------- */
@@ -131,6 +149,7 @@ struct plozz_remux_session {
 static int avio_read_adapter(void *opaque, uint8_t *buf, int buf_size) {
     plozz_remux_session *s = (plozz_remux_session *)opaque;
     int n = s->read_cb(s->opaque, buf, buf_size);
+    if (n > 0) s->bytes_read += n;
     if (n == 0) return AVERROR_EOF;
     if (n < 0) return AVERROR(EIO);
     return n;
@@ -558,6 +577,7 @@ static int read_raw_at(plozz_remux_session *s, int64_t offset, uint8_t *buf, int
         if (n <= 0) break;
         got += n;
     }
+    s->bytes_read += got;
     return got;
 }
 
@@ -733,14 +753,23 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
     int probes = 0;
     int timed_out = 0;
     int64_t deadline = av_gettime_relative() + PLOZZ_KEYFRAME_SCAN_BUDGET_US;
+    int64_t bytes_start = s->bytes_read;
+    /* Either guard tripping aborts the whole scan to the fixed-cadence fallback. */
+    #define KF_BUDGET_BLOWN() \
+        (av_gettime_relative() >= deadline || \
+         (s->bytes_read - bytes_start) > PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET)
 
     while (last < duration - 0.001 && n < PLOZZ_MAX_SEGMENTS) {
-        /* Wall-clock guard: bound total open latency regardless of network
-         * round-trips so we never block the open thread past the watchdog. */
-        if (av_gettime_relative() >= deadline) { timed_out = 1; break; }
+        /* Wall-clock + byte guard: bound BOTH open latency and total transfer so a
+         * feature-length no-Cues title can never block/OOM the open thread. */
+        if (KF_BUDGET_BLOWN()) { timed_out = 1; break; }
         double found = -1.0;
         double window = step;
         for (int attempt = 0; attempt < 4096; attempt++) {
+            /* Re-check inside the widening loop: a sparse-keyframe boundary can do
+             * many seeks+reads, and a single slow network read between outer-loop
+             * checks must not let transfer run away past the budget. */
+            if (KF_BUDGET_BLOWN()) { timed_out = 1; break; }
             double tgt = last + window;
             int at_end = 0;
             if (tgt >= duration) { tgt = duration - 0.05; at_end = 1; }
@@ -758,12 +787,14 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
              * current window, so widen and retry. */
             window += (step > target_seconds) ? step : target_seconds;
         }
+        if (timed_out) break;
         if (found < 0.0) break;         /* no more keyframes; grouping tail covers rest */
         double gap = found - last;
         step = (gap > target_seconds) ? gap : target_seconds;
         kf[n++] = found;
         last = found;
     }
+    #undef KF_BUDGET_BLOWN
 
     av_packet_free(&pkt);
     if (out_probes) *out_probes = probes;
@@ -800,18 +831,24 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
     int probes = 0;
     int timed_out = 0;
     int header_reads = 0;
+    int64_t bytes_before = s->bytes_read;
     int kf_count = discover_keyframes_by_seek(s, eff_target, &kf, &probes, &timed_out,
                                               s->keyframe_index_mode, &header_reads);
+    int64_t scan_bytes = s->bytes_read - bytes_before;
     if (timed_out) {
-        /* Budget blown (e.g. slow/stalled network on a huge title): abandon the
-         * scan and keep the existing fixed-cadence table. Degraded (the old EXTINF
-         * mismatch) but the open thread is never blocked past the watchdog. */
+        /* Budget blown (slow/stalled network, or a feature-length title whose upfront
+         * av_read_frame discovery would transfer hundreds of MB): abandon the scan and
+         * keep the existing fixed-cadence table. Degraded (the old EXTINF mismatch =
+         * possible desync) but the open thread is never blocked/OOM-killed — the title
+         * PLAYS instead of crashing. */
         free(kf);
-        AVStream *vst = s->ic->streams[s->video_index];
         avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
         remux_log(1, "remux: keyframe-scan aborted after %d seek-probes "
-                  "(>%llds budget) — keeping fixed-cadence table",
-                  probes, (long long)(PLOZZ_KEYFRAME_SCAN_BUDGET_US / 1000000LL));
+                  "(%lld bytes read; limits %llds / %lldMB) — keeping fixed-cadence "
+                  "table (playable, possibly desynced)",
+                  probes, (long long)scan_bytes,
+                  (long long)(PLOZZ_KEYFRAME_SCAN_BUDGET_US / 1000000LL),
+                  (long long)(PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET / (1024 * 1024)));
         return 0;
     }
     if (kf_count <= 1) { free(kf); return 0; }
@@ -828,17 +865,17 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
     s->used_fixed_cadence = 0;
 
     /* Rewind so the first segment's mux begins from a clean t=0 BACKWARD seek. */
-    AVStream *vst = s->ic->streams[s->video_index];
     avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
 
-    /* Telemetry: the seek-probe count is the open-latency footprint — O(segments),
-     * not O(filesize), and capped at PLOZZ_MAX_SCAN_SEGMENTS via eff_target. The
+    /* Telemetry: seek-probe count + bytes read are the open-latency footprint —
+     * O(segments), not O(filesize), capped via eff_target/byte-budget. The
      * coordinator's A/B reads this against the sibling's full-file scan to confirm
-     * the startup-speed win on multi-GB 4K titles. */
+     * the startup-speed win on multi-GB 4K titles. header-parsed/probes near 1.0
+     * means the cheap cluster-header path served almost every boundary. */
     remux_log(1, "remux: keyframe-scan rebuilt %d segments (was %d fixed-cadence) "
-              "from %d keyframes via %d seek-probes (target=%.2fs eff=%.2fs) "
-              "[index-mode=%s header-parsed=%d/%d]",
-              count, old, kf_count, probes, target, eff_target,
+              "from %d keyframes via %d seek-probes, %lld bytes "
+              "(target=%.2fs eff=%.2fs) [index-mode=%s header-parsed=%d/%d]",
+              count, old, kf_count, probes, (long long)scan_bytes, target, eff_target,
               s->keyframe_index_mode ? "on" : "off", header_reads, probes);
     return count;
 }

@@ -100,6 +100,18 @@ Two distinct failure shapes were seen on-device, and only one is solved:
 belongs at the producer/cache layer (bounded in-flight muxing + backpressure + a bounded
 segment cache), which is precisely the AetherEngine machinery we have NOT yet built (§6, L5/L6).
 
+### 4.1 Raw on-device proof of the balloon mechanism (B7, seg83)
+
+The clearest single artifact of the effort. On a no-Cues title, far-seek window `END=1260` →
+`resolve` declared end `1253.750 + 19.916 = 1273.666`, but the mux END forward-walk ran all the
+way to **1511.917 (258s vspan)** because **no `AV_PKT_FLAG_KEY` exists anywhere between 1273.666
+and 1511.917** — a mis-flagged-keyframe region typical of no-Cues sources. This proves the span
+cap **bounds** the balloon (crash-safe) but does **not fix** it: the segment is still cut off a
+real keyframe, so a cap tight enough to prevent the balloon lands mid-GOP → stutter, while a cap
+loose enough to stay keyframe-aligned can still balloon past the jetsam limit. The actual cure is
+a **real parsed keyframe boundary** (Cues fast-path, or B6's parsed-END pre-resolve that drops
+the unreliable `KEY`-flag stop) — i.e. the whole reason the Cues pivot is primary.
+
 ---
 
 ## 5. Ownership map at reset (who built what)

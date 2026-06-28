@@ -175,6 +175,21 @@ public final class PlayerViewModel {
     /// regular library playback leaves this `false`.
     private let autoDismissOnEnd: Bool
 
+    /// Episode the player will advance to when this one ends, and the neighbor
+    /// behind it — both `nil` for movies/trailers/last episode. Resolved once via
+    /// ``neighborResolver`` after load so the controls can offer next/previous
+    /// mid-playback and so a clean playthrough auto-advances instead of dismissing.
+    public private(set) var nextEpisode: MediaItem?
+    public private(set) var previousEpisode: MediaItem?
+
+    /// Resolves the surrounding episodes (previous, next) for the playing item,
+    /// off the main actor. `nil` for non-episode playback.
+    private let neighborResolver: (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))?
+
+    /// Asks the host to swap the player to another episode (auto-advance at end or
+    /// a mid-playback next/previous jump). `nil` keeps the player single-shot.
+    private let onPlayEpisode: (@MainActor (MediaItem) -> Void)?
+
     /// Durable cross-server convergence hook, called once on `stop()` with the final
     /// position and watched percentage. The AppShell wires this to enqueue a
     /// ``WatchMutation`` so the watch fans out (resume / played+Trakt) to **every**
@@ -235,6 +250,8 @@ public final class PlayerViewModel {
         capabilities: MediaCapabilities = .detected(),
         preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore(),
         autoDismissOnEnd: Bool = false,
+        neighborResolver: (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))? = nil,
+        onPlayEpisode: (@MainActor (MediaItem) -> Void)? = nil,
         onPlaybackStopped: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
         onPlaybackStarted: @escaping @Sendable () -> Void = {},
         onPlaybackCheckpoint: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
@@ -251,6 +268,8 @@ public final class PlayerViewModel {
         self.capabilities = capabilities
         self.preferencesStore = preferencesStore
         self.autoDismissOnEnd = autoDismissOnEnd
+        self.neighborResolver = neighborResolver
+        self.onPlayEpisode = onPlayEpisode
         self.onPlaybackStopped = onPlaybackStopped
         self.onPlaybackStarted = onPlaybackStarted
         self.onPlaybackCheckpoint = onPlaybackCheckpoint
@@ -269,6 +288,11 @@ public final class PlayerViewModel {
         // task; `stop()` cancels it on an early Back.
         prefetchTask = Task { @MainActor [weak self] in
             await self?.startPlayback(forceTranscode: false, resumeOverride: nil)
+        }
+        // Resolve next/previous episodes in the background so a clean playthrough
+        // auto-advances and controls can offer a mid-play jump. Never blocks bring-up.
+        if neighborResolver != nil {
+            Task { @MainActor [weak self] in await self?.resolveNeighbors() }
         }
     }
 
@@ -291,13 +315,31 @@ public final class PlayerViewModel {
     }
 
     /// Called when the active engine reports a clean playthrough to the end of the
-    /// stream. Every playback now closes when it finishes so the player never
-    /// freezes on the final frame: trailers and movies return to the detail screen,
-    /// episodes return to the series page (with the next-up episode focused) so the
-    /// user is one click from continuing. `autoDismissOnEnd` is kept only as a hint
-    /// that this is a transient (trailer) player.
+    /// stream. Auto-advances to the next episode when one is queued, otherwise
+    /// dismisses so the player never freezes on the final frame: trailers/movies
+    /// return to detail, a season finale returns to the series page.
     private func handlePlaybackEnded() {
-        shouldDismiss = true
+        if let next = nextEpisode, let onPlayEpisode {
+            onPlayEpisode(next)
+        } else {
+            shouldDismiss = true
+        }
+    }
+
+    /// Swaps the player to another episode mid-playback (or at end). Stop/scrobble
+    /// for the current item still runs as the view tears down, so the finished
+    /// episode reports exactly once. No-op without a host advance hook.
+    public func playEpisode(_ episode: MediaItem) {
+        onPlayEpisode?(episode)
+    }
+
+    /// Loads the surrounding episodes so controls can offer next/previous and a
+    /// clean end auto-advances. Best-effort; silent on failure.
+    private func resolveNeighbors() async {
+        guard let neighborResolver else { return }
+        let (prev, next) = await neighborResolver()
+        previousEpisode = prev
+        nextEpisode = next
     }
 
     // MARK: - Engine selection / swapping

@@ -402,7 +402,8 @@ private func makePlayerViewModel(
     playbackSettings: PlaybackSettings,
     scrobbler: any TraktScrobbling,
     watchBridge: WatchOutboxBridge,
-    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+    requestPlay: @escaping (MediaItem) -> Void
 ) -> PlayerViewModel {
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
@@ -447,8 +448,24 @@ private func makePlayerViewModel(
     // account for single-source items, mirroring WatchMutationFactory.targets(for:).
     let liveAccountID = request.item.sourceAccountID ?? primaryAccountID
     let liveItemID = request.item.id
+    // For an episode, resolve its neighbours off the main actor so a clean
+    // playthrough auto-advances and controls can offer a mid-play jump. The
+    // provider is captured (a value-type session); `children(of:)` lists the
+    // season in broadcast order. Movies/trailers pass no resolver.
+    let episodeProvider = resolveProvider(request.item.sourceAccountID, in: accounts)
+    let neighborResolver: (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))?
+    if convergingItem.kind == .episode, let seasonID = convergingItem.seasonID {
+        let originAccountID = convergingItem.sourceAccountID
+        neighborResolver = {
+            let siblings = (try? await episodeProvider.children(of: seasonID)) ?? []
+            let tagged = originAccountID.map { id in siblings.map { $0.taggingSource(id) } } ?? siblings
+            return EpisodeSequence.neighbors(of: convergingItem, in: tagged)
+        }
+    } else {
+        neighborResolver = nil
+    }
     return PlayerViewModel(
-        provider: resolveProvider(request.item.sourceAccountID, in: accounts),
+        provider: episodeProvider,
         itemID: request.item.id,
         mediaSourceID: request.item.selectedVersionID,
         captionSettings: captionSettings,
@@ -456,6 +473,8 @@ private func makePlayerViewModel(
         startPosition: request.startPosition,
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(),
+        neighborResolver: neighborResolver,
+        onPlayEpisode: { requestPlay($0) },
         onPlaybackStopped: makePlaybackStoppedHandler(
             convergingItem: convergingItem,
             primaryAccountID: primaryAccountID,
@@ -718,27 +737,19 @@ private struct HomeTab: View {
                 )
             }
         }
-        .fullScreenCover(item: $playRequest) { request in
-            PlayerPresentation(
-                request: request,
-                make: {
-                    makePlayerViewModel(
-                        for: $0,
-                        accounts: accounts,
-                        captionSettings: captionSettings,
-                        playbackSettings: playbackSettings,
-                        scrobbler: scrobbler,
-                        watchBridge: watchBridge,
-                        identitySources: identitySources
-                    )
-                },
-                showDiagnostics: showDiagnostics,
-                themePalette: themePalette
-            )
-        }
-        .resumePrompt(item: $resumePrompt) { item, startPosition in
-            playRequest = PlayRequest(item: item, startPosition: startPosition)
-        }
+        .playerHost(
+            playRequest: $playRequest,
+            resumePrompt: $resumePrompt,
+            requestPlay: { requestPlay($0) },
+            accounts: accounts,
+            captionSettings: captionSettings,
+            playbackSettings: playbackSettings,
+            scrobbler: scrobbler,
+            watchBridge: watchBridge,
+            identitySources: identitySources,
+            showDiagnostics: showDiagnostics,
+            themePalette: themePalette
+        )
         .task(id: pendingPlayItemID) { await handleDeepLink() }
         .mediaItemNavigator { navigate($0) }
     }
@@ -825,6 +836,48 @@ private struct PlayRequest: Identifiable, Equatable {
     let item: MediaItem
     let startPosition: TimeInterval
     var id: String { item.id }
+}
+
+private extension View {
+    /// Shared player presentation host: the full-screen player + resume prompt.
+    /// HomeTab and SearchTab were byte-identical here, so both route through this
+    /// one modifier — auto-advance and player wiring live in a single place.
+    func playerHost(
+        playRequest: Binding<PlayRequest?>,
+        resumePrompt: Binding<MediaItem?>,
+        requestPlay: @escaping (MediaItem) -> Void,
+        accounts: [ResolvedAccount],
+        captionSettings: CaptionSettings,
+        playbackSettings: PlaybackSettings,
+        scrobbler: any TraktScrobbling,
+        watchBridge: WatchOutboxBridge,
+        identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+        showDiagnostics: Bool,
+        themePalette: ThemePalette
+    ) -> some View {
+        fullScreenCover(item: playRequest) { request in
+            PlayerPresentation(
+                request: request,
+                make: {
+                    makePlayerViewModel(
+                        for: $0,
+                        accounts: accounts,
+                        captionSettings: captionSettings,
+                        playbackSettings: playbackSettings,
+                        scrobbler: scrobbler,
+                        watchBridge: watchBridge,
+                        identitySources: identitySources,
+                        requestPlay: requestPlay
+                    )
+                },
+                showDiagnostics: showDiagnostics,
+                themePalette: themePalette
+            )
+        }
+        .resumePrompt(item: resumePrompt) { item, startPosition in
+            playRequest.wrappedValue = PlayRequest(item: item, startPosition: startPosition)
+        }
+    }
 }
 
 /// A navigation value for opening an item's detail page **from a library tile**,
@@ -996,27 +1049,19 @@ private struct SearchTab: View {
                 path.append(item)
             }
         }
-        .fullScreenCover(item: $playRequest) { request in
-            PlayerPresentation(
-                request: request,
-                make: {
-                    makePlayerViewModel(
-                        for: $0,
-                        accounts: accounts,
-                        captionSettings: captionSettings,
-                        playbackSettings: playbackSettings,
-                        scrobbler: scrobbler,
-                        watchBridge: watchBridge,
-                        identitySources: identitySources
-                    )
-                },
-                showDiagnostics: showDiagnostics,
-                themePalette: themePalette
-            )
-        }
-        .resumePrompt(item: $resumePrompt) { item, startPosition in
-            playRequest = PlayRequest(item: item, startPosition: startPosition)
-        }
+        .playerHost(
+            playRequest: $playRequest,
+            resumePrompt: $resumePrompt,
+            requestPlay: { requestPlay($0) },
+            accounts: accounts,
+            captionSettings: captionSettings,
+            playbackSettings: playbackSettings,
+            scrobbler: scrobbler,
+            watchBridge: watchBridge,
+            identitySources: identitySources,
+            showDiagnostics: showDiagnostics,
+            themePalette: themePalette
+        )
     }
 
     /// Selecting a search result always opens its detail page rather than

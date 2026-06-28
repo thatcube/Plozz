@@ -46,6 +46,16 @@ final class RemuxContentSource: @unchecked Sendable {
     private var distinctSegmentsProduced = 0
     private var totalBytesProduced: Int64 = 0
 
+    /// Ground-truth memory telemetry for the cold far-seek jetsam crash (signal 9).
+    /// `segmentServesInFlight` counts segment responses being assembled concurrently
+    /// on the origin's concurrent queue (a seek burst can spike this); the peaks +
+    /// peak `phys_footprint` are what the next on-device capture greps to size the
+    /// real RSS driver before the L5/L6 cache+backpressure policy is designed.
+    /// All guarded by `cacheLock`.
+    private var segmentServesInFlight = 0
+    private var peakSegmentServesInFlight = 0
+    private var peakPhysFootprintBytes: Int64 = 0
+
     /// Wall-clock (uptime ns) the previous on-demand segment mux finished, so the
     /// per-segment throughput line can report the inter-request cadence gap — a
     /// long gap before a just-in-time mux is the server-side fingerprint of an
@@ -136,7 +146,18 @@ final class RemuxContentSource: @unchecked Sendable {
     func stop() {
         cacheLock.lock()
         stopped = true
+        let peakInFlight = peakSegmentServesInFlight
+        let peakPhysMB = Double(peakPhysFootprintBytes) / 1_048_576
+        let distinct = distinctSegmentsProduced
+        let producedMB = Double(totalBytesProduced) / 1_048_576
         cacheLock.unlock()
+        let mem = MemoryProbe.sample()
+        // Teardown memory summary: the peak concurrent-serve depth + peak
+        // phys_footprint seen this session are the headline numbers for sizing the
+        // L5/L6 bounded-cache + backpressure policy from a real cold-resume run.
+        RemuxLog.info(String(format:
+            "remux-mem: teardown peakInflight=%d peakPhys=%.0fMB phys=%.0fMB rss=%.0fMB distinctSegs=%d produced=%.0fMB",
+            peakInFlight, peakPhysMB, mem.physFootprintMB, mem.residentMB, distinct, producedMB))
     }
 
     // MARK: - B7 lazy/windowed background discovery
@@ -337,6 +358,24 @@ final class RemuxContentSource: @unchecked Sendable {
     // MARK: - Media segments
 
     private func segmentBytes(_ index: Int) -> Data? {
+        // Track concurrent segment-serve depth + peak footprint for the cold-seek
+        // jetsam diagnostic (cheap: a counter bump + one Mach query per serve).
+        let footprint = MemoryProbe.sample()
+        cacheLock.lock()
+        segmentServesInFlight += 1
+        if segmentServesInFlight > peakSegmentServesInFlight {
+            peakSegmentServesInFlight = segmentServesInFlight
+        }
+        if footprint.physFootprint > peakPhysFootprintBytes {
+            peakPhysFootprintBytes = footprint.physFootprint
+        }
+        cacheLock.unlock()
+        defer {
+            cacheLock.lock()
+            segmentServesInFlight = max(0, segmentServesInFlight - 1)
+            cacheLock.unlock()
+        }
+
         // Fast path: a concurrent cache hit needs no production lock.
         cacheLock.lock()
         if let cached = segmentCache[index] {
@@ -408,6 +447,24 @@ final class RemuxContentSource: @unchecked Sendable {
                       netBefore: netBefore, netAfter: segmenter.networkSnapshot())
 
         insertSegment(index, produced)
+
+        // Ground-truth memory line for the cold far-seek jetsam crash: the real
+        // phys_footprint (the jetsam metric) at this serve, the bounded segment
+        // cache occupancy, and the concurrent-serve depth. Lets a cold-resume
+        // capture attribute RSS to cache vs decode buffers vs transient copies.
+        let mem = MemoryProbe.sample()
+        cacheLock.lock()
+        let cacheMB = Double(segmentCacheBytes) / 1_048_576
+        let cacheSegs = segmentCache.count
+        let inFlight = segmentServesInFlight
+        let peakInFlight = peakSegmentServesInFlight
+        let limitMB = Double(segmentCacheLimitBytes) / 1_048_576
+        cacheLock.unlock()
+        RemuxLog.info(String(format:
+            "remux-mem: seg=%d phys=%.0fMB rss=%.0fMB cache=%.0f/%.0fMB(%d segs) inflight=%d peak=%d",
+            index, mem.physFootprintMB, mem.residentMB, cacheMB, limitMB, cacheSegs,
+            inFlight, peakInFlight))
+
         return produced
     }
 

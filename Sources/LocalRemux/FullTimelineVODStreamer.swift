@@ -150,11 +150,19 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // declared durations match the muxed content. No-op when the index is
         // already keyframe-aligned (e.g. DoVi titles), so it can't regress those.
         let keyframeSegments = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeSegments")
+        // Flag `com.plozz.playback.remuxKeyframeFullScan` (DEFAULT OFF): safety
+        // override that forces the keyframe rebuild to use the exhaustive
+        // O(filesize) scan instead of the default sparse seek-sampling. Only
+        // meaningful alongside remuxKeyframeSegments; lets the rebuild fall back
+        // to the proven full scan without redeploying if seek-sampling ever
+        // misbehaves on a particular source.
+        let keyframeFullScan = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeFullScan")
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
-                                           keyframeSegments: keyframeSegments)
+                                           keyframeSegments: keyframeSegments,
+                                           keyframeFullScan: keyframeFullScan)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
-        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing") }
+        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")") }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only

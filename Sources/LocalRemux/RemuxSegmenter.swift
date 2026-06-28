@@ -128,7 +128,8 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// when the file can't be demuxed, so the caller's fallback path can report
     /// exactly why (vs an opaque failure).
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
-         deriveEac3FrameDur: Bool = false, keyframeSegments: Bool = false) throws {
+         deriveEac3FrameDur: Bool = false, keyframeSegments: Bool = false,
+         keyframeFullScan: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -159,13 +160,17 @@ final class RemuxSegmenter: @unchecked Sendable {
         // EXTINF, desyncing AVPlayer. This rescans real keyframes and rebuilds the
         // table so declared == actual. No-op when the index was already usable.
         if keyframeSegments {
-            // The rescan does a one-time SEQUENTIAL read of the whole source to
-            // find real keyframes. Boost the range reader's per-round-trip window
-            // first so that scan (and subsequent segment fetches) pulls large
-            // chunks instead of many small requests — cuts the open-time cost on
-            // high-bitrate 4K. boostReadAhead only ever raises the value.
+            // The rescan builds the boundary table by sparse seek-sampling
+            // (O(segment_count) seeks) by default, falling back to a full
+            // sequential scan only if seeking can't cover the stream. Boost the
+            // range reader's per-round-trip window first so any reads it does
+            // pull large chunks instead of many small requests — cuts the
+            // open-time cost on high-bitrate 4K. boostReadAhead only ever raises
+            // the value. `keyframeFullScan` (com.plozz.playback.remuxKeyframeFullScan)
+            // forces the exhaustive scan as a safety override.
             reader.boostReadAhead(8 << 20)
-            _ = plozz_remux_rescan_keyframe_segments(session, targetSegmentSeconds)
+            _ = plozz_remux_rescan_keyframe_segments(session, targetSegmentSeconds,
+                                                     keyframeFullScan ? 1 : 0)
         }
 
         var durations: [Double] = []

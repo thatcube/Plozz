@@ -165,9 +165,14 @@ int plozz_remux_eac3_frame_samples(const uint8_t *data, int size, int is_eac3);
  * to the true keyframe-to-keyframe delta. It is a no-op (returns the current
  * count) when the index was already usable or `s` is NULL, so it is safe and
  * cheap to call unconditionally once the flag is on. Must be called after open
- * and before reading the segment table. Returns the (possibly new) segment count.
+ * and before reading the segment table. By default it uses sparse seek-sampling
+ * (O(segment_count) seeks, fast on large files) and only falls back to an
+ * exhaustive O(filesize) scan if seek-sampling can't cover the stream; pass
+ * force_full_scan != 0 to skip seek-sampling and always do the exhaustive scan
+ * (a safety override). Returns the (possibly new) segment count.
  */
-int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_seconds);
+int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_seconds,
+                                         int force_full_scan);
 
 /*
  * Pure test/diagnostic helper: group a sorted list of keyframe times (seconds,

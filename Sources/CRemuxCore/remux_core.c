@@ -372,6 +372,106 @@ static int scan_keyframes(plozz_remux_session *s, double **out_kf, int *out_coun
     return 0;
 }
 
+/*
+ * Find segment boundaries by SPARSE SEEKING instead of reading the whole file:
+ * walk boundary→boundary, each step forward-seeking to (prev + target) and
+ * recording the landed video keyframe's PTS. Cost is O(segment_count) sparse
+ * seeks (libavformat's generic search jumps by byte position on these no-Cues
+ * Matroska files — the same fast path the per-segment muxer seek already uses),
+ * not O(filesize), so a 4K title's table builds in seconds instead of after a
+ * full multi-GB transfer. Boundaries are exact keyframe PTSs, identical in kind
+ * to scan_keyframes, so correctness is unchanged.
+ *
+ * Returns 0 with an increasing list in *out_kf / *out_count (caller frees) when
+ * it covered the stream; returns -1 when a forward seek stops making progress
+ * even after a bounded forward-read (the caller then falls back to the full
+ * scan, which is slower but always correct). Rewinds to the start when done.
+ */
+static int sample_keyframes_by_seek(plozz_remux_session *s, double target_seconds,
+                                    double **out_kf, int *out_count) {
+    *out_kf = NULL;
+    *out_count = 0;
+    if (target_seconds < 1.0) target_seconds = 6.0;
+    AVStream *vst = s->ic->streams[s->video_index];
+    double file_start = (s->ic->start_time != AV_NOPTS_VALUE)
+        ? (double)s->ic->start_time / AV_TIME_BASE : 0.0;
+    double duration = s->duration_seconds;
+
+    int cap = 1024, n = 0;
+    double *kf = (double *)malloc(sizeof(double) * (size_t)cap);
+    if (!kf) return -1;
+    kf[n++] = 0.0;  /* the timeline always starts at 0 (muxer seeks back to the first IDR) */
+
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) { free(kf); return -1; }
+
+    int failed = 0;
+    double prev = 0.0;
+    /* Bound on how many packets a single step may read forward (when a seek
+     * undershoots) before we declare the sparse path unreliable and bail to the
+     * full scan — keeps a misbehaving forward seek from quietly reading the whole
+     * file one GOP at a time. */
+    const int MAX_FWD_PKTS = 4000;
+
+    while (n < PLOZZ_MAX_SEGMENTS) {
+        double tgt = prev + target_seconds;
+        if (duration > 0 && tgt >= duration - 0.001) break;  /* tail handled by the planner */
+
+        int64_t seek_ts = (int64_t)((tgt + file_start) / av_q2d(vst->time_base));
+        /* Forward seek: keyframe with ts in [seek_ts, +inf) — i.e. the first IDR
+         * at/after the target. min_ts == ts forces the forward direction. */
+        int rc = avformat_seek_file(s->ic, s->video_index, seek_ts, seek_ts, INT64_MAX, 0);
+
+        double k = -1.0;
+        int tries = 0;
+        while (tries < MAX_FWD_PKTS && av_read_frame(s->ic, pkt) >= 0) {
+            tries++;
+            if (pkt->stream_index == s->video_index && (pkt->flags & AV_PKT_FLAG_KEY)) {
+                int64_t ts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : pkt->dts;
+                if (ts != AV_NOPTS_VALUE) {
+                    double t = ts * av_q2d(vst->time_base) - file_start;
+                    if (t > prev + 0.001) { k = t; av_packet_unref(pkt); break; }
+                    /* Landed at/before prev (seek undershot): keep reading forward
+                     * to the next keyframe past prev, within the cap. */
+                }
+            }
+            av_packet_unref(pkt);
+        }
+        if (rc < 0 && k < 0) { failed = 1; break; }
+        if (k < 0) {
+            /* No keyframe found past prev within the cap. If we're near the end
+             * that's just the tail; otherwise the sparse path is unreliable. */
+            if (duration > 0 && prev >= duration * 0.95) break;
+            failed = 1;
+            break;
+        }
+        if (n >= cap) {
+            int ncap = cap * 2;
+            double *nk = (double *)realloc(kf, sizeof(double) * (size_t)ncap);
+            if (!nk) break;
+            kf = nk; cap = ncap;
+        }
+        kf[n++] = k;
+        prev = k;
+    }
+
+    av_packet_free(&pkt);
+    /* Rewind so the first muxed segment's BACKWARD seek begins from t=0. */
+    avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
+
+    /* Reject a run that bailed early (covered far less than the file) so the
+     * caller falls back to the exhaustive scan rather than shipping a short table. */
+    if (failed || n < 2 ||
+        (duration > 0 && kf[n - 1] < duration * 0.5)) {
+        free(kf);
+        return -1;
+    }
+
+    *out_kf = kf;
+    *out_count = n;
+    return 0;
+}
+
 /* ----- open -------------------------------------------------------------- */
 
 /* Record a precise failure (stage + AVERROR) into the caller's result so an
@@ -549,10 +649,11 @@ void plozz_remux_set_derive_eac3_frame_dur(plozz_remux_session *s, int enabled) 
     s->derive_eac3_frame_dur = enabled ? 1 : 0;
 }
 
-int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_seconds) {
+int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_seconds,
+                                         int force_full_scan) {
     if (!s) return 0;
     /* No-op when the container index was usable: those boundaries are already the
-     * real keyframes, so a full scan would just be wasted I/O. */
+     * real keyframes, so a rescan would just be wasted I/O. */
     if (!s->used_fixed_cadence) {
         remux_log(0, "remux: keyframe-scan skipped — index already keyframe-aligned "
                      "(%d segments)", s->segment_count);
@@ -563,11 +664,22 @@ int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_s
     int64_t t0 = av_gettime();
     double *kf = NULL;
     int kf_count = 0;
-    if (scan_keyframes(s, &kf, &kf_count) < 0 || kf_count < 2) {
-        free(kf);
-        remux_log(1, "remux: keyframe-scan found %d keyframes; keeping %d "
-                     "fixed-cadence segments", kf_count, s->segment_count);
-        return s->segment_count;
+    const char *method = "seek-sample";
+
+    /* Fast path: sparse seek-sampling builds the boundary table without reading
+     * the whole file. Fall back to the exhaustive scan if it's forced off or it
+     * couldn't cover the stream (a forward seek that wouldn't advance), so a
+     * misbehaving seek degrades to slow-but-correct, never wrong. */
+    if (force_full_scan ||
+        sample_keyframes_by_seek(s, target_seconds, &kf, &kf_count) < 0) {
+        free(kf); kf = NULL; kf_count = 0;
+        method = force_full_scan ? "full-scan(forced)" : "full-scan(fallback)";
+        if (scan_keyframes(s, &kf, &kf_count) < 0 || kf_count < 2) {
+            free(kf);
+            remux_log(1, "remux: keyframe rebuild found %d keyframes; keeping %d "
+                         "fixed-cadence segments", kf_count, s->segment_count);
+            return s->segment_count;
+        }
     }
 
     int cap = kf_count + 1;
@@ -588,9 +700,9 @@ int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_s
     s->used_fixed_cadence = 0;
 
     double elapsed = (double)(av_gettime() - t0) / 1e6;
-    remux_log(0, "remux: keyframe-scan rebuilt %d->%d segments from %d keyframes "
-                 "in %.2fs (declared durations now match real GOPs)",
-              old, count, kf_count, elapsed);
+    remux_log(0, "remux: keyframe-scan rebuilt %d->%d segments from %d boundaries "
+                 "in %.2fs via %s (declared durations now match real GOPs)",
+              old, count, kf_count, elapsed, method);
     return count;
 }
 

@@ -184,10 +184,22 @@ struct KeyframeTable { var duration: Double; var times: [Double]; var byteOffset
 >   `set_cue_table` (it's what's on `main` after the merge); reconcile only if it later prefers the
 >   apply_keyframe_boundaries_ex shape. **Gating: only set a cue table when `used_fixed_cadence==1`
 >   (libav-blind-but-Cues-exist); native-index titles NO-OP full-vod — don't set there.**
-> - **0-based boundaries:** `plan_segments_core` clamps a non-zero first boundary → segment-0
->   becomes over-long → desync. The marshal MUST feed 0-based times — Track A added
->   `KeyframeTable.zeroBasedTimes`; B7 also normalizes to 0-based inside the consume at `3aaace3`
->   ("normalize cue-table boundaries to 0-based domain in full-vod consume").
+> - **⚠️ Domain contract — VERIFIED against merged `remux_core.c:1180–1245` (resolves a B5/Track A
+>   flag; the two C entries want OPPOSITE arrays):**
+>   - **MERGED path = `set_cue_table` (full-vod, `build_segments_verbatim`):** expects **PRE-GROUPED
+>     final boundaries in ABSOLUTE SOURCE seconds**, WITH the trailing programme-end kept as the
+>     closer. The consume **normalizes 0-based ITSELF** by subtracting the container `start_time`
+>     (`file_start`, line 1202) and clamping the head to 0 (line 1203) — it does NOT subtract the
+>     producer's first PTS. So the Swift marshal must feed **raw source-domain times** (B5's
+>     `CuesVODPlan.boundaryPTS`); **do NOT pre-zero with `zeroBasedTimes`** — pre-zeroing by
+>     first-PTS double-shifts a non-zero-start title and makes the muxer seek past every keyframe →
+>     desync. No-op / byte-identical on the common `start_time==0` title. Grouping authority lives in
+>     Swift; C tiles verbatim — never pass raw dense ungrouped Cue keyframes to `set_cue_table`.
+>   - **The (NON-merged) `apply_keyframe_boundaries_ex` / `apply_keyframes` static-VOD form** is the
+>     opposite contract: expects RAW dense keyframes, re-groups to a cadence, force-zeroes seg-0,
+>     drops the trailing end. THAT form is where the `zeroBasedTimes` + `add_tail=0` notes apply.
+>   - Net: `zeroBasedTimes` is the WRONG feed for the path that's actually on `main`. Route B5's
+>     pre-grouped `boundaryPTS` (raw source domain, trailing end included) to `set_cue_table`.
 >
 > **B5 final-report integration gotchas (bank these — non-obvious, costly to rediscover):**
 > - **Cache call-site merge break (B5 ↔ Track C):** B5's branch still has the PRE-donation

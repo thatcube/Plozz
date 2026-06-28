@@ -270,41 +270,75 @@ struct SeriesDetailView: View {
     // MARK: Season tabs
 
     private var seasonTabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(seasons) { season in
-                    seasonChip(season)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(seasons) { season in
+                        seasonChip(season)
+                    }
                 }
+                .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
+                .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                // Headroom for the focused chip's lift so it is never clipped.
+                .padding(.vertical, 12)
             }
-            .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
-            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-            // Headroom for the focused chip's lift so it is never clipped.
-            .padding(.vertical, 12)
+            // Never clip a focused chip's lift, shadow or border.
+            .scrollClipDisabled()
+            // Treat the whole tab bar as one focus section so pressing "up" from any
+            // episode — even when the rail is scrolled far to the right and no tab
+            // sits directly above — reliably enters the bar instead of being trapped.
+            .focusSection()
+            .onChange(of: focusedSeasonID) { _, newValue in
+                guard let id = newValue else {
+                    // Focus left the bar (up to Play, or down to the episodes); re-arm
+                    // the gate so the next entry again lands only on the active season.
+                    seasonBarEngaged = false
+                    return
+                }
+                // We're now inside the bar — open every chip to focus so left/right
+                // navigation between seasons works.
+                seasonBarEngaged = true
+                // Focus has genuinely left the episode rail (it's now on the bar), so
+                // tell the rail to re-arm its entry gate for the next down-press.
+                episodeRailResetToken += 1
+                guard let season = seasons.first(where: { $0.id == id }) else { return }
+                select(season)
+                // Deliberately *don't* move the hero to the season: focusing the tab bar
+                // keeps the page on the episode you were last viewing, so going up and
+                // back down stays anchored to that episode rather than the season.
+            }
+            // Keep the ACTIVE season chip scrolled into view whenever focus is *not*
+            // inside the bar, so pressing DOWN from the hero Play row always has the
+            // active season sitting directly below to land on — even when it's a high
+            // season (e.g. S12) parked off-screen to the right. Without this the chip
+            // stays off-screen and tvOS's downward search skips the whole bar and
+            // drops focus straight into the on-screen episode rail, making the season
+            // row unreachable. While focus *is* in the bar, tvOS owns scrolling as the
+            // user moves left/right, so we stand back (guarded by `seasonBarEngaged`).
+            .onAppear { scrollActiveSeasonIntoView(using: proxy) }
+            .onChange(of: selectedSeasonID) { _, _ in
+                guard !seasonBarEngaged else { return }
+                scrollActiveSeasonIntoView(using: proxy)
+            }
+            .onChange(of: seasonBarEngaged) { _, engaged in
+                // Focus just left the bar: re-anchor the (now settled) active season
+                // to the leading edge so the next down-press from Play lands on it.
+                if !engaged { scrollActiveSeasonIntoView(using: proxy) }
+            }
         }
-        // Never clip a focused chip's lift, shadow or border.
-        .scrollClipDisabled()
-        // Treat the whole tab bar as one focus section so pressing "up" from any
-        // episode — even when the rail is scrolled far to the right and no tab
-        // sits directly above — reliably enters the bar instead of being trapped.
-        .focusSection()
-        .onChange(of: focusedSeasonID) { _, newValue in
-            guard let id = newValue else {
-                // Focus left the bar (up to Play, or down to the episodes); re-arm
-                // the gate so the next entry again lands only on the active season.
-                seasonBarEngaged = false
-                return
+    }
+
+    /// Scrolls the season bar so the active (`selectedSeasonID`, falling back to the
+    /// first) chip is leading-aligned — directly under the hero Play button — so it
+    /// is always on-screen and reachable by a down-press. Deferred a runloop tick so
+    /// the chip is laid out before we scroll, and animated so a far season glides in
+    /// rather than snapping.
+    private func scrollActiveSeasonIntoView(using proxy: ScrollViewProxy) {
+        guard let id = selectedSeasonID ?? seasons.first?.id else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(id, anchor: .leading)
             }
-            // We're now inside the bar — open every chip to focus so left/right
-            // navigation between seasons works.
-            seasonBarEngaged = true
-            // Focus has genuinely left the episode rail (it's now on the bar), so
-            // tell the rail to re-arm its entry gate for the next down-press.
-            episodeRailResetToken += 1
-            guard let season = seasons.first(where: { $0.id == id }) else { return }
-            select(season)
-            // Deliberately *don't* move the hero to the season: focusing the tab bar
-            // keeps the page on the episode you were last viewing, so going up and
-            // back down stays anchored to that episode rather than the season.
         }
     }
 
@@ -330,6 +364,9 @@ struct SeriesDetailView: View {
         // No system focus ring — the pill + scale is the focus treatment.
         .focusEffectDisabled()
         .focused($focusedSeasonID, equals: season.id)
+        // Stable scroll target so the season bar can programmatically scroll the
+        // active chip into view (see `scrollActiveSeasonIntoView`).
+        .id(season.id)
         // Remove non-active seasons from the focus system until the bar is engaged,
         // so directional entry can only ever land on the active season (no snap).
         .disabled(!isFocusable)

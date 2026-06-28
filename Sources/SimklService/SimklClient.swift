@@ -78,6 +78,17 @@ struct SimklClient: Sendable {
             .jsonBody(body)
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
+
+    // MARK: - Real-time scrobble
+
+    /// `POST /scrobble/{action}` — reports real-time playback (start/pause/stop).
+    /// Shows "Now Watching" on the user's Simkl dashboard and auto-marks watched
+    /// on stop with progress >= 80%.
+    func scrobble(action: String, body: SimklScrobbleBody, accessToken: String) async throws {
+        let endpoint = try Endpoint(method: .post, path: "/scrobble/\(action)", headers: headers(accessToken: accessToken))
+            .jsonBody(body)
+        _ = try await http.send(endpoint, baseURL: baseURL)
+    }
 }
 
 /// Thrown when the PIN code has expired or been consumed.

@@ -20,7 +20,9 @@ public struct DisabledSimklScrobbler: SimklScrobbling {
     public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {}
 }
 
-/// Live Simkl scrobbler. Only fires on `.stop` past the finished threshold (like Trakt).
+/// Live Simkl scrobbler. Sends real-time scrobble events (start/pause/stop)
+/// so "Now Watching" appears on the user's dashboard, plus fires sync/history
+/// on stop past the threshold for durable watched marking.
 public actor SimklScrobbler: SimklScrobbling {
     private let client: SimklClient
     private let tokenStore: SimklTokenStoring
@@ -31,25 +33,24 @@ public actor SimklScrobbler: SimklScrobbling {
     }
 
     public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {
-        // Simkl history is "mark as watched" — only fire on stop past threshold.
-        guard event == .stop, progress >= 80 else { return }
-        guard let body = Self.historyBody(for: item) else { return }
+        guard let action = Self.action(for: event) else { return }
+        guard let body = Self.scrobbleBody(for: item, progress: progress) else { return }
         guard let token = tokenStore.load()?.accessToken else { return }
 
         do {
-            try await client.addToHistory(body: body, accessToken: token)
-            PlozzLog.playback.debug("Simkl scrobble succeeded")
+            try await client.scrobble(action: action, body: body, accessToken: token)
+            PlozzLog.playback.debug("Simkl scrobble \(action) succeeded")
         } catch {
-            PlozzLog.playback.debug("Simkl scrobble failed (non-fatal)")
+            PlozzLog.playback.debug("Simkl scrobble \(action) failed (non-fatal)")
         }
     }
 
     public func scrobbleResult(item: MediaItem, progress: Double, event: PlaybackEvent) async throws {
-        guard event == .stop, progress >= 80 else {
-            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "skip(gate event=\(event) progress=\(Int(progress)))"))
+        guard let action = Self.action(for: event) else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "skip(event=\(event) not scrobbled)"))
             return
         }
-        guard let body = Self.historyBody(for: item) else {
+        guard let body = Self.scrobbleBody(for: item, progress: progress) else {
             FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "skip(no usable ids)"))
             return
         }
@@ -57,12 +58,66 @@ public actor SimklScrobbler: SimklScrobbling {
             FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "skip(not connected)"))
             return
         }
+
+        // Fire real-time scrobble for all events.
         do {
-            try await client.addToHistory(body: body, accessToken: token)
-            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "OK"))
+            try await client.scrobble(action: action, body: body, accessToken: token)
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "OK(\(action))"))
         } catch {
             FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "THROW(\(error))"))
             throw error
+        }
+
+        // On stop past threshold, also fire sync/history as a durable backup
+        // (the outbox retries this path on failure).
+        if event == .stop, progress >= 80, let histBody = Self.historyBody(for: item) {
+            do {
+                try await client.addToHistory(body: histBody, accessToken: token)
+                FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "history-backup OK"))
+            } catch {
+                // Non-fatal — the scrobble/stop already marked it watched.
+                FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "history-backup fail (non-fatal)"))
+            }
+        }
+    }
+
+    // MARK: - Event → action mapping
+
+    /// Maps a playback event to a Simkl scrobble action. `.progress` is skipped
+    /// per Simkl docs ("Do not poll /scrobble/* periodically").
+    static func action(for event: PlaybackEvent) -> String? {
+        switch event {
+        case .start, .unpause: return "start"
+        case .pause: return "pause"
+        case .stop: return "stop"
+        case .progress: return nil
+        }
+    }
+
+    // MARK: - Scrobble body (real-time)
+
+    /// Builds a scrobble body for `POST /scrobble/{start,pause,stop}`.
+    static func scrobbleBody(for item: MediaItem, progress: Double) -> SimklScrobbleBody? {
+        let clamped = min(max(progress, 0), 100)
+
+        switch item.kind {
+        case .movie, .video:
+            let ids = simklIDs(from: item.providerIDs)
+            guard !ids.isEmpty else { return nil }
+            let movie = SimklScrobbleMovieRef(title: item.title, year: item.productionYear, ids: ids)
+            return SimklScrobbleBody(movie: movie, progress: clamped)
+        case .episode:
+            guard let season = item.seasonNumber, let episode = item.episodeNumber else {
+                return nil
+            }
+            let seriesIDs = simklSeriesIDs(from: item.providerIDs)
+            let ids = seriesIDs.isEmpty ? simklIDs(from: item.providerIDs) : seriesIDs
+            guard !ids.isEmpty else { return nil }
+            let show = SimklScrobbleShowRef(title: nil, year: nil, ids: ids)
+            let ep = SimklScrobbleEpisodeRef(season: season, number: episode)
+            return SimklScrobbleBody(show: show, episode: ep, progress: clamped)
+        default:
+            return nil
         }
     }
 

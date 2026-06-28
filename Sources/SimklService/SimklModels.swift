@@ -121,3 +121,30 @@ struct SimklEpisodeEntry: Encodable, Equatable {
         case watchedAt = "watched_at"
     }
 }
+
+// MARK: - Real-time scrobble DTOs (POST /scrobble/{start,pause,stop})
+
+/// Body for `POST /scrobble/{start,pause,stop}`.
+struct SimklScrobbleBody: Encodable, Equatable {
+    var movie: SimklScrobbleMovieRef?
+    var show: SimklScrobbleShowRef?
+    var episode: SimklScrobbleEpisodeRef?
+    var progress: Double
+}
+
+struct SimklScrobbleMovieRef: Encodable, Equatable {
+    var title: String?
+    var year: Int?
+    var ids: SimklIDs
+}
+
+struct SimklScrobbleShowRef: Encodable, Equatable {
+    var title: String?
+    var year: Int?
+    var ids: SimklIDs
+}
+
+struct SimklScrobbleEpisodeRef: Encodable, Equatable {
+    var season: Int?
+    var number: Int?
+}

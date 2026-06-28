@@ -29,7 +29,7 @@ public struct AniListConfig: Sendable, Equatable {
     /// The relay auth URL the user visits (QR code target).
     public var authorizationURL: String? {
         guard clientID != nil else { return nil }
-        return "\(relayBaseURL)/auth/anilist"
+        return "\(relayBaseURL)/anilist"
     }
 
     public static func resolved(

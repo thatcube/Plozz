@@ -73,7 +73,7 @@ public final class AniListService {
 
     /// Completes the connection by redeeming a short code from the auth relay.
     public func submitToken(_ input: String) async {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             phase = .error("Code cannot be empty")
             return

@@ -7,9 +7,8 @@ MAL_CLIENT_ID = "453e05d6355620ecc1047e9dac4dd184"
 ANILIST_CLIENT_ID = "44569"
 
 # Secrets (set via `wrangler secret put`):
-# MAL_CLIENT_SECRET (not needed for public PKCE client)
 # ANILIST_CLIENT_SECRET
 
 [[kv_namespaces]]
 binding = "AUTH_KV"
-id = "" # Fill after `wrangler kv:namespace create AUTH_KV`
+id = "152ec5bca6e1429d82e5b93e0fc549c3"

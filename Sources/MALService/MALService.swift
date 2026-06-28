@@ -67,14 +67,14 @@ public final class MALService {
         connectTask?.cancel()
         connectTask = nil
         // Show the relay auth URL — Worker handles PKCE and exchange
-        phase = .awaitingAuthorizationCode(authorizationURL: "\(config.relayBaseURL)/auth/mal")
+        phase = .awaitingAuthorizationCode(authorizationURL: "\(config.relayBaseURL)/myanimelist")
     }
 
     /// Redeems a short code from the auth relay to get the access token.
     public func submitAuthorizationCode(_ input: String) {
         guard config.isConfigured else { phase = .unavailable; return }
 
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             phase = .error("Code cannot be empty")
             return

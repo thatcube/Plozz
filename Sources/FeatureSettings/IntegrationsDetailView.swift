@@ -241,7 +241,7 @@ struct AniListTokenEntryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Scan the QR code or visit the URL on your phone, sign in to AniList, then enter the 6-character code shown:")
+            Text("Scan the QR code or visit the URL on your phone, sign in to AniList, then enter the code shown:")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -253,7 +253,7 @@ struct AniListTokenEntryView: View {
                         .background(.white, in: RoundedRectangle(cornerRadius: 14))
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("plozz.app/auth/anilist")
+                        Text("plozz.app/anilist")
                             .font(.title3.weight(.semibold))
                         TextField("Enter code", text: $codeInput)
                         HStack(spacing: 16) {
@@ -278,7 +278,7 @@ struct MALAuthorizationCodeEntryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Scan the QR code or visit the URL on your phone, sign in to MyAnimeList, then enter the 6-character code shown:")
+            Text("Scan the QR code or visit the URL on your phone, sign in to MyAnimeList, then enter the code shown:")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -290,7 +290,7 @@ struct MALAuthorizationCodeEntryView: View {
                         .background(.white, in: RoundedRectangle(cornerRadius: 14))
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("plozz.app/auth/mal")
+                        Text("plozz.app/myanimelist")
                             .font(.title3.weight(.semibold))
                         TextField("Enter code", text: $codeInput)
                         HStack(spacing: 16) {

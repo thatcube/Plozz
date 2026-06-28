@@ -59,9 +59,9 @@ persist PTS-only, guard with size+duration+ETag).
 
 ## Preserved tags (resurrect with `git switch -c <branch> <tag>`)
 - `preserve/remux-b5-cues-2f73cf8` — Swift Cues reader + `remuxCuesProbe` (MatroskaKeyframeSampler, 214 tests)
-- `preserve/remux-b6-cues-83e2120` — C direct-EBML Cues + in-muxer apply (153 tests)
-- `preserve/remux-b7-fullvod-879a5a3` — full-vod engine + span-cap (build 759) — **merge baseline**
-- `preserve/remux-trackA-cues-vod-92a440f` — provider lane (KeyframeTableSource/sink/coordinator, 678 tests)
+- `preserve/remux-b6-cues-d485635` — C direct-EBML Cues (byte-offset emit) + 4K probe-window + resync guard
+- `preserve/remux-b7-fullvod-3aaace3` — full-vod engine + span-cap + **Cue-consume wired in** — **THE MERGE BASELINE** (clean FF of main)
+- `preserve/remux-trackA-cues-vod-73d03e3` — provider lane + `KeyframeTable` canonical in `CoreModels` root
 - `preserve/remux-trackB-fmp4-bb497a5` — resource-loader fMP4+sidx + estimator crash fix
 - `preserve/remux-trackC-nocues-b572cbf` — no-Cues cache + background populator
 

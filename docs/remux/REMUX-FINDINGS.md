@@ -121,7 +121,7 @@ At reset the concerns were consolidated one-owner-each:
 
 | Concern | Owner | Lang | Notes |
 |---|---|---|---|
-| Full-vod **engine** (declare VOD+ENDLIST, forward-snap on-demand mux, serving) | **B7** | C/Swift | The deploy spine. `set_full_vod_mode`. Tag `preserve/remux-b7-fullvod-879a5a3`. |
+| Full-vod **engine** (declare VOD+ENDLIST, forward-snap on-demand mux, serving) | **B7** | C/Swift | The deploy spine. `set_full_vod_mode` + **Cue-consume wired in**. Tag `preserve/remux-b7-fullvod-3aaace3`. |
 | **Cues fast-path** (open-time exact index) | **B5** | Swift | `readCues()/hasCues()/keyframeTableFromCues()` on one `MatroskaKeyframeSampler` (shares `parseInit` with the no-Cues walk) + `remuxCuesProbe` diagnostic. Tag `preserve/remux-b5-cues-2f73cf8`, 214 tests. |
 | **Cues fast-path (alt)** + live per-seek **resolve** + cluster **resync** | **B6** | C | `plozz_remux_read_cues_table` (in-muxer apply) + `kf_probe_at` + 6a86a8b resync (hot mux path). Tag `preserve/remux-b6-cues-83e2120`. |
 | Provider protocol / source selection / Swift→C marshal | **Track A** | Swift | `MatroskaCueParser` + provider plumbing. Tag `preserve/remux-trackA-cues-vod-fb0e34c`. |
@@ -234,20 +234,61 @@ All experimental engines are reachable forever via these annotated tags (branche
 | Tag | What |
 |---|---|
 | `preserve/remux-b5-cues-2f73cf8` | B5 Cues fast-path — Swift `readCues`/`keyframeTableFromCues` on `MatroskaKeyframeSampler` + `remuxCuesProbe` diagnostic, 214 tests |
-| `preserve/remux-b6-cues-83e2120` | B6 direct-EBML Cues fast-path — C `read_cues_table`, in-muxer apply, 153 tests |
-| `preserve/remux-b7-fullvod-879a5a3` | B7 full-vod engine + span-cap + `PLOZZ_SEGMENT_SPAN_CAP` (build 759) — **the merge baseline** |
-| `preserve/remux-trackA-cues-vod-92a440f` | Track A provider lane: `KeyframeTableSource`/provider/`FullVODKeyframeSink`/coordinator + `zeroBasedTimes` (678 tests) |
+| `preserve/remux-b6-cues-d485635` | B6 direct-EBML Cues — C `read_cues_table` (now emits byte offsets) + 4K-widened probe window + backward-align resync guard + warm session-cache (supersedes 83e2120) |
+| `preserve/remux-b7-fullvod-3aaace3` | **THE MERGE BASELINE** — B7 full-vod engine + span-cap + `PLOZZ_SEGMENT_SPAN_CAP` knob **+ Cue fast-path CONSUME wired into the engine** (exact-boundary VOD table + pre-seeded resolves). Clean FF of main. (supersedes 879a5a3) |
+| `preserve/remux-trackA-cues-vod-73d03e3` | Track A provider lane + **`KeyframeTable` relocated to `CoreModels` root (canonical)** + byteOffsets all-or-nothing (supersedes 92a440f) |
 | `preserve/remux-trackB-fmp4-bb497a5` | Track B `AVAssetResourceLoaderDelegate` fMP4+sidx + `FragmentSizeEstimator` crash fix |
 | `preserve/remux-trackC-nocues-b572cbf` | Track C no-Cues cache + background populator |
 
 Inspect any with `git show <tag>` or `git checkout <tag>`. To resurrect work:
 `git switch -c <new-branch> <tag>`.
 
-**Merge-base lineage note (B7 engine):** `879a5a3` = `b382cad` (cap = `max(2×cadence, 8)`,
-= 60 at cadence 30, **no ceiling** — correct) **+ the `PLOZZ_SEGMENT_SPAN_CAP` knob**. The
-intermediate `ccad89b` added a 30s ceiling that **clipped legit ~33s segments — a regression**,
-and `879a5a3` already reverts it. So `879a5a3` is byte-identical to `b382cad` on default behavior
-plus an optional override; **merge `879a5a3`, never `ccad89b` standalone.**
+**Merge-base lineage note (B7 engine):** the merge baseline is **`3aaace3`** (= `879a5a3`
++ the Cue-consume). `879a5a3` = `b382cad` (cap = `max(2×cadence, 8)`, = 60 at cadence 30,
+**no ceiling** — correct) **+ the `PLOZZ_SEGMENT_SPAN_CAP` knob**. The intermediate `ccad89b`
+added a 30s ceiling that **clipped legit ~33–36s segments — a regression**, and `879a5a3`
+already reverts it. `3aaace3` then adds the **Cue fast-path consume** (`4c7e92c` exact-boundary
+VOD table + pre-seeded resolves, `cc66a0f` tiles producer boundaries verbatim, `3aaace3` 0-based
+normalize). All of `b382cad → … → 3aaace3` is a **clean fast-forward of main**. **Merge
+`3aaace3`; never `ccad89b` standalone.**
+
+### 8.1 Confirmed final tips (git ground truth, 2026-06-28 ~01:55 — self-reports were stale)
+
+| Session | Branch | Confirmed tip | Worktree |
+|---|---|---|---|
+| B7 (engine) | `thatcube-b7-lazy-windowed-index` | **`3aaace3`** | clean (only never-commit `PlozzApp.swift` flag block + build artifacts) |
+| B5 (Cues) | `thatcube-remux-desync-stutter-fix` | `2f73cf8` | clean (only `PlozzApp.swift`) |
+| B6 (Cues) | `thatcube-thatcube-b6-remux-desync-independent` | `d485635` | clean |
+| Track A (provider) | `thatcube-track-a-cues-vod` | `73d03e3` | clean |
+| Track B (fMP4) | `thatcube-track-b-fmp4-loader` | `bb497a5` | clean |
+
+> NOTE: post-report commits (B7 `879a5a3→3aaace3`, B6 `83e2120→d485635`, Track A `92a440f→73d03e3`)
+> were authored after each session's last green-build claim, so their **build/test status is
+> coordinator-unverified** — the fresh session should run `./tools/run-tests.sh LocalRemuxTests`
+> + a device build at `3aaace3` before relying on it.
+
+### 8.2 Two integration rulings locked for the fresh session (record only)
+
+1. **Cues source = serve B5's Swift `keyframeTableFromCues()`** (byteOffsets populated → B7's
+   forward-snap is a no-op; marshalled once at open, not the per-seek hot path). **B6's C
+   `read_cues_table` = differential oracle** (must agree on PTS+offset per Cues title;
+   disagreement = parser bug caught pre-ship) **+ owner of the no-Cues walk.** Not two competing
+   serve-parsers — different layers. B7's `3aaace3` already consumes a *passed* Cue boundary
+   table, so the producer is the marshalled B5 table.
+2. **Canonical C sink** = B7's `plozz_remux_set_cue_table(s, duration, times, count,
+   byte_offsets?)` setter → consume inside `set_full_vod_mode` (just before the fixed-cadence
+   build), **gated on `used_fixed_cadence==1`** so a good-libav-index DoVi title no-ops the
+   full-vod path → **byte-identical, HARD-REQ-5 protected**. `byteOffsets` present = Phase-2
+   direct byte-seek; nil = backward-seek-by-time (the boundary *is* a real keyframe). This
+   build+pre-seed is the **one shared `apply_keyframes` ingest** B5 Cues / B6 no-Cues / Track C
+   cache all reuse.
+
+### 8.3 Other branches NOT individually tagged
+
+~80 other worktree branches exist (earlier B1–B4 remux experiments, SSOT, watch-state, UI, etc.).
+Only the 6 canonical remux tags above are preserved. **If any of those other branches hold work
+worth keeping, tag them before deleting** — otherwise branch deletion loses them. The remux
+*lessons* from the earlier experiments are already captured in this document.
 
 ---
 

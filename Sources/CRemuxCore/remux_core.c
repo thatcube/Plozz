@@ -16,6 +16,7 @@
 #include <Libavutil/mathematics.h>
 #include <Libavutil/mem.h>
 #include <Libavutil/dovi_meta.h>
+#include <Libavutil/time.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -57,6 +58,15 @@ static void remux_log(int level, const char *fmt, ...) {
  * This is what lets a 30-40 GB remux start fast without reading O(filesize).
  */
 #define PLOZZ_MAX_SCAN_SEGMENTS 512
+/*
+ * Wall-clock budget for the whole keyframe-scan discovery, in microseconds. The
+ * probe loop is synchronous (off the MainActor — see FullTimelineVODStreamer's
+ * Task.detached open), so on a 30-40 GB title over a slow/stalled network even a
+ * bounded probe count could exceed the tvOS open/playback-start watchdog. If the
+ * budget is blown, discovery aborts and the caller falls back to the original
+ * fixed-cadence table: degraded (the old EXTINF mismatch) but never a hang/crash.
+ */
+#define PLOZZ_KEYFRAME_SCAN_BUDGET_US (8 * 1000000LL)
 
 struct plozz_remux_session {
     void *opaque;
@@ -377,9 +387,10 @@ static double read_seek_keyframe_pts(plozz_remux_session *s, AVPacket *pkt, doub
  * on failure. `*out_probes` (optional) receives the number of seek-probes performed.
  */
 static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seconds,
-                                      double **out_kf, int *out_probes) {
+                                      double **out_kf, int *out_probes, int *out_timed_out) {
     if (out_kf) *out_kf = NULL;
     if (out_probes) *out_probes = 0;
+    if (out_timed_out) *out_timed_out = 0;
     if (!s || !out_kf || s->video_index < 0) return 0;
     double duration = s->duration_seconds;
     if (duration <= 0) return 0;
@@ -403,8 +414,13 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
      * any that still come out short). */
     double step = target_seconds;
     int probes = 0;
+    int timed_out = 0;
+    int64_t deadline = av_gettime_relative() + PLOZZ_KEYFRAME_SCAN_BUDGET_US;
 
     while (last < duration - 0.001 && n < PLOZZ_MAX_SEGMENTS) {
+        /* Wall-clock guard: bound total open latency regardless of network
+         * round-trips so we never block the open thread past the watchdog. */
+        if (av_gettime_relative() >= deadline) { timed_out = 1; break; }
         double found = -1.0;
         double window = step;
         for (int attempt = 0; attempt < 4096; attempt++) {
@@ -434,6 +450,7 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
 
     av_packet_free(&pkt);
     if (out_probes) *out_probes = probes;
+    if (out_timed_out) *out_timed_out = timed_out;
     *out_kf = kf;
     return n;
 }
@@ -463,7 +480,20 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
 
     double *kf = NULL;
     int probes = 0;
-    int kf_count = discover_keyframes_by_seek(s, eff_target, &kf, &probes);
+    int timed_out = 0;
+    int kf_count = discover_keyframes_by_seek(s, eff_target, &kf, &probes, &timed_out);
+    if (timed_out) {
+        /* Budget blown (e.g. slow/stalled network on a huge title): abandon the
+         * scan and keep the existing fixed-cadence table. Degraded (the old EXTINF
+         * mismatch) but the open thread is never blocked past the watchdog. */
+        free(kf);
+        AVStream *vst = s->ic->streams[s->video_index];
+        avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
+        remux_log(1, "remux: keyframe-scan aborted after %d seek-probes "
+                  "(>%llds budget) — keeping fixed-cadence table",
+                  probes, (long long)(PLOZZ_KEYFRAME_SCAN_BUDGET_US / 1000000LL));
+        return 0;
+    }
     if (kf_count <= 1) { free(kf); return 0; }
 
     plozz_remux_segment *segs = NULL;

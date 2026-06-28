@@ -392,6 +392,27 @@ static void build_segment_table(plozz_remux_session *s, double target_seconds) {
     plozz_remux_segment *segs = NULL;
     int count = 0;
 
+    /* Trustworthiness gate (AetherEngine keyframeIndexIsTrustworthy): reject a
+     * clustered/degenerate index whose largest CONSECUTIVE keyframe gap exceeds a
+     * trusted bound, so a sparse index can't build a multi-thousand-second segment
+     * (a RAM bomb). The tail-to-EOF gap is not a consecutive-kf gap and is not
+     * counted (the loop only spans kf[i]-kf[i-1]). On rejection we force the
+     * fixed-cadence fallback. No-op for well-indexed Cues/DoVi titles (gaps << 30s),
+     * so their output stays byte-identical. */
+    if (kf_count > 1) {
+        double max_gap = 0.0;
+        for (int i = 1; i < kf_count; i++) {
+            double g = kf[i] - kf[i - 1];
+            if (g > max_gap) max_gap = g;
+        }
+        double trusted = 30.0;   /* max(4*target, 30); target <= 6 => 30 */
+        if (max_gap > trusted + 0.0005) {
+            remux_log(1, "remux: keyframe index UNTRUSTWORTHY (max kf gap=%.3fs > %.1fs) — fixed fallback",
+                      max_gap, trusted);
+            kf_count = 0;
+        }
+    }
+
     if (kf_count > 1) {
         count = build_segments_from_keyframes(kf, kf_count, duration, target_seconds, &segs);
     }
@@ -1032,11 +1053,37 @@ int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
     remux_log(1, "remux: kf-index setup enabled=%d video_track=%lld",
               s->kf_ix.enabled, (long long)s->kf_ix.video_track);
 
-    /* Declare the cadence from the measured average GOP so EXTINF ~= real span. */
-    double fallback = (s->target_segment_seconds < 1.0) ? 6.0 : s->target_segment_seconds;
-    double cadence = estimate_gop_cadence(s, fallback);
-    s->target_segment_seconds = cadence;
-    build_segment_table(s, cadence);
+    /* AetherEngine direction: do NOT drive the published table from an ESTIMATED GOP
+     * cadence. On no-Cues sparse-keyframe titles the backward-seek probe can return
+     * phantom keyframes clustered near the seek step (the All Quiet 5.73s bug), which
+     * under-declares EXTINF vs the real forward-snapped span -> media PTS races ahead
+     * of declared playlist time -> AVPlayer can't assemble the initial buffer ->
+     * watchdog SIGKILL before frame 1. Use a FIXED cadence (default 4.0s, the
+     * AetherEngine targetSegmentDuration), env-overridable via REMUX_FULLVOD_CADENCE so
+     * the single shared Apple TV can A/B-sweep the cadence (1..30s) across relaunches
+     * WITHOUT a rebuild -- the fastest way to map AVPlayer's tolerance to declared-vs-
+     * real over-delivery on a real no-Cues 4K title. */
+    double fixed_cadence = 4.0;
+    const char *env_cad = getenv("REMUX_FULLVOD_CADENCE");
+    if (env_cad && *env_cad) {
+        double v = atof(env_cad);
+        if (v >= 1.0 && v <= 30.0) fixed_cadence = v;
+    }
+    /* DIAGNOSTIC ONLY (gated on REMUX_STDOUT so production opens stay scan-free): run
+     * the old estimate purely to emit the per-probe "cadence probe i=N kf=X gap=Y"
+     * trace, so the SAME capture reveals whether the probes returned phantoms
+     * (0,5.7,11.4) or the real keyframes (0,15,25) -- WITHOUT letting it drive the
+     * table. Skipped entirely in production: zero open-time probe reads. */
+    double diag_est = -1.0;
+    if (getenv("REMUX_STDOUT")) {
+        diag_est = estimate_gop_cadence(s, fixed_cadence);
+    }
+    remux_log(1, "remux: full-vod cadence FIXED=%.2fs (estimate diag=%.2fs not used) src=%s",
+              fixed_cadence, diag_est,
+              (env_cad && *env_cad) ? "env" : "default");
+    double cadence = fixed_cadence;
+    s->target_segment_seconds = fixed_cadence;
+    build_segment_table(s, fixed_cadence);
 
     free(s->resolved_kf);
     s->resolved_kf_count = s->segment_count + 1;

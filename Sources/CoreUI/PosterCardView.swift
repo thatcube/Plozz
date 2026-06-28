@@ -106,7 +106,7 @@ public struct PosterCardView: View {
                     .opacity(subtitleText == nil ? 0 : 1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, metrics.posterCaptionHorizontalPadding)
+            .padding([.horizontal, .bottom], metrics.posterCaptionInset)
         }
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: isFocused)
@@ -140,7 +140,7 @@ public struct PosterCardView: View {
                     .lineLimit(1)
                     .opacity(subtitleText == nil ? 0 : 1)
             }
-            .padding(.horizontal, metrics.landscapeCaptionHorizontalPadding)
+            .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
             .frame(width: size.width, alignment: .leading)
         }
         .padding(metrics.cardInset)

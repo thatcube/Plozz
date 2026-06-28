@@ -87,17 +87,18 @@ public struct PlozzMetrics: Equatable, Sendable {
 
     // MARK: Caption corner-clearance (derived)
 
-    /// Extra horizontal inset for a poster card's caption — *beyond* the shared
-    /// `cardInset` — so left-aligned title/metadata text clears the rounded outer
-    /// corner instead of crowding it. Sized so the text's total inset from the
-    /// glass edge is `captionCornerClearanceFactor` × the outer radius, and scales
-    /// with the radius (and thus density). The artwork is unaffected.
-    public var posterCaptionHorizontalPadding: CGFloat {
+    /// Extra inset for a poster card's caption — *beyond* the shared `cardInset` —
+    /// applied to its left, right *and* bottom so title/metadata text clears the
+    /// rounded outer corners instead of crowding them, leaving the text in a
+    /// balanced safe area. Sized so the text's total inset from the glass edge is
+    /// `captionCornerClearanceFactor` × the outer radius, and scales with the
+    /// radius (and thus density). The artwork is unaffected.
+    public var posterCaptionInset: CGFloat {
         max(posterCardCornerRadius * PlozzTheme.Metrics.captionCornerClearanceFactor - cardInset, 0)
     }
 
-    /// Landscape / music card counterpart of `posterCaptionHorizontalPadding`.
-    public var landscapeCaptionHorizontalPadding: CGFloat {
+    /// Landscape / music card counterpart of `posterCaptionInset`.
+    public var landscapeCaptionInset: CGFloat {
         max(landscapeCardCornerRadius * PlozzTheme.Metrics.captionCornerClearanceFactor - cardInset, 0)
     }
 

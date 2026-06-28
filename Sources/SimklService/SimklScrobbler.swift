@@ -34,14 +34,20 @@ public actor SimklScrobbler: SimklScrobbling {
 
     public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {
         guard let action = Self.action(for: event) else { return }
-        guard let body = Self.scrobbleBody(for: item, progress: progress) else { return }
-        guard let token = tokenStore.load()?.accessToken else { return }
+        guard let body = Self.scrobbleBody(for: item, progress: progress) else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl-rt", item: item, outcome: "skip(no body event=\(event) s=\(item.seasonNumber.map(String.init) ?? "nil") e=\(item.episodeNumber.map(String.init) ?? "nil"))"))
+            return
+        }
+        guard let token = tokenStore.load()?.accessToken else {
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl-rt", item: item, outcome: "skip(not connected)"))
+            return
+        }
 
         do {
             try await client.scrobble(action: action, body: body, accessToken: token)
-            PlozzLog.playback.debug("Simkl scrobble \(action) succeeded")
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl-rt", item: item, outcome: "OK(\(action))"))
         } catch {
-            PlozzLog.playback.debug("Simkl scrobble \(action) failed (non-fatal)")
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl-rt", item: item, outcome: "THROW(\(action) \(error))"))
         }
     }
 

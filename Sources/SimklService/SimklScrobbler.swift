@@ -69,13 +69,12 @@ public actor SimklScrobbler: SimklScrobbling {
     // MARK: - Mapping
 
     static func historyBody(for item: MediaItem) -> SimklHistoryBody? {
-        let ids = simklIDs(from: item.providerIDs)
-        guard !ids.isEmpty else { return nil }
-
         let now = ISO8601DateFormatter().string(from: Date())
 
         switch item.kind {
         case .movie, .video:
+            let ids = simklIDs(from: item.providerIDs)
+            guard !ids.isEmpty else { return nil }
             let entry = SimklHistoryMovieEntry(
                 title: item.title,
                 year: item.productionYear,
@@ -87,10 +86,14 @@ public actor SimklScrobbler: SimklScrobbling {
             guard let season = item.seasonNumber, let episode = item.episodeNumber else {
                 return nil
             }
+            // Simkl expects show-level IDs, not episode-level. Use the series
+            // namespace (SeriesTmdb, SeriesImdb, etc.) when available, falling
+            // back to the episode-level IDs only if the series IDs are missing.
+            let seriesIDs = simklSeriesIDs(from: item.providerIDs)
+            let ids = seriesIDs.isEmpty ? simklIDs(from: item.providerIDs) : seriesIDs
+            guard !ids.isEmpty else { return nil }
             let episodeEntry = SimklEpisodeEntry(number: episode, watchedAt: now)
             let seasonEntry = SimklSeasonEntry(number: season, episodes: [episodeEntry])
-            // For episodes, the show ids come from providerIDs (which are typically
-            // the series-level ids from the media server).
             let showEntry = SimklHistoryShowEntry(
                 title: nil,
                 year: nil,
@@ -103,7 +106,7 @@ public actor SimklScrobbler: SimklScrobbling {
         }
     }
 
-    /// Extracts Simkl-compatible ids from a provider id map.
+    /// Extracts Simkl-compatible ids from a provider id map (episode/movie level).
     static func simklIDs(from providerIDs: [String: String]) -> SimklIDs {
         var ids = SimklIDs()
         for (key, rawValue) in providerIDs {
@@ -121,6 +124,31 @@ public actor SimklScrobbler: SimklScrobbling {
             case "mal", "myanimelist":
                 ids.mal = Int(value)
             case "anilist":
+                ids.anilist = Int(value)
+            default:
+                continue
+            }
+        }
+        return ids
+    }
+
+    /// Extracts series-level IDs (SeriesImdb, SeriesTmdb, SeriesTvdb) for
+    /// episode scrobbles. Simkl needs the *show* ID, not the episode ID.
+    static func simklSeriesIDs(from providerIDs: [String: String]) -> SimklIDs {
+        var ids = SimklIDs()
+        for (key, rawValue) in providerIDs {
+            let value = rawValue.trimmingCharacters(in: .whitespaces)
+            guard !value.isEmpty else { continue }
+            switch key.lowercased() {
+            case "seriesimdb":
+                if value.hasPrefix("tt") { ids.imdb = value }
+            case "seriestmdb":
+                ids.tmdb = Int(value)
+            case "seriestvdb":
+                ids.tvdb = Int(value)
+            case "seriesmal", "seriesmyanimelist":
+                ids.mal = Int(value)
+            case "seriesanilist":
                 ids.anilist = Int(value)
             default:
                 continue

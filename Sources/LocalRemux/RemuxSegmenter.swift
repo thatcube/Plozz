@@ -208,7 +208,10 @@ final class RemuxSegmenter: @unchecked Sendable {
                 let restoreReadAhead = reader.currentReadAhead
                 if keyframeIndex {
                     plozz_remux_set_keyframe_index_mode(session, 1)
-                    reader.setReadAhead(64 * 1024)
+                    // 24KB resync+header reads per probe; 32KB read-ahead caps each tiny
+                    // header fetch while leaving av_read_frame's large calibration reads
+                    // (count >> read-ahead) untouched. Keeps 1489 probes well under budget.
+                    reader.setReadAhead(32 * 1024)
                 }
                 // Bracket the rebuild with the reader's byte/fetch counters so the cost of
                 // seek-sampled discovery is visible in the log: it must be O(segments) tiny
@@ -454,7 +457,7 @@ enum ParallelKeyframeDiscovery {
             let maxProbes = Int((sliceEnd - sliceStart) / target) * 3 + 16
 
             let reader = HTTPRangeReader(url: sourceURL, headers: headers)
-            if keyframeIndex { reader.setReadAhead(64 * 1024) }
+            if keyframeIndex { reader.setReadAhead(32 * 1024) }
 
             func record(_ keyframes: [Double], complete: Bool, headerReads: Int = 0) {
                 let snap = reader.networkSnapshot()

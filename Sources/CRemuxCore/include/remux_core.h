@@ -285,6 +285,15 @@ int plozz_remux_test_parse_cluster_keyframe(const uint8_t *buf, int len,
                                             int64_t video_track, int64_t *out_raw);
 
 /*
+ * Pure test/diagnostic helper: locate the Matroska Cluster sync (0x1F43B675) nearest
+ * to `anchor` in `buf[0..len)`, preferring the latest sync at or before `anchor`, else
+ * the first after it. Returns the byte offset, or -1 if no sync is in the window. This
+ * is the resync the header-parse uses to tolerate a cursor that a no-Cues BACKWARD seek
+ * left a few bytes past the Cluster header. No session state.
+ */
+int plozz_remux_test_find_cluster_sync(const uint8_t *buf, int len, int anchor);
+
+/*
  * Pure test/diagnostic helper: group a sorted list of real keyframe times (in
  * seconds, 0-based) into non-overlapping segments of at least `target_seconds`
  * each, snapping every boundary to a real keyframe and stamping each segment's

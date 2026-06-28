@@ -179,4 +179,76 @@ final class RemuxClusterParseTests: XCTestCase {
         XCTAssertNil(parse([0x1F], videoTrack: 1))
     }
 }
+
+/// Pure-logic tests for `plozz_remux_test_find_cluster_sync` — the resync that lets
+/// the header-parse path tolerate a libav cursor a no-Cues BACKWARD seek leaves a few
+/// bytes PAST the Cluster header. It scans a small window read just BEFORE the cursor
+/// and returns the offset of the nearest Cluster sync (0x1F43B675) at/<= the anchor,
+/// else the first after it, else -1. Without this, every probe missed and discovery
+/// fell back to ~1 MiB av_read_frame reads (the 13%-coverage bug).
+final class RemuxClusterSyncTests: XCTestCase {
+
+    private func find(_ buf: [UInt8], anchor: Int) -> Int {
+        return buf.withUnsafeBufferPointer {
+            Int(plozz_remux_test_find_cluster_sync($0.baseAddress, Int32(buf.count), Int32(anchor)))
+        }
+    }
+
+    private let SYNC: [UInt8] = [0x1F, 0x43, 0xB6, 0x75]
+
+    func testSyncExactlyAtAnchor() {
+        // Cursor landed exactly on the cluster header.
+        var buf = [UInt8](repeating: 0x00, count: 8)
+        buf += SYNC
+        buf += [UInt8](repeating: 0x11, count: 8)
+        XCTAssertEqual(find(buf, anchor: 8), 8)
+    }
+
+    func testSyncJustBeforeAnchor() {
+        // The real bug: seek left the cursor a few bytes past the header → anchor is
+        // inside the cluster; resync must walk BACK to the header at offset 8.
+        var buf = [UInt8](repeating: 0x00, count: 8)
+        buf += SYNC
+        buf += [UInt8](repeating: 0x22, count: 64)
+        XCTAssertEqual(find(buf, anchor: 20), 8)
+    }
+
+    func testPrefersLatestSyncAtOrBeforeAnchor() {
+        // Two clusters in the window; the keyframe at the cursor belongs to the LATER
+        // one, so the resync must pick the latest sync <= anchor, not the first.
+        var buf = SYNC                                   // cluster A @ 0
+        buf += [UInt8](repeating: 0x33, count: 30)
+        let bAt = buf.count                              // cluster B @ 34
+        buf += SYNC
+        buf += [UInt8](repeating: 0x44, count: 30)
+        XCTAssertEqual(find(buf, anchor: bAt + 5), bAt)
+    }
+
+    func testFallsForwardWhenNoSyncPrecedesAnchor() {
+        // No sync at/<= anchor → take the first sync AFTER it rather than failing.
+        var buf = [UInt8](repeating: 0x00, count: 10)
+        let at = buf.count
+        buf += SYNC
+        XCTAssertEqual(find(buf, anchor: 3), at)
+    }
+
+    func testReturnsMinusOneWhenNoSync() {
+        let buf = [UInt8](repeating: 0x5A, count: 64)
+        XCTAssertEqual(find(buf, anchor: 32), -1)
+    }
+
+    func testIgnoresPartialSyncAtBufferEnd() {
+        // A truncated 3-byte prefix of the sync at the tail must not match.
+        var buf = [UInt8](repeating: 0x00, count: 16)
+        buf += [0x1F, 0x43, 0xB6] // partial, no 0x75
+        XCTAssertEqual(find(buf, anchor: 16), -1)
+    }
+
+    func testAnchorBeyondBufferClampsToLatestSync() {
+        // Defensive: an anchor past the buffer still returns the latest sync present.
+        var buf = [UInt8](repeating: 0x00, count: 4)
+        buf += SYNC
+        XCTAssertEqual(find(buf, anchor: 9999), 4)
+    }
+}
 #endif

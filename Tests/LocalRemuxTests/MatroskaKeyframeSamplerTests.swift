@@ -921,6 +921,58 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         XCTAssertEqual(plan.totalDuration, 20, accuracy: 1e-9)
     }
 
+    // MARK: - boundaryPTS (the flat C-shim handoff array for B7's apply_keyframes)
+
+    func testBoundaryPTS_evenSpacing_isAnchoredCumulativeWithEnd() {
+        // Keyframes every 2s, target 4 → boundaries at 0/4/8, end at 12.
+        let kf: [(seconds: Double, clusterOffset: Int64)] =
+            [(0, 100), (2, 200), (4, 300), (6, 400), (8, 500), (10, 600)]
+        let plan = CuesVODPlan(keyframes: kf, totalDuration: 12, targetSeconds: 4)
+        XCTAssertEqual(plan.boundaryPTS, [0, 4, 8, 12])
+        // count-1 == segment count (apply_keyframes makes count-1 segments).
+        XCTAssertEqual(plan.boundaryPTS.count - 1, plan.segmentDurations.count)
+        XCTAssertEqual(plan.endPTS, 12, accuracy: 1e-9)
+        XCTAssertEqual(plan.boundaryPTS.last, plan.endPTS)
+    }
+
+    func testBoundaryPTS_anchoredAtNonZeroStartPTS() {
+        // First keyframe at 5s → every boundary carries the +5s anchor offset.
+        let plan = CuesVODPlan(keyframes: [(5, 99)], totalDuration: 30, targetSeconds: 4)
+        XCTAssertEqual(plan.boundaryPTS, [5, 30]) // anchor 5 → end 30
+        XCTAssertEqual(plan.endPTS, 30, accuracy: 1e-9)
+    }
+
+    func testBoundaryPTS_interiorEntriesAreRealKeyframes_viaOracle() {
+        // The load-bearing guarantee for B7's muxer no-op: EVERY interior boundary
+        // handed to apply_keyframes is a REAL Cues keyframe. Validate the handoff
+        // array through KeyframeCutOracle against the FULL real keyframe table.
+        let kf: [(seconds: Double, clusterOffset: Int64)] =
+            [(0, 10), (3, 20), (7, 30), (9, 40), (13, 50), (17, 60), (21, 70)]
+        let plan = CuesVODPlan(keyframes: kf, totalDuration: 24, targetSeconds: 4)
+        let realKeyframeTimes = kf.map { $0.seconds }
+        let violations = KeyframeCutOracle.validateCutTimes(plan.boundaryPTS,
+                                                            keyframeTimes: realKeyframeTimes,
+                                                            duration: 24)
+        XCTAssertTrue(violations.isEmpty, "boundaryPTS must land every cut on a real keyframe: \(violations)")
+        // And every interior boundary really is in the source table.
+        for b in plan.boundaryPTS.dropLast() {
+            XCTAssertTrue(realKeyframeTimes.contains { abs($0 - b) < 1e-9 },
+                          "interior boundary \(b) is not a real keyframe")
+        }
+    }
+
+    func testBoundaryPTS_longGOP_staysKeyframeAligned_viaOracle() {
+        // A long GOP that collapses several target multiples to one boundary must
+        // still leave every cut on a real keyframe.
+        let kf: [(seconds: Double, clusterOffset: Int64)] =
+            [(0, 10), (1, 20), (13, 30), (14, 40), (18, 50)]
+        let plan = CuesVODPlan(keyframes: kf, totalDuration: 20, targetSeconds: 4)
+        let violations = KeyframeCutOracle.validateCutTimes(plan.boundaryPTS,
+                                                            keyframeTimes: kf.map { $0.seconds },
+                                                            duration: 20)
+        XCTAssertTrue(violations.isEmpty, "\(violations)")
+    }
+
     func testCuesVODPlan_missingDuration_tailUsesSpacingFallback() {
         // No usable duration (0): the last segment must still be strictly positive.
         let kf: [(seconds: Double, clusterOffset: Int64)] = [(0, 1), (4, 2), (8, 3)]

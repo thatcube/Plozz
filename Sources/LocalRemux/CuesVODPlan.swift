@@ -122,4 +122,41 @@ struct CuesVODPlan: Equatable, Sendable {
         let upper = min(index, segmentDurations.count)
         return segmentDurations[0..<upper].reduce(0, +)
     }
+
+    /// The absolute **SOURCE-PTS cut points** for the C muxer ingest
+    /// (`plozz_remux_apply_keyframes(session, kf_seconds, count)`):
+    /// `[startPTS, startPTS+d0, startPTS+d0+d1, …, startPTS+Σd]`.
+    ///
+    /// Hand this flat array (and `count == boundaryPTS.count`) straight to the shim.
+    /// `build_segments_from_keyframes` then makes `count-1` segments, segment *i* =
+    /// `[boundaryPTS[i], boundaryPTS[i+1]]`, so the C `segment_at` readback that
+    /// `RemuxSegmenter` feeds into `RemuxSegmentPlanner` yields **exact `EXTINF`**
+    /// AND the muxer cuts from the same `s->segments[]` — playlist and muxer can no
+    /// longer diverge.
+    ///
+    /// WHY EVERY INTERIOR ENTRY IS SAFE: each interior boundary is a *real* (grouped)
+    /// Cues keyframe — the grouping only ever picks an actual keyframe as a cut — so
+    /// the muxer's backward-seek-to-keyframe lands exactly on the boundary (a no-op),
+    /// never duplicating a GOP (the old overlap/desync bug) or cutting mid-GOP. The
+    /// FINAL entry is the programme end (`startPTS + totalDuration`), which closes the
+    /// last segment and need NOT itself be a keyframe. Validate with
+    /// `KeyframeCutOracle.validateCutTimes(boundaryPTS, keyframeTimes: realCues, …)`.
+    ///
+    /// Domain: SOURCE seconds (same as `readCues()` PTS). A title whose first keyframe
+    /// is a non-zero `startPTS` anchors here automatically; the offset propagates
+    /// through every entry.
+    var boundaryPTS: [Double] {
+        var out: [Double] = [startPTS]
+        out.reserveCapacity(segmentDurations.count + 1)
+        var acc = startPTS
+        for d in segmentDurations {
+            acc += d
+            out.append(acc)
+        }
+        return out
+    }
+
+    /// The programme end in source seconds — the final `boundaryPTS` entry that
+    /// closes the last segment (`startPTS + totalDuration`).
+    var endPTS: Double { startPTS + totalDuration }
 }

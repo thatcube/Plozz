@@ -71,6 +71,12 @@ struct SeriesDetailView: View {
     /// have different ids), so `effectivePlayVersionID` re-defaults to recommended.
     @State private var versionOverride: String?
 
+    /// The measured width of the season tab bar's viewport, used to size a trailing
+    /// spacer so even the LAST season chip can be scrolled to the leading edge
+    /// (pinned under the Play button) rather than bottoming out right-aligned at the
+    /// end of the bar. `0` until first layout (spacer is then zero-width).
+    @State private var seasonBarViewportWidth: CGFloat = 0
+
     /// The season+episode NUMBER to re-front after an IN-PLACE cross-server switch,
     /// captured from the currently-fronted episode the instant the user picks a new
     /// server. Once that server's episodes load, the page re-selects the matching
@@ -276,12 +282,33 @@ struct SeriesDetailView: View {
                     ForEach(seasons) { season in
                         seasonChip(season)
                     }
+                    // Trailing spacer the width of the viewport so the LAST season
+                    // chip can be scrolled fully to the leading edge (pinned under
+                    // the Play button) like every other chip, instead of bottoming
+                    // out right-aligned at the end of the bar. It is empty space
+                    // *after* the final season — which is exactly what should sit to
+                    // the right of the last season anyway — and is non-focusable, so
+                    // it never participates in left/right season navigation.
+                    if seasonBarViewportWidth > 0 {
+                        Color.clear
+                            .frame(width: seasonBarViewportWidth)
+                    }
                 }
                 .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
                 .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                 // Headroom for the focused chip's lift so it is never clipped.
                 .padding(.vertical, 12)
             }
+            // Measure the bar's viewport width to size the trailing spacer above.
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { seasonBarViewportWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, width in
+                            seasonBarViewportWidth = width
+                        }
+                }
+            )
             // Never clip a focused chip's lift, shadow or border.
             .scrollClipDisabled()
             // Treat the whole tab bar as one focus section so pressing "up" from any

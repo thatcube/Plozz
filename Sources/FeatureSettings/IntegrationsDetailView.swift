@@ -256,15 +256,35 @@ struct AttributionsDetailView: View {
                 )
                 attribution(
                     "FFmpeg",
-                    "Audio/video decoding uses FFmpeg libraries (libavcodec, libavformat, libavutil, libswresample, libswscale, libavfilter) licensed under the LGPL/GPL. ffmpeg.org"
+                    "Audio/video decoding uses FFmpeg libraries (libavcodec, libavformat, libavutil, libswresample, libswscale, libavfilter, libavdevice) licensed under the LGPL-2.1+. ffmpeg.org"
                 )
                 attribution(
                     "mpv & mpvkit",
-                    "Fallback playback uses mpv (licensed under GPL-2.0+) and the FFmpeg-family libraries (libass, dav1d, libplacebo) packaged by the mpvkit project."
+                    "Fallback playback uses mpv (GPL-2.0+) packaged by the mpvkit project. github.com/nicxleo/mpvkit"
                 )
                 attribution(
                     "libdovi",
                     "Dolby Vision metadata parsing uses libdovi, licensed under the MIT license."
+                )
+                attribution(
+                    "libass & Text Rendering",
+                    "Subtitle rendering uses libass (ISC license), FreeType (FreeType License / GPL-2.0), HarfBuzz (MIT), Fribidi (LGPL-2.1), and Unibreak (MIT)."
+                )
+                attribution(
+                    "dav1d",
+                    "AV1 video decoding uses dav1d by VideoLAN, licensed under the BSD-2-Clause license."
+                )
+                attribution(
+                    "libplacebo & MoltenVK",
+                    "GPU-accelerated video rendering uses libplacebo (LGPL-2.1) and MoltenVK (Apache-2.0) for Vulkan-to-Metal translation."
+                )
+                attribution(
+                    "GnuTLS & Networking",
+                    "TLS and network transport use GnuTLS (LGPL-2.1), Nettle (LGPL-3.0), GMP (LGPL-3.0), and AMSMB2 (LGPL-2.1). OpenSSL (Apache-2.0) provides additional cryptography."
+                )
+                attribution(
+                    "libbluray",
+                    "Blu-ray disc structure parsing uses libbluray, licensed under the LGPL-2.1."
                 )
                 attribution(
                     "TMDB",

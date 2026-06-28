@@ -75,6 +75,28 @@ final class KeyframeTableTests: XCTestCase {
         XCTAssertNil(table.byteOffsets)
     }
 
+    func testNormalizedDropsAllByteOffsetsWhenAnyEntryIsNegativeSentinel() {
+        // A -1 "no CueClusterPosition" sentinel poisons a muxer seek; offsets are
+        // all-or-nothing, so a single invalid entry drops the whole array but
+        // keeps every keyframe TIME (engine re-derives offsets).
+        let table = KeyframeTable.normalized(
+            times: [0, 4, 8],
+            byteOffsets: [100, -1, 800],
+            duration: 12
+        )
+        XCTAssertEqual(table.times, [0, 4, 8])
+        XCTAssertNil(table.byteOffsets)
+    }
+
+    func testNormalizedKeepsByteOffsetsWhenAllNonNegative() {
+        let table = KeyframeTable.normalized(
+            times: [0, 4, 8],
+            byteOffsets: [0, 400, 800], // 0 is a valid offset; only < 0 is invalid
+            duration: 12
+        )
+        XCTAssertEqual(table.byteOffsets, [0, 400, 800])
+    }
+
     func testNormalizedNilByteOffsetsStaysNil() {
         let table = KeyframeTable.normalized(times: [0, 4, 8], duration: 12)
         XCTAssertNil(table.byteOffsets)

@@ -58,15 +58,20 @@ public struct KeyframeTable: Equatable, Sendable {
     /// the declared duration.
     ///
     /// `byteOffsets`, when supplied, must be parallel to `times`; it is carried
-    /// through the same filter/sort/dedupe so the pairing is preserved. A
-    /// mismatched-length `byteOffsets` is treated as absent (times-only) rather
-    /// than risking a misaligned offset.
+    /// through the same filter/sort/dedupe so the pairing is preserved. Two safety
+    /// rules make the offsets all-or-nothing (so a consumer can trust every entry
+    /// or none):
+    ///   - A mismatched-length `byteOffsets` is treated as absent (times-only).
+    ///   - A `byteOffsets` containing ANY invalid entry (`< 0`, e.g. a producer's
+    ///     `-1` "no CueClusterPosition" sentinel) is treated as absent — a single
+    ///     poisoned offset would otherwise drive a bogus muxer seek. The engine
+    ///     then re-derives all offsets; the keyframe TIMES are still kept.
     public static func normalized(
         times rawTimes: [Double],
         byteOffsets rawOffsets: [Int64]? = nil,
         duration rawDuration: Double
     ) -> KeyframeTable {
-        let offsetsUsable = rawOffsets.map { $0.count == rawTimes.count } ?? false
+        let offsetsUsable = rawOffsets.map { $0.count == rawTimes.count && $0.allSatisfy { $0 >= 0 } } ?? false
         let paired: [(time: Double, offset: Int64?)] = rawTimes.enumerated().map { idx, time in
             (time, offsetsUsable ? rawOffsets?[idx] : nil)
         }

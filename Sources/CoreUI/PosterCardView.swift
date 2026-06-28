@@ -107,7 +107,7 @@ public struct PosterCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)
-            .padding(.bottom, 4)
+            .padding(.bottom, 14)
         }
         .padding(10)
         .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, isFocused: isFocused)

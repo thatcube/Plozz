@@ -130,7 +130,8 @@ final class RemuxSegmenter: @unchecked Sendable {
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
          deriveEac3FrameDur: Bool = false, keyframeScan: Bool = false,
          keyframeIndex: Bool = false, parallelScan: Bool = false,
-         parallelConcurrency: Int = 8) throws {
+         parallelConcurrency: Int = 8,
+         keyframeBudgetMB: Int = 0, keyframeTimeBudgetSec: Int = 0) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -153,6 +154,18 @@ final class RemuxSegmenter: @unchecked Sendable {
         // E-AC-3 frame sample count instead of the fixed 1536 fallback. The probe
         // already ran inside open(); this only selects whether the muxer consumes it.
         plozz_remux_set_derive_eac3_frame_dur(session, deriveEac3FrameDur ? 1 : 0)
+
+        // Flag-gated (com.plozz.playback.remuxKeyframeFull / remuxKeyframeBudgetMB):
+        // raise the keyframe-scan discovery budgets so a feature-length no-Cues 4K title
+        // discovers REAL keyframes across the WHOLE timeline (fully in sync + native full
+        // seek) at the cost of a slower open, instead of byte-bounding the scan and
+        // prefix-applying a drifting fixed-cadence tail. 0/0 leaves the safety-net
+        // defaults, so default behavior is byte-identical. Must precede the scan below.
+        if keyframeBudgetMB > 0 || keyframeTimeBudgetSec > 0 {
+            plozz_remux_set_keyframe_budget(session,
+                                            Int64(keyframeBudgetMB) * 1024 * 1024,
+                                            Int64(keyframeTimeBudgetSec) * 1_000_000)
+        }
 
         // Flag-gated (com.plozz.playback.remuxKeyframeScan): when the open-time table
         // is the FIXED-CADENCE fallback (source has no usable keyframe index), rebuild

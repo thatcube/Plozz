@@ -183,12 +183,33 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
             let v = UserDefaults.standard.integer(forKey: "com.plozz.playback.remuxParallelScanK")
             return v > 0 ? v : 8
         }()
+        // Flag `com.plozz.playback.remuxKeyframeFull` (DEFAULT OFF) + optional integer
+        // `remuxKeyframeBudgetMB` / `remuxKeyframeTimeBudgetSec`: interim "full scan" mode.
+        // Raise the keyframe-scan discovery budgets so a feature-length no-Cues 4K title
+        // discovers REAL keyframes across the WHOLE timeline (fully in sync + native full
+        // seek) at the cost of a slower open, instead of byte-bounding the scan at 96MB
+        // and prefix-applying a drifting fixed-cadence tail. Bounded (never unlimited) so
+        // a stalled network can't hang open. Inert unless keyframeScan engages, so default
+        // behavior is byte-identical. Defaults when full ON: 2048MB / 180s.
+        let keyframeFull = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeFull")
+        let budgetMBOverride = UserDefaults.standard.integer(forKey: "com.plozz.playback.remuxKeyframeBudgetMB")
+        let timeSecOverride = UserDefaults.standard.integer(forKey: "com.plozz.playback.remuxKeyframeTimeBudgetSec")
+        var keyframeBudgetMB = 0
+        var keyframeTimeBudgetSec = 0
+        if keyframeFull { keyframeBudgetMB = 2048; keyframeTimeBudgetSec = 180 }
+        if budgetMBOverride > 0 {
+            keyframeBudgetMB = budgetMBOverride
+            if keyframeTimeBudgetSec == 0 { keyframeTimeBudgetSec = 180 }
+        }
+        if timeSecOverride > 0 { keyframeTimeBudgetSec = timeSecOverride }
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
                                            keyframeScan: keyframeScan,
                                            keyframeIndex: keyframeIndex,
                                            parallelScan: parallelScan,
-                                           parallelConcurrency: parallelK)
+                                           parallelConcurrency: parallelK,
+                                           keyframeBudgetMB: keyframeBudgetMB,
+                                           keyframeTimeBudgetSec: keyframeTimeBudgetSec)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
         if keyframeScan { RemuxLog.info("Session: remuxKeyframeScan ON — real-keyframe segment table for no-index sources") }
         if keyframeScan {
@@ -197,6 +218,9 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
                 : "Session: keyframe-scan probes via av_read_frame demux (~0.8MB/probe; remuxKeyframeIndex forced OFF)")
             if parallelScan {
                 RemuxLog.info("Session: remuxParallelScan ON — discovering keyframe table across \(parallelK) concurrent slices (native full-timeline seek preserved)")
+            }
+            if keyframeBudgetMB > 0 || keyframeTimeBudgetSec > 0 {
+                RemuxLog.info("Session: remuxKeyframeFull ON — full-scan budgets \(keyframeBudgetMB)MB / \(keyframeTimeBudgetSec)s (whole-timeline in-sync, slower open; no fixed-cadence tail)")
             }
         }
         let facts = segmenter.facts

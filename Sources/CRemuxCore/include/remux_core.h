@@ -184,6 +184,20 @@ void plozz_remux_set_keyframe_scan(plozz_remux_session *s, int enabled);
  */
 void plozz_remux_set_keyframe_index_mode(plozz_remux_session *s, int enabled);
 
+/*
+ * Raise the keyframe-scan discovery budgets for the interim "full scan" mode
+ * (com.plozz.playback.remuxKeyframeFull / remuxKeyframeBudgetMB). `byte_budget`
+ * (bytes) and `time_budget_us` (microseconds) each replace the compile-time
+ * safety-net cap when > 0; a value <= 0 leaves that default in force. Raising both
+ * lets a feature-length no-Cues 4K title discover REAL keyframes across the WHOLE
+ * timeline (fully in sync + native full-timeline seek) at the cost of a slower open,
+ * instead of byte-bounding the scan and prefix-applying a drifting fixed-cadence tail.
+ * The scan stays bounded (never truly unlimited), so a stalled network can't hang the
+ * open thread. Must be called BEFORE plozz_remux_set_keyframe_scan. Ignored when NULL.
+ */
+void plozz_remux_set_keyframe_budget(plozz_remux_session *s,
+                                     long long byte_budget, long long time_budget_us);
+
 /* ----- standalone per-window keyframe probe (for a lazy/windowed indexer) -----
  *
  * The cheap exact keyframe-discovery primitive extracted as a self-contained,

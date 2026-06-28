@@ -146,6 +146,16 @@ struct plozz_remux_session {
      * Self-calibrating + self-validating: falls back to av_read_frame on any mismatch. */
     int keyframe_index_mode;
 
+    /* Optional runtime OVERRIDES for the keyframe-scan discovery budgets (0 = use the
+     * compile-time PLOZZ_KEYFRAME_SCAN_* defaults). The interim "full scan" mode
+     * (com.plozz.playback.remuxKeyframeFull / remuxKeyframeBudgetMB) raises these so a
+     * feature-length no-Cues 4K title discovers REAL keyframes across the WHOLE timeline
+     * — fully in sync + full seek — at the cost of a slower open, instead of byte-budget
+     * prefix-applying and leaving a fixed-cadence (drifting) tail. Still bounded (never
+     * truly unlimited) so a stalled network can't hang the open thread. */
+    int64_t keyframe_byte_budget;     /* bytes; 0 → PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET */
+    int64_t keyframe_time_budget_us;  /* microseconds; 0 → PLOZZ_KEYFRAME_SCAN_BUDGET_US */
+
     /* Monotonic count of payload bytes pulled through the read callbacks (avio +
      * direct header reads). Discovery delta-measures this to enforce a HARD byte
      * budget so a feature-length no-Cues title can never read enough to OOM/stall
@@ -874,12 +884,20 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
     double step = target_seconds;
     int probes = 0;
     int timed_out = 0;
-    int64_t deadline = av_gettime_relative() + PLOZZ_KEYFRAME_SCAN_BUDGET_US;
+    /* Effective discovery budgets: session overrides (interim full-scan mode) or the
+     * compile-time safety-net defaults. Both still bound the scan so a stalled network
+     * can't hang the open thread; full mode just trades a slower open for whole-timeline
+     * in-sync coverage instead of a byte-bounded prefix + drifting fixed-cadence tail. */
+    int64_t time_budget_us = (s->keyframe_time_budget_us > 0)
+        ? s->keyframe_time_budget_us : PLOZZ_KEYFRAME_SCAN_BUDGET_US;
+    int64_t byte_budget = (s->keyframe_byte_budget > 0)
+        ? s->keyframe_byte_budget : PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET;
+    int64_t deadline = av_gettime_relative() + time_budget_us;
     int64_t bytes_start = s->bytes_read;
     /* Either guard tripping aborts the whole scan to the fixed-cadence fallback. */
     #define KF_BUDGET_BLOWN() \
         (av_gettime_relative() >= deadline || \
-         (s->bytes_read - bytes_start) > PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET)
+         (s->bytes_read - bytes_start) > byte_budget)
 
     while (last < duration - 0.001 && n < PLOZZ_MAX_SEGMENTS) {
         /* Wall-clock + byte guard: bound BOTH open latency and total transfer so a
@@ -1138,6 +1156,11 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
     int timed_out = 0;
     int header_reads = 0;
     int64_t bytes_before = s->bytes_read;
+    /* Effective budgets for logging (mirror discover_keyframes_by_seek's resolution). */
+    long long log_budget_s = (long long)(((s->keyframe_time_budget_us > 0)
+        ? s->keyframe_time_budget_us : PLOZZ_KEYFRAME_SCAN_BUDGET_US) / 1000000LL);
+    long long log_budget_mb = (long long)(((s->keyframe_byte_budget > 0)
+        ? s->keyframe_byte_budget : PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET) / (1024 * 1024));
     int kf_count = discover_keyframes_by_seek(s, eff_target, &kf, &probes, &timed_out,
                                               s->keyframe_index_mode, &header_reads);
     int64_t scan_bytes = s->bytes_read - bytes_before;
@@ -1168,8 +1191,7 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
                       "covering %.1fs of %.1fs, fixed-cadence tail (was %d; start in-sync, "
                       "tail may desync)",
                       probes, (long long)scan_bytes,
-                      (long long)(PLOZZ_KEYFRAME_SCAN_BUDGET_US / 1000000LL),
-                      (long long)(PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET / (1024 * 1024)),
+                      log_budget_s, log_budget_mb,
                       hcount, covered, s->duration_seconds, old);
             return hcount;
         }
@@ -1179,8 +1201,7 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
                   "(%lld bytes read; limits %llds / %lldMB) — keeping fixed-cadence "
                   "table (playable, possibly desynced)",
                   probes, (long long)scan_bytes,
-                  (long long)(PLOZZ_KEYFRAME_SCAN_BUDGET_US / 1000000LL),
-                  (long long)(PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET / (1024 * 1024)));
+                  log_budget_s, log_budget_mb);
         return 0;
     }
     if (kf_count <= 1) { free(kf); return 0; }
@@ -1408,6 +1429,26 @@ void plozz_remux_set_keyframe_index_mode(plozz_remux_session *s, int enabled) {
      * keyframe packet. Set BEFORE plozz_remux_set_keyframe_scan; self-validates and
      * falls back to av_read_frame on any mismatch, so default output is unchanged. */
     s->keyframe_index_mode = enabled ? 1 : 0;
+}
+
+void plozz_remux_set_keyframe_budget(plozz_remux_session *s,
+                                     long long byte_budget, long long time_budget_us) {
+    if (!s) return;
+    /* 0 (or negative) leaves the compile-time safety-net default in force. Non-zero
+     * RAISES the cap for the interim full-scan mode (remuxKeyframeFull /
+     * remuxKeyframeBudgetMB): whole-timeline real-keyframe coverage at the cost of a
+     * slower open, instead of a byte-bounded prefix + drifting fixed-cadence tail. Set
+     * BEFORE plozz_remux_set_keyframe_scan so the rebuild observes it. */
+    s->keyframe_byte_budget = (byte_budget > 0) ? (int64_t)byte_budget : 0;
+    s->keyframe_time_budget_us = (time_budget_us > 0) ? (int64_t)time_budget_us : 0;
+    if (s->keyframe_byte_budget > 0 || s->keyframe_time_budget_us > 0) {
+        remux_log(1, "remux: keyframe-scan budget override — bytes=%lldMB time=%llds "
+                  "(full-scan mode: whole-timeline in-sync, slower open)",
+                  (long long)((s->keyframe_byte_budget > 0
+                       ? s->keyframe_byte_budget : PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET) / (1024 * 1024)),
+                  (long long)((s->keyframe_time_budget_us > 0
+                       ? s->keyframe_time_budget_us : PLOZZ_KEYFRAME_SCAN_BUDGET_US) / 1000000LL));
+    }
 }
 
 int plozz_remux_plan_segments(const double *keyframe_times, int count,

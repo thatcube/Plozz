@@ -241,24 +241,30 @@ int plozz_remux_lazy_header_reads(plozz_remux_session *s);
 int plozz_remux_uses_fixed_cadence(plozz_remux_session *s);
 
 /*
- * Track C persisted-index seam (OWNED BY B7 — landed in the integrated SHA).
+ * Track C persisted-index seam — APPLY-SEAM FORK (owned by B6 or B7, NOT Track C;
+ * unresolved at coordinator d035865f).
  *
- * `plozz_remux_apply_keyframes(s, kf_seconds, count)` installs an externally
- * supplied list of real keyframe times (seconds, sorted, 0-based) onto the
- * session, rebuilding the segment table on those boundaries with each EXTINF
- * stamped as the true keyframe-to-keyframe span — the SAME install the seek-probe
- * keyframe-scan performs (build_segments_from_keyframes → swap table →
- * BACKWARD-seek rewind), but fed from a persisted/Cues/server list instead of a
- * live scan, so a replay reaches exact-EXTINF static VOD with NO probing. Only
- * acts when the open-time table was the fixed-cadence fallback; Does NOT mux — it
- * only regroups the published table, which the existing single mux path serves.
+ * On a cache HIT Track C installs an externally supplied real-keyframe table onto
+ * the session so a replay reaches exact-EXTINF static VOD with NO probing, then
+ * reads the result back via plozz_remux_segment_at (single source of truth →
+ * playlist EXTINF == muxer cut boundaries). The C INGEST symbol is one of two,
+ * ruled by the coordinator's serving-shape fork:
+ *   • B6  plozz_remux_apply_keyframes(s, kf_seconds, count) — STATIC-VOD: GROUPS a
+ *         RAW keyframe array in C (build_segments_from_keyframes), used_fixed_cadence
+ *         =0, VOD+ENDLIST. Expects 0-BASED input.
+ *   • B7  plozz_remux_set_cue_table(s, duration, times, count, offsets?) — FULL-VOD:
+ *         VERBATIM-tiles PRE-GROUPED boundaries, keeps used_fixed_cadence, pre-seeds
+ *         resolved_kf. Normalizes domain internally (commit 3aaace3) → hand ABSOLUTE
+ *         source-PTS.
  *
- * Declaration intentionally NOT made here: this is B7's function to land so the
+ * Declaration intentionally NOT made here: the symbol is B6's/B7's to land so the
  * swarm keeps ONE engine / one definition. Track C codes its Swift seam AGAINST
- * this shape (RemuxSegmenter.applyExternalKeyframes) but does not call it until
- * B7 lands it in the integrated SHA; the cache-HIT readback then uses
- * plozz_remux_segment_at as the single source of truth (playlist EXTINF ==
- * muxer cut boundaries).
+ * this shape (RemuxSegmenter.applyExternalKeyframes, currently a return-0 stub) and
+ * does not call it until the fork is ruled. NOTE the two wiring traps documented at
+ * applyExternalKeyframes: (1) this cache holds RAW scan keyframes — the verbatim
+ * set_cue_table path needs Swift-side grouping first; (2) PTS domain differs between
+ * the two symbols (apply_keyframes 0-based vs set_cue_table absolute) — confirm the
+ * scan's domain with B6 when wiring apply_keyframes.
  */
 
 /*

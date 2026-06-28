@@ -448,20 +448,44 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// keyframe-to-keyframe EXTINF spans, then the caller reads the result back via
     /// `currentSegmentDurations()` (→ `plozz_remux_segment_at`) so the playlist
     /// EXTINF == the muxer's cut boundaries byte-for-byte (B7's single-source-of-
-    /// truth pattern), never emitting EXTINF independently from the raw times.
+    /// truth pattern), never emitting EXTINF independently from the raw times. This
+    /// readback seam holds for BOTH fork shapes below.
     ///
-    /// PENDING B7: the underlying `plozz_remux_apply_keyframes(s, kf, count)` is
-    /// B7's function to land in the integrated SHA (ONE engine / one definition);
-    /// it does not exist on B7's branch yet. Until B7 lands it, this is a STUB that
-    /// returns 0 (no mutation) so the cache-HIT path compiles and safely falls back
-    /// to B7's provisional full-vod. When B7 pings that it landed, the body becomes
-    /// the one-line `plozz_remux_apply_keyframes` call (guarded `times.count >= 2`,
-    /// returns the new segment count). No mux occurs either way.
+    /// PENDING — APPLY-SEAM FORK (unresolved at coordinator d035865f; do NOT
+    /// single-thread on "B7 lands it"). The C ingest symbol is NOT B7's to land;
+    /// two candidates serve the cache-HIT path and the coordinator rules which:
+    ///   • B6's `plozz_remux_apply_keyframes(s, kf, count)` — STATIC-VOD ingest:
+    ///     GROUPS a RAW keyframe array in C (build_segments_from_keyframes),
+    ///     sets used_fixed_cadence=0, serves VOD+ENDLIST. Pass RAW scan kfs. ✓
+    ///   • B7's `plozz_remux_set_cue_table(s, duration, times, count, offsets?)` —
+    ///     FULL-VOD ingest: VERBATIM-tiles PRE-GROUPED boundaries, keeps
+    ///     used_fixed_cadence (full-vod engage gate), pre-seeds resolved_kf.
+    ///
+    /// TWO FORK-DEPENDENT TRAPS the wired body must honor (this cache holds RAW
+    /// scan keyframes — every kf PTS — NOT grouped boundaries):
+    ///   1. GROUPING: the B6 path groups in C → pass raw kfs. The set_cue_table
+    ///      path tiles VERBATIM → raw kfs would yield one tiny segment per keyframe
+    ///      (thousands); it MUST be Swift-side grouped first (RemuxSegmentPlanner /
+    ///      B5 CuesVODPlan grouping → boundaries) before the call.
+    ///   2. PTS DOMAIN: the muxer seeks with (start_seconds + ic->start_time), so
+    ///      the table must be 0-based. set_cue_table normalizes internally (commit
+    ///      3aaace3) → hand it ABSOLUTE source-PTS, don't pre-subtract.
+    ///      apply_keyframes / build_segments_from_keyframes expect 0-BASED input →
+    ///      if our scan emits ABSOLUTE source-PTS, subtract the container start
+    ///      first or non-zero-start titles desync. CONFIRM the scan's domain with
+    ///      B6 when wiring that path.
+    ///
+    /// Until the fork is ruled this is a STUB returning 0 (no mutation) so the
+    /// cache-HIT path compiles and safely falls back to B7's provisional full-vod;
+    /// the streamer logs the distinct HIT-but-apply-seam-HELD state. The wired body
+    /// is a single grouping-aware + domain-aware call to whichever symbol wins.
     @discardableResult
     func applyExternalKeyframes(_ times: [Double]) -> Int {
         lock.lock(); defer { lock.unlock() }
         guard session != nil, times.count >= 2 else { return 0 }
-        // HELD: wire to plozz_remux_apply_keyframes once B7 lands it (see above).
+        // HELD: wire to B6 apply_keyframes (group-in-C, raw kfs) OR B7 set_cue_table
+        // (Swift-pre-grouped, absolute PTS) once the coordinator rules the fork —
+        // honor the grouping + PTS-domain traps documented above.
         return 0
     }
 

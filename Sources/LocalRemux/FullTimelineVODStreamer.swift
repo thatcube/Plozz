@@ -227,11 +227,11 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
                     if !live.isEmpty { plannerDurations = live }
                     RemuxLog.info("Session: remuxPersistIndex HIT — applied \(table.times.count) cached keyframes → \(plannerDurations.count) exact-EXTINF segments (no scan)")
                 } else {
-                    // applyExternalKeyframes is a STUB returning 0 until B7 lands
-                    // plozz_remux_apply_keyframes in the integrated SHA. The table is
-                    // cached and correct; we simply stay on B7's provisional full-vod
-                    // until the apply seam is wired.
-                    RemuxLog.info("Session: remuxPersistIndex HIT (\(table.times.count) cached keyframes) but apply seam HELD pending B7 plozz_remux_apply_keyframes — staying on provisional full-vod")
+                    // applyExternalKeyframes is a STUB returning 0 until the
+                    // apply-seam fork is ruled (B6 apply_keyframes vs B7
+                    // set_cue_table) in the integrated SHA. The table is cached and
+                    // correct; we stay on B7's provisional full-vod until wired.
+                    RemuxLog.info("Session: remuxPersistIndex HIT (\(table.times.count) cached keyframes) but apply seam HELD pending fork ruling (B6 apply_keyframes / B7 set_cue_table) — staying on provisional full-vod")
                 }
             } else {
                 RemuxLog.info("Session: remuxPersistIndex MISS — starting now on provisional full-vod; first-watch persist HELD (background walk = B5 sampler, pending no-Cues class sizing)")

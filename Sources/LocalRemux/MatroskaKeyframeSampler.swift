@@ -777,6 +777,27 @@ final class MatroskaKeyframeSampler {
         return .trustworthy(points: points, maxGapSeconds: maxGap)
     }
 
+    /// The full-duration EXACT VOD plan for the Cues fast-path: when the source
+    /// carries a TRUSTWORTHY Cues index, groups it into ~`targetSeconds` keyframe-cut
+    /// segments and returns the exact `CuesVODPlan` (durations + per-segment byte
+    /// offsets) a caller feeds to `RemuxSegmentPlanner.mediaPlaylist()` for a
+    /// full-duration VOD + `EXT-X-ENDLIST` (seek-anywhere) with exact `EXTINF`.
+    /// Returns nil when the Cues index is absent or untrustworthy — the caller then
+    /// falls back to `ProvisionalVODPlan` / uniform cadence (NEVER a client scan).
+    /// Total programme length comes from the container `Info/Duration` (cheap, from
+    /// the memoized init). Cursor-safe; reads only the index, never frame payloads.
+    func cuesVODPlan(targetSeconds: Double = 4.0,
+                     minCount: Int = 2,
+                     maxGapSeconds: Double = 30.0) -> CuesVODPlan? {
+        guard case let .trustworthy(points, _) =
+                keyframePlanFromCues(minCount: minCount, maxGapSeconds: maxGapSeconds) else {
+            return nil
+        }
+        let total = cachedInitInfo()?.durationSeconds ?? 0
+        return CuesVODPlan(keyframes: points.map { ($0.seconds, $0.clusterOffset) },
+                           totalDuration: total, targetSeconds: targetSeconds)
+    }
+
     /// Parses one CuePoint: CueTime (ticks) + the CueTrackPositions for the video
     /// track (or the first one if no track filter matches), yielding the absolute
     /// cluster offset. Returns nil if the CuePoint lacks a time or a cluster pos.

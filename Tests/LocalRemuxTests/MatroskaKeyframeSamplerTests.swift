@@ -817,5 +817,98 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         XCTAssertLessThan(sampler.stats.bytesRead, 100_000)
         XCTAssertLessThan(src.fetches, 40)
     }
+
+    // MARK: - CuesVODPlan (exact keyframe-cut full-duration plan)
+
+    func testCuesVODPlan_evenSpacing_groupsToTarget() {
+        // Keyframes every 2s; target 4s → 4s segments cut on real keyframes.
+        let kf: [(seconds: Double, clusterOffset: Int64)] =
+            [(0, 100), (2, 200), (4, 300), (6, 400), (8, 500), (10, 600)]
+        let plan = CuesVODPlan(keyframes: kf, totalDuration: 12, targetSeconds: 4)
+        XCTAssertEqual(plan.startPTS, 0)
+        XCTAssertEqual(plan.segmentDurations, [4, 4, 4])
+        // Boundaries are the keyframes at 0s, 4s, 8s → their cluster offsets.
+        XCTAssertEqual(plan.segmentByteOffsets, [100, 300, 500])
+        XCTAssertEqual(plan.totalDuration, 12, accuracy: 1e-9)
+    }
+
+    func testCuesVODPlan_longGOP_collapsesToOneBoundary() {
+        // A 12s GOP (1s→13s) crosses the 4/8/12 thresholds but must yield ONE
+        // boundary, not three empty segments.
+        let kf: [(seconds: Double, clusterOffset: Int64)] =
+            [(0, 10), (1, 20), (13, 30), (14, 40)]
+        let plan = CuesVODPlan(keyframes: kf, totalDuration: 20, targetSeconds: 4)
+        XCTAssertEqual(plan.segmentByteOffsets, [10, 30]) // only 0s and 13s
+        XCTAssertEqual(plan.segmentDurations.count, 2)
+        XCTAssertEqual(plan.segmentDurations[0], 13, accuracy: 1e-9)
+        XCTAssertTrue(plan.segmentDurations.allSatisfy { $0 > 0 })
+    }
+
+    func testCuesVODPlan_lastSegmentRunsToProgrammeEnd() {
+        let kf: [(seconds: Double, clusterOffset: Int64)] = [(0, 1), (4, 2)]
+        let plan = CuesVODPlan(keyframes: kf, totalDuration: 20, targetSeconds: 4)
+        XCTAssertEqual(plan.segmentDurations, [4, 16]) // tail extends to 20s
+        XCTAssertEqual(plan.totalDuration, 20, accuracy: 1e-9)
+    }
+
+    func testCuesVODPlan_missingDuration_tailUsesSpacingFallback() {
+        // No usable duration (0): the last segment must still be strictly positive.
+        let kf: [(seconds: Double, clusterOffset: Int64)] = [(0, 1), (4, 2), (8, 3)]
+        let plan = CuesVODPlan(keyframes: kf, totalDuration: 0, targetSeconds: 4)
+        XCTAssertEqual(plan.segmentDurations.count, 3)
+        XCTAssertTrue(plan.segmentDurations.allSatisfy { $0 > 0 })
+        XCTAssertEqual(plan.segmentDurations.last ?? 0, 4, accuracy: 1e-9) // prior spacing
+    }
+
+    func testCuesVODPlan_singleKeyframe_oneSegmentAnchored() {
+        let plan = CuesVODPlan(keyframes: [(5, 99)], totalDuration: 30, targetSeconds: 4)
+        XCTAssertEqual(plan.startPTS, 5)
+        XCTAssertEqual(plan.segmentDurations, [25]) // 5s → 30s programme end
+        XCTAssertEqual(plan.segmentByteOffsets, [99])
+    }
+
+    func testCuesVODPlan_dropsDuplicateTimestamps() {
+        let kf: [(seconds: Double, clusterOffset: Int64)] =
+            [(0, 1), (4, 2), (4, 3), (8, 4)] // duplicate 4s must collapse
+        let plan = CuesVODPlan(keyframes: kf, totalDuration: 12, targetSeconds: 4)
+        XCTAssertEqual(plan.segmentByteOffsets, [1, 2, 4]) // the first 4s kept
+        XCTAssertEqual(plan.segmentDurations, [4, 4, 4])
+    }
+
+    /// END-TO-END: the Cues reader → exact plan → existing planner emits a real
+    /// full-duration VOD + ENDLIST with exact EXTINF (the SHA's required artifact).
+    func testCuesVODPlan_endToEnd_emitsVODWithExactExtinf() {
+        let times = [0, 2000, 4000, 6000, 8000] // ms @ 1ms scale = 0,2,4,6,8 s
+        let built = buildFileWithCues(durationTicks: 10000, clusterTimes: times)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        guard let plan = sampler.cuesVODPlan(targetSeconds: 4) else {
+            return XCTFail("cuesVODPlan nil")
+        }
+        // Byte offsets land on real Cluster boundaries (0s and 4s and 8s keyframes).
+        XCTAssertEqual(plan.segmentByteOffsets.first,
+                       info.segmentDataOffset + Int64(built.clusterRelOffsets[0]))
+        XCTAssertEqual(plan.totalDuration, 10, accuracy: 1e-6)
+
+        let stream = RemuxSegmentPlanner.StreamInfo(
+            width: 3840, height: 2160, dolbyVisionProfile: 0, dolbyVisionLevel: 0,
+            audioIsEAC3: true, bandwidth: 0)
+        let m3u8 = RemuxSegmentPlanner(segmentDurations: plan.segmentDurations,
+                                       stream: stream).mediaPlaylist()
+        XCTAssertTrue(m3u8.contains("#EXT-X-PLAYLIST-TYPE:VOD"))
+        XCTAssertTrue(m3u8.contains("#EXT-X-ENDLIST"))
+        let extinfCount = m3u8.components(separatedBy: "#EXTINF:").count - 1
+        XCTAssertEqual(extinfCount, plan.segmentDurations.count) // one per segment
+    }
+
+    func testCuesVODPlan_untrustworthyOrAbsent_isNil() {
+        // Single keyframe → untrustworthy → nil (caller uses provisional fallback).
+        let few = buildFileWithCues(durationTicks: 4000, clusterTimes: [0])
+        XCTAssertNil(MatroskaKeyframeSampler(source: MemorySource(few.file)).cuesVODPlan())
+        // No Cues at all → nil.
+        let noCues = buildFile(durationTicks: 4000,
+                               clusters: [cluster(timecode: 0, blocks: [simpleBlock(track: 1, rel: 0, keyframe: true)])])
+        XCTAssertNil(MatroskaKeyframeSampler(source: MemorySource(noCues)).cuesVODPlan())
+    }
 }
 #endif

@@ -154,6 +154,19 @@ struct KeyframeTable { var duration: Double; var times: [Double]; var byteOffset
 > `liveCues < noCuesWalk < persistedCache < serverEndpoint`, `FullVODKeyframeSink` Swift→C seam,
 > default-OFF `FullVODKeyframeCoordinator`) is built and green at tag
 > `preserve/remux-trackA-cues-vod-92a440f` (supersedes fb0e34c) — pick it up rather than rebuild.
+> (Track A's true tip is `73d03e3`/`preserve/remux-trackA-cues-vod-73d03e3`, which already
+> **relocated `KeyframeTable` to the `CoreModels` root** — the canonical survivor.)
+>
+> **⚠️ THREE-MIRROR ATOMIC-COLLAPSE HAZARD (Track A flagged, honor at integration):** at full
+> integration there will be THREE `KeyframeTable` definitions — the canonical `CoreModels.KeyframeTable`
+> (survivor), B5's nested `MatroskaKeyframeSampler.KeyframeTable` (standalone-compile shim), and Track
+> C's top-level `LocalRemux.KeyframeTable` (standalone shim). The collapse must be **ONE atomic commit**
+> that deletes BOTH `LocalRemux` mirrors together, adds `import CoreModels` at every referencing site,
+> and routes construct-sites through `normalized()`. If a merge step deletes only one mirror, unqualified
+> `KeyframeTable` inside the `LocalRemux` module becomes ambiguous (CoreModels vs the surviving mirror) →
+> build break in the intermediate tree. So: never sequence a merge order that leaves one mirror live
+> while the other is gone. (Does NOT affect the engine-only merge on `main` — B7's `3aaace3` ships none
+> of these structs; this is purely a fresh-session provider-lane integration constraint.)
 >
 > **Two more settled handoff decisions (recorded; confirm against real merged code):**
 > - **0-based boundaries:** `plan_segments_core` clamps a non-zero first boundary → segment-0

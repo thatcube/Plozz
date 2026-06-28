@@ -8,6 +8,7 @@ import Foundation
 /// YouTube, Swiftfin, Jellyfin Web) — covering quick-step (5 s), standard
 /// (10 s), moderate (15 / 30 s) and long-skip (60 s) use cases.
 public enum SkipInterval: Int, Codable, CaseIterable, Hashable, Sendable {
+    case three = 3
     case five = 5
     case ten = 10
     case fifteen = 15
@@ -20,6 +21,7 @@ public enum SkipInterval: Int, Codable, CaseIterable, Hashable, Sendable {
     /// Human-readable label for the settings picker (e.g. "10 seconds").
     public var title: String {
         switch self {
+        case .three:   return "3 sec"
         case .five:    return "5 sec"
         case .ten:     return "10 sec"
         case .fifteen: return "15 sec"
@@ -28,9 +30,19 @@ public enum SkipInterval: Int, Codable, CaseIterable, Hashable, Sendable {
         }
     }
 
-    /// SF Symbol name for the forward-skip glyph (e.g. `goforward.10`).
-    public var forwardSymbol: String { "goforward.\(rawValue)" }
+    /// SF Symbol name for the forward-skip glyph (e.g. `goforward.10`). Falls
+    /// back to the plain `goforward` for values without a numbered variant.
+    public var forwardSymbol: String {
+        Self.numberedSymbols.contains(rawValue) ? "goforward.\(rawValue)" : "goforward"
+    }
 
-    /// SF Symbol name for the backward-skip glyph (e.g. `gobackward.10`).
-    public var backwardSymbol: String { "gobackward.\(rawValue)" }
+    /// SF Symbol name for the backward-skip glyph (e.g. `gobackward.10`). Falls
+    /// back to the plain `gobackward` for values without a numbered variant.
+    public var backwardSymbol: String {
+        Self.numberedSymbols.contains(rawValue) ? "gobackward.\(rawValue)" : "gobackward"
+    }
+
+    /// Skip-second values Apple ships dedicated `go{forward,backward}.N` glyphs
+    /// for. Other intervals (e.g. 3 s) use the plain non-numbered glyph.
+    private static let numberedSymbols: Set<Int> = [5, 10, 15, 30, 45, 60, 75, 90]
 }

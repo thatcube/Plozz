@@ -220,15 +220,13 @@ struct PlaybackDetailView: View {
                 }
 
                 SettingsPanel(
-                    title: "Skip Intervals",
-                    footer: "How far left/right presses on the Siri Remote jump during playback."
+                    title: "Skip Intervals (left/right on remote)"
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
                         LabeledSettingRow("Skip Backward", labelWidth: 220) {
                             SettingsOptionPicker(
                                 options: SkipInterval.allCases,
                                 selection: $playback.settings.skipBackwardInterval,
-                                icon: { _ in "gobackward" },
                                 title: { $0.title }
                             )
                         }
@@ -237,7 +235,6 @@ struct PlaybackDetailView: View {
                             SettingsOptionPicker(
                                 options: SkipInterval.allCases,
                                 selection: $playback.settings.skipForwardInterval,
-                                icon: { _ in "goforward" },
                                 title: { $0.title }
                             )
                         }

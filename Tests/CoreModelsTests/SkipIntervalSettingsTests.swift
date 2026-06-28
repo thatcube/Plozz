@@ -31,6 +31,9 @@ final class SkipIntervalSettingsTests: XCTestCase {
         XCTAssertEqual(SkipInterval.ten.backwardSymbol, "gobackward.10")
         XCTAssertEqual(SkipInterval.thirty.forwardSymbol, "goforward.30")
         XCTAssertEqual(SkipInterval.five.backwardSymbol, "gobackward.5")
+        // 3s has no numbered SF Symbol — falls back to the plain glyph.
+        XCTAssertEqual(SkipInterval.three.forwardSymbol, "goforward")
+        XCTAssertEqual(SkipInterval.three.backwardSymbol, "gobackward")
     }
 
     // MARK: - PlaybackSettings defaults

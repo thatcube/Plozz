@@ -2,7 +2,7 @@ import Foundation
 import CoreModels
 import CoreNetworking
 
-/// Orchestrates the Simkl OAuth device-code flow (same pattern as Trakt).
+/// Orchestrates the Simkl OAuth PIN flow (TV-friendly auth).
 public struct SimklAuthService: Sendable {
     private let client: SimklClient
     private let sleep: @Sendable (TimeInterval) async throws -> Void
@@ -22,20 +22,22 @@ public struct SimklAuthService: Sendable {
         try await client.requestDeviceCode()
     }
 
-    /// Polls for approval, returning the token once the user authorizes.
+    /// Polls `GET /oauth/pin/{USER_CODE}` until the user approves or the code expires.
     public func awaitToken(for code: SimklDeviceCode) async throws -> SimklTokens {
         let deadline = Date().addingTimeInterval(code.expiresIn)
         let pollInterval = max(code.interval, 5)
         while Date() < deadline {
             try Task.checkCancellation()
             do {
-                let response = try await client.requestToken(deviceCode: code.deviceCode)
-                return response.tokens
+                if let accessToken = try await client.pollForToken(userCode: code.userCode) {
+                    return SimklTokens(accessToken: accessToken)
+                }
+            } catch is SimklPINExpiredError {
+                throw AppError.quickConnectExpired
             } catch is CancellationError {
                 throw AppError.cancelled
-            } catch {
-                try await sleep(pollInterval)
             }
+            try await sleep(pollInterval)
         }
         throw AppError.quickConnectExpired
     }

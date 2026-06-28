@@ -13,16 +13,14 @@ public struct SimklTokens: Codable, Sendable, Equatable {
 
 // MARK: - OAuth device-code DTOs
 
-/// Response to `POST /oauth/device/code`.
+/// Response to `GET /oauth/pin?client_id=...`.
 public struct SimklDeviceCode: Decodable, Sendable, Equatable {
-    public let deviceCode: String
     public let userCode: String
     public let verificationURL: String
     public let expiresIn: TimeInterval
     public let interval: TimeInterval
 
     enum CodingKeys: String, CodingKey {
-        case deviceCode = "device_code"
         case userCode = "user_code"
         case verificationURL = "verification_url"
         case expiresIn = "expires_in"
@@ -30,34 +28,24 @@ public struct SimklDeviceCode: Decodable, Sendable, Equatable {
     }
 }
 
-/// Response to the token exchange.
-public struct SimklTokenResponse: Decodable, Sendable, Equatable {
-    public let accessToken: String
-
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
-    }
-
-    public var tokens: SimklTokens {
-        SimklTokens(accessToken: accessToken)
-    }
-}
-
 // MARK: - User
 
 /// Subset of Simkl user settings for display.
 public struct SimklUserSettings: Decodable, Sendable, Equatable {
+    public let account: Account
+
+    public struct Account: Decodable, Sendable, Equatable {
+        public let id: Int?
+    }
+
     public let user: User
 
     public struct User: Decodable, Sendable, Equatable {
         public let name: String
     }
 
+    /// The actual username from the API.
     public var displayName: String { user.name }
-
-    private enum CodingKeys: String, CodingKey {
-        case user = "account"
-    }
 }
 
 // MARK: - Scrobble DTOs

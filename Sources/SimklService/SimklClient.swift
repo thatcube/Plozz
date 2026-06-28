@@ -25,24 +25,41 @@ struct SimklClient: Sendable {
         return headers
     }
 
-    // MARK: - OAuth (device code)
+    // MARK: - OAuth (PIN flow)
 
+    /// `GET /oauth/pin?client_id=...` — request a device PIN code.
     func requestDeviceCode() async throws -> SimklDeviceCode {
-        let body = ["client_id": config.clientID ?? ""]
-        let endpoint = try Endpoint(method: .post, path: "/oauth/device/code", headers: headers())
-            .jsonBody(body)
+        let endpoint = Endpoint(
+            method: .get,
+            path: "/oauth/pin",
+            queryItems: [URLQueryItem(name: "client_id", value: config.clientID ?? "")],
+            headers: headers()
+        )
         return try await http.decode(SimklDeviceCode.self, from: endpoint, baseURL: baseURL)
     }
 
-    func requestToken(deviceCode: String) async throws -> SimklTokenResponse {
-        let body = [
-            "code": deviceCode,
-            "client_id": config.clientID ?? "",
-            "client_secret": config.clientSecret ?? ""
-        ]
-        let endpoint = try Endpoint(method: .post, path: "/oauth/device/token", headers: headers())
-            .jsonBody(body)
-        return try await http.decode(SimklTokenResponse.self, from: endpoint, baseURL: baseURL)
+    /// `GET /oauth/pin/{USER_CODE}?client_id=...` — poll for approval.
+    /// Returns `nil` if still pending, or the access token string on success.
+    func pollForToken(userCode: String) async throws -> String? {
+        let endpoint = Endpoint(
+            method: .get,
+            path: "/oauth/pin/\(userCode)",
+            queryItems: [URLQueryItem(name: "client_id", value: config.clientID ?? "")],
+            headers: headers()
+        )
+        let (data, _) = try await http.send(endpoint, baseURL: baseURL)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+
+        // Success: {"result":"OK","access_token":"..."}
+        if let token = json["access_token"] as? String {
+            return token
+        }
+        // If the response contains "device_code", the original code expired/was consumed
+        if json["device_code"] != nil {
+            throw SimklPINExpiredError()
+        }
+        // Still pending: {"result":"KO","message":"Authorization pending"}
+        return nil
     }
 
     // MARK: - User
@@ -62,3 +79,6 @@ struct SimklClient: Sendable {
         _ = try await http.send(endpoint, baseURL: baseURL)
     }
 }
+
+/// Thrown when the PIN code has expired or been consumed.
+struct SimklPINExpiredError: Error {}

@@ -4,6 +4,8 @@
 <dict>
 	<key>AniListClientID</key>
 	<string>$(ANILIST_CLIENT_ID)</string>
+	<key>AniListClientSecret</key>
+	<string>$(ANILIST_CLIENT_SECRET)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>

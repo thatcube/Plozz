@@ -84,8 +84,9 @@ targets:
         # Simkl client credentials for watch tracking. Register at simkl.com/apps.
         SimklClientID: "$(SIMKL_CLIENT_ID)"
         SimklClientSecret: "$(SIMKL_CLIENT_SECRET)"
-        # AniList client ID for anime tracking. Register at anilist.co/settings/developer.
+        # AniList client ID/secret for anime tracking (authorization code grant).
         AniListClientID: "$(ANILIST_CLIENT_ID)"
+        AniListClientSecret: "$(ANILIST_CLIENT_SECRET)"
         # Local network access is required for LAN server discovery on tvOS.
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:

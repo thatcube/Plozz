@@ -19,40 +19,52 @@ struct IntegrationsDetailView: View {
                 Text("Integrations").font(.largeTitle.bold())
 
                 // Unified tracker card — all services in one dense panel
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 0) {
                     // Trakt
-                    TrackerRow(name: "Trakt", phase: traktRowPhase, onConnect: { trakt.connect() }, onDisconnect: { Task { await trakt.disconnect() } })
-                        .task { await trakt.refreshStatus() }
-                    if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
-                        DeviceCodeConnectingView(serviceName: "Trakt", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: trakt.codeLifetime, onCancel: { trakt.cancelConnect() })
+                    VStack(alignment: .leading, spacing: 24) {
+                        TrackerRow(name: "Trakt", phase: traktRowPhase, onConnect: { trakt.connect() }, onDisconnect: { Task { await trakt.disconnect() } })
+                            .task { await trakt.refreshStatus() }
+                        if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
+                            DeviceCodeConnectingView(serviceName: "Trakt", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: trakt.codeLifetime, onCancel: { trakt.cancelConnect() })
+                        }
+                        sectionDivider
                     }
-
-                    sectionDivider
+                    .padding(.bottom, 24)
+                    .focusSection()
 
                     // Simkl
-                    TrackerRow(name: "Simkl", phase: simklRowPhase, onConnect: { simkl.connect() }, onDisconnect: { Task { await simkl.disconnect() } })
-                        .task { await simkl.refreshStatus() }
-                    if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
-                        DeviceCodeConnectingView(serviceName: "Simkl", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: simkl.codeLifetime, onCancel: { simkl.cancelConnect() })
+                    VStack(alignment: .leading, spacing: 24) {
+                        TrackerRow(name: "Simkl", phase: simklRowPhase, onConnect: { simkl.connect() }, onDisconnect: { Task { await simkl.disconnect() } })
+                            .task { await simkl.refreshStatus() }
+                        if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
+                            DeviceCodeConnectingView(serviceName: "Simkl", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: simkl.codeLifetime, onCancel: { simkl.cancelConnect() })
+                        }
+                        sectionDivider
                     }
-
-                    sectionDivider
+                    .padding(.bottom, 24)
+                    .focusSection()
 
                     // AniList
-                    TrackerRow(name: "AniList", phase: anilistRowPhase, onConnect: { anilist.connect() }, onDisconnect: { Task { await anilist.disconnect() } })
-                        .task { await anilist.refreshStatus() }
-                    if case .awaitingToken = anilist.phase {
-                        AniListTokenEntryView(anilist: anilist)
+                    VStack(alignment: .leading, spacing: 24) {
+                        TrackerRow(name: "AniList", phase: anilistRowPhase, onConnect: { anilist.connect() }, onDisconnect: { Task { await anilist.disconnect() } })
+                            .task { await anilist.refreshStatus() }
+                        if case .awaitingToken = anilist.phase {
+                            AniListTokenEntryView(anilist: anilist)
+                        }
+                        sectionDivider
                     }
-
-                    sectionDivider
+                    .padding(.bottom, 24)
+                    .focusSection()
 
                     // MyAnimeList
-                    TrackerRow(name: "MyAnimeList", phase: malRowPhase, onConnect: { mal.connect() }, onDisconnect: { Task { await mal.disconnect() } })
-                        .task { await mal.refreshStatus() }
-                    if case let .connecting(userCode, verificationURL, expiresAt) = mal.phase {
-                        DeviceCodeConnectingView(serviceName: "MyAnimeList", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: mal.codeLifetime, onCancel: { mal.cancelConnect() })
+                    VStack(alignment: .leading, spacing: 24) {
+                        TrackerRow(name: "MyAnimeList", phase: malRowPhase, onConnect: { mal.connect() }, onDisconnect: { Task { await mal.disconnect() } })
+                            .task { await mal.refreshStatus() }
+                        if case let .connecting(userCode, verificationURL, expiresAt) = mal.phase {
+                            DeviceCodeConnectingView(serviceName: "MyAnimeList", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: mal.codeLifetime, onCancel: { mal.cancelConnect() })
+                        }
                     }
+                    .focusSection()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(28)
@@ -228,7 +240,7 @@ struct AniListTokenEntryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Visit the URL below on your phone or computer, authorize Plozz, then paste the token here:")
+            Text("Scan the QR code or visit the URL, authorize Plozz, then paste the code shown after approval:")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -242,9 +254,9 @@ struct AniListTokenEntryView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("anilist.co/api/v2/oauth/authorize")
                             .font(.title3.weight(.semibold))
-                        TextField("Paste access token here", text: $tokenInput)
+                        TextField("Paste authorization code", text: $tokenInput)
                         HStack(spacing: 16) {
-                            Button("Submit Token") {
+                            Button("Connect") {
                                 Task { await anilist.submitToken(tokenInput) }
                             }
                             .disabled(tokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -309,6 +321,11 @@ struct DeviceCodeConnectingView: View {
 
     private var activationURL: String {
         let encoded = userCode.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userCode
+        // Simkl uses path-based PIN URLs (e.g. simkl.com/pin/ABC12)
+        if verificationURL.contains("simkl.com/pin") {
+            let base = verificationURL.hasSuffix("/") ? verificationURL : verificationURL + "/"
+            return "\(base)\(encoded)"
+        }
         return "\(verificationURL)?code=\(encoded)"
     }
 

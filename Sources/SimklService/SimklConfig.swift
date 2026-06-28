@@ -21,8 +21,9 @@ public struct SimklConfig: Sendable, Equatable {
         self.apiBaseURL = apiBaseURL
     }
 
+    /// PIN flow only requires clientID — no secret needed.
     public var isConfigured: Bool {
-        clientID != nil && clientSecret != nil
+        clientID != nil
     }
 
     public static func resolved(

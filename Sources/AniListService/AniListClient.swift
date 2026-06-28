@@ -40,6 +40,30 @@ struct AniListClient: Sendable {
         return AniListUser(id: viewer.id, name: viewer.name)
     }
 
+    // MARK: - OAuth token exchange
+
+    /// Exchanges an authorization code for an access token (code grant flow).
+    func exchangeCode(_ code: String) async throws -> String {
+        guard let clientID = config.clientID, let clientSecret = config.clientSecret else {
+            throw AppError.unknown("AniList: missing client credentials")
+        }
+        let tokenURL = URL(string: "https://anilist.co/api/v2/oauth/token")!
+        let requestBody = AniListTokenExchangeBody(
+            grantType: "authorization_code",
+            clientId: clientID,
+            clientSecret: clientSecret,
+            redirectUri: "https://anilist.co/api/v2/oauth/pin",
+            code: code
+        )
+        let endpoint = try Endpoint(method: .post, path: "", headers: [
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        ]).jsonBody(requestBody)
+        let (data, _) = try await http.send(endpoint, baseURL: tokenURL)
+        let tokenResponse = try JSONDecoder().decode(AniListTokenExchangeResponse.self, from: data)
+        return tokenResponse.accessToken
+    }
+
     // MARK: - Media lookup
 
     /// Looks up an anime by its AniList ID, MAL ID, or title.
@@ -140,4 +164,30 @@ enum AniListVariable: Encodable {
 struct AniListGraphQLBodyWithVars: Encodable {
     let query: String
     let variables: [String: AniListVariable]
+}
+
+// MARK: - OAuth token exchange bodies
+
+struct AniListTokenExchangeBody: Encodable {
+    let grantType: String
+    let clientId: String
+    let clientSecret: String
+    let redirectUri: String
+    let code: String
+
+    enum CodingKeys: String, CodingKey {
+        case grantType = "grant_type"
+        case clientId = "client_id"
+        case clientSecret = "client_secret"
+        case redirectUri = "redirect_uri"
+        case code
+    }
+}
+
+struct AniListTokenExchangeResponse: Decodable {
+    let accessToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+    }
 }

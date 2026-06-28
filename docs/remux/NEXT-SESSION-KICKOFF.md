@@ -43,10 +43,12 @@ keyframes only (Cues or a per-seek probe), never on a time cap.
 1. Land the **Cues fast-path** (B5 `readCues` or B6 `read_cues_table` → `KeyframeTable` →
    B7 `set_full_vod_mode`, short-circuiting cadence estimation when Cues exist). Real-keyframe
    boundaries make the far-seek balloon impossible on Cues titles. Prove on-device first.
-2. Run the **gating experiment** (one capture): B6 tag `preserve/remux-b6-cues-83e2120` with
-   `-com.plozz.playback.remuxCuesFastPath YES` logs `cues: found N CuePoints` on **Family Guy
-   43681** + **Jupiter 1438**. Settles whether those "no usable index" titles truly lack Cues
-   or ffmpeg just never fetched at-EOF Cues. Likely shrinks the no-Cues class to near-zero.
+2. Run the **gating experiment** (one capture): B5 tag `preserve/remux-b5-cues-2f73cf8` with
+   `-com.plozz.playback.remuxCuesProbe YES -com.plozz.playback.remuxHevcAny YES`, grep `cues:`
+   for `hasCues=YES count=N` on **Family Guy 43681** + **Jupiter 1438** (B5's probe is pure
+   measurement; B6's `83e2120` `remuxCuesFastPath` also applies). Settles whether those "no
+   usable index" titles truly lack Cues or ffmpeg just never fetched at-EOF Cues. Likely shrinks
+   the no-Cues class to near-zero.
 3. Fix the resume crash with bounded cache + backpressure (L5/L6).
 4. Apply Aether L7/L9 (DV panel signaling + synchronous `preferredDisplayCriteria`) to harden DoVi.
 5. Keep Track B (resource-loader fMP4) as a parked structural hedge only.
@@ -56,10 +58,10 @@ present for live Cues (resolve is a no-op), nil for persisted (backward-seek to 
 persist PTS-only, guard with size+duration+ETag).
 
 ## Preserved tags (resurrect with `git switch -c <branch> <tag>`)
-- `preserve/remux-b5-cues-777fde4` — Swift Cues reader (MatroskaKeyframeSampler, 152 tests)
+- `preserve/remux-b5-cues-2f73cf8` — Swift Cues reader + `remuxCuesProbe` (MatroskaKeyframeSampler, 214 tests)
 - `preserve/remux-b6-cues-83e2120` — C direct-EBML Cues + in-muxer apply (153 tests)
-- `preserve/remux-b7-fullvod-879a5a3` — full-vod engine + span-cap (build 759)
-- `preserve/remux-trackA-cues-vod-fb0e34c` — provider/marshal + MatroskaCueParser
+- `preserve/remux-b7-fullvod-879a5a3` — full-vod engine + span-cap (build 759) — **merge baseline**
+- `preserve/remux-trackA-cues-vod-92a440f` — provider lane (KeyframeTableSource/sink/coordinator, 678 tests)
 - `preserve/remux-trackB-fmp4-bb497a5` — resource-loader fMP4+sidx + estimator crash fix
 - `preserve/remux-trackC-nocues-b572cbf` — no-Cues cache + background populator
 

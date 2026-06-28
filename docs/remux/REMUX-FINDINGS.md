@@ -122,7 +122,7 @@ At reset the concerns were consolidated one-owner-each:
 | Concern | Owner | Lang | Notes |
 |---|---|---|---|
 | Full-vod **engine** (declare VOD+ENDLIST, forward-snap on-demand mux, serving) | **B7** | C/Swift | The deploy spine. `set_full_vod_mode`. Tag `preserve/remux-b7-fullvod-879a5a3`. |
-| **Cues fast-path** (open-time exact index) | **B5** | Swift | `readCues()/hasCues()` on one `MatroskaKeyframeSampler` (shares `parseInit` with the no-Cues walk). Tag `preserve/remux-b5-cues-777fde4`. |
+| **Cues fast-path** (open-time exact index) | **B5** | Swift | `readCues()/hasCues()/keyframeTableFromCues()` on one `MatroskaKeyframeSampler` (shares `parseInit` with the no-Cues walk) + `remuxCuesProbe` diagnostic. Tag `preserve/remux-b5-cues-2f73cf8`, 214 tests. |
 | **Cues fast-path (alt)** + live per-seek **resolve** + cluster **resync** | **B6** | C | `plozz_remux_read_cues_table` (in-muxer apply) + `kf_probe_at` + 6a86a8b resync (hot mux path). Tag `preserve/remux-b6-cues-83e2120`. |
 | Provider protocol / source selection / Swift→C marshal | **Track A** | Swift | `MatroskaCueParser` + provider plumbing. Tag `preserve/remux-trackA-cues-vod-fb0e34c`. |
 | Structural-cure: segment-less seekable fMP4 via `AVAssetResourceLoaderDelegate` + sidx | **Track B** | Swift | Independent of the Cues/KeyframeTable spine. Also fixed a real `FragmentSizeEstimator` overflow crash. Tag `preserve/remux-trackB-fmp4-bb497a5`. |
@@ -146,11 +146,11 @@ struct KeyframeTable { var duration: Double; var times: [Double]; var byteOffset
   (dodges the stale-offset-after-reencode trap). Persist **PTS seconds only**, guard with
   size + duration + ETag/Last-Modified HEAD.
 
-> **Known blocker for the next session:** there are currently **two** `KeyframeTable`
-> definitions — B5's nested `MatroskaKeyframeSampler.KeyframeTable` and Track A's canonical
-> `CoreModels.KeyframeTable` (identical fields). The first integration task is to canonicalize
-> **one** (Track A's in `CoreModels`) and have B5's sampler return that type so the modules can
-> exchange tables. Track A's provider lane (`KeyframeTableSource` protocol, priority selection
+> **Known blocker for the next session (mostly resolved):** B5 and Track A have **converged** on
+> a single `KeyframeTable` shape — Track A's canonical `CoreModels.KeyframeTable` and B5's
+> `keyframeTableFromCues()` emit the identical 3 fields. The one remaining **mechanical** step is
+> to have B5's sampler target *import* `CoreModels` and return that exact type (instead of its
+> still-nested struct of identical fields), so the modules literally exchange the same type. Track A's provider lane (`KeyframeTableSource` protocol, priority selection
 > `liveCues < noCuesWalk < persistedCache < serverEndpoint`, `FullVODKeyframeSink` Swift→C seam,
 > default-OFF `FullVODKeyframeCoordinator`) is built and green at tag
 > `preserve/remux-trackA-cues-vod-92a440f` (supersedes fb0e34c) — pick it up rather than rebuild.
@@ -204,9 +204,12 @@ Stop iterating the span-cap. Build the AetherEngine producer model properly, sma
    estimation when Cues exist. Exact EXTINF + real-keyframe segment boundaries = the §4-A
    balloon **cannot** happen on the ~90–95% of titles with Cues. **This likely makes most
    titles stable on its own** and should be proven on-device first.
-2. **Run the gating experiment** (one capture): B6's `83e2120` with
-   `-com.plozz.playback.remuxCuesFastPath YES` logs `cues: found N CuePoints` on the two
-   original "no usable index" bug titles (**Family Guy 43681**, **Jupiter 1438**). This settles
+2. **Run the gating experiment** (one capture): the cleanest probe is **B5's pure-measurement**
+   `remuxCuesProbe` (parses + logs + discards, zero serving effect) — `preserve/remux-b5-cues-2f73cf8`
+   with `-com.plozz.playback.remuxCuesProbe YES -com.plozz.playback.remuxHevcAny YES`, grep
+   `cues:` → `cues: hasCues=YES count=N span=[..]`. (B6's `83e2120` `remuxCuesFastPath` is the
+   apply-path sibling that *also* installs the boundaries.) Run on the two original "no usable
+   index" bug titles (**Family Guy 43681**, **Jupiter 1438**). This settles
    whether those titles *truly* lack Cues, or whether ffmpeg's `avformat_index` just never
    fetched the at-EOF Cues (because our localhost VOD range reader never served the
    avio-seek-to-EOF after `SeekHead→Cues`). If it's the latter, the direct-EBML reader fixes
@@ -230,7 +233,7 @@ All experimental engines are reachable forever via these annotated tags (branche
 
 | Tag | What |
 |---|---|
-| `preserve/remux-b5-cues-777fde4` | B5 Cues fast-path — Swift `readCues` on `MatroskaKeyframeSampler`, 152 tests |
+| `preserve/remux-b5-cues-2f73cf8` | B5 Cues fast-path — Swift `readCues`/`keyframeTableFromCues` on `MatroskaKeyframeSampler` + `remuxCuesProbe` diagnostic, 214 tests |
 | `preserve/remux-b6-cues-83e2120` | B6 direct-EBML Cues fast-path — C `read_cues_table`, in-muxer apply, 153 tests |
 | `preserve/remux-b7-fullvod-879a5a3` | B7 full-vod engine + span-cap + `PLOZZ_SEGMENT_SPAN_CAP` (build 759) — **the merge baseline** |
 | `preserve/remux-trackA-cues-vod-92a440f` | Track A provider lane: `KeyframeTableSource`/provider/`FullVODKeyframeSink`/coordinator + `zeroBasedTimes` (678 tests) |

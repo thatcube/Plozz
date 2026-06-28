@@ -165,10 +165,15 @@ public struct MediaRowView: View {
                         }
                         .padding(.leading, leadingInset)
                         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                        // Give the focused card's lift + drop shadow room so it is
-                        // never clipped by the scroll view's bounds.
-                        .padding(.top, metrics.railTopPadding)
-                        .padding(.bottom, metrics.railVerticalPadding)
+                        // Reserve generous vertical room *inside* the clip so a
+                        // focused card's lift + drop shadow are never cut. The rail
+                        // keeps clipping (no `scrollClipDisabled`) — that's what
+                        // keeps the focus engine's edge math correct so the first/
+                        // last card holds its inset instead of being yanked flush to
+                        // the screen. The negative outer padding below cancels this
+                        // clearance in layout, so the row's height and its gap to the
+                        // neighbouring rows are unchanged; only the clip grows.
+                        .padding(.vertical, metrics.railShadowClearance)
                         // Treat the rail as a single focus section so pressing down
                         // *enters the section* and selects its only focusable card
                         // (the gated target) regardless of horizontal alignment with
@@ -177,9 +182,8 @@ public struct MediaRowView: View {
                         // becomes unreachable.
                         .focusSection()
                     }
-                    // Let a focused card's lift, drop shadow and border render
-                    // outside the rail's bounds instead of being clipped.
-                    .scrollClipDisabled()
+                    .padding(.top, metrics.railTopClearanceOffset)
+                    .padding(.bottom, metrics.railBottomClearanceOffset)
                     .onAppear { applyInitialFocus(using: proxy) }
                     .onChange(of: focusedID) { _, newValue in
                         handleFocusChange(to: newValue, using: proxy)

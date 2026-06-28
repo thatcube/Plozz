@@ -121,10 +121,14 @@ struct MusicLandingView: View {
                     EntryTile(title: "Genres", icon: "guitars") { onSelectRoute(.grid(.genre)) }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, PlozzTheme.Spacing.small)
+                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
+                // engine holds the first/last tile at its inset, and reserve room
+                // *inside* the clip for the focused tile's lift + shadow. The
+                // negative outer padding restores the original inset, so the row's
+                // height is unchanged — only the clip grows.
+                .padding(.vertical, metrics.railShadowClearance)
             }
-            // Never clip a focused tile's lift, shadow or border.
-            .scrollClipDisabled()
+            .padding(.vertical, metrics.railClearanceOffset(for: PlozzTheme.Spacing.small))
         }
     }
 }
@@ -160,7 +164,8 @@ private struct EntryTile: View {
         .frame(width: tileWidth, height: tileHeight)
         .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
@@ -201,10 +206,14 @@ private struct MusicRow<Content: View>: View {
                     content()
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, metrics.railVerticalPadding)
+                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
+                // engine holds the first/last card at its inset, and reserve room
+                // *inside* the clip for the focused card's lift + shadow. The
+                // negative outer padding restores the original vertical inset, so
+                // the row's height is unchanged — only the clip grows.
+                .padding(.vertical, metrics.railShadowClearance)
             }
-            // Never clip a focused card's lift, shadow or border.
-            .scrollClipDisabled()
+            .padding(.vertical, metrics.railBottomClearanceOffset)
         }
     }
 }

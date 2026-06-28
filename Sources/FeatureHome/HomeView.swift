@@ -118,11 +118,15 @@ public struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.top, metrics.railTopPadding)
-                .padding(.bottom, metrics.railVerticalPadding)
+                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
+                // engine doesn't yank the first/last tile flush to the screen edge,
+                // and reserve room *inside* the clip for the focused tile's lift +
+                // shadow. The negative outer padding cancels that room in layout, so
+                // the row's height and spacing are unchanged — only the clip grows.
+                .padding(.vertical, metrics.railShadowClearance)
             }
-            // Never clip a focused card's lift, shadow or border.
-            .scrollClipDisabled()
+            .padding(.top, metrics.railTopClearanceOffset)
+            .padding(.bottom, metrics.railBottomClearanceOffset)
         }
     }
 
@@ -203,7 +207,8 @@ private struct LibraryCardView: View {
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)

@@ -93,7 +93,6 @@ private struct OptionalMediaEdge: ViewModifier {
 struct MusicCard: View {
     let artworkURL: URL?
     var systemPlaceholder: String = "music.note"
-    var isCircular: Bool = false
     let width: CGFloat
     let title: String
     var subtitle: String? = nil
@@ -111,7 +110,6 @@ struct MusicCard: View {
     init(
         artworkURL: URL?,
         systemPlaceholder: String = "music.note",
-        isCircular: Bool = false,
         width: CGFloat,
         title: String,
         subtitle: String? = nil,
@@ -120,7 +118,6 @@ struct MusicCard: View {
     ) {
         self.artworkURL = artworkURL
         self.systemPlaceholder = systemPlaceholder
-        self.isCircular = isCircular
         self.width = width
         self.title = title
         self.subtitle = subtitle
@@ -160,7 +157,8 @@ struct MusicCard: View {
         .padding(metrics.cardInset)
         .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
@@ -168,24 +166,13 @@ struct MusicCard: View {
 
     @ViewBuilder
     private var artwork: some View {
-        if isCircular {
-            MusicArtworkImage(
-                url: artworkURL,
-                systemPlaceholder: systemPlaceholder,
-                cornerRadius: scaledWidth / 2,
-                asyncFallbackURL: asyncFallbackURL,
-                placeholderColor: subtitleColor
-            )
-            .clipShape(Circle())
-        } else {
-            MusicArtworkImage(
-                url: artworkURL,
-                systemPlaceholder: systemPlaceholder,
-                cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
-                asyncFallbackURL: asyncFallbackURL,
-                placeholderColor: subtitleColor
-            )
-        }
+        MusicArtworkImage(
+            url: artworkURL,
+            systemPlaceholder: systemPlaceholder,
+            cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
+            asyncFallbackURL: asyncFallbackURL,
+            placeholderColor: subtitleColor
+        )
     }
 }
 
@@ -230,17 +217,32 @@ struct RecentTrackCard: View {
 
 struct ArtistCard: View {
     let artist: MusicArtist
-    var width: CGFloat = 240
     let action: () -> Void
+
+    @Environment(\.plozzMetrics) private var metrics
+
     var body: some View {
-        MusicCard(
-            artworkURL: artist.artworkURL,
-            systemPlaceholder: "music.mic",
-            isCircular: true,
-            width: width,
-            title: artist.name,
-            asyncFallbackURL: MusicArtworkFallback.artistImage(name: artist.name),
-            action: action
+        let diameter = metrics.artistTileDiameter
+        let slot = diameter + metrics.circleFocusPadding * 2
+        CircularFocusTile(
+            diameter: diameter,
+            focusPadding: metrics.circleFocusPadding,
+            action: action,
+            avatar: {
+                MusicArtworkImage(
+                    url: artist.artworkURL,
+                    systemPlaceholder: "music.mic",
+                    cornerRadius: diameter / 2,
+                    asyncFallbackURL: MusicArtworkFallback.artistImage(name: artist.name)
+                )
+            },
+            caption: { isFocused in
+                Text(artist.name)
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+                    .foregroundStyle(isFocused ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+                    .frame(width: slot)
+            }
         )
     }
 }

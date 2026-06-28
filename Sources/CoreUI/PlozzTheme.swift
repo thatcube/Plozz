@@ -60,6 +60,19 @@ public enum PlozzTheme {
         public static let landscapeWidth: CGFloat = 480
         public static let landscapeHeight: CGFloat = 270
 
+        // MARK: Circular tile sizes (round avatars: artists, cast)
+
+        /// Diameter of an artist's circular tile — kept close to a music card's
+        /// artwork so an Artists rail reads at the same scale as Albums/Playlists.
+        /// Density-scaled in `PlozzMetrics`.
+        public static let artistTileDiameter: CGFloat = 230
+        /// Diameter of a cast member's circular tile — a deliberately smaller
+        /// variant of the same style. Density-scaled in `PlozzMetrics`.
+        public static let castTileDiameter: CGFloat = 150
+        /// Clearance between a circular avatar and the focus glass halo around it
+        /// (the visible "padding" the halo adds when focused). Density-scaled.
+        public static let circleFocusPadding: CGFloat = 16
+
         // MARK: Spacing (derived from the `Spacing` scale)
 
         /// The single source of truth for the gap between adjacent media cards.
@@ -91,6 +104,23 @@ public enum PlozzTheme {
         /// shadow (radius 20 + y 10) plus the card's lift, so it can't be trimmed
         /// much further without the shadow visibly crowding the next row.
         public static let railVerticalPadding = Spacing.xxLarge
+        /// Vertical room reserved *inside* a horizontal rail's scroll clip for a
+        /// focused card's lift + drop shadow. A rail must **clip** its bounds —
+        /// disabling the clip makes the tvOS focus engine miscompute the edge and
+        /// yank the first/last card flush to the screen, eating its inset. So the
+        /// rail keeps clipping and instead pads its content by this much on the top
+        /// and bottom *inside* the clip, then cancels the same amount in layout
+        /// (see `PlozzMetrics.railTopClearanceOffset`) so the row's height — and the
+        /// gap to its neighbours — is byte-for-byte unchanged. Built from two parts
+        /// in `PlozzMetrics`:
+        ///   • `railShadowLiftAllowance` — the focused card's *lift*, which grows
+        ///     with the card, so it is density-scaled.
+        ///   • `railShadowFixedExtent` — the drop shadow's own reach (radius 20 +
+        ///     y 10). The shadow radius is a fixed pixel value that does **not**
+        ///     shrink at low densities, so this part stays fixed; scaling it would
+        ///     let the shadow clip at micro density.
+        public static let railShadowLiftAllowance: CGFloat = 28
+        public static let railShadowFixedExtent: CGFloat = 32
 
         // MARK: Corner radii
 

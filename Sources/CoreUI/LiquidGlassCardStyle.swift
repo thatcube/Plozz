@@ -158,6 +158,21 @@ public extension View {
             .focusEffectDisabled()
     }
 
+    /// Flattens a card's layer tree to reduce GPU offscreen render passes.
+    /// When Reduce Transparency is ON (opaque cards, no live glass), uses
+    /// `.drawingGroup()` to rasterize the entire card into one Metal texture —
+    /// collapsing clips, overlays, and borders into a single pass. When glass
+    /// is active, falls back to `.compositingGroup()` since `.drawingGroup()`
+    /// doesn't support live glass compositing.
+    @ViewBuilder
+    func plozzCardRasterize(reduceTransparency: Bool) -> some View {
+        if reduceTransparency {
+            self.drawingGroup()
+        } else {
+            self.compositingGroup()
+        }
+    }
+
     /// Wraps the view in a non-interactive Liquid Glass *panel* surface (HUDs,
     /// overlays). Uses native Liquid Glass on tvOS 26+ and a translucent material
     /// fallback on older versions, with a faint theme-aware scrim behind it for

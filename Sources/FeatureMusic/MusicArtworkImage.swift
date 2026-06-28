@@ -96,6 +96,11 @@ struct MusicCard: View {
 
     @FocusState private var isFocused: Bool
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzMetrics) private var metrics
+
+    /// The artwork edge length, scaled by the active UI density so music tiles
+    /// grow/shrink in step with the movie/show cards.
+    private var scaledWidth: CGFloat { (width * metrics.scale).rounded() }
 
     init(
         artworkURL: URL?,
@@ -134,7 +139,7 @@ struct MusicCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             artwork
-                .frame(width: width, height: width)
+                .frame(width: scaledWidth, height: scaledWidth)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
@@ -147,9 +152,9 @@ struct MusicCard: View {
                     .lineLimit(1)
                     .opacity(subtitle == nil ? 0 : 1)
             }
-            .frame(width: width, alignment: .leading)
+            .frame(width: scaledWidth, alignment: .leading)
         }
-        .padding(PlozzTheme.Metrics.mediumCardInset)
+        .padding(metrics.mediumCardInset)
         .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: isFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, action: action)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
@@ -164,7 +169,7 @@ struct MusicCard: View {
             MusicArtworkImage(
                 url: artworkURL,
                 systemPlaceholder: systemPlaceholder,
-                cornerRadius: width / 2,
+                cornerRadius: scaledWidth / 2,
                 asyncFallbackURL: asyncFallbackURL
             )
             .clipShape(Circle())

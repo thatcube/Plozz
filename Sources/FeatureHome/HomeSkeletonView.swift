@@ -22,13 +22,15 @@ struct HomeSkeletonView: View {
 
     @State private var visible = false
 
+    @Environment(\.plozzMetrics) private var metrics
+
     private var rows: [HomeRowKind] {
         layout.isEmpty ? HomeRowKind.defaultSkeletonLayout : layout
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
+            VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                 ForEach(rows, id: \.self) { kind in
                     skeletonRow(kind)
                 }
@@ -76,7 +78,7 @@ struct HomeSkeletonView: View {
             // clips its frame to the viewport, so the leading inset matches the real
             // row 1:1.
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: PlozzTheme.Metrics.cardSpacing) {
+                HStack(spacing: metrics.cardSpacing) {
                     ForEach(0..<cardCount(for: kind), id: \.self) { _ in
                         SkeletonCardView(style: cardStyle(for: kind))
                             .frame(width: cardWidth(for: kind))
@@ -85,7 +87,7 @@ struct HomeSkeletonView: View {
                 .padding(.leading, PlozzTheme.Metrics.screenPadding)
                 .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                 .padding(.top, 16)
-                .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
+                .padding(.bottom, metrics.railVerticalPadding)
             }
             .scrollClipDisabled()
             .scrollDisabled(true)
@@ -102,7 +104,7 @@ struct HomeSkeletonView: View {
     }
 
     private func cardWidth(for kind: HomeRowKind) -> CGFloat {
-        cardStyle(for: kind) == .landscape ? PlozzTheme.Metrics.landscapeWidth : PlozzTheme.Metrics.posterWidth
+        cardStyle(for: kind) == .landscape ? metrics.landscapeWidth : metrics.posterWidth
     }
 
     /// Enough placeholders to fill the 10-foot screen width for each card size.

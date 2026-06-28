@@ -20,6 +20,8 @@ public struct SkeletonCardView: View {
 
     private let style: Style
 
+    @Environment(\.plozzMetrics) private var metrics
+
     public init(style: Style = .poster) {
         self.style = style
     }
@@ -48,7 +50,7 @@ public struct SkeletonCardView: View {
             // size-20 fonts. Reusing the same fonts (via hidden sizing text) keeps
             // the caption block the exact same height, so the row never shifts
             // vertically when real content swaps in.
-            textLines(contentWidth: PlozzTheme.Metrics.posterWidth - 28, spacing: 2)
+            textLines(contentWidth: metrics.posterWidth - 28, spacing: 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
                 .padding(.bottom, 4)
@@ -63,15 +65,15 @@ public struct SkeletonCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous)
                 .fill(Color.plozzSkeletonFill)
-                .frame(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
+                .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
             // PosterCardView's landscape caption uses VStack(spacing: 4).
-            textLines(contentWidth: PlozzTheme.Metrics.landscapeWidth - 2 * PlozzTheme.Metrics.mediumCardInset, spacing: 4)
-                .frame(width: PlozzTheme.Metrics.landscapeWidth, alignment: .leading)
+            textLines(contentWidth: metrics.landscapeWidth - 2 * metrics.mediumCardInset, spacing: 4)
+                .frame(width: metrics.landscapeWidth, alignment: .leading)
         }
-        .padding(PlozzTheme.Metrics.mediumCardInset)
+        .padding(metrics.mediumCardInset)
         .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: false)
         .shimmering()
     }

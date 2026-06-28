@@ -55,6 +55,9 @@ struct MainTabView: View {
     let themeModel: ThemeSettingsModel
     let diagnosticsModel: DiagnosticsSettingsModel
     let musicPlayerModel: MusicPlayerSettingsModel
+    /// Per-profile UI density, injected into the environment below so the
+    /// Settings ▸ Appearance picker can edit it.
+    let uiDensityModel: UIDensitySettingsModel
     /// App-scoped audio engine, owned by `AppState` so it survives the per-profile
     /// subtree rebuild (this view is re-created with a new `.id` on profile switch).
     let audioController: AudioPlaybackController
@@ -188,6 +191,7 @@ struct MainTabView: View {
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .environment(musicPlayerModel)
+        .environment(uiDensityModel)
         .task(id: accounts.map(\.account.id)) {
             onWarmIdentityIndex()
         }

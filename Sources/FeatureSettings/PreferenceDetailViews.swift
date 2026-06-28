@@ -6,6 +6,7 @@ import CoreUI
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
     @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
+    @Environment(UIDensitySettingsModel.self) private var density
     /// App-wide (global) — persists across all profiles. Same un-namespaced
     /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
     /// See AGENTS.local.md ("Per-profile vs app-wide settings").
@@ -13,9 +14,39 @@ struct AppearanceDetailView: View {
 
     var body: some View {
         @Bindable var musicPlayer = musicPlayer
+        @Bindable var density = density
         return ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 Text("Appearance").font(.largeTitle.bold())
+                SettingsPanel(
+                    title: "Display Size",
+                    footer: "Scales cards, columns and spacing across the app for this profile. Larger sizes show fewer, bigger items — easier to see across the room."
+                ) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(UIDensity.allCases) { option in
+                                Button {
+                                    density.density = option
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: option.symbolName)
+                                        Text(option.displayName)
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .opacity(density.density == option ? 1 : 0)
+                                    }
+                                    .font(.headline)
+                                    .padding(.horizontal, 4)
+                                }
+                                .buttonStyle(PlozzSeasonTabStyle(isSelected: density.density == option))
+                                .accessibilityValue(density.density == option ? "Selected" : "")
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 6)
+                    }
+                    .scrollClipDisabled()
+                }
+
                 SettingsPanel(
                     title: "Theme",
                     footer: "Choose how Plozz looks. Theme applies to the active profile only."

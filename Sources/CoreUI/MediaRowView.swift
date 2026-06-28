@@ -46,6 +46,7 @@ public struct MediaRowView: View {
     private let itemByID: [String: MediaItem]
 
     @FocusState private var focusedID: String?
+    @Environment(\.plozzMetrics) private var metrics
     @State private var didApplyInitialFocus = false
     /// Whether focus currently sits inside this row. While `false` and a gate
     /// target is set, the first card focus lands on (whatever tvOS picks
@@ -148,7 +149,7 @@ public struct MediaRowView: View {
 
     public var body: some View {
         if !items.isEmpty {
-            VStack(alignment: .leading, spacing: PlozzTheme.Metrics.sectionTitleSpacing) {
+            VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
                 if !title.isEmpty {
                     Text(title)
                         .font(.system(size: 32, weight: .bold))
@@ -157,7 +158,7 @@ public struct MediaRowView: View {
 
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: PlozzTheme.Metrics.cardSpacing) {
+                        LazyHStack(spacing: metrics.cardSpacing) {
                             ForEach(items) { item in
                                 card(for: item)
                             }
@@ -166,8 +167,8 @@ public struct MediaRowView: View {
                         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                         // Give the focused card's lift + drop shadow room so it is
                         // never clipped by the scroll view's bounds.
-                        .padding(.top, PlozzTheme.Metrics.railTopPadding)
-                        .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
+                        .padding(.top, metrics.railTopPadding)
+                        .padding(.bottom, metrics.railVerticalPadding)
                         // Treat the rail as a single focus section so pressing down
                         // *enters the section* and selects its only focusable card
                         // (the gated target) regardless of horizontal alignment with
@@ -248,9 +249,9 @@ public struct MediaRowView: View {
     private var cardSlotWidth: CGFloat {
         switch style {
         case .poster:
-            return PlozzTheme.Metrics.posterWidth
+            return metrics.posterWidth
         case .landscape:
-            return PlozzTheme.Metrics.landscapeWidth + PlozzTheme.Metrics.mediumCardInset * 2
+            return metrics.landscapeCardSlotWidth
         }
     }
 

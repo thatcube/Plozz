@@ -89,6 +89,7 @@ public struct RootView: View {
                         themeModel: appState.themeModel,
                         diagnosticsModel: appState.diagnosticsModel,
                         musicPlayerModel: appState.musicPlayerModel,
+                        uiDensityModel: appState.uiDensityModel,
                         audioController: appState.audioController,
                         homeVisibility: appState.homeLibraryVisibilityModel,
                         homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
@@ -151,6 +152,7 @@ public struct RootView: View {
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
+        .environment(\.plozzMetrics, PlozzMetrics(density: appState.uiDensityModel.density))
         .environment(\.plozzReduceTransparency, systemReduceTransparency || reduceTransparencyOverride)
         .environment(displayVeil)
         .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)

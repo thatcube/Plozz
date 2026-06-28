@@ -12,6 +12,8 @@ public struct HomeView: View {
     private let onPlayItem: (MediaItem) -> Void
     private let onSelectLibrary: (MediaLibrary) -> Void
 
+    @Environment(\.plozzMetrics) private var metrics
+
     public init(
         viewModel: HomeViewModel,
         visibility: HomeLibraryVisibilityModel,
@@ -45,7 +47,7 @@ public struct HomeView: View {
             // effect on the next render even before any re-fetch settles.
             let rows = HomeRow.rows(for: content) { visibility.isVisible($0) }
             ScrollView {
-                VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
+                VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                     ForEach(rows) { row in
                         rowView(row)
                     }
@@ -101,12 +103,12 @@ public struct HomeView: View {
     }
 
     private func librariesRow(_ libraries: [AggregatedLibrary]) -> some View {
-        VStack(alignment: .leading, spacing: PlozzTheme.Metrics.sectionTitleSpacing) {
+        VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             Text("Libraries")
                 .font(.system(size: 32, weight: .bold))
                 .padding(.leading, PlozzTheme.Metrics.screenPadding)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: PlozzTheme.Metrics.cardSpacing) {
+                LazyHStack(spacing: metrics.cardSpacing) {
                     ForEach(libraries) { aggregated in
                         Button { onSelectLibrary(aggregated.library) } label: {
                             ZStack(alignment: .bottomLeading) {
@@ -126,7 +128,7 @@ public struct HomeView: View {
                                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                                 .padding(12)
                             }
-                            .frame(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
+                            .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
                             .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
                             .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.cornerRadius)
                         }
@@ -134,8 +136,8 @@ public struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.top, PlozzTheme.Metrics.railTopPadding)
-                .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
+                .padding(.top, metrics.railTopPadding)
+                .padding(.bottom, metrics.railVerticalPadding)
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()

@@ -7,22 +7,22 @@ import SwiftUI
 /// and inset should come from a token here rather than a hand-typed literal, so
 /// the whole UI moves together and stays consistent.
 public enum PlozzTheme {
-    /// A single global knob that scales every spacing/gap token in `Spacing`.
-    /// `1.0` is the standard density.
+    /// The compile-time density baseline. `scale` is fixed at `1.0` (standard):
+    /// the tokens in `Spacing`/`Metrics` below are the **standard-density**
+    /// constants and the tokens that never change with density (corner radii,
+    /// focus scales, screen edge padding).
     ///
-    /// This is the seam for a future **UI density** preference (e.g. Compact /
-    /// Standard / Spacious). Today `scale` is a fixed default; wiring it to a
-    /// per-profile setting (or resolving it from the SwiftUI environment) later
-    /// rescales the entire app's breathing room from this one place — no call
-    /// site needs to change because every view already reads the tokens below.
+    /// The *live* per-profile UI-density preference is no longer driven from
+    /// here — it is `CoreModels.UIDensity`, resolved into `PlozzMetrics` and
+    /// injected via `@Environment(\.plozzMetrics)` at the app root. Media views
+    /// (cards, grids, rails) read their scaled sizes/gaps from that environment
+    /// value so a density change restyles them live; everything else keeps using
+    /// these standard constants.
     public enum Density {
-        public static let compact: CGFloat = 0.8
-        public static let standard: CGFloat = 1.0
-        public static let spacious: CGFloat = 1.25
-
-        /// The active multiplier applied to every step in `Spacing`. Change this
-        /// one value — or later drive it from a setting — to restyle app-wide.
-        public static let scale: CGFloat = standard
+        /// The active multiplier applied to every step in `Spacing`. Fixed at
+        /// standard density — see `CoreModels.UIDensity` / `PlozzMetrics` for the
+        /// live, per-profile scaling.
+        public static let scale: CGFloat = 1.0
     }
 
     /// The canonical spacing scale, in points at standard density. Semantic

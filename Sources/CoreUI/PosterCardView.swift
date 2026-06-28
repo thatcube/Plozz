@@ -24,6 +24,7 @@ public struct PosterCardView: View {
     @FocusState private var isFocused: Bool
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
+    @Environment(\.plozzMetrics) private var metrics
 
     public init(
         item: MediaItem,
@@ -59,9 +60,9 @@ public struct PosterCardView: View {
     private var size: CGSize {
         switch style {
         case .poster:
-            return CGSize(width: PlozzTheme.Metrics.posterWidth, height: PlozzTheme.Metrics.posterHeight)
+            return CGSize(width: metrics.posterWidth, height: metrics.posterHeight)
         case .landscape:
-            return CGSize(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
+            return CGSize(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
         }
     }
 
@@ -142,7 +143,7 @@ public struct PosterCardView: View {
             }
             .frame(width: size.width, alignment: .leading)
         }
-        .padding(PlozzTheme.Metrics.mediumCardInset)
+        .padding(metrics.mediumCardInset)
         .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: isFocused)
         .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, action: action)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)

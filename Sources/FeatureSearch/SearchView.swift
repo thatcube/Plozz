@@ -11,6 +11,8 @@ public struct SearchView: View {
     private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
 
+    @Environment(\.plozzMetrics) private var metrics
+
     public init(
         viewModel: SearchViewModel,
         spoilerSettings: SpoilerSettings = .default,
@@ -20,10 +22,6 @@ public struct SearchView: View {
         self.spoilerSettings = spoilerSettings
         self.onSelect = onSelect
     }
-
-    // Shared dense "Browse" wall — identical column count and gutters to the
-    // library grid, so Search and Library read as the same surface.
-    private let columns = PlozzTheme.Grid.posterColumns
 
     public var body: some View {
         content
@@ -67,15 +65,19 @@ public struct SearchView: View {
     }
 
     private func results(_ sections: [SearchSection]) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
+        // Shared dense "Browse" wall — identical column count and gutters to the
+        // library grid (both from the live density metrics), so Search and
+        // Library read as the same surface and scale together.
+        let columns = metrics.posterColumns
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: metrics.rowSpacing) {
                 ForEach(sections) { section in
-                    VStack(alignment: .leading, spacing: PlozzTheme.Metrics.sectionTitleSpacing) {
+                    VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
                         Text(section.title)
                             .font(.system(size: 32, weight: .bold))
                             .padding(.leading, PlozzTheme.Metrics.screenPadding)
 
-                        LazyVGrid(columns: columns, alignment: .leading, spacing: PlozzTheme.Metrics.gridSpacing) {
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: metrics.gridSpacing) {
                             ForEach(section.items) { item in
                                 PosterCardView(item: item, style: .poster, spoilerSettings: spoilerSettings) {
                                     onSelect(item)
@@ -84,7 +86,7 @@ public struct SearchView: View {
                         }
                         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                         // Give focus room so the lifted card isn't clipped.
-                        .padding(.vertical, PlozzTheme.Metrics.sectionTitleSpacing)
+                        .padding(.vertical, metrics.sectionTitleSpacing)
                         .focusSection()
                     }
                 }

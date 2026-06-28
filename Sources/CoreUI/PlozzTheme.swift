@@ -73,20 +73,24 @@ public enum PlozzTheme {
         public static let cardSpacing = mediaSpacing
         /// Inter-card gap (both axes) in a poster grid.
         public static let gridSpacing = mediaSpacing
-        /// Vertical gap between stacked rows / sections on a screen.
-        public static let rowSpacing = Spacing.xxLarge
+        /// Vertical gap between stacked rows / sections on a screen. Kept a little
+        /// tighter than a full `Spacing` step (28 vs 40) so the wall of rows reads
+        /// densely rather than airy — the dominant "dead space" lever on the page.
+        public static let rowSpacing: CGFloat = 28
         /// Gap between a section's title and the row/grid beneath it.
         public static let sectionTitleSpacing = Spacing.medium
         /// Standard horizontal inset from the screen edge.
         public static let screenPadding = Spacing.xLarge
         /// Vertical inset at the very top/bottom of a screen's scroll content.
-        public static let screenVerticalPadding = Spacing.xxLarge
+        public static let screenVerticalPadding = Spacing.xLarge
         /// Headroom above a horizontal rail so a focused card's upward lift is
         /// never clipped by the scroll view's top edge.
         public static let railTopPadding = Spacing.medium
         /// Room below a rail for a focused card's lift + drop shadow so neither is
-        /// clipped by the scroll view's bottom edge.
-        public static let railVerticalPadding = Spacing.xxxLarge
+        /// clipped by the scroll view's bottom edge. Sized to just clear the focus
+        /// shadow (radius 20 + y 10) plus the card's lift, so it can't be trimmed
+        /// much further without the shadow visibly crowding the next row.
+        public static let railVerticalPadding = Spacing.xxLarge
 
         // MARK: Corner radii
 

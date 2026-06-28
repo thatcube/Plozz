@@ -86,6 +86,11 @@ final class HTTPRangeReader: @unchecked Sendable {
         readAhead = max(1 << 16, bytes)
     }
 
+    /// Current read-ahead granularity, so callers can snapshot it before lowering for a
+    /// probe phase and restore the exact prior value afterward (rather than assuming a
+    /// default). Read-only; mutate via `setReadAhead`/`boostReadAhead`.
+    var currentReadAhead: Int { readAhead }
+
     // MARK: - AVIO surface
 
     /// Total byte size, fetched once via a ranged probe (`Content-Range`/length).

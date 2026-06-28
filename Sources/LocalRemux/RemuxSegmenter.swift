@@ -140,12 +140,14 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// segment-MUXING read-ahead (which would over-fetch megabytes past each probed
     /// keyframe). `muxReadAhead` tracks the boosted muxing granularity.
     ///
-    /// Sized at 64KB to make B6's cheap cluster-header probe actually cheap: a header
-    /// parse issues a single ~16KB direct `read_raw_at` (count < read-ahead), so a
-    /// 64KB floor caps each header probe at one 64KB fetch instead of a 1 MiB refill
-    /// (~16x fewer bytes/probe on the background fill). The av_read_frame fallback /
+    /// Sized at 64KB to make B6's cheap cluster-header probe actually cheap: with the
+    /// cluster-sync resync (6a86a8b) a header parse issues a single ~24KB direct
+    /// `read_raw_at` (PLOZZ_KF_PROBE_READ = 8KB resync-back + 16KB window). Capping the
+    /// reader's read-ahead at this floor turns each header probe into one ~64KB fetch
+    /// instead of a 1 MiB refill (~16x fewer bytes/probe). The av_read_frame fallback /
     /// calibration path is NOT hurt: libavformat refills its 1 MiB avio buffer with
     /// large `count` reads, which dominate the 64KB floor, so those stay full-size.
+    /// (`setReadAhead` enforces a 64KB floor, so this is also the effective minimum.)
     private let probeReadAhead = 1 << 16
     private var muxReadAhead = 1 << 20
 
@@ -285,7 +287,16 @@ final class RemuxSegmenter: @unchecked Sendable {
         if fullVod, plozz_remux_uses_fixed_cadence(session) == 1 {
             let openStart = DispatchTime.now().uptimeNanoseconds
             let netBefore = reader.networkSnapshot()
-            if plozz_remux_set_full_vod_mode(session, 1) == 1 {
+            // The cadence walk inside set_full_vod_mode drives B6's cheap cluster-header
+            // probe (24KB direct read_raw_at per boundary). Cap the reader's read-ahead
+            // so each probe fetches ~32KB from the network instead of a 1 MiB refill;
+            // libavformat's calibration av_read_frame reads are count-driven and stay
+            // full-size. Restore the prior read-ahead for muxing afterward.
+            let restoreReadAhead = reader.currentReadAhead
+            reader.setReadAhead(probeReadAhead)
+            let fullVodResult = plozz_remux_set_full_vod_mode(session, 1)
+            reader.setReadAhead(restoreReadAhead)
+            if fullVodResult == 1 {
                 fullVodEngaged = true
                 let openMs = Double(DispatchTime.now().uptimeNanoseconds &- openStart) / 1_000_000
                 let after = reader.networkSnapshot()

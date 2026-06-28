@@ -60,6 +60,15 @@ static void remux_log(int level, const char *fmt, ...) {
  */
 #define PLOZZ_KF_HEADER_WINDOW 16384
 #define PLOZZ_KF_CALIB_PROBES 4
+/* After a BACKWARD seek on a no-Cues file the demuxer can leave the AVIO cursor a
+ * little PAST the Matroska Cluster header (not exactly on the 0x1F43B675 sync), so a
+ * parse anchored at the cursor misses and the WHOLE scan falls back to av_read_frame
+ * (~1 MiB/probe). Read a little BEFORE the cursor too and resync to the nearest
+ * preceding Cluster sync, so the cheap header parse engages regardless of the exact
+ * post-seek cursor. Calibration still cross-checks every resynced PTS, so a wrong
+ * resync can only fall back, never corrupt a boundary. */
+#define PLOZZ_KF_RESYNC_BACK   8192
+#define PLOZZ_KF_PROBE_READ    (PLOZZ_KF_RESYNC_BACK + PLOZZ_KF_HEADER_WINDOW)
 
 /*
  * Self-calibrating keyframe-PTS probe state, carried for the WHOLE session so
@@ -74,6 +83,7 @@ typedef struct {
     int64_t video_track;/* Matroska track number of the video stream */
     int calib_samples;  /* cross-checks accumulated so far */
     int header_reads;   /* telemetry: boundaries served purely by header-parse */
+    int probes_seen;    /* total probes (bounds the calibration diagnostics) */
 } kf_index_ctx;
 
 struct plozz_remux_session {
@@ -598,6 +608,34 @@ int plozz_remux_test_parse_cluster_keyframe(const uint8_t *buf, int len,
 }
 
 /*
+ * Find the byte offset of the Matroska Cluster sync (0x1F 0x43 0xB6 0x75) nearest to
+ * `anchor`, preferring the LATEST sync at or before `anchor` — the cluster that
+ * contains the keyframe the demuxer seeked to starts at or just before the cursor.
+ * Falls back to the first sync after `anchor` if none precedes it. Returns the offset
+ * or -1 when no sync is in the window. Pure; unit-testable via the shim below.
+ */
+static int mkv_find_cluster_sync(const uint8_t *buf, int len, int anchor) {
+    int best = -1;
+    for (int i = 0; i + 4 <= len; i++) {
+        if (buf[i] == 0x1Fu && buf[i + 1] == 0x43u &&
+            buf[i + 2] == 0xB6u && buf[i + 3] == 0x75u) {
+            if (i <= anchor) {
+                best = i;            /* keep the latest sync at/<= anchor */
+            } else {
+                if (best < 0) best = i;   /* none precedes anchor; take first after */
+                break;
+            }
+        }
+    }
+    return best;
+}
+
+/* Test shim: exposes the cluster-sync finder for unit tests (see header). */
+int plozz_remux_test_find_cluster_sync(const uint8_t *buf, int len, int anchor) {
+    return mkv_find_cluster_sync(buf, len, anchor);
+}
+
+/*
  * Read up to `want` bytes at byte `offset` directly via the session callbacks,
  * bypassing the avio buffer so the range reader's small discovery read-ahead
  * applies (a header parse needs only a few KB, not a 1 MiB avio refill). Returns
@@ -666,10 +704,32 @@ static double probe_keyframe_pts(plozz_remux_session *s, AVPacket *pkt, double f
     int64_t pos = avio_tell(s->ic->pb);
     int64_t raw = 0;
     int parsed = 0;
+    ix->probes_seen++;
     if (pos >= 0) {
-        uint8_t hbuf[PLOZZ_KF_HEADER_WINDOW];
-        int got = read_raw_at(s, pos, hbuf, PLOZZ_KF_HEADER_WINDOW);
-        if (got > 16 && mkv_parse_cluster_keyframe(hbuf, got, ix->video_track, &raw)) parsed = 1;
+        /* Read a little BEFORE the cursor and resync to the nearest preceding Cluster
+         * sync: a no-Cues BACKWARD seek can leave the cursor just past the cluster
+         * header, which previously made every parse miss → whole-scan av_read_frame. */
+        int back = (pos < PLOZZ_KF_RESYNC_BACK) ? (int)pos : PLOZZ_KF_RESYNC_BACK;
+        int64_t rstart = pos - back;
+        uint8_t hbuf[PLOZZ_KF_PROBE_READ];
+        int got = read_raw_at(s, rstart, hbuf, PLOZZ_KF_PROBE_READ);
+        int sync = (got > 16) ? mkv_find_cluster_sync(hbuf, got, back) : -1;
+        if (sync >= 0 &&
+            mkv_parse_cluster_keyframe(hbuf + sync, got - sync, ix->video_track, &raw)) {
+            parsed = 1;
+        }
+        /* Bounded calibration diagnostics: pinpoint why the cheap path does/doesn't
+         * engage (cursor not cluster-aligned vs track mismatch) without log spam. */
+        if (ix->probes_seen <= 8) {
+            int f = (sync >= 0) ? sync : 0;
+            unsigned b0 = (got > f) ? hbuf[f] : 0, b1 = (got > f + 1) ? hbuf[f + 1] : 0;
+            unsigned b2 = (got > f + 2) ? hbuf[f + 2] : 0, b3 = (got > f + 3) ? hbuf[f + 3] : 0;
+            remux_log(1, "remux: kf-index probe#%d pos=%lld got=%d clsync=%+d "
+                      "first4=%02x%02x%02x%02x parsed=%d raw=%lld track=%lld",
+                      ix->probes_seen, (long long)pos, got,
+                      (sync >= 0) ? (sync - back) : -9999,
+                      b0, b1, b2, b3, parsed, (long long)raw, (long long)ix->video_track);
+        }
     }
 
     if (ix->calibrated) {

@@ -134,17 +134,36 @@ private struct EntryTile: View {
     let icon: String
     let action: () -> Void
 
+    @FocusState private var isFocused: Bool
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzMetrics) private var metrics
+
+    private var titleColor: Color {
+        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+    }
+
+    /// Scale the tile size with the density setting so it grows/shrinks alongside
+    /// media cards when appearance is changed.
+    private var tileWidth: CGFloat { (260 * metrics.scale).rounded() }
+    private var tileHeight: CGFloat { (150 * metrics.scale).rounded() }
+    private var iconSize: CGFloat { (40 * metrics.scale).rounded() }
+
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 44))
-                    .foregroundStyle(Color.accentColor.gradient)
-                Text(title).font(.headline)
-            }
-            .frame(width: 280, height: 160)
+        VStack(spacing: (12 * metrics.scale).rounded()) {
+            Image(systemName: icon)
+                .font(.system(size: iconSize))
+                .foregroundStyle(isFocused ? titleColor : Color.accentColor)
+            Text(title)
+                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+                .foregroundStyle(titleColor)
         }
-        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
+        .frame(width: tileWidth, height: tileHeight)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 

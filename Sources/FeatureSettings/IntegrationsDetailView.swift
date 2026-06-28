@@ -252,55 +252,68 @@ struct AttributionsDetailView: View {
                 )
                 attribution(
                     "AetherEngine",
-                    "Plozzigen playback is powered by AetherEngine by Vincent Herbst, licensed under the LGPL-3.0 with an App Store / DRM exception. Source: github.com/superuser404notfound/AetherEngine"
+                    "Plozzigen playback is powered by AetherEngine by Vincent Herbst. Source: github.com/superuser404notfound/AetherEngine",
+                    licenses: [.lgpl("LGPL-3.0")]
                 )
                 attribution(
                     "FFmpeg",
-                    "Audio/video decoding uses FFmpeg libraries (libavcodec, libavformat, libavutil, libswresample, libswscale, libavfilter, libavdevice) licensed under the LGPL-2.1+. ffmpeg.org"
+                    "Audio/video decoding uses FFmpeg libraries (libavcodec, libavformat, libavutil, libswresample, libswscale, libavfilter, libavdevice). ffmpeg.org",
+                    licenses: [.lgpl("LGPL-2.1+")]
                 )
                 attribution(
                     "mpv & mpvkit",
-                    "Fallback playback uses mpv (GPL-2.0+) packaged by the mpvkit project. github.com/nicxleo/mpvkit"
+                    "Fallback playback uses mpv packaged by the mpvkit project. github.com/nicxleo/mpvkit",
+                    licenses: [.gpl("GPL-2.0+")]
                 )
                 attribution(
                     "libdovi",
-                    "Dolby Vision metadata parsing uses libdovi, licensed under the MIT license."
+                    "Dolby Vision metadata parsing uses libdovi.",
+                    licenses: [.mit()]
                 )
                 attribution(
                     "libass & Text Rendering",
-                    "Subtitle rendering uses libass (ISC license), FreeType (FreeType License / GPL-2.0), HarfBuzz (MIT), Fribidi (LGPL-2.1), and Unibreak (MIT)."
+                    "Subtitle rendering uses libass, FreeType, HarfBuzz, Fribidi, and Unibreak.",
+                    licenses: [.isc(), .lgpl("LGPL-2.1"), .mit()]
                 )
                 attribution(
                     "dav1d",
-                    "AV1 video decoding uses dav1d by VideoLAN, licensed under the BSD-2-Clause license."
+                    "AV1 video decoding uses dav1d by VideoLAN.",
+                    licenses: [.bsd("BSD-2")]
                 )
                 attribution(
                     "libplacebo & MoltenVK",
-                    "GPU-accelerated video rendering uses libplacebo (LGPL-2.1) and MoltenVK (Apache-2.0) for Vulkan-to-Metal translation."
+                    "GPU-accelerated video rendering uses libplacebo and MoltenVK for Vulkan-to-Metal translation.",
+                    licenses: [.lgpl("LGPL-2.1"), .apache()]
                 )
                 attribution(
                     "GnuTLS & Networking",
-                    "TLS and network transport use GnuTLS (LGPL-2.1), Nettle (LGPL-3.0), GMP (LGPL-3.0), and AMSMB2 (LGPL-2.1). OpenSSL (Apache-2.0) provides additional cryptography."
+                    "TLS and network transport use GnuTLS, Nettle, GMP, AMSMB2, and OpenSSL.",
+                    licenses: [.lgpl("LGPL-2.1"), .lgpl("LGPL-3.0"), .apache()]
                 )
                 attribution(
                     "libbluray",
-                    "Blu-ray disc structure parsing uses libbluray, licensed under the LGPL-2.1."
+                    "Blu-ray disc structure parsing uses libbluray.",
+                    licenses: [.lgpl("LGPL-2.1")]
                 )
                 attribution(
                     "TMDB",
-                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Artwork and metadata are provided by TMDB (themoviedb.org)."
+                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Artwork and metadata are provided by TMDB (themoviedb.org).",
+                    licenses: [.api()]
                 )
                 attribution(
                     "OMDb & AniList",
-                    "Additional ratings are sourced from the OMDb API (omdbapi.com) and AniList (anilist.co). Neither endorses or is affiliated with Plozz."
+                    "Additional ratings are sourced from the OMDb API (omdbapi.com) and AniList (anilist.co). Neither endorses or is affiliated with Plozz.",
+                    licenses: [.api()]
                 )
                 attribution(
                     "Wikidata",
-                    "Fallback artwork lookup uses the Wikidata Query Service (wikidata.org), available under the CC0 public domain dedication."
+                    "Fallback artwork lookup uses the Wikidata Query Service (wikidata.org).",
+                    licenses: [.cc0()]
                 )
                 attribution(
                     "YouTubeKit",
-                    "Trailer playback uses YouTubeKit by Alexander Eichhorn, licensed under the MIT license."
+                    "Trailer playback uses YouTubeKit by Alexander Eichhorn.",
+                    licenses: [.mit()]
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -310,15 +323,17 @@ struct AttributionsDetailView: View {
         .scrollClipDisabled()
     }
 
-    private func attribution(_ title: String, _ text: String) -> some View {
-        AttributionCard(title: title, text: text)
+    private func attribution(_ title: String, _ text: String, licenses: [LicenseBadge] = []) -> some View {
+        AttributionCard(title: title, text: text, licenses: licenses)
     }
 }
 
-/// A single focusable credit card with the shared inverted-card focus look.
+/// A single focusable credit card with the shared inverted-card focus look
+/// and optional license badge pills.
 private struct AttributionCard: View {
     let title: String
     let text: String
+    var licenses: [LicenseBadge] = []
 
     @FocusState private var isFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
@@ -327,8 +342,14 @@ private struct AttributionCard: View {
     private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(title).font(.headline.weight(.semibold))
+                Spacer()
+                ForEach(licenses) { badge in
+                    badge.view(focused: isFocused)
+                }
+            }
             Text(text)
                 .font(.callout)
                 .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.78)) : AnyShapeStyle(.secondary))
@@ -350,7 +371,51 @@ private struct AttributionCard: View {
         .focused($isFocused)
         .animation(.easeOut(duration: 0.16), value: isFocused)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title). \(text)")
+        .accessibilityLabel("\(title). \(licenses.map(\.label).joined(separator: ", ")). \(text)")
+    }
+}
+
+/// A license badge model with a tint color category.
+private struct LicenseBadge: Identifiable {
+    let id: String
+    let label: String
+    let tint: Color
+
+    func view(focused: Bool) -> some View {
+        Text(label)
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(focused ? Color.black : .white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill(focused ? tint.opacity(0.85) : tint.opacity(0.7))
+            )
+    }
+
+    // Factory presets for common license families
+    static func gpl(_ version: String = "GPL-3.0") -> LicenseBadge {
+        LicenseBadge(id: version, label: version, tint: Color(red: 0.85, green: 0.25, blue: 0.25))
+    }
+    static func lgpl(_ version: String = "LGPL-3.0") -> LicenseBadge {
+        LicenseBadge(id: version, label: version, tint: Color(red: 0.9, green: 0.45, blue: 0.2))
+    }
+    static func mit() -> LicenseBadge {
+        LicenseBadge(id: "MIT", label: "MIT", tint: Color(red: 0.2, green: 0.65, blue: 0.35))
+    }
+    static func apache() -> LicenseBadge {
+        LicenseBadge(id: "Apache-2.0", label: "Apache-2.0", tint: Color(red: 0.2, green: 0.5, blue: 0.8))
+    }
+    static func bsd(_ variant: String = "BSD-2") -> LicenseBadge {
+        LicenseBadge(id: variant, label: variant, tint: Color(red: 0.4, green: 0.55, blue: 0.7))
+    }
+    static func cc0() -> LicenseBadge {
+        LicenseBadge(id: "CC0", label: "CC0", tint: Color(red: 0.5, green: 0.5, blue: 0.5))
+    }
+    static func isc() -> LicenseBadge {
+        LicenseBadge(id: "ISC", label: "ISC", tint: Color(red: 0.3, green: 0.6, blue: 0.5))
+    }
+    static func api() -> LicenseBadge {
+        LicenseBadge(id: "API", label: "API", tint: Color(red: 0.55, green: 0.4, blue: 0.7))
     }
 }
 #endif

@@ -221,7 +221,7 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         let provisionalVOD = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxProvisionalVOD")
         // Flag `com.plozz.playback.remuxCuesProbe` (DEFAULT OFF): the CRITICAL
         // EXPERIMENT — parse the Matroska Cues index directly (bypassing libavformat)
-        // and log `cues-probe: ... N=<count>` so a capture settles whether a
+        // and log `cues: hasCues=YES count=<N> span=[t0..tN]` so a capture settles whether a
         // "no usable index" title actually carries Cues ffmpeg wasn't reading. Pure
         // measurement: result is logged + discarded, no behavior change.
         let cuesProbe = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxCuesProbe")
@@ -235,7 +235,7 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
                                            provisionalVOD: provisionalVOD,
                                            cuesProbe: cuesProbe)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
-        if cuesProbe { RemuxLog.info("Session: remuxCuesProbe ON — logging direct-EBML Cues count (cues-probe: marker)") }
+        if cuesProbe { RemuxLog.info("Session: remuxCuesProbe ON — logging direct-EBML Cues count (cues: marker)") }
         if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")\(keyframeCache ? " (cache ON)" : "")\(lazyKeyframes ? " (lazy ON)" : "")\(matroskaSampler ? " (matroska-sampler ON)" : "")\(provisionalVOD ? " (provisional-VOD ON)" : "")") }
         let facts = segmenter.facts
 

@@ -211,25 +211,25 @@ final class RemuxSegmenter: @unchecked Sendable {
         // ACTUALLY carries a Cues keyframe index ffmpeg simply wasn't following over
         // our VOD range reader. PURE MEASUREMENT: the table is logged and DISCARDED;
         // it changes NO playback behavior. Run on the suspect titles (Family Guy
-        // 43681, Jupiter 1438) and read the `cues-probe:` marker in the capture.
+        // 43681, Jupiter 1438) and read the `cues:` marker in the capture.
         if cuesProbe {
             let probeFixed = plozz_remux_used_fixed_cadence(session) == 1
             let probeReader = HTTPRangeReader(url: sourceURL, headers: headers)
             let probeSampler = MatroskaKeyframeSampler(source: HTTPRangeByteSource(probeReader))
             if let table = probeSampler.keyframeTableFromCues() {
                 let n = table.times.count
+                let t0 = table.times.first ?? 0, tN = table.times.last ?? 0
                 var maxGap = 0.0, k = 1
                 while k < n { let g = table.times[k] - table.times[k - 1]; if g > maxGap { maxGap = g }; k += 1 }
                 let trustworthy = n >= 2 && maxGap <= 30.0
                 RemuxLog.info(String(format:
-                    "cues-probe: %@ — libav fixedCadence=%@; direct-EBML Cues FOUND N=%d CuePoints "
-                        + "(duration=%.2fs, maxGap=%.2fs, byteOffsets=yes, trustworthy=%@)",
-                    sourceURL.lastPathComponent, probeFixed ? "YES" : "no",
-                    n, table.duration, maxGap, trustworthy ? "YES" : "no"))
+                    "cues: hasCues=YES count=%d span=[%.3f..%.3f] %@ — libav fixedCadence=%@, "
+                        + "duration=%.2fs, maxGap=%.2fs, byteOffsets=yes, trustworthy=%@",
+                    n, t0, tN, sourceURL.lastPathComponent, probeFixed ? "YES" : "no",
+                    table.duration, maxGap, trustworthy ? "YES" : "no"))
             } else {
                 RemuxLog.info(String(format:
-                    "cues-probe: %@ — libav fixedCadence=%@; direct-EBML Cues NONE "
-                        + "(no usable Cues element; routes to no-Cues walk)",
+                    "cues: hasCues=NO %@ — libav fixedCadence=%@ (no usable Cues element; routes to no-Cues walk)",
                     sourceURL.lastPathComponent, probeFixed ? "YES" : "no"))
             }
         }

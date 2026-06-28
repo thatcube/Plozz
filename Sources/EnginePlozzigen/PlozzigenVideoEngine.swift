@@ -49,6 +49,10 @@ public final class PlozzigenVideoEngine: VideoEngine {
         [.playbackSpeed]
     }
 
+    deinit {
+        progressTimer?.cancel()
+    }
+
     // MARK: - Callbacks
 
     public var onProgress: (@MainActor () -> Void)?
@@ -99,8 +103,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 startPosition: startPosition > 0 ? startPosition : nil,
                 options: options
             )
+            // Guard against stop() having run during the await above.
+            guard status == .loading else { return }
             engine.play()
-            // Track lists are published by AetherEngine after load completes.
             syncTracks()
         } catch {
             let err: AppError = .unknown(error.localizedDescription)

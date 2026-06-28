@@ -165,10 +165,18 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// carrying the precise failing libavformat stage + AVERROR + network reason
     /// when the file can't be demuxed, so the caller's fallback path can report
     /// exactly why (vs an opaque failure).
+    /// Set when the segment table was published as a full-duration **provisional
+    /// VOD** at open (flag `remuxProvisionalVOD`): the whole timeline is advertised
+    /// up front with estimated tail boundaries so AVPlayer permits seek-anywhere
+    /// immediately, instead of a growing EVENT list (which clamps far-seek to the
+    /// discovered frontier). Read by the streamer to serve a static VOD playlist.
+    private(set) var provisionalVODActive = false
+
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
          deriveEac3FrameDur: Bool = false, keyframeSegments: Bool = false,
          keyframeFullScan: Bool = false, keyframeCache: Bool = false,
-         lazyKeyframes: Bool = false, matroskaSampler: Bool = false) throws {
+         lazyKeyframes: Bool = false, matroskaSampler: Bool = false,
+         provisionalVOD: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -374,6 +382,57 @@ final class RemuxSegmenter: @unchecked Sendable {
                     RemuxLog.info("remux: lazy keyframe discovery — prefix found no "
                         + "keyframe in [0,90s] within budget; keeping fixed-cadence (no timeline scan)")
                 }
+            }
+
+            // Flag-gated (com.plozz.playback.remuxProvisionalVOD): convert a partial
+            // lazy PREFIX into a FULL-DURATION provisional VOD table at open.
+            //
+            // On-device we proved the growing EVENT shape (what lazy mode serves) is
+            // disqualified: AVPlayer plays it in sync but CLAMPS far-seek to the last
+            // advertised segment (a viewer could only skip ~3 min ahead — the
+            // discovered frontier). Full-timeline seek is a hard requirement. A VOD
+            // list WITH EXT-X-ENDLIST that advertises the WHOLE timeline up front lets
+            // AVPlayer permit seek-anywhere immediately. So here we keep the exact,
+            // keyframe-cut prefix the sampler just discovered and extend it across the
+            // rest of the timeline with an estimated fixed-cadence tail (the prefix's
+            // measured GOP cadence), then publish that as a static full table. Seek is
+            // immediate everywhere; the estimated-tail segments still mux from their
+            // nearest preceding real keyframe, so each is internally clean (the open
+            // declared-vs-real seek imprecision on the tail is the cost, traded for
+            // full seekability — measured on-device, refined per-segment in a follow-up).
+            if provisionalVOD, lazyStarted, lazyActive, !lazyComplete, self.lazyKf.count >= 2 {
+                var prefixDurations: [Double] = []
+                let pc = Int(plozz_remux_segment_count(session))
+                prefixDurations.reserveCapacity(pc)
+                for i in 0..<pc {
+                    var s = plozz_remux_segment()
+                    if plozz_remux_segment_at(session, Int32(i), &s) == 1 {
+                        prefixDurations.append(s.duration_seconds)
+                    }
+                }
+                let plan = ProvisionalVODPlan(totalDuration: sourceDuration,
+                                              realPrefix: prefixDurations,
+                                              targetSeconds: targetSegmentSeconds)
+                // Cumulative segment START times, EXCLUDING the final total — add_tail
+                // rebuilds the last segment to the real source duration. Boundaries are
+                // >= target apart so the C grouping keeps them as-is.
+                var boundaries: [Double] = [0]
+                var acc = 0.0
+                for d in plan.segmentDurations.dropLast() { acc += d; boundaries.append(acc) }
+                boundaries.withUnsafeBufferPointer { buf in
+                    _ = plozz_remux_apply_keyframe_boundaries_ex(session, buf.baseAddress,
+                        Int32(buf.count), targetSegmentSeconds, 1)
+                }
+                // Serve a STATIC full-duration VOD (no background EVENT growth): the
+                // table is complete now, so stop lazy discovery.
+                self.lazyActive = false
+                self.lazyComplete = true
+                self.provisionalVODActive = true
+                RemuxLog.info(String(format:
+                    "remux: provisional VOD — published FULL timeline %d segments "
+                        + "(%d exact prefix + estimated tail @ %.2fs cadence) to %.0fs; "
+                        + "ENDLIST at open → seek-anywhere",
+                    plan.segmentDurations.count, plan.realPrefixCount, plan.cadence, sourceDuration))
             }
 
             if !appliedCache && !lazyStarted {

@@ -210,15 +210,25 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // remuxKeyframeSegments; falls back to libavformat discovery for non-Matroska
         // sources. Composes with remuxKeyframeCache.
         let matroskaSampler = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxMatroskaSampler")
+        // Flag `com.plozz.playback.remuxProvisionalVOD` (DEFAULT OFF): publish the
+        // WHOLE timeline as a full-duration provisional VOD (EXT-X-ENDLIST at open)
+        // instead of a growing EVENT list, so AVPlayer permits seek-anywhere
+        // immediately. On-device the EVENT shape clamped far-seek to the discovered
+        // frontier (~3 min) — disqualifying for a movie. This keeps the exact
+        // sampler prefix and extends it with an estimated fixed-cadence tail; gated
+        // under remuxKeyframeSegments and only engages when a lazy prefix started
+        // (so it needs remuxMatroskaSampler or remuxLazyKeyframes too).
+        let provisionalVOD = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxProvisionalVOD")
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
                                            keyframeSegments: keyframeSegments,
                                            keyframeFullScan: keyframeFullScan,
                                            keyframeCache: keyframeCache,
                                            lazyKeyframes: lazyKeyframes,
-                                           matroskaSampler: matroskaSampler)
+                                           matroskaSampler: matroskaSampler,
+                                           provisionalVOD: provisionalVOD)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
-        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")\(keyframeCache ? " (cache ON)" : "")\(lazyKeyframes ? " (lazy ON)" : "")\(matroskaSampler ? " (matroska-sampler ON)" : "")") }
+        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")\(keyframeCache ? " (cache ON)" : "")\(lazyKeyframes ? " (lazy ON)" : "")\(matroskaSampler ? " (matroska-sampler ON)" : "")\(provisionalVOD ? " (provisional-VOD ON)" : "")") }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only

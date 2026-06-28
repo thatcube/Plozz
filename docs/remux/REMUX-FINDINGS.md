@@ -169,15 +169,25 @@ struct KeyframeTable { var duration: Double; var times: [Double]; var byteOffset
 > of these structs; this is purely a fresh-session provider-lane integration constraint.)
 >
 > **Two more settled handoff decisions (recorded; confirm against real merged code):**
+> - **⚠️ Canonical C sink — SHIPPED REALITY differs from my earlier recommendation. Verified against
+>   the MERGED engine (`3aaace3`) source:** the merged tree exposes
+>   **`plozz_remux_set_cue_table(session, double duration, const double* times, int count,
+>   const int64_t* byte_offsets /*nullable*/)`** + `plozz_remux_has_cue_table(session)`
+>   (`remux_core.h:313`/`:318`). Call order: `set_cue_table(...)` FIRST (stores the table only),
+>   THEN the UNCHANGED 2-arg `plozz_remux_set_full_vod_mode(session, 1)` (`remux_core.h:333`); the
+>   consume runs inside full-vod engage at `remux_core.c:1181` (`if (s->has_cue_table && cue_count>=2)`),
+>   gated on the existing `used_fixed_cadence==1` engage gate. **`apply_keyframe_boundaries_ex` is NOT
+>   present in the merged tree** — my earlier "reuse the existing `apply_keyframe_boundaries_ex`"
+>   recommendation was SUPERSEDED by what B7 actually shipped (`set_cue_table`). Track A's
+>   `FullVODKeyframeSink` is a one-signature swap either way (both consume the same
+>   `KeyframeTable{duration, zeroBasedTimes, byteOffsets?}`). Fresh session: wire against
+>   `set_cue_table` (it's what's on `main` after the merge); reconcile only if it later prefers the
+>   apply_keyframe_boundaries_ex shape. **Gating: only set a cue table when `used_fixed_cadence==1`
+>   (libav-blind-but-Cues-exist); native-index titles NO-OP full-vod — don't set there.**
 > - **0-based boundaries:** `plan_segments_core` clamps a non-zero first boundary → segment-0
 >   becomes over-long → desync. The marshal MUST feed 0-based times — Track A added
->   `KeyframeTable.zeroBasedTimes` for exactly this.
-> - **Canonical C sink = the EXISTING `plozz_remux_apply_keyframe_boundaries_ex(session, kf,
->   count, target, add_tail)`** (`remux_core.h:212`), **not** a new front-end on
->   `set_full_vod_mode`. It already exists + is tested on B5/B6 branches (B6's `apply_keyframes`
->   uses it); exact-Cues = `add_tail=0`, fixed-cadence replacement gated on
->   `used_fixed_cadence==1`. The 0-base rebase + `add_tail` stay in C; the Swift marshal only
->   feeds `zeroBasedTimes`. `set_full_vod_mode` keeps window/cadence setup only.
+>   `KeyframeTable.zeroBasedTimes`; B7 also normalizes to 0-based inside the consume at `3aaace3`
+>   ("normalize cue-table boundaries to 0-based domain in full-vod consume").
 >
 > **B5 final-report integration gotchas (bank these — non-obvious, costly to rediscover):**
 > - **Cache call-site merge break (B5 ↔ Track C):** B5's branch still has the PRE-donation

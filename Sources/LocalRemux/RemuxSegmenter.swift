@@ -186,9 +186,10 @@ final class RemuxSegmenter: @unchecked Sendable {
                         RemuxLog.info(String(format:
                             "RemuxSegmenter: PARALLEL keyframe-scan rebuilt %d segments from %d keyframes "
                             + "across %d slices (%d complete) — read %lld bytes (%.1f%% of %lld) in %d fetches, "
-                            + "%.2fs wall [index=%@]",
+                            + "%.2fs wall, header-parse served %d/%d boundaries [index=%@]",
                             applied, pr.keyframes.count, pr.sliceCount, pr.completeSlices,
                             pr.bytesRead, pct, total, pr.fetchCount, pr.elapsedSeconds,
+                            pr.headerReads, max(0, pr.keyframes.count - 1),
                             keyframeIndex ? "on" : "off"))
                     }
                 }
@@ -395,6 +396,7 @@ enum ParallelKeyframeDiscovery {
         var bytesRead: Int64
         var fetchCount: Int
         var elapsedSeconds: Double
+        var headerReads: Int       // boundaries served by the cheap cluster-header parse
     }
 
     /// Merge K per-slice keyframe arrays into one sorted, strictly-increasing list with a
@@ -424,6 +426,7 @@ enum ParallelKeyframeDiscovery {
         var complete: Bool
         var bytes: Int64
         var fetches: Int
+        var headerReads: Int
     }
 
     /// Run the parallel discovery over `sourceURL`. Returns nil when it cannot improve on
@@ -453,11 +456,12 @@ enum ParallelKeyframeDiscovery {
             let reader = HTTPRangeReader(url: sourceURL, headers: headers)
             if keyframeIndex { reader.setReadAhead(64 * 1024) }
 
-            func record(_ keyframes: [Double], complete: Bool) {
+            func record(_ keyframes: [Double], complete: Bool, headerReads: Int = 0) {
                 let snap = reader.networkSnapshot()
                 lock.lock()
                 outs.append(SliceOut(keyframes: keyframes, complete: complete,
-                                     bytes: snap.bytesFetched, fetches: snap.fetchCount))
+                                     bytes: snap.bytesFetched, fetches: snap.fetchCount,
+                                     headerReads: headerReads))
                 lock.unlock()
             }
 
@@ -488,7 +492,8 @@ enum ParallelKeyframeDiscovery {
             // Incomplete only when the cap tripped before reaching the slice end;
             // a natural stop (EOF / crossed end) is "complete" for this slice.
             let hitCap = n >= maxProbes && (keyframes.last ?? sliceStart) < sliceEnd
-            record(keyframes, complete: !hitCap)
+            record(keyframes, complete: !hitCap,
+                   headerReads: Int(plozz_remux_kf_probe_header_reads(probe)))
         }
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds &- started.uptimeNanoseconds) / 1e9
 
@@ -499,7 +504,8 @@ enum ParallelKeyframeDiscovery {
                       completeSlices: outs.filter { $0.complete }.count,
                       bytesRead: outs.reduce(0) { $0 + $1.bytes },
                       fetchCount: outs.reduce(0) { $0 + $1.fetches },
-                      elapsedSeconds: elapsed)
+                      elapsedSeconds: elapsed,
+                      headerReads: outs.reduce(0) { $0 + $1.headerReads })
     }
 }
 

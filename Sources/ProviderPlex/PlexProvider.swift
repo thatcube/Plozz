@@ -522,6 +522,9 @@ public struct PlexProvider: MediaProvider {
             productionYear: dto.year,
             officialRating: dto.contentRating,
             genres: dto.Genre?.compactMap(\.tag) ?? [],
+            people: people(from: dto),
+            studios: dto.studio.flatMap { $0.isEmpty ? nil : [$0] } ?? [],
+            tags: dto.Tag?.compactMap(\.tag).filter { !$0.isEmpty } ?? [],
             seriesID: isEpisode ? dto.grandparentRatingKey : (kind == .season ? dto.parentRatingKey : nil),
             seasonID: isEpisode ? dto.parentRatingKey : nil,
             runtime: runtime,
@@ -540,6 +543,43 @@ public struct PlexProvider: MediaProvider {
             isFavorite: false,
             lastPlayedAt: dto.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
+    }
+
+    /// Maps Plex's `<Role>` (cast) plus `<Director>`/`<Writer>` (crew) elements
+    /// into provider-agnostic `MediaPerson`s, so a movie opened from a Plex
+    /// library shows the same cast row as its Jellyfin counterpart. Each kind is
+    /// tagged so `MediaItem.cast` (actors only) and any future crew section can
+    /// split them. Person ids are namespaced by kind because Plex reuses one
+    /// global person id across roles (e.g. an actor who also directed), which
+    /// would otherwise collide in `Identifiable` lists.
+    private func people(from dto: PlexMetadata) -> [MediaPerson] {
+        func mapped(_ entries: [PlexRole]?, kind: String) -> [MediaPerson] {
+            (entries ?? []).compactMap { entry in
+                guard let name = entry.tag, !name.isEmpty else { return nil }
+                let identity = entry.id.map(String.init) ?? name
+                return MediaPerson(
+                    id: "\(kind.lowercased()):\(identity)",
+                    name: name,
+                    role: entry.role.flatMap { $0.isEmpty ? nil : $0 },
+                    kind: kind,
+                    imageURL: personImageURL(entry.thumb)
+                )
+            }
+        }
+        return mapped(dto.Role, kind: "Actor")
+            + mapped(dto.Director, kind: "Director")
+            + mapped(dto.Writer, kind: "Writer")
+    }
+
+    /// Resolves a person headshot. Plex serves these either as a server-relative
+    /// path (`/library/metadata/…/thumb/…`, needing the token + transcoder) or as
+    /// an already-absolute `metadata-static.plex.tv` URL — use the latter directly.
+    private func personImageURL(_ thumb: String?) -> URL? {
+        guard let thumb, !thumb.isEmpty else { return nil }
+        if thumb.hasPrefix("http://") || thumb.hasPrefix("https://") {
+            return URL(string: thumb)
+        }
+        return client.imageURL(path: thumb, maxWidth: 300)
     }
 
     /// Maps Plex's multiple `Media` elements (the same title in several

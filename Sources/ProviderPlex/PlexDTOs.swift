@@ -108,6 +108,17 @@ struct PlexMetadata: Decodable {
     /// also sharpens anime detection) instead of a fuzzy title search.
     let Guid: [PlexGuid]?
     let Genre: [PlexTag]?
+    /// Freeform keyword tags (`<Tag tag="…"/>`), when the agent records any.
+    /// Mapped to `MediaItem.tags` for parity with Jellyfin.
+    let Tag: [PlexTag]?
+    /// Cast (`<Role>` — actors, with character `role` and a headshot `thumb`).
+    let Role: [PlexRole]?
+    /// Crew elements Plex records as people with the same shape as `Role`
+    /// (an `id`, a person `tag` name and an optional `thumb`).
+    let Director: [PlexRole]?
+    let Writer: [PlexRole]?
+    /// Production company (Plex records a single `studio` attribute, not a list).
+    let studio: String?
     let Media: [PlexMedia]?
     /// Plex Pass intro/credits markers, present only when the metadata request
     /// passes `includeMarkers=1`. Offsets are in milliseconds.
@@ -123,6 +134,30 @@ struct PlexGuid: Decodable {
 /// used.
 struct PlexTag: Decodable {
     let tag: String?
+}
+
+/// A Plex person element (`<Role>`, `<Director>`, `<Writer>`): an actor or crew
+/// member. `tag` is the person's name, `role` the character (cast only) and
+/// `thumb` a headshot (a server path or an absolute metadata-static URL).
+/// Decoded leniently because Plex serialises `id` as a number or string
+/// depending on server version.
+struct PlexRole: Decodable {
+    let id: Int?
+    let tag: String?
+    let role: String?
+    let thumb: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, tag, role, thumb
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.flexibleInt(.id)
+        tag = c.flexibleString(.tag)
+        role = c.flexibleString(.role)
+        thumb = c.flexibleString(.thumb)
+    }
 }
 
 struct PlexMedia: Decodable {

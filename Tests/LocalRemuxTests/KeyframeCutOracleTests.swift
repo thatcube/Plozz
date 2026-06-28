@@ -169,6 +169,81 @@ final class KeyframeCutOracleTests: XCTestCase {
         XCTAssertTrue(v.contains { $0.kind == .nonPositiveSegment })
     }
 
+    // MARK: - Structural plan well-formedness (validatePlanWellFormed)
+
+    func testValidatePlanWellFormed_exactDurationSumPasses() {
+        // Sums exactly to total (the seek-bar / ENDLIST invariant).
+        let v = KeyframeCutOracle.validatePlanWellFormed(segmentDurations: [6, 6, 7, 5],
+                                                         totalDuration: 24)
+        XCTAssertTrue(v.isEmpty, "\(v)")
+    }
+
+    func testValidatePlanWellFormed_sumMismatchFlagged() {
+        let v = KeyframeCutOracle.validatePlanWellFormed(segmentDurations: [6, 6, 6],
+                                                         totalDuration: 24) // sums to 18
+        XCTAssertTrue(v.contains { $0.kind == .planSumMismatch })
+    }
+
+    func testValidatePlanWellFormed_nonPositiveSegmentFlagged() {
+        let v = KeyframeCutOracle.validatePlanWellFormed(segmentDurations: [6, 0, 6],
+                                                         totalDuration: 12)
+        XCTAssertTrue(v.contains { $0.kind == .nonPositiveSegment && $0.index == 1 })
+    }
+
+    func testValidatePlanWellFormed_emptyFlagged() {
+        let v = KeyframeCutOracle.validatePlanWellFormed(segmentDurations: [],
+                                                         totalDuration: 12)
+        XCTAssertTrue(v.contains { $0.kind == .emptyTable })
+    }
+
+    func testValidatePlanWellFormed_nonFiniteFlagged() {
+        let v = KeyframeCutOracle.validatePlanWellFormed(segmentDurations: [6, .nan, 6],
+                                                         totalDuration: 18)
+        XCTAssertTrue(v.contains { $0.kind == .nonFiniteValue && $0.index == 1 })
+    }
+
+    func testValidatePlanWellFormed_targetDurationCeilingTooLowFlagged() {
+        // Longest segment 11.4 but TARGETDURATION declared 6 → invalid HLS.
+        let v = KeyframeCutOracle.validatePlanWellFormed(segmentDurations: [6, 11.4, 5],
+                                                         totalDuration: 22.4,
+                                                         targetDurationCeiling: 6)
+        XCTAssertTrue(v.contains { $0.kind == .targetDurationTooLow })
+    }
+
+    func testValidatePlanWellFormed_acceptsMeasuredCadencePlan_thatKeyframeTierRejects() {
+        // THE two-tier point: B7's measured-cadence plan has an ESTIMATED tail that
+        // is NOT keyframe-aligned. The structural tier accepts it (well-formed:
+        // positive, sums to duration); the keyframe-exact tier MUST reject it
+        // (tail cuts aren't real keyframes). Proves validatePlanWellFormed is the
+        // right gate for B7's plan and validateCutTimes is not.
+        let durations = [6.0, 6, 6, 6, 6, 6, 6, 6, 6, 6] // 60s at fixed 6s cadence
+        let total = 60.0
+        // Structural tier: well-formed.
+        XCTAssertTrue(KeyframeCutOracle.validatePlanWellFormed(segmentDurations: durations,
+                                                               totalDuration: total).isEmpty)
+        // Keyframe-exact tier with real keyframes only every ~10s → mid-GOP cuts.
+        let realKeyframes = [0.0, 10, 20, 30, 40, 50]
+        let exact = KeyframeCutOracle.validateSegmentPlan(segmentDurations: durations,
+                                                          startPTS: 0,
+                                                          keyframeTimes: realKeyframes,
+                                                          duration: total)
+        XCTAssertTrue(exact.contains { $0.kind == .cutOffKeyframe },
+                      "keyframe-exact tier must reject a measured-cadence tail")
+    }
+
+    func testValidatePlanWellFormed_harvestsProvisionalVODPlanInvariants() {
+        // Harvest: the actual ProvisionalVODPlan output must satisfy the oracle's
+        // structural contract (exact-duration sum, positive, valid TARGETDURATION).
+        let plan = ProvisionalVODPlan(totalDuration: 8928,
+                                      realPrefix: [6, 6, 6, 7.2, 5.1],
+                                      targetSeconds: 6)
+        let v = KeyframeCutOracle.validatePlanWellFormed(
+            segmentDurations: plan.segmentDurations,
+            totalDuration: 8928, // the REQUESTED programme duration, not the computed sum
+            targetDurationCeiling: plan.targetDurationCeiling)
+        XCTAssertTrue(v.isEmpty, "ProvisionalVODPlan must be structurally well-formed: \(v)")
+    }
+
     // MARK: - Differential cross-check
 
     func testTablesAgree_identicalTablesAgree() {

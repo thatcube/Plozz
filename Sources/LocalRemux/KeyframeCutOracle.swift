@@ -47,6 +47,8 @@ enum KeyframeCutOracle {
             case cutOffKeyframe        // a cut boundary not on any real keyframe
             case firstCutNotAtAnchor   // first boundary not at the first keyframe
             case timelineGap           // boundaries don't tile [anchor, duration]
+            case planSumMismatch       // segment durations don't sum to total duration
+            case targetDurationTooLow  // HLS TARGETDURATION ceiling < longest segment
         }
         let kind: Kind
         /// Table/segment index the violation refers to, or -1 when not positional.
@@ -210,6 +212,69 @@ enum KeyframeCutOracle {
         }
         return validateCutTimes(boundaries, keyframeTimes: keyframeTimes,
                                 duration: duration, tolerance: tolerance)
+    }
+
+    // MARK: - Structural plan well-formedness (ANY VOD plan, keyframe-agnostic)
+
+    /// Validates the STRUCTURAL well-formedness of any emitted VOD segment plan —
+    /// the tier that applies to BOTH a keyframe-exact Cues plan AND B7's
+    /// measured-cadence provisional plan (whose tail is *intentionally estimated*,
+    /// NOT keyframe-aligned, so the stricter `validateCutTimes` on-keyframe check
+    /// must NOT be applied to it). This pins the invariants AVPlayer's seek-bar and
+    /// `EXT-X-ENDLIST` end-of-stream mapping depend on, independent of where the
+    /// boundaries fall:
+    ///
+    ///  * the plan is non-empty, all durations finite, every segment strictly
+    ///    positive (no zero/negative segment);
+    ///  * the advertised timeline sums EXACTLY to `totalDuration` (within
+    ///    `tolerance`) — a drift here is the tail-404 / seek-overshoot class of bug
+    ///    where the playlist claims a different length than the media;
+    ///  * (optional) the HLS `TARGETDURATION` ceiling is >= the longest segment, as
+    ///    the spec requires.
+    ///
+    /// Use this as the universal "is this playlist trustworthy" gate; layer
+    /// `validateCutTimes` on top ONLY for plans that additionally CLAIM every
+    /// boundary is a real keyframe (exact Cues / probe plans).
+    static func validatePlanWellFormed(segmentDurations: [Double],
+                                       totalDuration: Double,
+                                       targetDurationCeiling: Int? = nil,
+                                       tolerance: Double = defaultTolerance) -> [Violation] {
+        var out: [Violation] = []
+
+        if segmentDurations.isEmpty {
+            out.append(.init(kind: .emptyTable, index: -1, value: 0,
+                             detail: "VOD plan has no segments"))
+            return out
+        }
+
+        var sum = 0.0
+        var longest = 0.0
+        for (i, d) in segmentDurations.enumerated() {
+            if !d.isFinite {
+                out.append(.init(kind: .nonFiniteValue, index: i, value: d,
+                                 detail: "segment duration is not finite"))
+                continue
+            }
+            if d <= 0 {
+                out.append(.init(kind: .nonPositiveSegment, index: i, value: d,
+                                 detail: "segment \(i) has non-positive duration"))
+            }
+            sum += d
+            if d > longest { longest = d }
+        }
+
+        if totalDuration.isFinite && totalDuration > 0,
+           abs(sum - totalDuration) > max(tolerance, 1e-4) {
+            out.append(.init(kind: .planSumMismatch, index: -1, value: sum,
+                             detail: "segment durations sum to \(sum), not the media duration \(totalDuration) — seek-bar / ENDLIST drift"))
+        }
+
+        if let ceiling = targetDurationCeiling, Double(ceiling) + tolerance < longest {
+            out.append(.init(kind: .targetDurationTooLow, index: -1, value: Double(ceiling),
+                             detail: "TARGETDURATION \(ceiling) is below the longest segment \(longest) — invalid HLS"))
+        }
+
+        return out
     }
 
     // MARK: - Differential cross-check between two independent producers

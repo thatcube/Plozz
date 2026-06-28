@@ -112,6 +112,7 @@ public enum NightShiftDimness: String, CaseIterable, Identifiable, Codable, Send
 public enum NightShiftScheduleMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case solar
     case manual
+    case alwaysOn
 
     public var id: String { rawValue }
 
@@ -119,6 +120,7 @@ public enum NightShiftScheduleMode: String, CaseIterable, Identifiable, Codable,
         switch self {
         case .solar: return "Auto"
         case .manual: return "Manual"
+        case .alwaysOn: return "Always On"
         }
     }
 }

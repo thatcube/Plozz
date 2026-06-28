@@ -152,6 +152,20 @@ final class NightShiftModelTests: XCTestCase {
         XCTAssertEqual(model.currentIntensity, 0, accuracy: 0.0001)
     }
 
+    func testAlwaysOnIsFullStrengthRegardlessOfTime() {
+        var s = NightShiftSettings.default
+        s.isEnabled = true
+        s.scheduleMode = .alwaysOn
+        let model = makeModel(s)
+
+        // Always-on ignores the clock: full strength at noon and at midnight.
+        model.previewDate = todayAt(hour: 12)
+        XCTAssertEqual(model.currentIntensity, 1, accuracy: 0.0001)
+        model.previewDate = todayAt(hour: 0)
+        XCTAssertEqual(model.currentIntensity, 1, accuracy: 0.0001)
+        XCTAssertTrue(model.isActiveNow)
+    }
+
     func testChannelScalarsWarmAndDimAtFullNight() {
         var s = NightShiftSettings.default
         s.isEnabled = true

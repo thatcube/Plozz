@@ -195,7 +195,7 @@ public final class NightShiftSettingsModel {
     public var activeTimeZone: TimeZone {
         switch settings.scheduleMode {
         case .solar: return region.timeZone
-        case .manual: return .current
+        case .manual, .alwaysOn: return .current
         }
     }
 
@@ -316,6 +316,12 @@ public final class NightShiftSettingsModel {
     public func scheduleSummary(now: Date = Date()) -> String {
         let fade = fadeDescription
         switch settings.scheduleMode {
+        case .alwaysOn:
+            if !settings.isEnabled {
+                return "Off. Set to always on."
+            }
+            return "Always on. Tints the screen at full strength around the clock."
+
         case .manual:
             let on = clockLabel(minutes: settings.manualOnMinutes)
             let off = clockLabel(minutes: settings.manualOffMinutes)
@@ -363,6 +369,8 @@ public final class NightShiftSettingsModel {
             return manualIntensity(at: date)
         case .solar:
             return solarIntensity(at: date)
+        case .alwaysOn:
+            return 1
         }
     }
 

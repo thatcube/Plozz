@@ -39,12 +39,9 @@ struct NightShiftDetailView: View {
     // MARK: - Schedule
 
     private var schedulePanel: some View {
-        SettingsPanel(
-            title: "Schedule",
-            footer: "Auto follows your chosen city's sunset and sunrise. Manual turns Night Shift on and off at two fixed times in this Apple TV's time zone."
-        ) {
+        SettingsPanel {
             VStack(alignment: .leading, spacing: 20) {
-                LabeledSettingRow("When") {
+                LabeledSettingRow("Schedule") {
                     SettingsOptionPicker(
                         options: NightShiftScheduleMode.allCases,
                         selection: $model.settings.scheduleMode,
@@ -52,9 +49,10 @@ struct NightShiftDetailView: View {
                     )
                 }
 
-                if model.settings.scheduleMode == .solar {
+                switch model.settings.scheduleMode {
+                case .solar:
                     LabeledSettingRow("Location") { locationMenu }
-                } else {
+                case .manual:
                     LabeledSettingRow("Turns on") {
                         timeStepper(minutes: model.settings.manualOnMinutes) {
                             model.settings.manualOnMinutes = $0
@@ -65,17 +63,23 @@ struct NightShiftDetailView: View {
                             model.settings.manualOffMinutes = $0
                         }
                     }
+                case .alwaysOn:
+                    EmptyView()
                 }
 
-                LabeledSettingRow("Fade") {
-                    SettingsOptionPicker(
-                        options: NightShiftSettingsModel.fadeOptions,
-                        selection: Binding(
-                            get: { clampedFade },
-                            set: { model.settings.fadeMinutes = $0 }
-                        ),
-                        title: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
-                    )
+                // Fade only governs the schedule's on/off transition, so it is
+                // irrelevant when the tint is always on.
+                if model.settings.scheduleMode != .alwaysOn {
+                    LabeledSettingRow("Fade") {
+                        SettingsOptionPicker(
+                            options: NightShiftSettingsModel.fadeOptions,
+                            selection: Binding(
+                                get: { clampedFade },
+                                set: { model.settings.fadeMinutes = $0 }
+                            ),
+                            title: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
+                        )
+                    }
                 }
             }
         }

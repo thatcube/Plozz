@@ -2,41 +2,34 @@ import Foundation
 
 /// Configuration for the AniList integration.
 ///
-/// AniList uses OAuth 2.0. When both client ID and secret are available, we use
-/// the Authorization Code grant (shorter code to type on TV). Falls back to
-/// implicit grant (long token paste) if only the client ID is configured.
+/// AniList auth is handled by the plozz.app relay worker. The TV app shows
+/// the relay URL and a text field for the short redeem code.
 public struct AniListConfig: Sendable, Equatable {
     public var clientID: String?
     public var clientSecret: String?
+    public var relayBaseURL: String
     public var apiBaseURL: URL
-    public var authBaseURL: URL
 
     public init(
         clientID: String? = nil,
         clientSecret: String? = nil,
-        apiBaseURL: URL = URL(string: "https://graphql.anilist.co")!,
-        authBaseURL: URL = URL(string: "https://anilist.co")!
+        relayBaseURL: String = "https://plozz.app",
+        apiBaseURL: URL = URL(string: "https://graphql.anilist.co")!
     ) {
         self.clientID = Self.sanitize(clientID)
         self.clientSecret = Self.sanitize(clientSecret)
+        self.relayBaseURL = relayBaseURL
         self.apiBaseURL = apiBaseURL
-        self.authBaseURL = authBaseURL
     }
 
     public var isConfigured: Bool {
         clientID != nil
     }
 
-    /// Whether we can use the auth-code grant (requires secret).
-    public var supportsCodeGrant: Bool {
-        clientID != nil && clientSecret != nil
-    }
-
-    /// The authorization URL the user visits. AniList's PIN page only supports
-    /// implicit grant (displays the full access token for the user to copy).
+    /// The relay auth URL the user visits (QR code target).
     public var authorizationURL: String? {
-        guard let clientID else { return nil }
-        return "\(authBaseURL)/api/v2/oauth/authorize?client_id=\(clientID)&response_type=token"
+        guard clientID != nil else { return nil }
+        return "\(relayBaseURL)/auth/anilist"
     }
 
     public static func resolved(

@@ -71,39 +71,28 @@ public final class AniListService {
         phase = .awaitingToken(authorizationURL: url)
     }
 
-    /// Completes the connection with the access token from AniList's PIN page.
-    ///
-    /// Handles multiple input formats:
-    /// - The raw access token (copied from the PIN page)
-    /// - A full URL containing `access_token=...` (if user copies the whole URL)
+    /// Completes the connection by redeeming a short code from the auth relay.
     public func submitToken(_ input: String) async {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else {
-            phase = .error("Token cannot be empty")
+            phase = .error("Code cannot be empty")
             return
         }
 
-        let accessToken = Self.extractToken(from: trimmed)
-        let client = AniListClient(config: config, http: http)
-
         do {
+            let redeemURL = URL(string: "\(config.relayBaseURL)/api/redeem?code=\(trimmed)")!
+            let (data, _) = try await URLSession.shared.data(from: redeemURL)
+            let result = try JSONDecoder().decode(RelayRedeemResponse.self, from: data)
+
+            let accessToken = result.accessToken
+            let client = AniListClient(config: config, http: http)
             let user = try await client.viewer(accessToken: accessToken)
             let tokens = AniListTokens(accessToken: accessToken)
             try? tokenStore.save(tokens)
             phase = .connected(username: user.name)
         } catch {
-            phase = .error("Invalid token — please try again")
+            phase = .error("Invalid or expired code — please try again")
         }
-    }
-
-    /// Extracts an access token from a redirect URL fragment like
-    /// `http://localhost#access_token=XYZ&token_type=Bearer`
-    private static func extractToken(from input: String) -> String {
-        if input.contains("access_token=") {
-            let fragment = input.components(separatedBy: "access_token=").last ?? ""
-            return fragment.components(separatedBy: "&").first ?? input
-        }
-        return input
     }
 
     /// Cancels an in-flight connection attempt.
@@ -138,5 +127,20 @@ public enum AniListServiceFactory {
         #else
         return InMemoryAniListTokenStore()
         #endif
+    }
+}
+
+/// Response from the auth relay's /api/redeem endpoint.
+private struct RelayRedeemResponse: Decodable {
+    let service: String
+    let accessToken: String
+    let refreshToken: String?
+    let expiresIn: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case service
+        case accessToken
+        case refreshToken
+        case expiresIn
     }
 }

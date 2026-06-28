@@ -35,8 +35,6 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>MALClientID</key>
 	<string>$(MAL_CLIENT_ID)</string>
-	<key>MALRedirectURI</key>
-	<string>http://localhost</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

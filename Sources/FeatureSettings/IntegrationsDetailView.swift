@@ -233,15 +233,15 @@ struct TrackerRow: View {
     }
 }
 
-// MARK: - AniList Token Entry (expanded panel)
+// MARK: - AniList Relay Code Entry (expanded panel)
 
 struct AniListTokenEntryView: View {
     let anilist: AniListService
-    @State private var tokenInput: String = ""
+    @State private var codeInput: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Scan the QR code or visit the URL, authorize Plozz, then paste the code shown after approval:")
+            Text("Scan the QR code or visit the URL on your phone, sign in to AniList, then enter the 6-character code shown:")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -253,14 +253,14 @@ struct AniListTokenEntryView: View {
                         .background(.white, in: RoundedRectangle(cornerRadius: 14))
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("anilist.co/api/v2/oauth/authorize")
+                        Text("plozz.app/auth/anilist")
                             .font(.title3.weight(.semibold))
-                        TextField("Paste authorization code", text: $tokenInput)
+                        TextField("Enter code", text: $codeInput)
                         HStack(spacing: 16) {
                             Button("Connect") {
-                                Task { await anilist.submitToken(tokenInput) }
+                                Task { await anilist.submitToken(codeInput) }
                             }
-                            .disabled(tokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .disabled(codeInput.trimmingCharacters(in: .whitespaces).count < 4)
                             Button("Cancel", role: .cancel) {
                                 anilist.cancelConnect()
                             }
@@ -278,7 +278,7 @@ struct MALAuthorizationCodeEntryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Scan the QR code or visit the URL, approve Plozz in MyAnimeList, then paste the short code shown in the redirect URL:")
+            Text("Scan the QR code or visit the URL on your phone, sign in to MyAnimeList, then enter the 6-character code shown:")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -290,14 +290,14 @@ struct MALAuthorizationCodeEntryView: View {
                         .background(.white, in: RoundedRectangle(cornerRadius: 14))
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("myanimelist.net/v1/oauth2/authorize")
+                        Text("plozz.app/auth/mal")
                             .font(.title3.weight(.semibold))
-                        TextField("Paste authorization code or redirect URL", text: $codeInput)
+                        TextField("Enter code", text: $codeInput)
                         HStack(spacing: 16) {
                             Button("Connect") {
                                 mal.submitAuthorizationCode(codeInput)
                             }
-                            .disabled(codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(codeInput.trimmingCharacters(in: .whitespacesAndNewlines).count < 4)
                             Button("Cancel", role: .cancel) {
                                 mal.cancelConnect()
                             }

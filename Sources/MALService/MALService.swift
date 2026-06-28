@@ -25,7 +25,6 @@ public final class MALService {
     @ObservationIgnored private let auth: MALAuthService
     @ObservationIgnored private let tokenStore: MALTokenStoring
     @ObservationIgnored private var connectTask: Task<Void, Never>?
-    @ObservationIgnored private var pendingAuthorization: MALAuthorizationRequest?
 
     public init(config: MALConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: MALTokenStoring) {
         self.config = config
@@ -45,7 +44,6 @@ public final class MALService {
     public func setActiveProfile(namespace: String?) async {
         connectTask?.cancel()
         connectTask = nil
-        pendingAuthorization = nil
         tokenStore.setNamespace(namespace)
         phase = config.isConfigured ? .unknown : .unavailable
         await refreshStatus()
@@ -68,50 +66,43 @@ public final class MALService {
         guard config.isConfigured else { phase = .unavailable; return }
         connectTask?.cancel()
         connectTask = nil
-        do {
-            let authorization = try auth.beginAuthorization()
-            pendingAuthorization = authorization
-            phase = .awaitingAuthorizationCode(authorizationURL: authorization.authorizationURL)
-        } catch let error as AppError {
-            phase = .error(error.userMessage)
-        } catch {
-            phase = .error(AppError.unknown("").userMessage)
-        }
+        // Show the relay auth URL — Worker handles PKCE and exchange
+        phase = .awaitingAuthorizationCode(authorizationURL: "\(config.relayBaseURL)/auth/mal")
     }
 
+    /// Redeems a short code from the auth relay to get the access token.
     public func submitAuthorizationCode(_ input: String) {
         guard config.isConfigured else { phase = .unavailable; return }
-        guard let pendingAuthorization else {
-            phase = .error("Start a new MyAnimeList connection and try again")
-            return
-        }
 
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else {
-            phase = .error("Authorization code cannot be empty")
+            phase = .error("Code cannot be empty")
             return
         }
 
-        let authorizationCode = Self.extractAuthorizationCode(from: trimmed)
         connectTask?.cancel()
         connectTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let tokens = try await self.auth.exchangeAuthorizationCode(
-                    authorizationCode,
-                    codeVerifier: pendingAuthorization.codeVerifier
+                let redeemURL = URL(string: "\(self.config.relayBaseURL)/api/redeem?code=\(trimmed)")!
+                let (data, _) = try await URLSession.shared.data(from: redeemURL)
+                let result = try JSONDecoder().decode(RelayRedeemResponse.self, from: data)
+
+                let tokens = MALTokens(
+                    accessToken: result.accessToken,
+                    refreshToken: result.refreshToken ?? "",
+                    expiresAt: Date().addingTimeInterval(Double(result.expiresIn ?? 3600))
                 )
                 try Task.checkCancellation()
                 try? self.tokenStore.save(tokens)
                 let user = try? await self.auth.userInfo(accessToken: tokens.accessToken)
-                self.pendingAuthorization = nil
                 self.connectTask = nil
                 self.phase = .connected(username: user?.name ?? "MyAnimeList")
             } catch is CancellationError {
                 self.connectTask = nil
             } catch {
                 self.connectTask = nil
-                self.phase = .error("Invalid authorization code — please try again")
+                self.phase = .error("Invalid or expired code — please try again")
             }
         }
     }
@@ -119,14 +110,12 @@ public final class MALService {
     public func cancelConnect() {
         connectTask?.cancel()
         connectTask = nil
-        pendingAuthorization = nil
         phase = config.isConfigured ? .disconnected : .unavailable
     }
 
     public func disconnect() async {
         connectTask?.cancel()
         connectTask = nil
-        pendingAuthorization = nil
         try? tokenStore.clear()
         phase = config.isConfigured ? .disconnected : .unavailable
     }
@@ -137,20 +126,20 @@ public final class MALService {
         try? tokenStore.save(refreshed)
         return refreshed.accessToken
     }
+}
 
-    private static func extractAuthorizationCode(from input: String) -> String {
-        if let components = URLComponents(string: input),
-           let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
-           !code.isEmpty {
-            return code
-        }
+/// Response from the auth relay's /api/redeem endpoint.
+private struct RelayRedeemResponse: Decodable {
+    let service: String
+    let accessToken: String
+    let refreshToken: String?
+    let expiresIn: Int?
 
-        if let range = input.range(of: "code=") {
-            let remainder = input[range.upperBound...]
-            return remainder.split(separator: "&", maxSplits: 1).first.map(String.init) ?? input
-        }
-
-        return input
+    enum CodingKeys: String, CodingKey {
+        case service
+        case accessToken
+        case refreshToken
+        case expiresIn
     }
 }
 

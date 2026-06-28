@@ -157,12 +157,22 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // to the proven full scan without redeploying if seek-sampling ever
         // misbehaves on a particular source.
         let keyframeFullScan = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeFullScan")
+        // Flag `com.plozz.playback.remuxKeyframeCache` (DEFAULT OFF): persist the
+        // real keyframe boundaries discovered for a no-Cues source the first time
+        // it plays, and restore them instantly on every later resume / re-watch /
+        // relaunch (a tiny sidecar read instead of re-scanning the file). This is
+        // the fast-resume-from-arbitrary-offset path: exact keyframe discovery is
+        // paid at most once per title. Only meaningful alongside
+        // remuxKeyframeSegments (it caches that rebuild's output); strict no-op
+        // for real-Cues titles, which never scan.
+        let keyframeCache = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeCache")
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
                                            keyframeSegments: keyframeSegments,
-                                           keyframeFullScan: keyframeFullScan)
+                                           keyframeFullScan: keyframeFullScan,
+                                           keyframeCache: keyframeCache)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
-        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")") }
+        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")\(keyframeCache ? " (cache ON)" : "")") }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only

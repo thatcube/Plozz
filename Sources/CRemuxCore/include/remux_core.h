@@ -175,6 +175,30 @@ int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_s
                                          int force_full_scan);
 
 /*
+ * Returns 1 when the current segment table is the fixed-cadence fallback (the
+ * container had no usable keyframe index AND a keyframe rebuild has not yet
+ * replaced it), 0 when the table is keyframe-aligned (real Cues index, or a
+ * successful rescan / applied cache). Lets the caller tell whether a rescan
+ * actually rebuilt the table (so a freshly computed keyframe index is worth
+ * persisting) vs. kept the imperfect cadence table. 0 when `s` is NULL.
+ */
+int plozz_remux_used_fixed_cadence(plozz_remux_session *s);
+
+/*
+ * Apply a precomputed list of keyframe boundary times (seconds, 0-based, sorted
+ * ascending — typically restored from a persistent keyframe-index cache) as the
+ * segment table, WITHOUT scanning the source. Groups the boundaries exactly like
+ * plozz_remux_rescan_keyframe_segments would (>= target_seconds apart, declared
+ * duration = real boundary-to-boundary delta), replaces the table, and clears
+ * the fixed-cadence flag. This is the instant-open fast path for a title whose
+ * real keyframes were discovered on a previous play: no I/O, O(n) work. Returns
+ * the new segment count, or the current count unchanged when `kf` is NULL, has
+ * fewer than 2 entries, or `s` is NULL.
+ */
+int plozz_remux_apply_keyframe_boundaries(plozz_remux_session *s, const double *kf,
+                                          int kf_count, double target_seconds);
+
+/*
  * Pure test/diagnostic helper: group a sorted list of keyframe times (seconds,
  * 0-based) into segments at least `target_seconds` apart, each carrying its true
  * keyframe-to-keyframe duration; the tail runs to `duration` (or the last

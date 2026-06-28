@@ -751,6 +751,38 @@ int plozz_remux_rescan_keyframe_segments(plozz_remux_session *s, double target_s
     return count;
 }
 
+int plozz_remux_used_fixed_cadence(plozz_remux_session *s) {
+    return s ? s->used_fixed_cadence : 0;
+}
+
+int plozz_remux_apply_keyframe_boundaries(plozz_remux_session *s, const double *kf,
+                                          int kf_count, double target_seconds) {
+    if (!s) return 0;
+    if (!kf || kf_count < 2) return s->segment_count;
+    if (target_seconds < 1.0) target_seconds = 6.0;
+
+    int cap = kf_count + 1;
+    if (cap > PLOZZ_MAX_SEGMENTS) cap = PLOZZ_MAX_SEGMENTS;
+    plozz_remux_segment *segs =
+        (plozz_remux_segment *)malloc(sizeof(plozz_remux_segment) * (size_t)cap);
+    if (!segs) return s->segment_count;
+
+    int count = plozz_remux_plan_segments_from_keyframes(kf, kf_count, target_seconds,
+                                                         s->duration_seconds, segs, cap);
+    if (count <= 0) { free(segs); return s->segment_count; }
+
+    int old = s->segment_count;
+    free(s->segments);
+    s->segments = segs;
+    s->segment_count = count;
+    s->used_fixed_cadence = 0;
+
+    remux_log(0, "remux: keyframe-index cache applied %d->%d segments from %d cached "
+                 "boundaries (no scan — instant exact table)",
+              old, count, kf_count);
+    return count;
+}
+
 int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segment *out) {
     if (!s || !out || index < 0 || index >= s->segment_count) return 0;
     *out = s->segments[index];

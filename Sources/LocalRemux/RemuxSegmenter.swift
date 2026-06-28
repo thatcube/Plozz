@@ -123,13 +123,24 @@ final class RemuxSegmenter: @unchecked Sendable {
     private let lock = NSLock()
     let facts: Facts
 
+    /// Deferred persistent-cache write: set during init when a fresh keyframe scan
+    /// rebuilt the table (so it's worth saving), consumed once the rebuilt segment
+    /// durations have been read. nil when there's nothing to persist.
+    private struct PendingCacheStore {
+        let cache: KeyframeIndexCache
+        let key: String
+        let size: Int64
+        let duration: Double
+        let target: Double
+    }
+
     /// Opens `sourceURL` and builds the segment table. Throws a `RemuxOpenError`
     /// carrying the precise failing libavformat stage + AVERROR + network reason
     /// when the file can't be demuxed, so the caller's fallback path can report
     /// exactly why (vs an opaque failure).
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
          deriveEac3FrameDur: Bool = false, keyframeSegments: Bool = false,
-         keyframeFullScan: Bool = false) throws {
+         keyframeFullScan: Bool = false, keyframeCache: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -153,6 +164,8 @@ final class RemuxSegmenter: @unchecked Sendable {
         // already ran inside open(); this only selects whether the muxer consumes it.
         plozz_remux_set_derive_eac3_frame_dur(session, deriveEac3FrameDur ? 1 : 0)
 
+        var pendingStore: PendingCacheStore? = nil
+
         // Flag-gated (com.plozz.playback.remuxKeyframeSegments): when the source
         // had no usable keyframe index, open() built a fixed-cadence table whose
         // 6 s boundaries don't align to keyframes — long-GOP streams then produce
@@ -169,8 +182,49 @@ final class RemuxSegmenter: @unchecked Sendable {
             // the value. `keyframeFullScan` (com.plozz.playback.remuxKeyframeFullScan)
             // forces the exhaustive scan as a safety override.
             reader.boostReadAhead(8 << 20)
-            _ = plozz_remux_rescan_keyframe_segments(session, targetSegmentSeconds,
-                                                     keyframeFullScan ? 1 : 0)
+
+            // Persistent keyframe-index cache (flag com.plozz.playback.remuxKeyframeCache):
+            // discovering real keyframe boundaries on a no-Cues source is the
+            // expensive open-time cost. It never changes for a given file, so on
+            // the FIRST play we scan + persist it, and on every RESUME / re-watch
+            // we restore it instantly (no scan, just a tiny sidecar read) — the
+            // fast-resume path. Only meaningful when the source actually fell back
+            // to fixed-cadence (no usable index); a real-Cues title is already
+            // keyframe-aligned and skips all of this.
+            let wasFixedCadence = plozz_remux_used_fixed_cadence(session) == 1
+            var appliedCache = false
+            let cache = keyframeCache ? KeyframeIndexCache.makeDefault() : nil
+            let sourceSize = (keyframeCache && wasFixedCadence) ? reader.size() : -1
+            let sourceDuration = result.duration_seconds
+            let cacheKey = (cache != nil && wasFixedCadence)
+                ? KeyframeIndexCache.key(url: sourceURL, size: sourceSize, duration: sourceDuration)
+                : nil
+
+            if wasFixedCadence, let cache, let cacheKey,
+               let boundaries = cache.load(key: cacheKey, expectedSize: sourceSize,
+                                           expectedDuration: sourceDuration) {
+                boundaries.withUnsafeBufferPointer { buf in
+                    _ = plozz_remux_apply_keyframe_boundaries(session, buf.baseAddress,
+                                                              Int32(buf.count), targetSegmentSeconds)
+                }
+                appliedCache = true
+            }
+
+            if !appliedCache {
+                _ = plozz_remux_rescan_keyframe_segments(session, targetSegmentSeconds,
+                                                         keyframeFullScan ? 1 : 0)
+            }
+
+            // Persist a freshly-rebuilt table for next time: only when we actually
+            // scanned (not a cache hit) AND the rescan replaced the fixed-cadence
+            // table with a real keyframe one. Derive the boundary list from the
+            // rebuilt durations after they're read below.
+            if let cache, let cacheKey, !appliedCache, wasFixedCadence,
+               plozz_remux_used_fixed_cadence(session) == 0 {
+                pendingStore = PendingCacheStore(cache: cache, key: cacheKey,
+                                                 size: sourceSize, duration: sourceDuration,
+                                                 target: targetSegmentSeconds)
+            }
         }
 
         var durations: [Double] = []
@@ -181,6 +235,16 @@ final class RemuxSegmenter: @unchecked Sendable {
             if plozz_remux_segment_at(session, Int32(i), &seg) == 1 {
                 durations.append(seg.duration_seconds)
             }
+        }
+
+        // Persist the freshly-discovered keyframe boundaries so a resume / re-watch
+        // of this title reopens instantly with the exact table (no scan).
+        if let pendingStore {
+            let boundaries = KeyframeIndexCache.boundaries(fromDurations: durations)
+            pendingStore.cache.store(key: pendingStore.key, size: pendingStore.size,
+                                     duration: pendingStore.duration, target: pendingStore.target,
+                                     boundaries: boundaries)
+            RemuxLog.info("RemuxSegmenter: persisted keyframe-index (\(boundaries.count) boundaries) for fast resume")
         }
 
         self.facts = Facts(

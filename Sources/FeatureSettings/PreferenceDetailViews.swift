@@ -220,6 +220,31 @@ struct PlaybackDetailView: View {
                 }
 
                 SettingsPanel(
+                    title: "Skip Intervals",
+                    footer: "How far left/right presses on the Siri Remote jump during playback."
+                ) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        LabeledSettingRow("Skip Backward", labelWidth: 220) {
+                            SettingsOptionPicker(
+                                options: SkipInterval.allCases,
+                                selection: $playback.settings.skipBackwardInterval,
+                                icon: { _ in "gobackward" },
+                                title: { $0.title }
+                            )
+                        }
+
+                        LabeledSettingRow("Skip Forward", labelWidth: 220) {
+                            SettingsOptionPicker(
+                                options: SkipInterval.allCases,
+                                selection: $playback.settings.skipForwardInterval,
+                                icon: { _ in "goforward" },
+                                title: { $0.title }
+                            )
+                        }
+                    }
+                }
+
+                SettingsPanel(
                     title: "Skip Intros & Credits",
                     footer: "When your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin."
                 ) {

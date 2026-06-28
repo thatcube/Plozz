@@ -262,6 +262,8 @@ public final class PlayerViewModel {
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
         self.controls.localRemuxStrategies = LocalRemuxStrategyRegistry.availableChoices
         self.controls.selectedLocalRemuxStrategyID = preferencesStore.loadLocalRemuxStrategyID()
+        self.controls.skipBackwardInterval = playbackSettings.skipBackwardInterval
+        self.controls.skipForwardInterval = playbackSettings.skipForwardInterval
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the

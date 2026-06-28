@@ -745,8 +745,8 @@ private struct ScrubBar: View {
     /// Floated just above the scrub head (the focus indicator) and tracking it,
     /// Apple-TV style. The current time is pinned dead-centre on the thumb and
     /// never moves; the flanking glyphs hang off its left/right edges as overlays
-    /// so they can't shift it. A backward skip's −10 (and, if the seek is still
-    /// resolving, the loading spinner) sits to the left; a forward skip's +10, the
+    /// so they can't shift it. A backward skip (and, if the seek is still
+    /// resolving, the loading spinner) sits to the left; a forward skip, the
     /// spinner for a forward seek / plain scrub, and the circular pause glyph sit
     /// to the right. Clamped so the time never runs off either edge.
     @ViewBuilder
@@ -768,8 +768,8 @@ private struct ScrubBar: View {
             .position(x: cx, y: Self.timeRowY)
     }
 
-    /// Left of the current time: the −10 glyph after a backward skip, replaced by
-    /// the loading spinner if a backward seek is still resolving.
+    /// Left of the current time: the backward-skip glyph after a backward skip,
+    /// replaced by the loading spinner if a backward seek is still resolving.
     @ViewBuilder private var leftSlot: some View {
         if model.skipHintVisible && !model.skipHintForward {
             skipGlyph(forward: false)
@@ -778,9 +778,9 @@ private struct ScrubBar: View {
         }
     }
 
-    /// Right of the current time: the +10 glyph after a forward skip; otherwise
-    /// the spinner for a forward seek / plain scrub; otherwise the circular pause
-    /// glyph while paused. All share this one slot.
+    /// Right of the current time: the forward-skip glyph after a forward skip;
+    /// otherwise the spinner for a forward seek / plain scrub; otherwise the
+    /// circular pause glyph while paused. All share this one slot.
     @ViewBuilder private var rightSlot: some View {
         if model.skipHintVisible && model.skipHintForward {
             skipGlyph(forward: true)
@@ -794,10 +794,14 @@ private struct ScrubBar: View {
         }
     }
 
-    /// Compact ±10s glyph. It persists for the whole skip burst (no per-press
-    /// teardown), and a subtle scale dip gives "pressed" feedback on each press.
+    /// Compact skip glyph whose number matches the per-profile interval. It
+    /// persists for the whole skip burst (no per-press teardown), and a subtle
+    /// scale dip gives "pressed" feedback on each press.
     private func skipGlyph(forward: Bool) -> some View {
-        Image(systemName: forward ? "goforward.10" : "gobackward.10")
+        let symbol = forward
+            ? model.skipForwardInterval.forwardSymbol
+            : model.skipBackwardInterval.backwardSymbol
+        return Image(systemName: symbol)
             .font(.system(size: 28, weight: .semibold))
             .foregroundStyle(.white)
             .shadow(color: .black.opacity(0.35), radius: 3, y: 1)

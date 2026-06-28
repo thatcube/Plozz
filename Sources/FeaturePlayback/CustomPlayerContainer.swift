@@ -688,11 +688,11 @@ final class PlayerInputViewController: UIViewController {
 
     @objc private func handleLeft() {
         guard focusContext == .surface else { return }
-        skip(by: -10)
+        skip(by: -model.skipBackwardInterval.seconds)
     }
     @objc private func handleRight() {
         guard focusContext == .surface else { return }
-        skip(by: 10)
+        skip(by: model.skipForwardInterval.seconds)
     }
 
     /// A Down press from the scrub surface reveals the controls and drops focus
@@ -717,10 +717,10 @@ final class PlayerInputViewController: UIViewController {
         } else {
             // The crucial bit: stack on the LAST requested target, not on the
             // engine's possibly-stale `currentTime`. Without this, two fast
-            // right presses both compute `engine.currentTime + 10` from the
-            // same pre-seek position and produce a single +10 skip — exactly
-            // the "I pressed twice but nothing extra happened" bug. The view
-            // model coalesces all of them into one final seek.
+            // right presses both compute the same pre-seek position and
+            // produce a single skip — exactly the "I pressed twice but
+            // nothing extra happened" bug. The view model coalesces all of
+            // them into one final seek.
             let base = model.pendingSeekTarget ?? model.currentSeconds
             let target = min(max(0, base + seconds), model.duration)
             actions.seek(target)
@@ -731,7 +731,7 @@ final class PlayerInputViewController: UIViewController {
 
     // MARK: Skip hint
 
-    /// Pops the transient ±10s indicator and schedules its quick fade. Re-arming
+    /// Pops the transient skip indicator and schedules its quick fade. Re-arming
     /// the timer + bumping the token on each press makes rapid skips re-pop
     /// rather than sit static, matching Apple's player feel.
     private func flashSkipHint(forward: Bool) {

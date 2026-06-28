@@ -154,6 +154,7 @@ final class RemuxContentSource: @unchecked Sendable {
         let batchProbes = 48
         var totalProbes = 0
         var passes = 0
+        let fillNetStart = segmenter.networkSnapshot()
         while true {
             cacheLock.lock()
             let stop = stopped || lazyComplete
@@ -173,11 +174,17 @@ final class RemuxContentSource: @unchecked Sendable {
             cacheLock.unlock()
 
             // Periodic + terminal fill telemetry (the coordinator greps `remux-lazy:`
-            // to read the discovery curve vs B5/B6's all-at-open cost).
+            // to read the discovery curve vs B5/B6's all-at-open cost). fill-bytes is
+            // the cumulative network cost of BACKGROUND discovery — it's paid while
+            // AVPlayer is already playing, so unlike B6's 584 MB it never delays the
+            // first frame; reported so the per-region discovery cost is scoreable.
             if progress.complete || passes % 8 == 0 {
+                let net = segmenter.networkSnapshot()
+                let fillBytes = max(0, net.bytesFetched - fillNetStart.bytesFetched)
                 RemuxLog.info(String(format:
-                    "remux-lazy: fill ready=%d complete=%@ probes=%d elapsed=%.0fms",
-                    durations.count, progress.complete ? "YES" : "no", totalProbes, elapsedMs))
+                    "remux-lazy: fill ready=%d complete=%@ probes=%d elapsed=%.0fms fill-bytes=%.2fMB",
+                    durations.count, progress.complete ? "YES" : "no", totalProbes, elapsedMs,
+                    Double(fillBytes) / 1_048_576.0))
             }
             if progress.complete { break }
             // No progress and not complete (e.g. transient seek failure): avoid a

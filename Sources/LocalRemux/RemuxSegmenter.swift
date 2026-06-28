@@ -129,6 +129,15 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// the legacy fixed-cadence / keyframe-scan tables).
     let lazyEnabled: Bool
 
+    /// B7 per-phase read-ahead (bytes) for the shared range reader, switched inside
+    /// the demuxer `lock` so seek-heavy keyframe PROBING never inherits the large
+    /// segment-MUXING read-ahead (which would over-fetch megabytes past each probed
+    /// keyframe). `muxReadAhead` tracks the boosted muxing granularity; the probe cap
+    /// is the AVIO buffer size — going lower buys nothing (libavformat refills in
+    /// AVIO-buffer-sized reads) while staying at/above it prevents the over-read.
+    private let probeReadAhead = 1 << 20
+    private var muxReadAhead = 1 << 20
+
     /// Progress of one `extendLazyIndex` batch.
     struct LazyProgress: Sendable, Equatable {
         /// Number of fully-bracketed segments now published (monotonic).
@@ -178,10 +187,12 @@ final class RemuxSegmenter: @unchecked Sendable {
         var lazyEngaged = false
         if keyframeLazy, plozz_remux_uses_fixed_cadence(session) == 1 {
             let openStart = DispatchTime.now().uptimeNanoseconds
+            let netBefore = reader.networkSnapshot()
             if plozz_remux_lazy_begin(session) == 1 {
                 lazyEngaged = true
                 // Probe just enough to publish the first couple of segments so
                 // AVPlayer can start immediately; the rest fills in the background.
+                reader.setReadAhead(probeReadAhead)
                 var ready: Int32 = 0
                 var complete: Int32 = 0
                 var totalProbes = 0
@@ -193,9 +204,19 @@ final class RemuxSegmenter: @unchecked Sendable {
                     guardLoops += 1
                 } while ready < 2 && complete == 0 && guardLoops < 32
                 let openMs = Double(DispatchTime.now().uptimeNanoseconds &- openStart) / 1_000_000
+                // Bytes-read at open is the head-to-head score vs B6's upfront scan
+                // (which reads ~11% / 584 MB before first frame). The windowed index
+                // only resolves the first segments now, so this is the <<1% number the
+                // coordinator greps to compare time-to-first-frame footprint.
+                let after = reader.networkSnapshot()
+                let openBytes = max(0, after.bytesFetched - netBefore.bytesFetched)
+                let openFetches = after.fetchCount - netBefore.fetchCount
+                let total = reader.totalSize
+                let pct = total > 0 ? Double(openBytes) / Double(total) * 100.0 : 0.0
                 RemuxLog.info(String(format:
-                    "remux-lazy: open window ready=%d complete=%d probes=%d open-latency=%.0fms",
-                    ready, complete, totalProbes, openMs))
+                    "remux-lazy: open window ready=%d complete=%d probes=%d open-latency=%.0fms open-bytes=%.2fMB(%.3f%%) fetches=%d",
+                    ready, complete, totalProbes, openMs,
+                    Double(openBytes) / 1_048_576.0, pct, openFetches))
             } else {
                 RemuxLog.info("RemuxSegmenter: lazy-index begin declined; keeping table")
             }
@@ -302,6 +323,9 @@ final class RemuxSegmenter: @unchecked Sendable {
         var ready: Int32 = 0
         var complete: Int32 = 0
         var probes: Int32 = 0
+        // Seek-heavy discovery: cap read-ahead so each probe pulls only what it needs
+        // to reach the next keyframe PTS, never the boosted muxing read-ahead.
+        reader.setReadAhead(probeReadAhead)
         _ = plozz_remux_lazy_extend(session, untilSeconds, Int32(maxProbes),
                                     &ready, &complete, &probes)
         return LazyProgress(ready: Int(ready), complete: complete == 1, probes: Int(probes))
@@ -337,6 +361,7 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// Raise the range reader's per-round-trip read-ahead (one-time, before the
     /// origin serves) so high-bitrate 4K segments fetch in fewer round-trips.
     func boostReadAhead(_ bytes: Int) {
+        muxReadAhead = max(muxReadAhead, bytes)
         reader.boostReadAhead(bytes)
     }
 
@@ -388,6 +413,10 @@ final class RemuxSegmenter: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard let session else { return nil }
+        // Segment muxing wants the large read-ahead for throughput; restore it here
+        // in case a lazy probe batch left the small probe cap in place (both run
+        // under this lock, so the switch is race-free).
+        if lazyEnabled { reader.setReadAhead(muxReadAhead) }
         var out: UnsafeMutablePointer<UInt8>?
         var len: Int32 = 0
         guard body(session, &out, &len) == 1, let out, len > 0 else { return nil }

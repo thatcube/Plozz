@@ -76,6 +76,16 @@ final class HTTPRangeReader: @unchecked Sendable {
         readAhead = bytes
     }
 
+    /// Sets the read-ahead granularity directly (may LOWER it, unlike `boostReadAhead`).
+    /// B7 calls this from inside the demuxer lock to switch profiles per phase: a
+    /// small cap during seek-heavy keyframe PROBING (so discovery never over-reads
+    /// megabytes PAST the keyframe it only needs the PTS of — the coordinator's
+    /// "minimize bytes/probe" lever) and the boosted value during segment MUXING.
+    /// Safe because the range reader is only ever driven from within that lock.
+    func setReadAhead(_ bytes: Int) {
+        readAhead = max(1 << 16, bytes)
+    }
+
     // MARK: - AVIO surface
 
     /// Total byte size, fetched once via a ranged probe (`Content-Range`/length).

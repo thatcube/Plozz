@@ -25,7 +25,7 @@ public struct CastRowView: View {
 
     public var body: some View {
         if !people.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: PlozzTheme.Metrics.sectionTitleSpacing) {
                 if !title.isEmpty {
                     Text(title)
                         .font(.system(size: 32, weight: .bold))
@@ -33,15 +33,15 @@ public struct CastRowView: View {
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 28) {
+                    LazyHStack(spacing: PlozzTheme.Metrics.cardSpacing) {
                         ForEach(people) { person in
                             CastMemberCard(person: person)
                         }
                     }
                     .padding(.leading, leadingInset)
                     .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                    .padding(.top, 12)
-                    .padding(.bottom, 28)
+                    .padding(.top, PlozzTheme.Spacing.small)
+                    .padding(.bottom, PlozzTheme.Spacing.large)
                 }
                 .scrollClipDisabled()
             }

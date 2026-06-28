@@ -2,19 +2,94 @@
 import SwiftUI
 
 /// Centralised design tokens so spacing/sizing stay consistent and tweakable
-/// in one place across all features.
+/// in one place across all features. Think of this as the app's design-token
+/// sheet (the SwiftUI equivalent of CSS custom properties): every gap, gutter
+/// and inset should come from a token here rather than a hand-typed literal, so
+/// the whole UI moves together and stays consistent.
 public enum PlozzTheme {
+    /// A single global knob that scales every spacing/gap token in `Spacing`.
+    /// `1.0` is the standard density.
+    ///
+    /// This is the seam for a future **UI density** preference (e.g. Compact /
+    /// Standard / Spacious). Today `scale` is a fixed default; wiring it to a
+    /// per-profile setting (or resolving it from the SwiftUI environment) later
+    /// rescales the entire app's breathing room from this one place — no call
+    /// site needs to change because every view already reads the tokens below.
+    public enum Density {
+        public static let compact: CGFloat = 0.8
+        public static let standard: CGFloat = 1.0
+        public static let spacious: CGFloat = 1.25
+
+        /// The active multiplier applied to every step in `Spacing`. Change this
+        /// one value — or later drive it from a setting — to restyle app-wide.
+        public static let scale: CGFloat = standard
+    }
+
+    /// The canonical spacing scale, in points at standard density. Semantic
+    /// tokens in `Metrics` are expressed in terms of these steps so there is one
+    /// ladder of spacing values and a density change moves all of them at once.
+    public enum Spacing {
+        private static func step(_ points: CGFloat) -> CGFloat {
+            (points * Density.scale).rounded()
+        }
+
+        /// 4 pt — hairline gaps (e.g. a title and its subtitle).
+        public static let xxSmall = step(4)
+        /// 8 pt — tight inner padding.
+        public static let xSmall = step(8)
+        /// 12 pt — compact gaps.
+        public static let small = step(12)
+        /// 16 pt — a section's title-to-content gap, standard inner padding.
+        public static let medium = step(16)
+        /// 24 pt — the standard gap between media cards and grid gutters.
+        public static let large = step(24)
+        /// 32 pt — standard horizontal screen inset.
+        public static let xLarge = step(32)
+        /// 40 pt — vertical gap between stacked rows / sections.
+        public static let xxLarge = step(40)
+        /// 48 pt — generous headroom (e.g. focus-lift clearance under a rail).
+        public static let xxxLarge = step(48)
+    }
+
     public enum Metrics {
+        // MARK: Card sizes (fixed artwork dimensions — not density-scaled)
+
         /// Standard poster card width (3:2-ish) tuned for tvOS 10-foot UI.
         public static let posterWidth: CGFloat = 280
         public static let posterHeight: CGFloat = 420
         public static let landscapeWidth: CGFloat = 480
         public static let landscapeHeight: CGFloat = 270
-        public static let rowSpacing: CGFloat = 40
-        public static let cardSpacing: CGFloat = 40
-        /// Tighter spacing for dense multi-column library grids — small,
-        /// consistent gutters so posters read as a dense wall, not islands.
-        public static let gridSpacing: CGFloat = 24
+
+        // MARK: Spacing (derived from the `Spacing` scale)
+
+        /// The single source of truth for the gap between adjacent media cards.
+        /// Used by **every** poster/landscape rail *and* every poster grid, so the
+        /// space between media reads identically across Home, Search, the library
+        /// grid and detail rows — a tile in a Home rail sits the same distance
+        /// from its neighbour as a tile in the library wall.
+        public static let mediaSpacing = Spacing.large
+        /// Inter-card gap in a horizontal rail. Same value as `gridSpacing` so a
+        /// rail and a grid never disagree on how far apart cards sit.
+        public static let cardSpacing = mediaSpacing
+        /// Inter-card gap (both axes) in a poster grid.
+        public static let gridSpacing = mediaSpacing
+        /// Vertical gap between stacked rows / sections on a screen.
+        public static let rowSpacing = Spacing.xxLarge
+        /// Gap between a section's title and the row/grid beneath it.
+        public static let sectionTitleSpacing = Spacing.medium
+        /// Standard horizontal inset from the screen edge.
+        public static let screenPadding = Spacing.xLarge
+        /// Vertical inset at the very top/bottom of a screen's scroll content.
+        public static let screenVerticalPadding = Spacing.xxLarge
+        /// Headroom above a horizontal rail so a focused card's upward lift is
+        /// never clipped by the scroll view's top edge.
+        public static let railTopPadding = Spacing.medium
+        /// Room below a rail for a focused card's lift + drop shadow so neither is
+        /// clipped by the scroll view's bottom edge.
+        public static let railVerticalPadding = Spacing.xxxLarge
+
+        // MARK: Corner radii
+
         public static let cornerRadius: CGFloat = 12
         /// Poster (glass tile) surface + artwork corner radii. The shared
         /// browsing card used across Home rows, the library grid and Search,
@@ -27,19 +102,41 @@ public enum PlozzTheme {
         public static let mediumMediaCornerRadius: CGFloat = 18
         /// Content inset between a medium card's glass surface and its media.
         public static let mediumCardInset: CGFloat = 16
+
+        // MARK: Focus
+
         /// Focus scale for a lifted medium card.
         public static let mediumFocusedCardScale: CGFloat = 1.07
-        /// Vertical padding around a horizontal rail so a focused card's lift and
-        /// drop shadow are never clipped by the scroll view.
-        public static let railVerticalPadding: CGFloat = 48
         /// Scale applied to a focused browsing tile (matches Twozz Browse).
         public static let focusedCardScale: CGFloat = 1.08
-        public static let screenPadding: CGFloat = 32
+
+        // MARK: Detail
+
         /// Leading inset for the detail hero's title/metadata block, shared by the
         /// rows beneath it (seasons, episodes, cast, chips) so the whole page lines
         /// up on one edge. Matches the standard `screenPadding` used by the Home
         /// rows so detail and Home content sit on the same left edge.
         public static let heroLeadingPadding: CGFloat = screenPadding
+    }
+
+    /// The shared dense poster grid — the "Browse" wall. A fixed number of
+    /// flexible columns so each glass tile stretches to fill its column and the
+    /// gutters stay small and consistent (no big adaptive gaps). Used by the
+    /// library grid and Search so both have an identical column count and
+    /// spacing; anything else that lays movie/show posters in a grid should use
+    /// this too rather than rolling its own column maths.
+    public enum Grid {
+        /// Column count tuned for the tvOS 1920 pt-wide 10-foot UI.
+        public static let columnCount = 7
+
+        /// The grid's columns, carrying the shared gutter. Recomputed per access
+        /// so a future density change to `gridSpacing` is reflected automatically.
+        public static var posterColumns: [GridItem] {
+            Array(
+                repeating: GridItem(.flexible(), spacing: Metrics.gridSpacing, alignment: .top),
+                count: columnCount
+            )
+        }
     }
 }
 

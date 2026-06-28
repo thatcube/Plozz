@@ -50,7 +50,7 @@ public struct HomeView: View {
                         rowView(row)
                     }
                 }
-                .padding(.vertical, 40)
+                .padding(.vertical, PlozzTheme.Metrics.screenVerticalPadding)
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
@@ -101,7 +101,7 @@ public struct HomeView: View {
     }
 
     private func librariesRow(_ libraries: [AggregatedLibrary]) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: PlozzTheme.Metrics.sectionTitleSpacing) {
             Text("Libraries")
                 .font(.system(size: 32, weight: .bold))
                 .padding(.leading, PlozzTheme.Metrics.screenPadding)
@@ -134,7 +134,8 @@ public struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, 24)
+                .padding(.top, PlozzTheme.Metrics.railTopPadding)
+                .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()

@@ -100,7 +100,7 @@ struct MusicLandingView: View {
     }
 
     private func entryTiles(trailing: AnyView?) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: PlozzTheme.Metrics.sectionTitleSpacing) {
             HStack {
                 Text("Browse")
                     .font(.system(size: 32, weight: .bold))
@@ -112,14 +112,14 @@ struct MusicLandingView: View {
                 // Lazy so only on-screen tiles build their Liquid Glass surface —
                 // eager rails kept every card's glass effect live, which made
                 // focus navigation recompute every tile's SDF and lag the UI.
-                LazyHStack(spacing: 28) {
+                LazyHStack(spacing: PlozzTheme.Metrics.cardSpacing) {
                     EntryTile(title: "Artists", icon: "music.mic") { onSelectRoute(.grid(.artist)) }
                     EntryTile(title: "Albums", icon: "opticaldisc") { onSelectRoute(.grid(.album)) }
                     EntryTile(title: "Playlists", icon: "music.note.list") { onSelectRoute(.grid(.playlist)) }
                     EntryTile(title: "Genres", icon: "guitars") { onSelectRoute(.grid(.genre)) }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, 12)
+                .padding(.vertical, PlozzTheme.Spacing.small)
             }
             // Never clip a focused tile's lift, shadow or border.
             .scrollClipDisabled()
@@ -222,7 +222,7 @@ struct MusicGridView: View {
                     MusicPageHeader(title: title, controller: controller)
                         .padding(.top, PlozzTheme.Metrics.rowSpacing)
 
-                    LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.rowSpacing) {
+                    LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.gridSpacing) {
                         content
                     }
                     .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
@@ -336,7 +336,7 @@ struct ArtistDetailView: View {
                 Text("Albums").font(.system(size: 32, weight: .bold))
                     .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
 
-                LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.rowSpacing) {
+                LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.gridSpacing) {
                     ForEach(viewModel.albums) { album in
                         AlbumCard(album: album) { onSelectAlbum(album) }
                     }

@@ -148,7 +148,7 @@ public struct MediaRowView: View {
 
     public var body: some View {
         if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: PlozzTheme.Metrics.sectionTitleSpacing) {
                 if !title.isEmpty {
                     Text(title)
                         .font(.system(size: 32, weight: .bold))
@@ -166,7 +166,7 @@ public struct MediaRowView: View {
                         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
                         // Give the focused card's lift + drop shadow room so it is
                         // never clipped by the scroll view's bounds.
-                        .padding(.top, 16)
+                        .padding(.top, PlozzTheme.Metrics.railTopPadding)
                         .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
                         // Treat the rail as a single focus section so pressing down
                         // *enters the section* and selects its only focusable card

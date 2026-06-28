@@ -18,21 +18,66 @@ struct IntegrationsDetailView: View {
             VStack(alignment: .leading, spacing: 28) {
                 Text("Integrations").font(.largeTitle.bold())
 
-                SettingsPanel(title: "Trakt", footer: traktFooter) {
-                    TraktConnectionView(trakt: trakt)
+                // Unified tracker card — all services in one dense panel
+                VStack(alignment: .leading, spacing: 24) {
+                    TrackerRow(name: "Trakt", phase: traktRowPhase, onConnect: { trakt.connect() }, onDisconnect: { Task { await trakt.disconnect() } })
+                        .task { await trakt.refreshStatus() }
+
+                    sectionDivider
+
+                    TrackerRow(name: "Simkl", phase: simklRowPhase, onConnect: { simkl.connect() }, onDisconnect: { Task { await simkl.disconnect() } })
+                        .task { await simkl.refreshStatus() }
+
+                    sectionDivider
+
+                    TrackerRow(name: "AniList", phase: anilistRowPhase, onConnect: { anilist.connect() }, onDisconnect: { Task { await anilist.disconnect() } })
+                        .task { await anilist.refreshStatus() }
+
+                    sectionDivider
+
+                    TrackerRow(name: "MyAnimeList", phase: malRowPhase, onConnect: { mal.connect() }, onDisconnect: { Task { await mal.disconnect() } })
+                        .task { await mal.refreshStatus() }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(28)
+                .background(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+
+                // Expand into device-code or token-entry panels when connecting
+                if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
+                    SettingsPanel(title: "Trakt — Enter Code") {
+                        DeviceCodeConnectingView(serviceName: "Trakt", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: trakt.codeLifetime, onCancel: { trakt.cancelConnect() })
+                    }
                 }
 
-                SettingsPanel(title: "Simkl", footer: simklFooter) {
-                    SimklConnectionView(simkl: simkl)
+                if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
+                    SettingsPanel(title: "Simkl — Enter Code") {
+                        DeviceCodeConnectingView(serviceName: "Simkl", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: simkl.codeLifetime, onCancel: { simkl.cancelConnect() })
+                    }
                 }
 
-                SettingsPanel(title: "AniList", footer: anilistFooter) {
-                    AniListConnectionView(anilist: anilist)
+                if case .awaitingToken = anilist.phase {
+                    SettingsPanel(title: "AniList — Paste Token") {
+                        AniListTokenEntryView(anilist: anilist)
+                    }
                 }
 
-                SettingsPanel(title: "MyAnimeList", footer: malFooter) {
-                    MALConnectionView(mal: mal)
+                if case let .connecting(userCode, verificationURL, expiresAt) = mal.phase {
+                    SettingsPanel(title: "MyAnimeList — Enter Code") {
+                        DeviceCodeConnectingView(serviceName: "MyAnimeList", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: mal.codeLifetime, onCancel: { mal.cancelConnect() })
+                    }
                 }
+
+                Text("Each profile connects to its own accounts. Watches are tracked regardless of which server you're using.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
@@ -40,284 +85,186 @@ struct IntegrationsDetailView: View {
         .scrollClipDisabled()
     }
 
-    private var traktFooter: String? {
+    // MARK: - Row phase mapping
+
+    private var traktRowPhase: TrackerRowPhase {
         switch trakt.phase {
-        case .connecting, .connected: return nil
-        default: return "Connect Trakt to automatically scrobble what you watch to your Trakt.tv history. Each profile connects to its own Trakt account."
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .connecting: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
         }
     }
 
-    private var simklFooter: String? {
+    private var simklRowPhase: TrackerRowPhase {
         switch simkl.phase {
-        case .connecting, .connected: return nil
-        default: return "Connect Simkl to sync movies, shows, and anime to your Simkl watchlist."
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .connecting: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
         }
     }
 
-    private var anilistFooter: String? {
+    private var anilistRowPhase: TrackerRowPhase {
         switch anilist.phase {
-        case .awaitingToken, .connected: return nil
-        default: return "Connect AniList to automatically track your anime progress. Only anime with AniList/MAL metadata will be tracked."
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .awaitingToken: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
         }
     }
 
-    private var malFooter: String? {
+    private var malRowPhase: TrackerRowPhase {
         switch mal.phase {
-        case .connecting, .connected: return nil
-        default: return "Connect MyAnimeList to automatically update your anime list. Only anime with MAL metadata will be tracked."
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .connecting: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
         }
+    }
+
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.1))
+            .frame(height: 1)
+            .padding(.horizontal, -27)
     }
 }
 
-// MARK: - Trakt Connection View
+// MARK: - Unified Tracker Row
 
-/// The Trakt connect/disconnect flow rendered inside the Integrations panel.
-struct TraktConnectionView: View {
-    let trakt: TraktService
+/// The state a tracker row can be in (abstracted from service-specific enums).
+enum TrackerRowPhase: Equatable {
+    case loading
+    case unavailable
+    case disconnected
+    case connecting
+    case connected(String)
+    case error
+}
 
-    private enum Field: Hashable { case connect, cancel, disconnect, retry }
-    @FocusState private var focus: Field?
-
-    private enum PhaseTag: Equatable { case unknown, unavailable, disconnected, connecting, connected, error }
-    private var phaseTag: PhaseTag {
-        switch trakt.phase {
-        case .unknown: return .unknown
-        case .unavailable: return .unavailable
-        case .disconnected: return .disconnected
-        case .connecting: return .connecting
-        case .connected: return .connected
-        case .error: return .error
-        }
-    }
+/// A single row inside the unified tracker card. Shows the service name, a
+/// status badge, and a connect/disconnect action — all on one line. Mirrors the
+/// `LabeledSettingRow` density pattern from Appearance.
+struct TrackerRow: View {
+    let name: String
+    let phase: TrackerRowPhase
+    let onConnect: () -> Void
+    let onDisconnect: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            switch trakt.phase {
-            case .unknown:
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("Checking Trakt connection…")
-                        .foregroundStyle(.secondary)
-                }
+        HStack(spacing: 16) {
+            Text(name)
+                .font(.headline.weight(.semibold))
+                .frame(width: 180, alignment: .leading)
+
+            switch phase {
+            case .loading:
+                ProgressView()
+                    .controlSize(.small)
+                Spacer()
 
             case .unavailable:
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Trakt sync isn't configured in this build. Add a Trakt client id and secret to enable it.")
-                        .foregroundStyle(.secondary)
-                    Button { /* no-op — anchors focus */ } label: {
-                        Label("Trakt unavailable", systemImage: "xmark.circle")
-                    }
-                    .focused($focus, equals: .connect)
-                }
+                Text("Not configured")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                Spacer()
 
             case .disconnected:
-                Button(action: { trakt.connect() }) {
-                    Label("Connect to Trakt", systemImage: "link")
+                Spacer()
+                Button(action: onConnect) {
+                    Label("Connect", systemImage: "link")
                 }
-                .focused($focus, equals: .connect)
-                .frame(maxWidth: .infinity, alignment: .leading)
 
-            case let .connecting(userCode, verificationURL, expiresAt):
-                DeviceCodeConnectingView(
-                    serviceName: "Trakt",
-                    userCode: userCode,
-                    verificationURL: verificationURL,
-                    expiresAt: expiresAt,
-                    codeLifetime: trakt.codeLifetime,
-                    onCancel: { trakt.cancelConnect() }
-                )
+            case .connecting:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Connecting…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(role: .cancel, action: onConnect) {
+                    Text("Cancel")
+                        .font(.subheadline)
+                }
 
             case let .connected(username):
-                TrackerConnectedView(username: username, serviceName: "Trakt") {
-                    Task { await trakt.disconnect() }
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                    Text(username)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(role: .destructive, action: onDisconnect) {
+                    Label("Disconnect", systemImage: "xmark.circle")
+                        .font(.subheadline)
                 }
 
-            case let .error(message):
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
+            case .error:
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("Error")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Button(action: { trakt.connect() }) {
-                        Label("Try Again", systemImage: "arrow.clockwise")
-                    }
-                    .focused($focus, equals: .retry)
                 }
-            }
-        }
-        .task { await trakt.refreshStatus() }
-        .onChange(of: phaseTag) { _, tag in
-            guard focus != nil else { return }
-            switch tag {
-            case .connecting: focus = .cancel
-            case .disconnected: focus = .connect
-            case .connected: focus = .disconnect
-            case .error: focus = .retry
-            default: break
+                Spacer()
+                Button(action: onConnect) {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                        .font(.subheadline)
+                }
             }
         }
     }
 }
 
-// MARK: - Simkl Connection View
+// MARK: - AniList Token Entry (expanded panel)
 
-struct SimklConnectionView: View {
-    let simkl: SimklService
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            switch simkl.phase {
-            case .unknown:
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("Checking Simkl connection…").foregroundStyle(.secondary)
-                }
-            case .unavailable:
-                Text("Simkl sync isn't configured in this build. Add a Simkl client id and secret to enable it.")
-                    .foregroundStyle(.secondary)
-            case .disconnected:
-                Button(action: { simkl.connect() }) {
-                    Label("Connect to Simkl", systemImage: "link")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            case let .connecting(userCode, verificationURL, expiresAt):
-                DeviceCodeConnectingView(
-                    serviceName: "Simkl",
-                    userCode: userCode,
-                    verificationURL: verificationURL,
-                    expiresAt: expiresAt,
-                    codeLifetime: simkl.codeLifetime,
-                    onCancel: { simkl.cancelConnect() }
-                )
-            case let .connected(username):
-                TrackerConnectedView(username: username, serviceName: "Simkl") {
-                    Task { await simkl.disconnect() }
-                }
-            case let .error(message):
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.secondary)
-                    Button(action: { simkl.connect() }) {
-                        Label("Try Again", systemImage: "arrow.clockwise")
-                    }
-                }
-            }
-        }
-        .task { await simkl.refreshStatus() }
-    }
-}
-
-// MARK: - AniList Connection View
-
-struct AniListConnectionView: View {
+struct AniListTokenEntryView: View {
     let anilist: AniListService
     @State private var tokenInput: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            switch anilist.phase {
-            case .unknown:
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("Checking AniList connection…").foregroundStyle(.secondary)
-                }
-            case .unavailable:
-                Text("AniList sync isn't configured in this build. Add an AniList client id to enable it.")
-                    .foregroundStyle(.secondary)
-            case .disconnected:
-                Button(action: { anilist.connect() }) {
-                    Label("Connect to AniList", systemImage: "link")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            case let .awaitingToken(authorizationURL):
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Visit this URL on your phone or computer, authorize Plozz, then paste the token below:")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Visit the URL below on your phone or computer, authorize Plozz, then paste the token here:")
+                .font(.callout)
+                .foregroundStyle(.secondary)
 
-                    HStack(alignment: .center, spacing: 32) {
-                        QRCodeView(authorizationURL)
-                            .frame(width: 160, height: 160)
-                            .padding(10)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 14))
+            if case let .awaitingToken(authorizationURL) = anilist.phase {
+                HStack(alignment: .center, spacing: 32) {
+                    QRCodeView(authorizationURL)
+                        .frame(width: 160, height: 160)
+                        .padding(10)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 14))
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("anilist.co/api/v2/oauth/authorize")
-                                .font(.title3.weight(.semibold))
-                            TextField("Paste access token here", text: $tokenInput)
-                            HStack(spacing: 16) {
-                                Button("Submit Token") {
-                                    Task { await anilist.submitToken(tokenInput) }
-                                }
-                                .disabled(tokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
-                                Button("Cancel", role: .cancel) {
-                                    anilist.cancelConnect()
-                                }
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("anilist.co/api/v2/oauth/authorize")
+                            .font(.title3.weight(.semibold))
+                        TextField("Paste access token here", text: $tokenInput)
+                        HStack(spacing: 16) {
+                            Button("Submit Token") {
+                                Task { await anilist.submitToken(tokenInput) }
+                            }
+                            .disabled(tokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                            Button("Cancel", role: .cancel) {
+                                anilist.cancelConnect()
                             }
                         }
                     }
                 }
-            case let .connected(username):
-                TrackerConnectedView(username: username, serviceName: "AniList") {
-                    Task { await anilist.disconnect() }
-                }
-            case let .error(message):
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.secondary)
-                    Button(action: { anilist.connect() }) {
-                        Label("Try Again", systemImage: "arrow.clockwise")
-                    }
-                }
             }
         }
-        .task { await anilist.refreshStatus() }
-    }
-}
-
-// MARK: - MAL Connection View
-
-struct MALConnectionView: View {
-    let mal: MALService
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            switch mal.phase {
-            case .unknown:
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("Checking MyAnimeList connection…").foregroundStyle(.secondary)
-                }
-            case .unavailable:
-                Text("MyAnimeList sync isn't configured in this build. Add a MAL client id to enable it.")
-                    .foregroundStyle(.secondary)
-            case .disconnected:
-                Button(action: { mal.connect() }) {
-                    Label("Connect to MyAnimeList", systemImage: "link")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            case let .connecting(userCode, verificationURL, expiresAt):
-                DeviceCodeConnectingView(
-                    serviceName: "MyAnimeList",
-                    userCode: userCode,
-                    verificationURL: verificationURL,
-                    expiresAt: expiresAt,
-                    codeLifetime: mal.codeLifetime,
-                    onCancel: { mal.cancelConnect() }
-                )
-            case let .connected(username):
-                TrackerConnectedView(username: username, serviceName: "MyAnimeList") {
-                    Task { await mal.disconnect() }
-                }
-            case let .error(message):
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.secondary)
-                    Button(action: { mal.connect() }) {
-                        Label("Try Again", systemImage: "arrow.clockwise")
-                    }
-                }
-            }
-        }
-        .task { await mal.refreshStatus() }
     }
 }
 
@@ -380,31 +327,6 @@ struct DeviceCodeConnectingView: View {
             trimmed.removeFirst(prefix.count)
         }
         return trimmed
-    }
-}
-
-/// Shared connected-state view showing username + disconnect button.
-struct TrackerConnectedView: View {
-    let username: String
-    let serviceName: String
-    let onDisconnect: () -> Void
-
-    var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.title)
-                .foregroundStyle(.green)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(username).font(.headline)
-                Text("Your watches sync to \(serviceName)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button(role: .destructive, action: onDisconnect) {
-                Label("Disconnect", systemImage: "xmark.circle")
-            }
-        }
     }
 }
 

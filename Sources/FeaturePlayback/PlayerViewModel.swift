@@ -310,6 +310,11 @@ public final class PlayerViewModel {
                 return makeHybrid(captionSettings)
             }
             return engineFactory.makeNative(captionSettings)
+        case .plozzigen:
+            if let makePlozzigen = engineFactory.makePlozzigen, let engine = makePlozzigen() {
+                return engine
+            }
+            return engineFactory.makeNative(captionSettings)
         case .native:
             return engineFactory.makeNative(captionSettings)
         }
@@ -352,6 +357,9 @@ public final class PlayerViewModel {
         case .native:
             return engineFactory.hybridAvailable ? .hybrid : nil
         case .hybrid:
+            return .native
+        case .plozzigen:
+            // Plozzigen failed — fall back to native (server transcode safety net).
             return .native
         }
     }
@@ -404,6 +412,13 @@ public final class PlayerViewModel {
             var kind: PlaybackEngineKind
             if isLocalRemux {
                 kind = .native
+            } else if !forceTranscode, engineFactory.plozzigenAvailable,
+                      let descriptor = request.localRemuxSource,
+                      case .eligible = descriptor.eligibility(capabilities: capabilities, allowAnyDecodableHEVC: allowAnyDecodableHEVCRemux) {
+                // Plozzigen handles the full pipeline: FFmpeg demux → HLS-fMP4 →
+                // localhost → AVPlayer. Skip the LocalRemux strategy flow entirely;
+                // the engine reads localRemuxSource.originalURL directly.
+                kind = .plozzigen
             } else {
                 kind = EngineRouter.selectEngine(
                     source: request.sourceMetadata,

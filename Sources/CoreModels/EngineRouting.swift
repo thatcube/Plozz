@@ -15,6 +15,11 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
     /// `MPVVideoEngine` (libmpv). Decodes AVPlayer-incompatible sources on-device
     /// (MKV, DTS / DTS-HD / TrueHD, odd codecs) without a server transcode.
     case hybrid
+    /// `AetherVideoEngine`. FFmpeg demux → HLS-fMP4 copy-remux → localhost →
+    /// AVPlayer. Handles DoVi + Atmos MKV with full seek, bounded memory, and
+    /// native video rendering. Replaces the local-remux + native pipeline for
+    /// eligible sources.
+    case plozzigen
 }
 
 // MARK: - EngineRouter

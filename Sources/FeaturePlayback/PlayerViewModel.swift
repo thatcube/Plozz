@@ -1114,8 +1114,12 @@ public final class PlayerViewModel {
     public var isTranscoding: Bool { request?.isTranscoding ?? false }
 
     /// How the server is delivering the active stream (direct play / remux /
-    /// transcode). Read by the playback diagnostics overlay's Source row.
-    public var deliveryMode: PlaybackDiagnostics.PlaybackMode { request?.deliveryMode ?? .unknown }
+    /// transcode). When Plozzigen is the active engine, it overrides the provider's
+    /// mode since Plozzigen reads original bytes directly (not a server transcode).
+    public var deliveryMode: PlaybackDiagnostics.PlaybackMode {
+        if currentEngineKind == .plozzigen { return .plozzigen }
+        return request?.deliveryMode ?? .unknown
+    }
 
     /// Provider source facts (codec/HDR/channels/…) for the playing item, used
     /// to populate the playback diagnostics overlay.

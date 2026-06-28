@@ -22,6 +22,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         /// Plozz intercepted the original bytes locally and synthesized its own
         /// AVPlayer-facing stream (e.g. localhost/custom-scheme HLS).
         case localRemux
+        /// Plozzigen engine — on-device FFmpeg demux → HLS-fMP4 → AVPlayer.
+        /// Lossless local remux with DoVi, Atmos, and full-timeline seek.
+        case plozzigen
         /// Server re-encodes the video and/or audio.
         case transcode
         case unknown
@@ -31,6 +34,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
             case .directPlay: return "Direct Play"
             case .remux: return "Remux (server, lossless)"
             case .localRemux: return "Local Remux"
+            case .plozzigen: return "Direct Play (Plozzigen)"
             case .transcode: return "Transcode (server)"
             case .unknown: return "Unknown"
             }

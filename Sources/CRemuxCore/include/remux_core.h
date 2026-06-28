@@ -172,6 +172,29 @@ void plozz_remux_set_derive_eac3_frame_dur(plozz_remux_session *s, int enabled);
 void plozz_remux_set_keyframe_scan(plozz_remux_session *s, int enabled);
 
 /*
+ * Enable keyframe-index (Matroska cluster-header parse) mode for the post-open
+ * keyframe-scan. When on, discovery reads each boundary keyframe's PTS out of the
+ * cluster/Block header (a few KB) instead of demuxing the whole keyframe packet
+ * (~one 4K IDR), cutting open-latency byte cost ~10x on multi-GB no-Cues 4K titles.
+ * It self-calibrates the raw->seconds factor against av_read_frame on the first few
+ * boundaries and falls back to the proven av_read_frame path on ANY mismatch, so
+ * boundaries (and default output) are never corrupted. Must be called BEFORE
+ * plozz_remux_set_keyframe_scan. Callers gate this on the
+ * `com.plozz.playback.remuxKeyframeIndex` debug flag. Ignored when `s` is NULL.
+ */
+void plozz_remux_set_keyframe_index_mode(plozz_remux_session *s, int enabled);
+
+/*
+ * Pure test/diagnostic helper: parse a Matroska Cluster at `buf[0..len)` and return,
+ * via *out_raw, the raw (TimestampScale-unit) timestamp of the first keyframe block
+ * of `video_track` (clusterTimestamp + block relative ts). Returns 1 on success, 0
+ * when `buf` does not begin with a Cluster or no qualifying keyframe block fits in
+ * the window. Reads only element headers — never frame payloads. No session state.
+ */
+int plozz_remux_test_parse_cluster_keyframe(const uint8_t *buf, int len,
+                                            int64_t video_track, int64_t *out_raw);
+
+/*
  * Pure test/diagnostic helper: group a sorted list of real keyframe times (in
  * seconds, 0-based) into non-overlapping segments of at least `target_seconds`
  * each, snapping every boundary to a real keyframe and stamping each segment's

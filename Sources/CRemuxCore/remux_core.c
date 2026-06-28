@@ -67,6 +67,19 @@ static void remux_log(int level, const char *fmt, ...) {
  * fixed-cadence table: degraded (the old EXTINF mismatch) but never a hang/crash.
  */
 #define PLOZZ_KEYFRAME_SCAN_BUDGET_US (8 * 1000000LL)
+/*
+ * Keyframe-index (header-parse) mode constants. When enabled (flag
+ * com.plozz.playback.remuxKeyframeIndex) discovery reads each boundary keyframe's
+ * PTS from the Matroska cluster/Block HEADER instead of av_read_frame'ing the whole
+ * keyframe packet — cutting per-probe bytes from ~one 4K IDR (~1.4MB) to a few KB.
+ * PLOZZ_KF_HEADER_WINDOW is the small range read at each post-seek position;
+ * PLOZZ_KF_CALIB_PROBES is how many boundaries cross-check the header parse against
+ * av_read_frame (which also empirically derives the TimestampScale factor) before
+ * the cheap path is trusted for the remainder. Any mismatch falls back to the
+ * proven av_read_frame path, so correctness can never regress.
+ */
+#define PLOZZ_KF_HEADER_WINDOW 16384
+#define PLOZZ_KF_CALIB_PROBES 4
 
 struct plozz_remux_session {
     void *opaque;
@@ -105,6 +118,12 @@ struct plozz_remux_session {
      * so the keyframe-scan rebuild knows it should engage; 0 when the table was
      * built from a real keyframe index (already keyframe-aligned, never rebuilt). */
     int used_fixed_cadence;
+
+    /* 1 when the post-open keyframe-scan should read each boundary keyframe's PTS
+     * from the Matroska cluster/Block HEADER (a few KB) instead of av_read_frame'ing
+     * the whole keyframe packet (~one IDR). Gated by com.plozz.playback.remuxKeyframeIndex.
+     * Self-calibrating + self-validating: falls back to av_read_frame on any mismatch. */
+    int keyframe_index_mode;
 };
 
 /* ----- AVIO callback adapters ------------------------------------------- */
@@ -343,6 +362,205 @@ static void build_segment_table(plozz_remux_session *s, double target_seconds) {
     s->segment_count = count;
 }
 
+/* ===== Matroska/EBML cluster-header keyframe parse (keyframe-index mode) =====
+ *
+ * These helpers read a keyframe's presentation timestamp out of the Matroska
+ * Cluster + (Simple)Block HEADER (Timestamp element + the block's relative ts and
+ * keyframe flag) — a few bytes — instead of demuxing the whole keyframe packet.
+ * They are pure functions over an in-memory buffer (no I/O), so the parser is
+ * unit-tested directly via the plozz_remux_test_parse_cluster_keyframe shim.
+ */
+
+/* Length (1..8) of an EBML variable-length integer from its first byte; 0 if invalid. */
+static int ebml_vint_length(uint8_t first) {
+    for (int i = 0; i < 8; i++) {
+        if (first & (0x80 >> i)) return i + 1;
+    }
+    return 0;
+}
+
+/* Read an EBML element ID (marker bits KEPT) from p[0..avail). Returns bytes
+ * consumed (1..4) and writes the ID to *out_id, or 0 on insufficient/invalid. */
+static int ebml_read_id(const uint8_t *p, int avail, uint32_t *out_id) {
+    if (avail < 1) return 0;
+    int len = ebml_vint_length(p[0]);
+    if (len < 1 || len > 4 || len > avail) return 0;
+    uint32_t id = 0;
+    for (int i = 0; i < len; i++) id = (id << 8) | p[i];
+    *out_id = id;
+    return len;
+}
+
+/* Read an EBML size/value vint (marker bit STRIPPED) from p[0..avail). Returns
+ * bytes consumed (1..8) and writes the value to *out_val, or 0 on
+ * insufficient/invalid. *out_unknown (optional) is set when every value bit is 1
+ * (the "unknown size" sentinel). */
+static int ebml_read_size(const uint8_t *p, int avail, uint64_t *out_val, int *out_unknown) {
+    if (avail < 1) return 0;
+    int len = ebml_vint_length(p[0]);
+    if (len < 1 || len > 8 || len > avail) return 0;
+    uint8_t firstmask = (uint8_t)(0xFF >> len);
+    uint64_t v = (uint64_t)(p[0] & firstmask);
+    int all_ones = (v == (uint64_t)firstmask);
+    for (int i = 1; i < len; i++) {
+        v = (v << 8) | p[i];
+        if (p[i] != 0xFF) all_ones = 0;
+    }
+    if (out_unknown) *out_unknown = all_ones;
+    *out_val = v;
+    return len;
+}
+
+static uint64_t ebml_read_be_uint(const uint8_t *p, int len) {
+    uint64_t v = 0;
+    for (int i = 0; i < len; i++) v = (v << 8) | p[i];
+    return v;
+}
+
+#define MKV_ID_CLUSTER     0x1F43B675u
+#define MKV_ID_TIMESTAMP   0xE7u
+#define MKV_ID_SIMPLEBLOCK 0xA3u
+#define MKV_ID_BLOCKGROUP  0xA0u
+#define MKV_ID_BLOCK       0xA1u
+#define MKV_ID_REFBLOCK    0xFBu
+
+/* Parse a (Simple)Block header: track-number vint, 2-byte big-endian signed
+ * relative timestamp, 1 flags byte. Returns 1 with *trk/*rel/*keyframe set, else 0.
+ * The keyframe flag (0x80) is only meaningful for SimpleBlock; for a plain Block the
+ * caller infers keyframe-ness from the absence of a ReferenceBlock sibling. */
+static int mkv_block_header(const uint8_t *p, int avail, int64_t *trk, int64_t *rel, int *keyframe) {
+    uint64_t t = 0;
+    int tc = ebml_read_size(p, avail, &t, NULL); /* track number is an EBML vint */
+    if (tc == 0 || tc + 3 > avail) return 0;
+    int16_t r = (int16_t)(((uint16_t)p[tc] << 8) | (uint16_t)p[tc + 1]);
+    uint8_t flags = p[tc + 2];
+    if (trk) *trk = (int64_t)t;
+    if (rel) *rel = (int64_t)r;
+    if (keyframe) *keyframe = (flags & 0x80) ? 1 : 0;
+    return 1;
+}
+
+/* A BlockGroup is a keyframe iff it carries a Block with no ReferenceBlock. */
+static int mkv_blockgroup_keyframe(const uint8_t *p, int avail, int64_t video_track,
+                                   int64_t cluster_ts, int64_t *out_raw) {
+    int pos = 0, have_block = 0, has_ref = 0;
+    int64_t trk = -1, rel = 0;
+    while (pos < avail) {
+        uint32_t id = 0;
+        int cl = ebml_read_id(p + pos, avail - pos, &id);
+        if (cl == 0) break;
+        pos += cl;
+        uint64_t sz = 0;
+        int el = ebml_read_size(p + pos, avail - pos, &sz, NULL);
+        if (el == 0) break;
+        pos += el;
+        int body_avail = avail - pos;
+        if (body_avail < 0) break;
+        if (id == MKV_ID_BLOCK) {
+            int n = (sz <= (uint64_t)body_avail) ? (int)sz : body_avail;
+            mkv_block_header(p + pos, n, &trk, &rel, NULL);
+            have_block = 1;
+        } else if (id == MKV_ID_REFBLOCK) {
+            has_ref = 1;
+        }
+        if (sz > (uint64_t)body_avail) break;
+        pos += (int)sz;
+    }
+    if (have_block && !has_ref && trk == video_track) {
+        if (out_raw) *out_raw = cluster_ts + rel;
+        return 1;
+    }
+    return 0;
+}
+
+/*
+ * Parse a Matroska Cluster at buf[0..len) and return, via *out_raw, the raw
+ * (TimestampScale-unit) timestamp of the first KEYFRAME block of `video_track`
+ * (clusterTimestamp + block relative ts). Returns 1 on success; 0 when buf does not
+ * begin with a Cluster or no qualifying keyframe block is found within the window.
+ * Reads only element headers — never frame payloads.
+ */
+static int mkv_parse_cluster_keyframe(const uint8_t *buf, int len, int64_t video_track,
+                                      int64_t *out_raw) {
+    if (!buf || len < 2) return 0;
+    int pos = 0;
+    uint32_t id = 0;
+    int c = ebml_read_id(buf + pos, len - pos, &id);
+    if (c == 0 || id != MKV_ID_CLUSTER) return 0;
+    pos += c;
+    uint64_t csize = 0;
+    int unknown = 0;
+    int sc = ebml_read_size(buf + pos, len - pos, &csize, &unknown);
+    if (sc == 0) return 0;
+    pos += sc;
+    int cluster_end = len;
+    if (!unknown && csize <= (uint64_t)(len - pos)) cluster_end = pos + (int)csize;
+
+    int have_ts = 0;
+    int64_t cluster_ts = 0;
+    while (pos < cluster_end) {
+        uint32_t cid = 0;
+        int cl = ebml_read_id(buf + pos, cluster_end - pos, &cid);
+        if (cl == 0) break;
+        pos += cl;
+        uint64_t esize = 0;
+        int el = ebml_read_size(buf + pos, cluster_end - pos, &esize, NULL);
+        if (el == 0) break;
+        pos += el;
+        int body_avail = cluster_end - pos;
+        if (body_avail < 0) break;
+        const uint8_t *body = buf + pos;
+        if (cid == MKV_ID_TIMESTAMP) {
+            if (esize <= 8 && (int)esize <= body_avail) {
+                cluster_ts = (int64_t)ebml_read_be_uint(body, (int)esize);
+                have_ts = 1;
+            }
+        } else if (cid == MKV_ID_SIMPLEBLOCK && have_ts) {
+            int n = (esize <= (uint64_t)body_avail) ? (int)esize : body_avail;
+            int64_t trk = -1, rel = 0, kf = 0;
+            if (mkv_block_header(body, n, &trk, &rel, (int *)&kf) && trk == video_track && kf) {
+                if (out_raw) *out_raw = cluster_ts + rel;
+                return 1;
+            }
+        } else if (cid == MKV_ID_BLOCKGROUP && have_ts) {
+            int n = (esize <= (uint64_t)body_avail) ? (int)esize : body_avail;
+            int64_t raw = 0;
+            if (mkv_blockgroup_keyframe(body, n, video_track, cluster_ts, &raw)) {
+                if (out_raw) *out_raw = raw;
+                return 1;
+            }
+        }
+        if (esize > (uint64_t)body_avail) break; /* element body truncated by window */
+        pos += (int)esize;
+    }
+    return 0;
+}
+
+/* Test shim: exposes the pure cluster parser for unit tests (see header). */
+int plozz_remux_test_parse_cluster_keyframe(const uint8_t *buf, int len,
+                                            int64_t video_track, int64_t *out_raw) {
+    return mkv_parse_cluster_keyframe(buf, len, video_track, out_raw);
+}
+
+/*
+ * Read up to `want` bytes at byte `offset` directly via the session callbacks,
+ * bypassing the avio buffer so the range reader's small discovery read-ahead
+ * applies (a header parse needs only a few KB, not a 1 MiB avio refill). Returns
+ * bytes read (>=0). Disturbs the underlying reader position; callers re-sync via
+ * the next avformat_seek_file (or an explicit avio_seek before any av_read_frame).
+ */
+static int read_raw_at(plozz_remux_session *s, int64_t offset, uint8_t *buf, int want) {
+    if (!s || !s->seek_cb || !s->read_cb) return 0;
+    if (s->seek_cb(s->opaque, offset, SEEK_SET) < 0) return 0;
+    int got = 0;
+    while (got < want) {
+        int n = s->read_cb(s->opaque, buf + got, want - got);
+        if (n <= 0) break;
+        got += n;
+    }
+    return got;
+}
+
 /*
  * Read forward from the current demux position (just after a BACKWARD seek) and
  * return the 0-based seconds timestamp of the first VIDEO keyframe encountered,
@@ -374,6 +592,92 @@ static double read_seek_keyframe_pts(plozz_remux_session *s, AVPacket *pkt, doub
 }
 
 /*
+ * Self-calibrating keyframe-PTS probe used by discovery when keyframe-index mode is
+ * on. State carried across boundaries within one discovery pass.
+ */
+typedef struct {
+    int enabled;        /* header-parse requested (flag on) */
+    int calibrated;     /* scale validated across CALIB probes — cheap path trusted */
+    int failed;         /* calibration failed — use av_read_frame for the rest */
+    double scale;       /* seconds per raw cluster-ts unit (derived empirically) */
+    int64_t video_track;/* Matroska track number of the video stream */
+    int calib_samples;  /* cross-checks accumulated so far */
+    int header_reads;   /* telemetry: boundaries served purely by header-parse */
+} kf_index_ctx;
+
+/*
+ * Return the 0-based seconds PTS of the keyframe the demuxer just BACKWARD-seeked
+ * onto. In keyframe-index mode this parses the cluster header (a few KB) once the
+ * empirical raw->seconds `scale` has been validated against av_read_frame on the
+ * first PLOZZ_KF_CALIB_PROBES boundaries. Until then — and on any per-boundary
+ * uncertainty (unparsable window, non-monotonic/out-of-range value) — it returns the
+ * authoritative av_read_frame timestamp, so a wrong header read can never corrupt a
+ * boundary. `last` is the previous accepted boundary (monotonic guard).
+ */
+static double probe_keyframe_pts(plozz_remux_session *s, AVPacket *pkt, double file_start,
+                                 double last, kf_index_ctx *ix) {
+    if (!ix || !ix->enabled || ix->failed) {
+        return read_seek_keyframe_pts(s, pkt, file_start);
+    }
+    int64_t pos = avio_tell(s->ic->pb);
+    int64_t raw = 0;
+    int parsed = 0;
+    if (pos >= 0) {
+        uint8_t hbuf[PLOZZ_KF_HEADER_WINDOW];
+        int got = read_raw_at(s, pos, hbuf, PLOZZ_KF_HEADER_WINDOW);
+        if (got > 16 && mkv_parse_cluster_keyframe(hbuf, got, ix->video_track, &raw)) parsed = 1;
+    }
+
+    if (ix->calibrated) {
+        if (parsed) {
+            double t = raw * ix->scale - file_start;
+            if (t < 0 && t > -0.05) t = 0.0;
+            /* Monotonic + sane upper bound guards a stray mis-parse; otherwise the
+             * next avformat_seek_file re-syncs the reader (no restore needed). */
+            if (t > last + 0.001 && t < last + 600.0) {
+                ix->header_reads++;
+                return t;
+            }
+        }
+        /* Uncertain: restore reader/avio to `pos` and use av_read_frame this once. */
+        if (pos >= 0) {
+            s->seek_cb(s->opaque, pos, SEEK_SET);
+            avio_seek(s->ic->pb, pos, SEEK_SET);
+        }
+        return read_seek_keyframe_pts(s, pkt, file_start);
+    }
+
+    /* Calibration phase: read_raw_at moved the reader; restore before av_read_frame. */
+    if (pos >= 0) {
+        s->seek_cb(s->opaque, pos, SEEK_SET);
+        avio_seek(s->ic->pb, pos, SEEK_SET);
+    }
+    double pts_av = read_seek_keyframe_pts(s, pkt, file_start);
+    if (parsed && pts_av > 0.05 && raw > 0) {
+        double scale = (pts_av + file_start) / (double)raw;
+        if (ix->calib_samples == 0) ix->scale = scale;
+        double rel = (ix->scale != 0.0) ? (scale - ix->scale) / ix->scale : 1.0;
+        if (rel < 0) rel = -rel;
+        if (rel < 0.01) {
+            ix->calib_samples++;
+            if (ix->calib_samples >= PLOZZ_KF_CALIB_PROBES) {
+                ix->calibrated = 1;
+                remux_log(1, "remux: keyframe-index calibrated scale=%.9g after %d probes "
+                          "— header-parse engaged", ix->scale, ix->calib_samples);
+            }
+        } else {
+            ix->failed = 1;
+            remux_log(1, "remux: keyframe-index calibration mismatch (%.6g vs %.6g) "
+                      "— falling back to av_read_frame", scale, ix->scale);
+        }
+    } else if (ix->calib_samples == 0) {
+        ix->failed = 1;
+        remux_log(1, "remux: keyframe-index header parse unavailable — using av_read_frame");
+    }
+    return pts_av;
+}
+
+/*
  * Discover the source's real keyframe times (seconds, 0-based) by seek-probing,
  * for files whose container exposes no usable keyframe index. Starting from t=0,
  * each step BACKWARD-seeks ahead by an ADAPTIVE window and reads the keyframe it
@@ -387,10 +691,12 @@ static double read_seek_keyframe_pts(plozz_remux_session *s, AVPacket *pkt, doub
  * on failure. `*out_probes` (optional) receives the number of seek-probes performed.
  */
 static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seconds,
-                                      double **out_kf, int *out_probes, int *out_timed_out) {
+                                      double **out_kf, int *out_probes, int *out_timed_out,
+                                      int index_mode, int *out_header_reads) {
     if (out_kf) *out_kf = NULL;
     if (out_probes) *out_probes = 0;
     if (out_timed_out) *out_timed_out = 0;
+    if (out_header_reads) *out_header_reads = 0;
     if (!s || !out_kf || s->video_index < 0) return 0;
     double duration = s->duration_seconds;
     if (duration <= 0) return 0;
@@ -399,6 +705,17 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
     AVStream *vst = s->ic->streams[s->video_index];
     double file_start = (s->ic->start_time != AV_NOPTS_VALUE)
         ? (double)s->ic->start_time / AV_TIME_BASE : 0.0;
+
+    /* Keyframe-index (header-parse) context. video_track is the Matroska track
+     * number, which ffmpeg stores in AVStream.id; self-validation catches any
+     * mismatch and falls back, so an unexpected id never corrupts boundaries. */
+    kf_index_ctx ix;
+    memset(&ix, 0, sizeof(ix));
+    ix.enabled = index_mode ? 1 : 0;
+    ix.video_track = (int64_t)vst->id;
+    if (ix.enabled && ix.video_track <= 0) {
+        ix.enabled = 0; /* no usable track number; stay on the proven path */
+    }
 
     double *kf = (double *)malloc(sizeof(double) * (size_t)PLOZZ_MAX_SEGMENTS);
     if (!kf) return 0;
@@ -434,7 +751,7 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
                                    AVSEEK_FLAG_BACKWARD) < 0) {
                 break;
             }
-            double kpts = read_seek_keyframe_pts(s, pkt, file_start);
+            double kpts = probe_keyframe_pts(s, pkt, file_start, last, &ix);
             if (kpts > last + 0.05) { found = kpts; break; }
             if (at_end) break;          /* probed the tail, no further keyframe */
             /* Landed on/<= the previous boundary: keyframes are sparser than the
@@ -451,6 +768,7 @@ static int discover_keyframes_by_seek(plozz_remux_session *s, double target_seco
     av_packet_free(&pkt);
     if (out_probes) *out_probes = probes;
     if (out_timed_out) *out_timed_out = timed_out;
+    if (out_header_reads) *out_header_reads = ix.header_reads;
     *out_kf = kf;
     return n;
 }
@@ -481,7 +799,9 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
     double *kf = NULL;
     int probes = 0;
     int timed_out = 0;
-    int kf_count = discover_keyframes_by_seek(s, eff_target, &kf, &probes, &timed_out);
+    int header_reads = 0;
+    int kf_count = discover_keyframes_by_seek(s, eff_target, &kf, &probes, &timed_out,
+                                              s->keyframe_index_mode, &header_reads);
     if (timed_out) {
         /* Budget blown (e.g. slow/stalled network on a huge title): abandon the
          * scan and keep the existing fixed-cadence table. Degraded (the old EXTINF
@@ -516,8 +836,10 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
      * coordinator's A/B reads this against the sibling's full-file scan to confirm
      * the startup-speed win on multi-GB 4K titles. */
     remux_log(1, "remux: keyframe-scan rebuilt %d segments (was %d fixed-cadence) "
-              "from %d keyframes via %d seek-probes (target=%.2fs eff=%.2fs)",
-              count, old, kf_count, probes, target, eff_target);
+              "from %d keyframes via %d seek-probes (target=%.2fs eff=%.2fs) "
+              "[index-mode=%s header-parsed=%d/%d]",
+              count, old, kf_count, probes, target, eff_target,
+              s->keyframe_index_mode ? "on" : "off", header_reads, probes);
     return count;
 }
 
@@ -708,6 +1030,15 @@ void plozz_remux_set_keyframe_scan(plozz_remux_session *s, int enabled) {
         return;
     }
     build_segment_table_keyframe_scan(s);
+}
+
+void plozz_remux_set_keyframe_index_mode(plozz_remux_session *s, int enabled) {
+    if (!s) return;
+    /* Pure latency optimization of the keyframe-scan: when on, discovery reads each
+     * boundary keyframe's PTS from the cluster header (a few KB) instead of the whole
+     * keyframe packet. Set BEFORE plozz_remux_set_keyframe_scan; self-validates and
+     * falls back to av_read_frame on any mismatch, so default output is unchanged. */
+    s->keyframe_index_mode = enabled ? 1 : 0;
 }
 
 int plozz_remux_plan_segments(const double *keyframe_times, int count,

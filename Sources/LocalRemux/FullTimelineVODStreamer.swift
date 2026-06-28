@@ -149,11 +149,20 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // seek-probe so EXTINF == muxed span and segments don't overlap — eliminating
         // the progressive A/V desync + stutter those titles exhibit. No-op otherwise.
         let keyframeScan = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeScan")
+        // Flag `com.plozz.playback.remuxKeyframeIndex` (DEFAULT OFF): pure open-latency
+        // optimization of the keyframe-scan — read each boundary keyframe's PTS from the
+        // Matroska cluster header (a few KB) instead of demuxing the whole keyframe
+        // packet, cutting discovery byte-cost ~10x on multi-GB no-Cues 4K titles. It
+        // self-validates against the av_read_frame path and falls back on any mismatch,
+        // so it only matters when keyframeScan is also ON.
+        let keyframeIndex = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeIndex")
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
-                                           keyframeScan: keyframeScan)
+                                           keyframeScan: keyframeScan,
+                                           keyframeIndex: keyframeIndex)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
         if keyframeScan { RemuxLog.info("Session: remuxKeyframeScan ON — real-keyframe segment table for no-index sources") }
+        if keyframeIndex { RemuxLog.info("Session: remuxKeyframeIndex ON — cluster-header keyframe PTS (low open-latency)") }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only

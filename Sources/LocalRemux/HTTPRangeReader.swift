@@ -76,6 +76,18 @@ final class HTTPRangeReader: @unchecked Sendable {
         readAhead = bytes
     }
 
+    /// The current per-round-trip read-ahead granularity (bytes).
+    var currentReadAhead: Int { readAhead }
+
+    /// Sets the read-ahead granularity to an exact value (may LOWER it, unlike
+    /// `boostReadAhead`). Used to shrink over-fetch during keyframe-index discovery,
+    /// where each probe reads only a cluster header (a few KB) — a 1 MiB read-ahead
+    /// would otherwise pull ~1 MiB per probe. Restore the prior value afterwards.
+    /// Same single-thread, pre-serving contract as `boostReadAhead`: race-free.
+    func setReadAhead(_ bytes: Int) {
+        readAhead = max(1, bytes)
+    }
+
     // MARK: - AVIO surface
 
     /// Total byte size, fetched once via a ranged probe (`Content-Range`/length).

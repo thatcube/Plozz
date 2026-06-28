@@ -128,7 +128,8 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// when the file can't be demuxed, so the caller's fallback path can report
     /// exactly why (vs an opaque failure).
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
-         deriveEac3FrameDur: Bool = false, keyframeScan: Bool = false) throws {
+         deriveEac3FrameDur: Bool = false, keyframeScan: Bool = false,
+         keyframeIndex: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -160,6 +161,17 @@ final class RemuxSegmenter: @unchecked Sendable {
         // no-index titles). Must run BEFORE reading the segment count below, since it
         // can change segment_count. A no-op for index-built tables and when OFF.
         if keyframeScan {
+            // Flag-gated (com.plozz.playback.remuxKeyframeIndex): cut discovery's
+            // per-probe byte cost by reading each boundary keyframe's PTS from the
+            // Matroska cluster HEADER (a few KB) instead of demuxing the whole keyframe
+            // packet (~one 4K IDR ≈ 1+ MiB). Shrink the reader's read-ahead so the
+            // direct header reads don't over-fetch, then restore it for muxing. The C
+            // side self-validates against av_read_frame and falls back on any mismatch.
+            let restoreReadAhead = reader.currentReadAhead
+            if keyframeIndex {
+                plozz_remux_set_keyframe_index_mode(session, 1)
+                reader.setReadAhead(64 * 1024)
+            }
             // Bracket the rebuild with the reader's byte/fetch counters so the cost of
             // seek-sampled discovery is visible in the log: it must be O(segments) tiny
             // ranged reads, NOT O(filesize) — the open-latency advantage over a full
@@ -168,12 +180,13 @@ final class RemuxSegmenter: @unchecked Sendable {
             let total = reader.size()
             plozz_remux_set_keyframe_scan(session, 1)
             let after = reader.networkSnapshot()
+            if keyframeIndex { reader.setReadAhead(restoreReadAhead) }
             let scanBytes = after.bytesFetched - before.bytesFetched
             let scanFetches = after.fetchCount - before.fetchCount
             let pct = total > 0 ? Double(scanBytes) / Double(total) * 100 : 0
             RemuxLog.info(String(format:
-                "RemuxSegmenter: keyframe-scan discovery read %lld bytes (%.1f%% of %lld) in %d fetches",
-                scanBytes, pct, total, scanFetches))
+                "RemuxSegmenter: keyframe-scan discovery read %lld bytes (%.1f%% of %lld) in %d fetches [index=%@]",
+                scanBytes, pct, total, scanFetches, keyframeIndex ? "on" : "off"))
         }
 
         var durations: [Double] = []

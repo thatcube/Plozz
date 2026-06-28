@@ -137,7 +137,7 @@ struct MusicCard: View {
     private var subtitleColor: Color { usesLiftText ? .black.opacity(0.6) : .secondary }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PlozzTheme.Metrics.cardCaptionSpacing) {
+        VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: scaledWidth, height: scaledWidth)
 

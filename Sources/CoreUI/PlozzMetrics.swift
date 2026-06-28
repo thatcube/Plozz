@@ -102,6 +102,20 @@ public struct PlozzMetrics: Equatable, Sendable {
         max(landscapeCardCornerRadius * PlozzTheme.Metrics.captionCornerClearanceFactor - cardInset, 0)
     }
 
+    /// Gap between a poster card's artwork and its caption: the shared base
+    /// (`cardCaptionSpacing`) plus a fraction (`captionTopClearanceFactor`) of the
+    /// card's side/bottom `captionInset`, so the top breathing room scales up with
+    /// the side clearance but only ~half as much (the top edge isn't a corner the
+    /// text crowds).
+    public var posterCaptionTopSpacing: CGFloat {
+        PlozzTheme.Metrics.cardCaptionSpacing + posterCaptionInset * PlozzTheme.Metrics.captionTopClearanceFactor
+    }
+
+    /// Landscape / music card counterpart of `posterCaptionTopSpacing`.
+    public var landscapeCaptionTopSpacing: CGFloat {
+        PlozzTheme.Metrics.cardCaptionSpacing + landscapeCaptionInset * PlozzTheme.Metrics.captionTopClearanceFactor
+    }
+
     public init(density: UIDensity) {
         let s = CGFloat(density.scale)
         self.density = density

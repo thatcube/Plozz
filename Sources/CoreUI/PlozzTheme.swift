@@ -123,10 +123,17 @@ public enum PlozzTheme {
         /// `PlozzMetrics` (artwork itself is unaffected).
         public static let captionCornerClearanceFactor: CGFloat = 0.8
         /// Vertical gap between a media card's artwork and its caption block —
-        /// shared by **every** poster *and* landscape card so the title sits the
-        /// same distance below the photo on both. (The poster previously used a
-        /// slightly larger bespoke value, making its title sit farther from the art.)
+        /// the *base* shared by every poster and landscape card. The artwork sits
+        /// flush against the top corner curve (unlike the side/bottom text, which
+        /// is held off it by `captionInset`), so the gap above the title only needs
+        /// to grow by a *fraction* of that side inset — see
+        /// `captionTopClearanceFactor` and the derived `…CaptionTopSpacing`.
         public static let cardCaptionSpacing: CGFloat = 8
+        /// How much of a caption's side/bottom `captionInset` is added to the gap
+        /// above the title. The top edge isn't a rounded corner the text crowds
+        /// (the artwork is), so the title needs less added space there than the
+        /// sides — ~half reads balanced. Applied in `PlozzMetrics`.
+        public static let captionTopClearanceFactor: CGFloat = 0.5
 
         // MARK: Focus
 

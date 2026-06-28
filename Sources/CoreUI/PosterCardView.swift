@@ -84,7 +84,7 @@ public struct PosterCardView: View {
     // MARK: Poster
 
     private var posterCard: some View {
-        VStack(alignment: .leading, spacing: PlozzTheme.Metrics.cardCaptionSpacing) {
+        VStack(alignment: .leading, spacing: metrics.posterCaptionTopSpacing) {
             Color.clear
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
@@ -120,7 +120,7 @@ public struct PosterCardView: View {
     // MARK: Landscape (medium) card
 
     private var landscapeCard: some View {
-        VStack(alignment: .leading, spacing: PlozzTheme.Metrics.cardCaptionSpacing) {
+        VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: size.width, height: size.height)
                 .overlay(alignment: .topTrailing) { watchedBadge }

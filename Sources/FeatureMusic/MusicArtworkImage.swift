@@ -122,19 +122,15 @@ struct MusicCard: View {
         self.action = action
     }
 
-    /// True when the focused card renders an opaque white "lift" surface (Reduce
-    /// Transparency, or pre-Liquid-Glass tvOS), in which case the caption must
-    /// flip to dark ink. On the translucent-glass path (tvOS 26+) it stays
-    /// primary/secondary over the glass. Mirrors `PosterCardView`.
-    private var usesLiftText: Bool {
-        guard isFocused else { return false }
-        if reduceTransparency { return true }
-        if #available(tvOS 26.0, *) { return false }
-        return true
+    /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
+    /// "lift" surface. Centralised in `PlozzCardCaption` (CoreUI) so every card
+    /// type flips identically.
+    private var titleColor: Color {
+        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
     }
-
-    private var titleColor: Color { usesLiftText ? .black.opacity(0.9) : .primary }
-    private var subtitleColor: Color { usesLiftText ? .black.opacity(0.6) : .secondary }
+    private var subtitleColor: Color {
+        PlozzCardCaption.subtitleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {

@@ -166,7 +166,18 @@ private struct LibraryCardView: View {
 
     @FocusState private var isFocused: Bool
     @Environment(\.themePalette) private var palette
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.plozzMetrics) private var metrics
+
+    /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
+    /// "lift" surface — shared with every other card via `PlozzCardCaption` so the
+    /// Libraries tile flips contrast on focus just like Continue Watching / Latest.
+    private var titleColor: Color {
+        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+    }
+    private var subtitleColor: Color {
+        PlozzCardCaption.subtitleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
@@ -178,11 +189,11 @@ private struct LibraryCardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(aggregated.library.title)
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(titleColor)
                     .lineLimit(1)
                 Text(subtitle.isEmpty ? " " : subtitle)
                     .font(.system(size: metrics.cardSubtitleFontSize))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitle.isEmpty ? 0 : 1)
             }

@@ -43,19 +43,15 @@ public struct PosterCardView: View {
     private var hideThumbnail: Bool { spoilerSettings.shouldHideThumbnail(for: item) }
     private var hideText: Bool { spoilerSettings.shouldHideText(for: item) }
 
-    /// When a focused card renders an opaque white "lift" surface (Reduce
-    /// Transparency on, or pre-Liquid-Glass tvOS) its title/subtitle must flip to
-    /// dark ink so they don't vanish into the white. On the translucent-glass
-    /// path (tvOS 26+) the text stays primary/secondary over the glass.
-    private var usesLiftText: Bool {
-        guard isFocused else { return false }
-        if reduceTransparency { return true }
-        if #available(tvOS 26.0, *) { return false }
-        return true
+    /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
+    /// "lift" surface. Centralised in `PlozzCardCaption` so every card type flips
+    /// identically.
+    private var titleColor: Color {
+        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
     }
-
-    private var titleColor: Color { usesLiftText ? .black.opacity(0.9) : .primary }
-    private var subtitleColor: Color { usesLiftText ? .black.opacity(0.6) : .secondary }
+    private var subtitleColor: Color {
+        PlozzCardCaption.subtitleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+    }
 
     private var size: CGSize {
         switch style {

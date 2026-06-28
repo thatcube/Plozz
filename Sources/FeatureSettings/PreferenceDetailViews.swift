@@ -10,7 +10,11 @@ struct AppearanceDetailView: View {
     /// App-wide (global) — persists across all profiles. Same un-namespaced
     /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
     /// See AGENTS.local.md ("Per-profile vs app-wide settings").
-    @AppStorage("reduceTransparencyOverride") private var reduceTransparency = false
+    @AppStorage(TransparencyPreference.storageKey) private var transparencyPreferenceRaw = TransparencyPreference.default.rawValue
+
+    private var transparencyPreference: TransparencyPreference {
+        TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default
+    }
 
     var body: some View {
         @Bindable var musicPlayer = musicPlayer
@@ -86,12 +90,30 @@ struct AppearanceDetailView: View {
 
                     // Transparency
                     VStack(alignment: .leading, spacing: 16) {
-                        Text("Transparency").font(.headline.weight(.semibold))
-                        Toggle("Reduce transparency", isOn: $reduceTransparency)
-                        Text("Replaces the translucent “liquid glass” blur on cards, menus and overlays with solid surfaces. Turns on automatically when Reduce Transparency is enabled in tvOS Accessibility settings.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Transparency (liquid glass)").font(.headline.weight(.semibold))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(TransparencyPreference.allCases) { option in
+                                    Button {
+                                        transparencyPreferenceRaw = option.rawValue
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: option.symbolName)
+                                            Text(option.displayName)
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .opacity(transparencyPreference == option ? 1 : 0)
+                                        }
+                                        .font(.headline)
+                                        .padding(.horizontal, 4)
+                                    }
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: transparencyPreference == option))
+                                    .accessibilityValue(transparencyPreference == option ? "Selected" : "")
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
+                        }
+                        .scrollClipDisabled()
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -106,8 +128,7 @@ struct AppearanceDetailView: View {
                 )
 
                 SettingsPanel(
-                    title: "Music Player",
-                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme; or pin a fixed look."
+                    title: "Music Player"
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
                         ScrollView(.horizontal, showsIndicators: false) {

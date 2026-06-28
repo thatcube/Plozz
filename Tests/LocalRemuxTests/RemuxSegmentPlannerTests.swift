@@ -125,5 +125,51 @@ final class RemuxSegmentPlannerTests: XCTestCase {
     func testMediaSequenceStartsAtZero() {
         XCTAssertTrue(planner().mediaPlaylist().contains("#EXT-X-MEDIA-SEQUENCE:0"))
     }
+
+    // MARK: - B7 EVENT (progressive lazy/windowed) media playlist
+
+    func testEventPlaylistWhileIncompleteHasNoEndlist() {
+        // While the lazy index is still discovering, the media playlist is an EVENT
+        // playlist carrying only the segments found so far — and MUST NOT carry
+        // ENDLIST (that would tell AVPlayer the timeline is final and freeze growth).
+        let m = planner().mediaPlaylist(durations: [11.4, 12.8], complete: false)
+        XCTAssertTrue(m.contains("#EXT-X-PLAYLIST-TYPE:EVENT"))
+        XCTAssertFalse(m.contains("#EXT-X-ENDLIST"))
+        XCTAssertTrue(m.contains("#EXT-X-MAP:URI=\"\(RemuxSegmentPlanner.initName)\""))
+        // Exactly the two discovered segments, with their real spans.
+        XCTAssertTrue(m.contains("#EXTINF:11.400000,"))
+        XCTAssertTrue(m.contains("#EXTINF:12.800000,"))
+        XCTAssertTrue(m.contains(RemuxSegmentPlanner.segmentName(0)))
+        XCTAssertTrue(m.contains(RemuxSegmentPlanner.segmentName(1)))
+        XCTAssertFalse(m.contains(RemuxSegmentPlanner.segmentName(2)))
+    }
+
+    func testEventPlaylistGrowsThenCompletesToVOD() {
+        // A later reload carries more segments; once discovery completes the same
+        // generator emits the proven VOD form (PLAYLIST-TYPE:VOD + ENDLIST) so
+        // far-scrub is instant. Earlier EXTINFs are byte-identical across reloads —
+        // the no-desync invariant (published durations never change).
+        let p = planner()
+        let early = p.mediaPlaylist(durations: [11.4, 12.8], complete: false)
+        let later = p.mediaPlaylist(durations: [11.4, 12.8, 12.0, 6.5], complete: true)
+        // Prefix stability: the first two EXTINFs are unchanged.
+        XCTAssertTrue(later.contains("#EXTINF:11.400000,"))
+        XCTAssertTrue(later.contains("#EXTINF:12.800000,"))
+        XCTAssertTrue(early.contains("#EXTINF:11.400000,"))
+        // Completed form.
+        XCTAssertTrue(later.contains("#EXT-X-PLAYLIST-TYPE:VOD"))
+        XCTAssertTrue(later.contains("#EXT-X-ENDLIST"))
+        XCTAssertTrue(later.contains(RemuxSegmentPlanner.segmentName(3)))
+    }
+
+    func testEventPlaylistTargetDurationIsNonDecreasingCeil() {
+        // TARGETDURATION must cover the longest known segment and not shrink as the
+        // list grows (a decreasing target is an HLS violation AVPlayer can reject).
+        let p = planner()
+        let early = p.mediaPlaylist(durations: [11.4], complete: false)
+        let later = p.mediaPlaylist(durations: [11.4, 12.8], complete: false)
+        XCTAssertTrue(early.contains("#EXT-X-TARGETDURATION:12"))
+        XCTAssertTrue(later.contains("#EXT-X-TARGETDURATION:13"))
+    }
 }
 #endif

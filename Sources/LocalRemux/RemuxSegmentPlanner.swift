@@ -104,21 +104,40 @@ public struct RemuxSegmentPlanner: Equatable, Sendable {
     /// and one keyframe-cut fMP4 segment per entry, each with its exact `EXTINF`
     /// duration so scrubbing maps to the right segment.
     public func mediaPlaylist() -> String {
-        let target = max(1, Int(segmentDurations.map { $0.rounded(.up) }.max() ?? 6))
+        mediaPlaylist(durations: segmentDurations, complete: true)
+    }
+
+    /// The media playlist for an explicit (possibly still-growing) `durations` list.
+    ///
+    /// `complete == true` emits the proven VOD form (`PLAYLIST-TYPE:VOD` +
+    /// `EXT-X-ENDLIST`) — the whole timeline is known. `complete == false` emits an
+    /// EVENT playlist (`PLAYLIST-TYPE:EVENT`, no `ENDLIST`) carrying only the
+    /// segments discovered so far: the B7 lazy/windowed index serves this immediately
+    /// after probing just the first window and re-serves a longer list as background
+    /// discovery extends the frontier, so AVPlayer starts in a couple seconds
+    /// regardless of file size. Because only *fully-bracketed* segments are ever
+    /// published (the C core withholds the still-growing trailing group), every
+    /// `EXTINF` here equals the real muxed span and never changes between reloads —
+    /// so the EVENT→VOD growth introduces no A/V desync. `TARGETDURATION` is the
+    /// ceil of the longest known segment (non-decreasing as the list grows).
+    public func mediaPlaylist(durations: [Double], complete: Bool) -> String {
+        let target = max(1, Int(durations.map { $0.rounded(.up) }.max() ?? 6))
         var lines = [
             "#EXTM3U",
             "#EXT-X-VERSION:7",
             "#EXT-X-TARGETDURATION:\(target)",
             "#EXT-X-MEDIA-SEQUENCE:0",
-            "#EXT-X-PLAYLIST-TYPE:VOD",
+            "#EXT-X-PLAYLIST-TYPE:\(complete ? "VOD" : "EVENT")",
             "#EXT-X-INDEPENDENT-SEGMENTS",
             "#EXT-X-MAP:URI=\"\(Self.initName)\""
         ]
-        for (index, duration) in segmentDurations.enumerated() {
+        for (index, duration) in durations.enumerated() {
             lines.append("#EXTINF:\(Self.formatDuration(duration)),")
             lines.append(Self.segmentName(index))
         }
-        lines.append("#EXT-X-ENDLIST")
+        if complete {
+            lines.append("#EXT-X-ENDLIST")
+        }
         return lines.joined(separator: "\n") + "\n"
     }
 

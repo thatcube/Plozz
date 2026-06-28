@@ -172,6 +172,46 @@ void plozz_remux_set_derive_eac3_frame_dur(plozz_remux_session *s, int enabled);
 void plozz_remux_set_keyframe_scan(plozz_remux_session *s, int enabled);
 
 /*
+ * B7 lazy / windowed progressive index (default OFF; gated by the
+ * com.plozz.playback.remuxLazyIndex debug flag). Where the keyframe-SCAN path
+ * (above) discovers the WHOLE timeline synchronously at open — O(total segments)
+ * up-front seek round-trips, which still stalls launch + resume on a 30–40GB title
+ * — the lazy path discovers real keyframe boundaries PROGRESSIVELY so launch pays
+ * only for the first window and the rest of the timeline fills in the background
+ * (off the watchdog-critical path), bounded and cancellable.
+ *
+ * Lifecycle (only engages for a no-index, fixed-cadence source; a no-op that
+ * returns 0 for an index-built table so DoVi/Cues titles keep their exact VOD form):
+ *   1. plozz_remux_lazy_begin — seed the discovered-keyframe list with t=0 and
+ *      switch the session into lazy mode. The segment table starts EMPTY (0 ready
+ *      segments) until the first extend runs.
+ *   2. plozz_remux_lazy_extend — advance the frontier by bounded backward-seek
+ *      probes (up to `until_seconds` of timeline OR `max_probes` probes this call,
+ *      whichever first) and rebuild the table from the real keyframes found so far.
+ *      Resumable: call repeatedly (e.g. from a background thread between on-demand
+ *      muxes) to fill the timeline a chunk at a time. While incomplete only the
+ *      fully-bracketed (closed) segments are published, so a published EXTINF can
+ *      never change (no A/V desync). When the frontier reaches EOF the final
+ *      tail-to-duration segment is added and `*out_complete` is set — the table is
+ *      then the complete VOD timeline.
+ *
+ * Must serialise with plozz_remux_media_segment (both drive the single-threaded
+ * demuxer): the caller holds one lock across either call.
+ */
+int plozz_remux_lazy_begin(plozz_remux_session *s);
+int plozz_remux_lazy_extend(plozz_remux_session *s, double until_seconds,
+                            int max_probes, int *out_ready_segments,
+                            int *out_complete, int *out_probes);
+
+/*
+ * 1 when the open-time segment table is the fixed-cadence fallback (the source has
+ * no usable keyframe index) — the only case the keyframe-SCAN and lazy/windowed
+ * paths engage. 0 for an index-built (Matroska Cues) table, which is already
+ * keyframe-aligned. Lets the Swift layer decide whether to drive lazy discovery.
+ */
+int plozz_remux_uses_fixed_cadence(plozz_remux_session *s);
+
+/*
  * Pure test/diagnostic helper: group a sorted list of real keyframe times (in
  * seconds, 0-based) into non-overlapping segments of at least `target_seconds`
  * each, snapping every boundary to a real keyframe and stamping each segment's
@@ -186,6 +226,21 @@ int plozz_remux_plan_segments(const double *keyframe_times, int count,
                               double duration, double target_seconds,
                               double *out_starts, double *out_durations,
                               int max_out);
+
+/*
+ * Pure test/diagnostic helper for the B7 PROGRESSIVE planner. Groups the keyframes
+ * discovered SO FAR exactly as the lazy rebuild does: when `complete` == 0 only the
+ * fully-closed segments are emitted (the still-growing trailing group is withheld so
+ * a published EXTINF never changes as more keyframes arrive); when `complete` != 0
+ * the final tail to `duration` (or the last keyframe) is included. Same boundary
+ * invariants as plozz_remux_plan_segments (every boundary a real keyframe, each
+ * duration the true keyframe-to-keyframe span). Returns the number of segments
+ * written into out_starts/out_durations (capped at max_out). No session state.
+ */
+int plozz_remux_plan_segments_progressive(const double *keyframe_times, int count,
+                                          double duration, double target_seconds,
+                                          int complete, double *out_starts,
+                                          double *out_durations, int max_out);
 
 /*
  * Pure test/diagnostic helper: parse the first (E-)AC-3 syncframe in `data` and

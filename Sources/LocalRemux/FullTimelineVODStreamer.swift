@@ -149,11 +149,24 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // seek-probe so EXTINF == muxed span and segments don't overlap — eliminating
         // the progressive A/V desync + stutter those titles exhibit. No-op otherwise.
         let keyframeScan = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxKeyframeScan")
+        // Flag `com.plozz.playback.remuxLazyIndex` (DEFAULT OFF, B7): for no-index
+        // sources, discover real keyframe boundaries PROGRESSIVELY — probe only the
+        // first window at open (near-instant launch regardless of file size, incl.
+        // 30–40GB), serve a growing EVENT→VOD playlist, and fill the rest in the
+        // background off the watchdog path. Solves the same A/V-desync correctness
+        // problem as keyframeScan but without the O(total-segments) synchronous
+        // open-time cost; takes precedence over keyframeScan when both are set.
+        let lazyIndex = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxLazyIndex")
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
-                                           keyframeScan: keyframeScan)
+                                           keyframeScan: keyframeScan,
+                                           keyframeLazy: lazyIndex)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
         if keyframeScan { RemuxLog.info("Session: remuxKeyframeScan ON — real-keyframe segment table for no-index sources") }
+        if lazyIndex {
+            RemuxLog.info("Session: remuxLazyIndex ON — lazy/windowed progressive index"
+                + (segmenter.lazyEnabled ? " (engaged: no-index source)" : " (no-op: index-built source)"))
+        }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only
@@ -194,8 +207,13 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         let contentSource = RemuxContentSource(
             segmenter: segmenter,
             planner: planner,
-            prefetchDepth: prefetchEnabled ? 3 : 0
+            prefetchDepth: prefetchEnabled ? 3 : 0,
+            lazyEnabled: segmenter.lazyEnabled
         )
+        // B7: kick off background timeline discovery immediately (off the
+        // playback-critical path) so the EVENT playlist grows to a complete VOD
+        // list within seconds while AVPlayer already plays the first window.
+        if segmenter.lazyEnabled { contentSource.startLazyFill() }
         let server = FullTimelineVODServer { path in contentSource.response(forPath: path) }
         guard let baseURL = server.start() else {
             segmenter.close()

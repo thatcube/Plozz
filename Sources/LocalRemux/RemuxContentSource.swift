@@ -73,15 +73,49 @@ final class RemuxContentSource: @unchecked Sendable {
     /// Set on teardown so an in-progress prefetch worker stops promptly. `cacheLock`.
     private var stopped = false
 
+    /// B7 lazy/windowed index. When true the segment timeline is discovered
+    /// PROGRESSIVELY: the media playlist is served as a growing EVENT playlist (not
+    /// pinned) until discovery reaches EOF, a background driver extends the frontier
+    /// off the playback-critical path, and the in-range segment bound follows the
+    /// live published count rather than a fixed total. When false (default) the
+    /// behaviour is byte-identical to the original VOD path.
+    private let lazyEnabled: Bool
+    /// Live published segment count (lazy mode); for non-lazy it equals the fixed
+    /// total. Guarded by `cacheLock`.
+    private var liveSegmentCount: Int
+    /// Live published segment durations for the EVENT media playlist. `cacheLock`.
+    private var liveSegmentDurations: [Double]
+    /// Whether progressive discovery has reached EOF (timeline complete). `cacheLock`.
+    private var lazyComplete: Bool
+    /// Whether the background discovery driver has been started (once). `cacheLock`.
+    private var lazyFillStarted = false
+    private let lazyQueue = DispatchQueue(
+        label: "com.thatcube.Plozz.localremux.lazyindex", qos: .userInitiated)
+    /// Uptime (ns) the session began driving discovery, for the fill-rate telemetry.
+    private var lazyFillStartNanos: UInt64 = 0
+
     let segmentCount: Int
 
     init(segmenter: RemuxSegmenter, planner: RemuxSegmentPlanner,
-         segmentCacheLimitBytes: Int = 96 << 20, prefetchDepth: Int = 0) {
+         segmentCacheLimitBytes: Int = 96 << 20, prefetchDepth: Int = 0,
+         lazyEnabled: Bool = false) {
         self.segmenter = segmenter
         self.planner = planner
         self.segmentCacheLimitBytes = segmentCacheLimitBytes
         self.prefetchDepth = max(0, prefetchDepth)
-        self.segmentCount = planner.segmentDurations.count
+        self.lazyEnabled = lazyEnabled
+        if lazyEnabled {
+            let durations = segmenter.currentSegmentDurations()
+            self.liveSegmentDurations = durations
+            self.liveSegmentCount = durations.count
+            self.lazyComplete = false
+            self.segmentCount = 0   // unused in lazy mode (bound follows liveSegmentCount)
+        } else {
+            self.liveSegmentDurations = planner.segmentDurations
+            self.liveSegmentCount = planner.segmentDurations.count
+            self.lazyComplete = true
+            self.segmentCount = planner.segmentDurations.count
+        }
     }
 
     /// Stops background prefetch. Called on session teardown BEFORE the segmenter
@@ -90,6 +124,68 @@ final class RemuxContentSource: @unchecked Sendable {
         cacheLock.lock()
         stopped = true
         cacheLock.unlock()
+    }
+
+    // MARK: - B7 lazy/windowed background discovery
+
+    /// Starts the background driver that progressively discovers the rest of the
+    /// timeline's real keyframe boundaries, OFF the playback-critical path. Each
+    /// pass advances the frontier by a small, bounded probe budget (releasing the
+    /// demuxer lock between batches so on-demand muxing interleaves), republishing
+    /// the growing EVENT playlist, until discovery reaches EOF. Idempotent; a no-op
+    /// when lazy mode is off. The fill is much faster than realtime playback, so the
+    /// timeline typically becomes a complete VOD list within seconds — after which
+    /// far-scrub is instant. Crash-safe: bounded, cancellable, never a synchronous
+    /// O(filesize) or O(total-segments) stall.
+    func startLazyFill() {
+        guard lazyEnabled else { return }
+        cacheLock.lock()
+        if lazyFillStarted || stopped || lazyComplete { cacheLock.unlock(); return }
+        lazyFillStarted = true
+        lazyFillStartNanos = DispatchTime.now().uptimeNanoseconds
+        cacheLock.unlock()
+        lazyQueue.async { [weak self] in self?.lazyFillLoop() }
+    }
+
+    private func lazyFillLoop() {
+        // Probe budget per batch: small enough to yield the demuxer lock frequently
+        // (so a just-in-time segment mux never waits long behind discovery), large
+        // enough that the timeline fills in a handful of seconds.
+        let batchProbes = 48
+        var totalProbes = 0
+        var passes = 0
+        while true {
+            cacheLock.lock()
+            let stop = stopped || lazyComplete
+            cacheLock.unlock()
+            if stop { break }
+
+            let progress = segmenter.extendLazyIndex(untilSeconds: 0, maxProbes: batchProbes)
+            totalProbes += progress.probes
+            passes += 1
+
+            let durations = segmenter.currentSegmentDurations()
+            cacheLock.lock()
+            liveSegmentDurations = durations
+            liveSegmentCount = durations.count
+            lazyComplete = progress.complete
+            let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds &- lazyFillStartNanos) / 1_000_000
+            cacheLock.unlock()
+
+            // Periodic + terminal fill telemetry (the coordinator greps `remux-lazy:`
+            // to read the discovery curve vs B5/B6's all-at-open cost).
+            if progress.complete || passes % 8 == 0 {
+                RemuxLog.info(String(format:
+                    "remux-lazy: fill ready=%d complete=%@ probes=%d elapsed=%.0fms",
+                    durations.count, progress.complete ? "YES" : "no", totalProbes, elapsedMs))
+            }
+            if progress.complete { break }
+            // No progress and not complete (e.g. transient seek failure): avoid a
+            // hot spin — back off briefly before retrying.
+            if progress.probes == 0 {
+                usleep(50_000)
+            }
+        }
     }
 
     // MARK: - Serving
@@ -112,16 +208,55 @@ final class RemuxContentSource: @unchecked Sendable {
         case .master:
             return pinnedBytes(route.resourceName) { self.planner.masterPlaylist().data(using: .utf8) ?? Data() }
         case .media:
+            // Lazy/EVENT mode: the playlist grows as discovery extends, so it must
+            // NOT be pinned until the timeline is complete — each AVPlayer reload
+            // sees the latest published segments. Once complete it's the final VOD
+            // list and gets pinned like the original path.
+            if lazyEnabled {
+                return lazyMediaPlaylistBytes()
+            }
             return pinnedBytes(route.resourceName) { self.planner.mediaPlaylist().data(using: .utf8) ?? Data() }
         case .initSegment:
             return pinnedBytes(route.resourceName) { self.segmenter.initSegment() }
         case .segment(let index):
-            guard index >= 0, index < segmentCount else {
-                RemuxLog.error("Origin: segment \(index) out of range (count=\(segmentCount))")
+            let bound = currentSegmentBound()
+            guard index >= 0, index < bound else {
+                RemuxLog.error("Origin: segment \(index) out of range (count=\(bound))")
                 return nil
             }
             return segmentBytes(index)
         }
+    }
+
+    /// The in-range bound for a requested segment index. In lazy mode this follows
+    /// the live published count (which grows as discovery extends); otherwise it's
+    /// the fixed total.
+    private func currentSegmentBound() -> Int {
+        guard lazyEnabled else { return segmentCount }
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        return liveSegmentCount
+    }
+
+    /// Builds the current EVENT (or, once complete, VOD) media playlist from the
+    /// live published durations. Pinned only once discovery is complete.
+    private func lazyMediaPlaylistBytes() -> Data? {
+        cacheLock.lock()
+        let durations = liveSegmentDurations
+        let complete = lazyComplete
+        if complete, let cached = pinned[RemuxRoute.mediaName] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
+        let text = planner.mediaPlaylist(durations: durations, complete: complete)
+        let data = text.data(using: .utf8) ?? Data()
+        if complete {
+            cacheLock.lock()
+            pinned[RemuxRoute.mediaName] = data
+            cacheLock.unlock()
+        }
+        return data
     }
 
     // MARK: - Pinned resources (playlists + init)
@@ -241,7 +376,7 @@ final class RemuxContentSource: @unchecked Sendable {
             cacheLock.lock()
             if stopped { prefetchScheduled = false; cacheLock.unlock(); return }
             let cursor = prefetchCursor
-            let maxIndex = min(cursor + prefetchDepth, segmentCount - 1)
+            let maxIndex = min(cursor + prefetchDepth, liveSegmentCount - 1)
             var target = -1
             var i = cursor + 1
             while i <= maxIndex {

@@ -123,12 +123,29 @@ final class RemuxSegmenter: @unchecked Sendable {
     private let lock = NSLock()
     let facts: Facts
 
+    /// B7: progressive lazy/windowed index is active for this source (the flag was
+    /// on AND the source has no usable keyframe index, so it was switched into
+    /// lazy mode). When false the segment table is final at open (index-built, or
+    /// the legacy fixed-cadence / keyframe-scan tables).
+    let lazyEnabled: Bool
+
+    /// Progress of one `extendLazyIndex` batch.
+    struct LazyProgress: Sendable, Equatable {
+        /// Number of fully-bracketed segments now published (monotonic).
+        var ready: Int
+        /// Whether discovery reached EOF — the timeline is now the complete VOD set.
+        var complete: Bool
+        /// Seek-probes spent this batch (the open-latency / discovery-cost metric).
+        var probes: Int
+    }
+
     /// Opens `sourceURL` and builds the segment table. Throws a `RemuxOpenError`
     /// carrying the precise failing libavformat stage + AVERROR + network reason
     /// when the file can't be demuxed, so the caller's fallback path can report
     /// exactly why (vs an opaque failure).
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
-         deriveEac3FrameDur: Bool = false, keyframeScan: Bool = false) throws {
+         deriveEac3FrameDur: Bool = false, keyframeScan: Bool = false,
+         keyframeLazy: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -152,14 +169,48 @@ final class RemuxSegmenter: @unchecked Sendable {
         // already ran inside open(); this only selects whether the muxer consumes it.
         plozz_remux_set_derive_eac3_frame_dur(session, deriveEac3FrameDur ? 1 : 0)
 
+        // B7 lazy/windowed index (com.plozz.playback.remuxLazyIndex). When the source
+        // has no usable keyframe index, switch the C core into PROGRESSIVE discovery:
+        // probe only the first window now (instant launch), then let a background
+        // driver extend the frontier. Takes precedence over the upfront keyframeScan
+        // when both are set (it solves the same correctness problem without paying
+        // O(total-segments) synchronously at open). A no-op for index-built sources.
+        var lazyEngaged = false
+        if keyframeLazy, plozz_remux_uses_fixed_cadence(session) == 1 {
+            let openStart = DispatchTime.now().uptimeNanoseconds
+            if plozz_remux_lazy_begin(session) == 1 {
+                lazyEngaged = true
+                // Probe just enough to publish the first couple of segments so
+                // AVPlayer can start immediately; the rest fills in the background.
+                var ready: Int32 = 0
+                var complete: Int32 = 0
+                var totalProbes = 0
+                var guardLoops = 0
+                repeat {
+                    var p: Int32 = 0
+                    _ = plozz_remux_lazy_extend(session, 0, 24, &ready, &complete, &p)
+                    totalProbes += Int(p)
+                    guardLoops += 1
+                } while ready < 2 && complete == 0 && guardLoops < 32
+                let openMs = Double(DispatchTime.now().uptimeNanoseconds &- openStart) / 1_000_000
+                RemuxLog.info(String(format:
+                    "remux-lazy: open window ready=%d complete=%d probes=%d open-latency=%.0fms",
+                    ready, complete, totalProbes, openMs))
+            } else {
+                RemuxLog.info("RemuxSegmenter: lazy-index begin declined; keeping table")
+            }
+        }
+        self.lazyEnabled = lazyEngaged
+
         // Flag-gated (com.plozz.playback.remuxKeyframeScan): when the open-time table
         // is the FIXED-CADENCE fallback (source has no usable keyframe index), rebuild
         // it on the file's REAL keyframe boundaries — discovered via cheap BACKWARD
         // seek-probes — so each segment's EXTINF equals the muxed span and consecutive
         // segments don't overlap (the fix for the progressive desync/stutter on
         // no-index titles). Must run BEFORE reading the segment count below, since it
-        // can change segment_count. A no-op for index-built tables and when OFF.
-        if keyframeScan {
+        // can change segment_count. A no-op for index-built tables, when OFF, and when
+        // the B7 lazy index already engaged (mutually exclusive — same correctness).
+        if keyframeScan && !lazyEngaged {
             // Bracket the rebuild with the reader's byte/fetch counters so the cost of
             // seek-sampled discovery is visible in the log: it must be O(segments) tiny
             // ranged reads, NOT O(filesize) — the open-latency advantage over a full
@@ -232,6 +283,55 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// for the per-segment throughput-starvation diagnostic.
     func networkSnapshot() -> HTTPRangeReader.NetworkSnapshot {
         reader.networkSnapshot()
+    }
+
+    /// B7: advance progressive keyframe discovery by one bounded batch (serialised
+    /// with `mediaSegment` on the same lock, since both drive the single-threaded
+    /// demuxer). `untilSeconds <= 0` means "toward EOF"; `maxProbes` caps the
+    /// backward-seek probes this call so the lock is released promptly between
+    /// batches and on-demand muxing can interleave. Returns the current ready
+    /// segment count, completion, and probes spent. No-op (ready = published count,
+    /// complete = true) when lazy mode isn't active.
+    func extendLazyIndex(untilSeconds: Double, maxProbes: Int) -> LazyProgress {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let session, lazyEnabled else {
+            return LazyProgress(ready: session.map { Int(plozz_remux_segment_count($0)) } ?? 0,
+                                complete: true, probes: 0)
+        }
+        var ready: Int32 = 0
+        var complete: Int32 = 0
+        var probes: Int32 = 0
+        _ = plozz_remux_lazy_extend(session, untilSeconds, Int32(maxProbes),
+                                    &ready, &complete, &probes)
+        return LazyProgress(ready: Int(ready), complete: complete == 1, probes: Int(probes))
+    }
+
+    /// B7: the current published segment durations (snapshot under the demuxer
+    /// lock). Grows as background discovery extends the frontier; in non-lazy mode
+    /// this is just the final table.
+    func currentSegmentDurations() -> [Double] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let session else { return [] }
+        let count = Int(plozz_remux_segment_count(session))
+        var durations: [Double] = []
+        durations.reserveCapacity(count)
+        for i in 0..<count {
+            var seg = plozz_remux_segment()
+            if plozz_remux_segment_at(session, Int32(i), &seg) == 1 {
+                durations.append(seg.duration_seconds)
+            }
+        }
+        return durations
+    }
+
+    /// B7: the current published segment count (cheap, under the lock).
+    func currentSegmentCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let session else { return 0 }
+        return Int(plozz_remux_segment_count(session))
     }
 
     /// Raise the range reader's per-round-trip read-ahead (one-time, before the

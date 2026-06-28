@@ -37,3 +37,21 @@ public struct CuesKeyframeProvider {
         return KeyframeTable.normalized(times: times, byteOffsets: offsets, duration: duration)
     }
 }
+
+// MARK: - KeyframeTableSource conformance
+
+/// The Cues fast-path is the first concrete ``KeyframeTableSource`` — the highest
+/// priority (``KeyframeSourceKind/liveCues``) open-time source. It is "available"
+/// only when the parsed summary actually carries Cues; otherwise the selector
+/// falls through to the no-Cues walk / cache.
+extension CuesKeyframeProvider: KeyframeTableSource {
+    public var kind: KeyframeSourceKind { .liveCues }
+
+    public func isAvailable() -> Bool { !summary.cues.isEmpty }
+
+    public func loadKeyframeTable() -> KeyframeTable? {
+        guard !summary.cues.isEmpty else { return nil }
+        let table = keyframeTable()
+        return table.isEmpty ? nil : table
+    }
+}

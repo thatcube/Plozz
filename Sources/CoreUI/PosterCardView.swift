@@ -133,7 +133,6 @@ public struct PosterCardView: View {
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                 Text(subtitleText ?? " ")
                     .font(.system(size: metrics.cardSubtitleFontSize))
                     .foregroundStyle(subtitleColor)

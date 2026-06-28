@@ -180,7 +180,6 @@ private struct LibraryCardView: View {
                     .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                 Text(subtitle.isEmpty ? " " : subtitle)
                     .font(.system(size: metrics.cardSubtitleFontSize))
                     .foregroundStyle(.secondary)

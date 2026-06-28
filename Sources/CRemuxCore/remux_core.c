@@ -1880,12 +1880,24 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
      * ~1-GOP overlap, benign — AVPlayer dedupes by PTS). Never cut before the window
      * edge (end_limit), so normal/indexed segments that end on their real boundary
      * keyframe are unaffected. */
-    double cap_span = 2.0 * s->target_segment_seconds;
-    if (cap_span < 8.0) cap_span = 8.0;
-    if (cap_span > 30.0) cap_span = 30.0;   /* absolute memory ceiling: a single 4K
-                                             * segment past ~30s risks tvOS jetsam
-                                             * regardless of cadence (the 258s seg83
-                                             * resume crash) — bound it independent of C. */
+    /* Default: 2x cadence so a legit GOP-variance segment (up to ~2x C) still stops
+     * on its real keyframe (the end_limit guard below keeps the cap >= the declared
+     * window edge), while a sparse/mis-flagged-keyframe region can't balloon one 4K
+     * segment to ~200s -> tvOS jetsam SIGKILL (seg83 198-258s @C=15, seg44 198s @C=30,
+     * both 4K). 30s was too tight at C=30 (it clipped legit ~33s segments right at the
+     * window edge); 60s bounds a single 4K dyn_buf regardless of cadence (cadence is
+     * env-clamped <=30, so 2*C <= 60 -> the ceiling never clips a legit segment).
+     * PLOZZ_SEGMENT_SPAN_CAP overrides it ON-DEVICE (no rebuild) for higher-bitrate 4K
+     * that jetsams sooner, or to tighten the bound while diagnosing. */
+    double cap_span;
+    const char *seg_cap_env = getenv("PLOZZ_SEGMENT_SPAN_CAP");
+    if (seg_cap_env && *seg_cap_env && atof(seg_cap_env) >= 8.0) {
+        cap_span = atof(seg_cap_env);
+    } else {
+        cap_span = 2.0 * s->target_segment_seconds;
+        if (cap_span < 8.0) cap_span = 8.0;
+        if (cap_span > 60.0) cap_span = 60.0;
+    }
     double hard_cap_limit = start_s + file_start + cap_span;
     if (hard_cap_limit < end_limit) hard_cap_limit = end_limit;
     /* B7 full-VOD: the absolute pts of the keyframe that stops this segment is

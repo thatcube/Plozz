@@ -77,6 +77,15 @@ targets:
         # no-op). Create an app at https://trakt.tv/oauth/applications to get these.
         TraktClientID: "$(TRAKT_CLIENT_ID)"
         TraktClientSecret: "$(TRAKT_CLIENT_SECRET)"
+        # MyAnimeList client ID for anime tracking (device-code OAuth). Substituted
+        # from MAL_CLIENT_ID build setting (gitignored Config/Secrets.local.xcconfig).
+        # Empty by default, which disables MAL sync.
+        MALClientID: "$(MAL_CLIENT_ID)"
+        # Simkl client credentials for watch tracking. Register at simkl.com/apps.
+        SimklClientID: "$(SIMKL_CLIENT_ID)"
+        SimklClientSecret: "$(SIMKL_CLIENT_SECRET)"
+        # AniList client ID for anime tracking. Register at anilist.co/settings/developer.
+        AniListClientID: "$(ANILIST_CLIENT_ID)"
         # Local network access is required for LAN server discovery on tvOS.
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:

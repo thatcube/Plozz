@@ -820,7 +820,7 @@ public struct JellyfinProvider: MediaProvider {
         return people.compactMap { person in
             guard let id = person.Id, let name = person.Name, !name.isEmpty else { return nil }
             let imageURL = person.PrimaryImageTag != nil
-                ? client.imageURL(itemID: id, kind: .primary, maxWidth: 300)
+                ? client.imageURL(itemID: id, kind: .primary, maxWidth: 300, tag: person.PrimaryImageTag)
                 : nil
             return MediaPerson(
                 id: id,
@@ -839,15 +839,15 @@ public struct JellyfinProvider: MediaProvider {
     /// `BackdropImageTags`. Series-level art (seriesPoster/fallback) is resolved
     /// separately against `SeriesId` and intentionally not gated here.
     private static func imageURL(for dto: BaseItemDto, kind: ImageKind, maxWidth: Int, client: JellyfinClient) -> URL? {
-        let advertised: Bool
+        let tag: String?
         switch kind {
-        case .primary: advertised = dto.ImageTags?["Primary"] != nil
-        case .thumb: advertised = dto.ImageTags?["Thumb"] != nil
-        case .logo: advertised = dto.ImageTags?["Logo"] != nil
-        case .backdrop: advertised = (dto.BackdropImageTags?.isEmpty == false)
+        case .primary: tag = dto.ImageTags?["Primary"]
+        case .thumb: tag = dto.ImageTags?["Thumb"]
+        case .logo: tag = dto.ImageTags?["Logo"]
+        case .backdrop: tag = dto.BackdropImageTags?.first
         }
-        guard advertised else { return nil }
-        return client.imageURL(itemID: dto.Id, kind: kind, maxWidth: maxWidth)
+        guard tag != nil else { return nil }
+        return client.imageURL(itemID: dto.Id, kind: kind, maxWidth: maxWidth, tag: tag)
     }
 
     /// Resolves the stylized title/logo art URL for the detail hero.
@@ -865,8 +865,8 @@ public struct JellyfinProvider: MediaProvider {
                 client.imageURL(itemID: $0, kind: .logo, maxWidth: 720)
             }
         default:
-            guard dto.ImageTags?["Logo"] != nil else { return nil }
-            return client.imageURL(itemID: dto.Id, kind: .logo, maxWidth: 720)
+            guard let logoTag = dto.ImageTags?["Logo"] else { return nil }
+            return client.imageURL(itemID: dto.Id, kind: .logo, maxWidth: 720, tag: logoTag)
         }
     }
 

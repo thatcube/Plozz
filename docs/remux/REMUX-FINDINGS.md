@@ -153,7 +153,18 @@ struct KeyframeTable { var duration: Double; var times: [Double]; var byteOffset
 > exchange tables. Track A's provider lane (`KeyframeTableSource` protocol, priority selection
 > `liveCues < noCuesWalk < persistedCache < serverEndpoint`, `FullVODKeyframeSink` Swift→C seam,
 > default-OFF `FullVODKeyframeCoordinator`) is built and green at tag
-> `preserve/remux-trackA-cues-vod-fb0e34c` — pick it up rather than rebuild.
+> `preserve/remux-trackA-cues-vod-92a440f` (supersedes fb0e34c) — pick it up rather than rebuild.
+>
+> **Two more settled handoff decisions (recorded; confirm against real merged code):**
+> - **0-based boundaries:** `plan_segments_core` clamps a non-zero first boundary → segment-0
+>   becomes over-long → desync. The marshal MUST feed 0-based times — Track A added
+>   `KeyframeTable.zeroBasedTimes` for exactly this.
+> - **Canonical C sink = the EXISTING `plozz_remux_apply_keyframe_boundaries_ex(session, kf,
+>   count, target, add_tail)`** (`remux_core.h:212`), **not** a new front-end on
+>   `set_full_vod_mode`. It already exists + is tested on B5/B6 branches (B6's `apply_keyframes`
+>   uses it); exact-Cues = `add_tail=0`, fixed-cadence replacement gated on
+>   `used_fixed_cadence==1`. The 0-base rebase + `add_tail` stay in C; the Swift marshal only
+>   feeds `zeroBasedTimes`. `set_full_vod_mode` keeps window/cadence setup only.
 
 ---
 

@@ -197,8 +197,49 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
             throw FullTimelineVODError.emptySegments
         }
 
+        // Flag `com.plozz.playback.remuxPersistIndex` (DEFAULT OFF): Track C's
+        // no-Cues persisted-index REPLAY fast path. On a replay, load the title's
+        // real keyframe table from disk (the shared `KeyframeTable` currency, key =
+        // content-stable host|path|size|round(duration), guarded by size+duration +
+        // a cheap HEAD ETag/Last-Modified) and apply it → exact-EXTINF static VOD at
+        // ~1s open, NO scan. A miss simply starts now on B7's provisional full-vod
+        // table; the first-watch PRODUCER (background discovery → persist) is HELD
+        // until the no-Cues class is sized, and when un-held the background
+        // full-timeline walk runs on B5's MatroskaKeyframeSampler (the cold-path
+        // whole-timeline enumerator); B6's kf_probe_at stays the live per-seek
+        // primitive inside B7's engine. Inert when OFF, so the default open path is
+        // byte-identical.
+        var plannerDurations = facts.segmentDurations
+        if UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxPersistIndex") {
+            let size = segmenter.sourceSize()
+            let duration = facts.durationSeconds
+            let validators = KeyframeIndexService.headValidators(url: source.originalURL)
+            let cacheProvider = KeyframeIndexService.CachedProvider(
+                url: source.originalURL, size: size, duration: duration,
+                validators: validators)
+            if size > 0, duration > 0, let table = cacheProvider.keyframeTable() {
+                // Cache HIT. Install the exact table, then read the result back via
+                // currentSegmentDurations() (→ plozz_remux_segment_at) so playlist
+                // EXTINF == muxer cut boundaries (B7's single source of truth) — we
+                // never emit EXTINF straight from table.times.
+                if segmenter.applyExternalKeyframes(table.times) > 0 {
+                    let live = segmenter.currentSegmentDurations()
+                    if !live.isEmpty { plannerDurations = live }
+                    RemuxLog.info("Session: remuxPersistIndex HIT — applied \(table.times.count) cached keyframes → \(plannerDurations.count) exact-EXTINF segments (no scan)")
+                } else {
+                    // applyExternalKeyframes is a STUB returning 0 until B7 lands
+                    // plozz_remux_apply_keyframes in the integrated SHA. The table is
+                    // cached and correct; we simply stay on B7's provisional full-vod
+                    // until the apply seam is wired.
+                    RemuxLog.info("Session: remuxPersistIndex HIT (\(table.times.count) cached keyframes) but apply seam HELD pending B7 plozz_remux_apply_keyframes — staying on provisional full-vod")
+                }
+            } else {
+                RemuxLog.info("Session: remuxPersistIndex MISS — starting now on provisional full-vod; first-watch persist HELD (background walk = B5 sampler, pending no-Cues class sizing)")
+            }
+        }
+
         let planner = RemuxSegmentPlanner(
-            segmentDurations: facts.segmentDurations,
+            segmentDurations: plannerDurations,
             stream: streamInfo(facts: facts, source: source)
         )
 

@@ -402,7 +402,8 @@ final class RemuxSegmenter: @unchecked Sendable {
 
     /// B7: the current published segment durations (snapshot under the demuxer
     /// lock). Grows as background discovery extends the frontier; in non-lazy mode
-    /// this is just the final table.
+    /// this is just the final table. Track C also reads this after a persisted-index
+    /// `applyExternalKeyframes` so the replay's exact-EXTINF table reaches the planner.
     func currentSegmentDurations() -> [Double] {
         lock.lock()
         defer { lock.unlock() }
@@ -434,6 +435,34 @@ final class RemuxSegmenter: @unchecked Sendable {
         defer { lock.unlock() }
         guard let session else { return 0 }
         return Int(plozz_remux_lazy_header_reads(session))
+    }
+
+    /// Total byte size of the source, primed via a ranged probe. Used by the
+    /// persisted keyframe-index cache key + content guard (size+duration identity).
+    func sourceSize() -> Int64 {
+        reader.size()
+    }
+
+    /// Installs an externally discovered keyframe table (seconds) onto the C
+    /// session, rebuilding the segment table with real-keyframe boundaries + true
+    /// keyframe-to-keyframe EXTINF spans, then the caller reads the result back via
+    /// `currentSegmentDurations()` (→ `plozz_remux_segment_at`) so the playlist
+    /// EXTINF == the muxer's cut boundaries byte-for-byte (B7's single-source-of-
+    /// truth pattern), never emitting EXTINF independently from the raw times.
+    ///
+    /// PENDING B7: the underlying `plozz_remux_apply_keyframes(s, kf, count)` is
+    /// B7's function to land in the integrated SHA (ONE engine / one definition);
+    /// it does not exist on B7's branch yet. Until B7 lands it, this is a STUB that
+    /// returns 0 (no mutation) so the cache-HIT path compiles and safely falls back
+    /// to B7's provisional full-vod. When B7 pings that it landed, the body becomes
+    /// the one-line `plozz_remux_apply_keyframes` call (guarded `times.count >= 2`,
+    /// returns the new segment count). No mux occurs either way.
+    @discardableResult
+    func applyExternalKeyframes(_ times: [Double]) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        guard session != nil, times.count >= 2 else { return 0 }
+        // HELD: wire to plozz_remux_apply_keyframes once B7 lands it (see above).
+        return 0
     }
 
     /// Raise the range reader's per-round-trip read-ahead (one-time, before the

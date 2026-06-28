@@ -241,6 +241,27 @@ int plozz_remux_lazy_header_reads(plozz_remux_session *s);
 int plozz_remux_uses_fixed_cadence(plozz_remux_session *s);
 
 /*
+ * Track C persisted-index seam (OWNED BY B7 — landed in the integrated SHA).
+ *
+ * `plozz_remux_apply_keyframes(s, kf_seconds, count)` installs an externally
+ * supplied list of real keyframe times (seconds, sorted, 0-based) onto the
+ * session, rebuilding the segment table on those boundaries with each EXTINF
+ * stamped as the true keyframe-to-keyframe span — the SAME install the seek-probe
+ * keyframe-scan performs (build_segments_from_keyframes → swap table →
+ * BACKWARD-seek rewind), but fed from a persisted/Cues/server list instead of a
+ * live scan, so a replay reaches exact-EXTINF static VOD with NO probing. Only
+ * acts when the open-time table was the fixed-cadence fallback; Does NOT mux — it
+ * only regroups the published table, which the existing single mux path serves.
+ *
+ * Declaration intentionally NOT made here: this is B7's function to land so the
+ * swarm keeps ONE engine / one definition. Track C codes its Swift seam AGAINST
+ * this shape (RemuxSegmenter.applyExternalKeyframes) but does not call it until
+ * B7 lands it in the integrated SHA; the cache-HIT readback then uses
+ * plozz_remux_segment_at as the single source of truth (playlist EXTINF ==
+ * muxer cut boundaries).
+ */
+
+/*
  * Pure test/diagnostic helper: locate the Matroska Cluster sync (0x1F43B675) nearest
  * to `anchor` in `buf[0..len)`, preferring the latest sync at or before `anchor`, else
  * the first after it. Returns the byte offset, or -1 if no sync is in the window. This

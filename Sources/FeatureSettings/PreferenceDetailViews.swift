@@ -36,8 +36,9 @@ struct AppearanceDetailView: View {
                                         HStack(spacing: 10) {
                                             Image(systemName: option.symbolName)
                                             Text(option.displayName)
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .opacity(theme.theme == option ? 1 : 0)
+                                            if theme.theme == option {
+                                                Image(systemName: "checkmark.circle.fill")
+                                            }
                                         }
                                         .font(.headline)
                                         .padding(.horizontal, 4)
@@ -66,8 +67,9 @@ struct AppearanceDetailView: View {
                                         HStack(spacing: 10) {
                                             Image(systemName: option.symbolName)
                                             Text(option.displayName)
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .opacity(density.density == option ? 1 : 0)
+                                            if density.density == option {
+                                                Image(systemName: "checkmark.circle.fill")
+                                            }
                                         }
                                         .font(.headline)
                                         .padding(.horizontal, 4)
@@ -100,8 +102,9 @@ struct AppearanceDetailView: View {
                                         HStack(spacing: 10) {
                                             Image(systemName: option.symbolName)
                                             Text(option.displayName)
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .opacity(transparencyPreference == option ? 1 : 0)
+                                            if transparencyPreference == option {
+                                                Image(systemName: "checkmark.circle.fill")
+                                            }
                                         }
                                         .font(.headline)
                                         .padding(.horizontal, 4)
@@ -140,8 +143,9 @@ struct AppearanceDetailView: View {
                                         HStack(spacing: 10) {
                                             Image(systemName: option.symbolName)
                                             Text(option.displayName)
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .opacity(musicPlayer.appearance == option ? 1 : 0)
+                                            if musicPlayer.appearance == option {
+                                                Image(systemName: "checkmark.circle.fill")
+                                            }
                                         }
                                         .font(.headline)
                                         .padding(.horizontal, 4)

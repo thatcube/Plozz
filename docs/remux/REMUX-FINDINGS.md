@@ -249,6 +249,14 @@ Stop iterating the span-cap. Build the AetherEngine producer model properly, sma
    case — but the mature reference (AetherEngine) uses localhost-HLS + lazy producer, not a
    resource loader, so it's the lower-priority bet. Park unless the Cues path proves insufficient.
 5. **Apply L7/L9** (DV panel signaling + synchronous display criteria) to harden DoVi.
+6. **No-Cues 4K per-seek hardening candidates (B6's frozen lane, NOT yet built):** make the
+   keyframe probe-window knobs `PLOZZ_KF_HEADER_WINDOW` / `PLOZZ_KF_RESYNC_BACK` env-tunable
+   (getenv, default-identical) so the 4K parse window can be sized **on-device without a rebuild**.
+   Addresses the known caveat: a giant 4K cluster whose video SimpleBlock sits past the fixed 16KB
+   header window currently fail-closes to the seek-landing keyframe (bounded but coarse). Also add
+   robustness tests for the truncated-window fail-closed + cluster-sync resync at varied cursor
+   offsets. The per-seek primitive itself (`kf_probe_at/_next/_range`, cluster-sync resync,
+   video_track re-arm) is preserved at `preserve/remux-b6-cues-d485635`.
 
 **Evidence bar:** nothing is "working" on n=1. Validate across multiple 4K titles, both DoVi
 profiles (P5/P8.1), DD+/Atmos variants, **and a cold-resume + a near-EOF tail test on each**.

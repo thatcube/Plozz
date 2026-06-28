@@ -353,6 +353,71 @@ final class MatroskaKeyframeSampler {
         return out
     }
 
+    /// The per-seek primitive an on-demand VOD origin needs: resolve the real
+    /// keyframe-cluster boundary at or just before `targetSeconds` using only
+    /// cluster-header reads (a few small ranged GETs, no frame payloads). Returns
+    /// the boundary's start time and the byte offset of its Cluster element so the
+    /// caller can seek the muxer straight there — making a far-seek snap to a
+    /// keyframe in well under 64 KB instead of an av_read_frame scan over the GOP.
+    /// Returns nil if the source isn't byte-seekable (unknown total size / no
+    /// duration) or no cluster brackets the target within the bounded search.
+    ///
+    /// Strategy: estimate the byte offset from `target/duration`, biased to
+    /// UNDERSHOOT by `marginBytes` so a short, cheap FORWARD cluster walk lands the
+    /// bracketing keyframe — stepping forward skips by the cluster size field,
+    /// whereas stepping back would need a fresh sync scan. Sync to the first
+    /// cluster at/after the estimate, then walk forward (size-skipping) while the
+    /// cluster keyframe time stays <= target; the last such cluster is the answer.
+    /// If the estimate overshoots the target with no candidate, back off and retry,
+    /// bounded.
+    func keyframeBoundary(near targetSeconds: Double, info: InitInfo,
+                          marginBytes: Int64 = 8 * 1024 * 1024,
+                          maxSteps: Int = 64, maxRetries: Int = 8)
+        -> (startSeconds: Double, clusterOffset: Int64)? {
+        let total = source.totalSize
+        guard total > 0, info.durationSeconds > 0 else { return nil }
+        let clamped = max(0, min(targetSeconds, info.durationSeconds))
+
+        var estimate = Int64((clamped / info.durationSeconds) * Double(total)) - marginBytes
+        if estimate < info.firstClusterOffset { estimate = info.firstClusterOffset }
+
+        var retries = 0
+        while retries <= maxRetries {
+            guard let firstOff = clusterAtOrAfter(estimate, info: info) else { return nil }
+            var clusterOff = firstOff
+            var best: (Double, Int64)? = nil
+            var steps = 0
+            while steps < maxSteps {
+                steps += 1
+                guard let cl = readClusterKeyframe(at: clusterOff, info: info),
+                      let t = cl.keyframeSeconds else { break }
+                if t <= clamped + 1e-6 {
+                    best = (t, clusterOff)
+                    if cl.nextClusterOffset < 0 || cl.nextClusterOffset <= clusterOff { return best }
+                    clusterOff = cl.nextClusterOffset
+                } else {
+                    // This cluster is already past the target.
+                    if let b = best { return b }
+                    break // overshot with no candidate → re-seek earlier
+                }
+            }
+            if let b = best { return b }
+            if estimate <= info.firstClusterOffset { return nil }
+            estimate = max(info.firstClusterOffset, estimate - marginBytes * 2)
+            retries += 1
+        }
+        return nil
+    }
+
+    /// Offset of the Cluster element at or after `offset`: `offset` itself when it
+    /// already sits on a Cluster ID, else a bounded forward sync scan for the next
+    /// `0x1F43B675`. Never seeks before the first cluster.
+    private func clusterAtOrAfter(_ offset: Int64, info: InitInfo) -> Int64? {
+        let start = max(offset, info.firstClusterOffset)
+        if let el = readElementHeader(at: start), el.id == MKV.cluster { return start }
+        return findClusterSync(from: start)
+    }
+
     private struct ClusterResult {
         var keyframeSeconds: Double?
         var nextClusterOffset: Int64

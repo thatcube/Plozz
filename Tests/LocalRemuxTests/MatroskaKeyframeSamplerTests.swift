@@ -322,5 +322,92 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         let kf = sampler.allKeyframes(info)
         XCTAssertEqual(kf, [0.0, 2.0, 4.0])
     }
+    // MARK: - keyframeBoundary(near:) per-seek primitive
+
+    /// Builds the standard 20-cluster, large-payload file used by the seek tests:
+    /// clusters at 0s,1s,…,19s, each padded so the file is ~4 MB and a byte-offset
+    /// estimate maps roughly linearly to time (≈CBR).
+    private func bigSeekFile(payloadBytes: Int = 200_000) -> [UInt8] {
+        let pad = [UInt8](repeating: 0x77, count: payloadBytes)
+        let clusters = (0..<20).map { i in
+            cluster(timecode: i * 1000, blocks: [simpleBlock(track: 1, rel: 0, keyframe: true, payload: pad)])
+        }
+        return buildFile(durationTicks: 20000, clusters: clusters)
+    }
+
+    func testKeyframeBoundary_snapsToEnclosingKeyframe_lowByte() {
+        let file = bigSeekFile()
+        let src = MemorySource(file)
+        let sampler = MatroskaKeyframeSampler(source: src)
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        // Seek to 10.4s with a ~one-cluster margin so the byte estimate (not a
+        // from-start walk) does the work: must snap to the 10.0s keyframe.
+        let hit = sampler.keyframeBoundary(near: 10.4, info: info, marginBytes: 250_000)
+        XCTAssertNotNil(hit)
+        XCTAssertEqual(hit?.startSeconds ?? -1, 10.0, accuracy: 1e-9)
+        // The estimate must have skipped the early clusters → genuinely low-byte.
+        XCTAssertLessThan(sampler.stats.bytesRead, file.count / 4)
+        XCTAssertLessThan(src.fetches, 25)
+    }
+
+    func testKeyframeBoundary_exactBoundaryReturnsThatCluster() {
+        let file = bigSeekFile()
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        XCTAssertEqual(sampler.keyframeBoundary(near: 5.0, info: info, marginBytes: 250_000)?.startSeconds ?? -1,
+                       5.0, accuracy: 1e-9)
+    }
+
+    func testKeyframeBoundary_targetBeforeFirstReturnsFirst() {
+        let file = bigSeekFile()
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        XCTAssertEqual(sampler.keyframeBoundary(near: 0.0, info: info)?.startSeconds ?? -1,
+                       0.0, accuracy: 1e-9)
+    }
+
+    func testKeyframeBoundary_targetPastEndClampsToLast() {
+        let file = bigSeekFile()
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        // 100s clamps to the 20s duration → last keyframe is 19.0s.
+        XCTAssertEqual(sampler.keyframeBoundary(near: 100.0, info: info, marginBytes: 250_000)?.startSeconds ?? -1,
+                       19.0, accuracy: 1e-9)
+    }
+
+    func testKeyframeBoundary_offsetIsSeekable() {
+        // The returned clusterOffset must itself be a Cluster element start whose
+        // timecode is the reported boundary — i.e. directly usable as a muxer seek.
+        let file = bigSeekFile()
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        guard let hit = sampler.keyframeBoundary(near: 12.7, info: info, marginBytes: 250_000) else {
+            return XCTFail("no boundary")
+        }
+        XCTAssertEqual(hit.startSeconds, 12.0, accuracy: 1e-9)
+        // Re-walk from the returned offset: the first keyframe there is 12.0s.
+        var out: [Double] = []
+        var st = MatroskaKeyframeSampler.WalkState(clusterOffset: hit.clusterOffset, done: false)
+        _ = sampler.walkClusters(info, state: &st, untilSeconds: 12.0, into: &out)
+        XCTAssertEqual(out.first ?? -1, 12.0, accuracy: 1e-9)
+    }
+
+    func testKeyframeBoundary_unknownTotalSizeReturnsNil() {
+        final class UnsizedSource: ByteRangeSource {
+            let data: [UInt8]
+            init(_ d: [UInt8]) { data = d }
+            var totalSize: Int64 { -1 }   // server didn't advertise a length
+            func readRange(at offset: Int64, count: Int) -> Data {
+                guard offset >= 0, offset < Int64(data.count), count > 0 else { return Data() }
+                return Data(data[Int(offset)..<min(data.count, Int(offset) + count)])
+            }
+        }
+        let file = bigSeekFile()
+        let sampler = MatroskaKeyframeSampler(source: UnsizedSource(file))
+        // parseInit may still work, but a byte-fraction seek needs a known size.
+        let info = MatroskaKeyframeSampler.InitInfo(videoTrack: 1, timecodeScale: 1_000_000,
+            durationSeconds: 20.0, segmentDataOffset: 0, firstClusterOffset: 0)
+        XCTAssertNil(sampler.keyframeBoundary(near: 10.0, info: info))
+    }
 }
 #endif

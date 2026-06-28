@@ -20,6 +20,8 @@ public struct LibraryBrowseView: View {
     private let spoilerSettings: SpoilerSettings
     private let onSelect: (MediaItem) -> Void
 
+    @Environment(\.plozzMetrics) private var metrics
+
     public init(
         viewModel: LibraryBrowseViewModel,
         title: String,
@@ -32,35 +34,30 @@ public struct LibraryBrowseView: View {
         self.onSelect = onSelect
     }
 
-    // Dense, fixed 7-column grid (Twozz "Browse" density). Flexible columns let
-    // each glass tile stretch to fill its column, so gutters stay small and
-    // consistent and the wall of posters reaches edge-to-edge — no big adaptive
-    // gaps.
-    private static let columnCount = 7
-    private let columns = Array(
-        repeating: GridItem(.flexible(), spacing: PlozzTheme.Metrics.gridSpacing, alignment: .top),
-        count: LibraryBrowseView.columnCount
-    )
-
     public var body: some View {
-        ContentStateView(
+        // Shared dense "Browse" wall — flexible columns from the live density
+        // metrics so each glass tile stretches to fill its column and the wall
+        // scales with the UI-density setting. Search reuses the same spec so the
+        // two surfaces match.
+        let columns = metrics.posterColumns
+        return ContentStateView(
             state: viewModel.state,
             emptyMessage: "This library is empty.",
             onRetry: { Task { await viewModel.loadFirstPage() } }
         ) { total in
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 20) {
+                LazyVStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
                     header
-                    LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.gridSpacing) {
+                    LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
                         ForEach(0..<total, id: \.self) { index in
                             cell(at: index)
                         }
                     }
                     .padding(.horizontal, HomeLayout.horizontalPadding)
-                    .padding(.bottom, 40)
+                    .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                     .focusSection()
                 }
-                .padding(.top, 24)
+                .padding(.top, PlozzTheme.Spacing.large)
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
@@ -78,7 +75,7 @@ public struct LibraryBrowseView: View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
                 .font(.largeTitle.bold())
-            Spacer(minLength: 24)
+            Spacer(minLength: PlozzTheme.Spacing.large)
             sortControl
         }
         .padding(.horizontal, HomeLayout.horizontalPadding)

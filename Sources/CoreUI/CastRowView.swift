@@ -13,6 +13,8 @@ public struct CastRowView: View {
     /// hero leading padding so the cast row aligns with the hero text above.
     private let leadingInset: CGFloat
 
+    @Environment(\.plozzMetrics) private var metrics
+
     public init(
         title: String = "Cast",
         people: [MediaPerson],
@@ -25,23 +27,23 @@ public struct CastRowView: View {
 
     public var body: some View {
         if !people.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
                 if !title.isEmpty {
                     Text(title)
-                        .font(.system(size: 32, weight: .bold))
+                        .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                         .padding(.leading, leadingInset)
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 28) {
+                    LazyHStack(spacing: metrics.cardSpacing) {
                         ForEach(people) { person in
                             CastMemberCard(person: person)
                         }
                     }
                     .padding(.leading, leadingInset)
                     .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                    .padding(.top, 12)
-                    .padding(.bottom, 28)
+                    .padding(.top, PlozzTheme.Spacing.small)
+                    .padding(.bottom, PlozzTheme.Spacing.large)
                 }
                 .scrollClipDisabled()
             }

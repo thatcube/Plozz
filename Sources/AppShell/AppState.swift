@@ -55,6 +55,10 @@ public final class AppState {
     /// without a reload, and scoped per profile (rebuilt on profile switch) so
     /// each profile keeps its own Home customization.
     public private(set) var homeLibraryVisibilityModel: HomeLibraryVisibilityModel
+    /// The active profile's UI density (Compact / Standard / Spacious / Extra
+    /// Large). Scaled into `PlozzMetrics` and injected into the environment at the
+    /// app root, and rebuilt on profile switch like the other per-profile models.
+    public private(set) var uiDensityModel: UIDensitySettingsModel
 
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
@@ -583,6 +587,7 @@ public final class AppState {
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         musicPlayerModel: MusicPlayerSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
+        uiDensityModel: UIDensitySettingsModel? = nil,
         ratingsProvider: (any ExternalRatingsProviding)? = nil,
         traktService: TraktService? = nil
     ) {
@@ -600,6 +605,7 @@ public final class AppState {
             || playbackModel != nil
             || themeModel != nil || diagnosticsModel != nil
             || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
+            || uiDensityModel != nil
         self.usesInjectedModels = injected
         let ns = (profilesModel ?? self.profilesModel).activeNamespace
         // Seed Trakt with the active profile's namespace so its scrobbler and the
@@ -613,6 +619,8 @@ public final class AppState {
         self.musicPlayerModel = musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         self.homeLibraryVisibilityModel = homeLibraryVisibilityModel
             ?? HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
+        self.uiDensityModel = uiDensityModel
+            ?? UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
@@ -1245,6 +1253,7 @@ public final class AppState {
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         musicPlayerModel = MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
+        uiDensityModel = UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
     }
 
     /// Repoints Trakt (and its shared scrobbler) at the active profile's own

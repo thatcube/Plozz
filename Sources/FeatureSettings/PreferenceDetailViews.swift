@@ -6,48 +6,132 @@ import CoreUI
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
     @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
+    @Environment(UIDensitySettingsModel.self) private var density
     /// App-wide (global) — persists across all profiles. Same un-namespaced
     /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
     /// See AGENTS.local.md ("Per-profile vs app-wide settings").
-    @AppStorage("reduceTransparencyOverride") private var reduceTransparency = false
+    @AppStorage(TransparencyPreference.storageKey) private var transparencyPreferenceRaw = TransparencyPreference.default.rawValue
+
+    private var transparencyPreference: TransparencyPreference {
+        TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default
+    }
 
     var body: some View {
         @Bindable var musicPlayer = musicPlayer
+        @Bindable var density = density
         return ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 Text("Appearance").font(.largeTitle.bold())
-                SettingsPanel(
-                    title: "Theme",
-                    footer: "Choose how Plozz looks. Theme applies to the active profile only."
-                ) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(AppTheme.allCases) { option in
-                                Button {
-                                    theme.theme = option
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: option.symbolName)
-                                        Text(option.displayName)
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .opacity(theme.theme == option ? 1 : 0)
+
+                VStack(alignment: .leading, spacing: 28) {
+                    // Theme
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Theme").font(.headline.weight(.semibold))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(AppTheme.allCases) { option in
+                                    Button {
+                                        theme.theme = option
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: option.symbolName)
+                                            Text(option.displayName)
+                                            if theme.theme == option {
+                                                Image(systemName: "checkmark.circle.fill")
+                                            }
+                                        }
+                                        .font(.headline)
+                                        .padding(.horizontal, 4)
                                     }
-                                    .font(.headline)
-                                    .padding(.horizontal, 4)
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
+                                    .accessibilityValue(theme.theme == option ? "Selected" : "")
                                 }
-                                .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
-                                .accessibilityValue(theme.theme == option ? "Selected" : "")
                             }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
                         }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 6)
+                        .scrollClipDisabled()
                     }
-                    .scrollClipDisabled()
+
+                    sectionDivider
+
+                    // Display Size
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Display Size").font(.headline.weight(.semibold))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(UIDensity.allCases) { option in
+                                    Button {
+                                        density.density = option
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: option.symbolName)
+                                            Text(option.displayName)
+                                            if density.density == option {
+                                                Image(systemName: "checkmark.circle.fill")
+                                            }
+                                        }
+                                        .font(.headline)
+                                        .padding(.horizontal, 4)
+                                    }
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: density.density == option))
+                                    .accessibilityValue(density.density == option ? "Selected" : "")
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
+                        }
+                        .scrollClipDisabled()
+                        Text("Scales card size, columns and spacing.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    sectionDivider
+
+                    // Transparency
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Transparency (liquid glass)").font(.headline.weight(.semibold))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(TransparencyPreference.allCases) { option in
+                                    Button {
+                                        transparencyPreferenceRaw = option.rawValue
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: option.symbolName)
+                                            Text(option.displayName)
+                                            if transparencyPreference == option {
+                                                Image(systemName: "checkmark.circle.fill")
+                                            }
+                                        }
+                                        .font(.headline)
+                                        .padding(.horizontal, 4)
+                                    }
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: transparencyPreference == option))
+                                    .accessibilityValue(transparencyPreference == option ? "Selected" : "")
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
+                        }
+                        .scrollClipDisabled()
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(28)
+                .background(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                )
 
                 SettingsPanel(
-                    title: "Music Player",
-                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme; or pin a fixed look."
+                    title: "Music Player"
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -59,8 +143,9 @@ struct AppearanceDetailView: View {
                                         HStack(spacing: 10) {
                                             Image(systemName: option.symbolName)
                                             Text(option.displayName)
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .opacity(musicPlayer.appearance == option ? 1 : 0)
+                                            if musicPlayer.appearance == option {
+                                                Image(systemName: "checkmark.circle.fill")
+                                            }
                                         }
                                         .font(.headline)
                                         .padding(.horizontal, 4)
@@ -77,20 +162,24 @@ struct AppearanceDetailView: View {
                         Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
                     }
                 }
-
-                SettingsPanel(
-                    title: "Transparency",
-                    footer: "Replaces the translucent “liquid glass” blur on cards, menus and overlays with solid surfaces. Turns on automatically when Reduce Transparency is enabled in tvOS Accessibility settings."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Toggle("Reduce transparency", isOn: $reduceTransparency)
-                    }
-                }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
+    }
+
+    /// Hairline rule between the joined Appearance sections so they read as one
+    /// grouped container rather than separate cards. The negative horizontal
+    /// padding cancels the container's 28 pt content inset *minus* the 1 pt
+    /// border stroke, so the rule meets the inner edge of the border exactly
+    /// without overlapping it (overlapping would stack the two translucent
+    /// fills into a darker dot at each end).
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.1))
+            .frame(height: 1)
+            .padding(.horizontal, -27)
     }
 }
 

@@ -1,13 +1,20 @@
 // Plozz Auth Relay — Cloudflare Worker
 // Handles OAuth for MAL and AniList on behalf of the tvOS app.
 //
-// Flow:
-// 1. TV shows QR → user scans → lands on /auth/{service}
-// 2. Worker redirects to OAuth provider
-// 3. Provider calls back → Worker exchanges code for token
-// 4. Worker generates short 6-char code, stores token in KV
-// 5. Shows user "Enter this code on your TV: XXXXXX"
-// 6. TV calls /api/redeem?code=XXXXXX → gets token
+// See worker/README.md for full docs (architecture, endpoints, deploy, gotchas).
+//
+// Flow (high level):
+// 1. TV shows a QR for plozz.app/myanimelist or plozz.app/anilist.
+// 2. User opens it on their phone and approves with the provider.
+// 3. MAL: Worker exchanges the code for a token server-side (PKCE + secret).
+//    AniList: Worker IPs are blocked, so the token arrives in the URL fragment
+//    (implicit grant) and a browser page POSTs it back to /api/store.
+// 4. Worker stores the token in KV under a single-use 4-digit redeem code.
+// 5. User types the 4 digits on the TV.
+// 6. TV calls /api/redeem?code=NNNN → gets the token (code is then deleted).
+//
+// 4-digit numeric codes are used because they're easy to DICTATE into the
+// Apple TV remote (letter dictation via Siri is unreliable).
 
 const BASE_URL = "https://plozz.app";
 const CODE_TTL = 600; // 10 minutes
@@ -50,6 +57,7 @@ function successPage(code, service) {
     },
   };
   const svc = logos[service] || { url: "", name: "Service" };
+  const codeDigits = String(code).split("").map((d) => `<span>${d}</span>`).join("");
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -66,34 +74,38 @@ function successPage(code, service) {
     }
     .card {
       background: #16213e; border-radius: 24px; padding: 40px 36px;
-      text-align: center; max-width: 380px; width: 100%;
+      text-align: center; max-width: 460px; width: 100%;
       box-shadow: 0 20px 60px rgba(0,0,0,.4);
+      container-type: inline-size;
     }
     .logos {
       display: flex; align-items: center; justify-content: center;
-      gap: 14px; margin-bottom: 28px;
+      gap: 14px; margin-bottom: 52px;
     }
     .logos img {
-      width: 44px; height: 44px; border-radius: 10px;
+      width: 60px; height: 60px; border-radius: 12px;
       object-fit: contain;
     }
     .connector {
       display: flex; align-items: center; gap: 4px;
     }
     .connector .dot {
-      width: 5px; height: 5px; border-radius: 50%; background: #4fc3f7;
+      width: 5px; height: 5px; border-radius: 50%; background: #fff;
     }
     .connector .line {
-      width: 28px; height: 2px; background: linear-gradient(90deg, #4fc3f7, #4dd0e1);
+      width: 28px; height: 2px; background: #fff;
     }
-    .subtitle { color: #a0a0b0; font-size: 15px; margin-bottom: 20px; }
+    .subtitle { color: #c8c8d4; font-size: 19px; font-weight: 600; margin-bottom: 30px; }
     .code {
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: clamp(48px, 15vw, 72px); font-weight: 700; letter-spacing: 0.2em;
-      background: #0a2a4a; border-radius: 14px; padding: 22px 36px;
-      display: inline-block; color: #fff;
+      display: flex; justify-content: center; align-items: center; gap: 0.1em;
+      width: fit-content; max-width: 100%; margin: 0 auto; line-height: 1;
+      font-family: 'SF Mono', 'Menlo', 'Cascadia Code', 'Fira Code', monospace;
+      font-size: clamp(44px, 30cqi, 104px); font-weight: 700; color: #fff;
+      background: #0a2a4a; border-radius: 14px; padding: 20px 40px;
+      box-sizing: border-box;
     }
-    .hint { color: #555568; font-size: 13px; margin-top: 20px; }
+    .code span { flex: 0 0 auto; text-align: center; }
+    .hint { color: #85889a; font-size: 13px; margin-top: 20px; }
   </style>
 </head>
 <body>
@@ -103,8 +115,8 @@ function successPage(code, service) {
       <div class="connector"><div class="dot"></div><div class="line"></div><div class="dot"></div></div>
       <img src="${PLOZZ_LOGO}" alt="Plozz">
     </div>
-    <p class="subtitle">Enter code on your TV</p>
-    <div class="code">${code}</div>
+    <p class="subtitle">Enter code on your Apple TV</p>
+    <div class="code">${codeDigits}</div>
     <p class="hint">Expires in 10 minutes</p>
   </div>
 </body>
@@ -165,37 +177,40 @@ function anilistImplicitPage() {
     }
     .card {
       background: #16213e; border-radius: 20px; padding: 48px;
-      text-align: center; max-width: 420px; width: 100%;
+      text-align: center; max-width: 460px; width: 100%;
+      container-type: inline-size;
     }
     .logos {
       display: flex; align-items: center; justify-content: center;
-      gap: 12px; margin-bottom: 24px;
+      gap: 14px; margin-bottom: 52px;
     }
     .logos img {
-      width: 48px; height: 48px; border-radius: 12px;
+      width: 60px; height: 60px; border-radius: 12px;
       object-fit: contain;
     }
     .connector {
       display: flex; align-items: center; gap: 4px;
     }
     .connector .dot {
-      width: 6px; height: 6px; border-radius: 50%; background: #4fc3f7;
+      width: 6px; height: 6px; border-radius: 50%; background: #fff;
     }
     .connector .line {
-      width: 32px; height: 2px; background: linear-gradient(90deg, #4fc3f7, #4dd0e1);
+      width: 32px; height: 2px; background: #fff;
     }
-    .subtitle { color: #a0a0b0; font-size: 15px; margin-bottom: 20px; }
+    .subtitle { color: #c8c8d4; font-size: 19px; font-weight: 600; margin-bottom: 30px; }
     .code {
-      font-family: 'SF Mono', monospace;
-      font-size: clamp(48px, 15vw, 72px); font-weight: 700;
-      letter-spacing: 0.2em; margin: 24px 0; color: #fff;
-      background: #0a2a4a; border-radius: 14px; padding: 22px 36px;
-      display: inline-block;
+      display: flex; justify-content: center; align-items: center; gap: 0.1em;
+      width: fit-content; max-width: 100%; margin: 30px auto; line-height: 1;
+      font-family: 'SF Mono', 'Menlo', 'Cascadia Code', 'Fira Code', monospace;
+      font-size: clamp(44px, 30cqi, 104px); font-weight: 700; color: #fff;
+      background: #0a2a4a; border-radius: 14px; padding: 20px 40px;
+      box-sizing: border-box;
     }
+    .code span { flex: 0 0 auto; text-align: center; }
     .icon { font-size: 64px; margin-bottom: 16px; }
     h1 { font-size: 22px; margin-bottom: 8px; }
     p { color: #a0a0b0; font-size: 16px; }
-    .hint { color: #555568; font-size: 13px; margin-top: 20px; }
+    .hint { color: #85889a; font-size: 13px; margin-top: 20px; }
     .spinner { display: inline-block; width: 48px; height: 48px; border: 4px solid #0f3460; border-top-color: #4fc3f7; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error { color: #ff6b6b; }
@@ -222,7 +237,8 @@ function anilistImplicitPage() {
         });
         if (!storeResp.ok) throw new Error('Failed to store token');
         const { code } = await storeResp.json();
-        card.innerHTML = '<div class="logos"><img src="' + ANILIST_LOGO + '" alt="AniList"><div class="connector"><div class="dot"></div><div class="line"></div><div class="dot"></div></div><img src="' + PLOZZ_LOGO + '" alt="Plozz"></div><p class="subtitle">Enter code on your TV</p><div class="code">' + code + '</div><p class="hint">Expires in 10 minutes</p>';
+        const codeDigits = String(code).split('').map(function(d){ return '<span>' + d + '</span>'; }).join('');
+        card.innerHTML = '<div class="logos"><img src="${ANILIST_LOGO}" alt="AniList"><div class="connector"><div class="dot"></div><div class="line"></div><div class="dot"></div></div><img src="${PLOZZ_LOGO}" alt="Plozz"></div><p class="subtitle">Enter code on your Apple TV</p><div class="code">' + codeDigits + '</div><p class="hint">Expires in 10 minutes</p>';
       } catch (e) {
         card.innerHTML = '<div class="icon">✗</div><h1>Something went wrong</h1><p class="error">' + e.message + '</p>';
       }

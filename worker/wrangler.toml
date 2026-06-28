@@ -6,8 +6,10 @@ compatibility_date = "2024-01-01"
 MAL_CLIENT_ID = "453e05d6355620ecc1047e9dac4dd184"
 ANILIST_CLIENT_ID = "44569"
 
-# Secrets (set via `wrangler secret put`):
-# ANILIST_CLIENT_SECRET
+# Secrets (set via `wrangler secret put` — never commit these):
+#   MAL_CLIENT_SECRET      (required — MAL token exchange)
+#   ANILIST_CLIENT_SECRET  (reserved/unused — AniList uses implicit grant)
+# See README.md for details.
 
 [[kv_namespaces]]
 binding = "AUTH_KV"

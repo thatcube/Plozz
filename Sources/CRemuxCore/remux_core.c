@@ -1882,6 +1882,10 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
      * keyframe are unaffected. */
     double cap_span = 2.0 * s->target_segment_seconds;
     if (cap_span < 8.0) cap_span = 8.0;
+    if (cap_span > 30.0) cap_span = 30.0;   /* absolute memory ceiling: a single 4K
+                                             * segment past ~30s risks tvOS jetsam
+                                             * regardless of cadence (the 258s seg83
+                                             * resume crash) — bound it independent of C. */
     double hard_cap_limit = start_s + file_start + cap_span;
     if (hard_cap_limit < end_limit) hard_cap_limit = end_limit;
     /* B7 full-VOD: the absolute pts of the keyframe that stops this segment is

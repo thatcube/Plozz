@@ -71,6 +71,7 @@ public final class PlaybackDiagnosticsSampler {
         engineName: String? = nil,
         capabilities: MediaCapabilities = .detected(),
         sourceProvider: ProviderKind? = nil,
+        serverName: String? = nil,
         streamURL: URL? = nil,
         remuxEligible: Bool? = nil,
         remuxEligibilityDetail: String? = nil,
@@ -84,7 +85,8 @@ public final class PlaybackDiagnosticsSampler {
             from: metadata,
             mode: mode,
             capabilities: capabilities,
-            sourceProvider: sourceProvider
+            sourceProvider: sourceProvider,
+            serverName: serverName
         )
         base.engineName = engineName
         base.streamTransport = PlaybackDiagnostics.streamTransportSummary(url: streamURL)

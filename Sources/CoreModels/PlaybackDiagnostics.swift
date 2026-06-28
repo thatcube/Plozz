@@ -269,6 +269,8 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     /// Which backend resolved this playback (Plex / Jellyfin), shown in the
     /// "Source Provider" row.
     public var sourceProvider: ProviderKind?
+    /// Friendly server name shown in the overlay header (e.g. "Allie's Jellyfin").
+    public var serverName: String?
     /// Container codec FourCC tag, e.g. `hvc1` / `hev1` / `dvh1`. The hvc1-vs-hev1
     /// distinction is make-or-break for AVPlayer (hev1 plays audio with a black
     /// screen), so it's surfaced explicitly.
@@ -1043,10 +1045,12 @@ public extension PlaybackDiagnostics {
         from metadata: MediaSourceMetadata?,
         mode: PlaybackMode,
         capabilities: MediaCapabilities = .default,
-        sourceProvider: ProviderKind? = nil
+        sourceProvider: ProviderKind? = nil,
+        serverName: String? = nil
     ) -> PlaybackDiagnostics {
         var d = PlaybackDiagnostics(mode: mode)
         d.sourceProvider = sourceProvider
+        d.serverName = serverName
         guard let metadata else { return d }
 
         d.container = metadata.container

@@ -231,6 +231,7 @@ public struct PlayerView: View {
             engineName: viewModel.engineDisplayName,
             capabilities: viewModel.mediaCapabilities,
             sourceProvider: viewModel.sourceProvider,
+            serverName: viewModel.serverName,
             streamURL: viewModel.diagnosticsStreamURL,
             remuxEligible: viewModel.remuxEligibilitySummary?.eligible,
             remuxEligibilityDetail: viewModel.remuxEligibilitySummary?.detail,

@@ -40,23 +40,33 @@ struct PlaybackDiagnosticsOverlay: View {
 
     @ViewBuilder
     private var header: some View {
-        HStack(spacing: 10) {
-            if let provider = diagnostics?.sourceProvider {
-                Image(provider == .plex ? "PlexLogo" : "JellyfinLogo")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 18, height: 18)
-                    .foregroundStyle(providerTint(provider))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Playback Diagnostics")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(palette.primaryText)
+                Spacer()
+                if let engine = diagnostics?.engineName {
+                    Text(engine)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(palette.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(palette.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                }
             }
-            Text("Playback Diagnostics")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(palette.primaryText)
-            Spacer()
-            if let engine = diagnostics?.engineName {
-                Text(engine)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(palette.accent)
+            if let provider = diagnostics?.sourceProvider {
+                HStack(spacing: 6) {
+                    Image(provider == .plex ? "PlexLogo" : "JellyfinLogo")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                        .foregroundStyle(providerTint(provider))
+                    Text("Playing from \(diagnostics?.serverName ?? provider.displayName)")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(palette.secondaryText)
+                }
             }
         }
         .padding(.bottom, 10)
@@ -193,6 +203,7 @@ struct PlaybackDiagnosticsOverlay: View {
             Text(label)
                 .font(.system(size: 14, design: .monospaced))
                 .foregroundStyle(palette.secondaryText)
+                .frame(width: 110, alignment: .leading)
                 .gridColumnAlignment(.leading)
             Text(value)
                 .font(.system(size: 14, design: .monospaced).weight(.semibold))

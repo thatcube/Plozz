@@ -1127,6 +1127,7 @@ public final class PlayerViewModel {
 
     /// Which backend (Plex / Jellyfin) resolved the active playback.
     public var sourceProvider: ProviderKind? { request?.sourceProvider }
+    public var serverName: String? { request?.serverName }
 
     /// The URL AVPlayer is actually playing (after any local-remux swap), used for
     /// the diagnostics "Stream" transport row.

@@ -129,6 +129,12 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// the legacy fixed-cadence / keyframe-scan tables).
     let lazyEnabled: Bool
 
+    /// B7: full-VOD provisional-timeline mode is active (the remuxFullVod flag was on
+    /// AND the source has no usable keyframe index). The full 0->duration table is
+    /// published for instant full-timeline seek; the C core forward-snaps each
+    /// segment's boundaries on mux. False for index-built/no-op sources.
+    let fullVodEnabled: Bool
+
     /// B7 per-phase read-ahead (bytes) for the shared range reader, switched inside
     /// the demuxer `lock` so seek-heavy keyframe PROBING never inherits the large
     /// segment-MUXING read-ahead (which would over-fetch megabytes past each probed
@@ -159,7 +165,7 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// exactly why (vs an opaque failure).
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
          deriveEac3FrameDur: Bool = false, keyframeScan: Bool = false,
-         keyframeLazy: Bool = false) throws {
+         keyframeLazy: Bool = false, fullVod: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -190,7 +196,7 @@ final class RemuxSegmenter: @unchecked Sendable {
         // when both are set (it solves the same correctness problem without paying
         // O(total-segments) synchronously at open). A no-op for index-built sources.
         var lazyEngaged = false
-        if keyframeLazy, plozz_remux_uses_fixed_cadence(session) == 1 {
+        if keyframeLazy, !fullVod, plozz_remux_uses_fixed_cadence(session) == 1 {
             let openStart = DispatchTime.now().uptimeNanoseconds
             let netBefore = reader.networkSnapshot()
             // Enable B6's cheap cluster-header keyframe probe BEFORE lazy_begin (it
@@ -250,7 +256,7 @@ final class RemuxSegmenter: @unchecked Sendable {
         // no-index titles). Must run BEFORE reading the segment count below, since it
         // can change segment_count. A no-op for index-built tables, when OFF, and when
         // the B7 lazy index already engaged (mutually exclusive — same correctness).
-        if keyframeScan && !lazyEngaged {
+        if keyframeScan && !lazyEngaged && !fullVod {
             // Bracket the rebuild with the reader's byte/fetch counters so the cost of
             // seek-sampled discovery is visible in the log: it must be O(segments) tiny
             // ranged reads, NOT O(filesize) — the open-latency advantage over a full
@@ -266,6 +272,39 @@ final class RemuxSegmenter: @unchecked Sendable {
                 "RemuxSegmenter: keyframe-scan discovery read %lld bytes (%.1f%% of %lld) in %d fetches",
                 scanBytes, pct, total, scanFetches))
         }
+
+        // B7 full-VOD provisional timeline (com.plozz.playback.remuxFullVod). Publishes
+        // the full 0->duration fixed-cadence table so the ENTIRE scrub bar is seekable
+        // at open (instant launch AND full-timeline seek — the requirement the windowed
+        // lazy EVENT playlist failed), while muxing each segment with forward-snapped
+        // contiguous boundaries so adjacent segments never overlap/duplicate (anti-
+        // desync). Takes precedence over lazy/keyframeScan (both skipped above) and is a
+        // byte-identical no-op for index-built (Cues/DoVi) sources. Must run BEFORE the
+        // duration read below since it can change the cadence/segment count.
+        var fullVodEngaged = false
+        if fullVod, plozz_remux_uses_fixed_cadence(session) == 1 {
+            let openStart = DispatchTime.now().uptimeNanoseconds
+            let netBefore = reader.networkSnapshot()
+            if plozz_remux_set_full_vod_mode(session, 1) == 1 {
+                fullVodEngaged = true
+                let openMs = Double(DispatchTime.now().uptimeNanoseconds &- openStart) / 1_000_000
+                let after = reader.networkSnapshot()
+                let openBytes = max(0, after.bytesFetched - netBefore.bytesFetched)
+                let openFetches = after.fetchCount - netBefore.fetchCount
+                let total = reader.totalSize
+                let pct = total > 0 ? Double(openBytes) / Double(total) * 100.0 : 0.0
+                let segs = Int(plozz_remux_segment_count(session))
+                // ZERO upfront keyframe discovery: open cost is just avformat_open +
+                // table publish, independent of runtime/filesize. This is the headline
+                // TTFF number — the whole timeline is seekable with no scan tax.
+                RemuxLog.info(String(format:
+                    "remux-fullvod: open segs=%d open-latency=%.0fms open-bytes=%.2fMB(%.3f%%) fetches=%d",
+                    segs, openMs, Double(openBytes) / 1_048_576.0, pct, openFetches))
+            } else {
+                RemuxLog.info("RemuxSegmenter: full-vod declined (indexed source); serving as-is")
+            }
+        }
+        self.fullVodEnabled = fullVodEngaged
 
         var durations: [Double] = []
         let count = Int(plozz_remux_segment_count(session))

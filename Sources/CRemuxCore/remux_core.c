@@ -136,6 +136,23 @@ struct plozz_remux_session {
     int keyframe_index_mode;
     kf_index_ctx kf_ix;
     int64_t bytes_read;
+
+    /* B7 full-duration provisional VOD (gated by com.plozz.playback.remuxFullVod).
+     * The whole 0->duration timeline is published as a complete VOD at open (fixed
+     * provisional cadence `target_segment_seconds`, so the entire scrub bar is
+     * seekable immediately — full native seek, the requirement the windowed EVENT
+     * shape couldn't meet), but each segment's REAL keyframe boundaries are resolved
+     * LAZILY on first request via forward-snap (B_k = first keyframe >= k*T), cached
+     * in `resolved_kf` so neighbours share the boundary keyframe. mux_segment_full
+     * then cuts [B_index, B_index+1): contiguous + non-overlapping (the anti-desync
+     * invariant), reusing the proven mux path. Only the published EXTINF stays
+     * provisional (~T vs the real span) — A/V sync is carried by the continuous,
+     * non-overlapping per-segment PTS. Engages only for a no-index (fixed-cadence)
+     * source; a no-op for index-built (Cues/DoVi) tables. */
+    int full_vod_mode;
+    double *resolved_kf;     /* resolved forward-snap boundaries, -1 = unresolved */
+    int resolved_kf_count;   /* == segment_count + 1 (one boundary per edge) */
+    int full_vod_resolves;   /* telemetry: boundaries resolved on-demand so far */
 };
 
 /* ----- AVIO callback adapters ------------------------------------------- */
@@ -869,6 +886,56 @@ int plozz_remux_uses_fixed_cadence(plozz_remux_session *s) {
 }
 
 /*
+ * B7 full-VOD mode: publish the existing full 0->duration fixed-cadence table as the
+ * playlist (so the WHOLE scrub bar is seekable at open — instant launch, full seek),
+ * but mux each segment with FORWARD-snapped contiguous boundaries (resolve_forward_kf
+ * + per-mux stop-keyframe caching) so adjacent segments never overlap/duplicate (the
+ * desync root). decl/EXTINF stays the provisional cadence; the real muxed span is
+ * reported in remux-av so the coordinator can confirm AVPlayer holds A/V sync.
+ *
+ * Engages ONLY when the table fell back to fixed cadence (no usable keyframe index):
+ * for Cues/DoVi titles the index boundaries are already exact, so this is a no-op and
+ * output stays byte-identical. Must be called BEFORE Swift reads segment durations.
+ * Returns 1 if full-VOD engaged, 0 if it no-op'd (indexed source or no session).
+ */
+int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
+    if (!s || !enabled) return 0;
+    if (!s->used_fixed_cadence) {
+        remux_log(0, "remux: full-vod requested but source has a real keyframe index — no-op");
+        return 0;
+    }
+    /* Fixed cadence >= a typical GOP so every provisional window contains ~1 keyframe
+     * (vspan ~= decl, no empty windows). No open-time GOP measurement: that costs a
+     * forward read to the 2nd keyframe (~1 GOP) and would defeat instant open. */
+    double cadence = (s->target_segment_seconds > 12.0) ? s->target_segment_seconds : 12.0;
+    if (cadence != s->target_segment_seconds) {
+        s->target_segment_seconds = cadence;
+        build_segment_table(s, cadence);
+    }
+
+    free(s->resolved_kf);
+    s->resolved_kf_count = s->segment_count + 1;
+    s->resolved_kf = (double *)malloc(sizeof(double) * (size_t)s->resolved_kf_count);
+    if (!s->resolved_kf) { s->resolved_kf_count = 0; return 0; }
+    for (int i = 0; i < s->resolved_kf_count; i++) s->resolved_kf[i] = -1.0;
+    s->resolved_kf[0] = 0.0;   /* B_0 is always the file head */
+    s->full_vod_mode = 1;
+    s->full_vod_resolves = 0;
+
+    /* Rewind the shared demux cursor to the head so the first served segment starts
+     * cleanly (the table build / any probing may have left it mid-file). */
+    avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
+
+    remux_log(0, "remux: full-vod engaged cadence=%.1fs segs=%d duration=%.1fs",
+              cadence, s->segment_count, s->duration_seconds);
+    return 1;
+}
+
+int plozz_remux_full_vod_resolves(plozz_remux_session *s) {
+    return s ? s->full_vod_resolves : 0;
+}
+
+/*
  * Enable the cheap cluster-header keyframe probe for progressive discovery. Must be
  * called BEFORE plozz_remux_lazy_begin (which snapshots it into the per-session
  * kf_index_ctx). Pure latency optimization: self-validates against av_read_frame and
@@ -1213,6 +1280,79 @@ int plozz_remux_segment_at(plozz_remux_session *s, int index, plozz_remux_segmen
     return 1;
 }
 
+/*
+ * Smallest keyframe time >= x from a sorted list, or `duration` (the timeline tail)
+ * when x is past the last keyframe. The pure rule behind the B7 full-VOD forward
+ * snap: a provisional window boundary at time x resolves to the first REAL keyframe
+ * at/after it, so adjacent windows share that keyframe and the muxed segments are
+ * contiguous + non-overlapping.
+ */
+static double first_kf_ge(const double *kf, int count, double x, double duration) {
+    for (int i = 0; i < count; i++) {
+        if (kf[i] >= x - 0.001) return kf[i];
+    }
+    return duration;
+}
+
+/*
+ * PURE, TESTABLE planner for the B7 full-duration provisional VOD (mirrors
+ * plozz_remux_plan_segments). Given the source's real keyframe times, lay out the
+ * N = ceil(duration/target) PROVISIONAL fixed-cadence windows that the playlist
+ * publishes at open, but snap each window's [start,end) to real keyframes via
+ * forward-snap: segment k = [first_kf>=k*T, first_kf>=(k+1)*T). This is exactly
+ * what the on-demand resolver computes per request (one probe per boundary, cached),
+ * proven here to be CONTIGUOUS (seg k end == seg k+1 start) and NON-OVERLAPPING for
+ * any keyframe layout — the anti-desync invariant. An empty window (no keyframe in
+ * [k*T,(k+1)*T), i.e. GOP > T) is guarded by advancing the end to the next strictly
+ * greater keyframe so a segment is never zero-length. Writes starts/durations and
+ * returns the segment count (<= max_out).
+ */
+int plozz_remux_plan_forward_snap(const double *keyframe_times, int count,
+                                  double duration, double target_seconds,
+                                  double *out_starts, double *out_durations,
+                                  int max_out) {
+    if (!keyframe_times || count < 1 || max_out <= 0) return 0;
+    if (target_seconds < 1.0) target_seconds = 6.0;
+    if (duration <= 0.0) return 0;
+
+    int n = (int)(duration / target_seconds);
+    if (n * target_seconds < duration - 0.001) n++;   /* ceil */
+    if (n < 1) n = 1;
+
+    /* Walk the provisional window grid with a monotonic cursor = the previous
+     * segment's resolved END (== the next segment's forward-snapped START). For each
+     * window k, the candidate boundary is the first real keyframe >= k*T. When that
+     * lands at/before the cursor (the window contained no NEW keyframe — GOP > T),
+     * the window collapses into the current segment and is skipped, so the emitted
+     * boundaries are a strictly-increasing SUBSET of the keyframes: contiguous and
+     * non-overlapping for ANY layout. This mirrors what the runtime resolver yields
+     * in sequential playback, where each mux's stop keyframe is cached as the next
+     * start (collapsed windows inherit the same cached boundary). */
+    double cursor = 0.0;          /* B_0 is always the file head */
+    int out_count = 0;
+    for (int k = 1; k <= n && out_count < max_out; k++) {
+        double next = (k >= n)
+            ? duration
+            : first_kf_ge(keyframe_times, count, k * target_seconds, duration);
+        if (next <= cursor + 0.001) continue;   /* window collapsed into current seg */
+        if (next > duration) next = duration;
+        if (out_starts) out_starts[out_count] = cursor;
+        if (out_durations) out_durations[out_count] = next - cursor;
+        out_count++;
+        cursor = next;
+        if (cursor >= duration - 0.001) break;   /* reached EOF */
+    }
+    /* Tail: if the grid stopped short of EOF (e.g. last keyframe < duration and the
+     * final window already emitted), close the timeline to `duration`. */
+    if (out_count < max_out && cursor < duration - 0.001) {
+        if (out_starts) out_starts[out_count] = cursor;
+        if (out_durations) out_durations[out_count] = duration - cursor;
+        out_count++;
+    }
+    return out_count;
+}
+
+
 /* ----- muxer helpers ----------------------------------------------------- */
 
 /* HEVC sample-entry fourccs. `dvh1` carries the Dolby Vision signalling; `hvc1`
@@ -1368,6 +1508,64 @@ static int media_offset_after_init(const uint8_t *buf, int len);
 static int mux_segment_full(plozz_remux_session *s, int index,
                             uint8_t **out_buf, int *out_len);
 
+/* ----- B7 full-VOD forward-snap boundary resolution ---------------------- */
+
+/*
+ * The first REAL video keyframe at/after `target_t` (0-based seconds), discovered
+ * by a single BACKWARD seek to target_t then a forward read to the first KEY packet
+ * with pts >= target_t. Bounded (~one GOP read), used only on a random-access seek
+ * into an un-played region — sequential playback caches boundaries from each mux's
+ * stop keyframe instead (see mux_segment_full), so it pays no extra read. Returns
+ * -1.0 on seek/read failure (caller falls back to the provisional window edge).
+ */
+static double resolve_forward_kf(plozz_remux_session *s, double target_t) {
+    AVStream *vst = s->ic->streams[s->video_index];
+    double file_start = (s->ic->start_time != AV_NOPTS_VALUE)
+        ? (double)s->ic->start_time / AV_TIME_BASE : 0.0;
+    if (target_t < 0) target_t = 0;
+    int64_t seek_ts = (int64_t)((target_t + file_start) / av_q2d(vst->time_base));
+    if (avformat_seek_file(s->ic, s->video_index, INT64_MIN, seek_ts, seek_ts,
+                           AVSEEK_FLAG_BACKWARD) < 0) {
+        return -1.0;
+    }
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) return -1.0;
+    double found = -1.0;
+    int guard = 0;
+    while (av_read_frame(s->ic, pkt) >= 0) {
+        if (pkt->stream_index == s->video_index && (pkt->flags & AV_PKT_FLAG_KEY)
+            && pkt->pts != AV_NOPTS_VALUE) {
+            double pts_s = pkt->pts * av_q2d(vst->time_base) - file_start;
+            if (pts_s >= target_t - 0.05) { found = pts_s; av_packet_unref(pkt); break; }
+        }
+        av_packet_unref(pkt);
+        if (++guard > 2000000) break;   /* pathological safety bound */
+    }
+    av_packet_free(&pkt);
+    return found;
+}
+
+/*
+ * The resolved forward-snap START boundary B_index for full-VOD segment `index`:
+ * the cached value (filled by a prior segment's mux stop, or a prior random-access
+ * resolve), else resolved now from the provisional window start index*T and cached.
+ * B_0 is always 0 (the file head). Never returns < 0: on a resolve failure it falls
+ * back to the provisional window start so the mux still produces a (slightly
+ * mis-snapped) segment rather than failing.
+ */
+static double fullvod_resolve_start(plozz_remux_session *s, int index) {
+    double T = (s->target_segment_seconds < 1.0) ? 6.0 : s->target_segment_seconds;
+    if (index <= 0) return 0.0;
+    if (s->resolved_kf && index < s->resolved_kf_count && s->resolved_kf[index] >= -0.5) {
+        return s->resolved_kf[index];
+    }
+    double b = resolve_forward_kf(s, index * T);
+    if (b < 0) b = index * T;   /* provisional fallback (non-keyframe; degraded, not fatal) */
+    if (s->resolved_kf && index < s->resolved_kf_count) s->resolved_kf[index] = b;
+    s->full_vod_resolves++;
+    return b;
+}
+
 /* ----- init segment ------------------------------------------------------ */
 
 int plozz_remux_init_segment(plozz_remux_session *s, uint8_t **out_data, int *out_len) {
@@ -1430,6 +1628,24 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
     double start_s = s->segments[index].start_seconds;
     double end_s = start_s + s->segments[index].duration_seconds;
 
+    /* B7 full-VOD: the playlist published a PROVISIONAL fixed-cadence window
+     * [index*T,(index+1)*T). Forward-snap the START to the real keyframe B_index
+     * (cached from the previous segment's mux stop, or resolved on a random-access
+     * seek) so the segment begins exactly where the previous one ended — contiguous,
+     * never backward-snapping into the prior window (the overlap/duplication that
+     * caused the original desync). The END stays the provisional window edge: the
+     * read loop already stops at the first KEY >= end, which IS B_{index+1}, so the
+     * end forward-snaps for free and we capture it below to cache the next start. */
+    double provisional_end = end_s;
+    if (s->full_vod_mode) {
+        double b_start = fullvod_resolve_start(s, index);
+        start_s = b_start;
+        /* Empty-window guard (GOP > cadence): make sure the loop reads at least to
+         * the next keyframe after the start, so a degenerate window can't yield a
+         * zero-length segment (it costs a bounded one-GOP overlap instead). */
+        end_s = (provisional_end > b_start + 0.5) ? provisional_end : (b_start + 0.5);
+    }
+
     AVStream *vst = s->ic->streams[s->video_index];
     double file_start = (s->ic->start_time != AV_NOPTS_VALUE)
         ? (double)s->ic->start_time / AV_TIME_BASE : 0.0;
@@ -1475,6 +1691,10 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
 
     int wrote_any = 0;
     double end_limit = end_s + file_start;
+    /* B7 full-VOD: the absolute pts of the keyframe that stops this segment is
+     * exactly B_{index+1} (the next segment's forward-snapped start). Capture it so
+     * sequential playback caches every boundary for free (no extra resolve read). */
+    double captured_stop = -1.0;
     /* Defensive monotonic-DTS belt: av_read_frame returns packets in decode order,
      * so DTS must be strictly increasing and PTS >= DTS. GENPTS fixes the common
      * case, but guard here so movenc never receives an unset/backward DTS (which
@@ -1509,6 +1729,7 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
                 ? pkt->pts * av_q2d(vst->time_base) : -1.0;
             /* Stop at the next segment boundary (a keyframe at/after end). */
             if (pts_s >= 0 && pts_s >= end_limit && (pkt->flags & AV_PKT_FLAG_KEY)) {
+                captured_stop = pts_s - file_start;   /* B_{index+1}, 0-based */
                 av_packet_unref(pkt);
                 break;
             }
@@ -1575,6 +1796,15 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
     }
     av_packet_free(&pkt);
 
+    /* B7 full-VOD: cache the resolved next-segment start. If we stopped on a real
+     * keyframe, that pts is B_{index+1}; if we ran to EOF (last segment), the next
+     * boundary is the file duration. Sequential playback thus resolves the whole
+     * timeline for free as it advances — only random-access seeks pay a resolve. */
+    if (s->full_vod_mode && s->resolved_kf && (index + 1) < s->resolved_kf_count) {
+        double next_b = (captured_stop >= 0) ? captured_stop : s->duration_seconds;
+        if (s->resolved_kf[index + 1] < -0.5) s->resolved_kf[index + 1] = next_b;
+    }
+
     /* Emit the per-segment A/V drift telemetry before the trailer is written.
      * out_v/out_a time_base were set by movenc in avformat_write_header, so the
      * recorded raw ticks convert cleanly to seconds on the 0-based output
@@ -1625,6 +1855,17 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
             remux_log(1,
                 "remux-av: seg=%d decl=%.3f v[n=%d 0=%.3f 1=%.3f span=%.3f dts0=%.3f] a[none]",
                 index, decl, tel_v_count, v0, v1, vspan, vdts0);
+        }
+        if (s->full_vod_mode) {
+            int cached = (s->resolved_kf && index < s->resolved_kf_count
+                          && s->resolved_kf[index] >= -0.5);
+            remux_log(1,
+                "remux: full-vod seg=%d window=[%.3f,%.3f) start_kf=%.3f decl=%.3f vspan=%.3f "
+                "resolves=%d %s",
+                index, (double)index * s->target_segment_seconds,
+                (double)(index + 1) * s->target_segment_seconds,
+                start_s, decl, vspan, s->full_vod_resolves,
+                cached ? "cached" : "resolved");
         }
     }
 
@@ -1688,6 +1929,7 @@ void plozz_remux_close(plozz_remux_session *s) {
     if (!s) return;
     free(s->segments);
     free(s->lazy_kf);
+    free(s->resolved_kf);
     if (s->lazy_pkt) av_packet_free(&s->lazy_pkt);
     if (s->ic) {
         /* avformat_close_input frees ic; our custom pb is freed separately. */

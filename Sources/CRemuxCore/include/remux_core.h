@@ -272,6 +272,44 @@ int plozz_remux_plan_segments_progressive(const double *keyframe_times, int coun
                                           double *out_durations, int max_out);
 
 /*
+ * Enable the B7 FULL-VOD provisional-timeline mode. The playlist publishes the full
+ * 0->duration fixed-cadence table (so the entire scrub bar is seekable at open —
+ * instant launch + full-timeline seek), but every segment is muxed with FORWARD-
+ * snapped contiguous boundaries: segment k starts at the first real keyframe >= k*T
+ * (cached from the previous segment's stop keyframe, or resolved with one bounded
+ * GOP read on a random-access seek) and ends at the first keyframe >= (k+1)*T. This
+ * keeps adjacent segments contiguous and non-overlapping (the anti-desync invariant)
+ * while the declared EXTINF stays the provisional cadence. Engages ONLY when the
+ * table fell back to fixed cadence (no usable keyframe index); for Cues/DoVi sources
+ * it is a no-op and output is byte-identical. Must be called BEFORE the Swift layer
+ * reads segment durations. Returns 1 if engaged, 0 if it no-op'd.
+ */
+int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled);
+
+/*
+ * Telemetry: number of segment-start boundaries resolved on-demand (random-access
+ * seeks that paid a bounded one-GOP read) so far this session. Sequential playback
+ * caches boundaries for free from each mux's stop keyframe, so this counts only the
+ * extra reads scrubbing/resume incurred. 0 when full-VOD mode is off.
+ */
+int plozz_remux_full_vod_resolves(plozz_remux_session *s);
+
+/*
+ * Pure test/diagnostic helper for the B7 FULL-VOD forward-snap rule. Given the
+ * source's real keyframe times (seconds, 0-based, sorted), lay out the
+ * N = ceil(duration/target) provisional fixed-cadence windows the playlist publishes
+ * and snap each window's [start,end) to real keyframes: segment k =
+ * [first_kf>=k*T, first_kf>=(k+1)*T). Proven CONTIGUOUS (seg k end == seg k+1 start)
+ * and NON-OVERLAPPING for any keyframe layout, with a degenerate-window (GOP>T) guard
+ * that never emits a zero-length segment. Writes up to max_out starts/durations and
+ * returns the count. No session state; safe to call from tests.
+ */
+int plozz_remux_plan_forward_snap(const double *keyframe_times, int count,
+                                  double duration, double target_seconds,
+                                  double *out_starts, double *out_durations,
+                                  int max_out);
+
+/*
  * Pure test/diagnostic helper: parse the first (E-)AC-3 syncframe in `data` and
  * return the PCM sample count it represents (256/512/768/1536), or 0 if no
  * syncword is found or the leading frame is a dependent substream. Pass

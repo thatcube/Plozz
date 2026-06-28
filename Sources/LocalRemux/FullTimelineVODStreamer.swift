@@ -157,15 +157,28 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // problem as keyframeScan but without the O(total-segments) synchronous
         // open-time cost; takes precedence over keyframeScan when both are set.
         let lazyIndex = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxLazyIndex")
+        // Flag `com.plozz.playback.remuxFullVod` (DEFAULT OFF, B7): for no-index
+        // sources, publish the FULL 0->duration provisional table at open so the entire
+        // scrub bar is seekable immediately (instant launch AND full-timeline seek —
+        // the hard requirement the windowed lazy EVENT playlist could not meet), then
+        // forward-snap each segment's boundaries on mux so adjacent segments stay
+        // contiguous/non-overlapping (anti-desync). Takes precedence over lazyIndex and
+        // keyframeScan; no-op for index-built sources.
+        let fullVod = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxFullVod")
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
                                            keyframeScan: keyframeScan,
-                                           keyframeLazy: lazyIndex)
+                                           keyframeLazy: lazyIndex,
+                                           fullVod: fullVod)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
         if keyframeScan { RemuxLog.info("Session: remuxKeyframeScan ON — real-keyframe segment table for no-index sources") }
         if lazyIndex {
             RemuxLog.info("Session: remuxLazyIndex ON — lazy/windowed progressive index"
                 + (segmenter.lazyEnabled ? " (engaged: no-index source)" : " (no-op: index-built source)"))
+        }
+        if fullVod {
+            RemuxLog.info("Session: remuxFullVod ON — full-duration provisional VOD + forward-snap mux"
+                + (segmenter.fullVodEnabled ? " (engaged: no-index source)" : " (no-op: index-built source)"))
         }
         let facts = segmenter.facts
 

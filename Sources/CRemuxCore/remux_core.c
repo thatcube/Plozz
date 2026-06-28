@@ -974,6 +974,11 @@ static double estimate_gop_cadence(plozz_remux_session *s, double fallback) {
                                         fallback, last, &step, &probes);
         if (kf < 0) break;      /* no further keyframe before EOF */
         double gap = kf - last;
+        /* Per-iteration trace: shows the ACTUAL keyframe PTS each probe returned, so a
+         * degenerate cadence (e.g. probes returning the seek target instead of the real
+         * sparse keyframe on a no-Cues/1-entry-index title) is diagnosable head-to-head
+         * with the kf-index probe# raw values. */
+        remux_log(1, "remux: cadence probe i=%d kf=%.3f gap=%.3f probes=%d", i, kf, gap, probes);
         if (gap > 0.05) { sum += gap; n++; }
         last = kf;
         if (last >= s->duration_seconds - 0.1) break;

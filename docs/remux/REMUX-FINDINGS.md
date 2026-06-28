@@ -134,6 +134,15 @@ struct KeyframeTable { var duration: Double; var times: [Double]; var byteOffset
   (dodges the stale-offset-after-reencode trap). Persist **PTS seconds only**, guard with
   size + duration + ETag/Last-Modified HEAD.
 
+> **Known blocker for the next session:** there are currently **two** `KeyframeTable`
+> definitions — B5's nested `MatroskaKeyframeSampler.KeyframeTable` and Track A's canonical
+> `CoreModels.KeyframeTable` (identical fields). The first integration task is to canonicalize
+> **one** (Track A's in `CoreModels`) and have B5's sampler return that type so the modules can
+> exchange tables. Track A's provider lane (`KeyframeTableSource` protocol, priority selection
+> `liveCues < noCuesWalk < persistedCache < serverEndpoint`, `FullVODKeyframeSink` Swift→C seam,
+> default-OFF `FullVODKeyframeCoordinator`) is built and green at tag
+> `preserve/remux-trackA-cues-vod-fb0e34c` — pick it up rather than rebuild.
+
 ---
 
 ## 6. AetherEngine lessons (the reference implementation of our exact pipeline)

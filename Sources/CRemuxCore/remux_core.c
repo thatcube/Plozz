@@ -729,6 +729,9 @@ typedef struct {
     int calib_samples;  /* cross-checks accumulated so far */
     int header_reads;   /* telemetry: boundaries served purely by header-parse */
     int probes_seen;    /* total probes (bounds the calibration diagnostics) */
+    int64_t last_cluster_off; /* file byte offset of the last probed keyframe's cluster
+                               * (resync-refined when the header parse engaged, else the
+                               * seek-landing avio_tell) — for callers needing the offset */
 } kf_index_ctx;
 
 /*
@@ -742,10 +745,14 @@ typedef struct {
  */
 static double probe_keyframe_pts(plozz_remux_session *s, AVPacket *pkt, double file_start,
                                  double last, kf_index_ctx *ix) {
+    /* Record the seek-landing byte offset up front so callers that need a file offset
+     * (e.g. a lazy on-demand seek) always get a fresh value, even on the early
+     * av_read_frame paths below; the resync refines it when the header parse engages. */
+    int64_t pos = (s && s->ic && s->ic->pb) ? avio_tell(s->ic->pb) : -1;
+    if (ix) ix->last_cluster_off = pos;
     if (!ix || !ix->enabled || ix->failed) {
         return read_seek_keyframe_pts(s, pkt, file_start);
     }
-    int64_t pos = avio_tell(s->ic->pb);
     int64_t raw = 0;
     int parsed = 0;
     ix->probes_seen++;
@@ -758,6 +765,7 @@ static double probe_keyframe_pts(plozz_remux_session *s, AVPacket *pkt, double f
         uint8_t hbuf[PLOZZ_KF_PROBE_READ];
         int got = read_raw_at(s, rstart, hbuf, PLOZZ_KF_PROBE_READ);
         int sync = (got > 16) ? mkv_find_cluster_sync(hbuf, got, back) : -1;
+        if (sync >= 0) ix->last_cluster_off = rstart + sync;
         if (sync >= 0 &&
             mkv_parse_cluster_keyframe(hbuf + sync, got - sync, ix->video_track, &raw)) {
             parsed = 1;
@@ -1052,6 +1060,39 @@ int plozz_remux_kf_probe_range(plozz_remux_kf_probe *ctx, double start_seconds,
 
 int plozz_remux_kf_probe_header_reads(const plozz_remux_kf_probe *ctx) {
     return ctx ? ctx->ix.header_reads : 0;
+}
+
+int plozz_remux_kf_probe_at(plozz_remux_kf_probe *ctx, double target_seconds,
+                            double *out_pts, long long *out_byte_offset) {
+    if (!ctx || !ctx->s || !out_pts) return 0;
+    plozz_remux_session *s = ctx->s;
+    if (s->video_index < 0) return 0;
+    AVStream *vst = s->ic->streams[s->video_index];
+    double duration = s->duration_seconds;
+    if (target_seconds < 0.0) target_seconds = 0.0;
+    if (duration > 0.0 && target_seconds > duration - 0.05) target_seconds = duration - 0.05;
+    if (target_seconds < 0.0) target_seconds = 0.0;
+
+    int64_t seek_ts = (int64_t)((target_seconds + ctx->file_start) / av_q2d(vst->time_base));
+    if (avformat_seek_file(s->ic, s->video_index, INT64_MIN, seek_ts, seek_ts,
+                           AVSEEK_FLAG_BACKWARD) < 0) {
+        return 0;
+    }
+    /* Resolve the keyframe the BACKWARD seek landed on (the GOP at/just-before target).
+     * A TARGET-RELATIVE acceptance window lets the calibrated header parse engage here
+     * — kf_probe_next's window is forward-relative to a previous boundary, which the
+     * single on-demand "at" case has none of. probe_keyframe_pts stays fail-closed: on
+     * any uncertainty (uncalibrated, unparsable, out-of-window) it returns the
+     * authoritative av_read_frame PTS, so a wrong header read never mislocates a seek.
+     * The 599.95 back-window admits any real GOP (keyframes are seconds, not 10min apart)
+     * while rejecting a wildly stray parse. */
+    double last = target_seconds - 599.95;
+    double kpts = probe_keyframe_pts(s, ctx->pkt, ctx->file_start, last, &ctx->ix);
+    if (kpts < -0.5) return 0;            /* no keyframe / seek failure */
+    *out_pts = (kpts < 0.0) ? 0.0 : kpts;
+    if (out_byte_offset)
+        *out_byte_offset = (long long)(ctx->ix.last_cluster_off >= 0 ? ctx->ix.last_cluster_off : 0);
+    return 1;
 }
 
 void plozz_remux_kf_probe_free(plozz_remux_kf_probe *ctx) {

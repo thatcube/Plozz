@@ -259,6 +259,27 @@ int plozz_remux_kf_probe_range(plozz_remux_kf_probe *ctx, double start_seconds,
  * read (vs an av_read_frame fallback). 0 when `ctx` is NULL. */
 int plozz_remux_kf_probe_header_reads(const plozz_remux_kf_probe *ctx);
 
+/*
+ * On-demand single-keyframe probe for a LAZY seek: resolve the real keyframe AT (i.e.
+ * at or just before) `target_seconds` — the GOP a BACKWARD seek to that time lands on —
+ * using the cheap cluster-header parse, fail-closed to av_read_frame. This is the
+ * per-seek primitive for a full-duration provisional-VOD lazy engine: when AVPlayer
+ * requests an as-yet-undiscovered segment (including after a far seek), one call returns
+ * the real boundary to mux from for ONE ~64KB read instead of a ~MB IDR demux.
+ *
+ * On success returns 1 and writes the keyframe's 0-based seconds PTS to *out_pts and,
+ * when non-NULL, the file BYTE OFFSET of that keyframe's Matroska cluster to
+ * *out_byte_offset (resync-refined when the header parse engaged, else the seek-landing
+ * position). Returns 0 on seek failure / no keyframe. Unlike kf_probe_next (which finds
+ * the NEXT keyframe strictly after a previous boundary), this resolves the keyframe
+ * CONTAINING target, so it composes with an estimate-then-correct seek. Reusing one ctx
+ * across calls keeps calibration warm. The probe leaves the demux cursor disturbed —
+ * the caller must avformat_seek_file before muxing (a lazy filler already re-seeks).
+ * Borrows the session's demuxer; do not run concurrently with the muxer on one session.
+ */
+int plozz_remux_kf_probe_at(plozz_remux_kf_probe *ctx, double target_seconds,
+                            double *out_pts, long long *out_byte_offset);
+
 /* Release a keyframe probe. Safe on NULL. Does not close the session. */
 void plozz_remux_kf_probe_free(plozz_remux_kf_probe *ctx);
 

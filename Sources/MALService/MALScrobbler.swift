@@ -25,11 +25,13 @@ public actor MALScrobbler: MALScrobbling {
     private let client: MALClient
     private let auth: MALAuthService
     private let tokenStore: MALTokenStoring
+    private let idMapper: AnimeIDMapper
 
-    public init(config: MALConfig, http: HTTPClient, tokenStore: MALTokenStoring) {
+    public init(config: MALConfig, http: HTTPClient, tokenStore: MALTokenStoring, idMapper: AnimeIDMapper = .shared) {
         self.client = MALClient(config: config, http: http)
         self.auth = MALAuthService(config: config, http: http)
         self.tokenStore = tokenStore
+        self.idMapper = idMapper
     }
 
     public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {
@@ -70,7 +72,10 @@ public actor MALScrobbler: MALScrobbling {
     // MARK: - Internal
 
     private func updateList(item: MediaItem, accessToken: String) async throws {
-        guard let malID = extractMALID(from: item.providerIDs) else { return }
+        // Most anime libraries (Shoko/Jellyfin) tag only AniDB; resolve a MAL id
+        // on demand so MAL-only users still scrobble. No-op when one is present.
+        let mapped = await idMapper.enrich(extractMappedIDs(from: item.providerIDs))
+        guard let malID = mapped.mal else { return }
 
         let episodeProgress = item.episodeNumber
         try await client.updateAnimeListStatus(
@@ -107,17 +112,19 @@ public actor MALScrobbler: MALScrobbling {
         return false
     }
 
-    private func extractMALID(from providerIDs: [String: String]) -> Int? {
+    private func extractMappedIDs(from providerIDs: [String: String]) -> AnimeMappedIDs {
+        var ids = AnimeMappedIDs()
         for (key, rawValue) in providerIDs {
             let value = rawValue.trimmingCharacters(in: .whitespaces)
-            guard !value.isEmpty else { continue }
+            guard !value.isEmpty, let n = Int(value) else { continue }
             switch key.lowercased() {
-            case "mal", "myanimelist":
-                return Int(value)
-            default:
-                continue
+            case "mal", "myanimelist": ids.mal = n
+            case "anilist": ids.anilist = n
+            case "anidb": ids.anidb = n
+            case "kitsu": ids.kitsu = n
+            default: continue
             }
         }
-        return nil
+        return ids
     }
 }

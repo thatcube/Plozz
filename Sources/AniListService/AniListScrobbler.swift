@@ -25,10 +25,12 @@ public struct DisabledAniListScrobbler: AniListScrobbling {
 public actor AniListScrobbler: AniListScrobbling {
     private let client: AniListClient
     private let tokenStore: AniListTokenStoring
+    private let idMapper: AnimeIDMapper
 
-    public init(config: AniListConfig, http: HTTPClient, tokenStore: AniListTokenStoring) {
+    public init(config: AniListConfig, http: HTTPClient, tokenStore: AniListTokenStoring, idMapper: AnimeIDMapper = .shared) {
         self.client = AniListClient(config: config, http: http)
         self.tokenStore = tokenStore
+        self.idMapper = idMapper
     }
 
     public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {
@@ -69,7 +71,9 @@ public actor AniListScrobbler: AniListScrobbling {
     // MARK: - Internal
 
     private func updateList(item: MediaItem, accessToken: String) async throws {
-        let ids = extractIDs(from: item.providerIDs)
+        // AniList needs an AniList or MAL id; most anime libraries tag only AniDB,
+        // so translate on demand (cached) before falling back to a title search.
+        let ids = await idMapper.enrich(extractMappedIDs(from: item.providerIDs))
         guard let mediaId = try await client.findAnime(
             anilistID: ids.anilist,
             malID: ids.mal,
@@ -101,23 +105,17 @@ public actor AniListScrobbler: AniListScrobbling {
         return false
     }
 
-    private struct AnimeIDs {
-        var anilist: Int?
-        var mal: Int?
-    }
-
-    private func extractIDs(from providerIDs: [String: String]) -> AnimeIDs {
-        var ids = AnimeIDs()
+    private func extractMappedIDs(from providerIDs: [String: String]) -> AnimeMappedIDs {
+        var ids = AnimeMappedIDs()
         for (key, rawValue) in providerIDs {
             let value = rawValue.trimmingCharacters(in: .whitespaces)
-            guard !value.isEmpty else { continue }
+            guard !value.isEmpty, let n = Int(value) else { continue }
             switch key.lowercased() {
-            case "anilist":
-                ids.anilist = Int(value)
-            case "mal", "myanimelist":
-                ids.mal = Int(value)
-            default:
-                continue
+            case "anilist": ids.anilist = n
+            case "mal", "myanimelist": ids.mal = n
+            case "anidb": ids.anidb = n
+            case "kitsu": ids.kitsu = n
+            default: continue
             }
         }
         return ids

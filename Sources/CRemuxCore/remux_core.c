@@ -172,10 +172,11 @@ struct plozz_remux_session {
      * (a no-op), so segment STARTS land on real keyframes with zero probe reads. The
      * parallel byte offsets are stored for a future direct cluster byte-seek; nil ->
      * the muxer backward-seeks by time (boundary is already a real keyframe). */
-    double *cue_times;          /* sorted, ~0-based real keyframe times; NULL when unset */
+    double *cue_times;          /* sorted ABSOLUTE source-PTS keyframe times (container
+                                 * start_time subtracted to 0-based at consume); NULL unset */
     int cue_count;              /* number of cue_times (need >= 2 to form a segment) */
     int64_t *cue_byte_offsets;  /* parallel to cue_times; NULL when not supplied */
-    double cue_duration;        /* table's declared duration (<=0 -> use duration_seconds) */
+    double cue_duration;        /* table's declared ABSOLUTE end PTS (<=0 -> duration_seconds) */
     int has_cue_table;          /* 1 once a usable table is set */
 };
 
@@ -1178,15 +1179,29 @@ int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
      * under full-vod, so the build-time flag's post-engage value is inert here. */
     int cue_built = 0;
     if (s->has_cue_table && s->cue_count >= 2) {
-        /* The producer hands grouped, oracle-gated boundaries in SOURCE seconds. Build
-         * the boundary list verbatim; if a separate declared end extends past the last
-         * supplied boundary (producer passed keyframe STARTS + a separate programme end
-         * rather than appending it), close the final segment at that end. */
-        double end = (s->cue_duration > 0.0) ? s->cue_duration : s->duration_seconds;
+        /* The producer hands grouped, oracle-gated boundaries in ABSOLUTE SOURCE seconds
+         * (the same domain as raw Cue / SimpleBlock PTS). CRITICAL domain step: the muxer
+         * seeks with (start_seconds + file_start), file_start = container start_time (see
+         * mux_segment_full:1987), and the libav-index table is likewise stored 0-based
+         * (build_segment_table:430 subtracts start_time). So segments[].start_seconds MUST
+         * be 0-based. We normalize here by subtracting the container start_time — NOT the
+         * producer's first-PTS — because the muxer compensates with ic->start_time exactly,
+         * and on a non-zero-start title those can differ; subtracting anything else would
+         * leave the muxer seeking past every keyframe -> A/V desync. No-op on the common
+         * start_time==0 title, so byte-identical there. */
+        double file_start = (s->ic->start_time != AV_NOPTS_VALUE)
+            ? (double)s->ic->start_time / AV_TIME_BASE : 0.0;
+        /* cue_duration is an ABSOLUTE programme-end PTS (boundaryPTS.last) -> normalize it
+         * too; the duration_seconds fallback is already a 0-based length. */
+        double end = (s->cue_duration > 0.0) ? (s->cue_duration - file_start)
+                                             : s->duration_seconds;
         int nb = s->cue_count;
         double *bounds = (double *)malloc(sizeof(double) * (size_t)(nb + 1));
         if (bounds) {
-            memcpy(bounds, s->cue_times, sizeof(double) * (size_t)nb);
+            for (int i = 0; i < nb; i++) {
+                double t = s->cue_times[i] - file_start;
+                bounds[i] = (t > 0.0) ? t : 0.0;  /* clamp head like build_segment_table:431 */
+            }
             if (end > bounds[nb - 1] + 0.05) { bounds[nb] = end; nb++; }
             plozz_remux_segment *cue_segs = NULL;
             int cue_n = build_segments_verbatim(bounds, nb, &cue_segs);

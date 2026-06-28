@@ -298,8 +298,14 @@ int plozz_remux_plan_segments_progressive(const double *keyframe_times, int coun
  * index. Call BEFORE plozz_remux_set_full_vod_mode: the full-vod engage then builds the
  * segment table from these real boundaries (exact EXTINF, real-keyframe STARTS, every
  * forward-snap resolve pre-seeded to a no-op) instead of the fixed-cadence fallback.
- *  - times:        sorted, ~0-based keyframe times in seconds (count >= 2 to take effect)
- *  - duration:     declared timeline duration (<= 0 -> the session's probed duration)
+ *  - times:        sorted ABSOLUTE source-PTS keyframe times in seconds, i.e. the raw
+ *                  Cue/SimpleBlock timestamps (count >= 2 to take effect). Do NOT pre-
+ *                  subtract a start offset: the consume normalizes to the muxer's 0-based
+ *                  domain by subtracting the container start_time itself, so non-zero-start
+ *                  titles stay in sync. The final entry should be the programme end (it
+ *                  closes the last segment and need not be a keyframe).
+ *  - duration:     declared ABSOLUTE programme-end PTS (<= 0 -> the session's probed
+ *                  duration); also normalized by the container start_time at consume
  *  - byte_offsets: OPTIONAL parallel cluster byte offsets (NULL -> mux backward-seeks by
  *                  time; reserved for a future direct byte-seek optimization)
  * Stores a private copy; pass count < 2 or times == NULL to clear. No-op on NULL session.

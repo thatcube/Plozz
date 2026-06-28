@@ -702,10 +702,13 @@ struct SeriesDetailView: View {
         return { onPlay(trailer) }
     }
 
-    /// Picks the season to open on first appearance — the one pre-selected via
-    /// "Go to Season"/episode tap if any, otherwise the first season — and
-    /// preloads it. When targeting a tapped episode, swaps the hero to the richer
-    /// loaded copy of that episode once its season's episodes are available.
+    /// Picks the season to open on first appearance and preloads it. Every entry
+    /// point funnels through here: the single, shared resolver `resolvedInitialSeasonID()`
+    /// decides which season to land on (explicit hint → else the season you're
+    /// actually watching → else the first), so a plain series open no longer
+    /// defaults to Season 1 when you're mid-series. When targeting a tapped episode,
+    /// swaps the hero to the richer loaded copy of that episode once its season's
+    /// episodes are available.
     private func prepareInitialSeason() async {
         // After an in-place cross-server switch, re-front the same S·E episode on
         // the new server (its seasons just loaded under us). Matched by NUMBER
@@ -715,19 +718,15 @@ struct SeriesDetailView: View {
             await frontSwitchTarget(target)
             return
         }
-        if let id = resolvedInitialSeasonID() {
-            selectedSeasonID = id
-            await viewModel.loadEpisodes(for: id)
-            await frontTargetEpisodeIfNeeded(in: id)
-            return
-        }
-        guard let first = seasons.first else {
+        // No seasons at all (a flat "loose episode" show): just front any target
+        // episode and let the loose-episode rail show.
+        guard let id = resolvedInitialSeasonID() else {
             await frontTargetEpisodeIfNeeded(in: nil)
             return
         }
-        selectedSeasonID = first.id
-        await viewModel.loadEpisodes(for: first.id)
-        await frontTargetEpisodeIfNeeded(in: first.id)
+        selectedSeasonID = id
+        await viewModel.loadEpisodes(for: id)
+        await frontTargetEpisodeIfNeeded(in: id)
     }
 
     /// Re-selects the season with `target`'s number on the freshly-switched server
@@ -760,10 +759,29 @@ struct SeriesDetailView: View {
         updateRailTarget()
     }
 
-    /// The season to open: an already-selected/explicit one, the target episode's
-    /// own season, or — when that episode arrived from a *different server* (a
-    /// cross-server switch, so its season id won't match these seasons) — the
-    /// season with the same NUMBER. `nil` falls through to the first season.
+    /// **The single source of truth for which season the page opens on**, shared by
+    /// *every* entry point (they all reach this via `prepareInitialSeason`). The
+    /// entry points only differ in which hint they hand `SeriesDetailView`:
+    ///
+    ///   • a tapped **episode** card (Continue Watching / Recently Added) →
+    ///     `EpisodeContextRoute` → `initialEpisode`;
+    ///   • a tapped **season** card / "Go to Season" → `SeasonContextRoute` /
+    ///     `viewModel.preselectedSeasonID` → `initialSeasonID`;
+    ///   • a plain **series tile** (Library / Home / Search) → no season hint.
+    ///
+    /// Resolution order, most-specific first:
+    ///   1. an already-settled selection (e.g. after a season-tab focus);
+    ///   2. an explicit `initialSeasonID` (tapped season / "Go to Season");
+    ///   3. a tapped episode's own season — by id, or across servers by NUMBER
+    ///      (per-server season ids differ);
+    ///   4. **no hint:** the season the user is actually *watching* — first
+    ///      in-progress, else first unwatched, else last — from the seasons' own
+    ///      played state (carried by BOTH Jellyfin and Plex). This is what stops a
+    ///      mid-series show from wrongly opening on Season 1.
+    ///   5. ultimately the first season (a brand-new, fully-unwatched show).
+    ///
+    /// Returns `nil` only when there are no season containers at all (a flat
+    /// loose-episode show).
     private func resolvedInitialSeasonID() -> String? {
         if let id = selectedSeasonID, seasons.contains(where: { $0.id == id }) { return id }
         if let id = initialSeasonID, seasons.contains(where: { $0.id == id }) { return id }
@@ -772,7 +790,11 @@ struct SeriesDetailView: View {
            let match = seasons.first(where: { $0.seasonNumber == number }) {
             return match.id
         }
-        return nil
+        // No explicit hint (plain series open): land on the season the user is
+        // watching, using the same next-up rule the rest of the app uses, applied
+        // to the seasons themselves. Never Season 1 unless it genuinely is next up.
+        if let resume = SeriesResume.nextUp(in: seasons) { return resume.id }
+        return seasons.first?.id
     }
 
     /// After episodes load, replace the hero's tapped-episode placeholder with the

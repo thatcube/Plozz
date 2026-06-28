@@ -20,6 +20,36 @@ struct AppearanceDetailView: View {
                 Text("Appearance").font(.largeTitle.bold())
 
                 VStack(alignment: .leading, spacing: 28) {
+                    // Theme
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Theme").font(.headline.weight(.semibold))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(AppTheme.allCases) { option in
+                                    Button {
+                                        theme.theme = option
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: option.symbolName)
+                                            Text(option.displayName)
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .opacity(theme.theme == option ? 1 : 0)
+                                        }
+                                        .font(.headline)
+                                        .padding(.horizontal, 4)
+                                    }
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
+                                    .accessibilityValue(theme.theme == option ? "Selected" : "")
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
+                        }
+                        .scrollClipDisabled()
+                    }
+
+                    sectionDivider
+
                     // Display Size
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Display Size").font(.headline.weight(.semibold))
@@ -50,36 +80,6 @@ struct AppearanceDetailView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    sectionDivider
-
-                    // Theme
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Theme").font(.headline.weight(.semibold))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(AppTheme.allCases) { option in
-                                    Button {
-                                        theme.theme = option
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: option.symbolName)
-                                            Text(option.displayName)
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .opacity(theme.theme == option ? 1 : 0)
-                                        }
-                                        .font(.headline)
-                                        .padding(.horizontal, 4)
-                                    }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
-                                    .accessibilityValue(theme.theme == option ? "Selected" : "")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 6)
-                        }
-                        .scrollClipDisabled()
                     }
 
                     sectionDivider
@@ -145,11 +145,14 @@ struct AppearanceDetailView: View {
     }
 
     /// Hairline rule between the joined Appearance sections so they read as one
-    /// grouped container rather than four separate cards.
+    /// grouped container rather than separate cards. The negative horizontal
+    /// padding cancels the container's 28 pt content inset so the rule spans the
+    /// full width edge-to-edge.
     private var sectionDivider: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.1))
             .frame(height: 1)
+            .padding(.horizontal, -28)
     }
 }
 

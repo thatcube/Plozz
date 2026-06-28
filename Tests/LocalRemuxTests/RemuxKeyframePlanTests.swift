@@ -140,5 +140,80 @@ final class RemuxKeyframePlanTests: XCTestCase {
         let p = plan(keyframes: [], duration: 12, target: 6)
         XCTAssertEqual(p.count, 0)
     }
+
+    // MARK: - Hybrid partial-discovery table (prefix-apply on budget abort)
+
+    /// Mirror of the prefix-apply path: real-keyframe PREFIX [0 .. last keyframe]
+    /// followed by a fixed-cadence TAIL (last keyframe .. duration]. Drives
+    /// `plozz_remux_test_hybrid_segments` with synthetic keyframe lists.
+    private func hybrid(keyframes: [Double], duration: Double, target: Double,
+                        maxOut: Int = 4096) -> Plan {
+        var starts = [Double](repeating: -999, count: maxOut)
+        var durs = [Double](repeating: -999, count: maxOut)
+        let n = keyframes.withUnsafeBufferPointer { kf in
+            starts.withUnsafeMutableBufferPointer { s in
+                durs.withUnsafeMutableBufferPointer { d in
+                    Int(plozz_remux_test_hybrid_segments(kf.baseAddress, Int32(kf.count),
+                                                         duration, target,
+                                                         s.baseAddress, d.baseAddress,
+                                                         Int32(maxOut)))
+                }
+            }
+        }
+        return Plan(starts: Array(starts.prefix(n)), durations: Array(durs.prefix(n)), count: n)
+    }
+
+    /// The whole hybrid table is contiguous and spans the full timeline with no gap
+    /// or overlap at the prefix/tail seam — the core safety property of prefix-apply.
+    func testHybridIsContiguousAndCoversFullTimeline() {
+        // Sparse real keyframes covering only the first ~38s of a 120s title (the
+        // rest never got discovered before the budget tripped).
+        let kf = [0.0, 12.76, 25.5, 38.1]
+        let h = hybrid(keyframes: kf, duration: 120, target: 6)
+        XCTAssertGreaterThan(h.count, 0)
+        assertContiguousNonOverlapping(h)
+        XCTAssertEqual(h.starts.first!, 0, accuracy: 1e-6)
+        let end = h.starts.last! + h.durations.last!
+        XCTAssertEqual(end, 120, accuracy: 1e-6) // tail reaches the file end
+    }
+
+    /// The discovered prefix declares the REAL keyframe-to-keyframe spans (the in-sync
+    /// start), and the seam segment ends exactly on the last real keyframe so the
+    /// fixed-cadence tail begins there with no overlap.
+    func testHybridPrefixUsesRealSpansAndSeamsAtLastKeyframe() {
+        let kf = [0.0, 12.76, 25.5, 38.1]
+        let h = hybrid(keyframes: kf, duration: 120, target: 6)
+        // First prefix segment is the real ~12.76s span, never a fictitious 6s.
+        XCTAssertEqual(h.durations.first!, 12.76, accuracy: 1e-6)
+        // Some boundary lands exactly on the last discovered keyframe (38.1): that is
+        // the prefix/tail seam.
+        let lastKf = 38.1
+        let seam = h.starts.contains { abs($0 - lastKf) < 1e-6 }
+        XCTAssertTrue(seam, "no segment boundary at last discovered keyframe \(lastKf)")
+        // Tail segments after the seam are fixed-cadence 6s (until the final short one).
+        if let seamIdx = h.starts.firstIndex(where: { abs($0 - lastKf) < 1e-6 }) {
+            for i in seamIdx..<(h.count - 1) {
+                XCTAssertEqual(h.durations[i], 6, accuracy: 1e-6,
+                               "tail seg\(i) should be fixed-cadence 6s")
+            }
+        }
+    }
+
+    /// When discovery happened to reach the end of the file (last keyframe ≈ duration),
+    /// the hybrid table is pure real-keyframe segments with no fixed-cadence tail.
+    func testHybridWithNoTailIsAllRealKeyframes() {
+        let kf = [0.0, 12.0, 24.0, 36.0]
+        let h = hybrid(keyframes: kf, duration: 36, target: 6)
+        assertContiguousNonOverlapping(h)
+        let end = h.starts.last! + h.durations.last!
+        XCTAssertEqual(end, 36, accuracy: 1e-6)
+        // No tail boundary beyond the last keyframe.
+        XCTAssertLessThanOrEqual(h.starts.last!, 36)
+    }
+
+    func testHybridSingleKeyframeYieldsNoSegments() {
+        let h = hybrid(keyframes: [0.0], duration: 60, target: 6)
+        XCTAssertEqual(h.count, 0)
+    }
 }
 #endif

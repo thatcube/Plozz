@@ -312,6 +312,64 @@ static int build_segments_from_keyframes(const double *kf, int kf_count,
 }
 
 /*
+ * Build a HYBRID segment table for a PARTIAL keyframe discovery (budget hit before
+ * the whole timeline was scanned): real-keyframe boundaries for the discovered
+ * PREFIX [0 .. last discovered keyframe] so the START of the title — where playback
+ * begins — has correct EXTINF==span and is in sync, then fixed-cadence segments for
+ * the undiscovered TAIL (last_kf .. duration]. The tail keeps the old EXTINF-vs-span
+ * mismatch (possible desync) but it is pushed far past the playhead. This is what
+ * lets a feature-length / multi-GB title start FAST (budget-bounded) AND in sync,
+ * instead of discarding the discovered prefix and reverting wholesale to fixed
+ * cadence. Returns prefix+tail segment count, or 0 on failure (caller then keeps the
+ * existing fixed-cadence table).
+ */
+static int build_hybrid_table(const double *kf, int kf_count, double duration,
+                              double target_seconds, plozz_remux_segment **out_segs) {
+    if (out_segs) *out_segs = NULL;
+    if (!kf || kf_count <= 1 || !out_segs) return 0;
+    if (target_seconds < 1.0) target_seconds = 6.0;
+    double last_kf = kf[kf_count - 1];
+    if (last_kf <= 0.001) return 0;
+
+    /* Prefix: group the discovered keyframes, tail-bounded at last_kf (NOT the file
+     * end) so the final prefix segment ends exactly on the last real keyframe. */
+    plozz_remux_segment *prefix = NULL;
+    int prefix_count = build_segments_from_keyframes(kf, kf_count, last_kf,
+                                                     target_seconds, &prefix);
+    if (prefix_count <= 0) { free(prefix); return 0; }
+
+    int max_tail = 0;
+    if (duration > last_kf + 0.001) {
+        max_tail = (int)((duration - last_kf) / target_seconds) + 2;
+    }
+    long long cap = (long long)prefix_count + (long long)max_tail;
+    if (cap > PLOZZ_MAX_SEGMENTS) cap = PLOZZ_MAX_SEGMENTS;
+    plozz_remux_segment *segs =
+        (plozz_remux_segment *)malloc(sizeof(plozz_remux_segment) * (size_t)cap);
+    if (!segs) { free(prefix); return 0; }
+
+    int count = 0;
+    for (int i = 0; i < prefix_count && count < cap; i++) segs[count++] = prefix[i];
+    free(prefix);
+
+    /* Tail: fixed cadence from the last real keyframe to the file end (each boundary
+     * still snaps to a real keyframe at mux time via the BACKWARD seek). */
+    double t = last_kf;
+    while (t < duration - 0.001 && count < cap) {
+        double dur = target_seconds;
+        if (t + dur > duration) dur = duration - t;
+        segs[count].start_seconds = t;
+        segs[count].duration_seconds = dur;
+        count++;
+        t += target_seconds;
+    }
+
+    if (count <= 0) { free(segs); return 0; }
+    *out_segs = segs;
+    return count;
+}
+
+/*
  * Build the keyframe-aligned segment table from the video stream's libavformat
  * index. For Matroska this index is populated from the Cues at open time, so the
  * boundaries are the file's real IDR keyframes. Falls back to a fixed cadence
@@ -836,13 +894,39 @@ static int build_segment_table_keyframe_scan(plozz_remux_session *s) {
                                               s->keyframe_index_mode, &header_reads);
     int64_t scan_bytes = s->bytes_read - bytes_before;
     if (timed_out) {
-        /* Budget blown (slow/stalled network, or a feature-length title whose upfront
-         * av_read_frame discovery would transfer hundreds of MB): abandon the scan and
-         * keep the existing fixed-cadence table. Degraded (the old EXTINF mismatch =
-         * possible desync) but the open thread is never blocked/OOM-killed — the title
-         * PLAYS instead of crashing. */
-        free(kf);
+        /* Budget hit (slow network, or a feature-length title whose full upfront scan
+         * would transfer too much / take too long). DON'T discard what we found:
+         * PREFIX-APPLY the real keyframes discovered so far (they cover the START of
+         * the title, where playback begins) and fixed-cadence only the undiscovered
+         * TAIL. The start plays in sync; residual desync is pushed far past the
+         * playhead. The open thread is never blocked/OOM-killed — fast AND in-sync at
+         * the start. Falls back to keeping the fixed-cadence table only if even the
+         * hybrid build fails (e.g. nothing real discovered). */
         avformat_seek_file(s->ic, s->video_index, INT64_MIN, 0, 0, AVSEEK_FLAG_BACKWARD);
+        plozz_remux_segment *hsegs = NULL;
+        int hcount = (kf_count > 1)
+            ? build_hybrid_table(kf, kf_count, s->duration_seconds, eff_target, &hsegs)
+            : 0;
+        if (hcount > 0) {
+            double covered = kf[kf_count - 1];
+            int old = s->segment_count;
+            free(kf);
+            free(s->segments);
+            s->segments = hsegs;
+            s->segment_count = hcount;
+            s->used_fixed_cadence = 0;
+            remux_log(1, "remux: keyframe-scan budget hit after %d seek-probes, %lld bytes "
+                      "(limits %llds / %lldMB) — PREFIX-APPLIED %d real-keyframe segments "
+                      "covering %.1fs of %.1fs, fixed-cadence tail (was %d; start in-sync, "
+                      "tail may desync)",
+                      probes, (long long)scan_bytes,
+                      (long long)(PLOZZ_KEYFRAME_SCAN_BUDGET_US / 1000000LL),
+                      (long long)(PLOZZ_KEYFRAME_SCAN_BYTE_BUDGET / (1024 * 1024)),
+                      hcount, covered, s->duration_seconds, old);
+            return hcount;
+        }
+        free(hsegs);
+        free(kf);
         remux_log(1, "remux: keyframe-scan aborted after %d seek-probes "
                   "(%lld bytes read; limits %llds / %lldMB) — keeping fixed-cadence "
                   "table (playable, possibly desynced)",
@@ -1086,6 +1170,23 @@ int plozz_remux_plan_segments(const double *keyframe_times, int count,
     plozz_remux_segment *segs = NULL;
     int n = build_segments_from_keyframes(keyframe_times, count, duration,
                                           target_seconds, &segs);
+    if (n <= 0) { free(segs); return 0; }
+    if (n > max_out) n = max_out;
+    for (int i = 0; i < n; i++) {
+        if (out_starts) out_starts[i] = segs[i].start_seconds;
+        if (out_durations) out_durations[i] = segs[i].duration_seconds;
+    }
+    free(segs);
+    return n;
+}
+
+int plozz_remux_test_hybrid_segments(const double *keyframe_times, int count,
+                                     double duration, double target_seconds,
+                                     double *out_starts, double *out_durations,
+                                     int max_out) {
+    if (!keyframe_times || count <= 1 || max_out <= 0) return 0;
+    plozz_remux_segment *segs = NULL;
+    int n = build_hybrid_table(keyframe_times, count, duration, target_seconds, &segs);
     if (n <= 0) { free(segs); return 0; }
     if (n > max_out) n = max_out;
     for (int i = 0; i < n; i++) {

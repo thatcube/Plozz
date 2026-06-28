@@ -211,6 +211,18 @@ int plozz_remux_plan_segments(const double *keyframe_times, int count,
                               int max_out);
 
 /*
+ * Pure test/diagnostic helper: build the HYBRID partial-discovery table — a real
+ * keyframe-grouped prefix [0 .. last keyframe] followed by a fixed-cadence tail
+ * (last keyframe .. duration]. Mirrors the prefix-apply path taken when keyframe-scan
+ * discovery hits its budget mid-timeline. Writes up to `max_out` segments and returns
+ * the count (0 when fewer than two keyframes are supplied). No session state.
+ */
+int plozz_remux_test_hybrid_segments(const double *keyframe_times, int count,
+                                     double duration, double target_seconds,
+                                     double *out_starts, double *out_durations,
+                                     int max_out);
+
+/*
  * Pure test/diagnostic helper: parse the first (E-)AC-3 syncframe in `data` and
  * return the PCM sample count it represents (256/512/768/1536), or 0 if no
  * syncword is found or the leading frame is a dependent substream. Pass

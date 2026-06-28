@@ -93,6 +93,19 @@ final class RemuxContentSource: @unchecked Sendable {
         label: "com.thatcube.Plozz.localremux.lazyindex", qos: .userInitiated)
     /// Uptime (ns) the session began driving discovery, for the fill-rate telemetry.
     private var lazyFillStartNanos: UInt64 = 0
+    /// B7 windowed-fill state (all `cacheLock`). The background driver must NOT race
+    /// the frontier to EOF — that re-creates the brutal upfront I/O (just moved off
+    /// the open path) AND starves the foreground segment mux of the shared demuxer
+    /// lock. Instead it keeps the published timeline only `lazyWindowAhead` segments
+    /// ahead of the playhead and then IDLES until playback advances.
+    /// `lazyPlayhead` = highest segment index AVPlayer has requested.
+    private var lazyPlayhead = 0
+    /// Count of in-flight FOREGROUND (on-demand, non-prefetch) segment muxes. While
+    /// > 0 the background fill yields so a just-in-time segment never waits behind a
+    /// discovery batch (the fix for seg1 starving to 20s → teardown → seg2 404).
+    private var foregroundMuxPending = 0
+    /// Keep this many segments published ahead of the playhead, then idle.
+    private let lazyWindowAhead = 16
 
     let segmentCount: Int
 
@@ -148,18 +161,39 @@ final class RemuxContentSource: @unchecked Sendable {
     }
 
     private func lazyFillLoop() {
-        // Probe budget per batch: small enough to yield the demuxer lock frequently
-        // (so a just-in-time segment mux never waits long behind discovery), large
-        // enough that the timeline fills in a handful of seconds.
-        let batchProbes = 48
+        // WINDOWED background discovery. Two hard rules learned on-device (a frontier
+        // race to EOF pulled 594MB in 30s AND starved the foreground mux → seg1 took
+        // 20s → teardown → seg2 404):
+        //  1) Never extend more than `lazyWindowAhead` segments past the playhead;
+        //     idle until playback advances. Discovery cost stays local to the window.
+        //  2) Yield to the foreground: hold the demuxer lock only for SMALL probe
+        //     batches, and pause entirely while an on-demand segment mux is pending.
+        let batchProbes = 8
         var totalProbes = 0
         var passes = 0
         let fillNetStart = segmenter.networkSnapshot()
         while true {
             cacheLock.lock()
             let stop = stopped || lazyComplete
+            let playhead = lazyPlayhead
+            let published = liveSegmentCount
+            let foregroundPending = foregroundMuxPending
             cacheLock.unlock()
             if stop { break }
+
+            // Foreground priority: a just-in-time segment is muxing — get out of its
+            // way (don't contend for the shared demuxer lock) and re-check shortly.
+            if foregroundPending > 0 {
+                usleep(5_000)
+                continue
+            }
+
+            // Windowed: already enough runway ahead of the playhead → idle until
+            // AVPlayer advances (or a seek jumps the playhead forward).
+            if published >= playhead + lazyWindowAhead {
+                usleep(120_000)
+                continue
+            }
 
             let progress = segmenter.extendLazyIndex(untilSeconds: 0, maxProbes: batchProbes)
             totalProbes += progress.probes
@@ -173,24 +207,26 @@ final class RemuxContentSource: @unchecked Sendable {
             let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds &- lazyFillStartNanos) / 1_000_000
             cacheLock.unlock()
 
-            // Periodic + terminal fill telemetry (the coordinator greps `remux-lazy:`
-            // to read the discovery curve vs B5/B6's all-at-open cost). fill-bytes is
-            // the cumulative network cost of BACKGROUND discovery — it's paid while
-            // AVPlayer is already playing, so unlike B6's 584 MB it never delays the
-            // first frame; reported so the per-region discovery cost is scoreable.
+            // Periodic + terminal fill telemetry (the coordinator greps `remux-lazy:`).
+            // fill-bytes is the cumulative BACKGROUND discovery cost; because it's
+            // windowed it tracks the playhead, never the whole timeline up front.
             if progress.complete || passes % 8 == 0 {
                 let net = segmenter.networkSnapshot()
                 let fillBytes = max(0, net.bytesFetched - fillNetStart.bytesFetched)
                 RemuxLog.info(String(format:
-                    "remux-lazy: fill ready=%d complete=%@ probes=%d elapsed=%.0fms fill-bytes=%.2fMB",
+                    "remux-lazy: fill ready=%d complete=%@ probes=%d elapsed=%.0fms fill-bytes=%.2fMB playhead=%d window=%d",
                     durations.count, progress.complete ? "YES" : "no", totalProbes, elapsedMs,
-                    Double(fillBytes) / 1_048_576.0))
+                    Double(fillBytes) / 1_048_576.0, playhead, lazyWindowAhead))
             }
             if progress.complete { break }
             // No progress and not complete (e.g. transient seek failure): avoid a
             // hot spin — back off briefly before retrying.
             if progress.probes == 0 {
                 usleep(50_000)
+            } else {
+                // Yield the lock briefly so a foreground mux thread (NSLock is not
+                // fair) can acquire the demuxer between batches.
+                usleep(2_000)
             }
         }
     }
@@ -230,6 +266,13 @@ final class RemuxContentSource: @unchecked Sendable {
             guard index >= 0, index < bound else {
                 RemuxLog.error("Origin: segment \(index) out of range (count=\(bound))")
                 return nil
+            }
+            // Advance the playhead so the windowed background fill follows AVPlayer
+            // (a seek jumps it forward; the window re-aims around the new position).
+            if lazyEnabled {
+                cacheLock.lock()
+                if index > lazyPlayhead { lazyPlayhead = index }
+                cacheLock.unlock()
             }
             return segmentBytes(index)
         }
@@ -336,11 +379,21 @@ final class RemuxContentSource: @unchecked Sendable {
         let gapNanos: UInt64 = lastSegmentServedUptimeNanos == 0
             ? 0 : muxStart &- lastSegmentServedUptimeNanos
 
+        // Foreground priority: while a just-in-time (non-prefetch) segment is being
+        // muxed, the background discovery driver yields the shared demuxer lock so
+        // this mux never waits behind a probe batch.
+        let foreground = lazyEnabled && !isPrefetch
+        if foreground {
+            cacheLock.lock(); foregroundMuxPending += 1; cacheLock.unlock()
+        }
         var data = segmenter.mediaSegment(index)
         if data == nil || data?.isEmpty == true {
             // Never 404 a declared segment on a transient failure: retry once.
             RemuxLog.error("Origin: segment \(index) mux returned empty — retrying once")
             data = segmenter.mediaSegment(index)
+        }
+        if foreground {
+            cacheLock.lock(); foregroundMuxPending = max(0, foregroundMuxPending - 1); cacheLock.unlock()
         }
         guard let produced = data, !produced.isEmpty else {
             RemuxLog.error("Origin: segment \(index) mux FAILED after retry")

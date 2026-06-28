@@ -19,9 +19,11 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
     case standard
     /// Roomier — fewer columns, larger cards, more breathing room.
     case spacious
-    /// Largest layout — fewest columns, biggest cards. Tuned for low-vision
-    /// viewers who need media to be as large as possible.
+    /// Largest standard layout — fewest columns, big cards. Tuned for low-vision
+    /// viewers who need media to be large.
     case extraLarge
+    /// The absolute largest layout — biggest cards, fewest columns of all.
+    case maximum
 
     public var id: String { rawValue }
 
@@ -32,6 +34,7 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
         case .standard: return "Medium"
         case .spacious: return "Large"
         case .extraLarge: return "Huge"
+        case .maximum: return "Max"
         }
     }
 
@@ -42,7 +45,8 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
         case .compact: return "More cards, smaller"
         case .standard: return "Default size"
         case .spacious: return "Fewer cards, bigger"
-        case .extraLarge: return "Fewest cards, biggest"
+        case .extraLarge: return "Few cards, big"
+        case .maximum: return "Fewest cards, biggest"
         }
     }
 
@@ -54,7 +58,8 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
         case .compact: return "square.grid.3x3.fill"
         case .standard: return "square.grid.3x2.fill"
         case .spacious: return "square.grid.2x2.fill"
-        case .extraLarge: return "square.fill"
+        case .extraLarge: return "rectangle.grid.1x2.fill"
+        case .maximum: return "square.fill"
         }
     }
 
@@ -68,6 +73,7 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
         case .standard: return 1.0
         case .spacious: return 1.18
         case .extraLarge: return 1.4
+        case .maximum: return 1.65
         }
     }
 
@@ -81,6 +87,7 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
         case .standard: return 7
         case .spacious: return 6
         case .extraLarge: return 5
+        case .maximum: return 4
         }
     }
 

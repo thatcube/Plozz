@@ -18,63 +18,92 @@ struct AppearanceDetailView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 Text("Appearance").font(.largeTitle.bold())
-                SettingsPanel(
-                    title: "Display Size",
-                    footer: "Scales cards, columns and spacing across the app for this profile. Larger sizes show fewer, bigger items — easier to see across the room."
-                ) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(UIDensity.allCases) { option in
-                                Button {
-                                    density.density = option
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: option.symbolName)
-                                        Text(option.displayName)
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .opacity(density.density == option ? 1 : 0)
-                                    }
-                                    .font(.headline)
-                                    .padding(.horizontal, 4)
-                                }
-                                .buttonStyle(PlozzSeasonTabStyle(isSelected: density.density == option))
-                                .accessibilityValue(density.density == option ? "Selected" : "")
-                            }
-                        }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 6)
-                    }
-                    .scrollClipDisabled()
-                }
 
-                SettingsPanel(
-                    title: "Theme",
-                    footer: "Choose how Plozz looks. Theme applies to the active profile only."
-                ) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(AppTheme.allCases) { option in
-                                Button {
-                                    theme.theme = option
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: option.symbolName)
-                                        Text(option.displayName)
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .opacity(theme.theme == option ? 1 : 0)
+                VStack(alignment: .leading, spacing: 28) {
+                    // Display Size
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Display Size").font(.headline.weight(.semibold))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(UIDensity.allCases) { option in
+                                    Button {
+                                        density.density = option
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: option.symbolName)
+                                            Text(option.displayName)
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .opacity(density.density == option ? 1 : 0)
+                                        }
+                                        .font(.headline)
+                                        .padding(.horizontal, 4)
                                     }
-                                    .font(.headline)
-                                    .padding(.horizontal, 4)
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: density.density == option))
+                                    .accessibilityValue(density.density == option ? "Selected" : "")
                                 }
-                                .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
-                                .accessibilityValue(theme.theme == option ? "Selected" : "")
                             }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
                         }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 6)
+                        .scrollClipDisabled()
+                        Text("Scales card size, columns and spacing.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .scrollClipDisabled()
+
+                    sectionDivider
+
+                    // Theme
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Theme").font(.headline.weight(.semibold))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(AppTheme.allCases) { option in
+                                    Button {
+                                        theme.theme = option
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: option.symbolName)
+                                            Text(option.displayName)
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .opacity(theme.theme == option ? 1 : 0)
+                                        }
+                                        .font(.headline)
+                                        .padding(.horizontal, 4)
+                                    }
+                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
+                                    .accessibilityValue(theme.theme == option ? "Selected" : "")
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 6)
+                        }
+                        .scrollClipDisabled()
+                    }
+
+                    sectionDivider
+
+                    // Transparency
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Transparency").font(.headline.weight(.semibold))
+                        Toggle("Reduce transparency", isOn: $reduceTransparency)
+                        Text("Replaces the translucent “liquid glass” blur on cards, menus and overlays with solid surfaces. Turns on automatically when Reduce Transparency is enabled in tvOS Accessibility settings.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(28)
+                .background(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                )
 
                 SettingsPanel(
                     title: "Music Player",
@@ -108,20 +137,19 @@ struct AppearanceDetailView: View {
                         Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
                     }
                 }
-
-                SettingsPanel(
-                    title: "Transparency",
-                    footer: "Replaces the translucent “liquid glass” blur on cards, menus and overlays with solid surfaces. Turns on automatically when Reduce Transparency is enabled in tvOS Accessibility settings."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Toggle("Reduce transparency", isOn: $reduceTransparency)
-                    }
-                }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
+    }
+
+    /// Hairline rule between the joined Appearance sections so they read as one
+    /// grouped container rather than four separate cards.
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.1))
+            .frame(height: 1)
     }
 }
 

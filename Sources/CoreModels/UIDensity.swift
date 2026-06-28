@@ -11,42 +11,41 @@ import Foundation
 public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
     /// Tightest layout of all — the most columns, smallest cards and tightest
     /// gaps. For power users who want to pack the absolute maximum on screen.
+    case micro
+    /// Very tight — lots of columns, small cards, tight gaps.
     case extraCompact
-    /// Tighter than standard — more columns, smaller cards, tighter gaps. For
-    /// power users who want to see as much as possible at once.
+    /// Tighter than the default — more columns, smaller cards, tighter gaps.
     case compact
     /// The default, balanced layout.
     case standard
     /// Roomier — fewer columns, larger cards, more breathing room.
     case spacious
-    /// Largest standard layout — fewest columns, big cards. Tuned for low-vision
-    /// viewers who need media to be large.
+    /// Largest layout — fewest columns, big cards. Tuned for low-vision viewers
+    /// who need media to be large.
     case extraLarge
-    /// The absolute largest layout — biggest cards, fewest columns of all.
-    case maximum
 
     public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
+        case .micro: return "Micro"
         case .extraCompact: return "Tiny"
         case .compact: return "Small"
-        case .standard: return "Medium"
+        case .standard: return "Default"
         case .spacious: return "Large"
         case .extraLarge: return "Huge"
-        case .maximum: return "Max"
         }
     }
 
     /// Short helper line shown under each option in Settings.
     public var detail: String {
         switch self {
-        case .extraCompact: return "Most cards, smallest"
-        case .compact: return "More cards, smaller"
+        case .micro: return "Most cards, smallest"
+        case .extraCompact: return "More cards, smaller"
+        case .compact: return "Slightly smaller"
         case .standard: return "Default size"
         case .spacious: return "Fewer cards, bigger"
-        case .extraLarge: return "Few cards, big"
-        case .maximum: return "Fewest cards, biggest"
+        case .extraLarge: return "Fewest cards, biggest"
         }
     }
 
@@ -54,12 +53,12 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
     /// "grid density" ramp (fewer, bigger cells → more, smaller cells).
     public var symbolName: String {
         switch self {
-        case .extraCompact: return "square.grid.4x3.fill"
-        case .compact: return "square.grid.3x3.fill"
-        case .standard: return "square.grid.3x2.fill"
-        case .spacious: return "square.grid.2x2.fill"
-        case .extraLarge: return "rectangle.grid.1x2.fill"
-        case .maximum: return "square.fill"
+        case .micro: return "square.grid.4x3.fill"
+        case .extraCompact: return "square.grid.3x3.fill"
+        case .compact: return "square.grid.3x2.fill"
+        case .standard: return "square.grid.2x2.fill"
+        case .spacious: return "rectangle.grid.1x2.fill"
+        case .extraLarge: return "square.fill"
         }
     }
 
@@ -68,12 +67,12 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
     /// rhythm all scale by this factor.
     public var scale: Double {
         switch self {
+        case .micro: return 0.6
         case .extraCompact: return 0.72
         case .compact: return 0.85
         case .standard: return 1.0
         case .spacious: return 1.18
         case .extraLarge: return 1.4
-        case .maximum: return 1.65
         }
     }
 
@@ -82,12 +81,12 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
     /// main lever that makes posters visibly bigger at higher densities.
     public var posterGridColumns: Int {
         switch self {
+        case .micro: return 10
         case .extraCompact: return 9
         case .compact: return 8
         case .standard: return 7
         case .spacious: return 6
         case .extraLarge: return 5
-        case .maximum: return 4
         }
     }
 

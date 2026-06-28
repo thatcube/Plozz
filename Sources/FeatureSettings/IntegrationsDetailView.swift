@@ -20,23 +20,39 @@ struct IntegrationsDetailView: View {
 
                 // Unified tracker card — all services in one dense panel
                 VStack(alignment: .leading, spacing: 24) {
+                    // Trakt
                     TrackerRow(name: "Trakt", phase: traktRowPhase, onConnect: { trakt.connect() }, onDisconnect: { Task { await trakt.disconnect() } })
                         .task { await trakt.refreshStatus() }
+                    if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
+                        DeviceCodeConnectingView(serviceName: "Trakt", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: trakt.codeLifetime, onCancel: { trakt.cancelConnect() })
+                    }
 
                     sectionDivider
 
+                    // Simkl
                     TrackerRow(name: "Simkl", phase: simklRowPhase, onConnect: { simkl.connect() }, onDisconnect: { Task { await simkl.disconnect() } })
                         .task { await simkl.refreshStatus() }
+                    if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
+                        DeviceCodeConnectingView(serviceName: "Simkl", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: simkl.codeLifetime, onCancel: { simkl.cancelConnect() })
+                    }
 
                     sectionDivider
 
+                    // AniList
                     TrackerRow(name: "AniList", phase: anilistRowPhase, onConnect: { anilist.connect() }, onDisconnect: { Task { await anilist.disconnect() } })
                         .task { await anilist.refreshStatus() }
+                    if case .awaitingToken = anilist.phase {
+                        AniListTokenEntryView(anilist: anilist)
+                    }
 
                     sectionDivider
 
+                    // MyAnimeList
                     TrackerRow(name: "MyAnimeList", phase: malRowPhase, onConnect: { mal.connect() }, onDisconnect: { Task { await mal.disconnect() } })
                         .task { await mal.refreshStatus() }
+                    if case let .connecting(userCode, verificationURL, expiresAt) = mal.phase {
+                        DeviceCodeConnectingView(serviceName: "MyAnimeList", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: mal.codeLifetime, onCancel: { mal.cancelConnect() })
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(28)
@@ -48,31 +64,6 @@ struct IntegrationsDetailView: View {
                     RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                 )
-
-                // Expand into device-code or token-entry panels when connecting
-                if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
-                    SettingsPanel(title: "Trakt — Enter Code") {
-                        DeviceCodeConnectingView(serviceName: "Trakt", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: trakt.codeLifetime, onCancel: { trakt.cancelConnect() })
-                    }
-                }
-
-                if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
-                    SettingsPanel(title: "Simkl — Enter Code") {
-                        DeviceCodeConnectingView(serviceName: "Simkl", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: simkl.codeLifetime, onCancel: { simkl.cancelConnect() })
-                    }
-                }
-
-                if case .awaitingToken = anilist.phase {
-                    SettingsPanel(title: "AniList — Paste Token") {
-                        AniListTokenEntryView(anilist: anilist)
-                    }
-                }
-
-                if case let .connecting(userCode, verificationURL, expiresAt) = mal.phase {
-                    SettingsPanel(title: "MyAnimeList — Enter Code") {
-                        DeviceCodeConnectingView(serviceName: "MyAnimeList", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: mal.codeLifetime, onCancel: { mal.cancelConnect() })
-                    }
-                }
 
                 Text("Each profile connects to its own accounts. Watches are tracked regardless of which server you're using.")
                     .font(.footnote)

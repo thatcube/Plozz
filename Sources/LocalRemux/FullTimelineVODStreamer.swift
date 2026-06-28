@@ -204,14 +204,21 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // remuxKeyframeSegments; strict no-op for real-Cues titles. Composes with
         // remuxKeyframeCache (first watch = lazy; later resume = instant cache).
         let lazyKeyframes = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxLazyKeyframes")
+        // Flag `com.plozz.playback.remuxMatroskaSampler` (DEFAULT OFF): drive lazy
+        // discovery with the EBML cluster-header keyframe sampler (header-only,
+        // genuinely low-byte) instead of the libavformat seek-probe. Gated under
+        // remuxKeyframeSegments; falls back to libavformat discovery for non-Matroska
+        // sources. Composes with remuxKeyframeCache.
+        let matroskaSampler = UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxMatroskaSampler")
         let segmenter = try RemuxSegmenter(sourceURL: source.originalURL,
                                            deriveEac3FrameDur: deriveEac3,
                                            keyframeSegments: keyframeSegments,
                                            keyframeFullScan: keyframeFullScan,
                                            keyframeCache: keyframeCache,
-                                           lazyKeyframes: lazyKeyframes)
+                                           lazyKeyframes: lazyKeyframes,
+                                           matroskaSampler: matroskaSampler)
         if deriveEac3 { RemuxLog.info("Session: remuxEac3FrameDur ON — using probed eac3 frame_size") }
-        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")\(keyframeCache ? " (cache ON)" : "")\(lazyKeyframes ? " (lazy ON)" : "")") }
+        if keyframeSegments { RemuxLog.info("Session: remuxKeyframeSegments ON — keyframe-aligned segments when index missing\(keyframeFullScan ? " (full-scan forced)" : " (seek-sample)")\(keyframeCache ? " (cache ON)" : "")\(lazyKeyframes ? " (lazy ON)" : "")\(matroskaSampler ? " (matroska-sampler ON)" : "")") }
         let facts = segmenter.facts
 
         // Defense-in-depth gate (the provider eligibility gate already ran): only

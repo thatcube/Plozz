@@ -123,6 +123,17 @@ final class HTTPRangeReader: @unchecked Sendable {
         return position
     }
 
+    /// Direct ranged read of EXACTLY `[offset, offset+count)` with no read-ahead
+    /// inflation, for random-access callers that issue many tiny probes. The
+    /// Matroska header sampler walks cluster headers a few hundred bytes at a time;
+    /// routing it through `read`'s 1 MiB read-ahead would over-fetch gigabytes
+    /// across a feature-length file. Updates the network counters and `totalSize`.
+    func readExact(at offset: Int64, count: Int) -> Data {
+        guard count > 0, offset >= 0 else { return Data() }
+        if totalSize >= 0 && offset >= totalSize { return Data() }
+        return fetch(offset: offset, length: count) ?? Data()
+    }
+
     // MARK: - Cache
 
     private func readFromCache(into buffer: UnsafeMutablePointer<UInt8>, count: Int) -> Int? {
@@ -216,5 +227,23 @@ final class HTTPRangeReader: @unchecked Sendable {
         if http.statusCode == 200, http.expectedContentLength > 0 {
             totalSize = http.expectedContentLength
         }
+    }
+}
+
+/// Bridges an `HTTPRangeReader` to the `ByteRangeSource` the Matroska keyframe
+/// sampler consumes. Each `readRange` is a tight ranged GET (no read-ahead
+/// inflation) so the sampler's many small cluster-header probes stay genuinely
+/// low-byte. Construct over a DEDICATED reader instance — the sampler walks the
+/// file independently of the muxer's demuxer cursor, so it must never share the
+/// reader that on-demand segment muxing seeks.
+final class HTTPRangeByteSource: ByteRangeSource {
+    private let reader: HTTPRangeReader
+    init(_ reader: HTTPRangeReader) {
+        self.reader = reader
+        _ = reader.size() // prime totalSize
+    }
+    var totalSize: Int64 { reader.totalSize }
+    func readRange(at offset: Int64, count: Int) -> Data {
+        reader.readExact(at: offset, count: count)
     }
 }

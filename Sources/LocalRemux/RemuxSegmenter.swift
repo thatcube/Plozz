@@ -140,6 +140,16 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// re-watch restores the full index instantly).
     private var lazyPending: PendingCacheStore? = nil
 
+    // MARK: Matroska-sampler lazy state
+    /// Set during init when `remuxMatroskaSampler` drives discovery: the standalone
+    /// EBML cluster sampler and its parsed init, used by the background window loop
+    /// to extend the table by reading only cluster headers (no frame payloads, no
+    /// demuxer-cursor contention). `mkvWalk` (the resumable cursor) is guarded by
+    /// `lock`; `mkvSampler`/`mkvInfo` are immutable once set.
+    private var mkvSampler: MatroskaKeyframeSampler? = nil
+    private var mkvInfo: MatroskaKeyframeSampler.InitInfo? = nil
+    private var mkvWalk = MatroskaKeyframeSampler.WalkState(clusterOffset: -1, done: false)
+
     /// Deferred persistent-cache write: set during init when a fresh keyframe scan
     /// rebuilt the table (so it's worth saving), consumed once the rebuilt segment
     /// durations have been read. nil when there's nothing to persist.
@@ -158,7 +168,7 @@ final class RemuxSegmenter: @unchecked Sendable {
     init(sourceURL: URL, headers: [String: String] = [:], targetSegmentSeconds: Double = 6.0,
          deriveEac3FrameDur: Bool = false, keyframeSegments: Bool = false,
          keyframeFullScan: Bool = false, keyframeCache: Bool = false,
-         lazyKeyframes: Bool = false) throws {
+         lazyKeyframes: Bool = false, matroskaSampler: Bool = false) throws {
         _ = installRemuxLogBridge
         let reader = HTTPRangeReader(url: sourceURL, headers: headers)
         self.reader = reader
@@ -235,6 +245,70 @@ final class RemuxSegmenter: @unchecked Sendable {
                 appliedCache = true
             }
 
+            // Flag-gated (com.plozz.playback.remuxMatroskaSampler): drive lazy/
+            // windowed discovery with the standalone Matroska EBML keyframe sampler
+            // instead of the libavformat seek-probe. The sampler reads ONLY cluster
+            // headers + block keyframe flags through its OWN ranged byte source
+            // (never frame payloads, never the muxer's demuxer cursor), so the
+            // [0,90s] prefix is both instant AND exact, and the background window
+            // extension stays genuinely low-byte (a few hundred bytes per cluster)
+            // rather than pulling ~one I-frame per boundary. Same prefix-stable
+            // EVENT machinery as remuxLazyKeyframes; preferred over it when both are
+            // on. Strict no-op for real-Cues titles (wasFixedCadence == false).
+            if !appliedCache && !lazyStarted && matroskaSampler && wasFixedCadence {
+                let mkvReader = HTTPRangeReader(url: sourceURL, headers: headers)
+                let sampler = MatroskaKeyframeSampler(source: HTTPRangeByteSource(mkvReader))
+                if let info = sampler.parseInit() {
+                    let prefixSeconds = 90.0
+                    var walk = MatroskaKeyframeSampler.WalkState(
+                        clusterOffset: info.firstClusterOffset, done: false)
+                    var kf: [Double] = []
+                    _ = sampler.walkClusters(info, state: &walk,
+                                             untilSeconds: prefixSeconds, into: &kf)
+                    if kf.first != 0.0 { kf.insert(0.0, at: 0) }
+                    if kf.count >= 2 {
+                        let complete = walk.done
+                        kf.withUnsafeBufferPointer { buf in
+                            _ = plozz_remux_apply_keyframe_boundaries_ex(session, buf.baseAddress,
+                                Int32(buf.count), targetSegmentSeconds, complete ? 1 : 0)
+                        }
+                        self.lazyKf = kf
+                        self.lazyActive = !complete
+                        self.lazyComplete = complete
+                        self.mkvSampler = sampler
+                        self.mkvInfo = info
+                        self.mkvWalk = walk
+                        lazyStarted = true
+                        if let cache, let cacheKey {
+                            self.lazyPending = PendingCacheStore(cache: cache, key: cacheKey,
+                                size: sourceSize, duration: sourceDuration, target: targetSegmentSeconds)
+                        }
+                        let fileSize = sourceSize > 0 ? sourceSize : reader.size()
+                        let pct = fileSize > 0 ? Double(sampler.stats.bytesRead) / Double(fileSize) * 100 : 0
+                        RemuxLog.info(String(format:
+                            "remux-discovery: matroska sampler read %.3fMB = %.3f%% of %.2fMB "
+                                + "(%d clusters, lazy prefix %d keyframes [0,%.0fs])",
+                            Double(sampler.stats.bytesRead) / 1_048_576, pct,
+                            Double(fileSize) / 1_048_576, sampler.stats.clustersWalked,
+                            kf.count - 1, prefixSeconds))
+                        RemuxLog.info("remux: matroska keyframe sampler started — "
+                            + "\(complete ? "covered whole source (complete)" : "background extending window-by-window")")
+                    } else {
+                        // Parsed as Matroska but found no keyframe in the prefix
+                        // budget. Keep the crash-proof fixed-cadence table; do NOT
+                        // fall through to a timeline scan.
+                        lazyStarted = true
+                        RemuxLog.info("remux: matroska sampler found no keyframe in [0,90s]; "
+                            + "keeping fixed-cadence (no timeline scan)")
+                    }
+                } else {
+                    // Not parseable as Matroska (e.g. a TS/MP4 remux source). Fall
+                    // through to the libavformat lazy / bounded rescan paths below.
+                    RemuxLog.info("remux: matroska sampler — source not parseable as Matroska; "
+                        + "using libavformat discovery")
+                }
+            }
+
             // Flag-gated (com.plozz.playback.remuxLazyKeyframes): instead of
             // discovering the WHOLE keyframe table at open (O(filesize) full scan,
             // or even a bounded sparse scan over the entire timeline — both of which
@@ -244,7 +318,7 @@ final class RemuxSegmenter: @unchecked Sendable {
             // table window-by-window in the BACKGROUND (see discoverNextWindow). The
             // planner is prefix-stable, so appending later boundaries never changes
             // an already-published segment — safe to serve as an HLS EVENT playlist.
-            if !appliedCache && lazyKeyframes && wasFixedCadence {
+            if !appliedCache && lazyKeyframes && wasFixedCadence && !lazyStarted {
                 let prefixSeconds = 90.0
                 let netBefore = reader.networkSnapshot()
                 let prefix = Self.discoverRange(session, from: 0, to: prefixSeconds,
@@ -432,6 +506,9 @@ final class RemuxSegmenter: @unchecked Sendable {
     /// complete (EOF reached, or a graceful fixed-cadence tail finished a stalled
     /// region). Returns nil when not in lazy mode or already complete.
     func discoverNextWindow(windowSeconds: Double = 30.0) -> (durations: [Double], complete: Bool)? {
+        if mkvSampler != nil {
+            return discoverNextWindowMatroska(windowSeconds: windowSeconds)
+        }
         lock.lock()
         defer { lock.unlock() }
         guard let session, lazyActive, !lazyComplete else { return nil }
@@ -462,17 +539,73 @@ final class RemuxSegmenter: @unchecked Sendable {
             _ = plozz_remux_apply_keyframe_boundaries_ex(session, buf.baseAddress,
                 Int32(buf.count), targetSeconds, complete ? 1 : 0)
         }
+        let durations = finalizeLazyApply(complete: complete, kind: "lazy")
+        return (durations, complete)
+    }
 
-        var durations: [Double] = []
-        let count = Int(plozz_remux_segment_count(session))
-        durations.reserveCapacity(count)
-        for i in 0..<count {
-            var seg = plozz_remux_segment()
-            if plozz_remux_segment_at(session, Int32(i), &seg) == 1 {
-                durations.append(seg.duration_seconds)
-            }
+    /// Matroska-sampler variant of `discoverNextWindow`. Walks the next window of
+    /// cluster headers with the sampler's OWN byte source — so the (latency-bound,
+    /// low-byte) network I/O runs OUTSIDE the segmenter lock and never contends with
+    /// on-demand segment muxing on the shared demuxer. Only the boundary apply +
+    /// duration read touch the C session, so those happen under the lock.
+    private func discoverNextWindowMatroska(windowSeconds: Double) -> (durations: [Double], complete: Bool)? {
+        lock.lock()
+        guard session != nil, lazyActive, !lazyComplete,
+              let sampler = mkvSampler, let info = mkvInfo else {
+            lock.unlock(); return nil
+        }
+        let frontier = lazyKf.last ?? 0.0
+        var walk = mkvWalk
+        lock.unlock()
+
+        // I/O outside the lock: independent reader, no demuxer-cursor contention.
+        var fresh: [Double] = []
+        _ = sampler.walkClusters(info, state: &walk,
+                                 untilSeconds: frontier + windowSeconds, into: &fresh)
+        let newKf = fresh.filter { $0 > frontier + 1e-6 }
+
+        lock.lock()
+        defer { lock.unlock() }
+        guard let session, lazyActive, !lazyComplete else { return nil }
+        mkvWalk = walk
+        var complete = walk.done
+        if newKf.isEmpty && !complete {
+            // No forward progress this window — finish with a crash-proof fixed-
+            // cadence tail (never spin). Published prefix segments stay exact.
+            let dur = facts.durationSeconds
+            var t = frontier + targetSeconds
+            while t < dur - 0.001 { lazyKf.append(t); t += targetSeconds }
+            complete = true
+            RemuxLog.info("remux: matroska discovery made no progress at "
+                + "\(String(format: "%.1f", frontier))s — fixed-cadence tail to "
+                + "\(String(format: "%.1f", dur))s")
+        } else {
+            lazyKf.append(contentsOf: newKf)
         }
 
+        lazyKf.withUnsafeBufferPointer { buf in
+            _ = plozz_remux_apply_keyframe_boundaries_ex(session, buf.baseAddress,
+                Int32(buf.count), targetSeconds, complete ? 1 : 0)
+        }
+        let durations = finalizeLazyApply(complete: complete, kind: "matroska")
+        return (durations, complete)
+    }
+
+    /// Lock MUST be held. Reads the grown segment durations from the C session and,
+    /// when discovery is complete, flips the lazy flags, persists the pending cache
+    /// (fast resume), and raises the muxing read-ahead. Returns the durations.
+    private func finalizeLazyApply(complete: Bool, kind: String) -> [Double] {
+        var durations: [Double] = []
+        if let session {
+            let count = Int(plozz_remux_segment_count(session))
+            durations.reserveCapacity(count)
+            for i in 0..<count {
+                var seg = plozz_remux_segment()
+                if plozz_remux_segment_at(session, Int32(i), &seg) == 1 {
+                    durations.append(seg.duration_seconds)
+                }
+            }
+        }
         if complete {
             lazyComplete = true
             lazyActive = false
@@ -481,18 +614,18 @@ final class RemuxSegmenter: @unchecked Sendable {
                 pending.cache.store(key: pending.key, size: pending.size,
                                     duration: pending.duration, target: pending.target,
                                     boundaries: boundaries)
-                RemuxLog.info("remux: lazy discovery complete (\(durations.count) segments) — "
+                RemuxLog.info("remux: \(kind) discovery complete (\(durations.count) segments) — "
                     + "persisted keyframe-index (\(boundaries.count) boundaries) for fast resume")
                 lazyPending = nil
             } else {
-                RemuxLog.info("remux: lazy discovery complete (\(durations.count) segments)")
+                RemuxLog.info("remux: \(kind) discovery complete (\(durations.count) segments)")
             }
-            // Lazy discovery is finished; on-demand 4K segment muxing now benefits
-            // from a larger per-round-trip read-ahead (no more sparse seeks to
-            // over-fetch). Safe now that no background window will run again.
+            // On-demand 4K segment muxing now benefits from a larger per-round-trip
+            // read-ahead (no more sparse seeks to over-fetch). Safe now that no
+            // background window will run again.
             reader.boostReadAhead(8 << 20)
         }
-        return (durations, complete)
+        return durations
     }
 
     /// Calls the C bounded sparse seek-sample over `(from, to]` and marshals the

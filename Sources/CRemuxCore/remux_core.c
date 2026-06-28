@@ -1020,6 +1020,12 @@ int plozz_remux_set_full_vod_mode(plozz_remux_session *s, int enabled) {
     s->kf_ix.enabled = 1;
     s->kf_ix.video_track = (int64_t)s->ic->streams[s->video_index]->id;
     if (s->kf_ix.video_track <= 0) s->kf_ix.enabled = 0;
+    /* Setup marker: the per-probe "kf-index probe#" diagnostics live AFTER the
+     * (!enabled) early-return in probe_keyframe_pts, so a disabled index would
+     * produce ZERO probe lines — indistinguishable from "engaged but fell back".
+     * Emit enabled/video_track once here so a no-probe-lines capture is unambiguous. */
+    remux_log(1, "remux: kf-index setup enabled=%d video_track=%lld",
+              s->kf_ix.enabled, (long long)s->kf_ix.video_track);
 
     /* Declare the cadence from the measured average GOP so EXTINF ~= real span. */
     double fallback = (s->target_segment_seconds < 1.0) ? 6.0 : s->target_segment_seconds;

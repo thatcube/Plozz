@@ -173,7 +173,7 @@ let package = Package(
         .target(
             name: "LocalRemux",
             dependencies: [
-                "CoreModels", "FeaturePlayback", "CRemuxCore",
+                "CoreModels", "CRemuxCore",
                 // The FFmpeg static frameworks cross-reference each other and the
                 // third-party decoders, so a standalone link of this module (e.g.
                 // the LocalRemuxProbe gate / LocalRemuxTests) needs the SAME full

@@ -157,7 +157,7 @@ public final class NativeVideoEngine: VideoEngine {
         item.textStyleRules = captionSettings.textStyleRules()
         // Drive the tvOS display into the right dynamic range (true Dolby
         // Vision / HDR10 / HLG) for this source before playback begins.
-        configureDynamicRange(for: request, item: item)
+        await configureDynamicRange(for: request, item: item)
 
         let player = AVPlayer(playerItem: item)
         player.allowsExternalPlayback = true
@@ -212,12 +212,40 @@ public final class NativeVideoEngine: VideoEngine {
     /// (or returns to SDR) with the panel. `appliesPerFrameHDRDisplayMetadata`
     /// is enabled for HDR/DoVi so per-frame RPU/HDR metadata is forwarded to the
     /// display. All best-effort and crash-safe: failures never block playback.
-    private func configureDynamicRange(for request: PlaybackRequest, item: AVPlayerItem) {
+    private func configureDynamicRange(for request: PlaybackRequest, item: AVPlayerItem) async {
         let mode = HDRDisplayMode(request.sourceMetadata)
         item.appliesPerFrameHDRDisplayMetadata = mode.isHDR
         #if os(tvOS)
         pendingDisplayCriteria = makeDisplayCriteria(mode: mode, metadata: request.sourceMetadata)
         applyDisplayCriteria()
+        
+        if mode.isHDR, let window = videoOutputView?.window {
+            // Aether L9: Wait for the HDMI handshake to complete before we attach
+            // the AVPlayerItem to the AVPlayer, so AVPlayer validates the master 
+            // playlist against the *new* display mode, avoiding -11868 or -1002.
+            let start = DispatchTime.now().uptimeNanoseconds
+            
+            // Stage 1: Wait up to 1000ms for isDisplayModeSwitchInProgress to turn true
+            var switchStarted = false
+            for _ in 0..<100 {
+                if window.avDisplayManager.isDisplayModeSwitchInProgress {
+                    switchStarted = true
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+            }
+            
+            // Stage 2: Wait up to 5s for the switch to finish and EDR headroom to rise
+            if switchStarted {
+                for _ in 0..<50 {
+                    if !window.avDisplayManager.isDisplayModeSwitchInProgress {
+                        let headroom = window.screen.currentEDRHeadroom
+                        if headroom > 1.001 { break }
+                    }
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                }
+            }
+        }
         #endif
     }
 

@@ -190,6 +190,32 @@ final class RemuxSegmenter: @unchecked Sendable {
         // E-AC-3 frame sample count instead of the fixed 1536 fallback. The probe
         // already ran inside open(); this only selects whether the muxer consumes it.
         plozz_remux_set_derive_eac3_frame_dur(session, deriveEac3FrameDur ? 1 : 0)
+        var lazyEngaged = false
+        var fullVodEngaged = false
+        
+        // --- PHASE 1: CUES FAST-PATH ---
+        // Before falling back to fixed cadence or lazy discovery, check if this is an MKV 
+        // with a Cues index we can read in <1s.
+        let sampler = MatroskaKeyframeSampler(source: reader)
+        if let plan = sampler.cuesVODPlan(targetSeconds: targetSegmentSeconds, minCount: 2, maxGapSeconds: 30.0) {
+            RemuxLog.info("RemuxSegmenter: Cues index found! Exact keyframe VOD plan built (\(plan.segmentDurations.count) segments)")
+            
+            // Wire the exact Cues table directly into the C muxer.
+            // boundaryPTS contains [start, start+d0, start+d0+d1... end] exactly as the C core expects
+            let boundaries = plan.boundaryPTS
+            let offsets = plan.segmentByteOffsets + [0] // pad to match count
+            boundaries.withUnsafeBufferPointer { tPtr in
+                offsets.withUnsafeBufferPointer { oPtr in
+                    plozz_remux_set_cue_table(session, plan.totalDuration, tPtr.baseAddress, Int32(boundaries.count), oPtr.baseAddress)
+                }
+            }
+            
+            // Enable full VOD mode based on the Cues table we just passed it
+            if plozz_remux_set_full_vod_mode(session, 1) == 1 {
+                fullVodEngaged = true
+            }
+        }
+
 
         // B7 lazy/windowed index (com.plozz.playback.remuxLazyIndex). When the source
         // has no usable keyframe index, switch the C core into PROGRESSIVE discovery:
@@ -197,7 +223,6 @@ final class RemuxSegmenter: @unchecked Sendable {
         // driver extend the frontier. Takes precedence over the upfront keyframeScan
         // when both are set (it solves the same correctness problem without paying
         // O(total-segments) synchronously at open). A no-op for index-built sources.
-        var lazyEngaged = false
         if keyframeLazy, !fullVod, plozz_remux_uses_fixed_cadence(session) == 1 {
             let openStart = DispatchTime.now().uptimeNanoseconds
             let netBefore = reader.networkSnapshot()
@@ -238,7 +263,7 @@ final class RemuxSegmenter: @unchecked Sendable {
                 let after = reader.networkSnapshot()
                 let openBytes = max(0, after.bytesFetched - netBefore.bytesFetched)
                 let openFetches = after.fetchCount - netBefore.fetchCount
-                let total = reader.totalSize
+                let total = reader.size()
                 let pct = total > 0 ? Double(openBytes) / Double(total) * 100.0 : 0.0
                 RemuxLog.info(String(format:
                     "remux-lazy: open window ready=%d complete=%d probes=%d open-latency=%.0fms open-bytes=%.2fMB(%.3f%%) fetches=%d",
@@ -283,7 +308,6 @@ final class RemuxSegmenter: @unchecked Sendable {
         // desync). Takes precedence over lazy/keyframeScan (both skipped above) and is a
         // byte-identical no-op for index-built (Cues/DoVi) sources. Must run BEFORE the
         // duration read below since it can change the cadence/segment count.
-        var fullVodEngaged = false
         if fullVod, plozz_remux_uses_fixed_cadence(session) == 1 {
             let openStart = DispatchTime.now().uptimeNanoseconds
             let netBefore = reader.networkSnapshot()
@@ -302,7 +326,7 @@ final class RemuxSegmenter: @unchecked Sendable {
                 let after = reader.networkSnapshot()
                 let openBytes = max(0, after.bytesFetched - netBefore.bytesFetched)
                 let openFetches = after.fetchCount - netBefore.fetchCount
-                let total = reader.totalSize
+                let total = reader.size()
                 let pct = total > 0 ? Double(openBytes) / Double(total) * 100.0 : 0.0
                 let segs = Int(plozz_remux_segment_count(session))
                 // ZERO upfront keyframe discovery: open cost is just avformat_open +

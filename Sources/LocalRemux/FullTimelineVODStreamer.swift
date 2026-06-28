@@ -1,7 +1,6 @@
 #if canImport(AVFoundation)
 import Foundation
 import CoreModels
-import FeaturePlayback
 
 // MARK: - Engine registration
 
@@ -106,7 +105,11 @@ public final class FullTimelineVODSession: LocalRemuxStreamingSession {
         // keyframe-cut VOD segments, and plays + seeks natively across the full
         // timeline. This mirrors the proven direct-fMP4 DoVi path. The master route
         // stays served by the origin for diagnostics; we just don't hand it over.
-        let url = components.baseURL.appendingPathComponent(RemuxRoute.mediaName)
+        // Because we implemented Aether L9 synchronous `preferredDisplayCriteria` 
+        // waiting, we can now hand AVPlayer the master playlist directly. It will 
+        // read the CODECS/VIDEO-RANGE attributes and validate them against the 
+        // successfully-switched DoVi/HDR panel state, avoiding -1002.
+        let url = components.baseURL.appendingPathComponent(RemuxRoute.masterName)
         return LocalRemuxPreparedStream(
             playbackURL: url,
             isManifestStream: true,

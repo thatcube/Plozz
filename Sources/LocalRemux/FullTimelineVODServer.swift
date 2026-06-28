@@ -40,6 +40,11 @@ final class FullTimelineVODServer: @unchecked Sendable {
     private let maxHeaderBytes = 64 * 1024
     private let maxRequestsPerConnection = 100_000
 
+    /// L6 Backpressure: Cap the number of concurrent segment requests processing
+    /// to avoid AVPlayer speculative prefetch buffering massive amounts of RAM
+    /// into NWConnection send queues during a cold resume.
+    private let inflightLimiter = DispatchSemaphore(value: 3)
+
     init(provider: @escaping ResponseProvider) {
         self.provider = provider
     }
@@ -198,15 +203,21 @@ final class FullTimelineVODServer: @unchecked Sendable {
             return
         }
 
+        let isMedia = path.contains(".m4s") || path.contains(".mp4")
+        if isMedia { inflightLimiter.wait() }
+        
         guard let response = provider(path) else {
+            if isMedia { inflightLimiter.signal() }
             RemuxLog.error("Origin: \(method) \(path) -> 404 (no resource)")
             sendError(status: "404 Not Found", on: connection, keepAlive: keepAlive)
             return
         }
+        
         send(
             method: method, path: path, body: response.data, contentType: response.contentType,
             headOnly: isHead, range: range, keepAlive: keepAlive,
-            on: connection, leftover: leftover, servedSoFar: servedSoFar
+            on: connection, leftover: leftover, servedSoFar: servedSoFar,
+            didLimit: isMedia
         )
     }
 
@@ -214,7 +225,7 @@ final class FullTimelineVODServer: @unchecked Sendable {
 
     private func send(method: String, path: String, body: Data, contentType: String,
                       headOnly: Bool, range: (start: Int, end: Int?)?, keepAlive: Bool,
-                      on connection: NWConnection, leftover: Data, servedSoFar: Int) {
+                      on connection: NWConnection, leftover: Data, servedSoFar: Int, didLimit: Bool = false) {
         let total = body.count
         var status = "200 OK"
         var slice = body
@@ -249,6 +260,7 @@ final class FullTimelineVODServer: @unchecked Sendable {
         var out = Data(header.utf8)
         if !headOnly { out.append(slice) }
         connection.send(content: out, completion: .contentProcessed { [weak self] error in
+            if didLimit { self?.inflightLimiter.signal() }
             guard let self else { return }
             if error != nil || !keepAlive {
                 self.close(connection)

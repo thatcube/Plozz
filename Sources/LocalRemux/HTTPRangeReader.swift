@@ -233,3 +233,21 @@ final class HTTPRangeReader: @unchecked Sendable {
         }
     }
 }
+
+
+// MARK: - ByteRangeSource
+
+extension HTTPRangeReader: ByteRangeSource {
+
+
+    func readRange(at offset: Int64, count: Int) -> Data {
+        guard count > 0 else { return Data() }
+        var data = Data(count: count)
+        let _ = seek(offset: offset, whence: 0) // SEEK_SET
+        let readCount = data.withUnsafeMutableBytes { ptr in
+            read(into: ptr.baseAddress!.assumingMemoryBound(to: UInt8.self), count: count)
+        }
+        if readCount < 0 { return Data() }
+        return data.prefix(readCount)
+    }
+}

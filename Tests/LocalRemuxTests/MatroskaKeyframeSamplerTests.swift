@@ -710,6 +710,62 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
 
     /// Non-1ms TimecodeScale must be applied to CueTime exactly (the PTS the muxer
     /// will seek to).
+    // MARK: - cueAtOrBefore (far-seek resolve)
+
+    /// The far-seek resolve must return the keyframe AT OR BEFORE the target so the
+    /// served segment covers it: exact hits return themselves; a target mid-GOP snaps
+    /// back to the opening keyframe; past-end clamps to the last keyframe; before-start
+    /// clamps to the first.
+    func testCueAtOrBefore_snapsBackAndClamps() {
+        let pts = [0.0, 6.0, 12.0, 18.0, 24.0]
+        let points = pts.enumerated().map {
+            MatroskaKeyframeSampler.CuePoint(seconds: $0.element, clusterOffset: Int64(1000 + $0.offset))
+        }
+        let sampler = MatroskaKeyframeSampler(source: MemorySource([0x18, 0x53, 0x80, 0x67]))
+        // Exact boundary hits land on themselves.
+        XCTAssertEqual(sampler.cueAtOrBefore(0.0, in: points)?.seconds, 0.0)
+        XCTAssertEqual(sampler.cueAtOrBefore(6.0, in: points)?.seconds, 6.0)
+        XCTAssertEqual(sampler.cueAtOrBefore(24.0, in: points)?.seconds, 24.0)
+        // Mid-GOP targets snap BACK to the opening keyframe (never overshoot forward).
+        XCTAssertEqual(sampler.cueAtOrBefore(5.9, in: points)?.seconds, 0.0)
+        XCTAssertEqual(sampler.cueAtOrBefore(11.999, in: points)?.seconds, 6.0)
+        XCTAssertEqual(sampler.cueAtOrBefore(17.0, in: points)?.seconds, 12.0)
+        // Past the last keyframe clamps to the last (the only segment that can cover it).
+        XCTAssertEqual(sampler.cueAtOrBefore(1000.0, in: points)?.seconds, 24.0)
+        // Before the first keyframe clamps to the first (earliest playable content).
+        XCTAssertEqual(sampler.cueAtOrBefore(-5.0, in: points)?.seconds, 0.0)
+        // The byte offset of the resolved keyframe rides along for a direct avio-seek.
+        XCTAssertEqual(sampler.cueAtOrBefore(13.0, in: points)?.clusterOffset, 1002)
+    }
+
+    /// Empty table → nil (caller routes to the no-Cues walker).
+    func testCueAtOrBefore_emptyTableNil() {
+        let sampler = MatroskaKeyframeSampler(source: MemorySource([0x18, 0x53, 0x80, 0x67]))
+        XCTAssertNil(sampler.cueAtOrBefore(10.0, in: []))
+    }
+
+    /// End-to-end: the convenience reads the real Cues index and resolves a mid-GOP
+    /// far-seek to the exact opening keyframe PTS + its absolute cluster offset.
+    func testCueKeyframe_atOrBefore_readsIndexAndResolves() {
+        let times = [0, 6006, 12012, 18018, 24024] // 1ms ticks
+        let built = buildFileWithCues(durationTicks: 30030, clusterTimes: times)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        // Seek to 14.0s lands inside the [12.012, 18.018) GOP → snaps back to 12.012.
+        guard let hit = sampler.cueKeyframe(atOrBefore: 14.0) else { return XCTFail("nil") }
+        XCTAssertEqual(hit.seconds, built.keyframeSeconds[2], accuracy: 1e-9)
+        let expectedAbs = info.segmentDataOffset + Int64(built.clusterRelOffsets[2])
+        XCTAssertEqual(hit.clusterOffset, expectedAbs)
+    }
+
+    /// No Cues → the convenience returns nil so the caller falls back to the walker.
+    func testCueKeyframe_atOrBefore_noCuesNil() {
+        let noCues = buildFile(durationTicks: 4000,
+                               clusters: [cluster(timecode: 0, blocks: [simpleBlock(track: 1, rel: 0, keyframe: true)])])
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(noCues))
+        XCTAssertNil(sampler.cueKeyframe(atOrBefore: 2.0))
+    }
+
     func testReadCues_appliesTimecodeScale() {
         // 100us ticks: 10 ticks = 1ms; times below are in those ticks.
         let times = [0, 60_060, 120_120]

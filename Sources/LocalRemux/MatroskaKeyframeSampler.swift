@@ -798,6 +798,50 @@ final class MatroskaKeyframeSampler {
                            totalDuration: total, targetSeconds: targetSeconds)
     }
 
+    /// FAR-SEEK RESOLVE for the Cues fast-path: the real keyframe AT OR BEFORE
+    /// `targetSeconds`. A seek must snap BACK to the keyframe that opens the GOP
+    /// covering the target, so the served segment actually CONTAINS the target and
+    /// AVPlayer never overshoots into an undecodable mid-GOP frame. Returns that
+    /// keyframe's PTS + cluster byte offset (so the producer can `avio`-seek straight
+    /// to it, skipping a forward `av_read_frame` GOP walk).
+    ///
+    /// `targetSeconds` is a SOURCE time, the same domain as `readCues()` PTS. (B7 maps
+    /// a playlist-time seek to source by adding the `startPTS` anchor before calling.)
+    ///
+    /// PURE + O(log n): a binary search over the already-in-memory sorted Cues table —
+    /// NO additional I/O. The caller passes the table it already read for the open-path
+    /// VOD, so repeated far-seeks cost nothing beyond the one-time index read.
+    ///
+    /// EDGE: a target BELOW the first keyframe clamps to the first keyframe (the
+    /// earliest playable content — the only segment that can cover such a target).
+    /// An empty table returns nil.
+    func cueAtOrBefore(_ targetSeconds: Double, in points: [CuePoint]) -> CuePoint? {
+        guard let first = points.first else { return nil }
+        if targetSeconds < first.seconds { return first } // floor clamp
+        // Largest index whose seconds <= target (points are sorted ascending).
+        var lo = 0, hi = points.count - 1, ans = 0
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if points[mid].seconds <= targetSeconds + 1e-9 {
+                ans = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return points[ans]
+    }
+
+    /// Convenience: read the Cues index and resolve the at-or-before keyframe for
+    /// `targetSeconds` in one call. Returns nil when the source carries no usable Cues
+    /// (caller then routes the seek through the no-Cues walker). For repeated seeks,
+    /// prefer caching `readCues()` once and calling `cueAtOrBefore(_:in:)` per seek so
+    /// the index is not re-read every time.
+    func cueKeyframe(atOrBefore targetSeconds: Double) -> CuePoint? {
+        guard let points = readCues() else { return nil }
+        return cueAtOrBefore(targetSeconds, in: points)
+    }
+
     /// Parses one CuePoint: CueTime (ticks) + the CueTrackPositions for the video
     /// track (or the first one if no track filter matches), yielding the absolute
     /// cluster offset. Returns nil if the CuePoint lacks a time or a cluster pos.

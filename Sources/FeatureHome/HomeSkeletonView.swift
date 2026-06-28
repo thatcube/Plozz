@@ -35,7 +35,7 @@ struct HomeSkeletonView: View {
                     skeletonRow(kind)
                 }
             }
-            .padding(.vertical, 40)
+            .padding(.vertical, PlozzTheme.Metrics.screenVerticalPadding)
         }
         .scrollClipDisabled()
         .scrollDisabled(true)
@@ -52,7 +52,7 @@ struct HomeSkeletonView: View {
     private func skeletonRow(_ kind: HomeRowKind) -> some View {
         // Mirrors MediaRowView's title + horizontal rail layout and paddings so
         // the skeleton occupies the same vertical space as the real row.
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             // Reserve the *exact* height of MediaRowView's title — a hidden Text in
             // the real font (system 32 bold) — with the placeholder pill overlaid.
             // Matching the title height is load-bearing: a shorter title bar makes
@@ -86,7 +86,7 @@ struct HomeSkeletonView: View {
                 }
                 .padding(.leading, PlozzTheme.Metrics.screenPadding)
                 .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                .padding(.top, 16)
+                .padding(.top, metrics.railTopPadding)
                 .padding(.bottom, metrics.railVerticalPadding)
             }
             .scrollClipDisabled()
@@ -103,8 +103,15 @@ struct HomeSkeletonView: View {
         }
     }
 
+    /// The layout slot reserved for each skeleton card — must equal
+    /// `MediaRowView.cardSlotWidth` so the placeholder cards sit at the *exact*
+    /// same pitch as the real row. A poster's glass equals `posterWidth`; a
+    /// landscape card's glass is `landscapeWidth + 2 * mediumCardInset`
+    /// (`landscapeCardSlotWidth`), so pinning to the bare `landscapeWidth` would
+    /// make the placeholders 32 pt too narrow and bunch them closer than the real
+    /// Continue Watching / Libraries cards.
     private func cardWidth(for kind: HomeRowKind) -> CGFloat {
-        cardStyle(for: kind) == .landscape ? metrics.landscapeWidth : metrics.posterWidth
+        cardStyle(for: kind) == .landscape ? metrics.landscapeCardSlotWidth : metrics.posterWidth
     }
 
     /// Enough placeholders to fill the 10-foot screen width for each card size.

@@ -321,6 +321,17 @@ normalize). All of `b382cad → … → 3aaace3` is a **clean fast-forward of ma
    disagreement = parser bug caught pre-ship) **+ owner of the no-Cues walk.** Not two competing
    serve-parsers — different layers. B7's `3aaace3` already consumes a *passed* Cue boundary
    table, so the producer is the marshalled B5 table.
+   > **⚠️ Correctness justification (B5 differential-oracle catch — exactly why B5's reader serves):**
+   > B6's C Cues handoff used **wrong EBML IDs** — `CueClusterPosition` as `0xF7` (correct = **`0xF1`**;
+   > `0xF7` is `CueTrack`) and `SeekID` as `0x1549A966` (correct = **`0x53AB`**; `0x1549A966` is the
+   > `Info`/SegmentInfo element). B5's Swift reader uses the spec-correct `0xF1`/`0x53AB`, asserted by a
+   > synthetic SeekHead+Cues unit test (known CueTime/CueClusterPosition → exact PTS + byte offset).
+   > Porting B6's C Cues parsing verbatim would have produced **garbage byteOffsets + missed SeekHeads**.
+   > So: serve B5's reader; do NOT port the EBML-ID details from `preserve/remux-b6-cues-d485635`'s
+   > Cues path. (B6's KEPT per-seek primitive `kf_probe_at` reads the SimpleBlock keyframe bit, a
+   > different code path — B5 flagged B6 to confirm it didn't inherit the ID swap.) NOTE: the merged
+   > engine `3aaace3` contains NO Cues-parsing C at all (only the inert `set_cue_table` consume), so
+   > this bug is NOT on `main` after the merge — it's purely a "which reader to harvest" guide.
 2. **Canonical C sink** = B7's `plozz_remux_set_cue_table(s, duration, times, count,
    byte_offsets?)` setter → consume inside `set_full_vod_mode` (just before the fixed-cadence
    build), **gated on `used_fixed_cadence==1`** so a good-libav-index DoVi title no-ops the

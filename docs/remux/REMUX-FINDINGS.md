@@ -339,6 +339,18 @@ normalize). All of `b382cad → … → 3aaace3` is a **clean fast-forward of ma
    direct byte-seek; nil = backward-seek-by-time (the boundary *is* a real keyframe). This
    build+pre-seed is the **one shared `apply_keyframes` ingest** B5 Cues / B6 no-Cues / Track C
    cache all reuse.
+3. **Cue-title serving model = FULL-VOD (`set_cue_table`), NOT static-VOD.** A title that is
+   libav-index-blind (`used_fixed_cadence==1`) but physically ships Cues can be served two ways,
+   and both were built: (a) **STATIC-VOD** — B6's `plozz_remux_apply_keyframes(s,kf,count)` rebuilds
+   the exact table, sets `used_fixed_cadence=0`, regular mux, full ENDLIST at open; (b) **FULL-VOD** —
+   B7's `set_cue_table` keeps the full-vod gate + pre-seeds `resolved_kf[]` so every resolve is a
+   no-op. **Ruling: ship FULL-VOD** — it's the single serving path the "full-vod shape solves BOTH
+   Cues and no-Cues" verdict already commits to, Track A's `KeyframeTable` hand-off targets it
+   cleanly, and **it's what the merged engine `3aaace3` actually carries** (`apply_keyframes` static
+   path is NOT in the merged tree). Static-VOD is arguably simpler when all keyframes are known
+   upfront, but shipping both = two serving paths to maintain. Both still need **layer-2 (mux END
+   stop-by-PTS)** for an exact END on a flag-blind title; the span cap bounds the over-walk until
+   then. (Not a symbol collision — different names — but only ONE serves cues; it's FULL-VOD.)
 
 ### 8.3 Other branches NOT individually tagged
 

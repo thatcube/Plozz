@@ -123,10 +123,10 @@ At reset the concerns were consolidated one-owner-each:
 |---|---|---|---|
 | Full-vod **engine** (declare VOD+ENDLIST, forward-snap on-demand mux, serving) | **B7** | C/Swift | The deploy spine. `set_full_vod_mode` + **Cue-consume wired in**. Tag `preserve/remux-b7-fullvod-3aaace3`. |
 | **Cues fast-path** (open-time exact index) | **B5** | Swift | `readCues()/hasCues()/keyframeTableFromCues()` on one `MatroskaKeyframeSampler` (shares `parseInit` with the no-Cues walk) + `remuxCuesProbe` diagnostic. Tag `preserve/remux-b5-cues-2f73cf8`, 214 tests. |
-| **Cues fast-path (alt)** + live per-seek **resolve** + cluster **resync** | **B6** | C | `plozz_remux_read_cues_table` (in-muxer apply) + `kf_probe_at` + 6a86a8b resync (hot mux path). Tag `preserve/remux-b6-cues-83e2120`. |
-| Provider protocol / source selection / Swift→C marshal | **Track A** | Swift | `MatroskaCueParser` + provider plumbing. Tag `preserve/remux-trackA-cues-vod-fb0e34c`. |
+| **Cues fast-path (alt)** + live per-seek **resolve** + cluster **resync** | **B6** | C | `plozz_remux_read_cues_table` (in-muxer apply) + `kf_probe_at` + 6a86a8b resync (hot mux path). Tag `preserve/remux-b6-cues-d485635` (real tip; supersedes 83e2120). |
+| Provider protocol / source selection / Swift→C marshal | **Track A** | Swift | `MatroskaCueParser` + provider plumbing + canonical `CoreModels.KeyframeTable` + `zeroBasedTimes`. Tag `preserve/remux-trackA-cues-vod-73d03e3` (real tip; supersedes fb0e34c). |
 | Structural-cure: segment-less seekable fMP4 via `AVAssetResourceLoaderDelegate` + sidx | **Track B** | Swift | Independent of the Cues/KeyframeTable spine. Also fixed a real `FragmentSizeEstimator` overflow crash. Tag `preserve/remux-trackB-fmp4-bb497a5`. |
-| no-Cues **cache + background populator** | **Track C** | Swift | Background full-walk → persist times-only index, ETag/size guard. Tag `preserve/remux-trackC-nocues-b572cbf`. |
+| no-Cues **cache + background populator** | **Track C** | Swift | Background full-walk → persist times-only index, ETag/size guard. Tag `preserve/remux-trackC-nocues-0094702` (real tip of `thatcube-ideal-train`; the earlier `b572cbf` tag is an **orphaned amend off the real branch** — do NOT harvest it). |
 
 **Duplication that recurred (watch for it next time):** three separate Cues parsers
 (B5 Swift, B6 C, Track A) and two VOD engines (B7 + B5's `ProvisionalVODPlan`). The container
@@ -274,7 +274,7 @@ All experimental engines are reachable forever via these annotated tags (branche
 | `preserve/remux-b7-fullvod-3aaace3` | **THE MERGE BASELINE** — B7 full-vod engine + span-cap + `PLOZZ_SEGMENT_SPAN_CAP` knob **+ Cue fast-path CONSUME wired into the engine** (exact-boundary VOD table + pre-seeded resolves). Clean FF of main. (supersedes 879a5a3) |
 | `preserve/remux-trackA-cues-vod-73d03e3` | Track A provider lane + **`KeyframeTable` relocated to `CoreModels` root (canonical)** + byteOffsets all-or-nothing (supersedes 92a440f) |
 | `preserve/remux-trackB-fmp4-bb497a5` | Track B `AVAssetResourceLoaderDelegate` fMP4+sidx + `FragmentSizeEstimator` crash fix |
-| `preserve/remux-trackC-nocues-b572cbf` | Track C no-Cues cache + background populator |
+| `preserve/remux-trackC-nocues-0094702` | Track C no-Cues cache + background populator (KeyframeIndexCache v2 + KeyframeIndexService + FullTimelineVODStreamer, all behind `remuxPersistIndex` default-OFF; 154 tests). **Real tip of `thatcube-ideal-train`.** ⚠️ The earlier `preserve/remux-trackC-nocues-b572cbf` tag is an ORPHANED amend off the real branch — do NOT harvest it. |
 
 Inspect any with `git show <tag>` or `git checkout <tag>`. To resurrect work:
 `git switch -c <new-branch> <tag>`.

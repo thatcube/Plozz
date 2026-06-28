@@ -12,11 +12,12 @@ struct IntegrationsDetailView: View {
     let simkl: SimklService
     let anilist: AniListService
     let mal: MALService
+    @Bindable var playback: PlaybackSettingsModel
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                Text("Integrations").font(.largeTitle.bold())
+                Text("Trackers").font(.largeTitle.bold())
 
                 // Unified tracker card — all services in one dense panel
                 VStack(alignment: .leading, spacing: 0) {
@@ -81,6 +82,15 @@ struct IntegrationsDetailView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                SettingsPanel(
+                    title: "Watch Status",
+                    footer: playback.settings.syncWatchAcrossServers
+                        ? "Marking or resuming a title updates every server that has it."
+                        : "Only the server you watched on is updated."
+                ) {
+                    Toggle("Sync across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
+                }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)

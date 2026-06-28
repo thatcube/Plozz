@@ -259,7 +259,7 @@ public struct SettingsView: View {
 
     /// Rows nested inside the profile container. Order is deliberate:
     /// identity-shaping rows first (Plex linked user, Server accounts), then
-    /// presentation (Appearance, Captions, Spoilers), then Integrations, then
+    /// presentation (Appearance, Captions, Spoilers), then Trackers, then
     /// profile management (edit/delete, ask-on-startup). Each row pushes its
     /// own detail page via the root NavigationStack.
     @ViewBuilder
@@ -288,8 +288,8 @@ public struct SettingsView: View {
             navRow("Spoilers", icon: "eye.slash",
                    value: spoilers.settings.isEnabled ? "On" : "Off",
                    route: .spoilers)
-            navRow("Integrations", icon: "link",
-                   value: traktSummary,
+            navRow("Trackers — Trakt, Simkl, AniList, MyAnimeList", icon: "link",
+                   value: nil,
                    route: .integrations)
             if profilesEnabled {
                 navRow("Manage Profiles", icon: "person.crop.circle",
@@ -370,7 +370,7 @@ public struct SettingsView: View {
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
-            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal)
+            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, playback: playback)
         case .attributions:
             AttributionsDetailView()
         case let .plexUser(accountID):
@@ -611,24 +611,6 @@ public struct SettingsView: View {
             return "\(included) of \(accounts.count)"
         }
         return accounts.count == 1 ? "1 account" : "\(accounts.count) accounts"
-    }
-
-    private var traktSummary: String? {
-        var connected: [String] = []
-        if case .connected = trakt.phase { connected.append("Trakt") }
-        if case .connected = simkl.phase { connected.append("Simkl") }
-        if case .connected = anilist.phase { connected.append("AniList") }
-        if case .connected = mal.phase { connected.append("MAL") }
-        if !connected.isEmpty { return connected.joined(separator: ", ") }
-        // Fall back to individual status
-        switch trakt.phase {
-        case .connecting: return "Connecting…"
-        case .disconnected: return "Off"
-        case .unavailable: return "Off"
-        case .error: return "Error"
-        case .unknown: return nil
-        case .connected: return nil // handled above
-        }
     }
 
     /// Shared leading icon for every Settings row. Explicit point size +

@@ -15,8 +15,9 @@ and the single place caption customization lives.
 - `ServerDetailView` + `ServersAndLibrariesDetailView` — manage stored
   servers / accounts (`AccountStore`), pick which Jellyfin libraries the
   current profile includes, remove accounts.
-- `IntegrationsDetailView` — Trakt OAuth sign-in & disconnect (delegates
-  to `TraktService`).
+- `IntegrationsDetailView` — "Trackers" page: connect/disconnect for Trakt,
+  Simkl, AniList & MyAnimeList (delegates to each tracker service) plus the
+  Watch Status across-servers sync toggle.
 - `PreferenceDetailViews` — captions / spoiler / diagnostics /
   Home-customization preferences. Caption customization renders the
   live preview via `CoreUI.CaptionSettingsCard` so what you see in

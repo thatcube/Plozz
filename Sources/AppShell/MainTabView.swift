@@ -402,8 +402,7 @@ private func makePlayerViewModel(
     playbackSettings: PlaybackSettings,
     scrobbler: any TraktScrobbling,
     watchBridge: WatchOutboxBridge,
-    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
-    requestPlay: @escaping (MediaItem) -> Void
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
 ) -> PlayerViewModel {
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
@@ -474,7 +473,6 @@ private func makePlayerViewModel(
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(),
         neighborResolver: neighborResolver,
-        onPlayEpisode: { requestPlay($0) },
         onPlaybackStopped: makePlaybackStoppedHandler(
             convergingItem: convergingItem,
             primaryAccountID: primaryAccountID,
@@ -596,13 +594,31 @@ func makePlaybackStoppedHandler(
 ///
 /// Building the model in `.task`, gated by this view's identity, fires the factory
 /// once per presentation instead of once per render.
+///
+/// **Episode advance**: when a `PlayerViewModel` sets its `pendingNextEpisode`,
+/// this view swaps the VM in-place — the `Color.black` ZStack stays up so the
+/// full-screen cover never dismisses and the series page never flashes through.
 @MainActor
 private struct PlayerPresentation: View {
-    let request: PlayRequest
     let make: (PlayRequest) -> PlayerViewModel
     let showDiagnostics: Bool
     let themePalette: ThemePalette
+
+    /// The currently-active play request; changes when auto-advancing episodes.
+    @State private var activeRequest: PlayRequest
     @State private var viewModel: PlayerViewModel?
+
+    init(
+        request: PlayRequest,
+        make: @escaping (PlayRequest) -> PlayerViewModel,
+        showDiagnostics: Bool,
+        themePalette: ThemePalette
+    ) {
+        self.make = make
+        self.showDiagnostics = showDiagnostics
+        self.themePalette = themePalette
+        self._activeRequest = State(initialValue: request)
+    }
 
     var body: some View {
         ZStack {
@@ -613,11 +629,25 @@ private struct PlayerPresentation: View {
                     showDiagnostics: showDiagnostics,
                     themePalette: themePalette
                 )
+                .id(activeRequest.id)
             }
         }
         .task {
             if viewModel == nil {
-                viewModel = make(request)
+                viewModel = make(activeRequest)
+            }
+        }
+        .onChange(of: viewModel?.pendingNextEpisode?.id) { _, nextID in
+            guard nextID != nil, let next = viewModel?.pendingNextEpisode else { return }
+            Task { @MainActor in
+                // Stop + scrobble the finished episode before swapping.
+                await viewModel?.stop()
+                // Create the new VM and update the request in one synchronous
+                // block so SwiftUI batches the render: the .id change forces a
+                // fresh PlayerView that picks up the new VM via @State init.
+                let newRequest = PlayRequest(item: next, startPosition: 0)
+                viewModel = make(newRequest)
+                activeRequest = newRequest
             }
         }
     }
@@ -740,7 +770,6 @@ private struct HomeTab: View {
         .playerHost(
             playRequest: $playRequest,
             resumePrompt: $resumePrompt,
-            requestPlay: { requestPlay($0) },
             accounts: accounts,
             captionSettings: captionSettings,
             playbackSettings: playbackSettings,
@@ -845,7 +874,6 @@ private extension View {
     func playerHost(
         playRequest: Binding<PlayRequest?>,
         resumePrompt: Binding<MediaItem?>,
-        requestPlay: @escaping (MediaItem) -> Void,
         accounts: [ResolvedAccount],
         captionSettings: CaptionSettings,
         playbackSettings: PlaybackSettings,
@@ -866,8 +894,7 @@ private extension View {
                         playbackSettings: playbackSettings,
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
-                        identitySources: identitySources,
-                        requestPlay: requestPlay
+                        identitySources: identitySources
                     )
                 },
                 showDiagnostics: showDiagnostics,
@@ -1052,7 +1079,6 @@ private struct SearchTab: View {
         .playerHost(
             playRequest: $playRequest,
             resumePrompt: $resumePrompt,
-            requestPlay: { requestPlay($0) },
             accounts: accounts,
             captionSettings: captionSettings,
             playbackSettings: playbackSettings,

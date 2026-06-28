@@ -716,6 +716,67 @@ final class MatroskaKeyframeSampler {
         return points
     }
 
+    /// The verdict of the Cues plan-source: either a TRUSTWORTHY keyframe table the
+    /// caller can publish as an exact-EXTINF VOD, or a signal that the caller must
+    /// fall back to its uniform-cadence plan (NEVER a client-side timeline scan).
+    enum CuesKeyframePlan: Equatable {
+        /// Cues present and trustworthy: a sorted, full-timeline (PTS, byteOffset)
+        /// table. `maxGapSeconds` is the largest consecutive-keyframe spacing seen
+        /// (diagnostic; already within the trust threshold).
+        case trustworthy(points: [CuePoint], maxGapSeconds: Double)
+        /// Cues present but NOT trustworthy (too few points, or a consecutive-keyframe
+        /// gap exceeds the threshold — sparse/clustered index). Use the uniform fallback.
+        case untrustworthy(reason: Untrust)
+        /// No usable Cues element. Use the walker / uniform fallback.
+        case absent
+
+        enum Untrust: Equatable {
+            case tooFewPoints(count: Int)
+            case gapTooLarge(maxGapSeconds: Double)
+        }
+    }
+
+    /// The Cues PLAN SOURCE for B7's unified arch: returns a keyframe-accurate plan
+    /// directly from the container index, with the AetherEngine trustworthiness gate
+    /// applied so a sparse/clustered/absent index degrades to the caller's uniform-4s
+    /// fallback rather than a stall.
+    ///
+    /// GATE (mirrors AetherEngine `keyframeIndexIsTrustworthy`): trust the Cues list
+    /// only if `count >= minCount` (default 2) AND the maximum spacing between
+    /// CONSECUTIVE keyframes is `<= maxGapSeconds` (default 30s). The leading interval
+    /// (0 → first keyframe) is the EXTINF anchor `startPts0`, not gated.
+    ///
+    /// BOUNDED BY CONSTRUCTION — no linear scan risk: `readCues` reads only the Cues
+    /// element body (capped at `maxCuesBytes`, default 8 MiB) via positioned ranged
+    /// reads; it never demuxes frames, so a malformed/absent Cues can at worst cost a
+    /// single bounded read, not a linear file walk. (That is the structural guarantee
+    /// AetherEngine's 10 s `cuePrewarmTimeout` exists to enforce against libav's index
+    /// build; here it holds without a wall clock. A caller that still wants a wall-clock
+    /// deadline can wrap this call — it is pure and cancellation-safe.)
+    ///
+    /// CURSOR-SAFE: like all sampler APIs, holds no libav context and shares no demux
+    /// cursor; safe to call at open time before the muxer starts.
+    func keyframePlanFromCues(minCount: Int = 2,
+                              maxGapSeconds: Double = 30.0,
+                              maxCuesBytes: Int = 8 * 1024 * 1024) -> CuesKeyframePlan {
+        guard let points = readCues(maxCuesBytes: maxCuesBytes) else { return .absent }
+        guard points.count >= minCount else {
+            return .untrustworthy(reason: .tooFewPoints(count: points.count))
+        }
+        // points are sorted ascending by readCues; gate the largest consecutive gap.
+        var maxGap = 0.0
+        var k = 1
+        while k < points.count {
+            let gap = points[k].seconds - points[k - 1].seconds
+            if gap > maxGap { maxGap = gap }
+            k += 1
+        }
+        guard maxGap <= maxGapSeconds else {
+            return .untrustworthy(reason: .gapTooLarge(maxGapSeconds: maxGap))
+        }
+        return .trustworthy(points: points, maxGapSeconds: maxGap)
+    }
+
     /// Parses one CuePoint: CueTime (ticks) + the CueTrackPositions for the video
     /// track (or the first one if no track filter matches), yielding the absolute
     /// cluster offset. Returns nil if the CuePoint lacks a time or a cluster pos.

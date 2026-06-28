@@ -741,5 +741,81 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         XCTAssertLessThan(src.fetches, 40)
         XCTAssertGreaterThan(built.file.count, 40_000_000)
     }
+
+    // MARK: - Cues plan source (trustworthiness gate)
+
+    /// A dense, well-formed Cues index is TRUSTWORTHY: the plan source returns the
+    /// exact full-timeline table B7 publishes as an exact-EXTINF VOD.
+    func testKeyframePlanFromCues_dense_isTrustworthy() {
+        let times = [0, 6006, 12012, 18018, 24024] // ~6s GOPs @ 1ms scale
+        let built = buildFileWithCues(durationTicks: 30030, clusterTimes: times)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard case let .trustworthy(points, maxGap) = sampler.keyframePlanFromCues() else {
+            return XCTFail("expected trustworthy")
+        }
+        XCTAssertEqual(points.map(\.seconds), built.keyframeSeconds)
+        XCTAssertEqual(maxGap, 6.006, accuracy: 1e-6) // largest consecutive spacing
+    }
+
+    /// A single-keyframe Cues index is NOT trustworthy (can't anchor EXTINF spacing):
+    /// the gate signals tooFewPoints so the caller uses its uniform-4s fallback.
+    func testKeyframePlanFromCues_tooFewPoints_untrustworthy() {
+        let built = buildFileWithCues(durationTicks: 4000, clusterTimes: [0])
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard case let .untrustworthy(reason) = sampler.keyframePlanFromCues() else {
+            return XCTFail("expected untrustworthy")
+        }
+        XCTAssertEqual(reason, .tooFewPoints(count: 1))
+    }
+
+    /// A Cues index with a consecutive-keyframe gap beyond the 30s threshold is
+    /// sparse/clustered and NOT trustworthy — publishing it would diverge from the
+    /// real cuts and stall AVPlayer, so the gate rejects it.
+    func testKeyframePlanFromCues_largeGap_untrustworthy() {
+        // 0 → 6s → 50s: the 44s middle gap exceeds the 30s trust threshold.
+        let times = [0, 6000, 50000]
+        let built = buildFileWithCues(durationTicks: 56000, clusterTimes: times)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard case let .untrustworthy(reason) = sampler.keyframePlanFromCues() else {
+            return XCTFail("expected untrustworthy")
+        }
+        XCTAssertEqual(reason, .gapTooLarge(maxGapSeconds: 44.0))
+    }
+
+    /// The threshold is configurable: the same large-gap index becomes trustworthy
+    /// when the caller raises maxGapSeconds above the observed gap.
+    func testKeyframePlanFromCues_thresholdConfigurable() {
+        let times = [0, 6000, 50000] // 44s max gap
+        let built = buildFileWithCues(durationTicks: 56000, clusterTimes: times)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard case .trustworthy = sampler.keyframePlanFromCues(maxGapSeconds: 45.0) else {
+            return XCTFail("expected trustworthy at raised threshold")
+        }
+    }
+
+    /// No Cues element at all → .absent, so the caller uses the walker / uniform
+    /// fallback (NEVER a client-side timeline scan).
+    func testKeyframePlanFromCues_noCues_absent() {
+        let noCues = buildFile(durationTicks: 4000,
+                               clusters: [cluster(timecode: 0, blocks: [simpleBlock(track: 1, rel: 0, keyframe: true)])])
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(noCues))
+        XCTAssertEqual(sampler.keyframePlanFromCues(), .absent)
+    }
+
+    /// The gate is BOUNDED like readCues: deciding trustworthiness on a large (~80MB)
+    /// file still reads only the index, never the frame payloads.
+    func testKeyframePlanFromCues_isCheapOnLargeFile() {
+        let times = (0..<300).map { $0 * 6000 }
+        let built = buildFileWithCues(durationTicks: 300 * 6000, clusterTimes: times,
+                                      payloadBytes: 256 * 1024)
+        let src = MemorySource(built.file)
+        let sampler = MatroskaKeyframeSampler(source: src)
+        guard case let .trustworthy(points, _) = sampler.keyframePlanFromCues() else {
+            return XCTFail("expected trustworthy")
+        }
+        XCTAssertEqual(points.count, 300)
+        XCTAssertLessThan(sampler.stats.bytesRead, 100_000)
+        XCTAssertLessThan(src.fetches, 40)
+    }
 }
 #endif

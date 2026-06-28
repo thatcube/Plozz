@@ -931,6 +931,43 @@ int plozz_remux_kf_probe_next(plozz_remux_kf_probe *ctx, double after_seconds,
     return 0;
 }
 
+/* Discover every keyframe in the time window [start_seconds, end_seconds] by
+ * driving plozz_remux_kf_probe_next forward from `start_seconds`. Writes the
+ * discovered keyframe PTS (strictly increasing) into out_pts (caller-allocated,
+ * capacity max_out) and returns the count written.
+ *
+ * Termination (matches the previously inline per-slice loop):
+ *   - stops AFTER appending the first keyframe >= end_seconds (inclusive seam, so
+ *     adjacent windows share a boundary the caller's merge collapses);
+ *   - stops when max_out is reached (cap → the window degrades to coarser-but-
+ *     in-sync, never desync);
+ *   - stops on EOF / seek failure / no forward progress.
+ *
+ * The probe ctx carries the self-calibrating kf_index_ctx, so a caller that
+ * REUSES one ctx across successive windows (e.g. B7's EVENT background fill)
+ * keeps calibration warm across batches; a caller that uses one ctx per slice
+ * (the bounded-parallel scan) calibrates that slice once. end_seconds <= 0 means
+ * "until EOF or the cap". This is the single shared windowed-discovery entry
+ * point — both the parallel scan and a lazy/windowed filler route through it so
+ * the seam + cap semantics never diverge. */
+int plozz_remux_kf_probe_range(plozz_remux_kf_probe *ctx, double start_seconds,
+                               double end_seconds, double target_gap,
+                               int max_out, double *out_pts) {
+    if (!ctx || !out_pts || max_out <= 0) return 0;
+    if (start_seconds < 0.0) start_seconds = 0.0;
+    int count = 0;
+    double after = start_seconds;
+    double pts = 0.0;
+    while (count < max_out) {
+        if (!plozz_remux_kf_probe_next(ctx, after, target_gap, &pts)) break;
+        if (pts <= after) break;                 /* EOF / seek fail / no progress */
+        out_pts[count++] = pts;
+        after = pts;
+        if (end_seconds > 0.0 && pts >= end_seconds) break;   /* inclusive seam */
+    }
+    return count;
+}
+
 int plozz_remux_kf_probe_header_reads(const plozz_remux_kf_probe *ctx) {
     return ctx ? ctx->ix.header_reads : 0;
 }

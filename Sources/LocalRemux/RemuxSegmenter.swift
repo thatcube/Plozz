@@ -374,7 +374,8 @@ final class RemuxSegmenter: @unchecked Sendable {
 /// serialized round-trips). This splits the timeline into K disjoint slices and
 /// discovers each slice's real keyframe boundaries CONCURRENTLY, each on its own
 /// probe session + `HTTPRangeReader` (separate URLSession connection + demux cursor),
-/// using the same self-calibrating `plozz_remux_kf_probe_next` primitive. That
+/// driving each slice through the shared `plozz_remux_kf_probe_range` windowed entry
+/// point (the same self-calibrating primitive B7's lazy fill calls). That
 /// collapses the serialized RTTs to ~N/K, so a multi-GB / 2.5 h no-Cues title can
 /// rebuild its WHOLE timeline near the couple-second bar.
 ///
@@ -475,23 +476,19 @@ enum ParallelKeyframeDiscovery {
             }
             defer { plozz_remux_kf_probe_free(probe) }
 
-            var found: [Double] = []
-            var after = sliceStart
-            var probes = 0
-            var pts: Double = 0
-            while after < sliceEnd && probes < maxProbes {
-                probes += 1
-                let ok = withUnsafeMutablePointer(to: &pts) {
-                    plozz_remux_kf_probe_next(probe, after, target, $0)
-                }
-                if ok != 1 || pts <= after { break }   // EOF / seek fail / no progress
-                found.append(pts)
-                after = pts
+            // Route the whole slice through the shared C windowed-discovery entry
+            // point (plozz_remux_kf_probe_range) — the same primitive B7's lazy
+            // fill calls — so seam/cap semantics stay identical across callers.
+            var found = [Double](repeating: 0, count: max(1, maxProbes))
+            let n = found.withUnsafeMutableBufferPointer { buf in
+                Int(plozz_remux_kf_probe_range(probe, sliceStart, sliceEnd, target,
+                                               Int32(buf.count), buf.baseAddress))
             }
-            // Incomplete only when the probe cap tripped before reaching the slice end;
-            // a natural stop (EOF) with room to spare is "complete" for this slice.
-            let hitCap = probes >= maxProbes && after < sliceEnd
-            record(found, complete: !hitCap)
+            let keyframes = Array(found.prefix(n))
+            // Incomplete only when the cap tripped before reaching the slice end;
+            // a natural stop (EOF / crossed end) is "complete" for this slice.
+            let hitCap = n >= maxProbes && (keyframes.last ?? sliceStart) < sliceEnd
+            record(keyframes, complete: !hitCap)
         }
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds &- started.uptimeNanoseconds) / 1e9
 

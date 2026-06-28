@@ -224,6 +224,23 @@ plozz_remux_kf_probe *plozz_remux_kf_probe_create(plozz_remux_session *s,
 int plozz_remux_kf_probe_next(plozz_remux_kf_probe *ctx, double after_seconds,
                               double target_gap, double *out_pts);
 
+/*
+ * Discover every keyframe in the window [start_seconds, end_seconds] by driving
+ * plozz_remux_kf_probe_next forward from start_seconds. Writes the strictly
+ * increasing keyframe PTS into out_pts (caller-allocated, capacity max_out) and
+ * returns the count written. Stops after appending the first keyframe
+ * >= end_seconds (inclusive seam, so adjacent windows share a boundary the
+ * caller's merge collapses), or when max_out is reached, or at EOF. Pass
+ * end_seconds <= 0 to scan until EOF or the cap. The probe ctx carries the
+ * self-calibrating header-parse state, so REUSING one ctx across successive
+ * windows (e.g. a lazy/windowed background fill) keeps calibration warm; the
+ * bounded-parallel scan uses one ctx per slice. Single shared windowed-discovery
+ * entry point — both callers route through it so seam/cap semantics never diverge.
+ */
+int plozz_remux_kf_probe_range(plozz_remux_kf_probe *ctx, double start_seconds,
+                               double end_seconds, double target_gap,
+                               int max_out, double *out_pts);
+
 /* Telemetry: number of boundaries this probe served purely from a cluster-header
  * read (vs an av_read_frame fallback). 0 when `ctx` is NULL. */
 int plozz_remux_kf_probe_header_reads(const plozz_remux_kf_probe *ctx);

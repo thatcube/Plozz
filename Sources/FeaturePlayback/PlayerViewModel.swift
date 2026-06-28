@@ -186,6 +186,12 @@ public final class PlayerViewModel {
     /// off the main actor. `nil` for non-episode playback.
     private let neighborResolver: (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))?
 
+    /// Resolves the playing episode's *series-level* external IDs (off the main
+    /// actor) and merges them into the scrobble item so trackers that need the
+    /// show's ids — Simkl — can match an episode whose metadata only carries
+    /// episode-level ids. `nil` for non-episode playback.
+    private let seriesIDResolver: (@Sendable () async -> [String: String]?)?
+
     /// Set when the player wants to advance to a different episode — either at
     /// natural end (auto-advance) or from a manual next/previous jump. The
     /// ``PlayerPresentation`` observes this and swaps the VM in-place so the
@@ -253,6 +259,7 @@ public final class PlayerViewModel {
         preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore(),
         autoDismissOnEnd: Bool = false,
         neighborResolver: (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))? = nil,
+        seriesIDResolver: (@Sendable () async -> [String: String]?)? = nil,
         onPlaybackStopped: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
         onPlaybackStarted: @escaping @Sendable () -> Void = {},
         onPlaybackCheckpoint: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
@@ -270,6 +277,7 @@ public final class PlayerViewModel {
         self.preferencesStore = preferencesStore
         self.autoDismissOnEnd = autoDismissOnEnd
         self.neighborResolver = neighborResolver
+        self.seriesIDResolver = seriesIDResolver
         self.onPlaybackStopped = onPlaybackStopped
         self.onPlaybackStarted = onPlaybackStarted
         self.onPlaybackCheckpoint = onPlaybackCheckpoint
@@ -340,6 +348,26 @@ public final class PlayerViewModel {
         let (prev, next) = await neighborResolver()
         previousEpisode = prev
         nextEpisode = next
+    }
+
+    /// Fetches the playing episode's series-level ids and folds them into the
+    /// item's `providerIDs` under the `Series*` namespace, so scrobblers that
+    /// need the show's id (Simkl) can match an episode that only carried
+    /// episode-level ids. Best-effort: a miss leaves scrobble behavior unchanged.
+    private func enrichSeriesIDs() async {
+        guard let seriesIDResolver, var current = request else { return }
+        guard let raw = await seriesIDResolver(), !raw.isEmpty else { return }
+        let map: [(ProviderIDNamespace, String)] = [
+            (.imdb, "SeriesImdb"), (.tmdb, "SeriesTmdb"), (.tvdb, "SeriesTvdb"),
+            (.myAnimeList, "SeriesMal"), (.aniList, "SeriesAniList")
+        ]
+        var merged = current.item.providerIDs
+        for (namespace, key) in map {
+            guard let value = raw.providerID(namespace) else { continue }
+            if merged[key] == nil { merged[key] = value }
+        }
+        current.item.providerIDs = merged
+        request = current
     }
 
     // MARK: - Engine selection / swapping
@@ -446,6 +474,12 @@ public final class PlayerViewModel {
             request = await applyLocalRemuxIfNeeded(to: request, forceTranscode: forceTranscode)
             self.request = request
             configureControls(for: request)
+
+            // Enrich the episode with its series-level ids in the background so the
+            // first scrobble can identify the show on trackers that require it.
+            if request.item.kind == .episode, seriesIDResolver != nil {
+                Task { @MainActor [weak self] in await self?.enrichSeriesIDs() }
+            }
 
             // An explicit override wins over the provider's resume point so the
             // caller can force "start over" (0) or resume from a chosen second.

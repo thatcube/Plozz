@@ -44,8 +44,8 @@ public actor SimklScrobbler: SimklScrobbling {
         }
 
         do {
-            try await client.scrobble(action: action, body: body, accessToken: token)
-            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl-rt", item: item, outcome: "OK(\(action))"))
+            let resp = try await client.scrobble(action: action, body: body, accessToken: token)
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl-rt", item: item, outcome: "OK(\(action)) resp=\(resp.prefix(200))"))
         } catch {
             FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl-rt", item: item, outcome: "THROW(\(action) \(error))"))
         }
@@ -116,10 +116,14 @@ public actor SimklScrobbler: SimklScrobbling {
             guard let season = item.seasonNumber, let episode = item.episodeNumber else {
                 return nil
             }
+            // Simkl needs the SHOW's ids (or title), never the episode's. Use the
+            // series-namespace ids when present; otherwise fall back to the series
+            // title so Simkl can match. Episode-level ids would resolve to the
+            // wrong show, so never send them as show ids.
             let seriesIDs = simklSeriesIDs(from: item.providerIDs)
-            let ids = seriesIDs.isEmpty ? simklIDs(from: item.providerIDs) : seriesIDs
-            guard !ids.isEmpty else { return nil }
-            let show = SimklScrobbleShowRef(title: nil, year: nil, ids: ids)
+            let title = item.parentTitle
+            guard !seriesIDs.isEmpty || title != nil else { return nil }
+            let show = SimklScrobbleShowRef(title: title, year: item.productionYear, ids: seriesIDs)
             let ep = SimklScrobbleEpisodeRef(season: season, number: episode)
             return SimklScrobbleBody(show: show, episode: ep, progress: clamped)
         default:
@@ -148,17 +152,18 @@ public actor SimklScrobbler: SimklScrobbling {
                 return nil
             }
             // Simkl expects show-level IDs, not episode-level. Use the series
-            // namespace (SeriesTmdb, SeriesImdb, etc.) when available, falling
-            // back to the episode-level IDs only if the series IDs are missing.
+            // namespace (SeriesTmdb, SeriesImdb, etc.) when available, else fall
+            // back to the series title — never episode-level IDs, which resolve
+            // to the wrong show.
             let seriesIDs = simklSeriesIDs(from: item.providerIDs)
-            let ids = seriesIDs.isEmpty ? simklIDs(from: item.providerIDs) : seriesIDs
-            guard !ids.isEmpty else { return nil }
+            let title = item.parentTitle
+            guard !seriesIDs.isEmpty || title != nil else { return nil }
             let episodeEntry = SimklEpisodeEntry(number: episode, watchedAt: now)
             let seasonEntry = SimklSeasonEntry(number: season, episodes: [episodeEntry])
             let showEntry = SimklHistoryShowEntry(
-                title: nil,
-                year: nil,
-                ids: ids,
+                title: title,
+                year: item.productionYear,
+                ids: seriesIDs,
                 seasons: [seasonEntry]
             )
             return SimklHistoryBody(shows: [showEntry])

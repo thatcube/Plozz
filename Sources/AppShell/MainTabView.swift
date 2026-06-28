@@ -479,6 +479,16 @@ private func makePlayerViewModel(
     } else {
         neighborResolver = nil
     }
+    // Resolve the series' external ids once so an episode that only carries
+    // episode-level ids can still identify its show to Simkl.
+    let seriesIDResolver: (@Sendable () async -> [String: String]?)?
+    if convergingItem.kind == .episode, let seriesID = convergingItem.seriesID {
+        seriesIDResolver = {
+            (try? await episodeProvider.item(id: seriesID))?.providerIDs
+        }
+    } else {
+        seriesIDResolver = nil
+    }
     return PlayerViewModel(
         provider: episodeProvider,
         itemID: request.item.id,
@@ -489,6 +499,7 @@ private func makePlayerViewModel(
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(),
         neighborResolver: neighborResolver,
+        seriesIDResolver: seriesIDResolver,
         onPlaybackStopped: makePlaybackStoppedHandler(
             convergingItem: convergingItem,
             primaryAccountID: primaryAccountID,

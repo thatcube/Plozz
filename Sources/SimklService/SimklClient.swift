@@ -83,11 +83,21 @@ struct SimklClient: Sendable {
 
     /// `POST /scrobble/{action}` — reports real-time playback (start/pause/stop).
     /// Shows "Now Watching" on the user's Simkl dashboard and auto-marks watched
-    /// on stop with progress >= 80%.
-    func scrobble(action: String, body: SimklScrobbleBody, accessToken: String) async throws {
-        let endpoint = try Endpoint(method: .post, path: "/scrobble/\(action)", headers: headers(accessToken: accessToken))
-            .jsonBody(body)
-        _ = try await http.send(endpoint, baseURL: baseURL)
+    /// on stop with progress >= 80%. Returns the raw response body for diagnostics.
+    @discardableResult
+    func scrobble(action: String, body: SimklScrobbleBody, accessToken: String) async throws -> String {
+        let endpoint = try Endpoint(
+            method: .post,
+            path: "/scrobble/\(action)",
+            queryItems: [
+                URLQueryItem(name: "client_id", value: config.clientID ?? ""),
+                URLQueryItem(name: "app-name", value: "Plozz"),
+                URLQueryItem(name: "app-version", value: "1.0")
+            ],
+            headers: headers(accessToken: accessToken)
+        ).jsonBody(body)
+        let (data, _) = try await http.send(endpoint, baseURL: baseURL)
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }
 

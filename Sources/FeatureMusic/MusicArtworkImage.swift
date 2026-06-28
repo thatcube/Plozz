@@ -154,9 +154,9 @@ struct MusicCard: View {
             }
             .frame(width: scaledWidth, alignment: .leading)
         }
-        .padding(metrics.mediumCardInset)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: isFocused)
-        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, action: action)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)

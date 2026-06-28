@@ -224,8 +224,8 @@ public struct MediaRowView: View {
         // its artwork width, or the layout slot is narrower than what's drawn and
         // the surfaces overhang into the inter-card gap. A poster's artwork is
         // flexible, so its glass equals `posterWidth`. A landscape card's artwork
-        // is fixed and sits inside a `mediumCardInset` glass margin, so its glass
-        // is `landscapeWidth + 2 * mediumCardInset` — pin to that so `cardSpacing`
+        // is fixed and sits inside a `cardInset` glass margin, so its glass
+        // is `landscapeWidth + 2 * cardInset` — pin to that so `cardSpacing`
         // is a real gap and adjacent cards never overlap at rest.
         let card = PosterCardView(item: item, style: style, spoilerSettings: spoilerSettings) { onSelect(item) }
             .frame(width: cardSlotWidth)

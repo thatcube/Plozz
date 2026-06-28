@@ -29,8 +29,9 @@ public struct PlozzMetrics: Equatable, Sendable {
     public let posterHeight: CGFloat
     public let landscapeWidth: CGFloat
     public let landscapeHeight: CGFloat
-    /// Inset between a medium (landscape) card's glass surface and its media.
-    public let mediumCardInset: CGFloat
+    /// Inset between a media card's glass surface and its artwork — shared by
+    /// poster *and* landscape cards so the glass border is a uniform thickness.
+    public let cardInset: CGFloat
 
     // MARK: Media spacing (scaled)
 
@@ -65,7 +66,23 @@ public struct PlozzMetrics: Equatable, Sendable {
     /// glass-surface width (artwork + both insets) so `cardSpacing` lands as a
     /// true visible gap between cards rather than overlapping the glass.
     public var landscapeCardSlotWidth: CGFloat {
-        landscapeWidth + mediumCardInset * 2
+        landscapeWidth + cardInset * 2
+    }
+
+    // MARK: Concentric card corner radii (derived)
+
+    /// Outer (glass) corner radius for a poster ("Browse") card: its fixed inner
+    /// artwork radius plus the shared `cardInset`. Deriving it this way keeps the
+    /// glass border a true constant-width ring concentric with the artwork —
+    /// `outer = inner + inset` — at every density.
+    public var posterCardCornerRadius: CGFloat {
+        PlozzTheme.Metrics.posterArtCornerRadius + cardInset
+    }
+
+    /// Outer (glass) corner radius for a landscape / music media card, derived
+    /// from its inner media radius + `cardInset` for the same concentric border.
+    public var landscapeCardCornerRadius: CGFloat {
+        PlozzTheme.Metrics.mediumMediaCornerRadius + cardInset
     }
 
     public init(density: UIDensity) {
@@ -80,7 +97,7 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.posterHeight = step(PlozzTheme.Metrics.posterHeight)
         self.landscapeWidth = step(PlozzTheme.Metrics.landscapeWidth)
         self.landscapeHeight = step(PlozzTheme.Metrics.landscapeHeight)
-        self.mediumCardInset = step(PlozzTheme.Metrics.mediumCardInset)
+        self.cardInset = step(PlozzTheme.Metrics.cardInset)
 
         self.cardSpacing = step(PlozzTheme.Metrics.cardSpacing)
         self.gridSpacing = step(PlozzTheme.Metrics.gridSpacing)

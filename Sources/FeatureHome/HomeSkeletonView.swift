@@ -106,7 +106,7 @@ struct HomeSkeletonView: View {
     /// The layout slot reserved for each skeleton card — must equal
     /// `MediaRowView.cardSlotWidth` so the placeholder cards sit at the *exact*
     /// same pitch as the real row. A poster's glass equals `posterWidth`; a
-    /// landscape card's glass is `landscapeWidth + 2 * mediumCardInset`
+    /// landscape card's glass is `landscapeWidth + 2 * cardInset`
     /// (`landscapeCardSlotWidth`), so pinning to the bare `landscapeWidth` would
     /// make the placeholders 32 pt too narrow and bunch them closer than the real
     /// Continue Watching / Libraries cards.

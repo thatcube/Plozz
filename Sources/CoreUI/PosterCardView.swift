@@ -109,9 +109,9 @@ public struct PosterCardView: View {
             .padding(.horizontal, 4)
             .padding(.bottom, 14)
         }
-        .padding(10)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, isFocused: isFocused)
-        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, action: action)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.posterCardCornerRadius, action: action)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.focusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
@@ -143,9 +143,9 @@ public struct PosterCardView: View {
             }
             .frame(width: size.width, alignment: .leading)
         }
-        .padding(metrics.mediumCardInset)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: isFocused)
-        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, action: action)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)

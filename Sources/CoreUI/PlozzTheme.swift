@@ -91,17 +91,30 @@ public enum PlozzTheme {
         // MARK: Corner radii
 
         public static let cornerRadius: CGFloat = 12
-        /// Poster (glass tile) surface + artwork corner radii. The shared
-        /// browsing card used across Home rows, the library grid and Search,
-        /// styled to match the Twozz "Browse" tile.
-        public static let posterCardCornerRadius: CGFloat = 26
+
+        // A media card (poster or landscape) nests clipped artwork inside a glass
+        // surface, separated by `cardInset` on every side. For the rounded border
+        // to read as a *constant-width* ring, the two rounded rects must be
+        // concentric:
+        //     outer (glass) radius = inner (media) radius + cardInset
+        // The inner (media) radii below are the fixed, design-tuned values; the
+        // outer (glass) radii are *derived* from them in `PlozzMetrics`
+        // (`posterCardCornerRadius` / `landscapeCardCornerRadius`), so the glass
+        // corner always stays concentric with the artwork at every density.
+
+        /// Inner artwork corner radius for a poster ("Browse") card. Matches Twozz.
         public static let posterArtCornerRadius: CGFloat = 16
-        /// Medium (landscape) card surface + media corner radii, matching the
-        /// Twozz medium content card.
-        public static let mediumCardCornerRadius: CGFloat = 22
+        /// Inner media corner radius for a landscape (medium) card. Matches Twozz.
         public static let mediumMediaCornerRadius: CGFloat = 18
-        /// Content inset between a medium card's glass surface and its media.
-        public static let mediumCardInset: CGFloat = 16
+        /// Uniform inset between a media card's glass surface and its artwork —
+        /// shared by **every** poster *and* landscape card so the glass border
+        /// reads the same thickness across the whole UI. Density-scaled in
+        /// `PlozzMetrics`; the outer glass radii are derived from it.
+        public static let cardInset: CGFloat = 12
+        /// Corner radius for standalone glass *panels* (settings cards, the mini
+        /// player) — surfaces that don't nest inset artwork, so they aren't bound
+        /// by the concentric rule above and keep a fixed radius.
+        public static let mediumCardCornerRadius: CGFloat = 22
 
         // MARK: Focus
 

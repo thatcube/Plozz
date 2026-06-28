@@ -50,13 +50,13 @@ public struct SkeletonCardView: View {
             // size-20 fonts. Reusing the same fonts (via hidden sizing text) keeps
             // the caption block the exact same height, so the row never shifts
             // vertically when real content swaps in.
-            textLines(contentWidth: metrics.posterWidth - 28, spacing: 2)
+            textLines(contentWidth: metrics.posterWidth - 2 * (metrics.cardInset + 4), spacing: 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
                 .padding(.bottom, 14)
         }
-        .padding(10)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, isFocused: false)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: false)
         .shimmering()
     }
 
@@ -70,11 +70,11 @@ public struct SkeletonCardView: View {
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
             // PosterCardView's landscape caption uses VStack(spacing: 4).
-            textLines(contentWidth: metrics.landscapeWidth - 2 * metrics.mediumCardInset, spacing: 4)
+            textLines(contentWidth: metrics.landscapeWidth - 2 * metrics.cardInset, spacing: 4)
                 .frame(width: metrics.landscapeWidth, alignment: .leading)
         }
-        .padding(metrics.mediumCardInset)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: false)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: false)
         .shimmering()
     }
 

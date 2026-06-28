@@ -22,6 +22,10 @@ struct MusicArtworkImage: View {
     /// don't shift with the app theme.
     var showsMediaEdge: Bool = true
     var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
+    /// Optional override for the placeholder icon color — pass
+    /// `PlozzCardCaption.subtitleColor(...)` so it flips with focus + reduced
+    /// transparency. Falls back to `.secondary` when nil.
+    var placeholderColor: Color? = nil
 
     init(
         url: URL?,
@@ -29,7 +33,8 @@ struct MusicArtworkImage: View {
         cornerRadius: CGFloat = 12,
         variant: ArtworkImageVariant = .original,
         showsMediaEdge: Bool = true,
-        asyncFallbackURL: (@Sendable () async -> URL?)? = nil
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        placeholderColor: Color? = nil
     ) {
         self.url = url
         self.systemPlaceholder = systemPlaceholder
@@ -37,6 +42,7 @@ struct MusicArtworkImage: View {
         self.variant = variant
         self.showsMediaEdge = showsMediaEdge
         self.asyncFallbackURL = asyncFallbackURL
+        self.placeholderColor = placeholderColor
     }
 
     var body: some View {
@@ -58,7 +64,7 @@ struct MusicArtworkImage: View {
     private var placeholder: some View {
         Image(systemName: systemPlaceholder)
             .font(.system(size: 44))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(placeholderColor ?? .secondary)
     }
 }
 
@@ -167,7 +173,8 @@ struct MusicCard: View {
                 url: artworkURL,
                 systemPlaceholder: systemPlaceholder,
                 cornerRadius: scaledWidth / 2,
-                asyncFallbackURL: asyncFallbackURL
+                asyncFallbackURL: asyncFallbackURL,
+                placeholderColor: subtitleColor
             )
             .clipShape(Circle())
         } else {
@@ -175,7 +182,8 @@ struct MusicCard: View {
                 url: artworkURL,
                 systemPlaceholder: systemPlaceholder,
                 cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
-                asyncFallbackURL: asyncFallbackURL
+                asyncFallbackURL: asyncFallbackURL,
+                placeholderColor: subtitleColor
             )
         }
     }

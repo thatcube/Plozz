@@ -152,6 +152,7 @@ public enum FanoutDiagnostics {
         case let .external(source, value): return "\(source):\(value)"
         case let .title(normalizedTitle, year, kind):
             return "title:\(normalizedTitle):\(year.map(String.init) ?? "?"):\(kind)"
+        case let .sameItemID(id): return "itemID:\(id)"
         }
     }
 

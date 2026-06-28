@@ -237,30 +237,50 @@ struct AttributionsDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 Text("Attributions & Licensing").font(.largeTitle.bold())
 
-                Text("Plozz is free and open source, and stands on the shoulders of these projects and services. It is not affiliated with, endorsed, or certified by any of them.")
+                Text("Plozz is free and open source under the GPL-3.0 license with an App Store exception. It is not affiliated with, endorsed, or certified by any of the projects or services listed below.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 attribution(
-                    "Media servers",
-                    "Jellyfin — the free software media system. Plozz is an unofficial client and is not affiliated with the Jellyfin project. Plex is a trademark of Plex, Inc.; Plozz is an unofficial client and is not affiliated with or endorsed by Plex, Inc."
+                    "Media Servers",
+                    "Jellyfin is a free software media system; Plozz is an unofficial client and is not affiliated with the Jellyfin project. Plex is a trademark of Plex, Inc.; Plozz is an unofficial client and is not endorsed by Plex, Inc."
                 )
                 attribution(
-                    "Brand marks",
-                    "The Plex and Jellyfin logos are used nominatively, solely to identify which server type an account connects to. They are unmodified and are not used as Plozz's own branding."
+                    "Brand Marks",
+                    "The Plex and Jellyfin logos are used nominatively to identify which server type an account connects to. They are unmodified and are not used as Plozz branding."
                 )
                 attribution(
-                    "Playback",
-                    "Playback is powered by mpv and libmpv (GPL/LGPL), together with the FFmpeg-family libraries (libass, dav1d, libplacebo, libbluray, and related components) packaged by the mpvkit project."
+                    "AetherEngine",
+                    "Plozzigen playback is powered by AetherEngine by Vincent Herbst, licensed under the LGPL-3.0 with an App Store / DRM exception. Source: github.com/superuser404notfound/AetherEngine"
                 )
                 attribution(
-                    "Metadata",
-                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Additional ratings and metadata are supplied by your media server and by TMDB, OMDb, and AniList."
+                    "FFmpeg",
+                    "Audio/video decoding uses FFmpeg libraries (libavcodec, libavformat, libavutil, libswresample, libswscale, libavfilter) licensed under the LGPL/GPL. ffmpeg.org"
                 )
                 attribution(
-                    "Swift packages",
-                    "YouTubeKit and additional open-source Swift packages are used under their respective licenses."
+                    "mpv & mpvkit",
+                    "Fallback playback uses mpv (licensed under GPL-2.0+) and the FFmpeg-family libraries (libass, dav1d, libplacebo) packaged by the mpvkit project."
+                )
+                attribution(
+                    "libdovi",
+                    "Dolby Vision metadata parsing uses libdovi, licensed under the MIT license."
+                )
+                attribution(
+                    "TMDB",
+                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Artwork and metadata are provided by TMDB (themoviedb.org)."
+                )
+                attribution(
+                    "OMDb & AniList",
+                    "Additional ratings are sourced from the OMDb API (omdbapi.com) and AniList (anilist.co). Neither endorses or is affiliated with Plozz."
+                )
+                attribution(
+                    "Wikidata",
+                    "Fallback artwork lookup uses the Wikidata Query Service (wikidata.org), available under the CC0 public domain dedication."
+                )
+                attribution(
+                    "YouTubeKit",
+                    "Trailer playback uses YouTubeKit by Alexander Eichhorn, licensed under the MIT license."
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)

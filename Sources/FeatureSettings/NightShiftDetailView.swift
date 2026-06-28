@@ -11,14 +11,6 @@ import CoreUI
 struct NightShiftDetailView: View {
     @Bindable var model: NightShiftSettingsModel
 
-    /// Which control row currently holds focus. Focusing the Darkness or Warmth
-    /// row flips the overlay to full strength so each level is visible live at
-    /// deep-night intensity; other rows leave the live schedule untouched.
-    private enum Field: Hashable {
-        case schedule, location, onTime, offTime, fade, darkness, warmth, preview
-    }
-    @FocusState private var focusedField: Field?
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -38,12 +30,6 @@ struct NightShiftDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
-        .onChange(of: focusedField) { _, field in
-            // Full-strength calibration preview only while the Darkness/Warmth row
-            // is focused, so the viewer can judge the deep-night look; it switches
-            // off the moment focus moves elsewhere.
-            model.isPreviewing = (field == .darkness || field == .warmth)
-        }
         .onChange(of: model.settings.isEnabled) { _, enabled in
             if !enabled { model.isPreviewing = false }
         }
@@ -57,42 +43,39 @@ struct NightShiftDetailView: View {
             title: "Schedule",
             footer: "Auto follows your chosen city's sunset and sunrise. Manual turns Night Shift on and off at two fixed times in this Apple TV's time zone."
         ) {
-            VStack(alignment: .leading, spacing: 24) {
-                labeledRow("When") {
-                    optionRow(
-                        NightShiftScheduleMode.allCases,
-                        selected: model.settings.scheduleMode,
-                        label: { $0.displayName },
-                        focus: .schedule
-                    ) { model.settings.scheduleMode = $0 }
+            VStack(alignment: .leading, spacing: 20) {
+                LabeledSettingRow("When") {
+                    SettingsOptionPicker(
+                        options: NightShiftScheduleMode.allCases,
+                        selection: $model.settings.scheduleMode,
+                        title: { $0.displayName }
+                    )
                 }
 
                 if model.settings.scheduleMode == .solar {
-                    labeledRow("Location") { locationMenu }
+                    LabeledSettingRow("Location") { locationMenu }
                 } else {
-                    HStack(alignment: .top, spacing: 40) {
-                        labeledRow("Turns on") {
-                            timeStepper(
-                                minutes: model.settings.manualOnMinutes,
-                                focus: .onTime
-                            ) { model.settings.manualOnMinutes = $0 }
+                    LabeledSettingRow("Turns on") {
+                        timeStepper(minutes: model.settings.manualOnMinutes) {
+                            model.settings.manualOnMinutes = $0
                         }
-                        labeledRow("Turns off") {
-                            timeStepper(
-                                minutes: model.settings.manualOffMinutes,
-                                focus: .offTime
-                            ) { model.settings.manualOffMinutes = $0 }
+                    }
+                    LabeledSettingRow("Turns off") {
+                        timeStepper(minutes: model.settings.manualOffMinutes) {
+                            model.settings.manualOffMinutes = $0
                         }
                     }
                 }
 
-                labeledRow("Fade") {
-                    optionRow(
-                        NightShiftSettingsModel.fadeOptions,
-                        selected: clampedFade,
-                        label: { NightShiftSettingsModel.fadeLabel(minutes: $0) },
-                        focus: .fade
-                    ) { model.settings.fadeMinutes = $0 }
+                LabeledSettingRow("Fade") {
+                    SettingsOptionPicker(
+                        options: NightShiftSettingsModel.fadeOptions,
+                        selection: Binding(
+                            get: { clampedFade },
+                            set: { model.settings.fadeMinutes = $0 }
+                        ),
+                        title: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
+                    )
                 }
             }
         }
@@ -116,7 +99,6 @@ struct NightShiftDetailView: View {
             .padding(.horizontal, 4)
         }
         .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
-        .focused($focusedField, equals: .location)
     }
 
     // MARK: - Appearance
@@ -126,35 +108,36 @@ struct NightShiftDetailView: View {
             title: "Look",
             footer: "Darkness dims the whole picture like sunglasses; Warmth tints it toward amber and red. Focus Darkness or Warmth to preview at full night strength, or play a whole day below."
         ) {
-            VStack(alignment: .leading, spacing: 24) {
-                labeledRow("Darkness") {
-                    optionRow(
-                        NightShiftDimness.allCases,
-                        selected: model.settings.dimness,
-                        label: { $0.displayName },
-                        focus: .darkness
-                    ) { model.settings.dimness = $0 }
-                }
-                labeledRow("Warmth") {
-                    optionRow(
-                        NightShiftWarmth.allCases,
-                        selected: model.settings.warmth,
-                        label: { $0.displayName },
-                        focus: .warmth
-                    ) { model.settings.warmth = $0 }
-                }
-
-                HStack(spacing: 28) {
-                    DayNightDial(
-                        intensity: model.currentIntensity,
-                        progress: model.previewProgress
+            VStack(alignment: .leading, spacing: 20) {
+                LabeledSettingRow("Darkness") {
+                    SettingsOptionPicker(
+                        options: NightShiftDimness.allCases,
+                        selection: $model.settings.dimness,
+                        onFocusChange: { model.isPreviewing = $0 },
+                        title: { $0.displayName }
                     )
-                    .frame(width: 160, height: 84)
-
-                    previewButton
-                    Spacer(minLength: 0)
                 }
-                .padding(.top, 4)
+                LabeledSettingRow("Warmth") {
+                    SettingsOptionPicker(
+                        options: NightShiftWarmth.allCases,
+                        selection: $model.settings.warmth,
+                        onFocusChange: { model.isPreviewing = $0 },
+                        title: { $0.displayName }
+                    )
+                }
+
+                LabeledSettingRow("Preview") {
+                    HStack(spacing: 28) {
+                        DayNightDial(
+                            intensity: model.currentIntensity,
+                            progress: model.previewProgress
+                        )
+                        .frame(width: 160, height: 84)
+
+                        previewButton
+                        Spacer(minLength: 0)
+                    }
+                }
             }
         }
     }
@@ -172,7 +155,6 @@ struct NightShiftDetailView: View {
             .padding(.horizontal, 4)
         }
         .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
-        .focused($focusedField, equals: .preview)
     }
 
     // MARK: - Building blocks
@@ -185,60 +167,10 @@ struct NightShiftDetailView: View {
         }) ?? 90
     }
 
-    private func labeledRow<Content: View>(
-        _ label: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(label)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            content()
-        }
-    }
-
-    /// A horizontal row of selectable pills over a discrete list of options,
-    /// matching the Appearance picker idiom. When `focus` is set, every pill in
-    /// the row shares that focus value so the row reads as "focused" for the live
-    /// calibration preview regardless of which pill the cursor lands on.
-    private func optionRow<Option: Hashable>(
-        _ options: [Option],
-        selected: Option,
-        label: @escaping (Option) -> String,
-        focus: Field? = nil,
-        select: @escaping (Option) -> Void
-    ) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
-                ForEach(options, id: \.self) { option in
-                    Button {
-                        select(option)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text(label(option))
-                            if option == selected {
-                                Image(systemName: "checkmark.circle.fill")
-                            }
-                        }
-                        .font(.headline)
-                        .padding(.horizontal, 4)
-                    }
-                    .buttonStyle(PlozzSeasonTabStyle(isSelected: option == selected))
-                    .focused($focusedField, equals: focus)
-                    .accessibilityValue(option == selected ? "Selected" : "")
-                }
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 6)
-        }
-        .scrollClipDisabled()
-    }
-
     /// A ±15-minute clock stepper that wraps around midnight. The arrows never
     /// disable; they nudge the manual on/off time by one step per press.
     private func timeStepper(
         minutes: Int,
-        focus: Field,
         commit: @escaping (Int) -> Void
     ) -> some View {
         let step = NightShiftSettingsModel.manualStepMinutes
@@ -249,7 +181,6 @@ struct NightShiftDetailView: View {
                 Image(systemName: "minus").font(.headline)
             }
             .plozzGlassPillButton(shape: .circle)
-            .focused($focusedField, equals: focus)
 
             Text(model.clockLabel(minutes: minutes))
                 .font(.headline.monospacedDigit())

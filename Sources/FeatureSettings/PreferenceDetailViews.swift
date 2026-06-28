@@ -27,30 +27,12 @@ struct AppearanceDetailView: View {
                     // Theme
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Theme").font(.headline.weight(.semibold))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(AppTheme.allCases) { option in
-                                    Button {
-                                        theme.theme = option
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: option.symbolName)
-                                            Text(option.displayName)
-                                            if theme.theme == option {
-                                                Image(systemName: "checkmark.circle.fill")
-                                            }
-                                        }
-                                        .font(.headline)
-                                        .padding(.horizontal, 4)
-                                    }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
-                                    .accessibilityValue(theme.theme == option ? "Selected" : "")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 6)
-                        }
-                        .scrollClipDisabled()
+                        SettingsOptionPicker(
+                            options: AppTheme.allCases,
+                            selection: $theme.theme,
+                            icon: { $0.symbolName },
+                            title: { $0.displayName }
+                        )
                     }
 
                     sectionDivider
@@ -58,30 +40,12 @@ struct AppearanceDetailView: View {
                     // Display Size
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Display Size").font(.headline.weight(.semibold))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(UIDensity.allCases) { option in
-                                    Button {
-                                        density.density = option
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: option.symbolName)
-                                            Text(option.displayName)
-                                            if density.density == option {
-                                                Image(systemName: "checkmark.circle.fill")
-                                            }
-                                        }
-                                        .font(.headline)
-                                        .padding(.horizontal, 4)
-                                    }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: density.density == option))
-                                    .accessibilityValue(density.density == option ? "Selected" : "")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 6)
-                        }
-                        .scrollClipDisabled()
+                        SettingsOptionPicker(
+                            options: UIDensity.allCases,
+                            selection: $density.density,
+                            icon: { $0.symbolName },
+                            title: { $0.displayName }
+                        )
                         Text("Scales card size, columns and spacing.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -93,30 +57,15 @@ struct AppearanceDetailView: View {
                     // Transparency
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Transparency (liquid glass)").font(.headline.weight(.semibold))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(TransparencyPreference.allCases) { option in
-                                    Button {
-                                        transparencyPreferenceRaw = option.rawValue
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: option.symbolName)
-                                            Text(option.displayName)
-                                            if transparencyPreference == option {
-                                                Image(systemName: "checkmark.circle.fill")
-                                            }
-                                        }
-                                        .font(.headline)
-                                        .padding(.horizontal, 4)
-                                    }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: transparencyPreference == option))
-                                    .accessibilityValue(transparencyPreference == option ? "Selected" : "")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 6)
-                        }
-                        .scrollClipDisabled()
+                        SettingsOptionPicker(
+                            options: TransparencyPreference.allCases,
+                            selection: Binding(
+                                get: { transparencyPreference },
+                                set: { transparencyPreferenceRaw = $0.rawValue }
+                            ),
+                            icon: { $0.symbolName },
+                            title: { $0.displayName }
+                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

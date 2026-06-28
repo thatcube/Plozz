@@ -205,6 +205,16 @@ schemes:
     build:
       targets:
         Plozz: all
+      preActions:
+        - script: |
+            # Auto-link local secrets if missing (worktrees don't inherit gitignored files).
+            SECRETS_FILE="${PROJECT_DIR}/Config/Secrets.local.xcconfig"
+            CANONICAL="$HOME/.config/plozz/Secrets.local.xcconfig"
+            if [ ! -e "$SECRETS_FILE" ] && [ -f "$CANONICAL" ]; then
+              ln -s "$CANONICAL" "$SECRETS_FILE"
+            fi
+          name: Link secrets from ~/.config/plozz
+          settingsTarget: Plozz
     run:
       config: Debug
     test:

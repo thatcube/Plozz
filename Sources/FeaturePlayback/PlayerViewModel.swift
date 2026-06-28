@@ -414,10 +414,11 @@ public final class PlayerViewModel {
                 kind = .native
             } else if !forceTranscode, engineFactory.plozzigenAvailable,
                       let descriptor = request.localRemuxSource,
-                      case .eligible = descriptor.eligibility(capabilities: capabilities, allowAnyDecodableHEVC: allowAnyDecodableHEVCRemux) {
+                      case .eligible = descriptor.plozzigenEligibility {
                 // Plozzigen handles the full pipeline: FFmpeg demux → HLS-fMP4 →
-                // localhost → AVPlayer. Skip the LocalRemux strategy flow entirely;
-                // the engine reads localRemuxSource.originalURL directly.
+                // localhost → AVPlayer. Covers HEVC/H.264/VP9/AV1 video with any
+                // audio (stream-copy or lossless bridge). Skip LocalRemux; the
+                // engine reads localRemuxSource.originalURL directly.
                 kind = .plozzigen
             } else {
                 kind = EngineRouter.selectEngine(
@@ -440,8 +441,9 @@ public final class PlayerViewModel {
             // (PGS/VOBSUB), AVPlayer can't render it — route to the hybrid engine
             // so it appears, but only when we're direct-playing and a hybrid
             // engine is available. (A file with a text-subtitle equivalent stays
-            // native; see `defaultSubtitleNeedsHybridEngine`.)
-            if !isLocalRemux, kind == .native, !request.isTranscoding, engineFactory.hybridAvailable,
+            // native; see `defaultSubtitleNeedsHybridEngine`.) Plozzigen also
+            // can't render bitmap subtitles, so it overrides too.
+            if !isLocalRemux, (kind == .native || kind == .plozzigen), !request.isTranscoding, engineFactory.hybridAvailable,
                request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
                    mode: captionSettings.subtitleMode,
                    preferredLanguage: captionSettings.resolvedPreferredLanguage) {

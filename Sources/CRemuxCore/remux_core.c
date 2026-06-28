@@ -1871,10 +1871,24 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
 
     int wrote_any = 0;
     double end_limit = end_s + file_start;
+    /* Hard span cap (MEMORY SAFETY). A cold/resume resolve into a sparse- or
+     * mis-flagged-keyframe region runs the keyframe-stop search far past the window:
+     * on a 4K DoVi title a resume@1320s muxed a single 198s segment into one dyn_buf
+     * -> tvOS jetsam/watchdog SIGKILL ("signal 9"). Bound the muxed span to ~2x the
+     * cadence: if we pass the cap before finding a keyframe >= end_limit, STOP HERE
+     * even off-keyframe. The next segment BACKWARD-seeks to a real IDR (bounded
+     * ~1-GOP overlap, benign — AVPlayer dedupes by PTS). Never cut before the window
+     * edge (end_limit), so normal/indexed segments that end on their real boundary
+     * keyframe are unaffected. */
+    double cap_span = 2.0 * s->target_segment_seconds;
+    if (cap_span < 8.0) cap_span = 8.0;
+    double hard_cap_limit = start_s + file_start + cap_span;
+    if (hard_cap_limit < end_limit) hard_cap_limit = end_limit;
     /* B7 full-VOD: the absolute pts of the keyframe that stops this segment is
      * exactly B_{index+1} (the next segment's forward-snapped start). Capture it so
      * sequential playback caches every boundary for free (no extra resolve read). */
     double captured_stop = -1.0;
+    int capped_stop = 0;   /* set when the hard span cap stops the segment off-keyframe */
     /* Defensive monotonic-DTS belt: av_read_frame returns packets in decode order,
      * so DTS must be strictly increasing and PTS >= DTS. GENPTS fixes the common
      * case, but guard here so movenc never receives an unset/backward DTS (which
@@ -1907,6 +1921,15 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
         if (is_video) {
             double pts_s = (pkt->pts != AV_NOPTS_VALUE)
                 ? pkt->pts * av_q2d(vst->time_base) : -1.0;
+            /* Hard span cap: stop HERE even off-keyframe once past the cap so a
+             * sparse/mis-flagged-keyframe region can't balloon one 4K segment to
+             * ~200s -> jetsam. Leave captured_stop unset so resolved_kf[index+1]
+             * stays unresolved and the next segment re-seeks to a real IDR. */
+            if (pts_s >= 0 && pts_s >= hard_cap_limit) {
+                capped_stop = 1;
+                av_packet_unref(pkt);
+                break;
+            }
             /* Stop at the next segment boundary (a keyframe at/after end). */
             if (pts_s >= 0 && pts_s >= end_limit && (pkt->flags & AV_PKT_FLAG_KEY)) {
                 captured_stop = pts_s - file_start;   /* B_{index+1}, 0-based */
@@ -1981,8 +2004,20 @@ static int mux_segment_full(plozz_remux_session *s, int index, uint8_t **out_dat
      * boundary is the file duration. Sequential playback thus resolves the whole
      * timeline for free as it advances — only random-access seeks pay a resolve. */
     if (s->full_vod_mode && s->resolved_kf && (index + 1) < s->resolved_kf_count) {
-        double next_b = (captured_stop >= 0) ? captured_stop : s->duration_seconds;
-        if (s->resolved_kf[index + 1] < -0.5) s->resolved_kf[index + 1] = next_b;
+        /* Only cache a TRUSTWORTHY next boundary: a real keyframe stop (captured_stop),
+         * or the file duration when we ran to EOF. A hard-cap off-keyframe stop is NOT
+         * a real boundary — leave it unresolved so the next segment re-seeks to an IDR
+         * (caching it, or caching duration, would mis-anchor the next segment). */
+        if (captured_stop >= 0) {
+            if (s->resolved_kf[index + 1] < -0.5) s->resolved_kf[index + 1] = captured_stop;
+        } else if (!capped_stop) {
+            if (s->resolved_kf[index + 1] < -0.5) s->resolved_kf[index + 1] = s->duration_seconds;
+        }
+    }
+
+    if (capped_stop) {
+        remux_log(1, "remux: full-vod seg=%d SPAN-CAPPED ~%.1fs off-keyframe (next re-seeks to IDR)",
+                  index, cap_span);
     }
 
     /* Emit the per-segment A/V drift telemetry before the trailer is written.

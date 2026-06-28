@@ -101,6 +101,23 @@ private enum MKV {
     static let block: UInt32        = 0x0000_00A1
     static let referenceBlock: UInt32 = 0x0000_00FB
 
+    // SeekHead (the Segment's index of top-level element positions) + Cues (the
+    // keyframe index). Used by the Cues fast-path.
+    static let seekHead: UInt32     = 0x114D_9B74
+    static let seek: UInt32         = 0x0000_4DBB
+    static let seekID: UInt32       = 0x0000_53AB
+    static let seekPosition: UInt32 = 0x0000_53AC
+    static let cues: UInt32         = 0x1C53_BB6B
+    static let cuePoint: UInt32     = 0x0000_00BB
+    static let cueTime: UInt32      = 0x0000_00B3
+    static let cueTrackPositions: UInt32 = 0x0000_00B7
+    static let cueTrack: UInt32     = 0x0000_00F7
+    static let cueClusterPosition: UInt32 = 0x0000_00F1
+
+    /// The Cues element ID as raw big-endian bytes, for matching a SeekHead entry's
+    /// SeekID (which stores the target element's full ID including its marker bit).
+    static let cuesIDBytes: [UInt8] = [0x1C, 0x53, 0xBB, 0x6B]
+
     static let videoTrackType: UInt64 = 1
 }
 
@@ -638,6 +655,185 @@ final class MatroskaKeyframeSampler {
             scanned += fresh.count
         }
         return nil
+    }
+
+    // MARK: - Cues fast-path (the PRIMARY track: ~90-95% of library MKVs)
+
+    /// A keyframe index entry parsed from the Matroska Cues element: the keyframe
+    /// presentation time and the absolute byte offset of the Cluster that begins it.
+    struct CuePoint: Equatable {
+        let seconds: Double
+        let clusterOffset: Int64
+    }
+
+    /// Cheap presence check: does this source carry a usable Cues keyframe index?
+    /// Resolves the Cues element offset (via SeekHead or a bounded top-level scan)
+    /// WITHOUT parsing every CuePoint — a couple of small ranged reads. Lets the
+    /// open path pick the fast-path vs the walker before committing to either.
+    func hasCues() -> Bool {
+        guard let info = cachedInitInfo() else { return false }
+        return cuesElementOffset(info) != nil
+    }
+
+    /// The Cues FAST-PATH. When the source carries a Cues index, parse it into the
+    /// EXACT (keyframe PTS, cluster offset) table for the WHOLE timeline in ~2
+    /// ranged reads — no cluster scan, no estimation, no fixed cadence. Returns the
+    /// points sorted by time (video track only when CueTrack is present), or nil
+    /// when there is no usable Cues element (caller then falls back to the walker).
+    ///
+    /// Cost: one small read to locate Cues (SeekHead is at the Segment front), then
+    /// one read of the Cues element body (tens of KB even for a 2.5 h feature: ~one
+    /// CuePoint per GOP × ~16 bytes). Independent of file size and bitrate.
+    func readCues(maxCuesBytes: Int = 8 * 1024 * 1024) -> [CuePoint]? {
+        guard let info = cachedInitInfo() else { return nil }
+        guard let cuesOff = cuesElementOffset(info),
+              let el = readElementHeader(at: cuesOff), el.id == MKV.cues else { return nil }
+
+        // Read the Cues body (bounded). Unknown-size Cues are rare; cap defensively.
+        let size: Int
+        if el.dataSize >= 0 { size = Int(min(Int64(maxCuesBytes), el.dataSize)) }
+        else { size = maxCuesBytes }
+        let body = bytes(at: el.dataOffset, count: size)
+        guard !body.isEmpty else { return nil }
+
+        var points: [CuePoint] = []
+        var i = 0
+        while i < body.count {
+            guard let cp = readChildHeader(body, i), cp.id == MKV.cuePoint else {
+                guard let any = readChildHeader(body, i) else { break }
+                if any.next <= i { break }
+                i = any.next
+                continue
+            }
+            if let p = parseCuePoint(body, cp.dataStart, cp.dataStart + cp.dataLen, info: info) {
+                points.append(p)
+            }
+            if cp.next <= i { break }
+            i = cp.next
+        }
+        guard !points.isEmpty else { return nil }
+        points.sort { $0.seconds < $1.seconds }
+        return points
+    }
+
+    /// Parses one CuePoint: CueTime (ticks) + the CueTrackPositions for the video
+    /// track (or the first one if no track filter matches), yielding the absolute
+    /// cluster offset. Returns nil if the CuePoint lacks a time or a cluster pos.
+    private func parseCuePoint(_ b: [UInt8], _ start: Int, _ end: Int, info: InitInfo) -> CuePoint? {
+        var timeTicks: UInt64?
+        var videoOffset: Int64?
+        var anyOffset: Int64?
+        var i = start
+        while i < end && i < b.count {
+            guard let el = readChildHeader(b, i) else { break }
+            if el.id == MKV.cueTime {
+                timeTicks = EBML.uint(b, el.dataStart, el.dataLen)
+            } else if el.id == MKV.cueTrackPositions {
+                let (track, pos) = parseCueTrackPositions(b, el.dataStart, el.dataStart + el.dataLen)
+                if let pos = pos {
+                    let abs = info.segmentDataOffset + Int64(bitPattern: pos)
+                    if track == info.videoTrack { videoOffset = abs }
+                    if anyOffset == nil { anyOffset = abs }
+                }
+            }
+            if el.next <= i { break }
+            i = el.next
+        }
+        guard let t = timeTicks, let off = videoOffset ?? anyOffset else { return nil }
+        return CuePoint(seconds: ticksToSeconds(Int64(t), info), clusterOffset: off)
+    }
+
+    private func parseCueTrackPositions(_ b: [UInt8], _ start: Int, _ end: Int) -> (track: UInt64?, pos: UInt64?) {
+        var track: UInt64?
+        var pos: UInt64?
+        var i = start
+        while i < end && i < b.count {
+            guard let el = readChildHeader(b, i) else { break }
+            if el.id == MKV.cueTrack { track = EBML.uint(b, el.dataStart, el.dataLen) }
+            else if el.id == MKV.cueClusterPosition { pos = EBML.uint(b, el.dataStart, el.dataLen) }
+            if el.next <= i { break }
+            i = el.next
+        }
+        return (track, pos)
+    }
+
+    /// Resolves the absolute offset of the Cues element: prefer the SeekHead (at the
+    /// Segment front) which names Cues' position directly; otherwise a bounded
+    /// top-level scan that also catches a Cues element placed before the clusters.
+    /// Returns nil if no Cues is found within the header region.
+    private func cuesElementOffset(_ info: InitInfo, maxHeaderBytes: Int = 8 * 1024 * 1024) -> Int64? {
+        var off = info.segmentDataOffset
+        let total = source.totalSize
+        let segEnd: Int64 = total >= 0 ? total : Int64.max
+        let hardStop = info.segmentDataOffset + Int64(maxHeaderBytes)
+        var seekHeadCues: Int64?
+
+        while off < segEnd && off < hardStop {
+            guard let el = readElementHeader(at: off) else { break }
+            switch el.id {
+            case MKV.cues:
+                return el.headerOffset
+            case MKV.seekHead:
+                if let c = parseSeekHeadForCues(el, info: info) { seekHeadCues = c }
+                if el.dataSize < 0 { return seekHeadCues }
+                off = el.dataOffset + el.dataSize
+            case MKV.cluster:
+                // Reached media. Cues, if present, is indexed by the SeekHead (it
+                // usually trails the clusters); return what the SeekHead told us.
+                return seekHeadCues.flatMap { verifyCues(at: $0) }
+            default:
+                if el.dataSize < 0 { return seekHeadCues.flatMap { verifyCues(at: $0) } }
+                off = el.dataOffset + el.dataSize
+            }
+        }
+        return seekHeadCues.flatMap { verifyCues(at: $0) }
+    }
+
+    /// Confirms a SeekHead-derived offset actually lands on a Cues element before we
+    /// trust it (guards against a stale/relative-base mismatch).
+    private func verifyCues(at offset: Int64) -> Int64? {
+        guard offset >= 0, let el = readElementHeader(at: offset), el.id == MKV.cues else { return nil }
+        return offset
+    }
+
+    /// Scans a SeekHead's Seek entries for the one whose SeekID is the Cues ID and
+    /// returns the absolute Cues offset (SeekPosition is relative to Segment data).
+    private func parseSeekHeadForCues(_ shEl: ElementHeader, info: InitInfo) -> Int64? {
+        let size = shEl.dataSize >= 0 ? Int(min(Int64(64 * 1024), shEl.dataSize)) : 64 * 1024
+        let body = bytes(at: shEl.dataOffset, count: size)
+        guard !body.isEmpty else { return nil }
+        var i = 0
+        while i < body.count {
+            guard let el = readChildHeader(body, i) else { break }
+            if el.id == MKV.seek {
+                if let pos = seekEntryCuesPosition(body, el.dataStart, el.dataStart + el.dataLen) {
+                    return info.segmentDataOffset + Int64(bitPattern: pos)
+                }
+            }
+            if el.next <= i { break }
+            i = el.next
+        }
+        return nil
+    }
+
+    /// If a Seek entry targets Cues (SeekID == Cues ID bytes), returns its
+    /// SeekPosition; nil otherwise.
+    private func seekEntryCuesPosition(_ b: [UInt8], _ start: Int, _ end: Int) -> UInt64? {
+        var isCues = false
+        var pos: UInt64?
+        var i = start
+        while i < end && i < b.count {
+            guard let el = readChildHeader(b, i) else { break }
+            if el.id == MKV.seekID {
+                let idBytes = Array(b[el.dataStart..<min(b.count, el.dataStart + max(0, el.dataLen))])
+                if idBytes == MKV.cuesIDBytes { isCues = true }
+            } else if el.id == MKV.seekPosition {
+                pos = EBML.uint(b, el.dataStart, el.dataLen)
+            }
+            if el.next <= i { break }
+            i = el.next
+        }
+        return isCues ? pos : nil
     }
 
     // MARK: Element-header reads over the source

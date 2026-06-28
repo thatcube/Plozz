@@ -52,6 +52,21 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
     private let idBlockGroup: [UInt8] = [0xA0]
     private let idBlock: [UInt8] = [0xA1]
     private let idReferenceBlock: [UInt8] = [0xFB]
+    private let idSeekHead: [UInt8] = [0x11, 0x4D, 0x9B, 0x74]
+    private let idSeek: [UInt8] = [0x4D, 0xBB]
+    private let idSeekID: [UInt8] = [0x53, 0xAB]
+    private let idSeekPosition: [UInt8] = [0x53, 0xAC]
+    private let idCues: [UInt8] = [0x1C, 0x53, 0xBB, 0x6B]
+    private let idCuePoint: [UInt8] = [0xBB]
+    private let idCueTime: [UInt8] = [0xB3]
+    private let idCueTrackPositions: [UInt8] = [0xB7]
+    private let idCueTrack: [UInt8] = [0xF7]
+    private let idCueClusterPosition: [UInt8] = [0xF1]
+
+    /// Fixed-width (8-byte) big-endian uint, so SeekPosition/CueClusterPosition keep
+    /// a constant encoded length regardless of value — lets the file builder compute
+    /// element offsets in one pass without a fixpoint over vint widths.
+    private func u64be(_ v: UInt64) -> [UInt8] { (0..<8).reversed().map { UInt8((v >> (8 * $0)) & 0xFF) } }
 
     private func simpleBlock(track: Int, rel: Int16, keyframe: Bool, payload: [UInt8] = [0xAA, 0xBB]) -> [UInt8] {
         var d = ebmlSize(track)                       // track number is a vint
@@ -100,6 +115,71 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         if withEBMLHeader { file += el(idEBMLHeader, [0x42, 0x86, 0x81, 0x01]) }
         file += el(idSegment, segBody)
         return file
+    }
+
+    /// A SeekHead element naming the Cues byte position (Segment-data-relative).
+    private func seekHead(cuesPos: UInt64) -> [UInt8] {
+        let seek = el(idSeek, el(idSeekID, idCues) + el(idSeekPosition, u64be(cuesPos)))
+        return el(idSeekHead, seek)
+    }
+
+    /// A Cues element from (timeTicks, [(track, segRelClusterPos)]) entries. Each
+    /// CuePoint may carry multiple CueTrackPositions to exercise track filtering.
+    private func cues(_ entries: [(time: Int, positions: [(track: Int, pos: Int)])]) -> [UInt8] {
+        var body: [UInt8] = []
+        for e in entries {
+            var cp = el(idCueTime, uintBytes(UInt64(e.time)))
+            for p in e.positions {
+                cp += el(idCueTrackPositions,
+                         el(idCueTrack, uintBytes(UInt64(p.track)))
+                         + el(idCueClusterPosition, u64be(UInt64(p.pos))))
+            }
+            body += el(idCuePoint, cp)
+        }
+        return el(idCues, body)
+    }
+
+    /// Builds a single-video-track file laid out as a real muxer would for the
+    /// Cues fast-path: SeekHead at the Segment front pointing at a TRAILING Cues
+    /// element after all clusters. Returns the file plus the expected keyframe
+    /// seconds and the Segment-data-relative cluster offsets so tests can assert
+    /// both PTS and absolute byte offsets end-to-end.
+    private func buildFileWithCues(timecodeScale: Int = 1_000_000, durationTicks: Int? = nil,
+                                   videoTrack: Int = 1, clusterTimes: [Int],
+                                   payloadBytes: Int = 2,
+                                   extraPositions: [(track: Int, pos: Int)] = []) ->
+        (file: [UInt8], keyframeSeconds: [Double], clusterRelOffsets: [Int]) {
+        var infoData = el(idTimecodeScale, uintBytes(UInt64(timecodeScale)))
+        if let d = durationTicks {
+            let bits = Double(d).bitPattern
+            infoData += el(idDuration, (0..<8).reversed().map { UInt8((bits >> (8 * $0)) & 0xFF) })
+        }
+        let infoEl = el(idInfo, infoData)
+        let tracksEl = el(idTracks, el(idTrackEntry,
+                          el(idTrackNumber, uintBytes(UInt64(videoTrack))) + el(idTrackType, [0x01])))
+        let pad = [UInt8](repeating: 0x77, count: max(2, payloadBytes))
+        let clusterEls = clusterTimes.map {
+            cluster(timecode: $0, blocks: [simpleBlock(track: videoTrack, rel: 0, keyframe: true, payload: pad)])
+        }
+        let shLen = seekHead(cuesPos: 0).count // fixed-width SeekPosition → stable length
+        let infoOff = shLen
+        let tracksOff = infoOff + infoEl.count
+        var clusterRelOffsets: [Int] = []
+        var run = tracksOff + tracksEl.count
+        for c in clusterEls { clusterRelOffsets.append(run); run += c.count }
+        let cuesRelOff = run
+        let entries = zip(clusterTimes, clusterRelOffsets).map { t, off in
+            (time: t, positions: [(track: videoTrack, pos: off)] + extraPositions)
+        }
+        let sh = seekHead(cuesPos: UInt64(cuesRelOff))
+        XCTAssertEqual(sh.count, shLen, "SeekHead width must be stable")
+        var segBody = sh + infoEl + tracksEl
+        for c in clusterEls { segBody += c }
+        segBody += cues(entries)
+        var file: [UInt8] = el(idEBMLHeader, [0x42, 0x86, 0x81, 0x01])
+        file += el(idSegment, segBody)
+        let kf = clusterTimes.map { Double($0) * Double(timecodeScale) / 1e9 }
+        return (file, kf, clusterRelOffsets)
     }
 
     // MARK: - In-memory source
@@ -581,6 +661,85 @@ final class MatroskaKeyframeSamplerTests: XCTestCase {
         }
         let sampler = MatroskaKeyframeSampler(source: UnsizedSource(bigSeekFile()))
         XCTAssertNil(sampler.discoverKeyframeAtOrAfter(5.0))
+    }
+
+    // MARK: - Cues fast-path (PRIMARY track for ~90-95% of library MKVs)
+
+    func testReadCues_trailingCues_exactTableAndOffsets() {
+        let times = [0, 6006, 12012, 18018, 24024] // ms ticks @ 1ms scale
+        let built = buildFileWithCues(timecodeScale: 1_000_000, durationTicks: 30030,
+                                      clusterTimes: times)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        guard let cues = sampler.readCues() else { return XCTFail("readCues nil") }
+        // Exact PTS table for the WHOLE timeline — no scan, no estimation.
+        XCTAssertEqual(cues.map(\.seconds), built.keyframeSeconds)
+        // Absolute cluster offsets resolve correctly and actually land on Cluster IDs.
+        let expectedAbs = built.clusterRelOffsets.map { info.segmentDataOffset + Int64($0) }
+        XCTAssertEqual(cues.map(\.clusterOffset), expectedAbs)
+        for abs in cues.map(\.clusterOffset) {
+            let id = Array(built.file[Int(abs)..<Int(abs) + 4])
+            XCTAssertEqual(id, [0x1F, 0x43, 0xB6, 0x75], "cue offset must point at a Cluster")
+        }
+    }
+
+    func testHasCues_trueWithIndex_falseWithout() {
+        let withCues = buildFileWithCues(clusterTimes: [0, 1000, 2000])
+        XCTAssertTrue(MatroskaKeyframeSampler(source: MemorySource(withCues.file)).hasCues())
+        // bigSeekFile / buildFile produce no SeekHead and no Cues.
+        let noCues = buildFile(durationTicks: 4000,
+                               clusters: [cluster(timecode: 0, blocks: [simpleBlock(track: 1, rel: 0, keyframe: true)])])
+        let s = MatroskaKeyframeSampler(source: MemorySource(noCues))
+        XCTAssertFalse(s.hasCues())
+        XCTAssertNil(s.readCues())
+    }
+
+    /// Non-1ms TimecodeScale must be applied to CueTime exactly (the PTS the muxer
+    /// will seek to).
+    func testReadCues_appliesTimecodeScale() {
+        // 100us ticks: 10 ticks = 1ms; times below are in those ticks.
+        let times = [0, 60_060, 120_120]
+        let built = buildFileWithCues(timecodeScale: 100_000, durationTicks: 180_180,
+                                      clusterTimes: times)
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard let cues = sampler.readCues() else { return XCTFail("readCues nil") }
+        let oracle = times.map { Double($0) * 100_000.0 / 1e9 }
+        XCTAssertEqual(cues.map(\.seconds), oracle)
+    }
+
+    /// When a CuePoint indexes multiple tracks, the fast-path must pick the VIDEO
+    /// track's cluster position, not an audio track's.
+    func testReadCues_filtersToVideoTrack() {
+        // Add a bogus audio (track 2) position with a WRONG offset to each CuePoint;
+        // the reader must ignore it and use the video (track 1) offset.
+        let built = buildFileWithCues(videoTrack: 1, clusterTimes: [0, 6000],
+                                      extraPositions: [(track: 2, pos: 999_999)])
+        let sampler = MatroskaKeyframeSampler(source: MemorySource(built.file))
+        guard let info = sampler.parseInit() else { return XCTFail("init") }
+        guard let cues = sampler.readCues() else { return XCTFail("readCues nil") }
+        let expectedAbs = built.clusterRelOffsets.map { info.segmentDataOffset + Int64($0) }
+        XCTAssertEqual(cues.map(\.clusterOffset), expectedAbs)
+    }
+
+    /// The fast-path is cheap: locating + reading the whole index costs a handful of
+    /// small reads (init + SeekHead + Cues body), nowhere near the file size — the
+    /// "<1s, ~2 range requests" property R1 measured.
+    func testReadCues_isCheap() {
+        // 300 keyframes ≈ a 30-min title at 6s GOPs, with ~256KB "frame payloads"
+        // per cluster so the file is ~80MB — the fast-path must read ~none of that.
+        let times = (0..<300).map { $0 * 6000 }
+        let built = buildFileWithCues(durationTicks: 300 * 6000, clusterTimes: times,
+                                      payloadBytes: 256 * 1024)
+        let src = MemorySource(built.file)
+        let sampler = MatroskaKeyframeSampler(source: src)
+        guard let cues = sampler.readCues() else { return XCTFail("readCues nil") }
+        XCTAssertEqual(cues.count, 300)
+        // Whole index located + read in well under 100 KB and a handful of fetches —
+        // bounded by the INDEX size, NOT the ~80 MB of frame payload (file-size /
+        // bitrate independent). This is the "<1s, ~2 range requests" property.
+        XCTAssertLessThan(sampler.stats.bytesRead, 100_000)
+        XCTAssertLessThan(src.fetches, 40)
+        XCTAssertGreaterThan(built.file.count, 40_000_000)
     }
 }
 #endif

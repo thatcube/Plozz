@@ -9,8 +9,11 @@ import Foundation
 /// point values it resolves to live in `CoreUI` (`PlozzMetrics`), so this stays
 /// Foundation-only and the Settings screen can edit it without importing SwiftUI.
 public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
-    /// Tightest layout — more columns, smaller cards, tighter gaps. For power
-    /// users who want to see as much as possible at once.
+    /// Tightest layout of all — the most columns, smallest cards and tightest
+    /// gaps. For power users who want to pack the absolute maximum on screen.
+    case extraCompact
+    /// Tighter than standard — more columns, smaller cards, tighter gaps. For
+    /// power users who want to see as much as possible at once.
     case compact
     /// The default, balanced layout.
     case standard
@@ -24,6 +27,7 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
 
     public var displayName: String {
         switch self {
+        case .extraCompact: return "Extra Compact"
         case .compact: return "Compact"
         case .standard: return "Standard"
         case .spacious: return "Spacious"
@@ -34,6 +38,7 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
     /// Short helper line shown under each option in Settings.
     public var detail: String {
         switch self {
+        case .extraCompact: return "Maximum on screen, tightest spacing"
         case .compact: return "More on screen, tighter spacing"
         case .standard: return "The balanced default"
         case .spacious: return "Larger cards, more breathing room"
@@ -42,11 +47,12 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 
     /// SF Symbol shown next to the option in Settings. Reads as a coarse → fine
-    /// "grid density" ramp.
+    /// "grid density" ramp (fewer, bigger cells → more, smaller cells).
     public var symbolName: String {
         switch self {
-        case .compact: return "square.grid.4x3.fill"
-        case .standard: return "square.grid.3x3.fill"
+        case .extraCompact: return "square.grid.4x3.fill"
+        case .compact: return "square.grid.3x3.fill"
+        case .standard: return "square.grid.3x2.fill"
         case .spacious: return "square.grid.2x2.fill"
         case .extraLarge: return "square.fill"
         }
@@ -57,6 +63,7 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
     /// rhythm all scale by this factor.
     public var scale: Double {
         switch self {
+        case .extraCompact: return 0.72
         case .compact: return 0.85
         case .standard: return 1.0
         case .spacious: return 1.18
@@ -69,6 +76,7 @@ public enum UIDensity: String, CaseIterable, Identifiable, Codable, Sendable {
     /// main lever that makes posters visibly bigger at higher densities.
     public var posterGridColumns: Int {
         switch self {
+        case .extraCompact: return 9
         case .compact: return 8
         case .standard: return 7
         case .spacious: return 6

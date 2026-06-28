@@ -69,7 +69,7 @@ final class UIDensitySettingsStoreTests: XCTestCase {
     func testScaleAndColumnsRampMonotonically() {
         // Higher density → larger scale and fewer poster columns. The settings
         // ladder relies on this ordering being monotonic.
-        let order: [UIDensity] = [.compact, .standard, .spacious, .extraLarge]
+        let order: [UIDensity] = [.extraCompact, .compact, .standard, .spacious, .extraLarge]
         for (lhs, rhs) in zip(order, order.dropFirst()) {
             XCTAssertLessThan(lhs.scale, rhs.scale, "\(lhs) should scale smaller than \(rhs)")
             XCTAssertGreaterThan(lhs.posterGridColumns, rhs.posterGridColumns, "\(lhs) should have more columns than \(rhs)")

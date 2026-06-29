@@ -245,6 +245,9 @@ public final class PlayerViewModel {
     /// bring-up; `stop()` cancels it so a Back during the transition tears down
     /// cleanly via the cancellation checks in `startPlayback`.
     private var prefetchTask: Task<Void, Never>?
+    /// Background series-id enrichment; awaited (briefly) at stop so a fast
+    /// finisher still scrobbles with the show's ids resolved.
+    private var enrichTask: Task<Void, Never>?
 
     public init(
         provider: any MediaProvider,
@@ -478,7 +481,7 @@ public final class PlayerViewModel {
             // Enrich the episode with its series-level ids in the background so the
             // first scrobble can identify the show on trackers that require it.
             if request.item.kind == .episode, seriesIDResolver != nil {
-                Task { @MainActor [weak self] in await self?.enrichSeriesIDs() }
+                enrichTask = Task { @MainActor [weak self] in await self?.enrichSeriesIDs() }
             }
 
             // An explicit override wins over the provider's resume point so the
@@ -1171,6 +1174,17 @@ public final class PlayerViewModel {
         let percent = watchedPercent(at: finalPosition)
         engine.stop()
         await teardownLocalRemuxSession()
+        // Let in-flight series-id enrichment finish so a fast playthrough still
+        // scrobbles with the show's ids (anime tagged only AniDB resolve mal/
+        // anilist here). Capped at 2s so a slow server never blocks teardown.
+        if let enrichTask {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await enrichTask.value }
+                group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+                _ = await group.next()
+                group.cancelAll()
+            }
+        }
         await report(event: .stop, isPaused: true, positionOverride: finalPosition)
         onPlaybackStopped(finalPosition, percent)
     }

@@ -219,6 +219,14 @@ struct MainTabView: View {
                 onSelectPlexHomeUser: onSelectPlexHomeUser
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+
+            #if DEBUG
+            // DEBUG-only live-preview harness for the subtitle renderer. Lets us
+            // design the subtitle look on-device without starting playback.
+            // Compiled out of Release/TestFlight.
+            SubtitleLabView()
+                .tabItem { Label("Sub Lab", systemImage: "captions.bubble") }
+            #endif
         }
         .environment(musicPlayerModel)
         .environment(uiDensityModel)

@@ -24,9 +24,9 @@ import OSLog
 ///    non-Apple toolchains (CI runs `swift test` on Linux). The string builders are
 ///    pure and unit-testable everywhere.
 public enum FanoutDiagnostics {
-    /// Thread-safe on/off gate. Default **on** for this diagnostics branch so the
-    /// maintainer can stream telemetry without toggling anything; flip via
-    /// ``setEnabled(_:)`` (e.g. from a Settings switch) to silence it.
+    /// Thread-safe on/off gate. Default **off** in release; auto-enabled only when
+    /// the process is launched with `PLZXFAN_STDOUT=1` so the maintainer can stream
+    /// telemetry. Flip via ``setEnabled(_:)`` (e.g. from a Settings switch).
     private static let gate = Gate()
 
     /// Whether fan-out telemetry is currently emitted.
@@ -199,7 +199,9 @@ public enum FanoutDiagnostics {
     /// 5.9, so a plain mutable static isn't `Sendable`).
     private final class Gate: @unchecked Sendable {
         private let lock = NSLock()
-        private var enabled = true
+        // Off in release; auto-on only when the maintainer launches with
+        // PLZXFAN_STDOUT=1, so shipped builds stay silent without a Settings toggle.
+        private var enabled = ProcessInfo.processInfo.environment["PLZXFAN_STDOUT"] == "1"
         var isEnabled: Bool { lock.lock(); defer { lock.unlock() }; return enabled }
         func setEnabled(_ value: Bool) { lock.lock(); enabled = value; lock.unlock() }
     }

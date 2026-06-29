@@ -66,9 +66,16 @@ public actor AnimeIDMapper {
         if let cached = cache[key] { return merge(ids, cached) }
 
         let resolved = await fetch(source: source, id: id)
-        cache[key] = resolved ?? ids   // negative cache: don't re-query a miss
-        persist()
-        return merge(ids, resolved ?? AnimeMappedIDs())
+        // Cache hits always; cache a miss only when ARM is certain (404), so a
+        // transient outage can't permanently poison anidb-only titles.
+        if let mapped = resolved.ids {
+            cache[key] = mapped
+            persist()
+        } else if resolved.definitive {
+            cache[key] = ids
+            persist()
+        }
+        return merge(ids, resolved.ids ?? AnimeMappedIDs())
     }
 
     // MARK: - Source selection
@@ -101,7 +108,10 @@ public actor AnimeIDMapper {
         let kitsu: Int?
     }
 
-    private func fetch(source: String, id: Int) async -> AnimeMappedIDs? {
+    /// Resolves ids from ARM. `definitive` is true when ARM gave an authoritative
+    /// answer (mapping found, or a 404 "no mapping"); false on transport/transient
+    /// errors so the caller skips negative-caching and retries later.
+    private func fetch(source: String, id: Int) async -> (ids: AnimeMappedIDs?, definitive: Bool) {
         let endpoint = Endpoint(
             method: .get,
             path: "/api/v2/ids",
@@ -112,10 +122,13 @@ public actor AnimeIDMapper {
         )
         do {
             let rec = try await http.decode(ARMRecord.self, from: endpoint, baseURL: baseURL, decoder: JSONDecoder())
-            return AnimeMappedIDs(anidb: rec.anidb, mal: rec.myanimelist, anilist: rec.anilist, kitsu: rec.kitsu)
+            return (AnimeMappedIDs(anidb: rec.anidb, mal: rec.myanimelist, anilist: rec.anilist, kitsu: rec.kitsu), true)
+        } catch AppError.notFound {
+            // ARM authoritatively has no mapping — safe to negative-cache.
+            return (nil, true)
         } catch {
             PlozzLog.networking.debug("AnimeIDMapper lookup failed (non-fatal) for \(source):\(id)")
-            return nil
+            return (nil, false)
         }
     }
 

@@ -23,6 +23,15 @@ settings:
     # CFBundleShortVersionString must match the parent app's). Bump by hand for a
     # real release.
     MARKETING_VERSION: "0.1"
+  configs:
+    # Project-wide Debug: InjectionNext needs per-file frontend command lines in
+    # the build log to recompile a single saved file. Set here (not just on the
+    # app target) so SPM package targets (RootView etc.) also emit them and can
+    # hot-reload. Debug-only, so Release/TestFlight is unaffected.
+    Debug:
+      EMIT_FRONTEND_COMMAND_LINES: YES
+      SWIFT_COMPILATION_MODE: incremental
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
 
 # Local Swift package providing all modular feature/code libraries.
 packages:

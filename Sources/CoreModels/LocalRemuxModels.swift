@@ -218,6 +218,21 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
         return container == "mkv" || container.contains("matroska")
     }
 
+    /// Containers AetherEngine (Plozzigen) demuxes and remuxes to AVPlayer:
+    /// Matroska/WebM **and** the MPEG-TS family (`.ts`/`.m2ts`/`.mts`). MP4/MOV are
+    /// deliberately excluded — those direct-play natively, so they never need the
+    /// remux pipeline. This is wider than `isMatroskaContainer` because the engine
+    /// handles transport-stream parts (UHD-BD remuxes ship as `.m2ts`) that mpv
+    /// could only play by crashing on multichannel audio.
+    public var isPlozzigenContainer: Bool {
+        let container = (sourceMetadata.container ?? "").lowercased()
+        switch container {
+        case "mkv", "webm": return true
+        case "ts", "m2ts", "mts", "m2t", "mpegts": return true
+        default: return container.contains("matroska") || container.contains("mpegts")
+        }
+    }
+
     public var isHevcVideo: Bool {
         let codec = (sourceMetadata.video?.codec ?? "").lowercased()
         return codec == "hevc" || codec == "h265"
@@ -276,7 +291,8 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
     /// - **Audio**: anything — fMP4-legal codecs (AAC, AC3, EAC3, FLAC, ALAC, MP3,
     ///   Opus) are stream-copied; incompatible ones (TrueHD, DTS) are bridged to
     ///   lossless FLAC internally.
-    /// - **Container**: MKV/Matroska (the primary use case; MP4 direct-play stays native)
+    /// - **Container**: MKV/Matroska/WebM **and** the MPEG-TS family (`.ts`/`.m2ts`/
+    ///   `.mts`); MP4/MOV direct-play stays native
     ///
     /// Only excludes DV Profile 7 dual-layer (unsupported everywhere except the
     /// original mastering decoder) and non-range-readable sources (can't seek).
@@ -284,8 +300,8 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
         guard byteRangeSupported else {
             return .ineligible("Source bytes are not range-readable")
         }
-        guard isMatroskaContainer else {
-            return .ineligible("Not a Matroska container (MP4/MOV direct-play stays native)")
+        guard isPlozzigenContainer else {
+            return .ineligible("Not a Plozzigen container (MP4/MOV direct-play stays native)")
         }
         let videoCodec = (sourceMetadata.video?.codec ?? "").lowercased()
         guard Self.plozzigenVideoCodecs.contains(videoCodec) else {

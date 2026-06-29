@@ -93,8 +93,15 @@ public final class PlozzigenVideoEngine: VideoEngine {
         // standard HLS / direct-play URLs.
         let url = request.localRemuxSource?.originalURL ?? request.streamURL
 
+        // For >6-channel sources (7.1), prefer the lossless FLAC bridge so the
+        // full 7.1 layout survives — the default `.surroundCompat` EAC3 bridge caps
+        // at 5.1. Multichannel-LPCM AVRs get true 7.1; stereo-only routes downmix
+        // gracefully. Either way it's an on-device bridge, never a server transcode.
+        let channels = request.localRemuxSource?.sourceMetadata.audio?.channels
+            ?? request.sourceMetadata?.audio?.channels ?? 0
         let options = LoadOptions(
-            matchContentEnabled: true
+            matchContentEnabled: true,
+            audioBridgeMode: channels > 6 ? .lossless : .surroundCompat
         )
 
         do {

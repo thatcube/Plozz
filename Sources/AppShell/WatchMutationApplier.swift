@@ -277,6 +277,7 @@ extension TraktScrobbleIntent {
             id: "trakt-intent",
             title: title ?? "",
             kind: kind,
+            parentTitle: seriesTitle,
             seasonNumber: seasonNumber,
             episodeNumber: episodeNumber,
             productionYear: year,

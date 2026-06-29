@@ -48,6 +48,9 @@ public struct EpisodeOrigin: Codable, Hashable, Sendable {
 public struct TraktScrobbleIntent: Codable, Hashable, Sendable {
     public var kind: MediaItemKind
     public var title: String?
+    /// Series title for episodes, so anime trackers can title-search brand-new
+    /// shows that public id maps (ARM) haven't indexed yet. Nil for movies.
+    public var seriesTitle: String?
     public var year: Int?
     public var seasonNumber: Int?
     public var episodeNumber: Int?
@@ -59,6 +62,7 @@ public struct TraktScrobbleIntent: Codable, Hashable, Sendable {
     public init(
         kind: MediaItemKind,
         title: String?,
+        seriesTitle: String? = nil,
         year: Int?,
         seasonNumber: Int?,
         episodeNumber: Int?,
@@ -67,6 +71,7 @@ public struct TraktScrobbleIntent: Codable, Hashable, Sendable {
     ) {
         self.kind = kind
         self.title = title
+        self.seriesTitle = seriesTitle
         self.year = year
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber

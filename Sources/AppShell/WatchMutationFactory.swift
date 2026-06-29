@@ -79,6 +79,7 @@ enum WatchMutationFactory {
         TraktScrobbleIntent(
             kind: item.kind,
             title: item.title,
+            seriesTitle: item.parentTitle,
             year: item.productionYear,
             seasonNumber: item.seasonNumber,
             episodeNumber: item.episodeNumber,

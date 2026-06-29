@@ -68,7 +68,22 @@ public actor LyricsDiskCache {
     /// metadata cache, so bumping the version cleanly starts fresh if the
     /// `Lyrics` shape ever evolves or we want to invalidate every cached
     /// entry in one go.
-    private static let cacheFileName = "plozz-lyrics-cache-v2.json"
+    ///
+    /// v2 → v3: invalidates negatives poisoned by an earlier bug where a
+    /// queue/prefetch resolve with a missing track artist skipped LRCLIB,
+    /// consulted only the server, and cached the resulting "no lyrics" as
+    /// authoritative. Those false negatives stuck for songs LRCLIB actually
+    /// has (e.g. popular tracks played from an album). The resolver no longer
+    /// caches an artist-less negative, so a one-time reset clears the bad data.
+    ///
+    /// v3 → v4: invalidates negatives cached for tracks whose player-supplied
+    /// artist differs from how LRCLIB files the song — a collaboration credited
+    /// to a duo/group name (e.g. "Bad Meets Evil" for an "Eminem, Royce da 5'9\""
+    /// track), a soundtrack under "Various Artists", classical filed by composer
+    /// vs. performer. The LRCLIB provider now has a title-only + duration-matched
+    /// fallback that finds these, so a one-time reset lets affected songs
+    /// re-resolve and pick up lyrics they actually have.
+    private static let cacheFileName = "plozz-lyrics-cache-v4.json"
     private static let cacheFilePrefix = "plozz-lyrics-cache"
 
     public init(directory: URL? = LyricsDiskCache.defaultDirectory()) {

@@ -175,7 +175,7 @@ private func lyricsCacheKey(for track: MusicTrack) -> String {
 /// attribution badge.
 @MainActor
 func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
-    { track in
+    { track, context in
         let key = lyricsCacheKey(for: track)
         // L1: in-memory memo for this session.
         if let cached = await LyricsMemoCache.shared.value(for: key) {
@@ -208,7 +208,14 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
                 staySilent: true
             )
         }
-        let resolution = await resolveSyncedLyrics(for: track, provider: provider)
+        // Background prefetch (next track + bulk sweep) skips the expensive
+        // LRCLIB title-only fallback to keep the shared rate limiter clear for
+        // the visible track; the visible resolve still runs it on-demand.
+        let resolution = await resolveSyncedLyrics(
+            for: track,
+            provider: provider,
+            allowTitleOnlyFallback: context == .visible
+        )
         // Only persist a result we actually trust. A positive (lyrics found) is
         // always trustworthy; a negative is trustworthy only when at least one
         // source was reachable. An offline/unreachable negative is cached in
@@ -253,7 +260,14 @@ func lyricsRefresher(for provider: any MusicProvider) -> AudioPlaybackController
         if let age = await LyricsDiskCache.shared.entryAge(key), age < refreshDebounce {
             return nil
         }
-        let resolution = await resolveSyncedLyrics(for: track, provider: provider)
+        // This re-checks the track the user is currently looking at (it went
+        // `.silent`), so it earns the full title-only fallback like a visible
+        // resolve.
+        let resolution = await resolveSyncedLyrics(
+            for: track,
+            provider: provider,
+            allowTitleOnlyFallback: true
+        )
         // Don't change anything if the device is offline — leave the existing
         // entry intact and let a future play try again. We only "consume" the
         // debounce window on an authoritative response.
@@ -289,7 +303,8 @@ func lyricsRefresher(for provider: any MusicProvider) -> AudioPlaybackController
 /// persistent cache.
 private func resolveSyncedLyrics(
     for track: MusicTrack,
-    provider: any MusicProvider
+    provider: any MusicProvider,
+    allowTitleOnlyFallback: Bool
 ) async -> (lyrics: Lyrics?, isAuthoritative: Bool) {
     // Read the global lyrics-enabled toggle defensively so the on-by-default
     // applies when the key was never written. Skips LRCLIB entirely when the
@@ -306,7 +321,17 @@ private func resolveSyncedLyrics(
     let lyricsEnabled = UserDefaults.standard.object(forKey: MusicLyricsPreference.storageKey) as? Bool
         ?? MusicLyricsPreference.defaultEnabled
     let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let lrclibAvailable = lyricsEnabled && artist.map { !$0.isEmpty } ?? false
+    let hasArtist = artist.map { !$0.isEmpty } ?? false
+    let lrclibAvailable = lyricsEnabled && hasArtist
+    // When lyrics are enabled but the track arrived without an artist (e.g. a
+    // queue/album row that only carries the title), we skip LRCLIB and consult
+    // the server alone. That makes any resulting negative INCOMPLETE — we never
+    // actually asked our best lyrics source. Such a negative must not be treated
+    // as authoritative, otherwise the prefetch sweep would burn a permanent
+    // "no lyrics" into the cache for songs that LRCLIB has, and a later play
+    // with full metadata would keep reading that poisoned negative. See the
+    // negative return sites below.
+    let lrclibSkippedForMissingArtist = lyricsEnabled && !hasArtist
 
     enum Source { case server, lrclib, deadline }
     struct Outcome { let source: Source; let lyrics: Lyrics?; let reachable: Bool }
@@ -338,7 +363,8 @@ private func resolveSyncedLyrics(
                     title: track.title,
                     artist: artist,
                     album: track.albumTitle,
-                    duration: track.duration
+                    duration: track.duration,
+                    allowTitleOnlyFallback: allowTitleOnlyFallback
                 )
                 return Outcome(source: .lrclib, lyrics: result.lyrics, reachable: result.reachable)
             }
@@ -346,10 +372,33 @@ private func resolveSyncedLyrics(
 
         var pendingLRCLIB: Lyrics?
         var sawServer = false
-        var anyReachable = false
+        var serverReachable = false
+        var lrclibReachable = false
         var startedDeadline = false
+        // A *negative* (no synced lyrics) may only be treated as authoritative —
+        // cached, and allowed to surface a one-time "No lyrics found" — when
+        // EVERY source we needed actually answered. The server is always
+        // consulted; LRCLIB is consulted whenever it's available (lyrics on +
+        // artist known). If a needed source was unreachable (offline, timeout,
+        // throttled, or cancelled mid-skip) the verdict is INCOMPLETE: stay
+        // silent, never cache it, and re-resolve on a later play. This is the
+        // core guard against poisoning a song LRCLIB actually has just because
+        // the LAN server answered "none" first while the LRCLIB request flaked
+        // under load.
+        func negativeIsAuthoritative() -> Bool {
+            guard serverReachable else { return false }
+            if lrclibSkippedForMissingArtist { return false }
+            if lrclibAvailable && !lrclibReachable { return false }
+            return true
+        }
         for await outcome in group {
-            if outcome.reachable { anyReachable = true }
+            if outcome.reachable {
+                switch outcome.source {
+                case .server: serverReachable = true
+                case .lrclib: lrclibReachable = true
+                case .deadline: break
+                }
+            }
             let synced = (outcome.lyrics?.isSynced == true && outcome.lyrics?.isEmpty == false)
                 ? outcome.lyrics
                 : nil
@@ -386,8 +435,9 @@ private func resolveSyncedLyrics(
                         }
                     }
                 } else if sawServer {
-                    // Both sources finished without synced lyrics.
-                    return (nil, anyReachable)
+                    // Both sources have reported without synced lyrics; the
+                    // negative is authoritative only if both were reachable.
+                    return (nil, negativeIsAuthoritative())
                 }
             case .deadline:
                 // Head-start window elapsed with the server still not producing
@@ -398,7 +448,13 @@ private func resolveSyncedLyrics(
                 }
             }
         }
-        return (pendingLRCLIB, anyReachable)
+        // Group exhausted. A positive `pendingLRCLIB` is always authoritative;
+        // a negative is authoritative only when every needed source answered
+        // (see negativeIsAuthoritative).
+        if pendingLRCLIB != nil {
+            return (pendingLRCLIB, true)
+        }
+        return (nil, negativeIsAuthoritative())
     }
 }
 #endif

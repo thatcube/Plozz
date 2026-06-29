@@ -53,7 +53,21 @@ public final class AudioPlaybackController {
     /// `LyricsRefresher`, so a song that later receives an LRCLIB upload — or
     /// one we simply couldn't fetch while offline — surfaces silently on a
     /// future play.
-    public typealias LyricsResolver = @MainActor (MusicTrack) async -> LyricsResolution
+    public typealias LyricsResolver = @MainActor (MusicTrack, LyricsResolveContext) async -> LyricsResolution
+
+    /// Why lyrics are being resolved, which tunes how hard the LRCLIB fallback
+    /// works. `visible` is the track the user is actually looking at (the Now
+    /// Playing panel) and earns the thorough title-only + duration-matched
+    /// fallback that rescues songs filed under a different artist name (a duo
+    /// alias, "Various Artists", composer-vs-performer). `prefetch` is
+    /// background queue-warming (next track + bulk sweep) where that extra
+    /// per-track fan-out isn't worth the shared LRCLIB rate-limiter contention,
+    /// so it sticks to the cheaper artist-qualified lookups — any track that
+    /// needs the fallback still gets it on-demand the instant it becomes visible.
+    public enum LyricsResolveContext: Sendable {
+        case visible
+        case prefetch
+    }
 
     /// Background re-check for a track whose cached answer was negative.
     /// Returns lyrics only when the *new* lookup found something the cache
@@ -479,7 +493,7 @@ public final class AudioPlaybackController {
         lyricsState = .loading
         let trackID = track.id
         lyricsLoadTask = Task { [weak self] in
-            let resolution = await lyricsResolver(track)
+            let resolution = await lyricsResolver(track, .visible)
             guard !Task.isCancelled, let self else { return }
             // Ignore a result that arrived after the user moved on.
             guard self.currentTrack?.id == trackID else { return }
@@ -537,7 +551,7 @@ public final class AudioPlaybackController {
         guard queue.indices.contains(nextIndex) else { return }
         let nextTrack = queue[nextIndex]
         lyricsPrefetchTask = Task { @MainActor in
-            _ = await lyricsResolver(nextTrack)
+            _ = await lyricsResolver(nextTrack, .prefetch)
         }
     }
 
@@ -564,7 +578,7 @@ public final class AudioPlaybackController {
         lyricsBulkPrefetchTask = Task { @MainActor [weak self] in
             for track in upcoming {
                 guard !Task.isCancelled else { return }
-                _ = await lyricsResolver(track)
+                _ = await lyricsResolver(track, .prefetch)
                 guard !Task.isCancelled else { return }
                 // Bail if the playback context changed under us (skip, stop,
                 // new album) — `loadLyrics` will have replaced this task.

@@ -32,9 +32,16 @@ public struct LRCLIBLyricsProvider: Sendable {
         title: String,
         artist: String,
         album: String?,
-        duration: TimeInterval?
+        duration: TimeInterval?,
+        allowTitleOnlyFallback: Bool = true
     ) async -> Lyrics? {
-        await lyricsWithStatus(title: title, artist: artist, album: album, duration: duration).lyrics
+        await lyricsWithStatus(
+            title: title,
+            artist: artist,
+            album: album,
+            duration: duration,
+            allowTitleOnlyFallback: allowTitleOnlyFallback
+        ).lyrics
     }
 
     /// Same fan-out lookup as `lyrics(...)`, but also reports whether *any*
@@ -46,7 +53,8 @@ public struct LRCLIBLyricsProvider: Sendable {
         title: String,
         artist: String,
         album: String?,
-        duration: TimeInterval?
+        duration: TimeInterval?,
+        allowTitleOnlyFallback: Bool = true
     ) async -> (lyrics: Lyrics?, reachable: Bool) {
         let trimmedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedArtist.isEmpty else { return (nil, false) }
@@ -59,7 +67,7 @@ public struct LRCLIBLyricsProvider: Sendable {
         // first synced result, cancelling the rest. Previously these ran
         // sequentially (up to 4 round-trips waited on serially), which is the
         // main reason lyrics sometimes took several seconds to appear.
-        return await withTaskGroup(of: Probe.self) { group in
+        let artistQualified: (lyrics: Lyrics?, reachable: Bool) = await withTaskGroup(of: Probe.self) { group in
             for candidate in candidates {
                 group.addTask {
                     let result = await self.exactMatch(
@@ -87,6 +95,39 @@ public struct LRCLIBLyricsProvider: Sendable {
             }
             return (plainFallback, anyReachable)
         }
+
+        // A synced hit from the artist-qualified pass wins outright.
+        if let lyrics = artistQualified.lyrics, lyrics.isSynced {
+            return (lyrics, true)
+        }
+
+        // Fallback: some catalogues file a track under a *different* artist name
+        // than the player shows — a collaboration credited to the duo's name
+        // (e.g. "Bad Meets Evil" for an "Eminem, Royce da 5'9\"" track), a
+        // soundtrack under "Various Artists", or classical filed by composer
+        // rather than performer. When the artist-qualified search finds nothing,
+        // retry by **title only** and accept a record solely on a tight duration
+        // match: without an artist to match on, duration is the guard that keeps
+        // same-title / different-song results out. Gated on a known duration and
+        // run only on the miss path, so it never overrides an artist match.
+        // `allowTitleOnlyFallback` is false for background prefetch: the extra
+        // per-track title-only round-trips aren't worth the shared rate-limiter
+        // contention when warming the queue, and the track still gets the full
+        // fallback on-demand the moment it becomes the visible Now Playing item.
+        var bestPlain = artistQualified.lyrics
+        var reachable = artistQualified.reachable
+        if allowTitleOnlyFallback, artistQualified.lyrics == nil, let duration, duration > 0 {
+            for candidate in candidates {
+                let result = await searchByTitleOnly(title: candidate, duration: duration)
+                if result.reachable { reachable = true }
+                guard let lyrics = result.record?.lyrics() else { continue }
+                if lyrics.isSynced {
+                    return (lyrics, true)
+                }
+                if bestPlain == nil { bestPlain = lyrics }
+            }
+        }
+        return (bestPlain, reachable)
     }
 
     /// The ordered, de-duplicated title queries to try: the original first, then
@@ -148,6 +189,25 @@ public struct LRCLIBLyricsProvider: Sendable {
             return (nil, result.reachable)
         }
         return (bestMatch(in: results, duration: duration), result.reachable)
+    }
+
+    /// Last-resort lookup used only when artist-qualified search finds nothing:
+    /// query by **title alone** and accept a record solely when its duration is
+    /// within a tight window of the playing track. Without an artist match,
+    /// duration is the only safeguard against unrelated songs that merely share
+    /// a title, so the tolerance is deliberately small.
+    private func searchByTitleOnly(title: String, duration: TimeInterval) async -> (record: LRCLIBRecord?, reachable: Bool) {
+        let items = [URLQueryItem(name: "track_name", value: title)]
+        guard let url = makeURL(path: "/search", queryItems: items) else { return (nil, false) }
+        await Self.rateLimiter.acquire()
+        let result = await MetadataHTTP.getWithStatus([LRCLIBRecord].self, url: url)
+        guard let records = result.value, !records.isEmpty else { return (nil, result.reachable) }
+        let tolerance: TimeInterval = 3
+        let inWindow = records.filter { record in
+            guard let recordDuration = record.duration else { return false }
+            return abs(recordDuration - duration) <= tolerance
+        }
+        return (bestMatch(in: inWindow, duration: duration), result.reachable)
     }
 
     /// Picks the best record: first prefer ones with **synced** lyrics, then —

@@ -432,9 +432,17 @@ public final class PlayerViewModel {
     private var alternateEngineKind: PlaybackEngineKind? {
         switch currentEngineKind {
         case .native:
+            // AVPlayer failed (e.g. the runtime `hev1` black-screen catch). Prefer
+            // Plozzigen (AetherEngine): it fetches the source itself and remuxes
+            // on-device. mpv (the hybrid engine) shares a decode-only FFmpeg with
+            // NO network/TLS protocols, so it cannot open a remote HTTPS stream and
+            // would only drop straight to a server transcode — use it only when
+            // Plozzigen isn't wired in.
+            if engineFactory.plozzigenAvailable { return .plozzigen }
             return engineFactory.hybridAvailable ? .hybrid : nil
         case .hybrid:
-            return .native
+            // mpv failed — try Plozzigen before giving up to native/transcode.
+            return engineFactory.plozzigenAvailable ? .plozzigen : .native
         case .plozzigen:
             // Plozzigen failed — fall back to native (server transcode safety net).
             return .native
@@ -510,6 +518,17 @@ public final class PlayerViewModel {
                     isTranscoding: request.isTranscoding,
                     hybridAvailable: engineFactory.hybridAvailable
                 )
+                // mpv (the hybrid engine) shares AetherEngine's decode-only FFmpeg
+                // build, which has NO network/TLS protocols compiled in. It
+                // therefore cannot open a remote HTTPS stream (every Plex/Jellyfin
+                // direct URL) — `loadfile` fails instantly and the player drops to
+                // a heavy server transcode. Plozzigen (AetherEngine) fetches the
+                // source itself and remuxes HEVC/`hev1`/etc. to AVPlayer on-device,
+                // so prefer it for any AVPlayer-incompatible source that would
+                // otherwise hit mpv.
+                if kind == .hybrid, engineFactory.plozzigenAvailable {
+                    kind = .plozzigen
+                }
             }
 
             // An adaptive source carries its audio as a *separate* track (e.g. a

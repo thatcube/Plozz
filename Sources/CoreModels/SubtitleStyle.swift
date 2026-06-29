@@ -130,19 +130,28 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
             case below, above
         }
         public var placement: Placement
-        /// Secondary size relative to the primary (e.g. 0.85 = a touch smaller).
+        /// When `false` (default) the secondary line shares the **primary** look
+        /// — same colour and size — so dual subtitles read as one cohesive
+        /// system. Flip it on to visually distinguish the second language (handy
+        /// for learning) via the overrides below.
+        public var differentiate: Bool
+        /// Secondary size relative to the primary — applied only when
+        /// ``differentiate`` is on (e.g. 0.85 = a touch smaller).
         public var relativeScale: Double
+        /// Secondary fill colour — applied only when ``differentiate`` is on.
         public var textColor: Color
         /// Gap between primary and secondary blocks, in points.
         public var gap: Double
 
         public init(
-            placement: Placement = .below,
+            placement: Placement = .above,
+            differentiate: Bool = false,
             relativeScale: Double = 0.85,
             textColor: Color = Color(red: 0.85, green: 0.92, blue: 1.0),
             gap: Double = 6
         ) {
             self.placement = placement
+            self.differentiate = differentiate
             self.relativeScale = relativeScale
             self.textColor = textColor
             self.gap = gap

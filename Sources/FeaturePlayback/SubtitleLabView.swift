@@ -57,6 +57,16 @@ public struct SubtitleLabView: View {
         return s
     }
 
+    /// Mutable binding into the optional secondary style for the dual-sub
+    /// controls (nil until a second track is enabled).
+    private var secBinding: Binding<SubtitleStyle.Secondary>? {
+        guard style.secondary != nil else { return nil }
+        return Binding(
+            get: { style.secondary ?? .init() },
+            set: { style.secondary = $0 }
+        )
+    }
+
     // MARK: - Controls
 
     private var controlPanel: some View {
@@ -105,7 +115,27 @@ public struct SubtitleLabView: View {
                 }
 
                 group("Dual subtitles") {
-                    Toggle("Enable second track", isOn: $dualEnabled)
+                    Toggle("Enable second track", isOn: Binding(
+                        get: { dualEnabled },
+                        set: { on in
+                            dualEnabled = on
+                            if on, style.secondary == nil { style.secondary = .init() }
+                        }))
+                    if dualEnabled, let sec = secBinding {
+                        cycleRow("Top line",
+                                 value: sec.wrappedValue.placement == .above ? "Secondary" : "Primary") {
+                            sec.wrappedValue.placement =
+                                sec.wrappedValue.placement == .above ? .below : .above
+                        }
+                        Toggle("Differentiate 2nd look", isOn: sec.differentiate)
+                        if sec.wrappedValue.differentiate {
+                            cycleRow("2nd colour", value: colorName(sec.wrappedValue.textColor)) {
+                                sec.wrappedValue.textColor = nextColor(after: sec.wrappedValue.textColor)
+                            }
+                            adjust("2nd size", sec.wrappedValue.relativeScale, "%.2f×",
+                                   0.5, 1.5, 0.05, set: { sec.wrappedValue.relativeScale = $0 })
+                        }
+                    }
                 }
 
                 Button("Reset to default") { style = .default; presetIndex = 0 }

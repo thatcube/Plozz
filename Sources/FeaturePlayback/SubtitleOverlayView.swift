@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import UIKit
 import CoreModels
 import CoreUI
 
@@ -175,13 +176,18 @@ public struct SubtitleOverlayView: View {
     @ViewBuilder
     private func secondaryBlock() -> some View {
         if let sec = style.secondary {
+            // Default: the secondary line inherits the primary look (colour +
+            // size) so dual subs read as one system. `differentiate` opts into a
+            // distinct colour/size for language-learning clarity.
+            let secFill = sec.differentiate ? scaled(sec.textColor) : scaled(style.textColor)
+            let secScale = sec.differentiate ? sec.relativeScale : 1.0
             VStack(spacing: 2) {
                 ForEach(secondary.filter { !$0.isImage }) { cue in
                     if case .text(let t) = cue.body {
                         StyledCueText(
                             text: t,
-                            fontSize: Self.baseFontSize * style.fontScale * sec.relativeScale,
-                            fillColor: scaled(sec.textColor),
+                            fontSize: Self.baseFontSize * style.fontScale * secScale,
+                            fillColor: secFill,
                             style: style
                         )
                     }
@@ -246,18 +252,15 @@ private extension SubtitleAlignment {
 // MARK: - A single styled cue line (background, edge, border, glyphs)
 
 /// Draws one text cue with background box, edge treatment and optional explicit
-/// border. Outlines are emulated by stacking the glyphs in eight directions —
-/// SwiftUI `Text` has no native stroke — which reads cleanly at couch distance.
+/// border. Outlines use a **true continuous stroke** (UIKit `NSAttributedString`
+/// stroke attributes) so they stay clean at any thickness, and read well at
+/// couch distance.
 private struct StyledCueText: View {
     let text: SubtitleText
     let fontSize: CGFloat
     let fillColor: Color
     var textAlignment: TextAlignment = .center
     let style: SubtitleStyle
-
-    private var font: Font {
-        .system(size: fontSize, weight: text.isBold ? .heavy : .semibold)
-    }
 
     var body: some View {
         content
@@ -271,33 +274,26 @@ private struct StyledCueText: View {
             }
     }
 
-    /// Compose the fill glyphs with edge (shadow / raised / depressed / uniform
-    /// outline) and an optional explicit border, both emulated as offset copies.
-    /// Built from a reusable `glyphs(_:)` so each copy is a fresh `Text` chain
-    /// rather than a shared, already-erased view.
+    /// The glyphs with a **true continuous outline** (explicit border / `.uniform`
+    /// edge) plus the directional edge (drop shadow / raised / depressed). The
+    /// outline is drawn by UIKit via `NSAttributedString` stroke attributes —
+    /// unlike the old eight-way offset-stamp, this stays an unbroken stroke at
+    /// any thickness instead of separating into dots.
     @ViewBuilder
     private var content: some View {
-        let outlineWidth = uniformOutlineWidth
-        ZStack {
-            if let outlineColor, outlineWidth > 0 {
-                ForEach(0..<Self.eightDirections.count, id: \.self) { i in
-                    let dir = Self.eightDirections[i]
-                    glyphs(outlineColor)
-                        .offset(x: dir.0 * outlineWidth, y: dir.1 * outlineWidth)
-                }
-            }
-            applyDirectionalEdge(glyphs(fillColor))
-        }
-    }
-
-    private func glyphs(_ color: Color) -> some View {
-        Text(text.string)
-            .font(font)
-            .italic(text.isItalic)
-            .foregroundStyle(color)
-            .multilineTextAlignment(textAlignment)
-            .lineLimit(4)
-            .fixedSize(horizontal: false, vertical: true)
+        applyDirectionalEdge(
+            OutlinedText(
+                text: text.string,
+                fontSize: fontSize,
+                isBold: text.isBold,
+                isItalic: text.isItalic,
+                fill: fillColor,
+                stroke: outlineColor,
+                strokeWidth: uniformOutlineWidth,
+                alignment: textAlignment,
+                maxLines: 4
+            )
+        )
     }
 
     /// Width of a uniform outline, taken from an explicit border or a `.uniform`
@@ -332,11 +328,82 @@ private struct StyledCueText: View {
             v.shadow(color: c, radius: 0, x: -t, y: -t)
         }
     }
+}
 
-    private static let eightDirections: [(CGFloat, CGFloat)] = [
-        (-1, -1), (0, -1), (1, -1),
-        (-1, 0),           (1, 0),
-        (-1, 1), (0, 1), (1, 1)
-    ]
+// MARK: - UIKit-backed outlined text (true continuous stroke)
+
+/// Renders a subtitle line with a real, continuous outline via
+/// `NSAttributedString` stroke attributes — the only way to get a clean stroke at
+/// any width on tvOS, since SwiftUI `Text` cannot stroke. Self-sizes (wrapping at
+/// the proposed width) so the background box and surrounding layout still fit the
+/// glyphs exactly.
+private struct OutlinedText: UIViewRepresentable {
+    let text: String
+    let fontSize: CGFloat
+    let isBold: Bool
+    let isItalic: Bool
+    let fill: Color
+    let stroke: Color?
+    let strokeWidth: CGFloat
+    let alignment: TextAlignment
+    let maxLines: Int
+
+    func makeUIView(context: Context) -> UILabel {
+        let l = UILabel()
+        l.backgroundColor = .clear
+        l.isOpaque = false
+        l.lineBreakMode = .byWordWrapping
+        l.setContentHuggingPriority(.required, for: .horizontal)
+        l.setContentHuggingPriority(.required, for: .vertical)
+        return l
+    }
+
+    func updateUIView(_ l: UILabel, context: Context) {
+        l.numberOfLines = maxLines
+        l.textAlignment = nsAlignment
+        l.attributedText = attributed
+        l.invalidateIntrinsicContentSize()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
+        let maxW = proposal.width.map { $0.isFinite ? $0 : 10_000 } ?? 10_000
+        uiView.preferredMaxLayoutWidth = maxW
+        let fit = uiView.sizeThatFits(CGSize(width: maxW, height: .greatestFiniteMagnitude))
+        return CGSize(width: min(fit.width, maxW), height: fit.height)
+    }
+
+    private var uiFont: UIFont {
+        var f = UIFont.systemFont(ofSize: fontSize, weight: isBold ? .heavy : .semibold)
+        if isItalic, let d = f.fontDescriptor.withSymbolicTraits(.traitItalic) {
+            f = UIFont(descriptor: d, size: fontSize)
+        }
+        return f
+    }
+
+    private var nsAlignment: NSTextAlignment {
+        switch alignment {
+        case .leading: return .left
+        case .trailing: return .right
+        default: return .center
+        }
+    }
+
+    private var attributed: NSAttributedString {
+        let para = NSMutableParagraphStyle()
+        para.alignment = nsAlignment
+        para.lineBreakMode = .byWordWrapping
+        var attrs: [NSAttributedString.Key: Any] = [
+            .font: uiFont,
+            .foregroundColor: UIColor(fill),
+            .paragraphStyle: para
+        ]
+        if let stroke, strokeWidth > 0 {
+            attrs[.strokeColor] = UIColor(stroke)
+            // `.strokeWidth` is a percentage of font size; a *negative* value
+            // means "fill *and* stroke" (positive would hollow the glyphs).
+            attrs[.strokeWidth] = -Double(strokeWidth / fontSize * 100)
+        }
+        return NSAttributedString(string: text, attributes: attrs)
+    }
 }
 #endif

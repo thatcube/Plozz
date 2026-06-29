@@ -234,10 +234,11 @@ function anilistImplicitPage() {
         const params = new URLSearchParams(hash);
         const accessToken = params.get('access_token');
         if (!accessToken) throw new Error('No access token received from AniList.');
+        const tvSession = (document.cookie.match(/(?:^|; )tv_session=([^;]+)/) || [])[1] || null;
         const storeResp = await fetch('${BASE_URL}/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ service: 'anilist', accessToken }),
+          body: JSON.stringify({ service: 'anilist', accessToken, tvSession }),
         });
         if (!storeResp.ok) throw new Error('Failed to store token');
         const { code } = await storeResp.json();
@@ -261,11 +262,14 @@ export default {
     if (path === "/myanimelist") {
       const codeVerifier = generateCodeVerifier();
       const sessionId = randomString(32);
+      // The TV passes its own 32-char session so the redeem code is bound to it.
+      const tvSession = url.searchParams.get("s") || null;
 
       // Store PKCE verifier in KV (needed for callback)
       await env.AUTH_KV.put(`session:${sessionId}`, JSON.stringify({
         service: "mal",
         codeVerifier,
+        tvSession,
         createdAt: Date.now(),
       }), { expirationTtl: CODE_TTL });
 
@@ -323,13 +327,14 @@ export default {
 
       const tokens = await tokenResp.json();
 
-      // Generate short redeem code and store tokens
+      // Generate short redeem code and store tokens, bound to the TV's session.
       const redeemCode = generateRedeemCode();
       await env.AUTH_KV.put(`redeem:${redeemCode}`, JSON.stringify({
         service: "mal",
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         expiresIn: tokens.expires_in,
+        tvSession: sessionData.tvSession || null,
       }), { expirationTtl: CODE_TTL });
 
       // Clean up session
@@ -346,7 +351,15 @@ export default {
       aniAuthURL.searchParams.set("client_id", env.ANILIST_CLIENT_ID);
       aniAuthURL.searchParams.set("response_type", "token");
 
-      return Response.redirect(aniAuthURL.toString(), 302);
+      // AniList's redirect_uri is fixed, so the TV session can't ride the query.
+      // Stash it in a short-lived same-domain cookie the callback page reads back.
+      const tvSession = url.searchParams.get("s");
+      const headers = { Location: aniAuthURL.toString() };
+      if (tvSession && /^[A-Za-z0-9]{8,64}$/.test(tvSession)) {
+        headers["Set-Cookie"] =
+          `tv_session=${tvSession}; Max-Age=${CODE_TTL}; Path=/; Secure; SameSite=Lax`;
+      }
+      return new Response(null, { status: 302, headers });
     }
 
     // --- AniList: Implicit grant landing page ---
@@ -371,6 +384,7 @@ export default {
           accessToken: body.accessToken,
           refreshToken: body.refreshToken || null,
           expiresIn: body.expiresIn || null,
+          tvSession: body.tvSession || null,
         }), { expirationTtl: CODE_TTL });
         return Response.json({ code: redeemCode }, {
           headers: { "Access-Control-Allow-Origin": "*" }
@@ -411,6 +425,17 @@ export default {
       if (!data) {
         await env.AUTH_KV.put(failKey, String(fails + 1), { expirationTtl: FAIL_WINDOW });
         return Response.json({ error: "invalid_or_expired" }, { status: 404 });
+      }
+
+      // Session binding: if this code was issued for a specific TV session, the
+      // redeeming TV must present the matching 32-char sessionId. A guessed
+      // 4-digit code is then useless without also knowing the 32-char session.
+      if (data.tvSession) {
+        const session = url.searchParams.get("session");
+        if (session !== data.tvSession) {
+          await env.AUTH_KV.put(failKey, String(fails + 1), { expirationTtl: FAIL_WINDOW });
+          return Response.json({ error: "invalid_or_expired" }, { status: 404 });
+        }
       }
 
       // One-time use: delete after retrieval; clear the client's fail counter.

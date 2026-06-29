@@ -29,6 +29,7 @@ public final class AniListService {
     @ObservationIgnored private let config: AniListConfig
     @ObservationIgnored private let tokenStore: AniListTokenStoring
     @ObservationIgnored private let http: HTTPClient
+    @ObservationIgnored private var pendingSession: String?
 
     public init(config: AniListConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: AniListTokenStoring) {
         self.config = config
@@ -68,7 +69,10 @@ public final class AniListService {
     public func connect() {
         guard config.isConfigured else { phase = .unavailable; return }
         guard let url = config.authorizationURL else { phase = .unavailable; return }
-        phase = .awaitingToken(authorizationURL: url)
+        // Mint a 32-char TV session so the short redeem code is bound to this TV.
+        let session = Self.randomSession()
+        pendingSession = session
+        phase = .awaitingToken(authorizationURL: "\(url)?s=\(session)")
     }
 
     /// Completes the connection by redeeming a short code from the auth relay.
@@ -80,7 +84,11 @@ public final class AniListService {
         }
 
         do {
-            let redeemURL = URL(string: "\(config.relayBaseURL)/api/redeem?code=\(trimmed)")!
+            var redeemString = "\(config.relayBaseURL)/api/redeem?code=\(trimmed)"
+            if let session = pendingSession {
+                redeemString += "&session=\(session)"
+            }
+            let redeemURL = URL(string: redeemString)!
             let (data, _) = try await URLSession.shared.data(from: redeemURL)
             let result = try JSONDecoder().decode(RelayRedeemResponse.self, from: data)
 
@@ -89,10 +97,17 @@ public final class AniListService {
             let user = try await client.viewer(accessToken: accessToken)
             let tokens = AniListTokens(accessToken: accessToken)
             try? tokenStore.save(tokens)
+            pendingSession = nil
             phase = .connected(username: user.name)
         } catch {
             phase = .error("Invalid or expired code — please try again")
         }
+    }
+
+    /// 32-char URL-safe session id binding a redeem code to this TV.
+    private static func randomSession() -> String {
+        let chars = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        return String((0..<32).map { _ in chars.randomElement()! })
     }
 
     /// Cancels an in-flight connection attempt.

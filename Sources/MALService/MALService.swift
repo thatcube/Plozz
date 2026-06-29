@@ -25,6 +25,7 @@ public final class MALService {
     @ObservationIgnored private let auth: MALAuthService
     @ObservationIgnored private let tokenStore: MALTokenStoring
     @ObservationIgnored private var connectTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingSession: String?
 
     public init(config: MALConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: MALTokenStoring) {
         self.config = config
@@ -66,8 +67,11 @@ public final class MALService {
         guard config.isConfigured else { phase = .unavailable; return }
         connectTask?.cancel()
         connectTask = nil
+        // Mint a 32-char TV session so the short redeem code is bound to this TV.
+        let session = Self.randomSession()
+        pendingSession = session
         // Show the relay auth URL — Worker handles PKCE and exchange
-        phase = .awaitingAuthorizationCode(authorizationURL: "\(config.relayBaseURL)/myanimelist")
+        phase = .awaitingAuthorizationCode(authorizationURL: "\(config.relayBaseURL)/myanimelist?s=\(session)")
     }
 
     /// Redeems a short code from the auth relay to get the access token.
@@ -84,7 +88,11 @@ public final class MALService {
         connectTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let redeemURL = URL(string: "\(self.config.relayBaseURL)/api/redeem?code=\(trimmed)")!
+                var redeemString = "\(self.config.relayBaseURL)/api/redeem?code=\(trimmed)"
+                if let session = self.pendingSession {
+                    redeemString += "&session=\(session)"
+                }
+                let redeemURL = URL(string: redeemString)!
                 let (data, _) = try await URLSession.shared.data(from: redeemURL)
                 let result = try JSONDecoder().decode(RelayRedeemResponse.self, from: data)
 
@@ -97,6 +105,7 @@ public final class MALService {
                 try? self.tokenStore.save(tokens)
                 let user = try? await self.auth.userInfo(accessToken: tokens.accessToken)
                 self.connectTask = nil
+                self.pendingSession = nil
                 self.phase = .connected(username: user?.name ?? "MyAnimeList")
             } catch is CancellationError {
                 self.connectTask = nil
@@ -125,6 +134,12 @@ public final class MALService {
         let refreshed = try await auth.refresh(tokens.refreshToken)
         try? tokenStore.save(refreshed)
         return refreshed.accessToken
+    }
+
+    /// 32-char URL-safe session id binding a redeem code to this TV.
+    private static func randomSession() -> String {
+        let chars = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        return String((0..<32).map { _ in chars.randomElement()! })
     }
 }
 

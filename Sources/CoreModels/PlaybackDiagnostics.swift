@@ -542,11 +542,24 @@ public extension PlaybackDiagnostics {
         codec: String?,
         profile: String?,
         channels: Int?,
-        capabilities: MediaCapabilities
+        capabilities: MediaCapabilities,
+        mode: PlaybackMode = .unknown
     ) -> String? {
         let token = (codec ?? "").lowercased().replacingOccurrences(of: "_", with: "-")
         let profileText = (profile ?? "").lowercased()
         let isAtmos = profileText.contains("atmos")
+        // Plozzigen (AetherEngine) bridges codecs AVPlayer can't decode to a
+        // lossless FLAC (>6ch) or EAC3 5.1 stream on-device, so DTS/TrueHD play
+        // without passthrough or mpv. Reflect that instead of the AVPlayer caveat.
+        if mode == .plozzigen {
+            switch token {
+            case "dts", "dca", "dts-hd", "dtshd", "dca-ma", "truehd", "mlp":
+                let bridged = (channels ?? 0) > 6 ? "lossless FLAC" : "EAC3 5.1"
+                return "Bridged on-device (\(bridged))"
+            default:
+                break
+            }
+        }
         switch token {
         case "eac3", "ec3", "ec-3", "e-ac-3":
             if isAtmos {
@@ -1109,7 +1122,8 @@ public extension PlaybackDiagnostics {
                 codec: a.codec,
                 profile: a.profile,
                 channels: a.channels,
-                capabilities: capabilities
+                capabilities: capabilities,
+                mode: mode
             )
         }
 

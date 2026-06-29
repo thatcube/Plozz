@@ -94,6 +94,16 @@ struct NowPlayingView: View {
     /// finish, then centers.
     @State private var latchedShowsLyricsPanel: Bool?
 
+    /// Pending "collapse the panel because lyrics are unavailable" timer. Held in
+    /// state so a follow-on `.loaded` result (e.g. the user skipping to the next
+    /// track) can cancel the collapse before the message even has time to fade.
+    @State private var pendingCollapse: Task<Void, Never>?
+
+    /// How long the "No lyrics found" message stays visible before the panel
+    /// collapses, so anyone reading the panel actually gets time to see it
+    /// rather than catching a flash mid-animation.
+    private static let noLyricsDwell: Duration = .milliseconds(1500)
+
     /// Whether to reserve the lyrics panel next to the player. Falls back to the
     /// live state only until the first track resolves (see `latchedShowsLyricsPanel`).
     private var showsLyricsPanel: Bool {
@@ -105,6 +115,8 @@ struct NowPlayingView: View {
     /// lookup — that hold is the "wait" before any artwork animation. Disabling
     /// lyrics always collapses the panel immediately.
     private func updateLyricsPanelLatch() {
+        pendingCollapse?.cancel()
+        pendingCollapse = nil
         guard lyricsEnabled else {
             latchedShowsLyricsPanel = false
             return
@@ -112,7 +124,24 @@ struct NowPlayingView: View {
         switch controller.lyricsState {
         case .loaded:
             latchedShowsLyricsPanel = true
-        case .unavailable, .idle:
+        case .unavailable:
+            // If the panel is currently open we hold it open for a beat so the
+            // "No lyrics found" message has time to be read before the panel
+            // slides shut. From a closed/undecided state we just collapse
+            // immediately — there's nothing for the user to read in that case.
+            if latchedShowsLyricsPanel == true {
+                pendingCollapse = Task { @MainActor in
+                    try? await Task.sleep(for: Self.noLyricsDwell)
+                    guard !Task.isCancelled else { return }
+                    if case .unavailable = controller.lyricsState, lyricsEnabled {
+                        latchedShowsLyricsPanel = false
+                    }
+                    pendingCollapse = nil
+                }
+            } else {
+                latchedShowsLyricsPanel = false
+            }
+        case .idle:
             latchedShowsLyricsPanel = false
         case .loading:
             break
@@ -682,6 +711,13 @@ struct NowPlayingLyricsView: View {
     let showTrackDetails: Bool
     /// Eases the lines in on first appearance instead of letting them pop.
     @State private var appeared = false
+    /// Whether the spinner + "Searching for lyrics…" label should be visible
+    /// for the current `.loading` window. Held off for `loadingChromeDelay` so
+    /// resolves that finish quickly (cache hits, fast server hits) never flash
+    /// the indicator on screen — the panel just stays blank for a beat and
+    /// then snaps to the lyrics.
+    @State private var showLoadingChrome = false
+    private static let loadingChromeDelay: Duration = .milliseconds(500)
 
     var body: some View {
         content
@@ -694,6 +730,28 @@ struct NowPlayingLyricsView: View {
                         .padding(.bottom, 4)
                 }
             }
+            // Reset the gate whenever we leave the loading state, and start the
+            // delay countdown each time we enter it. `.task(id:)` cancels its
+            // previous instance on identity change, which doubles as our timer
+            // cancellation when the state moves to `.loaded`/`.unavailable`
+            // before the delay elapses.
+            .task(id: isLoadingState) {
+                guard isLoadingState else {
+                    showLoadingChrome = false
+                    return
+                }
+                showLoadingChrome = false
+                try? await Task.sleep(for: Self.loadingChromeDelay)
+                guard !Task.isCancelled else { return }
+                showLoadingChrome = true
+            }
+    }
+
+    private var isLoadingState: Bool {
+        switch state {
+        case .idle, .loading: return true
+        case .loaded, .unavailable: return false
+        }
     }
 
     @ViewBuilder
@@ -702,13 +760,16 @@ struct NowPlayingLyricsView: View {
         case .idle, .loading:
             VStack(spacing: 18) {
                 Spacer()
-                ProgressView()
-                Text("Searching for lyrics…")
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(.secondary)
+                if showLoadingChrome {
+                    ProgressView()
+                    Text("Searching for lyrics…")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.easeInOut(duration: 0.2), value: showLoadingChrome)
 
         case .unavailable:
             VStack {

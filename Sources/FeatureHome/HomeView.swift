@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import Inject
 
 /// The Home screen: Continue Watching, Latest, and library shortcuts.
 public struct HomeView: View {
@@ -13,6 +14,7 @@ public struct HomeView: View {
     private let onSelectLibrary: (MediaLibrary) -> Void
 
     @Environment(\.plozzMetrics) private var metrics
+    @ObserveInjection var inject
 
     public init(
         viewModel: HomeViewModel,
@@ -77,6 +79,7 @@ public struct HomeView: View {
                 Task { await viewModel.load() }
             }
         }
+        .enableInjection()
     }
 
     /// Renders one resolved `HomeRow`. The per-kind wiring (card style, and

@@ -254,6 +254,7 @@ final class PlayerInputViewController: UIViewController {
     func attachControls(themePalette: ThemePaletteBox) {
         let exitToSurface: () -> Void = { [weak self] in self?.exitToSurface() }
         let actions = PlayerOptionsActions(
+            togglePlayPause: { [weak self] in self?.actions.togglePlayPause() },
             selectAudio: { [weak self] in self?.actions.selectAudio($0) },
             selectSubtitle: { [weak self] in self?.actions.selectSubtitle($0) },
             setPlaybackSpeed: { [weak self] in self?.actions.setPlaybackSpeed($0) },
@@ -670,7 +671,6 @@ final class PlayerInputViewController: UIViewController {
     }
 
     @objc private func handlePlayPause() {
-        guard focusContext == .surface else { return }
         if model.isScrubbing { commitScrub() }
         actions.togglePlayPause()
         flashControls()

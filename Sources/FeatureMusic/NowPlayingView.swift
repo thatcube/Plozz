@@ -700,9 +700,12 @@ struct NowPlayingLyricsView: View {
     private var content: some View {
         switch state {
         case .idle, .loading:
-            VStack {
+            VStack(spacing: 18) {
                 Spacer()
                 ProgressView()
+                Text("Searching for lyrics…")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(.secondary)
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

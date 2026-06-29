@@ -142,47 +142,95 @@ func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackControll
 /// Resolves a track's lyrics, returning **only a synced (scrollable/karaoke)
 /// version**. On a TV there's no way to manually scroll plain lyrics, so an
 /// unsynced result is treated as "no lyrics": we just show the centered song.
-/// Tries the user's server first; if it has no synced lyrics, consults the
-/// keyless LRCLIB fallback and uses that only when it's synced. Each result
-/// carries its own source tag (Jellyfin/Plex/LRCLIB) for the attribution badge.
+/// Races the user's server and the keyless LRCLIB fallback **in parallel** —
+/// previously the LRCLIB call only started after the server call had finished,
+/// which doubled the worst-case wait. Each result carries its own source tag
+/// (Jellyfin/Plex/LRCLIB) for the attribution badge, and results are memoised
+/// per-session in `LyricsMemoCache` so re-opening Now Playing for a recently
+/// played track is instant.
 func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
     { track in
-        let serverLyrics = try? await provider.lyrics(for: track.id)
-        if let serverLyrics, !serverLyrics.isEmpty, serverLyrics.isSynced {
-            return serverLyrics
+        if let cached = await LyricsMemoCache.shared.value(for: track.id) {
+            return cached
         }
+        let resolved = await resolveSyncedLyrics(for: track, provider: provider)
+        await LyricsMemoCache.shared.set(resolved, for: track.id)
+        return resolved
+    }
+}
 
-        // Server had no synced lyrics — try LRCLIB for a synced copy, but only
-        // when the user hasn't turned lyrics off. Don't send a opted-out user's
-        // track title/artist to a third party (lrclib.net) just to populate a
-        // panel they've hidden. Read defensively so the on-by-default applies
-        // when the key was never written.
-        //
-        // NOTE: this reads the *global* lyrics-enabled key, which is correct
-        // today because the toggle is global. If the "show lyrics" toggle is
-        // ever made per-profile (it lives as @AppStorage in NowPlayingView while
-        // appearance/showTrackDetails went per-profile in MusicPlayerSettingsStore),
-        // this read MUST become profile-namespace-scoped (SettingsKey.scoped) at
-        // the same time — otherwise the resolver reads the global key while the UI
-        // writes a scoped one and this gating silently desyncs.
-        let lyricsEnabled = UserDefaults.standard.object(forKey: MusicLyricsPreference.storageKey) as? Bool
-            ?? MusicLyricsPreference.defaultEnabled
-        if lyricsEnabled,
-           let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !artist.isEmpty {
-            let lrclibLyrics = await LRCLIBLyricsProvider().lyrics(
-                title: track.title,
-                artist: artist,
-                album: track.albumTitle,
-                duration: track.duration
-            )
-            if let lrclibLyrics, lrclibLyrics.isSynced {
-                return lrclibLyrics
+/// Fans the server lookup and the LRCLIB fallback out concurrently, returning
+/// whichever produces synced lyrics first (preferring the server's copy when
+/// both are usable so the attribution stays accurate to the user's library).
+private func resolveSyncedLyrics(
+    for track: MusicTrack,
+    provider: any MusicProvider
+) async -> Lyrics? {
+    // Read the global lyrics-enabled toggle defensively so the on-by-default
+    // applies when the key was never written. Skips LRCLIB entirely when the
+    // user has turned lyrics off, so we don't send their track title/artist
+    // to a third party for a panel they've hidden.
+    //
+    // NOTE: this reads the *global* lyrics-enabled key, which is correct
+    // today because the toggle is global. If the "show lyrics" toggle is
+    // ever made per-profile (it lives as @AppStorage in NowPlayingView while
+    // appearance/showTrackDetails went per-profile in MusicPlayerSettingsStore),
+    // this read MUST become profile-namespace-scoped (SettingsKey.scoped) at
+    // the same time — otherwise the resolver reads the global key while the UI
+    // writes a scoped one and this gating silently desyncs.
+    let lyricsEnabled = UserDefaults.standard.object(forKey: MusicLyricsPreference.storageKey) as? Bool
+        ?? MusicLyricsPreference.defaultEnabled
+    let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    async let serverLookup: Lyrics? = {
+        try? await provider.lyrics(for: track.id)
+    }()
+    async let lrclibLookup: Lyrics? = {
+        guard lyricsEnabled, let artist, !artist.isEmpty else { return nil }
+        return await LRCLIBLyricsProvider().lyrics(
+            title: track.title,
+            artist: artist,
+            album: track.albumTitle,
+            duration: track.duration
+        )
+    }()
+
+    let serverLyrics = await serverLookup
+    if let serverLyrics, !serverLyrics.isEmpty, serverLyrics.isSynced {
+        return serverLyrics
+    }
+    let lrclibLyrics = await lrclibLookup
+    if let lrclibLyrics, lrclibLyrics.isSynced {
+        return lrclibLyrics
+    }
+    return nil
+}
+
+/// Per-session memo of resolved lyrics, keyed by `MusicTrack.id`. Bounded so a
+/// long listening session can't grow it without limit. Crossing a track off the
+/// front when it overflows is fine — lyrics rarely change for the same track,
+/// and a miss just re-issues the (now parallelised) network lookup.
+actor LyricsMemoCache {
+    static let shared = LyricsMemoCache()
+
+    private var entries: [String: Lyrics?] = [:]
+    private var order: [String] = []
+    private let limit = 64
+
+    func value(for key: String) -> Lyrics?? {
+        guard let entry = entries[key] else { return nil }
+        return .some(entry)
+    }
+
+    func set(_ value: Lyrics?, for key: String) {
+        if entries[key] == nil {
+            order.append(key)
+            if order.count > limit, let evicted = order.first {
+                order.removeFirst()
+                entries.removeValue(forKey: evicted)
             }
         }
-
-        // Nothing synced anywhere: report no lyrics so the player stays centered.
-        return nil
+        entries[key] = value
     }
 }
 #endif

@@ -32,20 +32,34 @@ public struct LRCLIBLyricsProvider: Sendable {
         let candidates = titleCandidates(from: title)
         guard !candidates.isEmpty else { return nil }
 
-        var plainFallback: Lyrics?
-        for candidate in candidates {
-            if let exact = await exactMatch(title: candidate, artist: trimmedArtist, album: album, duration: duration),
-               let lyrics = exact.lyrics() {
-                if lyrics.isSynced { return lyrics }
+        // Fan out every candidate × {/get, /search} concurrently and take the
+        // first synced result, cancelling the rest. Previously these ran
+        // sequentially (up to 4 round-trips waited on serially), which is the
+        // main reason lyrics sometimes took several seconds to appear.
+        return await withTaskGroup(of: Lyrics?.self) { group in
+            for candidate in candidates {
+                group.addTask {
+                    await self.exactMatch(
+                        title: candidate, artist: trimmedArtist, album: album, duration: duration
+                    )?.lyrics()
+                }
+                group.addTask {
+                    await self.search(
+                        title: candidate, artist: trimmedArtist, duration: duration
+                    )?.lyrics()
+                }
+            }
+            var plainFallback: Lyrics?
+            for await result in group {
+                guard let lyrics = result else { continue }
+                if lyrics.isSynced {
+                    group.cancelAll()
+                    return lyrics
+                }
                 if plainFallback == nil { plainFallback = lyrics }
             }
-            if let searched = await search(title: candidate, artist: trimmedArtist, duration: duration),
-               let lyrics = searched.lyrics() {
-                if lyrics.isSynced { return lyrics }
-                if plainFallback == nil { plainFallback = lyrics }
-            }
+            return plainFallback
         }
-        return plainFallback
     }
 
     /// The ordered, de-duplicated title queries to try: the original first, then

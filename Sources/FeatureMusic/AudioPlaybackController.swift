@@ -44,12 +44,15 @@ public final class AudioPlaybackController {
     public typealias StreamURLResolver = @MainActor (MusicTrack) async -> ResolvedStream?
 
     /// Resolves a track's lyrics (provider-backed). The result reports both
-    /// the lyrics (or `nil` when the backend has none) and whether that
-    /// answer came from a *remembered negative* — i.e. a cache hit for "we
-    /// already asked and got nothing". When true, the controller stays in
-    /// `.silent` (no spinner, no "No lyrics found") and kicks off a
-    /// background re-check via `LyricsRefresher` so a song that later
-    /// receives an LRCLIB upload surfaces silently on a future play.
+    /// the lyrics (or `nil` when none are available) and whether the UI should
+    /// *stay silent* about a `nil` — i.e. suppress the one-time "No lyrics
+    /// found" message. That happens when the negative came from a cache hit / an
+    /// instrumental heuristic, **or** when we couldn't reach a server at all
+    /// (offline). In every silent case the controller stays in `.silent` (no
+    /// spinner, no message) and kicks off a background re-check via
+    /// `LyricsRefresher`, so a song that later receives an LRCLIB upload — or
+    /// one we simply couldn't fetch while offline — surfaces silently on a
+    /// future play.
     public typealias LyricsResolver = @MainActor (MusicTrack) async -> LyricsResolution
 
     /// Background re-check for a track whose cached answer was negative.
@@ -61,14 +64,17 @@ public final class AudioPlaybackController {
     /// Outcome of a `LyricsResolver` call.
     public struct LyricsResolution: Sendable, Equatable {
         public let lyrics: Lyrics?
-        /// True when this answer came from cache/heuristic instead of a fresh
-        /// lookup. Drives the "stay silent + re-check in the background"
-        /// behaviour for tracks we already know are (probably) instrumental.
-        public let isRememberedNegative: Bool
+        /// When `lyrics` is `nil`, true means the UI should stay silent rather
+        /// than flash "No lyrics found": the negative came from a cache hit, an
+        /// instrumental heuristic, or an unreachable server (offline). All of
+        /// those drive the "stay silent + re-check in the background" behaviour.
+        /// Only a *definitive first-time* negative from a reachable server sets
+        /// this `false`, which is the lone path allowed to show the message.
+        public let staySilent: Bool
 
-        public init(lyrics: Lyrics?, isRememberedNegative: Bool = false) {
+        public init(lyrics: Lyrics?, staySilent: Bool = false) {
             self.lyrics = lyrics
-            self.isRememberedNegative = isRememberedNegative
+            self.staySilent = staySilent
         }
     }
 
@@ -170,11 +176,18 @@ public final class AudioPlaybackController {
     /// Cache hits cost ~0ms so a re-played album finishes its sweep almost
     /// instantly; a fresh album incurs ~one polite request per track.
     private var lyricsBulkPrefetchTask: Task<Void, Never>?
-    /// Pause between successive bulk-prefetch lookups. Tuned to keep
-    /// LRCLIB-friendly pacing (well under 1 req/sec including the per-track
-    /// fan-out) without making the warm-up so slow that a long playlist
-    /// hasn't finished by the time the user reaches its end.
+    /// Pause between successive bulk-prefetch lookups. This spaces out *tracks*;
+    /// the actual per-request LRCLIB politeness is enforced separately by the
+    /// shared token-bucket rate limiter inside `LRCLIBLyricsProvider`, so a
+    /// track's internal fan-out can't burst past the global budget regardless of
+    /// this value. Tuned so a long playlist still finishes warming reasonably
+    /// soon without making the sweep feel like a network crawl.
     private static let bulkPrefetchSpacing: Duration = .milliseconds(1500)
+    /// Upper bound on how many upcoming tracks the background sweep warms per
+    /// run. Caps the work scheduled for very long playlists/albums; tracks past
+    /// this point are warmed lazily as the user advances (each track change
+    /// re-runs the sweep from the new position).
+    private static let maxBulkPrefetch = 30
     /// The unshuffled queue, so toggling shuffle off restores original order.
     private var orderedQueue: [MusicTrack] = []
     private var playSessionID: String?
@@ -476,7 +489,7 @@ public final class AudioPlaybackController {
             let usable = (lyrics?.isEmpty == false && lyrics?.isSynced == true) ? lyrics : nil
             if let usable {
                 self.lyricsState = .loaded(usable)
-            } else if resolution.isRememberedNegative {
+            } else if resolution.staySilent {
                 // Stay silent (panel hidden, no message) and re-check quietly.
                 self.lyricsState = .silent
                 self.refreshLyricsInBackground(for: track)
@@ -538,12 +551,16 @@ public final class AudioPlaybackController {
     /// re-played album costs essentially nothing — the loop blasts through
     /// the queue in milliseconds. Only previously-unseen tracks actually
     /// touch the network, and even those are paced to be a polite trickle
-    /// rather than a burst.
+    /// rather than a burst. The sweep is also capped to the next
+    /// `maxBulkPrefetch` tracks so a thousand-track playlist doesn't schedule
+    /// an unbounded crawl — anything past the cap is warmed lazily as the user
+    /// advances and this sweep re-runs from the new position.
     private func prefetchRestOfQueueLyrics() {
         guard let lyricsResolver else { return }
         let startIndex = index + 2 // immediate-next is handled separately
         guard startIndex < queue.count else { return }
-        let upcoming = Array(queue[startIndex...])
+        let endIndex = min(startIndex + Self.maxBulkPrefetch, queue.count)
+        let upcoming = Array(queue[startIndex..<endIndex])
         lyricsBulkPrefetchTask = Task { @MainActor [weak self] in
             for track in upcoming {
                 guard !Task.isCancelled else { return }

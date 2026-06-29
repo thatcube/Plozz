@@ -931,7 +931,12 @@ struct LyricsSourceBadge: View {
         case .plex:
             Image("PlexLogo").renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
         case .lrclib:
-            Image(systemName: "quote.bubble").font(.caption)
+            // LRCLIB ships no brand asset we can bundle, so use a lyrics-flavoured
+            // SF Symbol sized to match the 16×16 server logos above so all three
+            // attributions line up cleanly.
+            Image(systemName: "quote.bubble.fill")
+                .font(.system(size: 13))
+                .frame(width: 16, height: 16)
         }
     }
 }

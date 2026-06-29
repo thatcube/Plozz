@@ -136,10 +136,24 @@ func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackControll
     }
 }
 
+/// Builds the cache key for a track's lyrics. Scoping by `sourceAccountID`
+/// keeps the key unique across accounts and providers — server track IDs are
+/// only locally unique, so two different Jellyfin/Plex servers (or a Jellyfin
+/// and a Plex item) can collide on raw `id` alone and leak one library's
+/// lyrics/negatives into another. Falls back to the bare id when no account is
+/// attached (e.g. ad-hoc tracks) so behaviour is unchanged for the single-
+/// account case.
+private func lyricsCacheKey(for track: MusicTrack) -> String {
+    if let account = track.sourceAccountID, !account.isEmpty {
+        return "\(account)::\(track.id)"
+    }
+    return track.id
+}
+
 /// Builds a lyrics resolver bound to a music provider, mirroring
 /// `streamURLResolver`, so the Now Playing lyrics panel works for whichever
 /// backend owns the track.
-@MainActor
+///
 /// Resolves a track's lyrics, returning **only a synced (scrollable/karaoke)
 /// version**. On a TV there's no way to manually scroll plain lyrics, so an
 /// unsynced result is treated as "no lyrics": we just show the centered song.
@@ -150,22 +164,24 @@ func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackControll
 ///  1. `LyricsMemoCache` (in-memory, this session) — covers track ↔ track
 ///     hand-offs and the next-track prefetch.
 ///  2. `LyricsDiskCache` (persistent, across launches) — covers re-playing a
-///     track you've played any time in the last month, including remembering
-///     that an instrumental piece like Escala's *Palladio* has no lyrics so
-///     we never search for it again.
+///     track you've ever played, including remembering that an instrumental
+///     piece like Escala's *Palladio* has no lyrics so we don't search for it
+///     again (a debounced background re-check still catches a later upload).
 ///  3. Title heuristic (`isExplicitlyInstrumental`) — short-circuits tracks
 ///     whose own title says they're instrumental/karaoke without touching the
 ///     network at all.
 ///
 /// Each result carries its own source tag (Jellyfin/Plex/LRCLIB) for the
 /// attribution badge.
+@MainActor
 func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
     { track in
+        let key = lyricsCacheKey(for: track)
         // L1: in-memory memo for this session.
-        if let cached = await LyricsMemoCache.shared.value(for: track.id) {
+        if let cached = await LyricsMemoCache.shared.value(for: key) {
             return AudioPlaybackController.LyricsResolution(
                 lyrics: cached,
-                isRememberedNegative: cached == nil
+                staySilent: cached == nil
             )
         }
         // L2: on-disk cache from previous sessions. A negative hit here is the
@@ -174,41 +190,43 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         // `AudioPlaybackController` re-checks remembered negatives in the
         // background (debounced) so a song that *later* gains an LRCLIB upload
         // still surfaces without the user doing anything.
-        if let cached = await LyricsDiskCache.shared.cached(track.id) {
-            await LyricsMemoCache.shared.set(cached, for: track.id)
+        if let cached = await LyricsDiskCache.shared.cached(key) {
+            await LyricsMemoCache.shared.set(cached, for: key)
             return AudioPlaybackController.LyricsResolution(
                 lyrics: cached,
-                isRememberedNegative: cached == nil
+                staySilent: cached == nil
             )
         }
         // L3: title heuristic for explicitly-marked instrumental/karaoke
         // tracks. We still persist this through the cache layers so we don't
         // re-evaluate it on every play.
         if isExplicitlyInstrumental(title: track.title) {
-            await LyricsMemoCache.shared.set(nil, for: track.id)
-            await LyricsDiskCache.shared.store(nil, for: track.id)
+            await LyricsMemoCache.shared.set(nil, for: key)
+            await LyricsDiskCache.shared.store(nil, for: key)
             return AudioPlaybackController.LyricsResolution(
                 lyrics: nil,
-                isRememberedNegative: true
+                staySilent: true
             )
         }
         let resolution = await resolveSyncedLyrics(for: track, provider: provider)
-        // Only persist this result when we're confident it reflects a real
-        // verdict from a server, not a transport failure (offline / DNS / TLS).
-        // Otherwise an Apple TV that briefly lost wifi would permanently
-        // remember "no lyrics" for every song played during the outage.
-        // Still memoise within this session so a quick track ↔ track flick
-        // doesn't re-issue the same failing request every few seconds.
-        await LyricsMemoCache.shared.set(resolution.lyrics, for: track.id)
-        if resolution.isAuthoritative {
-            await LyricsDiskCache.shared.store(resolution.lyrics, for: track.id)
+        // Only persist a result we actually trust. A positive (lyrics found) is
+        // always trustworthy; a negative is trustworthy only when at least one
+        // source was reachable. An offline/unreachable negative is cached in
+        // *neither* L1 nor L2 — otherwise a single wifi blip would poison the
+        // memo for the session and a longer outage would burn "no lyrics" onto
+        // disk for every song played during it.
+        let trustworthy = resolution.lyrics != nil || resolution.isAuthoritative
+        if trustworthy {
+            await LyricsMemoCache.shared.set(resolution.lyrics, for: key)
+            await LyricsDiskCache.shared.store(resolution.lyrics, for: key)
         }
-        // First-time resolution: not a remembered negative, so the UI is
-        // allowed to show "No lyrics found" if `lyrics` is nil. This is the
-        // only path that lets that message ever appear.
         return AudioPlaybackController.LyricsResolution(
             lyrics: resolution.lyrics,
-            isRememberedNegative: false
+            // The one-time "No lyrics found" message is allowed only for a
+            // definitive negative from a reachable server. An unreachable
+            // negative stays silent and keeps re-checking, so a network blip
+            // never produces a false "No lyrics found".
+            staySilent: resolution.lyrics == nil && !resolution.isAuthoritative
         )
     }
 }
@@ -226,12 +244,13 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
 @MainActor
 func lyricsRefresher(for provider: any MusicProvider) -> AudioPlaybackController.LyricsRefresher {
     { track in
+        let key = lyricsCacheKey(for: track)
         // Skip if we recently re-checked. 7 days is long enough that an
         // instrumental track on heavy rotation costs effectively zero network
         // traffic, short enough that a newly-uploaded LRCLIB record surfaces
         // within a week of any future play of the song.
         let refreshDebounce: TimeInterval = 60 * 60 * 24 * 7
-        if let age = await LyricsDiskCache.shared.entryAge(track.id), age < refreshDebounce {
+        if let age = await LyricsDiskCache.shared.entryAge(key), age < refreshDebounce {
             return nil
         }
         let resolution = await resolveSyncedLyrics(for: track, provider: provider)
@@ -242,13 +261,13 @@ func lyricsRefresher(for provider: any MusicProvider) -> AudioPlaybackController
         if let lyrics = resolution.lyrics, !lyrics.isEmpty, lyrics.isSynced {
             // Found new lyrics — promote into both caches so the next play
             // resolves them instantly from L2 with no refresh needed.
-            await LyricsMemoCache.shared.set(lyrics, for: track.id)
-            await LyricsDiskCache.shared.store(lyrics, for: track.id)
+            await LyricsMemoCache.shared.set(lyrics, for: key)
+            await LyricsDiskCache.shared.store(lyrics, for: key)
             return lyrics
         } else {
             // Still nothing — reset the debounce clock without changing the
             // stored answer so we don't re-check again for another week.
-            await LyricsDiskCache.shared.touch(track.id)
+            await LyricsDiskCache.shared.touch(key)
             return nil
         }
     }
@@ -289,23 +308,28 @@ private func resolveSyncedLyrics(
     let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines)
     let lrclibAvailable = lyricsEnabled && artist.map { !$0.isEmpty } ?? false
 
-    enum Source { case server, lrclib }
+    enum Source { case server, lrclib, deadline }
     struct Outcome { let source: Source; let lyrics: Lyrics?; let reachable: Bool }
+
+    // Once LRCLIB already holds a synced copy, this is the longest it will wait
+    // for a still-pending server before showing what it has. The server's result
+    // carries the user's own library attribution so it wins ties, but we never
+    // block the visible panel on a slow/unhealthy server beyond this window.
+    let serverHeadStart: Duration = .milliseconds(300)
 
     return await withTaskGroup(of: Outcome.self) { group in
         group.addTask {
-            // Treat a URLError thrown by the server as a transport failure
-            // (offline / DNS / TLS / timeout) rather than a real "no lyrics"
-            // answer. Any other error (auth, decode, server bug) we treat as
-            // a real verdict — better than re-querying forever on a broken
-            // backend that's still online enough to return 5xx.
+            // The provider pre-classifies its own failures: a real "no lyrics"
+            // answer from a reachable server returns `nil`, while a transport
+            // failure (offline / DNS / TLS / timeout / expired session) is
+            // thrown. So any throw here means we could NOT obtain an
+            // authoritative verdict — mark it unreachable so callers don't burn
+            // a false "no lyrics" into the cache.
             do {
                 let lyrics = try await provider.lyrics(for: track.id)
                 return Outcome(source: .server, lyrics: lyrics, reachable: true)
-            } catch is URLError {
-                return Outcome(source: .server, lyrics: nil, reachable: false)
             } catch {
-                return Outcome(source: .server, lyrics: nil, reachable: true)
+                return Outcome(source: .server, lyrics: nil, reachable: false)
             }
         }
         if lrclibAvailable, let artist {
@@ -323,6 +347,7 @@ private func resolveSyncedLyrics(
         var pendingLRCLIB: Lyrics?
         var sawServer = false
         var anyReachable = false
+        var startedDeadline = false
         for await outcome in group {
             if outcome.reachable { anyReachable = true }
             let synced = (outcome.lyrics?.isSynced == true && outcome.lyrics?.isEmpty == false)
@@ -350,9 +375,26 @@ private func resolveSyncedLyrics(
                         return (synced, true)
                     }
                     pendingLRCLIB = synced
+                    // Server still pending: arm a bounded head-start timer so a
+                    // slow/unhealthy server can't pin the visible wait. When it
+                    // fires we surface the LRCLIB copy we already hold.
+                    if !startedDeadline {
+                        startedDeadline = true
+                        group.addTask {
+                            try? await Task.sleep(for: serverHeadStart)
+                            return Outcome(source: .deadline, lyrics: nil, reachable: false)
+                        }
+                    }
                 } else if sawServer {
                     // Both sources finished without synced lyrics.
                     return (nil, anyReachable)
+                }
+            case .deadline:
+                // Head-start window elapsed with the server still not producing
+                // synced lyrics — commit the LRCLIB copy we've been holding.
+                if let pendingLRCLIB {
+                    group.cancelAll()
+                    return (pendingLRCLIB, true)
                 }
             }
         }

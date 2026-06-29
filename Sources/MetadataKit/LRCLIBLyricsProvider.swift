@@ -13,6 +13,13 @@ import FoundationNetworking
 public struct LRCLIBLyricsProvider: Sendable {
     private static let base = "https://lrclib.net/api"
 
+    /// Shared app-wide rate limiter so *every* LRCLIB request — current-track
+    /// lookups, next-track prefetch, and the bulk queue sweep combined — stays
+    /// within polite limits for the keyless public endpoint. A single visible
+    /// lookup fans out a few requests; `burst` lets those go out immediately
+    /// while sustained background traffic is throttled toward ~`requestsPerSecond`.
+    static let rateLimiter = RateLimiter(requestsPerSecond: 2.0, burst: 8)
+
     public init() {}
 
     /// Looks up lyrics for a track, **preferring a synced version**. Tries the
@@ -124,6 +131,7 @@ public struct LRCLIBLyricsProvider: Sendable {
             items.append(URLQueryItem(name: "duration", value: String(Int(duration.rounded()))))
         }
         guard let url = makeURL(path: "/get", queryItems: items) else { return (nil, false) }
+        await Self.rateLimiter.acquire()
         let result = await MetadataHTTP.getWithStatus(LRCLIBRecord.self, url: url)
         return (result.value, result.reachable)
     }
@@ -134,6 +142,7 @@ public struct LRCLIBLyricsProvider: Sendable {
             URLQueryItem(name: "artist_name", value: artist)
         ]
         guard let url = makeURL(path: "/search", queryItems: items) else { return (nil, false) }
+        await Self.rateLimiter.acquire()
         let result = await MetadataHTTP.getWithStatus([LRCLIBRecord].self, url: url)
         guard let results = result.value, !results.isEmpty else {
             return (nil, result.reachable)

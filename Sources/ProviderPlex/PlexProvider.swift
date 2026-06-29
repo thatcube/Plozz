@@ -881,7 +881,8 @@ public struct PlexProvider: MediaProvider {
             language: language,
             isDefault: dto.default ?? dto.selected ?? false,
             isForced: dto.forced ?? false,
-            deliveryURL: deliveryURL
+            deliveryURL: deliveryURL,
+            isImageBasedSubtitle: isSubtitle && !isTextSubtitleCodec(dto.codec)
         )
     }
 

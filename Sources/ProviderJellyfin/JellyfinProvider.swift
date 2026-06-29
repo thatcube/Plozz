@@ -888,13 +888,16 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     private func map(stream dto: MediaStreamDto) -> MediaTrack {
-        MediaTrack(
+        let isSubtitle = dto.`Type` == "Subtitle"
+        return MediaTrack(
             id: dto.Index,
-            kind: dto.`Type` == "Subtitle" ? .subtitle : .audio,
+            kind: isSubtitle ? .subtitle : .audio,
             displayTitle: dto.DisplayTitle ?? dto.Language ?? dto.Codec ?? "Track \(dto.Index)",
             language: dto.Language,
             isDefault: dto.IsDefault ?? false,
-            isForced: dto.IsForced ?? false
+            isForced: dto.IsForced ?? false,
+            isImageBasedSubtitle: isSubtitle
+                && !(dto.IsTextSubtitleStream ?? isTextSubtitleCodec(dto.Codec))
         )
     }
 
@@ -912,7 +915,8 @@ public struct JellyfinProvider: MediaProvider {
             language: dto.Language,
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false,
-            deliveryURL: deliveryURL
+            deliveryURL: deliveryURL,
+            isImageBasedSubtitle: !isText
         )
     }
 

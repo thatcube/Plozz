@@ -64,6 +64,15 @@ public struct MALUserInfo: Decodable, Sendable, Equatable {
     public let name: String
 }
 
+/// Minimal decode of `GET /v2/anime?q=…` for title-based id lookup.
+public struct MALAnimeSearchResponse: Decodable, Sendable, Equatable {
+    public struct Entry: Decodable, Sendable, Equatable {
+        public struct Node: Decodable, Sendable, Equatable { public let id: Int }
+        public let node: Node
+    }
+    public let data: [Entry]
+}
+
 // MARK: - Anime list status
 
 /// MAL anime watching status values.

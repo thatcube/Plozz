@@ -112,6 +112,24 @@ struct MALClient: Sendable {
 
     // MARK: - Anime list
 
+    /// `GET /v2/anime?q=…` — searches MAL's catalog, returning the top match's id.
+    /// Fallback for anime whose AniDB id isn't in the ARM map (e.g. brand-new
+    /// seasons), so a MAL-only user still gets list updates.
+    func searchAnimeID(title: String, accessToken: String) async throws -> Int? {
+        let endpoint = Endpoint(
+            method: .get,
+            path: "/anime",
+            queryItems: [
+                URLQueryItem(name: "q", value: title),
+                URLQueryItem(name: "limit", value: "1"),
+                URLQueryItem(name: "fields", value: "id")
+            ],
+            headers: ["Authorization": "Bearer \(accessToken)"]
+        )
+        let result = try await http.decode(MALAnimeSearchResponse.self, from: endpoint, baseURL: apiBaseURL)
+        return result.data.first?.node.id
+    }
+
     /// `PATCH /v2/anime/{anime_id}/my_list_status` — updates the user's list entry.
     func updateAnimeListStatus(
         animeID: Int,

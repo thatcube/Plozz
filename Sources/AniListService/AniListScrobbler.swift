@@ -74,12 +74,14 @@ public actor AniListScrobbler: AniListScrobbling {
         // AniList needs an AniList or MAL id; most anime libraries tag only AniDB,
         // so translate on demand (cached) before falling back to a title search.
         let ids = await idMapper.enrich(extractMappedIDs(from: item.providerIDs))
-        guard let mediaId = try await client.findAnime(
+        let mediaId = try await client.findAnime(
             anilistID: ids.anilist,
             malID: ids.mal,
             title: item.parentTitle ?? item.title,
             accessToken: accessToken
-        ) else { return }
+        )
+        FanoutDiagnostics.emit("anilist.resolve title=\"\(item.parentTitle ?? item.title)\" mal=\(ids.mal.map(String.init) ?? "-") anilist=\(ids.anilist.map(String.init) ?? "-") media=\(mediaId.map(String.init) ?? "miss")")
+        guard let mediaId else { return }
 
         let episodeProgress = item.episodeNumber
         let status: AniListMediaListStatus = .current

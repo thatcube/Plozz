@@ -75,7 +75,16 @@ public actor MALScrobbler: MALScrobbling {
         // Most anime libraries (Shoko/Jellyfin) tag only AniDB; resolve a MAL id
         // on demand so MAL-only users still scrobble. No-op when one is present.
         let mapped = await idMapper.enrich(extractMappedIDs(from: item.providerIDs))
-        guard let malID = mapped.mal else { return }
+        var malID = mapped.mal
+        // ARM misses brand-new seasons; fall back to a MAL catalog title search.
+        if malID == nil {
+            let title = item.parentTitle ?? item.title
+            malID = try? await client.searchAnimeID(title: title, accessToken: accessToken)
+            FanoutDiagnostics.emit("mal.resolve title=\"\(title)\" arm=nil search->\(malID.map(String.init) ?? "miss")")
+        } else {
+            FanoutDiagnostics.emit("mal.resolve via=arm/native id=\(malID!)")
+        }
+        guard let malID else { return }
 
         let episodeProgress = item.episodeNumber
         try await client.updateAnimeListStatus(

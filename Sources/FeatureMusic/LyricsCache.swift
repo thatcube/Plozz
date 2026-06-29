@@ -34,72 +34,84 @@ actor LyricsMemoCache {
 /// alongside `MetadataDiskCache` in the user's Caches directory so the OS can
 /// reclaim it under pressure without losing user data.
 ///
-/// Caches **both** positives and negatives:
-///
-///  * A positive entry (`lyrics != nil`) means "we already fetched and parsed
-///    synced lyrics for this track" — re-opening it is instant on the next
-///    launch, not just in the same session.
-///  * A negative entry (`lyrics == nil`) means "this track resolved to no
-///    synced lyrics anywhere". This is the big win for purely instrumental
-///    pieces (classical, score) like *Palladio* by Escala — once we've asked
-///    once, we never ask again until the entry expires, and the panel goes
-///    straight to its "No lyrics found" state.
+/// Entries are stored **without TTL** — once we've ever resolved a track, we
+/// trust that answer until the cache file is evicted by the OS or until the
+/// schema is bumped via `cacheFileName`. The "what if lyrics get uploaded
+/// later" case is handled by `AudioPlaybackController`'s background-refresh
+/// path, which periodically re-checks remembered negatives (debounced via
+/// each entry's `lastChecked` timestamp). That way the user never sees a
+/// "Searching for lyrics…" or "No lyrics found" flash for a song we already
+/// know is instrumental, but a fresh upload for that song still surfaces on a
+/// later play without any manual cache-bust.
 ///
 /// Per-song JSON encodes to roughly 3 KB, so a heavy listening history of a
-/// few thousand tracks costs only a handful of MB on disk — gzip would halve
-/// that but isn't needed at this scale. Entries are dropped from memory on
-/// load when expired so the file self-prunes over time.
+/// few thousand tracks costs only a handful of MB on disk.
 public actor LyricsDiskCache {
     public static let shared = LyricsDiskCache()
 
     private struct Entry: Codable {
         let lyrics: Lyrics?
-        let expires: Date
+        /// Timestamp of the last *authoritative* resolution that produced this
+        /// entry. Used to debounce the background re-check of remembered
+        /// negatives so we don't hammer LRCLIB on every play of the same
+        /// instrumental — see `entryAge(_:)`.
+        let lastChecked: Date
     }
 
     private var entries: [String: Entry] = [:]
     private let fileURL: URL?
-    private let positiveTTL: TimeInterval
-    private let negativeTTL: TimeInterval
     private var loaded = false
     private var dirty = false
     private var persistTask: Task<Void, Never>?
 
     /// The on-disk cache filename carries a schema version, mirroring the
     /// metadata cache, so bumping the version cleanly starts fresh if the
-    /// `Lyrics` shape ever evolves.
-    private static let cacheFileName = "plozz-lyrics-cache-v1.json"
+    /// `Lyrics` shape ever evolves or we want to invalidate every cached
+    /// entry in one go.
+    private static let cacheFileName = "plozz-lyrics-cache-v2.json"
     private static let cacheFilePrefix = "plozz-lyrics-cache"
 
-    public init(
-        directory: URL? = LyricsDiskCache.defaultDirectory(),
-        positiveTTL: TimeInterval = 60 * 60 * 24 * 30,
-        negativeTTL: TimeInterval = 60 * 60 * 24 * 14
-    ) {
+    public init(directory: URL? = LyricsDiskCache.defaultDirectory()) {
         self.fileURL = directory?.appendingPathComponent(Self.cacheFileName)
-        self.positiveTTL = positiveTTL
-        self.negativeTTL = negativeTTL
         if let directory { Self.removeSupersededCaches(in: directory) }
     }
 
     /// Returns the cached entry for `key`:
-    /// - `.some(.some(lyrics))` for a fresh positive hit (use these lyrics);
-    /// - `.some(.none)` for a fresh remembered "no lyrics" answer (skip the
-    ///   network and show the empty state);
-    /// - `nil` when there's no fresh entry and the caller should resolve.
+    /// - `.some(.some(lyrics))` for a positive hit (use these lyrics);
+    /// - `.some(.none)` for a remembered "no lyrics" answer (skip the
+    ///   network and stay silent — caller may kick a background refresh);
+    /// - `nil` when there's no entry and the caller should resolve.
     public func cached(_ key: String) -> Lyrics?? {
         loadIfNeeded()
-        guard let entry = entries[key], entry.expires > Date() else { return nil }
+        guard let entry = entries[key] else { return nil }
         return .some(entry.lyrics)
     }
 
-    /// Stores a resolved result for `key`, using a shorter TTL for negatives
-    /// so the rare case of LRCLIB picking up new lyrics for a track doesn't
-    /// stay invisible to the user for a month.
+    /// Seconds since the entry for `key` was last authoritatively resolved,
+    /// or `nil` if there is no entry. Callers use this to decide whether a
+    /// remembered negative is old enough to deserve a background re-check.
+    public func entryAge(_ key: String) -> TimeInterval? {
+        loadIfNeeded()
+        guard let entry = entries[key] else { return nil }
+        return Date().timeIntervalSince(entry.lastChecked)
+    }
+
+    /// Stores a resolved result for `key`. No TTL — entries live until the
+    /// cache file is evicted by the OS or the schema is bumped.
     public func store(_ lyrics: Lyrics?, for key: String) {
         loadIfNeeded()
-        let ttl = lyrics == nil ? negativeTTL : positiveTTL
-        entries[key] = Entry(lyrics: lyrics, expires: Date().addingTimeInterval(ttl))
+        entries[key] = Entry(lyrics: lyrics, lastChecked: Date())
+        dirty = true
+        schedulePersist()
+    }
+
+    /// Records that we *re-checked* `key` and found nothing new, without
+    /// changing the stored result. Resets the debounce clock so the next
+    /// background refresh waits the full interval again.
+    public func touch(_ key: String) {
+        loadIfNeeded()
+        guard let entry = entries[key] else { return }
+        entries[key] = Entry(lyrics: entry.lyrics, lastChecked: Date())
         dirty = true
         schedulePersist()
     }
@@ -112,12 +124,7 @@ public actor LyricsDiskCache {
               let decoded = try? JSONDecoder().decode([String: Entry].self, from: data) else {
             return
         }
-        // Drop already-expired entries on load so the file self-prunes.
-        let now = Date()
-        entries = decoded.filter { $0.value.expires > now }
-        // If pruning actually removed anything, mark dirty so the trimmed set
-        // gets written back on the next change without forcing an immediate IO.
-        if entries.count != decoded.count { dirty = true }
+        entries = decoded
     }
 
     /// Debounces writes so a burst of `store` calls (e.g. an album prefetch)

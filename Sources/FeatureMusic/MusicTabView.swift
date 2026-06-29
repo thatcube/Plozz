@@ -83,7 +83,8 @@ public struct MusicTabView: View {
             tracks: [track],
             startIndex: 0,
             resolveStreamURL: streamURLResolver(for: provider),
-            resolveLyrics: lyricsResolver(for: provider)
+            resolveLyrics: lyricsResolver(for: provider),
+            refreshLyrics: lyricsRefresher(for: provider)
         )
     }
 
@@ -162,14 +163,23 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
     { track in
         // L1: in-memory memo for this session.
         if let cached = await LyricsMemoCache.shared.value(for: track.id) {
-            return cached
+            return AudioPlaybackController.LyricsResolution(
+                lyrics: cached,
+                isRememberedNegative: cached == nil
+            )
         }
         // L2: on-disk cache from previous sessions. A negative hit here is the
         // big saving for instrumental tracks — once we've ever asked and found
-        // nothing, we skip every network round-trip on future plays.
+        // nothing, we skip the network round-trip and stay silent on the UI.
+        // `AudioPlaybackController` re-checks remembered negatives in the
+        // background (debounced) so a song that *later* gains an LRCLIB upload
+        // still surfaces without the user doing anything.
         if let cached = await LyricsDiskCache.shared.cached(track.id) {
             await LyricsMemoCache.shared.set(cached, for: track.id)
-            return cached
+            return AudioPlaybackController.LyricsResolution(
+                lyrics: cached,
+                isRememberedNegative: cached == nil
+            )
         }
         // L3: title heuristic for explicitly-marked instrumental/karaoke
         // tracks. We still persist this through the cache layers so we don't
@@ -177,7 +187,10 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         if isExplicitlyInstrumental(title: track.title) {
             await LyricsMemoCache.shared.set(nil, for: track.id)
             await LyricsDiskCache.shared.store(nil, for: track.id)
-            return nil
+            return AudioPlaybackController.LyricsResolution(
+                lyrics: nil,
+                isRememberedNegative: true
+            )
         }
         let resolution = await resolveSyncedLyrics(for: track, provider: provider)
         // Only persist this result when we're confident it reflects a real
@@ -190,7 +203,54 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         if resolution.isAuthoritative {
             await LyricsDiskCache.shared.store(resolution.lyrics, for: track.id)
         }
-        return resolution.lyrics
+        // First-time resolution: not a remembered negative, so the UI is
+        // allowed to show "No lyrics found" if `lyrics` is nil. This is the
+        // only path that lets that message ever appear.
+        return AudioPlaybackController.LyricsResolution(
+            lyrics: resolution.lyrics,
+            isRememberedNegative: false
+        )
+    }
+}
+
+/// Background re-check for a track whose visible state is `.silent`. Honours
+/// a per-track debounce (`refreshDebounce`) so playing the same instrumental
+/// repeatedly costs at most one network round-trip per debounce window, and
+/// returns lyrics only when the fresh lookup actually found something the
+/// cache didn't have — never re-flashes "No lyrics found".
+///
+/// On a successful find, updates both cache layers so future plays resolve
+/// from L1/L2 with the new lyrics, no extra refresh needed. On a still-empty
+/// result, `touch`es the disk entry so the debounce clock resets and we
+/// don't re-check this track again until the next window.
+@MainActor
+func lyricsRefresher(for provider: any MusicProvider) -> AudioPlaybackController.LyricsRefresher {
+    { track in
+        // Skip if we recently re-checked. 7 days is long enough that an
+        // instrumental track on heavy rotation costs effectively zero network
+        // traffic, short enough that a newly-uploaded LRCLIB record surfaces
+        // within a week of any future play of the song.
+        let refreshDebounce: TimeInterval = 60 * 60 * 24 * 7
+        if let age = await LyricsDiskCache.shared.entryAge(track.id), age < refreshDebounce {
+            return nil
+        }
+        let resolution = await resolveSyncedLyrics(for: track, provider: provider)
+        // Don't change anything if the device is offline — leave the existing
+        // entry intact and let a future play try again. We only "consume" the
+        // debounce window on an authoritative response.
+        guard resolution.isAuthoritative else { return nil }
+        if let lyrics = resolution.lyrics, !lyrics.isEmpty, lyrics.isSynced {
+            // Found new lyrics — promote into both caches so the next play
+            // resolves them instantly from L2 with no refresh needed.
+            await LyricsMemoCache.shared.set(lyrics, for: track.id)
+            await LyricsDiskCache.shared.store(lyrics, for: track.id)
+            return lyrics
+        } else {
+            // Still nothing — reset the debounce clock without changing the
+            // stored answer so we don't re-check again for another week.
+            await LyricsDiskCache.shared.touch(track.id)
+            return nil
+        }
     }
 }
 

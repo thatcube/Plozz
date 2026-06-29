@@ -141,7 +141,12 @@ struct NowPlayingView: View {
             } else {
                 latchedShowsLyricsPanel = false
             }
-        case .idle:
+        case .idle, .silent:
+            // `.silent` means we already know this track has no lyrics (cache
+            // hit) and a background re-check is quietly under way. Behave
+            // exactly like `.idle` — no panel, no message, no dwell — so the
+            // user never sees a "Searching for lyrics…" / "No lyrics found"
+            // flash for a song they've played before.
             latchedShowsLyricsPanel = false
         case .loading:
             break
@@ -750,14 +755,20 @@ struct NowPlayingLyricsView: View {
     private var isLoadingState: Bool {
         switch state {
         case .idle, .loading: return true
-        case .loaded, .unavailable: return false
+        case .loaded, .unavailable, .silent: return false
         }
     }
 
     @ViewBuilder
     private var content: some View {
         switch state {
-        case .idle, .loading:
+        case .idle, .loading, .silent:
+            // `.silent` is the "we already know there's nothing, stay quiet"
+            // state — render exactly like `.idle` so the panel collapses
+            // without ever flashing the spinner or the "No lyrics found"
+            // message. The panel won't even be visible in this state thanks
+            // to `updateLyricsPanelLatch`, but rendering as blank is the
+            // belt-and-braces.
             VStack(spacing: 18) {
                 Spacer()
                 if showLoadingChrome {

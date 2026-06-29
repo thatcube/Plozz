@@ -122,6 +122,38 @@ if [[ -z "${APP_PATH:-}" || ! -d "$APP_PATH" ]]; then
 fi
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")"
 
+# --- Work around the Xcode swift-testing overlay duplicate-id install bug -----
+# Xcode embeds the swift-testing overlay frameworks in Debug, and two of them
+# ship with the SAME CFBundleIdentifier (`_Testing_CoreTransferable` wrongly
+# claims CoreGraphics'), so installd rejects the bundle with DuplicateIdentifier.
+# The project deliberately KEEPS these frameworks — hot-reload's Testing.framework
+# load chain depends on them (see docs/hot-reload.md) — so we patch the one bad
+# id and re-seal the app rather than delete anything. No-op if absent.
+CT="$APP_PATH/Frameworks/_Testing_CoreTransferable.framework"
+if [[ -d "$CT" ]]; then
+  CT_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CT/Info.plist" 2>/dev/null || true)"
+  if [[ "$CT_ID" != "com.apple.dt.swift-testing.overlay.CoreTransferable" ]]; then
+    echo "▸ Patching swift-testing overlay duplicate bundle id…"
+    SIGN_ID="${PLOZZ_SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
+              | awk '/Apple Development/{print $2; exit}')}"
+    if [[ -z "${SIGN_ID:-}" ]]; then
+      echo "✗ No codesigning identity found (set PLOZZ_SIGN_ID)." >&2; exit 1
+    fi
+    /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.apple.dt.swift-testing.overlay.CoreTransferable' "$CT/Info.plist"
+    codesign --force --sign "$SIGN_ID" --timestamp=none "$CT" >/dev/null
+    # Re-seal the app (its seal covers Frameworks/). Use the build's .xcent —
+    # NEVER --deep, which strips entitlements (see docs/hot-reload.md).
+    XCENT="$(dirname "$(dirname "$APP_PATH")")/../Intermediates.noindex/${SCHEME}.build/${CONFIG}-appletvos/${SCHEME}.build/${SCHEME}.app.xcent"
+    if [[ ! -f "$XCENT" ]]; then
+      echo "✗ Entitlements (.xcent) not found at $XCENT — cannot safely re-seal." >&2
+      echo "  Re-signing without it would strip entitlements; aborting." >&2
+      exit 1
+    fi
+    codesign --force --sign "$SIGN_ID" --entitlements "$XCENT" \
+             --timestamp=none --generate-entitlement-der "$APP_PATH" >/dev/null
+  fi
+fi
+
 echo "▸ Installing $BUNDLE_ID → Apple TV…"
 xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH"
 

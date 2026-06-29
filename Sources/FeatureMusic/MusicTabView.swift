@@ -159,9 +159,14 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
     }
 }
 
-/// Fans the server lookup and the LRCLIB fallback out concurrently, returning
-/// whichever produces synced lyrics first (preferring the server's copy when
-/// both are usable so the attribution stays accurate to the user's library).
+/// Fans the server lookup and the LRCLIB fallback out concurrently and returns
+/// the **first synced** result from either source. Previously this awaited the
+/// server before even peeking at LRCLIB, so a slow server pinned the visible
+/// wait even when LRCLIB would have answered in 200ms. The server is given a
+/// short head-start window so its result (which carries the user's own library
+/// attribution) wins all ties — if it hasn't produced synced lyrics by the time
+/// LRCLIB has, we take the LRCLIB result. Plain (unsynced) results never win,
+/// since the TV UI can't scroll them.
 private func resolveSyncedLyrics(
     for track: MusicTrack,
     provider: any MusicProvider
@@ -181,29 +186,64 @@ private func resolveSyncedLyrics(
     let lyricsEnabled = UserDefaults.standard.object(forKey: MusicLyricsPreference.storageKey) as? Bool
         ?? MusicLyricsPreference.defaultEnabled
     let artist = track.artistName?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let lrclibAvailable = lyricsEnabled && artist.map { !$0.isEmpty } ?? false
 
-    async let serverLookup: Lyrics? = {
-        try? await provider.lyrics(for: track.id)
-    }()
-    async let lrclibLookup: Lyrics? = {
-        guard lyricsEnabled, let artist, !artist.isEmpty else { return nil }
-        return await LRCLIBLyricsProvider().lyrics(
-            title: track.title,
-            artist: artist,
-            album: track.albumTitle,
-            duration: track.duration
-        )
-    }()
+    enum Source { case server, lrclib }
+    struct Outcome { let source: Source; let lyrics: Lyrics? }
 
-    let serverLyrics = await serverLookup
-    if let serverLyrics, !serverLyrics.isEmpty, serverLyrics.isSynced {
-        return serverLyrics
+    return await withTaskGroup(of: Outcome.self) { group in
+        group.addTask {
+            let lyrics = try? await provider.lyrics(for: track.id)
+            return Outcome(source: .server, lyrics: lyrics)
+        }
+        if lrclibAvailable, let artist {
+            group.addTask {
+                let lyrics = await LRCLIBLyricsProvider().lyrics(
+                    title: track.title,
+                    artist: artist,
+                    album: track.albumTitle,
+                    duration: track.duration
+                )
+                return Outcome(source: .lrclib, lyrics: lyrics)
+            }
+        }
+
+        var pendingLRCLIB: Lyrics?
+        var sawServer = false
+        for await outcome in group {
+            let synced = (outcome.lyrics?.isSynced == true && outcome.lyrics?.isEmpty == false)
+                ? outcome.lyrics
+                : nil
+            switch outcome.source {
+            case .server:
+                sawServer = true
+                if let synced {
+                    group.cancelAll()
+                    return synced
+                }
+                // Server said "no synced lyrics" — if LRCLIB already finished
+                // with a synced copy, use it; otherwise keep waiting on LRCLIB.
+                if let pendingLRCLIB {
+                    group.cancelAll()
+                    return pendingLRCLIB
+                }
+            case .lrclib:
+                if let synced {
+                    // Wait for the server only if it's still pending, to give
+                    // its (preferred) attribution a chance to land first.
+                    if sawServer {
+                        group.cancelAll()
+                        return synced
+                    }
+                    pendingLRCLIB = synced
+                } else if sawServer {
+                    // Both sources finished without synced lyrics.
+                    return nil
+                }
+            }
+        }
+        return pendingLRCLIB
     }
-    let lrclibLyrics = await lrclibLookup
-    if let lrclibLyrics, lrclibLyrics.isSynced {
-        return lrclibLyrics
-    }
-    return nil
 }
 
 /// Per-session memo of resolved lyrics, keyed by `MusicTrack.id`. Bounded so a

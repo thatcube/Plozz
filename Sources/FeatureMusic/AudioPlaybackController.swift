@@ -122,6 +122,11 @@ public final class AudioPlaybackController {
     private var resolver: StreamURLResolver?
     private var lyricsResolver: LyricsResolver?
     private var lyricsLoadTask: Task<Void, Never>?
+    /// Fire-and-forget warmup for the *next* queued track's lyrics, so by the
+    /// time the user advances it's already a memo-cache hit. Cancelled and
+    /// replaced on every track change so a runaway skip-skip-skip session
+    /// only ever has one prefetch in flight.
+    private var lyricsPrefetchTask: Task<Void, Never>?
     /// The unshuffled queue, so toggling shuffle off restores original order.
     private var orderedQueue: [MusicTrack] = []
     private var playSessionID: String?
@@ -278,6 +283,7 @@ public final class AudioPlaybackController {
         duration = 0
         currentQuality = nil
         lyricsLoadTask?.cancel()
+        lyricsPrefetchTask?.cancel()
         lyricsState = .idle
         // Relinquish the system Play/Pause button so the video player can
         // receive it again once music is no longer playing.
@@ -389,6 +395,7 @@ public final class AudioPlaybackController {
     /// shows a stale track's lyrics. With no resolver wired, stays `.unavailable`.
     private func loadLyrics(for track: MusicTrack) {
         lyricsLoadTask?.cancel()
+        lyricsPrefetchTask?.cancel()
         guard let lyricsResolver else {
             lyricsState = .unavailable
             return
@@ -407,6 +414,23 @@ public final class AudioPlaybackController {
             } else {
                 self.lyricsState = .unavailable
             }
+            // Warm the cache for the next queued track so advancing is instant.
+            // Fire-and-forget — the result is discarded; the resolver itself
+            // memoises it in LyricsMemoCache.
+            self.prefetchNextTrackLyrics()
+        }
+    }
+
+    /// Kicks off a background lookup for the immediate next queued track so it
+    /// resolves from `LyricsMemoCache` instantly when the user advances. Skips
+    /// when nothing is up next (the prefetch task is left nil).
+    private func prefetchNextTrackLyrics() {
+        guard let lyricsResolver else { return }
+        let nextIndex = index + 1
+        guard queue.indices.contains(nextIndex) else { return }
+        let nextTrack = queue[nextIndex]
+        lyricsPrefetchTask = Task { @MainActor in
+            _ = await lyricsResolver(nextTrack)
         }
     }
 

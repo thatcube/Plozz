@@ -12,18 +12,20 @@ struct MusicLandingView: View {
     let onPlayTrack: (MusicTrack) -> Void
     var layout: MusicLandingLayout = .default
 
+    @Environment(\.plozzMetrics) private var metrics
+
     var body: some View {
         ContentStateView(state: viewModel.state, emptyMessage: "No music found in your libraries.", onRetry: { Task { await viewModel.load() } }) { content in
             let firstSection = firstRenderedSection(content)
             ScrollView {
-                VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
+                VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                     // The page is composed by iterating the data-driven layout, so
                     // reordering or hiding a section is a value change, not a rewrite.
                     ForEach(layout.visibleSections, id: \.self) { section in
                         sectionView(section, content: content, isFirst: section == firstSection)
                     }
                 }
-                .padding(.vertical, PlozzTheme.Metrics.rowSpacing)
+                .padding(.vertical, metrics.rowSpacing)
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
@@ -100,10 +102,10 @@ struct MusicLandingView: View {
     }
 
     private func entryTiles(trailing: AnyView?) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             HStack {
                 Text("Browse")
-                    .font(.system(size: 32, weight: .bold))
+                    .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 Spacer()
                 if let trailing { trailing }
             }
@@ -112,17 +114,21 @@ struct MusicLandingView: View {
                 // Lazy so only on-screen tiles build their Liquid Glass surface —
                 // eager rails kept every card's glass effect live, which made
                 // focus navigation recompute every tile's SDF and lag the UI.
-                LazyHStack(spacing: 28) {
+                LazyHStack(spacing: metrics.cardSpacing) {
                     EntryTile(title: "Artists", icon: "music.mic") { onSelectRoute(.grid(.artist)) }
                     EntryTile(title: "Albums", icon: "opticaldisc") { onSelectRoute(.grid(.album)) }
                     EntryTile(title: "Playlists", icon: "music.note.list") { onSelectRoute(.grid(.playlist)) }
                     EntryTile(title: "Genres", icon: "guitars") { onSelectRoute(.grid(.genre)) }
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, 12)
+                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
+                // engine holds the first/last tile at its inset, and reserve room
+                // *inside* the clip for the focused tile's lift + shadow. The
+                // negative outer padding restores the original inset, so the row's
+                // height is unchanged — only the clip grows.
+                .padding(.vertical, metrics.railShadowClearance)
             }
-            // Never clip a focused tile's lift, shadow or border.
-            .scrollClipDisabled()
+            .padding(.vertical, metrics.railClearanceOffset(for: PlozzTheme.Spacing.small))
         }
     }
 }
@@ -132,17 +138,37 @@ private struct EntryTile: View {
     let icon: String
     let action: () -> Void
 
+    @FocusState private var isFocused: Bool
+    @Environment(\.plozzReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzMetrics) private var metrics
+
+    private var titleColor: Color {
+        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+    }
+
+    /// Scale the tile size with the density setting so it grows/shrinks alongside
+    /// media cards when appearance is changed.
+    private var tileWidth: CGFloat { (260 * metrics.scale).rounded() }
+    private var tileHeight: CGFloat { (150 * metrics.scale).rounded() }
+    private var iconSize: CGFloat { (40 * metrics.scale).rounded() }
+
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 44))
-                    .foregroundStyle(Color.accentColor.gradient)
-                Text(title).font(.headline)
-            }
-            .frame(width: 280, height: 160)
+        VStack(spacing: (12 * metrics.scale).rounded()) {
+            Image(systemName: icon)
+                .font(.system(size: iconSize))
+                .foregroundStyle(isFocused ? titleColor : Color.accentColor)
+            Text(title)
+                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+                .foregroundStyle(titleColor)
         }
-        .plozzCardButton(cornerRadius: PlozzTheme.Metrics.cornerRadius)
+        .frame(width: tileWidth, height: tileHeight)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
+        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 
@@ -155,10 +181,12 @@ private struct MusicRow<Content: View>: View {
     var trailing: AnyView? = nil
     @ViewBuilder var content: () -> Content
 
+    @Environment(\.plozzMetrics) private var metrics
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 24) {
-                Text(title).font(.system(size: 32, weight: .bold))
+                Text(title).font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 Spacer()
                 if let seeAll {
                     Button("See All", action: seeAll)
@@ -174,14 +202,18 @@ private struct MusicRow<Content: View>: View {
                 // The eager HStack kept every card's glass effect live, so fast
                 // focus moves recomputed every card's SDF and lagged navigation.
                 // Matches the lazy rails used elsewhere (MediaRowView/HomeView).
-                LazyHStack(alignment: .top, spacing: PlozzTheme.Metrics.cardSpacing) {
+                LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
                     content()
                 }
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                .padding(.vertical, PlozzTheme.Metrics.railVerticalPadding)
+                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
+                // engine holds the first/last card at its inset, and reserve room
+                // *inside* the clip for the focused card's lift + shadow. The
+                // negative outer padding restores the original vertical inset, so
+                // the row's height is unchanged — only the clip grows.
+                .padding(.vertical, metrics.railShadowClearance)
             }
-            // Never clip a focused card's lift, shadow or border.
-            .scrollClipDisabled()
+            .padding(.vertical, metrics.railBottomClearanceOffset)
         }
     }
 }
@@ -213,16 +245,20 @@ struct MusicGridView: View {
     let controller: AudioPlaybackController
     let onSelectRoute: (MusicRoute) -> Void
 
-    private let columns = [GridItem(.adaptive(minimum: 280), spacing: PlozzTheme.Metrics.gridSpacing)]
+    @Environment(\.plozzMetrics) private var metrics
 
     var body: some View {
-        ContentStateView(state: viewModel.state, emptyMessage: emptyMessage, onRetry: { Task { await viewModel.loadMore() } }) { _ in
+        // Density-scaled adaptive columns: a wider minimum at higher density gives
+        // fewer, bigger tiles (and matches the larger music cards), so the music
+        // grids respond to the UI-density setting like the movie/show wall.
+        let columns = [GridItem(.adaptive(minimum: (280 * metrics.scale).rounded()), spacing: metrics.gridSpacing)]
+        return ContentStateView(state: viewModel.state, emptyMessage: emptyMessage, onRetry: { Task { await viewModel.loadMore() } }) { _ in
             ScrollView {
-                VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
+                VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                     MusicPageHeader(title: title, controller: controller)
-                        .padding(.top, PlozzTheme.Metrics.rowSpacing)
+                        .padding(.top, metrics.rowSpacing)
 
-                    LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.rowSpacing) {
+                    LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
                         content
                     }
                     .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
@@ -301,11 +337,12 @@ struct ArtistDetailView: View {
     let controller: AudioPlaybackController
     let onSelectAlbum: (MusicAlbum) -> Void
 
-    private let columns = [GridItem(.adaptive(minimum: 280), spacing: PlozzTheme.Metrics.gridSpacing)]
+    @Environment(\.plozzMetrics) private var metrics
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
+        let columns = [GridItem(.adaptive(minimum: (280 * metrics.scale).rounded()), spacing: metrics.gridSpacing)]
+        return ScrollView {
+            VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                 HStack(alignment: .top, spacing: 32) {
                     MusicArtworkImage(
                         url: viewModel.artist.artworkURL,
@@ -333,10 +370,10 @@ struct ArtistDetailView: View {
                 // even when it's far to the right (off the album's vertical axis).
                 .focusSection()
 
-                Text("Albums").font(.system(size: 32, weight: .bold))
+                Text("Albums").font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                     .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
 
-                LazyVGrid(columns: columns, spacing: PlozzTheme.Metrics.rowSpacing) {
+                LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
                     ForEach(viewModel.albums) { album in
                         AlbumCard(album: album) { onSelectAlbum(album) }
                     }
@@ -347,7 +384,7 @@ struct ArtistDetailView: View {
                 // though no album sits directly beneath it.
                 .focusSection()
             }
-            .padding(.vertical, PlozzTheme.Metrics.rowSpacing)
+            .padding(.vertical, metrics.rowSpacing)
         }
         .scrollClipDisabled()
         .task { await viewModel.load() }

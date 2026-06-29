@@ -182,20 +182,22 @@ public extension Array where Element == MediaTrack {
     }
 
     /// `true` when the subtitle that would be shown by default is **image-based**
-    /// (PGS / VOBSUB / DVDSUB — signalled by `deliveryURL == nil`) *and* no
-    /// equivalent text subtitle exists (same language and forced-ness). AVPlayer
-    /// can't render image subs, so such a file must play on the hybrid engine for
-    /// the subtitle to appear. When a text equivalent exists, the native engine
-    /// can show that instead, so we stay native and keep its advantages (e.g.
-    /// true Dolby Vision).
+    /// (PGS / VOBSUB / DVDSUB) *and* no equivalent text subtitle exists (same
+    /// language and forced-ness). No on-device engine can render image subs, so
+    /// such a file must play on the hybrid engine for the subtitle to appear.
+    /// When a text equivalent exists, the native/Plozzigen engine can show that
+    /// instead, so we stay there and keep its advantages (e.g. true Dolby Vision,
+    /// no multichannel crash). Keyed off `isImageBasedSubtitle` — **not**
+    /// `deliveryURL == nil` — so an embedded text SRT (no sidecar URL, but
+    /// Plozzigen-renderable) is never mistaken for a bitmap sub.
     func defaultSubtitleNeedsHybridEngine(
         mode: CaptionSettings.SubtitleMode,
         preferredLanguage: String?
     ) -> Bool {
         guard let chosen = defaultSubtitleSelection(mode: mode, preferredLanguage: preferredLanguage),
-              chosen.deliveryURL == nil else { return false }
+              chosen.isImageBasedSubtitle else { return false }
         let hasTextEquivalent = contains {
-            $0.kind == .subtitle && $0.deliveryURL != nil
+            $0.kind == .subtitle && !$0.isImageBasedSubtitle
                 && $0.isForced == chosen.isForced
                 && LanguageMatch.matches($0.language, chosen.language)
         }

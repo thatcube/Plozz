@@ -15,6 +15,7 @@ trace-output/
 
 # Swift Package Manager
 .build/
+.build-dd/
 .swiftpm/
 Package.resolved
 
@@ -49,3 +50,4 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/test_output/
 fastlane/README.md
+Frameworks/

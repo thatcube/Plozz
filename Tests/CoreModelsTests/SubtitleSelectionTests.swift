@@ -71,11 +71,13 @@ final class ImageSubtitleRoutingTests: XCTestCase {
     private func textSub(_ id: Int, _ lang: String?, forced: Bool = false, isDefault: Bool = false) -> MediaTrack {
         MediaTrack(id: id, kind: .subtitle, displayTitle: lang ?? "Sub", language: lang,
                    isDefault: isDefault, isForced: forced,
-                   deliveryURL: URL(string: "https://example.com/sub/\(id).vtt"))
+                   deliveryURL: URL(string: "https://example.com/sub/\(id).vtt"),
+                   isImageBasedSubtitle: false)
     }
     private func imageSub(_ id: Int, _ lang: String?, forced: Bool = false, isDefault: Bool = false) -> MediaTrack {
         MediaTrack(id: id, kind: .subtitle, displayTitle: lang ?? "PGS", language: lang,
-                   isDefault: isDefault, isForced: forced, deliveryURL: nil)
+                   isDefault: isDefault, isForced: forced, deliveryURL: nil,
+                   isImageBasedSubtitle: true)
     }
 
     func testImageOnlySubtitleNeedsHybrid() {
@@ -86,6 +88,16 @@ final class ImageSubtitleRoutingTests: XCTestCase {
     func testTextSubtitleStaysNative() {
         let tracks = [textSub(2, "en")]
         XCTAssertFalse(tracks.defaultSubtitleNeedsHybridEngine(mode: .all, preferredLanguage: "en"))
+    }
+
+    func testEmbeddedTextSubtitleWithoutDeliveryURLStaysNative() {
+        // Plex serves embedded SRT with no sidecar URL: deliveryURL is nil but the
+        // codec is text, so it must NOT be treated as image-based (which would
+        // force the hybrid engine and crash on multichannel → needless transcode).
+        let embedded = MediaTrack(id: 2, kind: .subtitle, displayTitle: "English (SRT)",
+                                  language: "en", isDefault: true, isForced: false,
+                                  deliveryURL: nil, isImageBasedSubtitle: false)
+        XCTAssertFalse([embedded].defaultSubtitleNeedsHybridEngine(mode: .all, preferredLanguage: "en"))
     }
 
     func testImageSubtitleWithTextEquivalentStaysNative() {

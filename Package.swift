@@ -1,5 +1,6 @@
 // swift-tools-version:5.9
 import PackageDescription
+import Foundation
 
 // MARK: - Plozz modular package
 //
@@ -23,12 +24,17 @@ let package = Package(
         .library(name: "CoreUI", targets: ["CoreUI"]),
         .library(name: "MetadataKit", targets: ["MetadataKit"]),
         .library(name: "EngineMPV", targets: ["EngineMPV"]),
+        .library(name: "CRemuxCore", targets: ["CRemuxCore"]),
+        .library(name: "LocalRemux", targets: ["LocalRemux"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
         .library(name: "ProviderTrailers", targets: ["ProviderTrailers"]),
         .library(name: "RatingsService", targets: ["RatingsService"]),
         .library(name: "TraktService", targets: ["TraktService"]),
+        .library(name: "SimklService", targets: ["SimklService"]),
+        .library(name: "AniListService", targets: ["AniListService"]),
+        .library(name: "MALService", targets: ["MALService"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
@@ -45,7 +51,23 @@ let package = Package(
         // a natively-playable progressive stream URL we feed straight to AVPlayer
         // (the same approach Infuse uses). It includes an optional remote fallback
         // so extraction keeps working when YouTube changes its internal API.
-        .package(url: "https://github.com/alexeichhorn/YouTubeKit.git", from: "0.4.8")
+        .package(url: "https://github.com/alexeichhorn/YouTubeKit.git", from: "0.4.8"),
+
+        // AetherEngine — production media player engine for Apple platforms.
+        // FFmpeg demuxes, VideoToolbox decodes, AVPlayer handles Dolby Atmos.
+        // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", from: "4.6.3"),
+        // AetherEngine's FFmpeg build (n8.1.2, minimal LGPL decode-only). Shared
+        // by AetherEngine, CRemuxCore, EngineMPV, and LocalRemux — replaces the
+        // locally-staged Frameworks/mpv/Libav*.xcframework set (same n8.1 ABI).
+        .package(url: "https://github.com/superuser404notfound/FFmpegBuild", from: "1.0.1"),
+        // Dolby Vision RPU parser/converter (prebuilt xcframework, no Rust at
+        // build time). Used by AetherEngine for DV P7→8.1 NAL surgery; also
+        // satisfies libmpv's dovi symbol references.
+        .package(url: "https://github.com/superuser404notfound/LibDovi", from: "1.0.2"),
+        // InjectionNext SwiftUI hot-reload runtime (DEBUG dev only). Lets feature
+        // package views observe injection and redraw live on-device.
+        .package(url: "https://github.com/krzysztofzablocki/Inject", from: "1.5.2"),
     ],
     targets: [
         // MARK: Core
@@ -98,15 +120,108 @@ let package = Package(
             dependencies: [
                 "CoreModels",
                 "FeaturePlayback",
-                // LGPL-clean, locally-built FFmpeg + libmpv (local-path binaries).
-                "Libmpv", "Libavcodec", "Libavdevice", "Libavfilter",
-                "Libavformat", "Libavutil", "Libswresample", "Libswscale",
+                // libmpv (local binary, LGPL-clean decode-only).
+                "Libmpv",
+                // FFmpeg libraries from the shared FFmpegBuild package (n8.1.x ABI).
+                .product(name: "Libavcodec", package: "FFmpegBuild"),
+                "Libavdevice",
+                .product(name: "Libavfilter", package: "FFmpegBuild"),
+                .product(name: "Libavformat", package: "FFmpegBuild"),
+                .product(name: "Libavutil", package: "FFmpegBuild"),
+                .product(name: "Libswresample", package: "FFmpegBuild"),
+                .product(name: "Libswscale", package: "FFmpegBuild"),
+                // libdovi from AetherEngine's LibDovi package.
+                .product(name: "Dovi", package: "LibDovi"),
                 // Prebuilt dependency xcframeworks (MPVKit-published, hosted).
                 "Libssl", "Libcrypto", "Libass", "Libfreetype", "Libfribidi",
                 "Libharfbuzz", "MoltenVK", "Libshaderc_combined", "lcms2",
-                "Libplacebo", "Libdovi", "Libunibreak", "gmp", "nettle",
-                "hogweed", "gnutls", "Libdav1d", "Libuavs3d", "Libuchardet",
-                "Libbluray"
+                "Libplacebo", "Libunibreak", "gmp", "nettle",
+                "hogweed", "gnutls",
+                .product(name: "Libdav1d", package: "FFmpegBuild"),
+                "Libuavs3d", "Libuchardet", "Libbluray"
+            ],
+            linkerSettings: [
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("AVKit"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("AudioToolbox"),
+                .linkedFramework("CoreVideo"),
+                .linkedFramework("CoreFoundation"),
+                .linkedFramework("CoreMedia"),
+                .linkedFramework("Metal"),
+                .linkedFramework("VideoToolbox"),
+                .linkedLibrary("bz2"),
+                .linkedLibrary("iconv"),
+                .linkedLibrary("expat"),
+                .linkedLibrary("resolv"),
+                .linkedLibrary("xml2"),
+                .linkedLibrary("z"),
+                .linkedLibrary("c++")
+            ]
+        ),
+
+        // MARK: Local remux (Infuse-style localhost HLS origin)
+        //
+        // `CRemuxCore` is a thin C core over libavformat/libavcodec that demuxes
+        // the ORIGINAL Matroska bytes (delivered lazily via Swift HTTP range-read
+        // callbacks) and produces, on demand, one shared fMP4 init segment plus
+        // each `-c copy` media segment cut on the source's real IDR keyframes —
+        // no re-encode, so true Dolby Vision (dvcC/dvvC, sample entry dvh1) +
+        // E-AC-3 JOC Atmos (dec3) pass through untouched. It reuses the SAME
+        // locally-built, LGPL-clean FFmpeg binary targets EngineMPV already links
+        // (no new dependency); the public header is FFmpeg-free so the Swift layer
+        // never sees FFmpeg.
+        .target(
+            name: "CRemuxCore",
+            dependencies: [
+                .product(name: "Libavformat", package: "FFmpegBuild"),
+                .product(name: "Libavcodec", package: "FFmpegBuild"),
+                .product(name: "Libavutil", package: "FFmpegBuild"),
+                .product(name: "Libswresample", package: "FFmpegBuild"),
+            ],
+            cSettings: [
+                // Compile the FFmpeg `#include`s TEXTUALLY rather than as implicit
+                // Clang module imports. The av* frameworks ship an umbrella module
+                // map, but FFmpeg n8's `libavutil` umbrella pulls in
+                // `hwcontext_amf.h`, which unconditionally `#include <AMF/core/…>`
+                // (an external GPU SDK absent on tvOS) and so fails to build as a
+                // module. We never touch AMF: `avformat.h`/`avcodec.h` only
+                // include the avutil basics, so a textual compile resolves cleanly
+                // (the framework `Headers/` are found via `-F`, and FFmpeg's
+                // lowercase cross-includes like `"libavutil/dict.h"` resolve to
+                // `Libavutil.framework` on the case-insensitive filesystem).
+                .unsafeFlags(["-fno-modules"])
+            ]
+        ),
+        // `LocalRemux` is the Swift layer: the pure VOD-playlist planner + route
+        // parser, the `HTTPRangeReader` backing the C AVIO, the `RemuxSegmenter`
+        // bridge, the hardened loopback `NWListener` HLS origin (caching, keep-
+        // alive, concurrency, never-404-a-declared-segment), and the
+        // `LocalRemuxStreamer`/`Session` that hands AVPlayer a
+        // `http://127.0.0.1:<port>/master.m3u8` so it owns the stream + seeks
+        // natively. Depends on FeaturePlayback for the local-remux seam protocols
+        // and CoreModels for the strategy/source types; it is never linked FROM
+        // FeaturePlayback (its factory is registered at the AppShell composition
+        // root), so there is no dependency cycle.
+        .target(
+            name: "LocalRemux",
+            dependencies: [
+                "CoreModels", "FeaturePlayback", "CRemuxCore",
+                // FFmpeg from the shared FFmpegBuild package.
+                .product(name: "Libavcodec", package: "FFmpegBuild"),
+                "Libavdevice",
+                .product(name: "Libavfilter", package: "FFmpegBuild"),
+                .product(name: "Libavformat", package: "FFmpegBuild"),
+                .product(name: "Libavutil", package: "FFmpegBuild"),
+                .product(name: "Libswresample", package: "FFmpegBuild"),
+                .product(name: "Libswscale", package: "FFmpegBuild"),
+                .product(name: "Dovi", package: "LibDovi"),
+                "Libssl", "Libcrypto", "Libass", "Libfreetype", "Libfribidi",
+                "Libharfbuzz", "MoltenVK", "Libshaderc_combined", "lcms2",
+                "Libplacebo", "Libunibreak", "gmp", "nettle",
+                "hogweed", "gnutls",
+                .product(name: "Libdav1d", package: "FFmpegBuild"),
+                "Libuavs3d", "Libuchardet", "Libbluray"
             ],
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
@@ -157,23 +272,35 @@ let package = Package(
             name: "TraktService",
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
+        .target(
+            name: "SimklService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        .target(
+            name: "AniListService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        .target(
+            name: "MALService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
 
         // MARK: Features
         .target(
             name: "FeatureDiscovery",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", .product(name: "Inject", package: "Inject")]
         ),
         .target(
             name: "FeatureAuth",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex", .product(name: "Inject", package: "Inject")]
         ),
         .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers", .product(name: "Inject", package: "Inject")]
         ),
         .target(
             name: "FeaturePlayback",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService"],
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService", .product(name: "Inject", package: "Inject")],
             linkerSettings: [
                 // Force-link AVKit on tvOS so its `UIWindow (AVAdditions)`
                 // category (which adds `avDisplayManager`, used to drive the
@@ -186,15 +313,15 @@ let package = Package(
         ),
         .target(
             name: "FeatureSearch",
-            dependencies: ["CoreModels", "CoreUI"]
+            dependencies: ["CoreModels", "CoreUI", .product(name: "Inject", package: "Inject")]
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", .product(name: "Inject", package: "Inject")]
         ),
         .target(
             name: "FeatureProfiles",
-            dependencies: ["CoreModels", "CoreUI"]
+            dependencies: ["CoreModels", "CoreUI", .product(name: "Inject", package: "Inject")]
         ),
 
         // MARK: Music (browse + audio playback engine)
@@ -205,7 +332,7 @@ let package = Package(
         // it stays decoupled from the video feature modules.
         .target(
             name: "FeatureMusic",
-            dependencies: ["CoreModels", "CoreUI", "MetadataKit"]
+            dependencies: ["CoreModels", "CoreUI", "MetadataKit", .product(name: "Inject", package: "Inject")]
         ),
 
         // MARK: Top Shelf (shared with the tvOS Top Shelf extension)
@@ -219,6 +346,24 @@ let package = Package(
             dependencies: ["CoreModels"]
         ),
 
+        // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
+        //
+        // Wraps AetherEngine (the upstream media-player library) behind Plozz's
+        // `VideoEngine` protocol. AetherEngine handles: FFmpeg demux → on-device
+        // copy-remux → localhost HLS-fMP4 → AVPlayer, with bounded segment cache,
+        // backpressure, producer-restart seek, Dolby Vision signaling, and Atmos
+        // passthrough. This module is the integration adapter — all Plozz-specific
+        // orchestration (server progress, subtitles, routing) stays in
+        // FeaturePlayback / PlayerViewModel.
+        .target(
+            name: "EnginePlozzigen",
+            dependencies: [
+                "CoreModels",
+                "FeaturePlayback",
+                .product(name: "AetherEngine", package: "AetherEngine"),
+            ]
+        ),
+
         // MARK: App composition root
         .target(
             name: "AppShell",
@@ -227,6 +372,8 @@ let package = Package(
                 "CoreNetworking",
                 "CoreUI",
                 "EngineMPV",
+                "EnginePlozzigen",
+                "LocalRemux",
                 "FeatureDiscovery",
                 "FeatureAuth",
                 "MetadataKit",
@@ -235,6 +382,9 @@ let package = Package(
                 "ProviderTrailers",
                 "RatingsService",
                 "TraktService",
+                "SimklService",
+                "AniListService",
+                "MALService",
                 "FeatureHome",
                 "FeaturePlayback",
                 "FeatureSearch",
@@ -323,22 +473,25 @@ let package = Package(
             name: "EngineMPVTests",
             dependencies: ["EngineMPV", "CoreModels"]
         ),
+        // LocalRemux's pure logic (VOD-playlist planner, route parser, segment
+        // index/cache math) is exercised here. Like EngineMPVTests it links the
+        // FFmpeg binary targets transitively, so it builds/runs on the tvOS
+        // Simulator (where the framework slices exist) via tools/run-tests.sh; the
+        // assertions themselves are platform-independent pure logic.
+        .testTarget(
+            name: "LocalRemuxTests",
+            dependencies: ["LocalRemux", "CoreModels", "CRemuxCore"]
+        ),
 
         // MARK: - EngineMPV binary dependencies
         //
-        // Locally-built, LGPLv3 / decode-only FFmpeg + libmpv xcframeworks. Built
-        // by tools/build-mpv-tvos.sh (MPVKit 0.41.0-n8.1, `--disable-nonfree`, no
-        // `--enable-gpl`; verified FFMPEG_LICENSE == "LGPL version 3 or later").
-        // Staged under Frameworks/mpv/ (gitignored) by tools/stage-mpv-frameworks.sh.
-        // NOT committed — regenerate locally before building EngineMPV.
+        // libmpv + Libavdevice are kept as local binary targets (not provided by
+        // FFmpegBuild). All other FFmpeg libraries come from the shared FFmpegBuild
+        // package. Staged under Frameworks/mpv/ (gitignored) by
+        // tools/stage-mpv-frameworks.sh. NOT committed — regenerate locally before
+        // building EngineMPV.
         .binaryTarget(name: "Libmpv", path: "Frameworks/mpv/Libmpv.xcframework"),
-        .binaryTarget(name: "Libavcodec", path: "Frameworks/mpv/Libavcodec.xcframework"),
         .binaryTarget(name: "Libavdevice", path: "Frameworks/mpv/Libavdevice.xcframework"),
-        .binaryTarget(name: "Libavfilter", path: "Frameworks/mpv/Libavfilter.xcframework"),
-        .binaryTarget(name: "Libavformat", path: "Frameworks/mpv/Libavformat.xcframework"),
-        .binaryTarget(name: "Libavutil", path: "Frameworks/mpv/Libavutil.xcframework"),
-        .binaryTarget(name: "Libswresample", path: "Frameworks/mpv/Libswresample.xcframework"),
-        .binaryTarget(name: "Libswscale", path: "Frameworks/mpv/Libswscale.xcframework"),
 
         // Prebuilt dependency xcframeworks — MPVKit's published, checksummed
         // binaries (independent libraries whose licenses are unaffected by the
@@ -409,11 +562,6 @@ let package = Package(
             checksum: "1e69250279be9334cd2f6849abdc884c8e4bb29212467b6f071fdc1ac2010b6b"
         ),
         .binaryTarget(
-            name: "Libdovi",
-            url: "https://github.com/mpvkit/libdovi-build/releases/download/3.3.2/Libdovi.xcframework.zip",
-            checksum: "e693e239808350868e79c5448ef9f02e2716bc822dd8632a41a368a1eae5ca7d"
-        ),
-        .binaryTarget(
             name: "MoltenVK",
             url: "https://github.com/mpvkit/moltenvk-build/releases/download/1.4.1/MoltenVK.xcframework.zip",
             checksum: "9bd1ca1e4563bacd25d6e55d37b10341d50b2601bc2684bc332188e79daa2b79"
@@ -434,14 +582,26 @@ let package = Package(
             checksum: "99ca0b86e2a5a99c445d3e41df6f2fc08294e1a004b03f6a5645f299f06bf378"
         ),
         .binaryTarget(
-            name: "Libdav1d",
-            url: "https://github.com/mpvkit/libdav1d-build/releases/download/1.5.2-xcode/Libdav1d.xcframework.zip",
-            checksum: "8a8b78e23e28ecc213232805f3c1936141fc9befe113e87234f4f897f430a532"
-        ),
-        .binaryTarget(
             name: "Libuchardet",
             url: "https://github.com/mpvkit/libuchardet-build/releases/download/0.0.8-xcode/Libuchardet.xcframework.zip",
             checksum: "503202caa0dafb6996b2443f53408a713b49f6c2d4a26d7856fd6143513a50d7"
         )
     ]
 )
+
+// InjectionNext hot-reload: every local Swift target must link `-interposable`
+// so saved function bodies can be swapped live on-device. Gated on PLOZZ_INJECT
+// so it only applies to dev injection builds — Release/TestFlight never gets it.
+if ProcessInfo.processInfo.environment["PLOZZ_INJECT"] != nil {
+    for target in package.targets where target.type == .regular {
+        var flags = target.linkerSettings ?? []
+        flags.append(.unsafeFlags(["-Xlinker", "-interposable"]))
+        target.linkerSettings = flags
+        // InjectionNext recompiles ONE saved file, which requires per-file
+        // (batch/incremental) compiles in the build log; whole-module has no
+        // -primary-file line for it to copy. Force batch mode on every target.
+        var sflags = target.swiftSettings ?? []
+        sflags.append(.unsafeFlags(["-enable-batch-mode", "-no-whole-module-optimization", "-v"]))
+        target.swiftSettings = sflags
+    }
+}

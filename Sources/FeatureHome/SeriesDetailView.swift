@@ -71,6 +71,12 @@ struct SeriesDetailView: View {
     /// have different ids), so `effectivePlayVersionID` re-defaults to recommended.
     @State private var versionOverride: String?
 
+    /// The measured width of the season tab bar's viewport, used to size a trailing
+    /// spacer so even the LAST season chip can be scrolled to the leading edge
+    /// (pinned under the Play button) rather than bottoming out right-aligned at the
+    /// end of the bar. `0` until first layout (spacer is then zero-width).
+    @State private var seasonBarViewportWidth: CGFloat = 0
+
     /// The season+episode NUMBER to re-front after an IN-PLACE cross-server switch,
     /// captured from the currently-fronted episode the instant the user picks a new
     /// server. Once that server's episodes load, the page re-selects the matching
@@ -270,41 +276,96 @@ struct SeriesDetailView: View {
     // MARK: Season tabs
 
     private var seasonTabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(seasons) { season in
-                    seasonChip(season)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(seasons) { season in
+                        seasonChip(season)
+                    }
+                    // Trailing spacer the width of the viewport so the LAST season
+                    // chip can be scrolled fully to the leading edge (pinned under
+                    // the Play button) like every other chip, instead of bottoming
+                    // out right-aligned at the end of the bar. It is empty space
+                    // *after* the final season — which is exactly what should sit to
+                    // the right of the last season anyway — and is non-focusable, so
+                    // it never participates in left/right season navigation.
+                    if seasonBarViewportWidth > 0 {
+                        Color.clear
+                            .frame(width: seasonBarViewportWidth)
+                    }
                 }
+                .padding(.trailing, PlozzTheme.Metrics.screenPadding)
+                // Headroom for the focused chip's lift so it is never clipped.
+                .padding(.vertical, 12)
             }
+            // Inset the whole scroll VIEWPORT to the hero keyline (rather than
+            // padding the content), so a chip scrolled to `.leading` aligns to the
+            // keyline — where "S·E"/Play start — instead of the column edge. Padding
+            // the content instead let `scrollTo(.leading)` pin the chip to the
+            // scrollview's own leading edge, clipping it left of the keyline.
             .padding(.leading, PlozzTheme.Metrics.heroLeadingPadding)
-            .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-            // Headroom for the focused chip's lift so it is never clipped.
-            .padding(.vertical, 12)
-        }
-        // Never clip a focused chip's lift, shadow or border.
-        .scrollClipDisabled()
-        // Treat the whole tab bar as one focus section so pressing "up" from any
-        // episode — even when the rail is scrolled far to the right and no tab
-        // sits directly above — reliably enters the bar instead of being trapped.
-        .focusSection()
-        .onChange(of: focusedSeasonID) { _, newValue in
-            guard let id = newValue else {
-                // Focus left the bar (up to Play, or down to the episodes); re-arm
-                // the gate so the next entry again lands only on the active season.
-                seasonBarEngaged = false
-                return
+            // Measure the (inset) viewport width to size the trailing spacer above.
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { seasonBarViewportWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, width in
+                            seasonBarViewportWidth = width
+                        }
+                }
+            )
+            // Never clip a focused chip's lift, shadow or border.
+            .scrollClipDisabled()
+            // Treat the whole tab bar as one focus section so pressing "up" from any
+            // episode — even when the rail is scrolled far to the right and no tab
+            // sits directly above — reliably enters the bar instead of being trapped.
+            .focusSection()
+            .onChange(of: focusedSeasonID) { _, newValue in
+                guard let id = newValue else {
+                    // Focus left the bar (up to Play, or down to the episodes); re-arm
+                    // the gate so the next entry again lands only on the active season.
+                    seasonBarEngaged = false
+                    return
+                }
+                // We're now inside the bar — open every chip to focus so left/right
+                // navigation between seasons works.
+                seasonBarEngaged = true
+                // Focus has genuinely left the episode rail (it's now on the bar), so
+                // tell the rail to re-arm its entry gate for the next down-press.
+                episodeRailResetToken += 1
+                guard let season = seasons.first(where: { $0.id == id }) else { return }
+                select(season)
+                // Deliberately *don't* move the hero to the season: focusing the tab bar
+                // keeps the page on the episode you were last viewing, so going up and
+                // back down stays anchored to that episode rather than the season.
             }
-            // We're now inside the bar — open every chip to focus so left/right
-            // navigation between seasons works.
-            seasonBarEngaged = true
-            // Focus has genuinely left the episode rail (it's now on the bar), so
-            // tell the rail to re-arm its entry gate for the next down-press.
-            episodeRailResetToken += 1
-            guard let season = seasons.first(where: { $0.id == id }) else { return }
-            select(season)
-            // Deliberately *don't* move the hero to the season: focusing the tab bar
-            // keeps the page on the episode you were last viewing, so going up and
-            // back down stays anchored to that episode rather than the season.
+            // Position the active season chip ONCE on arrival (and on an external
+            // re-selection such as a cross-server switch) so a high season parked
+            // off-screen right is brought into view, leading-aligned to the keyline,
+            // and is reachable by a down-press from Play. We deliberately do NOT
+            // re-anchor when focus merely leaves the bar (e.g. moving down into the
+            // episodes): once the user has scrolled the bar it stays where they left
+            // it rather than snapping back. Guarded by `seasonBarEngaged` so it never
+            // fights tvOS's own scrolling while focus is inside the bar.
+            .onAppear { scrollActiveSeasonIntoView(using: proxy) }
+            .onChange(of: selectedSeasonID) { _, _ in
+                guard !seasonBarEngaged else { return }
+                scrollActiveSeasonIntoView(using: proxy)
+            }
+        }
+    }
+
+    /// Scrolls the season bar so the active (`selectedSeasonID`, falling back to the
+    /// first) chip is leading-aligned — directly under the hero Play button — so it
+    /// is always on-screen and reachable by a down-press. Deferred a runloop tick so
+    /// the chip is laid out before we scroll, and animated so a far season glides in
+    /// rather than snapping.
+    private func scrollActiveSeasonIntoView(using proxy: ScrollViewProxy) {
+        guard let id = selectedSeasonID ?? seasons.first?.id else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(id, anchor: .leading)
+            }
         }
     }
 
@@ -330,6 +391,9 @@ struct SeriesDetailView: View {
         // No system focus ring — the pill + scale is the focus treatment.
         .focusEffectDisabled()
         .focused($focusedSeasonID, equals: season.id)
+        // Stable scroll target so the season bar can programmatically scroll the
+        // active chip into view (see `scrollActiveSeasonIntoView`).
+        .id(season.id)
         // Remove non-active seasons from the focus system until the bar is engaged,
         // so directional entry can only ever land on the active season (no snap).
         .disabled(!isFocusable)
@@ -665,10 +729,13 @@ struct SeriesDetailView: View {
         return { onPlay(trailer) }
     }
 
-    /// Picks the season to open on first appearance — the one pre-selected via
-    /// "Go to Season"/episode tap if any, otherwise the first season — and
-    /// preloads it. When targeting a tapped episode, swaps the hero to the richer
-    /// loaded copy of that episode once its season's episodes are available.
+    /// Picks the season to open on first appearance and preloads it. Every entry
+    /// point funnels through here: the single, shared resolver `resolvedInitialSeasonID()`
+    /// decides which season to land on (explicit hint → else the season you're
+    /// actually watching → else the first), so a plain series open no longer
+    /// defaults to Season 1 when you're mid-series. When targeting a tapped episode,
+    /// swaps the hero to the richer loaded copy of that episode once its season's
+    /// episodes are available.
     private func prepareInitialSeason() async {
         // After an in-place cross-server switch, re-front the same S·E episode on
         // the new server (its seasons just loaded under us). Matched by NUMBER
@@ -678,19 +745,15 @@ struct SeriesDetailView: View {
             await frontSwitchTarget(target)
             return
         }
-        if let id = resolvedInitialSeasonID() {
-            selectedSeasonID = id
-            await viewModel.loadEpisodes(for: id)
-            await frontTargetEpisodeIfNeeded(in: id)
-            return
-        }
-        guard let first = seasons.first else {
+        // No seasons at all (a flat "loose episode" show): just front any target
+        // episode and let the loose-episode rail show.
+        guard let id = resolvedInitialSeasonID() else {
             await frontTargetEpisodeIfNeeded(in: nil)
             return
         }
-        selectedSeasonID = first.id
-        await viewModel.loadEpisodes(for: first.id)
-        await frontTargetEpisodeIfNeeded(in: first.id)
+        selectedSeasonID = id
+        await viewModel.loadEpisodes(for: id)
+        await frontTargetEpisodeIfNeeded(in: id)
     }
 
     /// Re-selects the season with `target`'s number on the freshly-switched server
@@ -723,10 +786,29 @@ struct SeriesDetailView: View {
         updateRailTarget()
     }
 
-    /// The season to open: an already-selected/explicit one, the target episode's
-    /// own season, or — when that episode arrived from a *different server* (a
-    /// cross-server switch, so its season id won't match these seasons) — the
-    /// season with the same NUMBER. `nil` falls through to the first season.
+    /// **The single source of truth for which season the page opens on**, shared by
+    /// *every* entry point (they all reach this via `prepareInitialSeason`). The
+    /// entry points only differ in which hint they hand `SeriesDetailView`:
+    ///
+    ///   • a tapped **episode** card (Continue Watching / Recently Added) →
+    ///     `EpisodeContextRoute` → `initialEpisode`;
+    ///   • a tapped **season** card / "Go to Season" → `SeasonContextRoute` /
+    ///     `viewModel.preselectedSeasonID` → `initialSeasonID`;
+    ///   • a plain **series tile** (Library / Home / Search) → no season hint.
+    ///
+    /// Resolution order, most-specific first:
+    ///   1. an already-settled selection (e.g. after a season-tab focus);
+    ///   2. an explicit `initialSeasonID` (tapped season / "Go to Season");
+    ///   3. a tapped episode's own season — by id, or across servers by NUMBER
+    ///      (per-server season ids differ);
+    ///   4. **no hint:** the season the user is actually *watching* — first
+    ///      in-progress, else first unwatched, else last — from the seasons' own
+    ///      played state (carried by BOTH Jellyfin and Plex). This is what stops a
+    ///      mid-series show from wrongly opening on Season 1.
+    ///   5. ultimately the first season (a brand-new, fully-unwatched show).
+    ///
+    /// Returns `nil` only when there are no season containers at all (a flat
+    /// loose-episode show).
     private func resolvedInitialSeasonID() -> String? {
         if let id = selectedSeasonID, seasons.contains(where: { $0.id == id }) { return id }
         if let id = initialSeasonID, seasons.contains(where: { $0.id == id }) { return id }
@@ -735,7 +817,11 @@ struct SeriesDetailView: View {
            let match = seasons.first(where: { $0.seasonNumber == number }) {
             return match.id
         }
-        return nil
+        // No explicit hint (plain series open): land on the season the user is
+        // watching, using the same next-up rule the rest of the app uses, applied
+        // to the seasons themselves. Never Season 1 unless it genuinely is next up.
+        if let resume = SeriesResume.nextUp(in: seasons) { return resume.id }
+        return seasons.first?.id
     }
 
     /// After episodes load, replace the hero's tapped-episode placeholder with the

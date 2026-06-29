@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import Inject
 import AVFoundation
 #if canImport(AVKit)
 import AVKit
@@ -35,6 +36,8 @@ public struct PlayerView: View {
         self.showDiagnostics = showDiagnostics
         self.themePalette = themePalette
     }
+
+    @ObserveInjection var inject
 
     public var body: some View {
         ZStack {
@@ -144,8 +147,10 @@ public struct PlayerView: View {
             if viewModel.controls.diagnosticsEnabled { startSampling() }
         }
         .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
-            // Playback finished on an auto-dismiss player (a trailer); close it.
-            if shouldDismiss { dismiss() }
+            // Playback finished; close the player so it never freezes on the final
+            // frame. Use the HDR-aware path so finishing a Dolby Vision/HDR title
+            // fades cleanly back to SDR instead of flashing.
+            if shouldDismiss { dismissSmoothly() }
         }
         .onChange(of: viewModel.displayMode) { oldMode, newMode in
             // The display is being driven to a new dynamic range (initial resolve
@@ -169,6 +174,7 @@ public struct PlayerView: View {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }
         }
+        .enableInjection()
     }
 
     /// Dismiss with an HDR-aware fade that keeps the screen fully black from the
@@ -231,10 +237,12 @@ public struct PlayerView: View {
             engineName: viewModel.engineDisplayName,
             capabilities: viewModel.mediaCapabilities,
             sourceProvider: viewModel.sourceProvider,
+            serverName: viewModel.serverName,
             streamURL: viewModel.diagnosticsStreamURL,
             remuxEligible: viewModel.remuxEligibilitySummary?.eligible,
             remuxEligibilityDetail: viewModel.remuxEligibilitySummary?.detail,
-            remuxSnapshot: { viewModel.localRemuxDiagnostics }
+            remuxSnapshot: { viewModel.localRemuxDiagnostics },
+            engineTelemetry: { viewModel.engineLiveTelemetry }
         )
     }
 }

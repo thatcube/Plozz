@@ -22,18 +22,20 @@ struct HomeSkeletonView: View {
 
     @State private var visible = false
 
+    @Environment(\.plozzMetrics) private var metrics
+
     private var rows: [HomeRowKind] {
         layout.isEmpty ? HomeRowKind.defaultSkeletonLayout : layout
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: PlozzTheme.Metrics.rowSpacing) {
+            VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                 ForEach(rows, id: \.self) { kind in
                     skeletonRow(kind)
                 }
             }
-            .padding(.vertical, 40)
+            .padding(.vertical, PlozzTheme.Metrics.screenVerticalPadding)
         }
         .scrollClipDisabled()
         .scrollDisabled(true)
@@ -50,14 +52,14 @@ struct HomeSkeletonView: View {
     private func skeletonRow(_ kind: HomeRowKind) -> some View {
         // Mirrors MediaRowView's title + horizontal rail layout and paddings so
         // the skeleton occupies the same vertical space as the real row.
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             // Reserve the *exact* height of MediaRowView's title — a hidden Text in
-            // the real font (system 32 bold) — with the placeholder pill overlaid.
-            // Matching the title height is load-bearing: a shorter title bar makes
-            // the cards sit higher, so the whole row drops when the real (taller)
-            // title loads in.
+            // the real (density-scaled) header font — with the placeholder pill
+            // overlaid. Matching the title height is load-bearing: a shorter title
+            // bar makes the cards sit higher, so the whole row drops when the real
+            // (taller) title loads in.
             Text(" ")
-                .font(.system(size: 32, weight: .bold))
+                .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .hidden()
                 .overlay(alignment: .leading) {
@@ -76,7 +78,7 @@ struct HomeSkeletonView: View {
             // clips its frame to the viewport, so the leading inset matches the real
             // row 1:1.
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: PlozzTheme.Metrics.cardSpacing) {
+                HStack(spacing: metrics.cardSpacing) {
                     ForEach(0..<cardCount(for: kind), id: \.self) { _ in
                         SkeletonCardView(style: cardStyle(for: kind))
                             .frame(width: cardWidth(for: kind))
@@ -84,8 +86,8 @@ struct HomeSkeletonView: View {
                 }
                 .padding(.leading, PlozzTheme.Metrics.screenPadding)
                 .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                .padding(.top, 16)
-                .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
+                .padding(.top, metrics.railTopPadding)
+                .padding(.bottom, metrics.railVerticalPadding)
             }
             .scrollClipDisabled()
             .scrollDisabled(true)
@@ -101,8 +103,15 @@ struct HomeSkeletonView: View {
         }
     }
 
+    /// The layout slot reserved for each skeleton card — must equal
+    /// `MediaRowView.cardSlotWidth` so the placeholder cards sit at the *exact*
+    /// same pitch as the real row. A poster's glass equals `posterWidth`; a
+    /// landscape card's glass is `landscapeWidth + 2 * cardInset`
+    /// (`landscapeCardSlotWidth`), so pinning to the bare `landscapeWidth` would
+    /// make the placeholders 32 pt too narrow and bunch them closer than the real
+    /// Continue Watching / Libraries cards.
     private func cardWidth(for kind: HomeRowKind) -> CGFloat {
-        cardStyle(for: kind) == .landscape ? PlozzTheme.Metrics.landscapeWidth : PlozzTheme.Metrics.posterWidth
+        cardStyle(for: kind) == .landscape ? metrics.landscapeCardSlotWidth : metrics.posterWidth
     }
 
     /// Enough placeholders to fill the 10-foot screen width for each card size.

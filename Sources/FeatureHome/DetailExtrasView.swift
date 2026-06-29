@@ -43,11 +43,12 @@ private struct InfoChipsRow: View {
     let title: String
     let values: [String]
     var leadingInset: CGFloat = PlozzTheme.Metrics.screenPadding
+    @Environment(\.plozzMetrics) private var metrics
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title)
-                .font(.system(size: 32, weight: .bold))
+                .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
             FlowLayout(spacing: 12, lineSpacing: 12) {
                 ForEach(values, id: \.self) { value in
                     Text(value)
@@ -76,6 +77,7 @@ private struct StudiosRow: View {
 
     @State private var ordered: [Studio]
     @State private var didResolve = false
+    @Environment(\.plozzMetrics) private var metrics
 
     init(studios: [String]) {
         self.studios = studios
@@ -91,7 +93,7 @@ private struct StudiosRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Studios")
-                .font(.system(size: 32, weight: .bold))
+                .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
             if !logoStudios.isEmpty {
                 FlowLayout(spacing: 16, lineSpacing: 16) {
                     ForEach(logoStudios) { studio in

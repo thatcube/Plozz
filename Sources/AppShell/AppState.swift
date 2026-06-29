@@ -10,6 +10,9 @@ import ProviderJellyfin
 import ProviderPlex
 import RatingsService
 import TraktService
+import SimklService
+import AniListService
+import MALService
 import TopShelfKit
 
 /// The app's composition root and single source of truth for session state.
@@ -55,6 +58,14 @@ public final class AppState {
     /// without a reload, and scoped per profile (rebuilt on profile switch) so
     /// each profile keeps its own Home customization.
     public private(set) var homeLibraryVisibilityModel: HomeLibraryVisibilityModel
+    /// The active profile's UI density (Compact / Standard / Spacious / Extra
+    /// Large). Scaled into `PlozzMetrics` and injected into the environment at the
+    /// app root, and rebuilt on profile switch like the other per-profile models.
+    public private(set) var uiDensityModel: UIDensitySettingsModel
+    /// The active profile's Night Shift (warm/dim screen tint) settings + live
+    /// schedule. Scoped per profile (rebuilt on profile switch) like the theme;
+    /// its overlay is installed at the app root in `RootView`.
+    public private(set) var nightShiftModel: NightShiftSettingsModel
 
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
@@ -123,6 +134,15 @@ public final class AppState {
     /// A no-op when no Trakt client credentials are configured.
     public let traktService: TraktService
 
+    /// Simkl sync: device-code OAuth + history scrobble. Mirrors Trakt's pattern.
+    public let simklService: SimklService
+
+    /// AniList sync: token-entry OAuth + GraphQL list update (anime only).
+    public let anilistService: AniListService
+
+    /// MyAnimeList sync: device-code OAuth + list update (anime only).
+    public let malService: MALService
+
     /// The handler behind every card's press-and-hold context menu. Lazily
     /// created so it can capture `self`; resolves the owning provider per item
     /// and performs watched-state (and future) actions against the server.
@@ -154,6 +174,15 @@ public final class AppState {
             },
             traktScrobbler: { [weak self] in
                 await MainActor.run { self?.traktService.scrobbler ?? DisabledTraktScrobbler() }
+            },
+            simklScrobbler: { [weak self] in
+                await MainActor.run { self?.simklService.scrobbler ?? DisabledSimklScrobbler() }
+            },
+            anilistScrobbler: { [weak self] in
+                await MainActor.run { self?.anilistService.scrobbler ?? DisabledAniListScrobbler() }
+            },
+            malScrobbler: { [weak self] in
+                await MainActor.run { self?.malService.scrobbler ?? DisabledMALScrobbler() }
             },
             allAccountIDs: { [weak self] in
                 await MainActor.run { self?.accounts.map(\.id) ?? [] }
@@ -583,8 +612,13 @@ public final class AppState {
         diagnosticsModel: DiagnosticsSettingsModel? = nil,
         musicPlayerModel: MusicPlayerSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
+        uiDensityModel: UIDensitySettingsModel? = nil,
+        nightShiftModel: NightShiftSettingsModel? = nil,
         ratingsProvider: (any ExternalRatingsProviding)? = nil,
-        traktService: TraktService? = nil
+        traktService: TraktService? = nil,
+        simklService: SimklService? = nil,
+        anilistService: AniListService? = nil,
+        malService: MALService? = nil
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
@@ -600,11 +634,17 @@ public final class AppState {
             || playbackModel != nil
             || themeModel != nil || diagnosticsModel != nil
             || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
+            || uiDensityModel != nil
+            || nightShiftModel != nil
         self.usesInjectedModels = injected
         let ns = (profilesModel ?? self.profilesModel).activeNamespace
         // Seed Trakt with the active profile's namespace so its scrobbler and the
         // Settings connection model read that profile's own Trakt tokens.
         self.traktService = traktService ?? TraktServiceFactory.make(namespace: ns)
+        // Seed other trackers with the same profile namespace.
+        self.simklService = simklService ?? SimklServiceFactory.make(namespace: ns)
+        self.anilistService = anilistService ?? AniListServiceFactory.make(namespace: ns)
+        self.malService = malService ?? MALServiceFactory.make(namespace: ns)
         self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         self.playbackModel = playbackModel ?? PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
@@ -613,6 +653,10 @@ public final class AppState {
         self.musicPlayerModel = musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         self.homeLibraryVisibilityModel = homeLibraryVisibilityModel
             ?? HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
+        self.uiDensityModel = uiDensityModel
+            ?? UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
+        self.nightShiftModel = nightShiftModel
+            ?? NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
@@ -1245,16 +1289,24 @@ public final class AppState {
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         musicPlayerModel = MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
+        uiDensityModel = UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
+        nightShiftModel = NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
     }
 
     /// Repoints Trakt (and its shared scrobbler) at the active profile's own
     /// connection so each household profile scrobbles to its own Trakt account.
-    /// Fire-and-forget: the status refresh is async and best-effort.
+    /// Also repoints Simkl, AniList, and MAL. Fire-and-forget: the status refresh
+    /// is async and best-effort.
     private func updateTraktForActiveProfile() {
         let ns = profilesModel.activeNamespace
         resetWatchReconciler()
         resetIdentityIndex()
-        Task { await traktService.setActiveProfile(namespace: ns) }
+        Task {
+            await traktService.setActiveProfile(namespace: ns)
+            await simklService.setActiveProfile(namespace: ns)
+            await anilistService.setActiveProfile(namespace: ns)
+            await malService.setActiveProfile(namespace: ns)
+        }
     }
 
     private func apply(_ event: SessionEvent) {

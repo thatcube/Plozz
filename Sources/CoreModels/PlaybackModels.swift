@@ -21,6 +21,13 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     /// play. `nil` for audio tracks and for subtitles that can't be delivered
     /// as text (e.g. image-based PGS/VOBSUB, which need server burn-in).
     public var deliveryURL: URL?
+    /// `true` for image-based subtitles (PGS/VOBSUB/DVDSUB) that no on-device
+    /// engine can render — only a server burn-in transcode shows them. A *text*
+    /// subtitle embedded in the container (so it has no `deliveryURL`) is **not**
+    /// image-based: Plozzigen remuxes it into the playback stream. Routing must
+    /// key off this flag, not `deliveryURL == nil`, or embedded SRT gets pushed
+    /// to the hybrid engine (and crashes on multichannel) needlessly.
+    public var isImageBasedSubtitle: Bool
 
     public init(
         id: Int,
@@ -29,7 +36,8 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         language: String? = nil,
         isDefault: Bool = false,
         isForced: Bool = false,
-        deliveryURL: URL? = nil
+        deliveryURL: URL? = nil,
+        isImageBasedSubtitle: Bool = false
     ) {
         self.id = id
         self.kind = kind
@@ -38,6 +46,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.isDefault = isDefault
         self.isForced = isForced
         self.deliveryURL = deliveryURL
+        self.isImageBasedSubtitle = isImageBasedSubtitle
     }
 }
 
@@ -234,6 +243,8 @@ public struct PlaybackRequest: Hashable, Sendable {
     /// whether a given title is being served from Plex or Jellyfin. `nil` for
     /// sources without a first-class provider (e.g. YouTube trailers).
     public var sourceProvider: ProviderKind?
+    /// Friendly name of the media server (e.g. "Allie's Jellyfin", "Living Room").
+    public var serverName: String?
 
     public init(
         item: MediaItem,
@@ -248,7 +259,8 @@ public struct PlaybackRequest: Hashable, Sendable {
         sourceMetadata: MediaSourceMetadata? = nil,
         localRemuxSource: LocalRemuxSourceDescriptor? = nil,
         scrubPreview: ScrubPreviewSource? = nil,
-        sourceProvider: ProviderKind? = nil
+        sourceProvider: ProviderKind? = nil,
+        serverName: String? = nil
     ) {
         self.item = item
         self.streamURL = streamURL
@@ -264,6 +276,7 @@ public struct PlaybackRequest: Hashable, Sendable {
         self.scrubPreview = scrubPreview
         self.isManifestStream = isTranscoding || streamURL.pathExtension.lowercased() == "m3u8"
         self.sourceProvider = sourceProvider
+        self.serverName = serverName
     }
 }
 

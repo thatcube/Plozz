@@ -15,18 +15,46 @@ public struct WatchOutboxState: Codable, Sendable, Equatable {
     /// Trakt idempotency ledger: key → when we wrote it, pruned by TTL so our own
     /// replays across relaunch don't re-post history.
     public var appliedTrakt: [String: Date]
+    /// Simkl idempotency ledger.
+    public var appliedSimkl: [String: Date]
+    /// AniList idempotency ledger.
+    public var appliedAniList: [String: Date]
+    /// MAL idempotency ledger.
+    public var appliedMAL: [String: Date]
 
     public init(
         pending: [WatchMutation] = [],
         clock: [String: Date] = [:],
-        appliedTrakt: [String: Date] = [:]
+        appliedTrakt: [String: Date] = [:],
+        appliedSimkl: [String: Date] = [:],
+        appliedAniList: [String: Date] = [:],
+        appliedMAL: [String: Date] = [:]
     ) {
         self.pending = pending
         self.clock = clock
         self.appliedTrakt = appliedTrakt
+        self.appliedSimkl = appliedSimkl
+        self.appliedAniList = appliedAniList
+        self.appliedMAL = appliedMAL
     }
 
     public static let empty = WatchOutboxState()
+
+    // MARK: - Codable (back-compatible)
+
+    private enum CodingKeys: String, CodingKey {
+        case pending, clock, appliedTrakt, appliedSimkl, appliedAniList, appliedMAL
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pending = (try? container.decodeIfPresent([WatchMutation].self, forKey: .pending)) ?? []
+        clock = (try? container.decodeIfPresent([String: Date].self, forKey: .clock)) ?? [:]
+        appliedTrakt = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedTrakt)) ?? [:]
+        appliedSimkl = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedSimkl)) ?? [:]
+        appliedAniList = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedAniList)) ?? [:]
+        appliedMAL = (try? container.decodeIfPresent([String: Date].self, forKey: .appliedMAL)) ?? [:]
+    }
 }
 
 /// Persistence seam for the outbox. Implementations must be cold-start safe:

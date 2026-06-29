@@ -83,7 +83,11 @@ public final class PlayerControlsModel {
     /// reads it to take/relinquish focus.
     public var controlBarVisible: Bool = false
 
-    // MARK: Skip hint (transient ±10s indicator)
+    // MARK: Skip hint (transient ±Ns indicator)
+    /// How many seconds a left-press skips backward (per-profile setting).
+    public var skipBackwardInterval: SkipInterval = .ten
+    /// How many seconds a right-press skips forward (per-profile setting).
+    public var skipForwardInterval: SkipInterval = .ten
     /// Whether the last skip was forward; drives which glyph the hint shows.
     public var skipHintForward: Bool = true
     /// True while the transient skip indicator is on screen.

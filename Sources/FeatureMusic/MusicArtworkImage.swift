@@ -22,6 +22,10 @@ struct MusicArtworkImage: View {
     /// don't shift with the app theme.
     var showsMediaEdge: Bool = true
     var asyncFallbackURL: (@Sendable () async -> URL?)? = nil
+    /// Optional override for the placeholder icon color — pass
+    /// `PlozzCardCaption.subtitleColor(...)` so it flips with focus + reduced
+    /// transparency. Falls back to `.secondary` when nil.
+    var placeholderColor: Color? = nil
 
     init(
         url: URL?,
@@ -29,7 +33,8 @@ struct MusicArtworkImage: View {
         cornerRadius: CGFloat = 12,
         variant: ArtworkImageVariant = .original,
         showsMediaEdge: Bool = true,
-        asyncFallbackURL: (@Sendable () async -> URL?)? = nil
+        asyncFallbackURL: (@Sendable () async -> URL?)? = nil,
+        placeholderColor: Color? = nil
     ) {
         self.url = url
         self.systemPlaceholder = systemPlaceholder
@@ -37,6 +42,7 @@ struct MusicArtworkImage: View {
         self.variant = variant
         self.showsMediaEdge = showsMediaEdge
         self.asyncFallbackURL = asyncFallbackURL
+        self.placeholderColor = placeholderColor
     }
 
     var body: some View {
@@ -58,7 +64,7 @@ struct MusicArtworkImage: View {
     private var placeholder: some View {
         Image(systemName: systemPlaceholder)
             .font(.system(size: 44))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(placeholderColor ?? .secondary)
     }
 }
 
@@ -87,7 +93,6 @@ private struct OptionalMediaEdge: ViewModifier {
 struct MusicCard: View {
     let artworkURL: URL?
     var systemPlaceholder: String = "music.note"
-    var isCircular: Bool = false
     let width: CGFloat
     let title: String
     var subtitle: String? = nil
@@ -96,11 +101,15 @@ struct MusicCard: View {
 
     @FocusState private var isFocused: Bool
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
+    @Environment(\.plozzMetrics) private var metrics
+
+    /// The artwork edge length, scaled by the active UI density so music tiles
+    /// grow/shrink in step with the movie/show cards.
+    private var scaledWidth: CGFloat { (width * metrics.scale).rounded() }
 
     init(
         artworkURL: URL?,
         systemPlaceholder: String = "music.note",
-        isCircular: Bool = false,
         width: CGFloat,
         title: String,
         subtitle: String? = nil,
@@ -109,7 +118,6 @@ struct MusicCard: View {
     ) {
         self.artworkURL = artworkURL
         self.systemPlaceholder = systemPlaceholder
-        self.isCircular = isCircular
         self.width = width
         self.title = title
         self.subtitle = subtitle
@@ -117,42 +125,40 @@ struct MusicCard: View {
         self.action = action
     }
 
-    /// True when the focused card renders an opaque white "lift" surface (Reduce
-    /// Transparency, or pre-Liquid-Glass tvOS), in which case the caption must
-    /// flip to dark ink. On the translucent-glass path (tvOS 26+) it stays
-    /// primary/secondary over the glass. Mirrors `PosterCardView`.
-    private var usesLiftText: Bool {
-        guard isFocused else { return false }
-        if reduceTransparency { return true }
-        if #available(tvOS 26.0, *) { return false }
-        return true
+    /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
+    /// "lift" surface. Centralised in `PlozzCardCaption` (CoreUI) so every card
+    /// type flips identically.
+    private var titleColor: Color {
+        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+    }
+    private var subtitleColor: Color {
+        PlozzCardCaption.subtitleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
     }
 
-    private var titleColor: Color { usesLiftText ? .black.opacity(0.9) : .primary }
-    private var subtitleColor: Color { usesLiftText ? .black.opacity(0.6) : .secondary }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
-                .frame(width: width, height: width)
+                .frame(width: scaledWidth, height: scaledWidth)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
                 Text(subtitle ?? " ")
-                    .font(.system(size: 20))
+                    .font(.system(size: metrics.cardSubtitleFontSize))
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitle == nil ? 0 : 1)
             }
-            .frame(width: width, alignment: .leading)
+            .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
+            .frame(width: scaledWidth, alignment: .leading)
         }
-        .padding(PlozzTheme.Metrics.mediumCardInset)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: isFocused)
-        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, action: action)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
@@ -160,22 +166,13 @@ struct MusicCard: View {
 
     @ViewBuilder
     private var artwork: some View {
-        if isCircular {
-            MusicArtworkImage(
-                url: artworkURL,
-                systemPlaceholder: systemPlaceholder,
-                cornerRadius: width / 2,
-                asyncFallbackURL: asyncFallbackURL
-            )
-            .clipShape(Circle())
-        } else {
-            MusicArtworkImage(
-                url: artworkURL,
-                systemPlaceholder: systemPlaceholder,
-                cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
-                asyncFallbackURL: asyncFallbackURL
-            )
-        }
+        MusicArtworkImage(
+            url: artworkURL,
+            systemPlaceholder: systemPlaceholder,
+            cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
+            asyncFallbackURL: asyncFallbackURL,
+            placeholderColor: subtitleColor
+        )
     }
 }
 
@@ -220,17 +217,32 @@ struct RecentTrackCard: View {
 
 struct ArtistCard: View {
     let artist: MusicArtist
-    var width: CGFloat = 240
     let action: () -> Void
+
+    @Environment(\.plozzMetrics) private var metrics
+
     var body: some View {
-        MusicCard(
-            artworkURL: artist.artworkURL,
-            systemPlaceholder: "music.mic",
-            isCircular: true,
-            width: width,
-            title: artist.name,
-            asyncFallbackURL: MusicArtworkFallback.artistImage(name: artist.name),
-            action: action
+        let diameter = metrics.artistTileDiameter
+        let slot = diameter + metrics.circleFocusPadding * 2
+        CircularFocusTile(
+            diameter: diameter,
+            focusPadding: metrics.circleFocusPadding,
+            action: action,
+            avatar: {
+                MusicArtworkImage(
+                    url: artist.artworkURL,
+                    systemPlaceholder: "music.mic",
+                    cornerRadius: diameter / 2,
+                    asyncFallbackURL: MusicArtworkFallback.artistImage(name: artist.name)
+                )
+            },
+            caption: { isFocused in
+                Text(artist.name)
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+                    .foregroundStyle(isFocused ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+                    .frame(width: slot)
+            }
         )
     }
 }

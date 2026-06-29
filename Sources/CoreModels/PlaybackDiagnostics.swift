@@ -22,6 +22,9 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         /// Plozz intercepted the original bytes locally and synthesized its own
         /// AVPlayer-facing stream (e.g. localhost/custom-scheme HLS).
         case localRemux
+        /// Plozzigen engine — on-device FFmpeg demux → HLS-fMP4 → AVPlayer.
+        /// Lossless local remux with DoVi, Atmos, and full-timeline seek.
+        case plozzigen
         /// Server re-encodes the video and/or audio.
         case transcode
         case unknown
@@ -31,6 +34,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
             case .directPlay: return "Direct Play"
             case .remux: return "Remux (server, lossless)"
             case .localRemux: return "Local Remux"
+            case .plozzigen: return "Direct Play (Plozzigen)"
             case .transcode: return "Transcode (server)"
             case .unknown: return "Unknown"
             }
@@ -238,6 +242,10 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var droppedVideoFrames: Int?
     /// Nominal frame rate of the video track, in frames/sec.
     public var frameRate: Double?
+    /// Live frame rate the engine is actually presenting, in frames/sec. From a
+    /// non-AVFoundation engine's telemetry; a value far below `frameRate` while
+    /// dropped frames climb is the on-device decode/compositor-stutter signal.
+    public var observedFps: Double?
     /// Friendly device model, e.g. `Apple TV 4K (3rd gen)`.
     public var deviceModel: String?
     /// Physical memory, in bytes.
@@ -265,6 +273,8 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     /// Which backend resolved this playback (Plex / Jellyfin), shown in the
     /// "Source Provider" row.
     public var sourceProvider: ProviderKind?
+    /// Friendly server name shown in the overlay header (e.g. "Allie's Jellyfin").
+    public var serverName: String?
     /// Container codec FourCC tag, e.g. `hvc1` / `hev1` / `dvh1`. The hvc1-vs-hev1
     /// distinction is make-or-break for AVPlayer (hev1 plays audio with a black
     /// screen), so it's surfaced explicitly.
@@ -324,6 +334,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         bufferedSecondsAhead: Double? = nil,
         droppedVideoFrames: Int? = nil,
         frameRate: Double? = nil,
+        observedFps: Double? = nil,
         deviceModel: String? = nil,
         deviceMemoryBytes: Int64? = nil,
         freeDiskBytes: Int64? = nil,
@@ -370,6 +381,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.bufferedSecondsAhead = bufferedSecondsAhead
         self.droppedVideoFrames = droppedVideoFrames
         self.frameRate = frameRate
+        self.observedFps = observedFps
         self.deviceModel = deviceModel
         self.deviceMemoryBytes = deviceMemoryBytes
         self.freeDiskBytes = freeDiskBytes
@@ -536,11 +548,24 @@ public extension PlaybackDiagnostics {
         codec: String?,
         profile: String?,
         channels: Int?,
-        capabilities: MediaCapabilities
+        capabilities: MediaCapabilities,
+        mode: PlaybackMode = .unknown
     ) -> String? {
         let token = (codec ?? "").lowercased().replacingOccurrences(of: "_", with: "-")
         let profileText = (profile ?? "").lowercased()
         let isAtmos = profileText.contains("atmos")
+        // Plozzigen (AetherEngine) bridges codecs AVPlayer can't decode to a
+        // lossless FLAC (>6ch) or EAC3 5.1 stream on-device, so DTS/TrueHD play
+        // without passthrough or mpv. Reflect that instead of the AVPlayer caveat.
+        if mode == .plozzigen {
+            switch token {
+            case "dts", "dca", "dts-hd", "dtshd", "dca-ma", "truehd", "mlp":
+                let bridged = (channels ?? 0) > 6 ? "lossless FLAC" : "EAC3 5.1"
+                return "Bridged on-device (\(bridged))"
+            default:
+                break
+            }
+        }
         switch token {
         case "eac3", "ec3", "ec-3", "e-ac-3":
             if isAtmos {
@@ -740,25 +765,16 @@ public extension PlaybackDiagnostics {
     static func streamTransportSummary(url: URL?) -> String? {
         guard let url else { return nil }
         let host = (url.host ?? "").lowercased()
-        let ext = url.pathExtension.lowercased()
-        let kind: String
-        switch ext {
-        case "m3u8": kind = "HLS"
-        case "mp4", "m4v": kind = "fMP4/MP4"
-        case "mov": kind = "QuickTime"
-        case "mkv": kind = "Matroska"
-        case "ts", "m2ts": kind = "MPEG-TS"
-        default: kind = (url.scheme ?? "").uppercased()
-        }
+        let scheme = (url.scheme ?? "").uppercased()
         let isLocal = host == "127.0.0.1" || host == "localhost" || host == "::1"
         if isLocal {
             let port = url.port.map { ":\($0)" } ?? ""
-            return "App-local \(host)\(port) · \(kind)"
+            return "App-local \(host)\(port)"
         }
         if host.isEmpty {
-            return kind.isEmpty ? nil : kind
+            return scheme.isEmpty ? nil : scheme
         }
-        return "\(host) · \(kind)"
+        return "\(host) · \(scheme)"
     }
 
     /// Formats a resolution with an optional quality label, e.g.
@@ -830,13 +846,23 @@ public extension PlaybackDiagnostics {
     // MARK: Instance convenience (used by the overlay)
 
     var resolutionText: String { Self.formatResolution(resolution) }
+    /// e.g. `3840×2160 (4K)` or `1920×1080 (1080p)`.
+    var resolutionWithQualityText: String {
+        guard let resolution, resolution.width > 0, resolution.height > 0 else { return Self.placeholder }
+        if let label = resolution.qualityLabel {
+            return "\(resolution.displayString) (\(label))"
+        }
+        return resolution.displayString
+    }
     var indicatedBitrateText: String { Self.formatBitrate(indicatedBitrate) }
     var observedBitrateText: String { Self.formatBitrate(observedBitrate) }
     var bufferText: String { Self.formatBuffer(bufferedSecondsAhead) }
     var frameRateText: String { Self.formatFrameRate(frameRate) }
+    var hdrText: String { hdr == .unknown ? Self.placeholder : hdr.displayName }
     var videoCodecText: String { videoCodec ?? Self.placeholder }
     var audioCodecText: String { audioCodec ?? Self.placeholder }
     var droppedFramesText: String { droppedVideoFrames.map(String.init) ?? Self.placeholder }
+    var observedFpsText: String { observedFps.map { String(format: "%.0f fps", $0) } ?? Self.placeholder }
 
     /// Friendly container name, e.g. `Matroska (MKV)`.
     var containerText: String { Self.containerLabel(container) ?? Self.placeholder }
@@ -868,6 +894,19 @@ public extension PlaybackDiagnostics {
 
     var audioOutputText: String {
         audioOutputDescription ?? Self.placeholder
+    }
+
+    var audioChannelsText: String {
+        Self.channelDescription(layout: audioChannelLayout, channels: audioChannels) ?? Self.placeholder
+    }
+
+    var audioSampleRateText: String {
+        Self.formatSampleRate(audioSampleRate) ?? Self.placeholder
+    }
+
+    var audioBitrateText: String {
+        guard let br = audioBitrate, br > 0 else { return Self.placeholder }
+        return Self.formatBitrate(br)
     }
 
     /// Backend that resolved the stream, e.g. `Plex` / `Jellyfin`.
@@ -1039,10 +1078,12 @@ public extension PlaybackDiagnostics {
         from metadata: MediaSourceMetadata?,
         mode: PlaybackMode,
         capabilities: MediaCapabilities = .default,
-        sourceProvider: ProviderKind? = nil
+        sourceProvider: ProviderKind? = nil,
+        serverName: String? = nil
     ) -> PlaybackDiagnostics {
         var d = PlaybackDiagnostics(mode: mode)
         d.sourceProvider = sourceProvider
+        d.serverName = serverName
         guard let metadata else { return d }
 
         d.container = metadata.container
@@ -1088,7 +1129,8 @@ public extension PlaybackDiagnostics {
                 codec: a.codec,
                 profile: a.profile,
                 channels: a.channels,
-                capabilities: capabilities
+                capabilities: capabilities,
+                mode: mode
             )
         }
 

@@ -176,9 +176,45 @@ final class ReferenceServerRemuxLocalRemuxSession: LocalRemuxStreamingSession {
 /// The single registry sibling remux branches plug into. Add a new strategy id +
 /// factory here, then expose its counters through `LocalRemuxMetricsController`,
 /// and the diagnostics overlay / torture harness pick it up automatically.
+///
+/// Engine modules that link FFmpeg (e.g. LocalRemux) cannot be referenced from
+/// this FFmpeg-free module, so they contribute their streamer at launch via
+/// `register(choice:factory:)`. The *choice* half lives in CoreModels
+/// (`LocalRemuxStrategyChoice.registerDynamic`) so persistence and display-name
+/// resolution recognise it; the *factory* half is held here.
 public enum LocalRemuxStrategyRegistry {
+    /// Thread-safe id → streamer-factory store for dynamically-registered engines.
+    private final class FactoryStore: @unchecked Sendable {
+        static let shared = FactoryStore()
+        private let lock = NSLock()
+        private var factories: [String: @Sendable () -> any LocalRemuxStreamer] = [:]
+
+        func register(id: String, factory: @escaping @Sendable () -> any LocalRemuxStreamer) {
+            lock.lock(); defer { lock.unlock() }
+            factories[id] = factory
+        }
+
+        func factory(for id: String) -> (@Sendable () -> any LocalRemuxStreamer)? {
+            lock.lock(); defer { lock.unlock() }
+            return factories[id]
+        }
+    }
+
     public static var availableChoices: [LocalRemuxStrategyChoice] {
-        LocalRemuxStrategyChoice.builtInChoices
+        LocalRemuxStrategyChoice.allChoices
+    }
+
+    /// Contribute an engine: registers the user-visible choice (CoreModels) and the
+    /// factory used to build the streamer when that id is selected. Idempotent by
+    /// id, so calling it again at a later launch simply refreshes the entry. The
+    /// built-in choices (which include the default full-timeline VOD engine) are
+    /// always present; this only needs to wire the FFmpeg-linked *factory*.
+    public static func register(
+        choice: LocalRemuxStrategyChoice,
+        factory: @escaping @Sendable () -> any LocalRemuxStreamer
+    ) {
+        LocalRemuxStrategyChoice.registerDynamic(choice)
+        FactoryStore.shared.register(id: choice.id, factory: factory)
     }
 
     public static func makeStreamer(for strategyID: String) -> (any LocalRemuxStreamer)? {
@@ -186,7 +222,7 @@ public enum LocalRemuxStrategyRegistry {
         case LocalRemuxStrategyChoice.referenceServerRemuxID:
             return ReferenceServerRemuxLocalRemuxStreamer()
         default:
-            return nil
+            return FactoryStore.shared.factory(for: strategyID)?()
         }
     }
 }

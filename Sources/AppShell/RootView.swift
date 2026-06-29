@@ -16,10 +16,10 @@ public struct RootView: View {
     @State private var appState: AppState
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
-    /// The OS-level Reduce Transparency setting, OR-combined with the in-app
-    /// "Reduce transparency" toggle (Settings ▸ Appearance) and injected as the
-    /// app-wide `\.plozzReduceTransparency` so the liquid-glass surfaces switch
-    /// to solid when *either* is on (the app override never weakens the OS one).
+    /// The OS-level Reduce Transparency setting, resolved against the in-app
+    /// "Transparency (liquid glass)" preference (Settings ▸ Appearance) and
+    /// injected as the app-wide `\.plozzReduceTransparency`. `tvOS Default`
+    /// follows this OS value; `On` forces glass; `Off` forces solid.
     @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
     /// Deliberately an APP-WIDE (global) setting: a plain `@AppStorage` key with no
     /// profile namespace, so it persists across every profile and is intentionally
@@ -27,7 +27,7 @@ public struct RootView: View {
     /// Do not scope this per profile — accessibility/visual-comfort preferences
     /// belong to the household, not an individual profile. See AGENTS.local.md
     /// ("Per-profile vs app-wide settings").
-    @AppStorage("reduceTransparencyOverride") private var reduceTransparencyOverride = false
+    @AppStorage(TransparencyPreference.storageKey) private var transparencyPreferenceRaw = TransparencyPreference.default.rawValue
     /// Window-level black veil that survives the player's dismiss into Home so it
     /// can cover the TV's *physical* HDR/DV → SDR panel switch (which on some TVs
     /// lags ~1s behind tvOS's `displayDidSettle`). Injected into the environment so
@@ -89,11 +89,16 @@ public struct RootView: View {
                         themeModel: appState.themeModel,
                         diagnosticsModel: appState.diagnosticsModel,
                         musicPlayerModel: appState.musicPlayerModel,
+                        uiDensityModel: appState.uiDensityModel,
+                        nightShiftModel: appState.nightShiftModel,
                         audioController: appState.audioController,
                         homeVisibility: appState.homeLibraryVisibilityModel,
                         homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,
+                        simkl: appState.simklService,
+                        anilist: appState.anilistService,
+                        mal: appState.malService,
                         mediaItemActionHandler: appState.mediaItemActionHandler,
                         enqueueWatchMutation: { appState.enqueueWatchMutation($0) },
                         watchBridge: WatchOutboxBridge(
@@ -151,7 +156,8 @@ public struct RootView: View {
         }
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
-        .environment(\.plozzReduceTransparency, systemReduceTransparency || reduceTransparencyOverride)
+        .environment(\.plozzMetrics, PlozzMetrics(density: appState.uiDensityModel.density))
+        .environment(\.plozzReduceTransparency, (TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default).reducesTransparency(systemReduceTransparency: systemReduceTransparency))
         .environment(displayVeil)
         .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)
         .fullScreenCover(item: Binding(
@@ -192,6 +198,12 @@ public struct RootView: View {
                            value: displayVeil.veilOpacity)
         }
         .modifier(RootDisplaySettleObserver { displayVeil.displayDidSettle() })
+        // Per-profile Night Shift: a warm/dim screen tint that multiplies the
+        // whole app (player included) on the active profile's schedule. Installed
+        // at the app root so it floats above every screen and modal cover. The
+        // model is rebuilt on profile switch by AppState, so each profile gets its
+        // own tint without re-architecting this call site.
+        .installNightShiftOverlay(appState.nightShiftModel)
     }
 }
 

@@ -16,7 +16,10 @@ public struct LocalRemuxStrategyChoice: Hashable, Sendable, Codable, Identifiabl
 
     public static let disabledID = "disabled"
     public static let referenceServerRemuxID = "reference.server-remux"
-    public static let defaultID = referenceServerRemuxID
+    /// The production full-timeline localhost VOD remux engine (this branch). It
+    /// is the default for eligible single-layer DoVi P5/8 + AC-3/E-AC-3 MKVs.
+    public static let fullTimelineVODID = "fulltimeline.localhost-vod"
+    public static let defaultID = fullTimelineVODID
 
     public static let disabled = LocalRemuxStrategyChoice(
         id: disabledID,
@@ -30,13 +33,61 @@ public struct LocalRemuxStrategyChoice: Hashable, Sendable, Codable, Identifiabl
         detail: "Diagnostic baseline: force an AVPlayer HLS manifest so the Remux overlay and seek torture test actually run. Real local engines replace this."
     )
 
+    public static let fullTimelineVOD = LocalRemuxStrategyChoice(
+        id: fullTimelineVODID,
+        displayName: "Full-timeline localhost VOD",
+        detail: "App owns the stream: a loopback HTTP origin serves a full-timeline VOD HLS playlist (every segment declared up front) whose fMP4 segments are -c copy remuxed from the original MKV (dvh1 + dvcC/dvvC Dolby Vision, dec3 E-AC-3 Atmos, no re-encode). Every far seek resolves locally, so AVPlayer seek-ahead never 404s."
+    )
+
     public static let builtInChoices: [LocalRemuxStrategyChoice] = [
         .disabled,
+        .fullTimelineVOD,
         .referenceServerRemux
     ]
 
+    /// Thread-safe holder for strategy choices contributed at launch by engine
+    /// modules that link FFmpeg (e.g. the full-timeline VOD remux in LocalRemux).
+    /// Keeping the *choice* registry in CoreModels — separate from
+    /// FeaturePlayback's *factory* registry — lets persistence
+    /// (`PlaybackPreferencesStore`) and display-name resolution (`choice(for:)`)
+    /// recognise dynamic ids everywhere, without CoreModels knowing how to build a
+    /// streamer.
+    private final class DynamicChoiceRegistry: @unchecked Sendable {
+        static let shared = DynamicChoiceRegistry()
+        private let lock = NSLock()
+        private var choices: [LocalRemuxStrategyChoice] = []
+
+        func register(_ choice: LocalRemuxStrategyChoice) {
+            lock.lock(); defer { lock.unlock() }
+            choices.removeAll { $0.id == choice.id }
+            choices.append(choice)
+        }
+
+        var all: [LocalRemuxStrategyChoice] {
+            lock.lock(); defer { lock.unlock() }
+            return choices
+        }
+    }
+
+    /// Register (or replace, by id) a dynamically-contributed strategy choice.
+    /// Idempotent: re-registering the same id updates its metadata in place.
+    public static func registerDynamic(_ choice: LocalRemuxStrategyChoice) {
+        DynamicChoiceRegistry.shared.register(choice)
+    }
+
+    /// Built-in choices followed by any dynamically-registered ones, de-duplicated
+    /// by id (built-ins win). This is the canonical list the Remux overlay picker
+    /// should present.
+    public static var allChoices: [LocalRemuxStrategyChoice] {
+        var result = builtInChoices
+        for choice in DynamicChoiceRegistry.shared.all where !result.contains(where: { $0.id == choice.id }) {
+            result.append(choice)
+        }
+        return result
+    }
+
     public static func choice(for id: String) -> LocalRemuxStrategyChoice {
-        builtInChoices.first(where: { $0.id == id }) ?? .disabled
+        allChoices.first(where: { $0.id == id }) ?? .disabled
     }
 }
 
@@ -84,15 +135,28 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
     }
 
     /// The shared policy for when Plozz should prefer the native local-remux seam
-    /// over the raw-MKV mpv path: single-layer Dolby Vision Profile 5 / 8.x in an
+    /// over the raw-MKV mpv path.
+    ///
+    /// **Default (narrow) gate** — single-layer Dolby Vision Profile 5 / 8.x in an
     /// MKV/Matroska container, Apple-decodable HEVC video, and AC-3 / E-AC-3 audio
     /// (including DD+ JOC Atmos). Profile 7 / TrueHD remain on the hybrid engine.
-    public func eligibility(capabilities: MediaCapabilities) -> Eligibility {
+    ///
+    /// **Widened gate** (`allowAnyDecodableHEVC == true`, B2 debug flag
+    /// `com.plozz.playback.remuxHevcAny`) — accept *any* AVPlayer-decodable HEVC in
+    /// an MKV with AC-3 / E-AC-3 audio, regardless of HDR signal: Dolby Vision
+    /// (P5/8), HDR10, HDR10+, HLG, **or** SDR; 8- or 10-bit. The remux `-c copy`
+    /// muxer handles HEVC + (e)ac3 identically for all of these, so routing them
+    /// to remux→AVPlayer keeps them off the multichannel-crashing mpv fallback and
+    /// preserves native seek + surround/Atmos. Only formats AVPlayer genuinely
+    /// can't hardware-decode stay on the hybrid engine: dual-layer Dolby Vision
+    /// Profile 7 (BL+EL+RPU) and HEVC Range Extensions (4:2:2 / 4:4:4 / ≥12-bit).
+    /// TrueHD audio still stays on mpv either way.
+    public func eligibility(
+        capabilities: MediaCapabilities,
+        allowAnyDecodableHEVC: Bool = false
+    ) -> Eligibility {
         guard byteRangeSupported else {
             return .ineligible("Original bytes are not marked range-readable")
-        }
-        guard capabilities.supportsDolbyVision else {
-            return .ineligible("Current display route does not advertise Dolby Vision")
         }
         guard isMatroskaContainer else {
             return .ineligible("Source is not a Matroska/MKV container")
@@ -100,12 +164,32 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
         guard isHevcVideo else {
             return .ineligible("Video is not HEVC")
         }
-        guard let profile = normalizedDolbyVisionProfile else {
-            return .ineligible("Source is not identified as single-layer Dolby Vision")
+
+        if allowAnyDecodableHEVC {
+            // Widened gate: any AVPlayer-decodable HEVC qualifies. Only exclude the
+            // formats VideoToolbox can't hardware-decode (so they'd black-screen on
+            // AVPlayer even after an hvc1 re-tag) — those must stay on the hybrid
+            // engine. Dolby Vision *display* capability is not required here: HDR10
+            // and SDR HEVC render on AVPlayer regardless of the DoVi route.
+            if normalizedDolbyVisionProfile == 7 {
+                return .ineligible("Dolby Vision Profile 7 stays on the hybrid engine")
+            }
+            if isHevcRangeExtensions {
+                return .ineligible("HEVC Range Extensions (4:2:2/4:4:4/12-bit) stay on the hybrid engine")
+            }
+        } else {
+            // Narrow (default) gate: single-layer Dolby Vision Profile 5 / 8 only.
+            guard capabilities.supportsDolbyVision else {
+                return .ineligible("Current display route does not advertise Dolby Vision")
+            }
+            guard let profile = normalizedDolbyVisionProfile else {
+                return .ineligible("Source is not identified as single-layer Dolby Vision")
+            }
+            guard profile == 5 || profile == 8 else {
+                return .ineligible("Dolby Vision Profile \(profile) stays on the hybrid engine")
+            }
         }
-        guard profile == 5 || profile == 8 else {
-            return .ineligible("Dolby Vision Profile \(profile) stays on the hybrid engine")
-        }
+
         guard let audioCodec = sourceMetadata.audio?.codec?.lowercased(), !audioCodec.isEmpty else {
             return .ineligible("Audio codec is missing")
         }
@@ -118,8 +202,14 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
         return .eligible
     }
 
-    public func shouldPreferLocalRemux(capabilities: MediaCapabilities) -> Bool {
-        if case .eligible = eligibility(capabilities: capabilities) { return true }
+    public func shouldPreferLocalRemux(
+        capabilities: MediaCapabilities,
+        allowAnyDecodableHEVC: Bool = false
+    ) -> Bool {
+        if case .eligible = eligibility(
+            capabilities: capabilities,
+            allowAnyDecodableHEVC: allowAnyDecodableHEVC
+        ) { return true }
         return false
     }
 
@@ -128,9 +218,41 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
         return container == "mkv" || container.contains("matroska")
     }
 
+    /// Containers AetherEngine (Plozzigen) demuxes and remuxes to AVPlayer:
+    /// Matroska/WebM **and** the MPEG-TS family (`.ts`/`.m2ts`/`.mts`). MP4/MOV are
+    /// deliberately excluded — those direct-play natively, so they never need the
+    /// remux pipeline. This is wider than `isMatroskaContainer` because the engine
+    /// handles transport-stream parts (UHD-BD remuxes ship as `.m2ts`) that mpv
+    /// could only play by crashing on multichannel audio.
+    public var isPlozzigenContainer: Bool {
+        let container = (sourceMetadata.container ?? "").lowercased()
+        switch container {
+        case "mkv", "webm": return true
+        case "ts", "m2ts", "mts", "m2t", "mpegts": return true
+        default: return container.contains("matroska") || container.contains("mpegts")
+        }
+    }
+
     public var isHevcVideo: Bool {
         let codec = (sourceMetadata.video?.codec ?? "").lowercased()
         return codec == "hevc" || codec == "h265"
+    }
+
+    /// True for HEVC **Range Extensions**: 4:2:2 / 4:4:4 chroma or ≥12-bit depth.
+    /// VideoToolbox hardware decode covers Main / Main 10 (4:2:0) only, so these
+    /// black-screen on AVPlayer even after an hvc1 re-tag — they must stay on the
+    /// hybrid engine. Main 10 4:2:0 (the basis of HDR) is intentionally excluded:
+    /// only chroma/bit-depth beyond Main 10 qualifies. Mirrors the routing-side
+    /// classifier in `EngineRouter.isHevcRangeExtensions`.
+    public var isHevcRangeExtensions: Bool {
+        guard isHevcVideo else { return false }
+        let profile = (sourceMetadata.video?.profile ?? "").lowercased()
+        if profile.contains("4:2:2") || profile.contains("4:4:4")
+            || profile.contains("rext") || profile.contains("range extensions") {
+            return true
+        }
+        if let depth = sourceMetadata.video?.bitDepth { return depth >= 12 }
+        return false
     }
 
     /// Preferred Dolby Vision profile normalization:
@@ -151,5 +273,44 @@ public struct LocalRemuxSourceDescriptor: Hashable, Sendable {
         default:
             return nil
         }
+    }
+
+    // MARK: - Plozzigen (wide) eligibility
+
+    /// Video codecs AetherEngine can handle — either via its native HLS-fMP4 →
+    /// AVPlayer path (HEVC/H.264/VP9) or its software decode path (AV1/dav1d).
+    private static let plozzigenVideoCodecs: Set<String> = [
+        "hevc", "h265", "h264", "avc", "avc1", "vp9", "av1", "av01"
+    ]
+
+    /// Wide eligibility gate for the Plozzigen engine (AetherEngine). Unlike the
+    /// narrow `eligibility()` (which requires HEVC + AC3/EAC3 only), Plozzigen
+    /// accepts any video/audio combination AetherEngine can process:
+    ///
+    /// - **Video**: HEVC, H.264, VP9, AV1 (software decode on tvOS)
+    /// - **Audio**: anything — fMP4-legal codecs (AAC, AC3, EAC3, FLAC, ALAC, MP3,
+    ///   Opus) are stream-copied; incompatible ones (TrueHD, DTS) are bridged to
+    ///   lossless FLAC internally.
+    /// - **Container**: MKV/Matroska/WebM **and** the MPEG-TS family (`.ts`/`.m2ts`/
+    ///   `.mts`); MP4/MOV direct-play stays native
+    ///
+    /// Only excludes DV Profile 7 dual-layer (unsupported everywhere except the
+    /// original mastering decoder) and non-range-readable sources (can't seek).
+    public var plozzigenEligibility: Eligibility {
+        guard byteRangeSupported else {
+            return .ineligible("Source bytes are not range-readable")
+        }
+        guard isPlozzigenContainer else {
+            return .ineligible("Not a Plozzigen container (MP4/MOV direct-play stays native)")
+        }
+        let videoCodec = (sourceMetadata.video?.codec ?? "").lowercased()
+        guard Self.plozzigenVideoCodecs.contains(videoCodec) else {
+            return .ineligible("Video codec '\(videoCodec)' not supported by Plozzigen")
+        }
+        // DV Profile 7 (dual-layer BL+EL+RPU) can't be remuxed to single-layer.
+        if normalizedDolbyVisionProfile == 7 {
+            return .ineligible("Dolby Vision Profile 7 (dual-layer) requires hybrid engine")
+        }
+        return .eligible
     }
 }

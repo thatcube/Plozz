@@ -2,8 +2,12 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import Inject
 import FeatureProfiles
 import TraktService
+import SimklService
+import AniListService
+import MALService
 
 /// Settings root — a hierarchical list of top-level rows that each push a
 /// dedicated detail page.
@@ -30,8 +34,12 @@ public struct SettingsView: View {
     private let spoilers: SpoilerSettingsModel
     private let playback: PlaybackSettingsModel
     private let theme: ThemeSettingsModel
+    private let nightShift: NightShiftSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
     private let trakt: TraktService
+    private let simkl: SimklService
+    private let anilist: AniListService
+    private let mal: MALService
     private let discoveredLibraries: LoadState<[AggregatedLibrary]>
     private let reloadLibraries: () async -> Void
     private let accounts: [Account]
@@ -62,8 +70,12 @@ public struct SettingsView: View {
         spoilers: SpoilerSettingsModel,
         playback: PlaybackSettingsModel,
         theme: ThemeSettingsModel,
+        nightShift: NightShiftSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
         trakt: TraktService,
+        simkl: SimklService,
+        anilist: AniListService,
+        mal: MALService,
         discoveredLibraries: LoadState<[AggregatedLibrary]>,
         reloadLibraries: @escaping () async -> Void,
         accounts: [Account],
@@ -93,8 +105,12 @@ public struct SettingsView: View {
         self.spoilers = spoilers
         self.playback = playback
         self.theme = theme
+        self.nightShift = nightShift
         self.homeVisibility = homeVisibility
         self.trakt = trakt
+        self.simkl = simkl
+        self.anilist = anilist
+        self.mal = mal
         self.discoveredLibraries = discoveredLibraries
         self.reloadLibraries = reloadLibraries
         self.accounts = accounts
@@ -152,6 +168,8 @@ public struct SettingsView: View {
         )
     }
 
+    @ObserveInjection var inject
+
     public var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
@@ -192,6 +210,7 @@ public struct SettingsView: View {
         } message: {
             Text("This removes every Plex and Jellyfin sign-in on this Apple TV. You'll need to sign in again.")
         }
+        .enableInjection()
     }
 
     // MARK: - Profile container (header + all settings this profile owns)
@@ -244,7 +263,7 @@ public struct SettingsView: View {
 
     /// Rows nested inside the profile container. Order is deliberate:
     /// identity-shaping rows first (Plex linked user, Server accounts), then
-    /// presentation (Appearance, Captions, Spoilers), then Integrations, then
+    /// presentation (Appearance, Captions, Spoilers), then Trackers, then
     /// profile management (edit/delete, ask-on-startup). Each row pushes its
     /// own detail page via the root NavigationStack.
     @ViewBuilder
@@ -264,14 +283,17 @@ public struct SettingsView: View {
             navRow("Appearance", icon: "paintpalette",
                    value: theme.theme.displayName,
                    route: .appearance)
+            navRow("Night Shift", icon: "moon.stars",
+                   value: nightShift.settings.isEnabled ? "On" : "Off",
+                   route: .nightShift)
             navRow("Playback", icon: "play.rectangle",
                    value: playback.settings.skipIntros == .off ? nil : "Skip: \(playback.settings.skipIntros.title)",
                    route: .playback)
             navRow("Spoilers", icon: "eye.slash",
                    value: spoilers.settings.isEnabled ? "On" : "Off",
                    route: .spoilers)
-            navRow("Integrations", icon: "link",
-                   value: traktSummary,
+            navRow("Trackers — Trakt, Simkl, AniList, MyAnimeList", icon: "link",
+                   value: nil,
                    route: .integrations)
             if profilesEnabled {
                 navRow("Manage Profiles", icon: "person.crop.circle",
@@ -343,6 +365,8 @@ public struct SettingsView: View {
             ServersAndLibrariesDetailView(context: context)
         case .appearance:
             AppearanceDetailView(theme: theme)
+        case .nightShift:
+            NightShiftDetailView(model: nightShift)
         case .playback:
             PlaybackDetailView(playback: playback)
         case .captions:
@@ -350,7 +374,7 @@ public struct SettingsView: View {
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
-            IntegrationsDetailView(trakt: trakt)
+            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, playback: playback, serverCount: activeProfileServerCount)
         case .attributions:
             AttributionsDetailView()
         case let .plexUser(accountID):
@@ -593,15 +617,14 @@ public struct SettingsView: View {
         return accounts.count == 1 ? "1 account" : "\(accounts.count) accounts"
     }
 
-    private var traktSummary: String? {
-        switch trakt.phase {
-        case let .connected(name): return name
-        case .connecting: return "Connecting…"
-        case .disconnected: return "Off"
-        case .unavailable: return "Unavailable"
-        case .error: return "Error"
-        case .unknown: return nil
-        }
+    /// Number of distinct servers the active profile can watch from. Cross-server
+    /// watch-status sync is only meaningful when this is 2+ (otherwise there's
+    /// nowhere to fan out to), so the Trackers page uses it to gate that toggle.
+    private var activeProfileServerCount: Int {
+        let relevant = profilesEnabled
+            ? accounts.filter { isAccountIncludedInActiveProfile($0.id) }
+            : accounts
+        return Set(relevant.map { $0.server.id }).count
     }
 
     /// Shared leading icon for every Settings row. Explicit point size +

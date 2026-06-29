@@ -23,11 +23,23 @@ settings:
     # CFBundleShortVersionString must match the parent app's). Bump by hand for a
     # real release.
     MARKETING_VERSION: "0.1"
+  configs:
+    # Project-wide Debug: InjectionNext needs per-file frontend command lines in
+    # the build log to recompile a single saved file. Set here (not just on the
+    # app target) so SPM package targets (RootView etc.) also emit them and can
+    # hot-reload. Debug-only, so Release/TestFlight is unaffected.
+    Debug:
+      EMIT_FRONTEND_COMMAND_LINES: YES
+      SWIFT_COMPILATION_MODE: incremental
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
 
 # Local Swift package providing all modular feature/code libraries.
 packages:
   Plozz:
     path: .
+  Inject:
+    url: https://github.com/krzysztofzablocki/Inject
+    from: "1.5.2"
 
 targets:
   Plozz:
@@ -77,6 +89,16 @@ targets:
         # no-op). Create an app at https://trakt.tv/oauth/applications to get these.
         TraktClientID: "$(TRAKT_CLIENT_ID)"
         TraktClientSecret: "$(TRAKT_CLIENT_SECRET)"
+        # MyAnimeList client ID for anime tracking (device-code OAuth). Substituted
+        # from MAL_CLIENT_ID build setting (gitignored Config/Secrets.local.xcconfig).
+        # Empty by default, which disables MAL sync.
+        MALClientID: "$(MAL_CLIENT_ID)"
+        # Simkl client credentials for watch tracking. Register at simkl.com/apps.
+        SimklClientID: "$(SIMKL_CLIENT_ID)"
+        SimklClientSecret: "$(SIMKL_CLIENT_SECRET)"
+        # AniList client ID/secret for anime tracking (authorization code grant).
+        AniListClientID: "$(ANILIST_CLIENT_ID)"
+        AniListClientSecret: "$(ANILIST_CLIENT_SECRET)"
         # Local network access is required for LAN server discovery on tvOS.
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:
@@ -118,15 +140,41 @@ targets:
         # display-mode switch), so the linker's default `-dead_strip_dylibs`
         # otherwise drops it and the selector is unrecognized at runtime (crash).
         OTHER_LDFLAGS: "-Wl,-needed_framework,AVKit"
+      configs:
+        # `-interposable` lets InjectionNext swap function bodies at runtime for
+        # live UI hot-reload. Debug only — never ship it in Release.
+        Debug:
+          OTHER_LDFLAGS: "-Wl,-needed_framework,AVKit -Xlinker -interposable"
+          # InjectionNext (Cursor/VS Code, no-Xcode mode) parses build logs to
+          # learn how to recompile a saved file; Xcode 16.3+ needs this to keep
+          # emitting the frontend command lines it reads.
+          EMIT_FRONTEND_COMMAND_LINES: YES
+          # InjectionNext recompiles ONE saved file; whole-module mode breaks that.
+          SWIFT_COMPILATION_MODE: incremental
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          # copy_bundle.sh (below) writes + codesigns the on-device injection
+          # bundle into the .app, which the script sandbox blocks.
+          ENABLE_USER_SCRIPT_SANDBOXING: NO
     configFiles:
       Debug: Config/Secrets.xcconfig
-      Release: Config/Secrets.xcconfig
       Release: Config/Secrets.xcconfig
     dependencies:
       - package: Plozz
         product: AppShell
+      - package: Inject
       - target: PlozzTopShelf
         embed: true
+    postBuildScripts:
+      # On-device InjectionNext hot-reload: copy the prebuilt tvOS device
+      # injection bundle into the .app and codesign it so the running app can
+      # connect back to the InjectionNext server. The script self-gates to Debug
+      # (Release/TestFlight builds skip it), so this never ships.
+      - script: |
+          RESOURCES="/Applications/InjectionNext.app/Contents/Resources"
+          if [ -f "$RESOURCES/copy_bundle.sh" ]; then
+            "$RESOURCES/copy_bundle.sh"
+          fi
+        name: "InjectionNext: copy device bundle (Debug only)"
 
   PlozzTopShelf:
     type: com.apple.product-type.tv-app-extension
@@ -177,11 +225,44 @@ targets:
       - package: Plozz
         product: EngineMPV
 
+  # COMPILE/LINK gate target for the local-remux engine. This tvOS framework
+  # links the LocalRemux package product (and through it CRemuxCore + the FFmpeg
+  # xcframeworks) on its own so CI / the build gate can prove the Infuse-style
+  # localhost remux origin compiles + links against the tvOS SDK independent of
+  # the full app. LocalRemux is also linked into the shipping app via AppShell.
+  # Build via the LocalRemuxProbe scheme.
+  LocalRemuxProbe:
+    type: framework
+    platform: tvOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App/LocalRemuxProbe
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz.LocalRemuxProbe
+        PRODUCT_NAME: LocalRemuxProbe
+        GENERATE_INFOPLIST_FILE: YES
+        # Probe-only; never shipped, so skip code signing entirely.
+        CODE_SIGNING_ALLOWED: NO
+    dependencies:
+      - package: Plozz
+        product: LocalRemux
+
 schemes:
   Plozz:
     build:
       targets:
         Plozz: all
+      preActions:
+        - script: |
+            # Auto-link local secrets if missing (worktrees don't inherit gitignored files).
+            SECRETS_FILE="${PROJECT_DIR}/Config/Secrets.local.xcconfig"
+            CANONICAL="$HOME/.config/plozz/Secrets.local.xcconfig"
+            if [ ! -e "$SECRETS_FILE" ] && [ -f "$CANONICAL" ]; then
+              ln -s "$CANONICAL" "$SECRETS_FILE"
+            fi
+          name: Link secrets from ~/.config/plozz
+          settingsTarget: Plozz
     run:
       config: Debug
     test:
@@ -198,5 +279,13 @@ schemes:
     build:
       targets:
         EngineMPVProbe: all
+    run:
+      config: Debug
+
+  # Compile/link gate for the LocalRemux localhost remux engine.
+  LocalRemuxProbe:
+    build:
+      targets:
+        LocalRemuxProbe: all
     run:
       config: Debug

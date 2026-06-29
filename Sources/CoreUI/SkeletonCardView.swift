@@ -20,6 +20,8 @@ public struct SkeletonCardView: View {
 
     private let style: Style
 
+    @Environment(\.plozzMetrics) private var metrics
+
     public init(style: Style = .poster) {
         self.style = style
     }
@@ -33,7 +35,7 @@ public struct SkeletonCardView: View {
 
     // Mirrors `PosterCardView.posterCard`.
     private var posterCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: metrics.posterCaptionTopSpacing) {
             Color.clear
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
@@ -48,31 +50,31 @@ public struct SkeletonCardView: View {
             // size-20 fonts. Reusing the same fonts (via hidden sizing text) keeps
             // the caption block the exact same height, so the row never shifts
             // vertically when real content swaps in.
-            textLines(contentWidth: PlozzTheme.Metrics.posterWidth - 28, spacing: 2)
+            textLines(contentWidth: metrics.posterWidth - 2 * metrics.posterCaptionInset, spacing: 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
-                .padding(.bottom, 4)
+                .padding([.horizontal, .bottom], metrics.posterCaptionInset)
         }
-        .padding(10)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, isFocused: false)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: false)
         .shimmering()
     }
 
     // Mirrors `PosterCardView.landscapeCard`.
     private var landscapeCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous)
                 .fill(Color.plozzSkeletonFill)
-                .frame(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
+                .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
             // PosterCardView's landscape caption uses VStack(spacing: 4).
-            textLines(contentWidth: PlozzTheme.Metrics.landscapeWidth - 2 * PlozzTheme.Metrics.mediumCardInset, spacing: 4)
-                .frame(width: PlozzTheme.Metrics.landscapeWidth, alignment: .leading)
+            textLines(contentWidth: metrics.landscapeWidth - 2 * metrics.landscapeCaptionInset, spacing: 4)
+                .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
+                .frame(width: metrics.landscapeWidth, alignment: .leading)
         }
-        .padding(PlozzTheme.Metrics.mediumCardInset)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: false)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: false)
         .shimmering()
     }
 
@@ -84,8 +86,8 @@ public struct SkeletonCardView: View {
     /// on load) while giving the placeholders soft, fully-rounded edges.
     private func textLines(contentWidth: CGFloat, spacing: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: spacing) {
-            capsuleLine(font: .subheadline.weight(.semibold), width: max(contentWidth * 0.7, 1), height: 16)
-            capsuleLine(font: .system(size: 20), width: max(contentWidth * 0.45, 1), height: 13)
+            capsuleLine(font: .system(size: metrics.cardTitleFontSize, weight: .semibold), width: max(contentWidth * 0.7, 1), height: (16 * metrics.scale).rounded())
+            capsuleLine(font: .system(size: metrics.cardSubtitleFontSize), width: max(contentWidth * 0.45, 1), height: (13 * metrics.scale).rounded())
         }
     }
 

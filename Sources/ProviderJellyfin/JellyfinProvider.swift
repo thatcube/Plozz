@@ -365,7 +365,8 @@ public struct JellyfinProvider: MediaProvider {
             sourceMetadata: Self.sourceMetadata(container: originalContainer, streams: originalStreams),
             localRemuxSource: localRemuxSource,
             scrubPreview: trickplayManifest(itemID: itemID, source: source, trickplay: detail.Trickplay).map(ScrubPreviewSource.tiled),
-            sourceProvider: .jellyfin
+            sourceProvider: .jellyfin,
+            serverName: session.server.name
         )
     }
 
@@ -887,13 +888,16 @@ public struct JellyfinProvider: MediaProvider {
     }
 
     private func map(stream dto: MediaStreamDto) -> MediaTrack {
-        MediaTrack(
+        let isSubtitle = dto.`Type` == "Subtitle"
+        return MediaTrack(
             id: dto.Index,
-            kind: dto.`Type` == "Subtitle" ? .subtitle : .audio,
+            kind: isSubtitle ? .subtitle : .audio,
             displayTitle: dto.DisplayTitle ?? dto.Language ?? dto.Codec ?? "Track \(dto.Index)",
             language: dto.Language,
             isDefault: dto.IsDefault ?? false,
-            isForced: dto.IsForced ?? false
+            isForced: dto.IsForced ?? false,
+            isImageBasedSubtitle: isSubtitle
+                && !(dto.IsTextSubtitleStream ?? isTextSubtitleCodec(dto.Codec))
         )
     }
 
@@ -911,7 +915,8 @@ public struct JellyfinProvider: MediaProvider {
             language: dto.Language,
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false,
-            deliveryURL: deliveryURL
+            deliveryURL: deliveryURL,
+            isImageBasedSubtitle: !isText
         )
     }
 

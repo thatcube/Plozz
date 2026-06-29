@@ -24,9 +24,9 @@ import OSLog
 ///    non-Apple toolchains (CI runs `swift test` on Linux). The string builders are
 ///    pure and unit-testable everywhere.
 public enum FanoutDiagnostics {
-    /// Thread-safe on/off gate. Default **on** for this diagnostics branch so the
-    /// maintainer can stream telemetry without toggling anything; flip via
-    /// ``setEnabled(_:)`` (e.g. from a Settings switch) to silence it.
+    /// Thread-safe on/off gate. Default **off** in release; auto-enabled only when
+    /// the process is launched with `PLZXFAN_STDOUT=1` so the maintainer can stream
+    /// telemetry. Flip via ``setEnabled(_:)`` (e.g. from a Settings switch).
     private static let gate = Gate()
 
     /// Whether fan-out telemetry is currently emitted.
@@ -134,15 +134,42 @@ public enum FanoutDiagnostics {
             + "kind=\(target.providerKind?.rawValue ?? "?") -> \(outcome)"
     }
 
-    /// (d) Drain summary after one mutation pass.
+    /// (d) Drain summary after one mutation pass. Surfaces every tracker mirror's
+    /// pending flag (not just Trakt) so a stuck Simkl/AniList/MAL scrobble is
+    /// visible at a glance alongside the server targets.
     public static func drainDoneLine(
         canonicalMediaID: String,
         remainingTargets: Int,
         fullyApplied: Bool,
-        traktPending: Bool
+        traktPending: Bool,
+        simklPending: Bool = false,
+        anilistPending: Bool = false,
+        malPending: Bool = false
     ) -> String {
         "drain.done canonical=\(canonicalMediaID) remainingTargets=\(remainingTargets) "
-            + "fullyApplied=\(fullyApplied) traktPending=\(traktPending)"
+            + "fullyApplied=\(fullyApplied) trakt=\(traktPending ? "pending" : "done") "
+            + "simkl=\(simklPending ? "pending" : "done") "
+            + "anilist=\(anilistPending ? "pending" : "done") "
+            + "mal=\(malPending ? "pending" : "done")"
+    }
+
+    /// (e) One external-tracker scrobble attempt's outcome. Surfaces the silent
+    /// no-op branches inside each scrobbler (gate / no usable ids / not connected /
+    /// not anime) plus success / failure, so a watch that never reaches a tracker is
+    /// pinpointable on device. Logs the title + the catalogue ids being sent (imdb /
+    /// tmdb / tvdb / mal / anilist — never tokens), since a present-but-wrong id
+    /// (e.g. an episode id used as a show id) is the subtle failure to catch.
+    public static func scrobbleLine(tracker: String, item: MediaItem, outcome: String) -> String {
+        let se = item.kind == .episode
+            ? " s\(item.seasonNumber.map(String.init) ?? "?")e\(item.episodeNumber.map(String.init) ?? "?")"
+            : ""
+        let ids = item.providerIDs.isEmpty
+            ? "[]"
+            : "[" + item.providerIDs
+                .map { "\($0.key.lowercased()):\($0.value)" }
+                .sorted()
+                .joined(separator: ",") + "]"
+        return "scrobble.\(tracker) title=\"\(item.title)\" kind=\(item.kind)\(se) ids=\(ids) -> \(outcome)"
     }
 
     // MARK: - Formatting helpers
@@ -152,6 +179,7 @@ public enum FanoutDiagnostics {
         case let .external(source, value): return "\(source):\(value)"
         case let .title(normalizedTitle, year, kind):
             return "title:\(normalizedTitle):\(year.map(String.init) ?? "?"):\(kind)"
+        case let .sameItemID(id): return "itemID:\(id)"
         }
     }
 
@@ -171,7 +199,9 @@ public enum FanoutDiagnostics {
     /// 5.9, so a plain mutable static isn't `Sendable`).
     private final class Gate: @unchecked Sendable {
         private let lock = NSLock()
-        private var enabled = true
+        // Off in release; auto-on only when the maintainer launches with
+        // PLZXFAN_STDOUT=1, so shipped builds stay silent without a Settings toggle.
+        private var enabled = ProcessInfo.processInfo.environment["PLZXFAN_STDOUT"] == "1"
         var isEnabled: Bool { lock.lock(); defer { lock.unlock() }; return enabled }
         func setEnabled(_ value: Bool) { lock.lock(); enabled = value; lock.unlock() }
     }

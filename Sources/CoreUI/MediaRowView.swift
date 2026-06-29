@@ -46,6 +46,7 @@ public struct MediaRowView: View {
     private let itemByID: [String: MediaItem]
 
     @FocusState private var focusedID: String?
+    @Environment(\.plozzMetrics) private var metrics
     @State private var didApplyInitialFocus = false
     /// Whether focus currently sits inside this row. While `false` and a gate
     /// target is set, the first card focus lands on (whatever tvOS picks
@@ -148,26 +149,31 @@ public struct MediaRowView: View {
 
     public var body: some View {
         if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
                 if !title.isEmpty {
                     Text(title)
-                        .font(.system(size: 32, weight: .bold))
+                        .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                         .padding(.leading, leadingInset)
                 }
 
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: PlozzTheme.Metrics.cardSpacing) {
+                        LazyHStack(spacing: metrics.cardSpacing) {
                             ForEach(items) { item in
                                 card(for: item)
                             }
                         }
                         .padding(.leading, leadingInset)
                         .padding(.trailing, PlozzTheme.Metrics.screenPadding)
-                        // Give the focused card's lift + drop shadow room so it is
-                        // never clipped by the scroll view's bounds.
-                        .padding(.top, 16)
-                        .padding(.bottom, PlozzTheme.Metrics.railVerticalPadding)
+                        // Reserve generous vertical room *inside* the clip so a
+                        // focused card's lift + drop shadow are never cut. The rail
+                        // keeps clipping (no `scrollClipDisabled`) — that's what
+                        // keeps the focus engine's edge math correct so the first/
+                        // last card holds its inset instead of being yanked flush to
+                        // the screen. The negative outer padding below cancels this
+                        // clearance in layout, so the row's height and its gap to the
+                        // neighbouring rows are unchanged; only the clip grows.
+                        .padding(.vertical, metrics.railShadowClearance)
                         // Treat the rail as a single focus section so pressing down
                         // *enters the section* and selects its only focusable card
                         // (the gated target) regardless of horizontal alignment with
@@ -176,9 +182,8 @@ public struct MediaRowView: View {
                         // becomes unreachable.
                         .focusSection()
                     }
-                    // Let a focused card's lift, drop shadow and border render
-                    // outside the rail's bounds instead of being clipped.
-                    .scrollClipDisabled()
+                    .padding(.top, metrics.railTopClearanceOffset)
+                    .padding(.bottom, metrics.railBottomClearanceOffset)
                     .onAppear { applyInitialFocus(using: proxy) }
                     .onChange(of: focusedID) { _, newValue in
                         handleFocusChange(to: newValue, using: proxy)
@@ -214,15 +219,20 @@ public struct MediaRowView: View {
 
     @ViewBuilder
     private func card(for item: MediaItem) -> some View {
-        // Poster cards are flexible-width (they stretch to fill a grid column);
-        // in a horizontal rail we pin them to the standard poster width so the
-        // row lays out consistently. Landscape cards keep their intrinsic size.
-        // Pin every card to a known width so a `LazyHStack` can compute the
-        // offset of a far-off initial-focus target (e.g. episode 132 of a long
+        // Pin every card to its true rendered width so a `LazyHStack` can compute
+        // the offset of a far-off initial-focus target (e.g. episode 132 of a long
         // season) without first realising every card in between — which is what
         // made focusing the "next up" episode lag on huge seasons.
+        //
+        // The pinned width must equal the card's *glass surface* width, not just
+        // its artwork width, or the layout slot is narrower than what's drawn and
+        // the surfaces overhang into the inter-card gap. A poster's artwork is
+        // flexible, so its glass equals `posterWidth`. A landscape card's artwork
+        // is fixed and sits inside a `cardInset` glass margin, so its glass
+        // is `landscapeWidth + 2 * cardInset` — pin to that so `cardSpacing`
+        // is a real gap and adjacent cards never overlap at rest.
         let card = PosterCardView(item: item, style: style, spoilerSettings: spoilerSettings) { onSelect(item) }
-            .frame(width: style == .poster ? PlozzTheme.Metrics.posterWidth : PlozzTheme.Metrics.landscapeWidth)
+            .frame(width: cardSlotWidth)
             .id(item.id)
             .onAppear {
                 visibleIDs.insert(item.id)
@@ -235,6 +245,17 @@ public struct MediaRowView: View {
                 .disabled(cardIsDisabled(item))
         } else {
             card
+        }
+    }
+
+    /// The layout width reserved for one card in the rail — its full glass-surface
+    /// width, so `cardSpacing` lands as a true visible gap between cards.
+    private var cardSlotWidth: CGFloat {
+        switch style {
+        case .poster:
+            return metrics.posterWidth
+        case .landscape:
+            return metrics.landscapeCardSlotWidth
         }
     }
 

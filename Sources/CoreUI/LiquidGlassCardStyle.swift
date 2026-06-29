@@ -158,12 +158,27 @@ public extension View {
             .focusEffectDisabled()
     }
 
+    /// Flattens a card's layer tree to reduce GPU offscreen render passes.
+    /// When Reduce Transparency is ON (opaque cards, no live glass), uses
+    /// `.drawingGroup()` to rasterize the entire card into one Metal texture —
+    /// collapsing clips, overlays, and borders into a single pass. When glass
+    /// is active, falls back to `.compositingGroup()` since `.drawingGroup()`
+    /// doesn't support live glass compositing.
+    @ViewBuilder
+    func plozzCardRasterize(reduceTransparency: Bool) -> some View {
+        if reduceTransparency {
+            self.drawingGroup()
+        } else {
+            self.compositingGroup()
+        }
+    }
+
     /// Wraps the view in a non-interactive Liquid Glass *panel* surface (HUDs,
     /// overlays). Uses native Liquid Glass on tvOS 26+ and a translucent material
     /// fallback on older versions, with a faint theme-aware scrim behind it for
     /// legibility over bright video. Respects Reduce Transparency.
-    func plozzGlassPanel(cornerRadius: CGFloat, scrimOpacity: Double = 0.1) -> some View {
-        modifier(PlozzGlassPanelModifier(cornerRadius: cornerRadius, scrimOpacity: scrimOpacity))
+    func plozzGlassPanel(cornerRadius: CGFloat, scrimOpacity: Double = 0.1, refractEdgesOnly: Bool = false) -> some View {
+        modifier(PlozzGlassPanelModifier(cornerRadius: cornerRadius, scrimOpacity: scrimOpacity, refractEdgesOnly: refractEdgesOnly))
     }
 }
 
@@ -173,14 +188,16 @@ public extension View {
 public struct PlozzGlassPanelModifier: ViewModifier {
     private let cornerRadius: CGFloat
     private let scrimOpacity: Double
+    private let refractEdgesOnly: Bool
 
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
     @Environment(\.colorScheme) private var colorScheme
 
-    public init(cornerRadius: CGFloat, scrimOpacity: Double = 0.1) {
+    public init(cornerRadius: CGFloat, scrimOpacity: Double = 0.1, refractEdgesOnly: Bool = false) {
         self.cornerRadius = cornerRadius
         self.scrimOpacity = scrimOpacity
+        self.refractEdgesOnly = refractEdgesOnly
     }
 
     public func body(content: Content) -> some View {
@@ -189,11 +206,51 @@ public struct PlozzGlassPanelModifier: ViewModifier {
         // panel keeps text legible over any frame while still tracking the theme.
         let scrim = (colorScheme == .dark ? Color.black : Color.white).opacity(scrimOpacity)
 
-        content
-            .background { shape.fill(scrim) }
-            .modifier(GlassSurface(shape: shape, reduceTransparency: reduceTransparency, palette: palette))
-            .overlay { shape.strokeBorder(palette.cardBorder.opacity(0.6), lineWidth: 1) }
-            .clipShape(shape)
+        // Refract-edges-only: skip the full-panel blur (which samples live video
+        // every frame and stutters playback) and instead pass the video through a
+        // faint scrim while faking glass with a bright refractive rim. Matches
+        // Infuse's info HUD: crisp video behind, lit edges, zero compositor cost.
+        if refractEdgesOnly {
+            content
+                .background { shape.fill(scrim) }
+                .modifier(RefractiveRimGlass(cornerRadius: cornerRadius, palette: palette))
+                .clipShape(shape)
+        } else {
+            content
+                .background { shape.fill(scrim) }
+                .modifier(GlassSurface(shape: shape, reduceTransparency: reduceTransparency, palette: palette))
+                .overlay { shape.strokeBorder(palette.cardBorder.opacity(0.6), lineWidth: 1) }
+                .clipShape(shape)
+        }
+    }
+}
+
+/// True edge refraction with minimal cost: confine real Liquid Glass to a thin
+/// rim band (genuine backdrop refraction at the edges) while the center stays
+/// crisp — the full-panel blur is what stutters, so masking glass to the border
+/// keeps the look at a fraction of the sample cost. Falls back to a lit gradient
+/// rim below tvOS 26 / under Reduce Transparency, where no backdrop sampling
+/// happens at all.
+private struct RefractiveRimGlass: ViewModifier {
+    let cornerRadius: CGFloat
+    let palette: ThemePalette
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        // Zero backdrop sampling: native glass over moving video forces a per-frame
+        // capture pass (stutters even masked to a rim), so fake the refracted edge
+        // with a lit gradient stroke — crisp video, no compositor cost.
+        content.overlay { shape.strokeBorder(fauxRim, lineWidth: 1.5) }
+    }
+
+    /// Top-lit → dark-bottom gradient stroke that reads as a refracted edge with
+    /// zero backdrop sampling (legacy / reduce-transparency path).
+    private var fauxRim: LinearGradient {
+        LinearGradient(
+            colors: [.white.opacity(0.55), palette.cardBorder.opacity(0.35), .white.opacity(0.15)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }
 

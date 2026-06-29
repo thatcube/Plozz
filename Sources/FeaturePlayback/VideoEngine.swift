@@ -162,6 +162,12 @@ public protocol VideoEngine: AnyObject {
     /// rather than being forced to implement it.
     var bufferedPosition: TimeInterval { get }
 
+    /// Live decode/render telemetry (dropped frames, observed FPS, bitrate) for
+    /// the diagnostics overlay. Engines backed by `AVPlayer` return `nil` (the
+    /// sampler reads the access log instead); non-native engines (Plozzigen/mpv)
+    /// vend it here so dropped frames / FPS aren't blank. Defaulted to `nil`.
+    var liveTelemetry: EngineLiveTelemetry? { get }
+
     // MARK: Tracks
 
     /// Selectable audio tracks for the active stream.
@@ -213,6 +219,10 @@ public protocol VideoEngine: AnyObject {
 public extension VideoEngine {
     /// Default: engines that don't track buffering report no buffer fill.
     var bufferedPosition: TimeInterval { 0 }
+
+    /// Default: native (`AVPlayer`) engines have no separate telemetry — the
+    /// sampler reads the access log. Engines without an `AVPlayer` override this.
+    var liveTelemetry: EngineLiveTelemetry? { nil }
 
     /// Default: a generic label for engines that don't name themselves.
     var displayName: String { "Player" }

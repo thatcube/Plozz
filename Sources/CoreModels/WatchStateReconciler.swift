@@ -3,7 +3,7 @@ import Foundation
 /// Performs the actual network writes for a drained ``WatchMutation``. The outbox
 /// core stays provider-agnostic; `AppShell` supplies a concrete applier that
 /// resolves an `accountID` to its `MediaProvider` (for played / resume writes) and
-/// mirrors to Trakt.
+/// mirrors to external trackers (Trakt, Simkl, AniList, MAL).
 ///
 /// Each method **throws on failure** so the reconciler keeps the target queued and
 /// retries later. A throw is the *only* signal to retry — returning normally is
@@ -14,23 +14,24 @@ public protocol WatchMutationApplying: Sendable {
     func setPlayed(_ played: Bool, on target: WatchMutationTarget) async throws
     /// Writes a resume position (seconds) to `target`'s server, session-lessly.
     func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget) async throws
-    /// Mirrors a finished watch to Trakt. Must treat "already scrobbled" (409) as
-    /// success and return normally.
+    /// Mirrors a finished watch to Trakt.
     func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws
+    /// Mirrors a finished watch to Simkl.
+    func scrobbleSimkl(_ intent: TraktScrobbleIntent) async throws
+    /// Mirrors a finished watch to AniList (anime only).
+    func scrobbleAniList(_ intent: TraktScrobbleIntent) async throws
+    /// Mirrors a finished watch to MyAnimeList (anime only).
+    func scrobbleMAL(_ intent: TraktScrobbleIntent) async throws
 
-    /// Resolves the cross-server **twin targets** for an episode `mutation` — the
-    /// same episode on every other server hosting the series, addressed by that
-    /// server's own id. Best-effort and confidence-gated: returns only targets it
-    /// is sure of, plus any accounts that couldn't be confirmed (so the reconciler
-    /// retries them rather than dropping or guessing). The default returns
-    /// ``WatchTargetExpansion/none`` so non-episode flows and test doubles need no
-    /// expansion. Must never throw — a probe failure is expressed as an
-    /// inconclusive account, not an error.
+    /// Resolves the cross-server **twin targets** for an episode `mutation`.
     func expandTargets(for mutation: WatchMutation) async -> WatchTargetExpansion
 }
 
 public extension WatchMutationApplying {
     func expandTargets(for mutation: WatchMutation) async -> WatchTargetExpansion { .none }
+    func scrobbleSimkl(_ intent: TraktScrobbleIntent) async throws {}
+    func scrobbleAniList(_ intent: TraktScrobbleIntent) async throws {}
+    func scrobbleMAL(_ intent: TraktScrobbleIntent) async throws {}
 }
 
 /// Drains the durable ``WatchOutboxState``: applies each pending mutation to every
@@ -167,6 +168,10 @@ public actor WatchStateReconciler {
             merged.trakt = carried
             merged.traktPending = existing.traktPending
         }
+        // Preserve pending tracker flags from either side (either still owed keeps it owed).
+        merged.simklPending = incoming.simklPending || existing.simklPending
+        merged.anilistPending = incoming.anilistPending || existing.anilistPending
+        merged.malPending = incoming.malPending || existing.malPending
         // Either side still owing twin expansion keeps it owed; preserve the origin
         // seed if the newer mutation lacked one (e.g. a mark-watched coalescing onto
         // a queued playback-stop).
@@ -302,13 +307,73 @@ public actor WatchStateReconciler {
             let key = mutation.traktIdempotencyKey(dayBucket: WatchMutation.dayBucket(for: mutation.capturedAt))
             if state.appliedTrakt[key] != nil {
                 mutation.traktPending = false
+                FanoutDiagnostics.emit("drain.trakt canonical=\(mutation.canonicalMediaID) -> skip(already applied this day)")
             } else {
                 do {
                     try await applier.scrobbleTrakt(intent)
                     state.appliedTrakt[key] = now()
                     mutation.traktPending = false
+                    FanoutDiagnostics.emit("drain.trakt canonical=\(mutation.canonicalMediaID) -> applied")
                 } catch {
                     // keep pending; retry next drain
+                    FanoutDiagnostics.emit("drain.trakt canonical=\(mutation.canonicalMediaID) -> THROW(\(error)) -> still pending")
+                }
+            }
+        }
+
+        // Simkl mirror (same idempotency pattern as Trakt).
+        if mutation.simklPending, let intent = mutation.trakt {
+            let key = mutation.traktIdempotencyKey(dayBucket: WatchMutation.dayBucket(for: mutation.capturedAt))
+            if state.appliedSimkl[key] != nil {
+                mutation.simklPending = false
+                FanoutDiagnostics.emit("drain.simkl canonical=\(mutation.canonicalMediaID) -> skip(already applied this day)")
+            } else {
+                do {
+                    try await applier.scrobbleSimkl(intent)
+                    state.appliedSimkl[key] = now()
+                    mutation.simklPending = false
+                    FanoutDiagnostics.emit("drain.simkl canonical=\(mutation.canonicalMediaID) -> applied")
+                } catch {
+                    // keep pending; retry next drain
+                    FanoutDiagnostics.emit("drain.simkl canonical=\(mutation.canonicalMediaID) -> THROW(\(error)) -> still pending")
+                }
+            }
+        }
+
+        // AniList mirror (anime only; the scrobbler no-ops for non-anime).
+        if mutation.anilistPending, let intent = mutation.trakt {
+            let key = mutation.traktIdempotencyKey(dayBucket: WatchMutation.dayBucket(for: mutation.capturedAt))
+            if state.appliedAniList[key] != nil {
+                mutation.anilistPending = false
+                FanoutDiagnostics.emit("drain.anilist canonical=\(mutation.canonicalMediaID) -> skip(already applied this day)")
+            } else {
+                do {
+                    try await applier.scrobbleAniList(intent)
+                    state.appliedAniList[key] = now()
+                    mutation.anilistPending = false
+                    FanoutDiagnostics.emit("drain.anilist canonical=\(mutation.canonicalMediaID) -> applied")
+                } catch {
+                    // keep pending; retry next drain
+                    FanoutDiagnostics.emit("drain.anilist canonical=\(mutation.canonicalMediaID) -> THROW(\(error)) -> still pending")
+                }
+            }
+        }
+
+        // MAL mirror (anime only; the scrobbler no-ops for non-anime).
+        if mutation.malPending, let intent = mutation.trakt {
+            let key = mutation.traktIdempotencyKey(dayBucket: WatchMutation.dayBucket(for: mutation.capturedAt))
+            if state.appliedMAL[key] != nil {
+                mutation.malPending = false
+                FanoutDiagnostics.emit("drain.mal canonical=\(mutation.canonicalMediaID) -> skip(already applied this day)")
+            } else {
+                do {
+                    try await applier.scrobbleMAL(intent)
+                    state.appliedMAL[key] = now()
+                    mutation.malPending = false
+                    FanoutDiagnostics.emit("drain.mal canonical=\(mutation.canonicalMediaID) -> applied")
+                } catch {
+                    // keep pending; retry next drain
+                    FanoutDiagnostics.emit("drain.mal canonical=\(mutation.canonicalMediaID) -> THROW(\(error)) -> still pending")
                 }
             }
         }
@@ -317,7 +382,10 @@ public actor WatchStateReconciler {
             canonicalMediaID: mutation.canonicalMediaID,
             remainingTargets: mutation.targets.count,
             fullyApplied: mutation.isFullyApplied,
-            traktPending: mutation.traktPending))
+            traktPending: mutation.traktPending,
+            simklPending: mutation.simklPending,
+            anilistPending: mutation.anilistPending,
+            malPending: mutation.malPending))
     }
 
     // MARK: - Housekeeping
@@ -325,6 +393,9 @@ public actor WatchStateReconciler {
     private func pruneExpired() {
         let cutoffTrakt = now().addingTimeInterval(-traktTTL)
         state.appliedTrakt = state.appliedTrakt.filter { $0.value >= cutoffTrakt }
+        state.appliedSimkl = state.appliedSimkl.filter { $0.value >= cutoffTrakt }
+        state.appliedAniList = state.appliedAniList.filter { $0.value >= cutoffTrakt }
+        state.appliedMAL = state.appliedMAL.filter { $0.value >= cutoffTrakt }
         let cutoffClock = now().addingTimeInterval(-clockTTL)
         // Keep clock entries that still guard a queued mutation regardless of age.
         let activeKeys = Set(state.pending.map(\.coalesceKey))

@@ -10,21 +10,21 @@ import Foundation
 public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
     /// Follow the device's current light/dark appearance.
     case system
+    /// A light theme.
+    case light
     /// A soft, dark gray theme.
     case dark
     /// A pure-black theme tuned for OLED panels.
     case oled
-    /// A light theme.
-    case light
 
     public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
         case .system: return "System"
+        case .light: return "Light"
         case .dark: return "Dark"
         case .oled: return "OLED"
-        case .light: return "Light"
         }
     }
 
@@ -32,9 +32,9 @@ public enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
     public var symbolName: String {
         switch self {
         case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max.fill"
         case .dark: return "moon.fill"
         case .oled: return "moon.stars.fill"
-        case .light: return "sun.max.fill"
         }
     }
 
@@ -49,10 +49,10 @@ public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, 
     /// Follow the app theme: a light theme gives the frosted-light player, any
     /// dark theme gives the vibrant-dark player.
     case matchTheme
-    /// Always the vibrant, artwork-tinted dark look.
-    case dark
     /// Always a frosted, lightly artwork-tinted light look.
     case light
+    /// Always the vibrant, artwork-tinted dark look.
+    case dark
     /// Always true black, with the artwork colors as subtle accents (OLED).
     case oled
 
@@ -61,9 +61,9 @@ public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, 
     public var displayName: String {
         switch self {
         case .matchTheme: return "Match Theme"
-        case .dark: return "Vibrant Dark"
-        case .light: return "Frosted Light"
-        case .oled: return "OLED Black"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        case .oled: return "OLED"
         }
     }
 
@@ -71,8 +71,8 @@ public enum MusicPlayerAppearance: String, CaseIterable, Identifiable, Codable, 
     public var symbolName: String {
         switch self {
         case .matchTheme: return "circle.lefthalf.filled"
-        case .dark: return "moon.fill"
         case .light: return "sun.max.fill"
+        case .dark: return "moon.fill"
         case .oled: return "moon.stars.fill"
         }
     }
@@ -92,4 +92,56 @@ public enum MusicLyricsPreference {
     public static let storageKey = "musicLyricsEnabled"
     /// Lyrics are on by default.
     public static let defaultEnabled = true
+}
+
+/// User control over the translucent "liquid glass" surfaces (cards, menus,
+/// overlays). A tri-state because the app sits on top of the tvOS Accessibility
+/// "Reduce Transparency" setting: the user can follow the system, force glass
+/// on, or force solid surfaces. Deliberately an APP-WIDE (global) setting — a
+/// visual-comfort/accessibility preference that belongs to the household, not a
+/// single profile. See AGENTS.local.md ("Per-profile vs app-wide settings").
+public enum TransparencyPreference: String, CaseIterable, Identifiable, Codable, Sendable {
+    /// Follow the tvOS Accessibility "Reduce Transparency" setting.
+    case system
+    /// Always show the translucent liquid-glass surfaces.
+    case on
+    /// Always use solid surfaces (reduced transparency).
+    case off
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .system: return "tvOS Default"
+        case .on: return "On"
+        case .off: return "Off"
+        }
+    }
+
+    /// SF Symbol shown next to the option in Settings.
+    public var symbolName: String {
+        switch self {
+        case .system: return "gearshape.fill"
+        case .on: return "sparkles"
+        case .off: return "square.fill"
+        }
+    }
+
+    public static let `default`: TransparencyPreference = .system
+
+    /// AppStorage key shared by RootView (reads it to drive the environment) and
+    /// Settings (writes it).
+    public static let storageKey = "transparencyPreference"
+
+    /// Whether liquid-glass surfaces should render SOLID (reduced transparency),
+    /// resolving this preference against the current tvOS Accessibility setting.
+    /// `on` forces glass even when the system asks to reduce it — an explicit,
+    /// in-app override the user opted into.
+    public func reducesTransparency(systemReduceTransparency: Bool) -> Bool {
+        switch self {
+        case .system: return systemReduceTransparency
+        case .on: return false
+        case .off: return true
+        }
+    }
 }

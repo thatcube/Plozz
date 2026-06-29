@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>AniListClientID</key>
+	<string>$(ANILIST_CLIENT_ID)</string>
+	<key>AniListClientSecret</key>
+	<string>$(ANILIST_CLIENT_SECRET)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
@@ -29,6 +33,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>MALClientID</key>
+	<string>$(MAL_CLIENT_ID)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -44,6 +50,10 @@
 	<string>Plozz uses your local network to discover Jellyfin servers automatically.</string>
 	<key>OMDBAPIKey</key>
 	<string>$(OMDB_API_KEY)</string>
+	<key>SimklClientID</key>
+	<string>$(SIMKL_CLIENT_ID)</string>
+	<key>SimklClientSecret</key>
+	<string>$(SIMKL_CLIENT_SECRET)</string>
 	<key>TMDBBearerToken</key>
 	<string>$(TMDB_BEARER_TOKEN)</string>
 	<key>TMDBProxyBaseURL</key>

@@ -97,6 +97,18 @@ public final class PlayerViewModel {
     /// Device/display/audio policy the router uses to pick an engine.
     private let capabilities: MediaCapabilities
 
+    /// Debug launch-arg flag (`-com.plozz.playback.remuxHevcAny YES`, **default
+    /// OFF**): widen local-remux eligibility from Dolby-Vision-only to *any*
+    /// AVPlayer-decodable HEVC (HDR10 / HDR10+ / HLG / SDR, 8- or 10-bit) in an MKV
+    /// with AC-3 / E-AC-3 audio. Set as a launch argument, it lands in the standard
+    /// `NSArgumentDomain`, so the maintainer can A/B exactly this one routing change
+    /// on the shared Apple TV. When ON, those titles reach remux→AVPlayer (native
+    /// seek + surround/Atmos) instead of falling through to the multichannel-
+    /// crashing mpv engine. Dolby Vision Profile 7 and TrueHD still stay on mpv.
+    private var allowAnyDecodableHEVCRemux: Bool {
+        UserDefaults.standard.bool(forKey: "com.plozz.playback.remuxHevcAny")
+    }
+
     /// The active engine. A `var` so the cross-engine fallback can swap engines
     /// at runtime (e.g. a failed VLCKit attempt → native, or vice-versa).
     private var engine: any VideoEngine
@@ -163,6 +175,29 @@ public final class PlayerViewModel {
     /// regular library playback leaves this `false`.
     private let autoDismissOnEnd: Bool
 
+    /// Episode the player will advance to when this one ends, and the neighbor
+    /// behind it — both `nil` for movies/trailers/last episode. Resolved once via
+    /// ``neighborResolver`` after load so the controls can offer next/previous
+    /// mid-playback and so a clean playthrough auto-advances instead of dismissing.
+    public private(set) var nextEpisode: MediaItem?
+    public private(set) var previousEpisode: MediaItem?
+
+    /// Resolves the surrounding episodes (previous, next) for the playing item,
+    /// off the main actor. `nil` for non-episode playback.
+    private let neighborResolver: (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))?
+
+    /// Resolves the playing episode's *series-level* external IDs (off the main
+    /// actor) and merges them into the scrobble item so trackers that need the
+    /// show's ids — Simkl — can match an episode whose metadata only carries
+    /// episode-level ids. `nil` for non-episode playback.
+    private let seriesIDResolver: (@Sendable () async -> [String: String]?)?
+
+    /// Set when the player wants to advance to a different episode — either at
+    /// natural end (auto-advance) or from a manual next/previous jump. The
+    /// ``PlayerPresentation`` observes this and swaps the VM in-place so the
+    /// full-screen cover never dismisses (no series-page flash).
+    public var pendingNextEpisode: MediaItem?
+
     /// Durable cross-server convergence hook, called once on `stop()` with the final
     /// position and watched percentage. The AppShell wires this to enqueue a
     /// ``WatchMutation`` so the watch fans out (resume / played+Trakt) to **every**
@@ -210,6 +245,9 @@ public final class PlayerViewModel {
     /// bring-up; `stop()` cancels it so a Back during the transition tears down
     /// cleanly via the cancellation checks in `startPlayback`.
     private var prefetchTask: Task<Void, Never>?
+    /// Background series-id enrichment; awaited (briefly) at stop so a fast
+    /// finisher still scrobbles with the show's ids resolved.
+    private var enrichTask: Task<Void, Never>?
 
     public init(
         provider: any MediaProvider,
@@ -223,6 +261,8 @@ public final class PlayerViewModel {
         capabilities: MediaCapabilities = .detected(),
         preferencesStore: PlaybackPreferencesStoring = PlaybackPreferencesStore(),
         autoDismissOnEnd: Bool = false,
+        neighborResolver: (@Sendable () async -> (previous: MediaItem?, next: MediaItem?))? = nil,
+        seriesIDResolver: (@Sendable () async -> [String: String]?)? = nil,
         onPlaybackStopped: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
         onPlaybackStarted: @escaping @Sendable () -> Void = {},
         onPlaybackCheckpoint: @escaping @Sendable (_ position: TimeInterval, _ watchedPercent: Double) -> Void = { _, _ in },
@@ -239,6 +279,8 @@ public final class PlayerViewModel {
         self.capabilities = capabilities
         self.preferencesStore = preferencesStore
         self.autoDismissOnEnd = autoDismissOnEnd
+        self.neighborResolver = neighborResolver
+        self.seriesIDResolver = seriesIDResolver
         self.onPlaybackStopped = onPlaybackStopped
         self.onPlaybackStarted = onPlaybackStarted
         self.onPlaybackCheckpoint = onPlaybackCheckpoint
@@ -250,6 +292,8 @@ public final class PlayerViewModel {
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
         self.controls.localRemuxStrategies = LocalRemuxStrategyRegistry.availableChoices
         self.controls.selectedLocalRemuxStrategyID = preferencesStore.loadLocalRemuxStrategyID()
+        self.controls.skipBackwardInterval = playbackSettings.skipBackwardInterval
+        self.controls.skipForwardInterval = playbackSettings.skipForwardInterval
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
@@ -257,6 +301,11 @@ public final class PlayerViewModel {
         // task; `stop()` cancels it on an early Back.
         prefetchTask = Task { @MainActor [weak self] in
             await self?.startPlayback(forceTranscode: false, resumeOverride: nil)
+        }
+        // Resolve next/previous episodes in the background so a clean playthrough
+        // auto-advances and controls can offer a mid-play jump. Never blocks bring-up.
+        if neighborResolver != nil {
+            Task { @MainActor [weak self] in await self?.resolveNeighbors() }
         }
     }
 
@@ -279,11 +328,51 @@ public final class PlayerViewModel {
     }
 
     /// Called when the active engine reports a clean playthrough to the end of the
-    /// stream. For auto-dismiss players (trailers) this asks the view to close;
-    /// for everything else it's a no-op so the finished frame stays on screen.
+    /// stream. Auto-advances to the next episode when one is queued, otherwise
+    /// dismisses so the player never freezes on the final frame: trailers/movies
+    /// return to detail, a season finale returns to the series page.
     private func handlePlaybackEnded() {
-        guard autoDismissOnEnd else { return }
-        shouldDismiss = true
+        if let next = nextEpisode {
+            pendingNextEpisode = next
+        } else {
+            shouldDismiss = true
+        }
+    }
+
+    /// Requests a swap to another episode mid-playback (or at end). The
+    /// ``PlayerPresentation`` observes ``pendingNextEpisode`` and handles the
+    /// actual VM swap so the full-screen cover stays up.
+    public func playEpisode(_ episode: MediaItem) {
+        pendingNextEpisode = episode
+    }
+
+    /// Loads the surrounding episodes so controls can offer next/previous and a
+    /// clean end auto-advances. Best-effort; silent on failure.
+    private func resolveNeighbors() async {
+        guard let neighborResolver else { return }
+        let (prev, next) = await neighborResolver()
+        previousEpisode = prev
+        nextEpisode = next
+    }
+
+    /// Fetches the playing episode's series-level ids and folds them into the
+    /// item's `providerIDs` under the `Series*` namespace, so scrobblers that
+    /// need the show's id (Simkl) can match an episode that only carried
+    /// episode-level ids. Best-effort: a miss leaves scrobble behavior unchanged.
+    private func enrichSeriesIDs() async {
+        guard let seriesIDResolver, var current = request else { return }
+        guard let raw = await seriesIDResolver(), !raw.isEmpty else { return }
+        let map: [(ProviderIDNamespace, String)] = [
+            (.imdb, "SeriesImdb"), (.tmdb, "SeriesTmdb"), (.tvdb, "SeriesTvdb"),
+            (.myAnimeList, "SeriesMal"), (.aniList, "SeriesAniList")
+        ]
+        var merged = current.item.providerIDs
+        for (namespace, key) in map {
+            guard let value = raw.providerID(namespace) else { continue }
+            if merged[key] == nil { merged[key] = value }
+        }
+        current.item.providerIDs = merged
+        request = current
     }
 
     // MARK: - Engine selection / swapping
@@ -296,6 +385,11 @@ public final class PlayerViewModel {
         case .hybrid:
             if let makeHybrid = engineFactory.makeHybrid {
                 return makeHybrid(captionSettings)
+            }
+            return engineFactory.makeNative(captionSettings)
+        case .plozzigen:
+            if let makePlozzigen = engineFactory.makePlozzigen, let engine = makePlozzigen() {
+                return engine
             }
             return engineFactory.makeNative(captionSettings)
         case .native:
@@ -341,6 +435,9 @@ public final class PlayerViewModel {
             return engineFactory.hybridAvailable ? .hybrid : nil
         case .hybrid:
             return .native
+        case .plozzigen:
+            // Plozzigen failed — fall back to native (server transcode safety net).
+            return .native
         }
     }
 
@@ -383,6 +480,12 @@ public final class PlayerViewModel {
             self.request = request
             configureControls(for: request)
 
+            // Enrich the episode with its series-level ids in the background so the
+            // first scrobble can identify the show on trackers that require it.
+            if request.item.kind == .episode, seriesIDResolver != nil {
+                enrichTask = Task { @MainActor [weak self] in await self?.enrichSeriesIDs() }
+            }
+
             // An explicit override wins over the provider's resume point so the
             // caller can force "start over" (0) or resume from a chosen second.
             let startPosition = resumeOverride ?? startPositionOverride ?? request.startPosition
@@ -392,6 +495,14 @@ public final class PlayerViewModel {
             var kind: PlaybackEngineKind
             if isLocalRemux {
                 kind = .native
+            } else if !forceTranscode, engineFactory.plozzigenAvailable,
+                      let descriptor = request.localRemuxSource,
+                      case .eligible = descriptor.plozzigenEligibility {
+                // Plozzigen handles the full pipeline: FFmpeg demux → HLS-fMP4 →
+                // localhost → AVPlayer. Covers HEVC/H.264/VP9/AV1 video with any
+                // audio (stream-copy or lossless bridge). Skip LocalRemux; the
+                // engine reads localRemuxSource.originalURL directly.
+                kind = .plozzigen
             } else {
                 kind = EngineRouter.selectEngine(
                     source: request.sourceMetadata,
@@ -413,8 +524,9 @@ public final class PlayerViewModel {
             // (PGS/VOBSUB), AVPlayer can't render it — route to the hybrid engine
             // so it appears, but only when we're direct-playing and a hybrid
             // engine is available. (A file with a text-subtitle equivalent stays
-            // native; see `defaultSubtitleNeedsHybridEngine`.)
-            if !isLocalRemux, kind == .native, !request.isTranscoding, engineFactory.hybridAvailable,
+            // native; see `defaultSubtitleNeedsHybridEngine`.) Plozzigen also
+            // can't render bitmap subtitles, so it overrides too.
+            if !isLocalRemux, (kind == .native || kind == .plozzigen), !request.isTranscoding, engineFactory.hybridAvailable,
                request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
                    mode: captionSettings.subtitleMode,
                    preferredLanguage: captionSettings.resolvedPreferredLanguage) {
@@ -528,7 +640,7 @@ public final class PlayerViewModel {
             localRemuxActivationMessage = "This provider did not expose original-file bytes for remux testing."
             return request
         }
-        switch descriptor.eligibility(capabilities: capabilities) {
+        switch descriptor.eligibility(capabilities: capabilities, allowAnyDecodableHEVC: allowAnyDecodableHEVCRemux) {
         case .eligible:
             break
         case .ineligible(let reason):
@@ -726,7 +838,12 @@ public final class PlayerViewModel {
         } catch {
             PlozzLog.playback.debug("Progress report failed (non-fatal)")
         }
-        await scrobbler.scrobble(item: request.item, progress: watchedPercent(), event: event)
+        // Compute the scrobble percent from the SAME position the report used. At
+        // stop() the engine is already torn down, so `engine.currentTime` reads 0 —
+        // honoring `positionOverride` keeps the live stop-scrobble's percent honest
+        // (otherwise Trakt would see 0% and never mark the title watched).
+        let scrobblePercent = positionOverride.map { watchedPercent(at: $0) } ?? watchedPercent()
+        await scrobbler.scrobble(item: request.item, progress: scrobblePercent, event: event)
     }
 
     /// Watched percentage (0...100) from the engine's current position over the
@@ -1059,6 +1176,17 @@ public final class PlayerViewModel {
         let percent = watchedPercent(at: finalPosition)
         engine.stop()
         await teardownLocalRemuxSession()
+        // Let in-flight series-id enrichment finish so a fast playthrough still
+        // scrobbles with the show's ids (anime tagged only AniDB resolve mal/
+        // anilist here). Capped at 2s so a slow server never blocks teardown.
+        if let enrichTask {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await enrichTask.value }
+                group.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+                _ = await group.next()
+                group.cancelAll()
+            }
+        }
         await report(event: .stop, isPaused: true, positionOverride: finalPosition)
         onPlaybackStopped(finalPosition, percent)
     }
@@ -1069,6 +1197,11 @@ public final class PlayerViewModel {
     /// AVFoundation-specific diagnostics sampler and the system player view.
     /// Returns `nil` for a non-AVFoundation engine (diagnostics is best-effort).
     public var player: AVPlayer? { (engine as? NativeVideoEngine)?.underlyingPlayer }
+
+    /// Live engine telemetry (dropped frames / FPS / bitrate) for diagnostics.
+    /// `nil` on the native engine (the sampler uses the AVPlayer access log); the
+    /// Plozzigen/mpv engines vend it so those fields aren't blank.
+    public var engineLiveTelemetry: EngineLiveTelemetry? { engine.liveTelemetry }
 
     /// A stable identity for the active player instance, so views can restart
     /// player-bound work (e.g. the diagnostics sampler) when the transcode
@@ -1085,8 +1218,12 @@ public final class PlayerViewModel {
     public var isTranscoding: Bool { request?.isTranscoding ?? false }
 
     /// How the server is delivering the active stream (direct play / remux /
-    /// transcode). Read by the playback diagnostics overlay's Source row.
-    public var deliveryMode: PlaybackDiagnostics.PlaybackMode { request?.deliveryMode ?? .unknown }
+    /// transcode). When Plozzigen is the active engine, it overrides the provider's
+    /// mode since Plozzigen reads original bytes directly (not a server transcode).
+    public var deliveryMode: PlaybackDiagnostics.PlaybackMode {
+        if currentEngineKind == .plozzigen { return .plozzigen }
+        return request?.deliveryMode ?? .unknown
+    }
 
     /// Provider source facts (codec/HDR/channels/…) for the playing item, used
     /// to populate the playback diagnostics overlay.
@@ -1094,6 +1231,7 @@ public final class PlayerViewModel {
 
     /// Which backend (Plex / Jellyfin) resolved the active playback.
     public var sourceProvider: ProviderKind? { request?.sourceProvider }
+    public var serverName: String? { request?.serverName }
 
     /// The URL AVPlayer is actually playing (after any local-remux swap), used for
     /// the diagnostics "Stream" transport row.
@@ -1104,7 +1242,7 @@ public final class PlayerViewModel {
     /// source facts when it qualifies, or the disqualifying reason when it doesn't.
     public var remuxEligibilitySummary: (eligible: Bool, detail: String)? {
         guard let descriptor = request?.localRemuxSource else { return nil }
-        switch descriptor.eligibility(capabilities: capabilities) {
+        switch descriptor.eligibility(capabilities: capabilities, allowAnyDecodableHEVC: allowAnyDecodableHEVCRemux) {
         case .eligible:
             let metadata = descriptor.sourceMetadata
             let doVi = descriptor.normalizedDolbyVisionProfile.map { "DoVi P\($0)" }
@@ -1192,7 +1330,7 @@ public final class PlayerViewModel {
         let selectedRemuxStrategyID = preferencesStore.loadLocalRemuxStrategyID()
         controls.selectedLocalRemuxStrategyID = selectedRemuxStrategyID
         if let descriptor = request.localRemuxSource {
-            switch descriptor.eligibility(capabilities: capabilities) {
+            switch descriptor.eligibility(capabilities: capabilities, allowAnyDecodableHEVC: allowAnyDecodableHEVCRemux) {
             case .eligible:
                 controls.localRemuxEligible = true
                 controls.localRemuxEligibilityMessage = localRemuxActivationMessage

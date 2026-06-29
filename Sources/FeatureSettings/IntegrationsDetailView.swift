@@ -3,122 +3,346 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import TraktService
+import SimklService
+import AniListService
+import MALService
 
 struct IntegrationsDetailView: View {
     let trakt: TraktService
-
-    private var traktFooter: String? {
-        switch trakt.phase {
-        case .connecting, .connected:
-            return nil
-        default:
-            return "Connect Trakt to automatically scrobble what you watch to your Trakt.tv history. Each profile connects to its own Trakt account."
-        }
-    }
+    let simkl: SimklService
+    let anilist: AniListService
+    let mal: MALService
+    @Bindable var playback: PlaybackSettingsModel
+    let serverCount: Int
+    @Namespace private var trackerFocus
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                Text("Integrations").font(.largeTitle.bold())
-                SettingsPanel(title: "Trakt", footer: traktFooter) {
-                    TraktConnectionView(trakt: trakt)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Trackers").font(.largeTitle.bold())
+                    Text("Connected per profile. Watches are tracked no matter which server you're on.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Unified tracker card — all services in one dense panel
+                VStack(alignment: .leading, spacing: 0) {
+                    // Trakt
+                    VStack(alignment: .leading, spacing: 24) {
+                        TrackerRow(name: "Trakt", phase: traktRowPhase, onConnect: { trakt.connect() }, onCancel: { trakt.cancelConnect() }, onDisconnect: { Task { await trakt.disconnect() } })
+                            .task { await trakt.refreshStatus() }
+                        if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
+                            DeviceCodeConnectingView(serviceName: "Trakt", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: trakt.codeLifetime, onCancel: { trakt.cancelConnect() })
+                        }
+                        sectionDivider
+                    }
+                    .padding(.bottom, 24)
+                    .prefersDefaultFocus(true, in: trackerFocus)
+                    .focusSection()
+
+                    // Simkl
+                    VStack(alignment: .leading, spacing: 24) {
+                        TrackerRow(name: "Simkl", phase: simklRowPhase, onConnect: { simkl.connect() }, onCancel: { simkl.cancelConnect() }, onDisconnect: { Task { await simkl.disconnect() } })
+                            .task { await simkl.refreshStatus() }
+                        if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
+                            DeviceCodeConnectingView(serviceName: "Simkl", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: simkl.codeLifetime, onCancel: { simkl.cancelConnect() })
+                        }
+                        sectionDivider
+                    }
+                    .padding(.bottom, 24)
+                    .focusSection()
+
+                    // AniList
+                    VStack(alignment: .leading, spacing: 24) {
+                        TrackerRow(name: "AniList", phase: anilistRowPhase, onConnect: { anilist.connect() }, onCancel: { anilist.cancelConnect() }, onDisconnect: { Task { await anilist.disconnect() } })
+                            .task { await anilist.refreshStatus() }
+                        if case .awaitingToken = anilist.phase {
+                            AniListTokenEntryView(anilist: anilist)
+                        }
+                        sectionDivider
+                    }
+                    .padding(.bottom, 24)
+                    .focusSection()
+
+                    // MyAnimeList
+                    VStack(alignment: .leading, spacing: 24) {
+                        TrackerRow(name: "MyAnimeList", phase: malRowPhase, onConnect: { mal.connect() }, onCancel: { mal.cancelConnect() }, onDisconnect: { Task { await mal.disconnect() } })
+                            .task { await mal.refreshStatus() }
+                        if case .awaitingAuthorizationCode = mal.phase {
+                            MALAuthorizationCodeEntryView(mal: mal)
+                        }
+                    }
+                    .focusSection()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(28)
+                .background(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+
+                SettingsPanel(
+                    title: "Watch Status",
+                    footer: canSyncAcrossServers
+                        ? (playback.settings.syncWatchAcrossServers
+                            ? "Marking or resuming a title updates every server that has it."
+                            : "Only the server you watched on is updated.")
+                        : "Add another server to sync watch status across servers."
+                ) {
+                    Toggle("Sync across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
+                        .disabled(!canSyncAcrossServers)
                 }
             }
+            .focusScope(trackerFocus)
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
     }
+
+    // MARK: - Row phase mapping
+
+    private var canSyncAcrossServers: Bool { serverCount >= 2 }
+
+    private var traktRowPhase: TrackerRowPhase {
+        switch trakt.phase {
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .connecting: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
+        }
+    }
+
+    private var simklRowPhase: TrackerRowPhase {
+        switch simkl.phase {
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .connecting: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
+        }
+    }
+
+    private var anilistRowPhase: TrackerRowPhase {
+        switch anilist.phase {
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .awaitingToken: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
+        }
+    }
+
+    private var malRowPhase: TrackerRowPhase {
+        switch mal.phase {
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .awaitingAuthorizationCode: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
+        }
+    }
+
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.1))
+            .frame(height: 1)
+            .padding(.horizontal, -27)
+    }
 }
 
-/// The Trakt connect/disconnect flow rendered inside the Integrations panel.
-///
-/// Driven entirely by the observable `TraktService.phase`, so connecting in
-/// one place and the live device-code prompt stay in sync. The device-code
-/// flow is the TV-friendly OAuth grant: we show a short code and the user
-/// approves it at `trakt.tv/activate` on a phone or computer.
-struct TraktConnectionView: View {
-    let trakt: TraktService
+// MARK: - Unified Tracker Row
 
-    private enum Field: Hashable { case connect, cancel, disconnect, retry }
-    @FocusState private var focus: Field?
+/// The state a tracker row can be in (abstracted from service-specific enums).
+enum TrackerRowPhase: Equatable {
+    case loading
+    case unavailable
+    case disconnected
+    case connecting
+    case connected(String)
+    case error
+}
 
-    private enum PhaseTag: Equatable { case unknown, unavailable, disconnected, connecting, connected, error }
-    private var phaseTag: PhaseTag {
-        switch trakt.phase {
-        case .unknown: return .unknown
-        case .unavailable: return .unavailable
-        case .disconnected: return .disconnected
-        case .connecting: return .connecting
-        case .connected: return .connected
-        case .error: return .error
-        }
-    }
+/// A single row inside the unified tracker card. Shows the service name, a
+/// status badge, and a connect/disconnect action — all on one line. Mirrors the
+/// `LabeledSettingRow` density pattern from Appearance.
+struct TrackerRow: View {
+    let name: String
+    let phase: TrackerRowPhase
+    let onConnect: () -> Void
+    let onCancel: () -> Void
+    let onDisconnect: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            switch trakt.phase {
-            case .unknown:
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("Checking Trakt connection…")
-                        .foregroundStyle(.secondary)
-                }
+        HStack(spacing: 16) {
+            Text(name)
+                .font(.headline.weight(.semibold))
+                .frame(width: 180, alignment: .leading)
+
+            switch phase {
+            case .loading:
+                ProgressView()
+                    .controlSize(.small)
+                Spacer()
 
             case .unavailable:
-                // tvOS requires at least one focusable element on a pushed
-                // view, otherwise focus is unanchored and Menu/Back falls
-                // through to the system and exits the app. An enabled but
-                // inert button keeps focus inside this view so Back pops.
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Trakt sync isn't configured in this build. Add a Trakt client id and secret to enable it.")
-                        .foregroundStyle(.secondary)
-                    Button { /* no-op — anchors focus */ } label: {
-                        Label("Trakt unavailable", systemImage: "xmark.circle")
-                    }
-                    .focused($focus, equals: .connect)
-                }
+                Text("Not configured")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                Spacer()
 
             case .disconnected:
-                Button(action: { trakt.connect() }) {
-                    Label("Connect to Trakt", systemImage: "link")
+                Spacer()
+                Button(action: onConnect) {
+                    Label("Connect", systemImage: "link")
                 }
-                .focused($focus, equals: .connect)
-                .frame(maxWidth: .infinity, alignment: .leading)
 
-            case let .connecting(userCode, verificationURL, expiresAt):
-                connectingView(userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt)
+            case .connecting:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Connecting…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(role: .cancel, action: onCancel) {
+                    Text("Cancel")
+                        .font(.subheadline)
+                }
 
             case let .connected(username):
-                connectedView(username: username)
-
-            case let .error(message):
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                    Text(username)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Button(action: { trakt.connect() }) {
-                        Label("Try Again", systemImage: "arrow.clockwise")
-                    }
-                    .focused($focus, equals: .retry)
                 }
-            }
-        }
-        .task { await trakt.refreshStatus() }
-        .onChange(of: phaseTag) { _, tag in
-            guard focus != nil else { return }
-            switch tag {
-            case .connecting: focus = .cancel
-            case .disconnected: focus = .connect
-            case .connected: focus = .disconnect
-            case .error: focus = .retry
-            default: break
+                Spacer()
+                Button(role: .destructive, action: onDisconnect) {
+                    Label("Disconnect", systemImage: "xmark.circle")
+                        .font(.subheadline)
+                }
+
+            case .error:
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("Error")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: onConnect) {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                        .font(.subheadline)
+                }
             }
         }
     }
+}
 
-    private func connectingView(userCode: String, verificationURL: String, expiresAt: Date) -> some View {
+// MARK: - AniList Relay Code Entry (expanded panel)
+
+struct AniListTokenEntryView: View {
+    let anilist: AniListService
+    @State private var codeInput: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Scan the QR code or visit the URL on your phone, sign in to AniList, then enter the code shown:")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if case let .awaitingToken(authorizationURL) = anilist.phase {
+                HStack(alignment: .center, spacing: 32) {
+                    QRCodeView(authorizationURL)
+                        .frame(width: 160, height: 160)
+                        .padding(10)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("plozz.app/anilist")
+                            .font(.title3.weight(.semibold))
+                        TextField("Enter code", text: $codeInput)
+                        HStack(spacing: 16) {
+                            Button("Connect") {
+                                Task { await anilist.submitToken(codeInput) }
+                            }
+                            .disabled(codeInput.trimmingCharacters(in: .whitespaces).count < 4)
+                            Button("Cancel", role: .cancel) {
+                                anilist.cancelConnect()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct MALAuthorizationCodeEntryView: View {
+    let mal: MALService
+    @State private var codeInput: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Scan the QR code or visit the URL on your phone, sign in to MyAnimeList, then enter the code shown:")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if case let .awaitingAuthorizationCode(authorizationURL) = mal.phase {
+                HStack(alignment: .center, spacing: 32) {
+                    QRCodeView(authorizationURL)
+                        .frame(width: 160, height: 160)
+                        .padding(10)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("plozz.app/myanimelist")
+                            .font(.title3.weight(.semibold))
+                        TextField("Enter code", text: $codeInput)
+                        HStack(spacing: 16) {
+                            Button("Connect") {
+                                mal.submitAuthorizationCode(codeInput)
+                            }
+                            .disabled(codeInput.trimmingCharacters(in: .whitespacesAndNewlines).count < 4)
+                            Button("Cancel", role: .cancel) {
+                                mal.cancelConnect()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Shared Components
+
+/// Reusable device-code connecting view (QR + code + countdown) for Trakt/Simkl.
+struct DeviceCodeConnectingView: View {
+    let serviceName: String
+    let userCode: String
+    let verificationURL: String
+    let expiresAt: Date
+    let codeLifetime: TimeInterval
+    let onCancel: () -> Void
+
+    var body: some View {
         HStack(alignment: .center, spacing: 32) {
-            QRCodeView(activationURL(userCode: userCode, verificationURL: verificationURL))
+            QRCodeView(activationURL)
                 .frame(width: 180, height: 180)
                 .padding(12)
                 .background(.white, in: RoundedRectangle(cornerRadius: 16))
@@ -128,7 +352,7 @@ struct TraktConnectionView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 12) {
-                Text(displayURL(verificationURL))
+                Text(displayURL)
                     .font(.title2.weight(.semibold))
                 Text(userCode)
                     .font(.plozzCode(size: 52))
@@ -137,16 +361,15 @@ struct TraktConnectionView: View {
                     .padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
                 HStack(spacing: 14) {
-                    TraktExpiryCountdown(expiresAt: expiresAt, lifetime: trakt.codeLifetime)
+                    TraktExpiryCountdown(expiresAt: expiresAt, lifetime: codeLifetime)
                         .frame(width: 64, height: 64)
                     Text("Waiting for approval…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-                Button(role: .cancel, action: { trakt.cancelConnect() }) {
+                Button(role: .cancel, action: onCancel) {
                     Text("Cancel")
                 }
-                .focused($focus, equals: .cancel)
                 .padding(.top, 16)
             }
 
@@ -154,34 +377,18 @@ struct TraktConnectionView: View {
         }
     }
 
-    private func activationURL(userCode: String, verificationURL: String) -> String {
+    private var activationURL: String {
         let encoded = userCode.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userCode
+        // Simkl uses path-based PIN URLs (e.g. simkl.com/pin/ABC12)
+        if verificationURL.contains("simkl.com/pin") {
+            let base = verificationURL.hasSuffix("/") ? verificationURL : verificationURL + "/"
+            return "\(base)\(encoded)"
+        }
         return "\(verificationURL)?code=\(encoded)"
     }
 
-    private func connectedView(username: String) -> some View {
-        HStack(spacing: 16) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.title)
-                .foregroundStyle(.green)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(username).font(.headline)
-                Text("Your watches sync to Trakt")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button(role: .destructive) {
-                Task { await trakt.disconnect() }
-            } label: {
-                Label("Disconnect", systemImage: "xmark.circle")
-            }
-            .focused($focus, equals: .disconnect)
-        }
-    }
-
-    private func displayURL(_ url: String) -> String {
-        var trimmed = url
+    private var displayURL: String {
+        var trimmed = verificationURL
         for prefix in ["https://", "http://"] where trimmed.hasPrefix(prefix) {
             trimmed.removeFirst(prefix.count)
         }
@@ -189,9 +396,7 @@ struct TraktConnectionView: View {
     }
 }
 
-/// Compact ring that depletes over the life of the current Trakt device code,
-/// with the seconds remaining at its centre, shifting to a warning tint as
-/// the deadline nears. The code auto-refreshes on expiry, so this just resets.
+/// Compact ring that depletes over the life of a device code.
 struct TraktExpiryCountdown: View {
     let expiresAt: Date
     let lifetime: TimeInterval
@@ -227,40 +432,95 @@ struct TraktExpiryCountdown: View {
     }
 }
 
-/// Open-source credits & licensing — the one acceptable level deeper from the
-/// inline About section on the main Settings page. Each credit is a focusable
-/// inverted-card so the page is reachable on the 10-foot UI and Menu/Back pops
-/// reliably (a fully non-interactive page can trap focus and quit the app).
+/// Open-source credits & licensing.
 struct AttributionsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 Text("Attributions & Licensing").font(.largeTitle.bold())
 
-                Text("Plozz is free and open source, and stands on the shoulders of these projects and services. It is not affiliated with, endorsed, or certified by any of them.")
+                Text("Plozz is free and open source under the GPL-3.0 license with an App Store exception. It is not affiliated with, endorsed, or certified by any of the projects or services listed below.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 attribution(
-                    "Media servers",
-                    "Jellyfin — the free software media system. Plozz is an unofficial client and is not affiliated with the Jellyfin project. Plex is a trademark of Plex, Inc.; Plozz is an unofficial client and is not affiliated with or endorsed by Plex, Inc."
+                    "Media Servers",
+                    "Jellyfin is a free software media system; Plozz is an unofficial client and is not affiliated with the Jellyfin project. Plex is a trademark of Plex, Inc.; Plozz is an unofficial client and is not endorsed by Plex, Inc."
                 )
                 attribution(
-                    "Brand marks",
-                    "The Plex and Jellyfin logos are used nominatively, solely to identify which server type an account connects to. They are unmodified and are not used as Plozz's own branding."
+                    "Brand Marks",
+                    "The Plex and Jellyfin logos are used nominatively to identify which server type an account connects to. They are unmodified and are not used as Plozz branding."
                 )
                 attribution(
-                    "Playback",
-                    "Playback is powered by mpv and libmpv (GPL/LGPL), together with the FFmpeg-family libraries (libass, dav1d, libplacebo, libbluray, and related components) packaged by the mpvkit project."
+                    "AetherEngine",
+                    "Plozzigen playback is powered by AetherEngine by Vincent Herbst. Source: github.com/superuser404notfound/AetherEngine",
+                    licenses: [.lgpl("LGPL-3.0")]
                 )
                 attribution(
-                    "Metadata",
-                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Additional ratings and metadata are supplied by your media server and by TMDB, OMDb, and AniList."
+                    "FFmpeg",
+                    "Audio/video decoding uses FFmpeg libraries (libavcodec, libavformat, libavutil, libswresample, libswscale, libavfilter, libavdevice). ffmpeg.org",
+                    licenses: [.lgpl("LGPL-2.1+")]
                 )
                 attribution(
-                    "Swift packages",
-                    "YouTubeKit and additional open-source Swift packages are used under their respective licenses."
+                    "mpv & mpvkit",
+                    "Fallback playback uses mpv packaged by the mpvkit project. github.com/nicxleo/mpvkit",
+                    licenses: [.gpl("GPL-2.0+")]
+                )
+                attribution(
+                    "libdovi",
+                    "Dolby Vision metadata parsing uses libdovi.",
+                    licenses: [.mit()]
+                )
+                attribution(
+                    "libass & Text Rendering",
+                    "Subtitle rendering uses libass, FreeType, HarfBuzz, Fribidi, and Unibreak.",
+                    licenses: [.isc(), .lgpl("LGPL-2.1"), .mit()]
+                )
+                attribution(
+                    "dav1d",
+                    "AV1 video decoding uses dav1d by VideoLAN.",
+                    licenses: [.bsd("BSD-2")]
+                )
+                attribution(
+                    "libplacebo & MoltenVK",
+                    "GPU-accelerated video rendering uses libplacebo and MoltenVK for Vulkan-to-Metal translation.",
+                    licenses: [.lgpl("LGPL-2.1"), .apache()]
+                )
+                attribution(
+                    "GnuTLS & Networking",
+                    "TLS and network transport use GnuTLS, Nettle, GMP, AMSMB2, and OpenSSL.",
+                    licenses: [.lgpl("LGPL-2.1"), .lgpl("LGPL-3.0"), .apache()]
+                )
+                attribution(
+                    "libbluray",
+                    "Blu-ray disc structure parsing uses libbluray.",
+                    licenses: [.lgpl("LGPL-2.1")]
+                )
+                attribution(
+                    "TMDB",
+                    "This product uses the TMDB API but is not endorsed or certified by TMDB. Artwork and metadata are provided by TMDB (themoviedb.org).",
+                    licenses: [.api()]
+                )
+                attribution(
+                    "OMDb & AniList",
+                    "Additional ratings are sourced from the OMDb API (omdbapi.com) and AniList (anilist.co). Neither endorses or is affiliated with Plozz.",
+                    licenses: [.api()]
+                )
+                attribution(
+                    "Watch Tracking",
+                    "Watch-history sync integrations — Trakt (trakt.tv), Simkl (simkl.com), AniList (anilist.co), and MyAnimeList (myanimelist.net) — use their respective public APIs. None endorses or is affiliated with Plozz.",
+                    licenses: [.api()]
+                )
+                attribution(
+                    "Wikidata",
+                    "Fallback artwork lookup uses the Wikidata Query Service (wikidata.org).",
+                    licenses: [.cc0()]
+                )
+                attribution(
+                    "YouTubeKit",
+                    "Trailer playback uses YouTubeKit by Alexander Eichhorn.",
+                    licenses: [.mit()]
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -270,15 +530,17 @@ struct AttributionsDetailView: View {
         .scrollClipDisabled()
     }
 
-    private func attribution(_ title: String, _ text: String) -> some View {
-        AttributionCard(title: title, text: text)
+    private func attribution(_ title: String, _ text: String, licenses: [LicenseBadge] = []) -> some View {
+        AttributionCard(title: title, text: text, licenses: licenses)
     }
 }
 
-/// A single focusable credit card with the shared inverted-card focus look.
+/// A single focusable credit card with the shared inverted-card focus look
+/// and optional license badge pills.
 private struct AttributionCard: View {
     let title: String
     let text: String
+    var licenses: [LicenseBadge] = []
 
     @FocusState private var isFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
@@ -287,8 +549,14 @@ private struct AttributionCard: View {
     private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(title).font(.headline.weight(.semibold))
+                Spacer()
+                ForEach(licenses) { badge in
+                    badge.view(focused: isFocused)
+                }
+            }
             Text(text)
                 .font(.callout)
                 .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.78)) : AnyShapeStyle(.secondary))
@@ -310,7 +578,51 @@ private struct AttributionCard: View {
         .focused($isFocused)
         .animation(.easeOut(duration: 0.16), value: isFocused)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title). \(text)")
+        .accessibilityLabel("\(title). \(licenses.map(\.label).joined(separator: ", ")). \(text)")
+    }
+}
+
+/// A license badge model with a tint color category.
+private struct LicenseBadge: Identifiable {
+    let id: String
+    let label: String
+    let tint: Color
+
+    func view(focused: Bool) -> some View {
+        Text(label)
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(focused ? Color.black : .white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill(focused ? tint.opacity(0.85) : tint.opacity(0.7))
+            )
+    }
+
+    // Factory presets for common license families
+    static func gpl(_ version: String = "GPL-3.0") -> LicenseBadge {
+        LicenseBadge(id: version, label: version, tint: Color(red: 0.85, green: 0.25, blue: 0.25))
+    }
+    static func lgpl(_ version: String = "LGPL-3.0") -> LicenseBadge {
+        LicenseBadge(id: version, label: version, tint: Color(red: 0.9, green: 0.45, blue: 0.2))
+    }
+    static func mit() -> LicenseBadge {
+        LicenseBadge(id: "MIT", label: "MIT", tint: Color(red: 0.2, green: 0.65, blue: 0.35))
+    }
+    static func apache() -> LicenseBadge {
+        LicenseBadge(id: "Apache-2.0", label: "Apache-2.0", tint: Color(red: 0.2, green: 0.5, blue: 0.8))
+    }
+    static func bsd(_ variant: String = "BSD-2") -> LicenseBadge {
+        LicenseBadge(id: variant, label: variant, tint: Color(red: 0.4, green: 0.55, blue: 0.7))
+    }
+    static func cc0() -> LicenseBadge {
+        LicenseBadge(id: "CC0", label: "CC0", tint: Color(red: 0.5, green: 0.5, blue: 0.5))
+    }
+    static func isc() -> LicenseBadge {
+        LicenseBadge(id: "ISC", label: "ISC", tint: Color(red: 0.3, green: 0.6, blue: 0.5))
+    }
+    static func api() -> LicenseBadge {
+        LicenseBadge(id: "API", label: "API", tint: Color(red: 0.55, green: 0.4, blue: 0.7))
     }
 }
 #endif

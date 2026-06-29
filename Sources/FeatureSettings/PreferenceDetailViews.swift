@@ -6,84 +6,90 @@ import CoreUI
 struct AppearanceDetailView: View {
     @Bindable var theme: ThemeSettingsModel
     @Environment(MusicPlayerSettingsModel.self) private var musicPlayer
+    @Environment(UIDensitySettingsModel.self) private var density
     /// App-wide (global) — persists across all profiles. Same un-namespaced
     /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
     /// See AGENTS.local.md ("Per-profile vs app-wide settings").
-    @AppStorage("reduceTransparencyOverride") private var reduceTransparency = false
+    @AppStorage(TransparencyPreference.storageKey) private var transparencyPreferenceRaw = TransparencyPreference.default.rawValue
+
+    private var transparencyPreference: TransparencyPreference {
+        TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default
+    }
 
     var body: some View {
         @Bindable var musicPlayer = musicPlayer
+        @Bindable var density = density
         return ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 Text("Appearance").font(.largeTitle.bold())
-                SettingsPanel(
-                    title: "Theme",
-                    footer: "Choose how Plozz looks. Theme applies to the active profile only."
-                ) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(AppTheme.allCases) { option in
-                                Button {
-                                    theme.theme = option
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: option.symbolName)
-                                        Text(option.displayName)
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .opacity(theme.theme == option ? 1 : 0)
-                                    }
-                                    .font(.headline)
-                                    .padding(.horizontal, 4)
-                                }
-                                .buttonStyle(PlozzSeasonTabStyle(isSelected: theme.theme == option))
-                                .accessibilityValue(theme.theme == option ? "Selected" : "")
-                            }
-                        }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 6)
+
+                VStack(alignment: .leading, spacing: 24) {
+                    // Theme
+                    LabeledSettingRow("Theme", labelWidth: 300) {
+                        SettingsOptionPicker(
+                            options: AppTheme.allCases,
+                            selection: $theme.theme,
+                            icon: { $0.symbolName },
+                            title: { $0.displayName }
+                        )
                     }
-                    .scrollClipDisabled()
+
+                    sectionDivider
+
+                    // Display Size
+                    LabeledSettingRow(
+                        "Display Size",
+                        subtitle: "Scales card size, columns and spacing.",
+                        labelWidth: 300
+                    ) {
+                        SettingsOptionPicker(
+                            options: UIDensity.allCases,
+                            selection: $density.density,
+                            icon: { $0.symbolName },
+                            title: { $0.displayName }
+                        )
+                    }
+
+                    sectionDivider
+
+                    // Transparency
+                    LabeledSettingRow("Transparency", subtitle: "Liquid glass", labelWidth: 300) {
+                        SettingsOptionPicker(
+                            options: TransparencyPreference.allCases,
+                            selection: Binding(
+                                get: { transparencyPreference },
+                                set: { transparencyPreferenceRaw = $0.rawValue }
+                            ),
+                            icon: { $0.symbolName },
+                            title: { $0.displayName }
+                        )
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(28)
+                .background(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                )
 
                 SettingsPanel(
-                    title: "Music Player",
-                    footer: "Sets the look of the full-screen Now Playing player. Match Theme follows your app theme; or pin a fixed look."
+                    title: "Music Player"
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(MusicPlayerAppearance.allCases) { option in
-                                    Button {
-                                        musicPlayer.appearance = option
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: option.symbolName)
-                                            Text(option.displayName)
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .opacity(musicPlayer.appearance == option ? 1 : 0)
-                                        }
-                                        .font(.headline)
-                                        .padding(.horizontal, 4)
-                                    }
-                                    .buttonStyle(PlozzSeasonTabStyle(isSelected: musicPlayer.appearance == option))
-                                    .accessibilityValue(musicPlayer.appearance == option ? "Selected" : "")
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 6)
+                        LabeledSettingRow("Style", labelWidth: 300) {
+                            SettingsOptionPicker(
+                                options: MusicPlayerAppearance.allCases,
+                                selection: $musicPlayer.appearance,
+                                icon: { $0.symbolName },
+                                title: { $0.displayName }
+                            )
                         }
-                        .scrollClipDisabled()
 
                         Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
-                    }
-                }
-
-                SettingsPanel(
-                    title: "Transparency",
-                    footer: "Replaces the translucent “liquid glass” blur on cards, menus and overlays with solid surfaces. Turns on automatically when Reduce Transparency is enabled in tvOS Accessibility settings."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Toggle("Reduce transparency", isOn: $reduceTransparency)
                     }
                 }
             }
@@ -91,6 +97,19 @@ struct AppearanceDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
+    }
+
+    /// Hairline rule between the joined Appearance sections so they read as one
+    /// grouped container rather than separate cards. The negative horizontal
+    /// padding cancels the container's 28 pt content inset *minus* the 1 pt
+    /// border stroke, so the rule meets the inner edge of the border exactly
+    /// without overlapping it (overlapping would stack the two translucent
+    /// fills into a darker dot at each end).
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.1))
+            .frame(height: 1)
+            .padding(.horizontal, -27)
     }
 }
 
@@ -136,13 +155,12 @@ struct SpoilersDetailView: View {
                         Toggle("Hide spoilers for unwatched episodes", isOn: $spoilers.settings.isEnabled)
 
                         if spoilers.settings.isEnabled {
-                            OptionCardRow(
-                                options: SpoilerSettings.Mode.allCases,
-                                selection: $spoilers.settings.mode
-                            ) { mode in
-                                Text(mode.displayName)
-                                    .font(.headline)
-                                    .multilineTextAlignment(.center)
+                            LabeledSettingRow("Mode", labelWidth: 220) {
+                                SettingsOptionPicker(
+                                    options: SpoilerSettings.Mode.allCases,
+                                    selection: $spoilers.settings.mode,
+                                    title: { $0.displayName }
+                                )
                             }
 
                             Text(modeExplanation)
@@ -168,12 +186,6 @@ struct SpoilersDetailView: View {
 }
 struct PlaybackDetailView: View {
     @Bindable var playback: PlaybackSettingsModel
-
-    private var syncExplanation: String {
-        playback.settings.syncWatchAcrossServers
-            ? "When you finish, resume, or mark a title, Plozz updates every server that has it — so your progress follows you no matter which server you watch on next."
-            : "Plozz only updates the server you actually watched on. Other servers that have the same title are left untouched."
-    }
 
     var body: some View {
         ScrollView {
@@ -205,54 +217,42 @@ struct PlaybackDetailView: View {
                     title: "Skip Intros & Credits",
                     footer: "When your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin."
                 ) {
-                    VStack(spacing: 4) {
-                        ForEach(SkipIntrosMode.allCases, id: \.self) { mode in
-                            Button {
-                                playback.settings.skipIntros = mode
-                            } label: {
-                                HStack(spacing: 16) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(mode.title).font(.callout.weight(.medium))
-                                        Text(mode.detail)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "checkmark")
-                                        .font(.callout.weight(.semibold))
-                                        .opacity(playback.settings.skipIntros == mode ? 1 : 0)
-                                }
-                                .padding(.vertical, 8)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(SettingsFocusButtonStyle())
-                            .accessibilityValue(playback.settings.skipIntros == mode ? "Selected" : "")
+                    VStack(alignment: .leading, spacing: 8) {
+                        LabeledSettingRow("Skip Intros", labelWidth: 220) {
+                            SettingsOptionPicker(
+                                options: SkipIntrosMode.allCases,
+                                selection: $playback.settings.skipIntros,
+                                title: { $0.title }
+                            )
                         }
+
+                        Text(playback.settings.skipIntros.detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
-                SettingsPanel(
-                    title: "Watch Status Sync",
-                    footer: "Applies to this profile only and takes effect immediately — no need to restart. Trakt scrobbling is unaffected either way."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Toggle("Sync watch status across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
+            SettingsPanel(
+                title: "Skip Intervals (left/right on remote)"
+            ) {
+                VStack(alignment: .leading, spacing: 18) {
+                    LabeledSettingRow("Skip Backward", labelWidth: 220) {
+                        SettingsOptionPicker(
+                            options: SkipInterval.allCases,
+                            selection: $playback.settings.skipBackwardInterval,
+                            title: { $0.title }
+                        )
+                    }
 
-                        HStack(alignment: .top, spacing: 14) {
-                            Image(systemName: playback.settings.syncWatchAcrossServers ? "arrow.triangle.2.circlepath" : "externaldrive")
-                                .font(.title3)
-                                .foregroundStyle(playback.settings.syncWatchAcrossServers ? Color.accentColor : .secondary)
-                                .frame(width: 36)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(playback.settings.syncWatchAcrossServers ? "All servers" : "This server only")
-                                    .font(.callout.weight(.semibold))
-                                Text(syncExplanation)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                    LabeledSettingRow("Skip Forward", labelWidth: 220) {
+                        SettingsOptionPicker(
+                            options: SkipInterval.allCases,
+                            selection: $playback.settings.skipForwardInterval,
+                            title: { $0.title }
+                        )
                     }
                 }
+            }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)

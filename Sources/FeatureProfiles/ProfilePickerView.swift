@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import Inject
 
 /// tvOS profile picker — the "Who's watching?" screen.
 ///
@@ -92,6 +93,8 @@ public struct ProfilePickerView: View {
         return UnitPoint(x: point.x / size.width, y: point.y / size.height)
     }
 
+    @ObserveInjection var inject
+
     public var body: some View {
         VStack(spacing: 48) {
             Text(title)
@@ -150,6 +153,7 @@ public struct ProfilePickerView: View {
             prefetchAvatars()
             setInitialFocusIfNeeded()
         }
+        .enableInjection()
     }
 
     /// Move focus to the default tile (last-used profile, else first) once when
@@ -241,28 +245,14 @@ private struct FocusGlassAvatar<Content: View>: View {
     @Environment(\.isFocused) private var isFocused
     @Environment(\.profileTilePressed) private var isPressed
 
-    private var scale: CGFloat { PlozzTheme.Metrics.mediumFocusedCardScale }
-
-    private var contentScale: CGFloat {
-        guard isFocused else { return 1 }
-        return isPressed ? scale * 0.97 : scale
-    }
-
     var body: some View {
-        ZStack {
-            Color.clear
-                .frame(width: ProfilePickerLayout.slot, height: ProfilePickerLayout.slot)
-                .plozzGlassCard(cornerRadius: ProfilePickerLayout.slot / 2, isFocused: true)
-                .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
-                .opacity(isFocused ? 1 : 0)
-
-            content()
-                .frame(width: ProfilePickerLayout.avatarSize, height: ProfilePickerLayout.avatarSize)
-                .scaleEffect(contentScale)
-        }
-        .frame(width: ProfilePickerLayout.slot, height: ProfilePickerLayout.slot)
-        .animation(.easeOut(duration: 0.22), value: isFocused)
-        .animation(.easeOut(duration: 0.12), value: isPressed)
+        CircularFocusHalo(
+            isFocused: isFocused,
+            isPressed: isPressed,
+            diameter: ProfilePickerLayout.avatarSize,
+            focusPadding: ProfilePickerLayout.focusPadding,
+            avatar: content
+        )
     }
 }
 

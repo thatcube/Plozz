@@ -24,6 +24,7 @@ public struct PosterCardView: View {
     @FocusState private var isFocused: Bool
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
+    @Environment(\.plozzMetrics) private var metrics
 
     public init(
         item: MediaItem,
@@ -42,26 +43,22 @@ public struct PosterCardView: View {
     private var hideThumbnail: Bool { spoilerSettings.shouldHideThumbnail(for: item) }
     private var hideText: Bool { spoilerSettings.shouldHideText(for: item) }
 
-    /// When a focused card renders an opaque white "lift" surface (Reduce
-    /// Transparency on, or pre-Liquid-Glass tvOS) its title/subtitle must flip to
-    /// dark ink so they don't vanish into the white. On the translucent-glass
-    /// path (tvOS 26+) the text stays primary/secondary over the glass.
-    private var usesLiftText: Bool {
-        guard isFocused else { return false }
-        if reduceTransparency { return true }
-        if #available(tvOS 26.0, *) { return false }
-        return true
+    /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
+    /// "lift" surface. Centralised in `PlozzCardCaption` so every card type flips
+    /// identically.
+    private var titleColor: Color {
+        PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
     }
-
-    private var titleColor: Color { usesLiftText ? .black.opacity(0.9) : .primary }
-    private var subtitleColor: Color { usesLiftText ? .black.opacity(0.6) : .secondary }
+    private var subtitleColor: Color {
+        PlozzCardCaption.subtitleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
+    }
 
     private var size: CGSize {
         switch style {
         case .poster:
-            return CGSize(width: PlozzTheme.Metrics.posterWidth, height: PlozzTheme.Metrics.posterHeight)
+            return CGSize(width: metrics.posterWidth, height: metrics.posterHeight)
         case .landscape:
-            return CGSize(width: PlozzTheme.Metrics.landscapeWidth, height: PlozzTheme.Metrics.landscapeHeight)
+            return CGSize(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
         }
     }
 
@@ -83,7 +80,7 @@ public struct PosterCardView: View {
     // MARK: Poster
 
     private var posterCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: metrics.posterCaptionTopSpacing) {
             Color.clear
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
@@ -95,23 +92,23 @@ public struct PosterCardView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(primaryText)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
                 Text(subtitleText ?? " ")
-                    .font(.system(size: 20))
+                    .font(.system(size: metrics.cardSubtitleFontSize))
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitleText == nil ? 0 : 1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
-            .padding(.bottom, 4)
+            .padding([.horizontal, .bottom], metrics.posterCaptionInset)
         }
-        .padding(10)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, isFocused: isFocused)
-        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.posterCardCornerRadius, action: action)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.posterCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.posterCardCornerRadius, action: action)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.focusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
@@ -120,7 +117,7 @@ public struct PosterCardView: View {
     // MARK: Landscape (medium) card
 
     private var landscapeCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: size.width, height: size.height)
                 .overlay(alignment: .topTrailing) { watchedBadge }
@@ -130,22 +127,23 @@ public struct PosterCardView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(primaryText)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
                     .foregroundStyle(titleColor)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                 Text(subtitleText ?? " ")
-                    .font(.system(size: 20))
+                    .font(.system(size: metrics.cardSubtitleFontSize))
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)
                     .opacity(subtitleText == nil ? 0 : 1)
             }
+            .padding([.horizontal, .bottom], metrics.landscapeCaptionInset)
             .frame(width: size.width, alignment: .leading)
         }
-        .padding(PlozzTheme.Metrics.mediumCardInset)
-        .plozzGlassCard(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, isFocused: isFocused)
-        .focusableCard(isFocused: $isFocused, cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, action: action)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0), radius: 20, y: 10)
+        .padding(metrics.cardInset)
+        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
@@ -324,16 +322,18 @@ public struct PosterCardView: View {
 
     /// Neutral, theme-agnostic placeholder showing the (series) title. Carries no
     /// episode-number text — the `S· · E·` subtitle already conveys that.
+    /// Uses the shared caption colors so icon/text flip on focus and respect
+    /// reduced-transparency.
     private var neutralPlaceholder: some View {
         ZStack {
-            Color.primary.opacity(0.08)
+            titleColor.opacity(0.08)
             VStack(spacing: 10) {
                 Image(systemName: "play.rectangle")
                     .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(subtitleColor)
                 Text(primaryText)
                     .font(.headline)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(titleColor)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 16)

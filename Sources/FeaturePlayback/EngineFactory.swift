@@ -20,18 +20,27 @@ public struct EngineFactory {
     /// Builds the VLCKit-backed hybrid engine, or `nil` when this build doesn't
     /// link an engine for AVPlayer-incompatible media (then routing stays native).
     public var makeHybrid: (@MainActor (CaptionSettings) -> any VideoEngine)?
+    /// Builds the Plozzigen engine (FFmpeg demux → HLS-fMP4 → AVPlayer), or `nil`
+    /// when the engine isn't linked. Used for DoVi/Atmos MKV sources that need
+    /// native AVPlayer rendering with full seek and bounded memory.
+    public var makePlozzigen: (@MainActor () -> (any VideoEngine)?)?
 
     public init(
         makeNative: @escaping @MainActor (CaptionSettings) -> any VideoEngine = { NativeVideoEngine(captionSettings: $0) },
-        makeHybrid: (@MainActor (CaptionSettings) -> any VideoEngine)? = nil
+        makeHybrid: (@MainActor (CaptionSettings) -> any VideoEngine)? = nil,
+        makePlozzigen: (@MainActor () -> (any VideoEngine)?)? = nil
     ) {
         self.makeNative = makeNative
         self.makeHybrid = makeHybrid
+        self.makePlozzigen = makePlozzigen
     }
 
     /// Whether a hybrid engine is wired in. Drives the router's `hybridAvailable`
     /// and the cross-engine fallback so advertise ⇔ route stays in lockstep.
     public var hybridAvailable: Bool { makeHybrid != nil }
+
+    /// Whether Plozzigen engine is wired in.
+    public var plozzigenAvailable: Bool { makePlozzigen != nil }
 
     /// Native-only factory: the conservative default that preserves today's
     /// behaviour everywhere a hybrid engine isn't injected.

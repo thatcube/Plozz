@@ -48,11 +48,6 @@ struct SettingsAboutSection: View {
                     .font(.callout)
                     .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
                     .fixedSize(horizontal: false, vertical: true)
-
-                Text("This product uses the TMDB API but is not endorsed or certified by TMDB. Ratings and metadata are supplied by your media server and by TMDB, OMDb, and AniList.")
-                    .font(.caption)
-                    .foregroundStyle(isFocused ? AnyShapeStyle(focusForeground.opacity(0.72)) : AnyShapeStyle(.secondary))
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -87,7 +82,7 @@ struct SettingsAboutSection: View {
         .focused($isFocused)
         .animation(.easeOut(duration: 0.16), value: isFocused)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("About Plozz. Version \(version), build \(build). Free and open source, an unofficial tvOS client for Jellyfin and Plex. This product uses the TMDB API but is not endorsed or certified by TMDB. Scan the on-screen code to view the GitHub repository.")
+        .accessibilityLabel("About Plozz. Version \(version), build \(build). Free and open source, an unofficial tvOS client for Jellyfin and Plex. Scan the on-screen code to view the GitHub repository.")
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {

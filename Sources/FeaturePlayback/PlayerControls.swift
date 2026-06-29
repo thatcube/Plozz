@@ -7,6 +7,7 @@ import CoreUI
 /// of `PlayerActions` so the controls stay presentation-only.
 @MainActor
 struct PlayerOptionsActions {
+    var togglePlayPause: () -> Void = {}
     var selectAudio: (Int) -> Void = { _ in }
     var selectSubtitle: (Int) -> Void = { _ in }
     var setPlaybackSpeed: (Double) -> Void = { _ in }
@@ -96,6 +97,7 @@ struct PlayerControls: View {
             if let panel { focus = .row(selectedRowIndex(for: panel)) }
         }
         .onExitCommand { handleExit() }
+        .onPlayPauseCommand { actions.togglePlayPause() }
         .onMoveCommand { direction in
             if direction == .up && openPanel == nil { onExitToSurface() }
         }
@@ -148,23 +150,22 @@ struct PlayerControls: View {
     }
 
     private var scrubberRow: some View {
-        HStack(spacing: 12) {
+        VStack(spacing: 4) {
             ScrubBar(
                 model: model,
                 palette: palette,
                 showThumbOverlay: openPanel == nil,
                 leadingInset: 60,
-                trailingInset: 60 + 12 + 120
+                trailingInset: 60
             )
                 .frame(height: 44)
                 .frame(maxWidth: .infinity)
-            // Remaining time pinned to the end of the bar. Fixed width so the
-            // track never resizes as the digits change.
+            // Remaining time under the bar, aligned to the right.
             Text("-" + Self.timeLabel(max(0, model.duration - model.displaySeconds)))
                 .monospacedDigit()
-                .font(.callout)
+                .font(.footnote)
                 .foregroundStyle(.white.opacity(0.85))
-                .frame(width: 120, alignment: .trailing)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 
@@ -177,6 +178,7 @@ struct PlayerControls: View {
                     toggle(category)
                 } label: {
                     Label(category.title, systemImage: category.icon)
+                        .labelStyle(.iconOnly)
                 }
                 .playerGlassButton(prominent: openPanel == category)
                 .focused($focus, equals: .button(category))
@@ -189,6 +191,7 @@ struct PlayerControls: View {
                     "Diagnostics",
                     systemImage: model.diagnosticsEnabled ? "waveform.circle.fill" : "waveform.circle"
                 )
+                .labelStyle(.iconOnly)
             }
             .playerGlassButton(prominent: model.diagnosticsEnabled)
             .focused($focus, equals: .diagnostics)
@@ -745,14 +748,17 @@ private struct ScrubBar: View {
     /// Floated just above the scrub head (the focus indicator) and tracking it,
     /// Apple-TV style. The current time is pinned dead-centre on the thumb and
     /// never moves; the flanking glyphs hang off its left/right edges as overlays
-    /// so they can't shift it. A backward skip's −10 (and, if the seek is still
-    /// resolving, the loading spinner) sits to the left; a forward skip's +10, the
+    /// so they can't shift it. A backward skip (and, if the seek is still
+    /// resolving, the loading spinner) sits to the left; a forward skip, the
     /// spinner for a forward seek / plain scrub, and the circular pause glyph sit
     /// to the right. Clamped so the time never runs off either edge.
     @ViewBuilder
     private func thumbOverlay(width: CGFloat, knobX: CGFloat) -> some View {
-        let margin: CGFloat = 120
-        let cx = min(max(margin, knobX), max(margin, width - margin))
+        // Left edge of text aligns with left edge of the scrub track (x=0).
+        // ~30 approximates half the time label width at .callout size.
+        let leftMargin: CGFloat = 30
+        let rightMargin: CGFloat = 120
+        let cx = min(max(leftMargin, knobX), max(leftMargin, width - rightMargin))
         Text(PlayerControls.timeLabel(model.displaySeconds))
             .monospacedDigit()
             .font(.callout.weight(.semibold))
@@ -768,8 +774,8 @@ private struct ScrubBar: View {
             .position(x: cx, y: Self.timeRowY)
     }
 
-    /// Left of the current time: the −10 glyph after a backward skip, replaced by
-    /// the loading spinner if a backward seek is still resolving.
+    /// Left of the current time: the backward-skip glyph after a backward skip,
+    /// replaced by the loading spinner if a backward seek is still resolving.
     @ViewBuilder private var leftSlot: some View {
         if model.skipHintVisible && !model.skipHintForward {
             skipGlyph(forward: false)
@@ -778,9 +784,9 @@ private struct ScrubBar: View {
         }
     }
 
-    /// Right of the current time: the +10 glyph after a forward skip; otherwise
-    /// the spinner for a forward seek / plain scrub; otherwise the circular pause
-    /// glyph while paused. All share this one slot.
+    /// Right of the current time: the forward-skip glyph after a forward skip;
+    /// otherwise the spinner for a forward seek / plain scrub; otherwise the
+    /// circular pause glyph while paused. All share this one slot.
     @ViewBuilder private var rightSlot: some View {
         if model.skipHintVisible && model.skipHintForward {
             skipGlyph(forward: true)
@@ -794,10 +800,14 @@ private struct ScrubBar: View {
         }
     }
 
-    /// Compact ±10s glyph. It persists for the whole skip burst (no per-press
-    /// teardown), and a subtle scale dip gives "pressed" feedback on each press.
+    /// Compact skip glyph whose number matches the per-profile interval. It
+    /// persists for the whole skip burst (no per-press teardown), and a subtle
+    /// scale dip gives "pressed" feedback on each press.
     private func skipGlyph(forward: Bool) -> some View {
-        Image(systemName: forward ? "goforward.10" : "gobackward.10")
+        let symbol = forward
+            ? model.skipForwardInterval.forwardSymbol
+            : model.skipBackwardInterval.backwardSymbol
+        return Image(systemName: symbol)
             .font(.system(size: 28, weight: .semibold))
             .foregroundStyle(.white)
             .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
@@ -817,12 +827,14 @@ private struct ScrubBar: View {
             let thumbWidth: CGFloat = 420
             let aspect = previewAspect
             let thumbHeight = thumbWidth / aspect
-            let edgeMargin: CGFloat = 16
-            let minX = -leadingInset + thumbWidth / 2 + edgeMargin
-            let maxX = width + trailingInset - thumbWidth / 2 - edgeMargin
-            let clampedX = min(max(minX, knobX), max(minX, maxX))
             let corner: CGFloat = 18
             let border: CGFloat = 12
+            // Account for glass border so visual left edge sits at x=0 (track edge).
+            let visualWidth = thumbWidth + 2 * border
+            let minX = visualWidth / 2
+            let edgeMargin: CGFloat = 16
+            let maxX = width + trailingInset - visualWidth / 2 - edgeMargin
+            let clampedX = min(max(minX, knobX), max(minX, maxX))
 
             let content = Image(decorative: image, scale: 1, orientation: .up)
                 .resizable()

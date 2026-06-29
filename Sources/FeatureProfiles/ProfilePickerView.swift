@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import Inject
 
 /// tvOS profile picker — the "Who's watching?" screen.
 ///
@@ -92,6 +93,8 @@ public struct ProfilePickerView: View {
         return UnitPoint(x: point.x / size.width, y: point.y / size.height)
     }
 
+    @ObserveInjection var inject
+
     public var body: some View {
         VStack(spacing: 48) {
             Text(title)
@@ -150,6 +153,7 @@ public struct ProfilePickerView: View {
             prefetchAvatars()
             setInitialFocusIfNeeded()
         }
+        .enableInjection()
     }
 
     /// Move focus to the default tile (last-used profile, else first) once when

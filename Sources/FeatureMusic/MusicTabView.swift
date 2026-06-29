@@ -3,6 +3,7 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import MetadataKit
+import Inject
 
 /// Navigation routes inside the Music tab's stack.
 enum MusicRoute: Hashable {
@@ -39,6 +40,8 @@ public struct MusicTabView: View {
         self.musicPlayer = musicPlayer
     }
 
+    @ObserveInjection var inject
+
     public var body: some View {
         NavigationStack(path: $path) {
             MusicLandingView(
@@ -66,6 +69,7 @@ public struct MusicTabView: View {
         .onChange(of: controller.playbackStartToken) { _, _ in
             showNowPlaying = true
         }
+        .enableInjection()
     }
 
     /// Plays a single recently-played song from the landing rail. Resolves the

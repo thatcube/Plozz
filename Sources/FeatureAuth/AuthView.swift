@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import Inject
 
 /// Authentication coordinator shown once a server is selected.
 ///
@@ -27,7 +28,10 @@ public struct AuthView: View {
         self.onCancel = onCancel
     }
 
+    @ObserveInjection var inject
+
     public var body: some View {
+        Group {
         if showingPasswordSignIn {
             PasswordSignInView(
                 viewModel: PasswordSignInViewModel(
@@ -50,6 +54,8 @@ public struct AuthView: View {
                 }
             )
         }
+        }
+        .enableInjection()
     }
 }
 

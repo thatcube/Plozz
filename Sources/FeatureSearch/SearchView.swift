@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreModels
 import CoreUI
+import Inject
 
 /// The Search screen: a `.searchable` field over a sectioned poster grid of
 /// results (Movies / TV Shows / Episodes), with the standard loading, empty and
@@ -23,6 +24,8 @@ public struct SearchView: View {
         self.onSelect = onSelect
     }
 
+    @ObserveInjection var inject
+
     public var body: some View {
         content
             .searchable(text: $viewModel.query, prompt: "Search movies, shows, and episodes")
@@ -34,6 +37,7 @@ public struct SearchView: View {
                     Task { await viewModel.search() }
                 }
             }
+            .enableInjection()
     }
 
     @ViewBuilder

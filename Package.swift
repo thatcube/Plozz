@@ -288,11 +288,11 @@ let package = Package(
         // MARK: Features
         .target(
             name: "FeatureDiscovery",
-            dependencies: ["CoreModels", "CoreNetworking"]
+            dependencies: ["CoreModels", "CoreNetworking", .product(name: "Inject", package: "Inject")]
         ),
         .target(
             name: "FeatureAuth",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex"]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex", .product(name: "Inject", package: "Inject")]
         ),
         .target(
             name: "FeatureHome",
@@ -300,7 +300,7 @@ let package = Package(
         ),
         .target(
             name: "FeaturePlayback",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService"],
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService", .product(name: "Inject", package: "Inject")],
             linkerSettings: [
                 // Force-link AVKit on tvOS so its `UIWindow (AVAdditions)`
                 // category (which adds `avDisplayManager`, used to drive the
@@ -313,15 +313,15 @@ let package = Package(
         ),
         .target(
             name: "FeatureSearch",
-            dependencies: ["CoreModels", "CoreUI"]
+            dependencies: ["CoreModels", "CoreUI", .product(name: "Inject", package: "Inject")]
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", .product(name: "Inject", package: "Inject")]
         ),
         .target(
             name: "FeatureProfiles",
-            dependencies: ["CoreModels", "CoreUI"]
+            dependencies: ["CoreModels", "CoreUI", .product(name: "Inject", package: "Inject")]
         ),
 
         // MARK: Music (browse + audio playback engine)
@@ -332,7 +332,7 @@ let package = Package(
         // it stays decoupled from the video feature modules.
         .target(
             name: "FeatureMusic",
-            dependencies: ["CoreModels", "CoreUI", "MetadataKit"]
+            dependencies: ["CoreModels", "CoreUI", "MetadataKit", .product(name: "Inject", package: "Inject")]
         ),
 
         // MARK: Top Shelf (shared with the tvOS Top Shelf extension)

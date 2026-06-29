@@ -20,6 +20,15 @@ public struct LRCLIBLyricsProvider: Sendable {
     /// while sustained background traffic is throttled toward ~`requestsPerSecond`.
     static let rateLimiter = RateLimiter(requestsPerSecond: 2.0, burst: 8)
 
+    /// How close (in seconds) a candidate record's own duration must be to the
+    /// playing track's duration for us to treat it as *the same recording*. Many
+    /// songs exist on LRCLIB as several same-title versions of very different
+    /// length — a radio edit, the album cut, a 12" extended/"summer" mix, a live
+    /// take — and each version's synced timestamps only line up with audio of a
+    /// matching length. A few seconds of slack absorbs encoding/gapless
+    /// differences between the same master without bleeding into a different cut.
+    static let durationMatchTolerance: TimeInterval = 2.5
+
     public init() {}
 
     /// Looks up lyrics for a track, **preferring a synced version**. Tries the
@@ -61,37 +70,65 @@ public struct LRCLIBLyricsProvider: Sendable {
         let candidates = titleCandidates(from: title)
         guard !candidates.isEmpty else { return (nil, false) }
 
-        struct Probe { let lyrics: Lyrics?; let reachable: Bool }
+        struct Probe { let record: LRCLIBRecord?; let reachable: Bool }
 
-        // Fan out every candidate × {/get, /search} concurrently and take the
-        // first synced result, cancelling the rest. Previously these ran
-        // sequentially (up to 4 round-trips waited on serially), which is the
-        // main reason lyrics sometimes took several seconds to appear.
+        // Treat a zero/absent duration as "unknown" so we don't try to
+        // duration-match against it.
+        let knownDuration: TimeInterval? = (duration ?? 0) > 0 ? duration : nil
+
+        // Fan out every candidate × {/get, /search} concurrently. When we know
+        // the track's duration we use it to pick the *right version* among
+        // same-title results of differing length (radio edit vs extended vs
+        // "summer version"), rather than taking whichever request returns first.
         let artistQualified: (lyrics: Lyrics?, reachable: Bool) = await withTaskGroup(of: Probe.self) { group in
             for candidate in candidates {
                 group.addTask {
                     let result = await self.exactMatch(
-                        title: candidate, artist: trimmedArtist, album: album, duration: duration
+                        title: candidate, artist: trimmedArtist, duration: duration
                     )
-                    return Probe(lyrics: result.record?.lyrics(), reachable: result.reachable)
+                    return Probe(record: result.record, reachable: result.reachable)
                 }
                 group.addTask {
                     let result = await self.search(
                         title: candidate, artist: trimmedArtist, duration: duration
                     )
-                    return Probe(lyrics: result.record?.lyrics(), reachable: result.reachable)
+                    return Probe(record: result.record, reachable: result.reachable)
                 }
             }
             var plainFallback: Lyrics?
+            var syncedRecords: [LRCLIBRecord] = []
             var anyReachable = false
             for await probe in group {
                 if probe.reachable { anyReachable = true }
-                guard let lyrics = probe.lyrics else { continue }
+                guard let record = probe.record, let lyrics = record.lyrics() else { continue }
                 if lyrics.isSynced {
-                    group.cancelAll()
-                    return (lyrics, true)
+                    guard let knownDuration else {
+                        // No duration to disambiguate versions — keep the old
+                        // first-synced-wins behaviour (fast, unchanged).
+                        group.cancelAll()
+                        return (lyrics, true)
+                    }
+                    // A synced record whose own length is within a couple
+                    // seconds is certainly the same recording: take it now and
+                    // cancel the rest so the common single-version case stays
+                    // fast.
+                    if let recordDuration = record.duration,
+                       abs(recordDuration - knownDuration) <= Self.durationMatchTolerance {
+                        group.cancelAll()
+                        return (lyrics, true)
+                    }
+                    // Otherwise hold onto it: a different request may yet return
+                    // a closer-length version, and we'll pick the nearest below.
+                    syncedRecords.append(record)
+                } else if plainFallback == nil {
+                    plainFallback = lyrics
                 }
-                if plainFallback == nil { plainFallback = lyrics }
+            }
+            // No tight match arrived; among whatever synced versions we saw,
+            // prefer the one whose duration is closest to the track.
+            if let best = bestMatch(in: syncedRecords, duration: knownDuration),
+               let lyrics = best.lyrics() {
+                return (lyrics, true)
             }
             return (plainFallback, anyReachable)
         }
@@ -155,19 +192,23 @@ public struct LRCLIBLyricsProvider: Sendable {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Exact-ish lookup via LRCLIB's `/get`, matched on **title + artist +
+    /// duration** only. We deliberately omit `album_name`: `/get` requires every
+    /// supplied field to match, and a player's album (a compilation, a
+    /// "Remastered 20xx" reissue, a soundtrack) frequently differs from how
+    /// LRCLIB filed the track, which turned otherwise-findable songs into 404s.
+    /// Duration is the stronger, version-aware signal — `/get` returns the
+    /// closest-length record for the title+artist, which is exactly the right
+    /// recording when several versions of differing length share a title.
     private func exactMatch(
         title: String,
         artist: String,
-        album: String?,
         duration: TimeInterval?
     ) async -> (record: LRCLIBRecord?, reachable: Bool) {
         var items = [
             URLQueryItem(name: "track_name", value: title),
             URLQueryItem(name: "artist_name", value: artist)
         ]
-        if let album, !album.trimmingCharacters(in: .whitespaces).isEmpty {
-            items.append(URLQueryItem(name: "album_name", value: album))
-        }
         if let duration, duration > 0 {
             items.append(URLQueryItem(name: "duration", value: String(Int(duration.rounded()))))
         }

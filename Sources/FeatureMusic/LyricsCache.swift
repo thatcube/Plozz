@@ -83,7 +83,17 @@ public actor LyricsDiskCache {
     /// vs. performer. The LRCLIB provider now has a title-only + duration-matched
     /// fallback that finds these, so a one-time reset lets affected songs
     /// re-resolve and pick up lyrics they actually have.
-    private static let cacheFileName = "plozz-lyrics-cache-v4.json"
+    ///
+    /// v4 → v5: invalidates *positives* poisoned by wrong-version matching. The
+    /// `/get` lookup used to require an album match (404ing on remaster /
+    /// compilation albums) and selection took whichever synced result returned
+    /// first, so a song with several same-title cuts of differing length (radio
+    /// edit vs extended vs "summer version") could cache a synced LRC from the
+    /// wrong-length version — lyrics that play increasingly out of sync. `/get`
+    /// now matches on title+artist+duration (no album) and selection prefers the
+    /// closest-length version, so a one-time reset lets affected songs re-resolve
+    /// against the correctly-timed version.
+    private static let cacheFileName = "plozz-lyrics-cache-v5.json"
     private static let cacheFilePrefix = "plozz-lyrics-cache"
 
     public init(directory: URL? = LyricsDiskCache.defaultDirectory()) {

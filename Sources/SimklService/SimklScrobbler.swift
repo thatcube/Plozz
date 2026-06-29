@@ -26,14 +26,17 @@ public struct DisabledSimklScrobbler: SimklScrobbling {
 public actor SimklScrobbler: SimklScrobbling {
     private let client: SimklClient
     private let tokenStore: SimklTokenStoring
+    private let idMapper: AnimeIDMapper
 
-    public init(config: SimklConfig, http: HTTPClient, tokenStore: SimklTokenStoring) {
+    public init(config: SimklConfig, http: HTTPClient, tokenStore: SimklTokenStoring, idMapper: AnimeIDMapper = .shared) {
         self.client = SimklClient(config: config, http: http)
         self.tokenStore = tokenStore
+        self.idMapper = idMapper
     }
 
     public func scrobble(item: MediaItem, progress: Double, event: PlaybackEvent) async {
         guard let action = Self.action(for: event) else { return }
+        let item = await enrichAnime(item)
         guard let body = Self.scrobbleBody(for: item, progress: progress) else {
             FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl-rt", item: item, outcome: "skip(no body event=\(event) s=\(item.seasonNumber.map(String.init) ?? "nil") e=\(item.episodeNumber.map(String.init) ?? "nil"))"))
             return
@@ -56,6 +59,7 @@ public actor SimklScrobbler: SimklScrobbling {
             FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "skip(event=\(event) not scrobbled)"))
             return
         }
+        let item = await enrichAnime(item)
         guard let body = Self.scrobbleBody(for: item, progress: progress) else {
             FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "skip(no usable ids)"))
             return
@@ -98,6 +102,30 @@ public actor SimklScrobbler: SimklScrobbling {
         case .stop: return "stop"
         case .progress: return nil
         }
+    }
+
+    // MARK: - Anime ID enrichment
+
+    /// For anime tagged only with AniDB (Shoko/Jellyfin), resolves MAL/AniList ids
+    /// via the shared mapper so Simkl can match — exactly like the MAL/AniList
+    /// scrobblers. No-op for non-anime or when usable ids already exist. The few
+    /// resolved ids are cached on disk, so each title queries at most once.
+    private func enrichAnime(_ item: MediaItem) async -> MediaItem {
+        let ids = item.providerIDs
+        // Only spend a lookup when we have an anidb anchor but no native list id.
+        let lowered = ids.reduce(into: [String: String]()) { $0[$1.key.lowercased()] = $1.value }
+        let hasAnidb = (lowered["anidb"] ?? lowered["seriesanidb"]) != nil
+        let hasNative = ["mal", "myanimelist", "anilist", "seriesmal", "seriesanilist"].contains { lowered[$0] != nil }
+        guard hasAnidb, !hasNative else { return item }
+        let anidb = Int(lowered["anidb"] ?? lowered["seriesanidb"] ?? "")
+        let mapped = await idMapper.enrich(AnimeMappedIDs(anidb: anidb))
+        guard !mapped.isEmpty else { return item }
+        var merged = ids
+        if let mal = mapped.mal { merged["mal"] = String(mal); merged["seriesmal"] = String(mal) }
+        if let al = mapped.anilist { merged["anilist"] = String(al); merged["seriesanilist"] = String(al) }
+        var copy = item
+        copy.providerIDs = merged
+        return copy
     }
 
     // MARK: - Scrobble body (real-time)
@@ -191,6 +219,8 @@ public actor SimklScrobbler: SimklScrobbling {
                 ids.mal = Int(value)
             case "anilist":
                 ids.anilist = Int(value)
+            case "anidb":
+                ids.anidb = Int(value)
             default:
                 continue
             }
@@ -216,6 +246,8 @@ public actor SimklScrobbler: SimklScrobbling {
                 ids.mal = Int(value)
             case "seriesanilist":
                 ids.anilist = Int(value)
+            case "seriesanidb", "anidb":
+                ids.anidb = Int(value)
             default:
                 continue
             }

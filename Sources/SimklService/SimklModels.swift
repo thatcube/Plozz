@@ -58,8 +58,9 @@ struct SimklIDs: Encodable, Equatable {
     var tvdb: Int?
     var mal: Int?
     var anilist: Int?
+    var anidb: Int?
 
-    var isEmpty: Bool { simkl == nil && imdb == nil && tmdb == nil && tvdb == nil && mal == nil && anilist == nil }
+    var isEmpty: Bool { simkl == nil && imdb == nil && tmdb == nil && tvdb == nil && mal == nil && anilist == nil && anidb == nil }
 }
 
 struct SimklHistoryMovie: Encodable, Equatable {

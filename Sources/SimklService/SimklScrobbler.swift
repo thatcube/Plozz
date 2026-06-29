@@ -73,6 +73,10 @@ public actor SimklScrobbler: SimklScrobbling {
         do {
             try await client.scrobble(action: action, body: body, accessToken: token)
             FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "OK(\(action))"))
+        } catch AppError.conflict {
+            // 409 = already scrobbled (the real-time path beat the durable drain
+            // to it). That's a success, not a retry — never leave it pending.
+            FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "OK(\(action) already-scrobbled)"))
         } catch {
             FanoutDiagnostics.emit(FanoutDiagnostics.scrobbleLine(tracker: "simkl", item: item, outcome: "THROW(\(error))"))
             throw error

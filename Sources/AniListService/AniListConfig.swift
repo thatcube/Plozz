@@ -2,7 +2,7 @@ import Foundation
 
 /// Configuration for the AniList integration.
 ///
-/// AniList auth is handled by the plozz.app relay worker. The TV app shows
+/// AniList auth is handled by the plozz.app relay. The TV app shows
 /// the relay URL and a text field for the short redeem code.
 public struct AniListConfig: Sendable, Equatable {
     public var clientID: String?

@@ -98,25 +98,62 @@ public struct SubtitleOverlayView: View {
 
     // MARK: - Text cues (primary + secondary)
 
+    /// Fraction of the container kept as a title-safe margin for edge-anchored
+    /// cues, so ASS signs near a screen edge aren't lost to tvOS overscan.
+    private static let titleSafeFraction: CGFloat = 0.05
+
     @ViewBuilder
     private func textLayer(in size: CGSize) -> some View {
-        let primaryText = primary.filter { !$0.isImage }
-        let alignment = blockVerticalAlignment(for: primaryText)
+        let text = primary.filter { !$0.isImage }
+        // A cue with an explicit alignment is a positioned sign/caption and is
+        // placed independently. Everything else is dialogue and shares the user's
+        // configured default seat — so a top sign never drags dialogue with it.
+        let positioned = text.filter { cueAlignment($0) != nil }
+        let dialogue = text.filter { cueAlignment($0) == nil }
 
+        ZStack {
+            // Default dialogue: primary dialogue lines + the dual-sub secondary,
+            // seated just above the bottom safe edge (user-adjustable). Multiple
+            // simultaneous lines stack here rather than overlapping.
+            dialogueStack(dialogue)
+                .frame(maxWidth: size.width * 0.92, alignment: .center)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, size.height * style.verticalPosition)
+                .offset(x: style.horizontalOffset * (size.width * 0.25))
+
+            // Positioned cues (ASS signs / captions): each honours its own `\an`
+            // plane independently, inset from the edges by a title-safe margin.
+            ForEach(positioned) { cue in
+                if case .text(let t) = cue.body, let a = t.alignment {
+                    StyledCueText(
+                        text: t,
+                        fontSize: Self.baseFontSize * style.fontScale,
+                        fillColor: scaled(style.textColor),
+                        textAlignment: a.textAlignment,
+                        style: style
+                    )
+                    .frame(maxWidth: size.width * 0.92, alignment: a.frameTextAlignment)
+                    .padding(.horizontal, size.width * Self.titleSafeFraction)
+                    .padding(.vertical, size.height * Self.titleSafeFraction)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: a.planeAlignment)
+                }
+            }
+        }
+    }
+
+    /// The shared default-position stack: primary dialogue plus the optional
+    /// secondary (dual-subtitle) block, ordered per ``SubtitleStyle/Secondary``.
+    @ViewBuilder
+    private func dialogueStack(_ dialogue: [SubtitleCue]) -> some View {
         VStack(spacing: style.secondary?.gap ?? 6) {
             if style.secondary?.placement == .above {
                 secondaryBlock()
             }
-            primaryBlock(primaryText)
+            primaryBlock(dialogue)
             if secondary.isEmpty == false, style.secondary?.placement != .above {
                 secondaryBlock()
             }
         }
-        .frame(maxWidth: size.width * 0.92, alignment: .center)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment.frameAlignment)
-        .padding(.bottom, alignment == .bottom ? size.height * style.verticalPosition : 0)
-        .padding(.top, alignment == .top ? size.height * style.verticalPosition : 0)
-        .offset(x: style.horizontalOffset * (size.width * 0.25))
     }
 
     @ViewBuilder
@@ -155,19 +192,9 @@ public struct SubtitleOverlayView: View {
 
     // MARK: - Helpers
 
-    /// Honour an explicit alignment from the first positioned cue (ASS signs /
-    /// captions); otherwise default to bottom.
-    private func blockVerticalAlignment(for cues: [SubtitleCue]) -> BlockAlignment {
-        for cue in cues {
-            if case .text(let t) = cue.body, let a = t.alignment {
-                switch a.vertical {
-                case .top: return .top
-                case .middle: return .middle
-                case .bottom: return .bottom
-                }
-            }
-        }
-        return .bottom
+    private func cueAlignment(_ cue: SubtitleCue) -> SubtitleAlignment? {
+        if case .text(let t) = cue.body { return t.alignment }
+        return nil
     }
 
     /// Apply the HDR luminance scale to a colour (no-op on SDR frames).
@@ -175,15 +202,43 @@ public struct SubtitleOverlayView: View {
         let k = lumaScale
         return Color(.sRGB, red: c.red * k, green: c.green * k, blue: c.blue * k, opacity: c.alpha)
     }
+}
 
-    private enum BlockAlignment {
-        case top, middle, bottom
-        var frameAlignment: Alignment {
-            switch self {
-            case .top: return .top
-            case .middle: return .center
-            case .bottom: return .bottom
-            }
+// MARK: - ASS `\an` plane → SwiftUI placement
+
+private extension SubtitleAlignment {
+    /// The container-fill alignment that pins a positioned cue to its `\an` plane.
+    var planeAlignment: Alignment {
+        let h: HorizontalAlignment
+        switch horizontal {
+        case .leading: h = .leading
+        case .center: h = .center
+        case .trailing: h = .trailing
+        }
+        let v: VerticalAlignment
+        switch vertical {
+        case .top: v = .top
+        case .middle: v = .center
+        case .bottom: v = .bottom
+        }
+        return Alignment(horizontal: h, vertical: v)
+    }
+
+    /// Multi-line justification within a positioned cue's own box.
+    var textAlignment: TextAlignment {
+        switch horizontal {
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
+        }
+    }
+
+    /// Horizontal seat of the cue box inside its max-width frame.
+    var frameTextAlignment: Alignment {
+        switch horizontal {
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
         }
     }
 }
@@ -197,6 +252,7 @@ private struct StyledCueText: View {
     let text: SubtitleText
     let fontSize: CGFloat
     let fillColor: Color
+    var textAlignment: TextAlignment = .center
     let style: SubtitleStyle
 
     private var font: Font {
@@ -239,7 +295,7 @@ private struct StyledCueText: View {
             .font(font)
             .italic(text.isItalic)
             .foregroundStyle(color)
-            .multilineTextAlignment(.center)
+            .multilineTextAlignment(textAlignment)
             .lineLimit(4)
             .fixedSize(horizontal: false, vertical: true)
     }

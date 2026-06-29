@@ -66,29 +66,48 @@ extension SubtitleCue: Equatable {
 }
 
 /// The text payload of a cue. A struct (not a bare `String`) so the model can
-/// grow additively: today it carries the plain string, italic emphasis, and an
-/// optional positional alignment parsed from ASS `\an` tags. Tomorrow it can
-/// carry per-word karaoke timing or inline colour runs **without** changing the
-/// `SubtitleCue.Body` enum or any call site that only reads `.string`.
+/// grow additively: today it carries the plain string, italic/bold emphasis, an
+/// optional positional alignment parsed from ASS `\an` tags, and — crucially —
+/// the **raw ASS event** so rich styling is preserved rather than flattened.
+/// Tomorrow it can carry per-word karaoke timing or resolved inline colour runs
+/// **without** changing the `SubtitleCue.Body` enum or any call site that only
+/// reads `.string`.
 public struct SubtitleText: Sendable, Equatable {
-    /// Display text with markup stripped (newlines preserved).
+    /// Display text with markup stripped (newlines preserved). Always renderable
+    /// by the current renderer, regardless of the source format.
     public var string: String
     public var isItalic: Bool
     public var isBold: Bool
-    /// Where the cue wants to sit, when the source positions it (ASS signs,
-    /// captions). `nil` means "use the user's configured default position".
+    /// Where the cue wants to sit, when the source positions it (ASS `\an`/`\pos`
+    /// signs, VTT line/position, captions). `nil` means "use the user's
+    /// configured default position".
     public var alignment: SubtitleAlignment?
+    /// The **raw ASS/SSA event line** (`Layer,Start,End,Style,…,Text` *including*
+    /// override tags) when the source is ASS and the engine was asked to preserve
+    /// markup (AetherEngine `LoadOptions.preserveASSMarkup`, whose `.text` carries
+    /// exactly this string). Plain sources (SRT/VTT/PGS) leave it `nil`.
+    ///
+    /// We keep it so a future ASS styling pass can reconstruct inline
+    /// colour/karaoke/positioning **without** the cue pipeline having flattened
+    /// the data away first — the single most expensive-to-reverse mistake in a
+    /// subtitle stack. The matching track-level `[Script Info]`/`[V4+ Styles]`
+    /// header (`TrackInfo.assHeader`) and font attachments travel with the cue
+    /// stream's *track descriptor* (introduced with the Plozzigen adapter), not on
+    /// every cue.
+    public var rawASS: String?
 
     public init(
         _ string: String,
         isItalic: Bool = false,
         isBold: Bool = false,
-        alignment: SubtitleAlignment? = nil
+        alignment: SubtitleAlignment? = nil,
+        rawASS: String? = nil
     ) {
         self.string = string
         self.isItalic = isItalic
         self.isBold = isBold
         self.alignment = alignment
+        self.rawASS = rawASS
     }
 }
 

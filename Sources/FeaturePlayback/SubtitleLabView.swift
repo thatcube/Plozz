@@ -237,7 +237,10 @@ extension SubtitleLabView {
 
 extension SubtitleLabView {
     /// A short looping script exercising the renderer: long & short lines, an
-    /// italic line, CJK glyphs, and a top-positioned "sign".
+    /// italic line, CJK glyphs, and independently-positioned ASS-style "signs"
+    /// (top-centre + top-left) that must render at their own planes **without**
+    /// dragging the simultaneous bottom dialogue with them. The top-centre sign
+    /// also carries a `rawASS` payload to prove rich markup survives the pipeline.
     static let primaryCues: [SubtitleCue] = [
         SubtitleCue(id: 1, start: 0.3, end: 3.2,
                     body: .text(.init("This is a long subtitle line to check wrapping, padding and the background box at couch distance."))),
@@ -246,9 +249,12 @@ extension SubtitleLabView {
         SubtitleCue(id: 3, start: 6.0, end: 9.0,
                     body: .text(.init("日本語の字幕テスト — CJK glyph rendering."))),
         SubtitleCue(id: 4, start: 6.0, end: 9.0,
-                    body: .text(.init("⟪ SIGN: PLATFORM 9¾ ⟫", alignment: .topCenter))),
+                    body: .text(.init("⟪ SIGN: PLATFORM 9¾ ⟫", alignment: .topCenter,
+                                      rawASS: #"Dialogue: 0,0:00:06.00,0:00:09.00,Sign,,0,0,0,,{\an8\pos(960,90)}⟪ SIGN: PLATFORM 9¾ ⟫"#))),
         SubtitleCue(id: 5, start: 9.4, end: 13.6,
-                    body: .text(.init("Bright white over HDR — this should be comfortable, not searing.", isBold: true)))
+                    body: .text(.init("Bright white over HDR — this should be comfortable, not searing.", isBold: true))),
+        SubtitleCue(id: 6, start: 9.4, end: 13.6,
+                    body: .text(.init("↖ EXIT", alignment: .topLeft)))
     ]
 
     /// Secondary (dual-subtitle) track — the learner's-language counterpart.

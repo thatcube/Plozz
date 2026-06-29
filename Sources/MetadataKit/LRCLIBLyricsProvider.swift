@@ -27,38 +27,58 @@ public struct LRCLIBLyricsProvider: Sendable {
         album: String?,
         duration: TimeInterval?
     ) async -> Lyrics? {
+        await lyricsWithStatus(title: title, artist: artist, album: album, duration: duration).lyrics
+    }
+
+    /// Same fan-out lookup as `lyrics(...)`, but also reports whether *any*
+    /// sub-request actually reached lrclib.net. Callers (the lyrics resolver)
+    /// use this `reachable` flag to avoid caching a "no lyrics" answer when
+    /// the device is simply offline — a missing answer in that case is
+    /// transport noise, not a real verdict.
+    public func lyricsWithStatus(
+        title: String,
+        artist: String,
+        album: String?,
+        duration: TimeInterval?
+    ) async -> (lyrics: Lyrics?, reachable: Bool) {
         let trimmedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedArtist.isEmpty else { return nil }
+        guard !trimmedArtist.isEmpty else { return (nil, false) }
         let candidates = titleCandidates(from: title)
-        guard !candidates.isEmpty else { return nil }
+        guard !candidates.isEmpty else { return (nil, false) }
+
+        struct Probe { let lyrics: Lyrics?; let reachable: Bool }
 
         // Fan out every candidate × {/get, /search} concurrently and take the
         // first synced result, cancelling the rest. Previously these ran
         // sequentially (up to 4 round-trips waited on serially), which is the
         // main reason lyrics sometimes took several seconds to appear.
-        return await withTaskGroup(of: Lyrics?.self) { group in
+        return await withTaskGroup(of: Probe.self) { group in
             for candidate in candidates {
                 group.addTask {
-                    await self.exactMatch(
+                    let result = await self.exactMatch(
                         title: candidate, artist: trimmedArtist, album: album, duration: duration
-                    )?.lyrics()
+                    )
+                    return Probe(lyrics: result.record?.lyrics(), reachable: result.reachable)
                 }
                 group.addTask {
-                    await self.search(
+                    let result = await self.search(
                         title: candidate, artist: trimmedArtist, duration: duration
-                    )?.lyrics()
+                    )
+                    return Probe(lyrics: result.record?.lyrics(), reachable: result.reachable)
                 }
             }
             var plainFallback: Lyrics?
-            for await result in group {
-                guard let lyrics = result else { continue }
+            var anyReachable = false
+            for await probe in group {
+                if probe.reachable { anyReachable = true }
+                guard let lyrics = probe.lyrics else { continue }
                 if lyrics.isSynced {
                     group.cancelAll()
-                    return lyrics
+                    return (lyrics, true)
                 }
                 if plainFallback == nil { plainFallback = lyrics }
             }
-            return plainFallback
+            return (plainFallback, anyReachable)
         }
     }
 
@@ -92,7 +112,7 @@ public struct LRCLIBLyricsProvider: Sendable {
         artist: String,
         album: String?,
         duration: TimeInterval?
-    ) async -> LRCLIBRecord? {
+    ) async -> (record: LRCLIBRecord?, reachable: Bool) {
         var items = [
             URLQueryItem(name: "track_name", value: title),
             URLQueryItem(name: "artist_name", value: artist)
@@ -103,21 +123,22 @@ public struct LRCLIBLyricsProvider: Sendable {
         if let duration, duration > 0 {
             items.append(URLQueryItem(name: "duration", value: String(Int(duration.rounded()))))
         }
-        guard let url = makeURL(path: "/get", queryItems: items) else { return nil }
-        return await MetadataHTTP.get(LRCLIBRecord.self, url: url)
+        guard let url = makeURL(path: "/get", queryItems: items) else { return (nil, false) }
+        let result = await MetadataHTTP.getWithStatus(LRCLIBRecord.self, url: url)
+        return (result.value, result.reachable)
     }
 
-    private func search(title: String, artist: String, duration: TimeInterval?) async -> LRCLIBRecord? {
+    private func search(title: String, artist: String, duration: TimeInterval?) async -> (record: LRCLIBRecord?, reachable: Bool) {
         let items = [
             URLQueryItem(name: "track_name", value: title),
             URLQueryItem(name: "artist_name", value: artist)
         ]
-        guard let url = makeURL(path: "/search", queryItems: items),
-              let results = await MetadataHTTP.get([LRCLIBRecord].self, url: url),
-              !results.isEmpty else {
-            return nil
+        guard let url = makeURL(path: "/search", queryItems: items) else { return (nil, false) }
+        let result = await MetadataHTTP.getWithStatus([LRCLIBRecord].self, url: url)
+        guard let results = result.value, !results.isEmpty else {
+            return (nil, result.reachable)
         }
-        return bestMatch(in: results, duration: duration)
+        return (bestMatch(in: results, duration: duration), result.reachable)
     }
 
     /// Picks the best record: first prefer ones with **synced** lyrics, then —

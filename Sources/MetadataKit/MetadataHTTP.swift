@@ -57,16 +57,45 @@ enum MetadataHTTP {
         return await perform(type, request: request, decoder: decoder)
     }
 
+    /// Like `get`, but also reports whether the server actually answered. The
+    /// `reachable` flag is `true` when we got *any* HTTP response back (even a
+    /// 404), and `false` only when the transport itself failed (offline, DNS,
+    /// TLS, timeout). Used by the lyrics layer to avoid caching a negative
+    /// result when the user is simply disconnected.
+    static func getWithStatus<T: Decodable>(
+        _ type: T.Type,
+        url: URL,
+        accept: String = "application/json",
+        headers: [String: String] = [:],
+        decoder: JSONDecoder = JSONDecoder()
+    ) async -> (value: T?, reachable: Bool) {
+        var request = URLRequest(url: url)
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
+        return await performWithStatus(type, request: request, decoder: decoder)
+    }
+
     private static func perform<T: Decodable>(
         _ type: T.Type,
         request: URLRequest,
         decoder: JSONDecoder
     ) async -> T? {
-        guard let (data, response) = try? await session.data(for: request) else { return nil }
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            return nil
+        await performWithStatus(type, request: request, decoder: decoder).value
+    }
+
+    private static func performWithStatus<T: Decodable>(
+        _ type: T.Type,
+        request: URLRequest,
+        decoder: JSONDecoder
+    ) async -> (value: T?, reachable: Bool) {
+        guard let (data, response) = try? await session.data(for: request) else {
+            return (nil, false)
         }
-        return try? decoder.decode(T.self, from: data)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            return (nil, true)
+        }
+        return (try? decoder.decode(T.self, from: data), true)
     }
 }
 

@@ -179,10 +179,18 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
             await LyricsDiskCache.shared.store(nil, for: track.id)
             return nil
         }
-        let resolved = await resolveSyncedLyrics(for: track, provider: provider)
-        await LyricsMemoCache.shared.set(resolved, for: track.id)
-        await LyricsDiskCache.shared.store(resolved, for: track.id)
-        return resolved
+        let resolution = await resolveSyncedLyrics(for: track, provider: provider)
+        // Only persist this result when we're confident it reflects a real
+        // verdict from a server, not a transport failure (offline / DNS / TLS).
+        // Otherwise an Apple TV that briefly lost wifi would permanently
+        // remember "no lyrics" for every song played during the outage.
+        // Still memoise within this session so a quick track ↔ track flick
+        // doesn't re-issue the same failing request every few seconds.
+        await LyricsMemoCache.shared.set(resolution.lyrics, for: track.id)
+        if resolution.isAuthoritative {
+            await LyricsDiskCache.shared.store(resolution.lyrics, for: track.id)
+        }
+        return resolution.lyrics
     }
 }
 
@@ -194,10 +202,16 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
 /// attribution) wins all ties — if it hasn't produced synced lyrics by the time
 /// LRCLIB has, we take the LRCLIB result. Plain (unsynced) results never win,
 /// since the TV UI can't scroll them.
+///
+/// The `isAuthoritative` flag reports whether at least one source actually
+/// reached a server (positive *or* negative). When both sources fail at the
+/// transport layer (offline, DNS, TLS), we return `(nil, isAuthoritative:
+/// false)` so callers can avoid burning that mistaken "no lyrics" into the
+/// persistent cache.
 private func resolveSyncedLyrics(
     for track: MusicTrack,
     provider: any MusicProvider
-) async -> Lyrics? {
+) async -> (lyrics: Lyrics?, isAuthoritative: Bool) {
     // Read the global lyrics-enabled toggle defensively so the on-by-default
     // applies when the key was never written. Skips LRCLIB entirely when the
     // user has turned lyrics off, so we don't send their track title/artist
@@ -216,28 +230,41 @@ private func resolveSyncedLyrics(
     let lrclibAvailable = lyricsEnabled && artist.map { !$0.isEmpty } ?? false
 
     enum Source { case server, lrclib }
-    struct Outcome { let source: Source; let lyrics: Lyrics? }
+    struct Outcome { let source: Source; let lyrics: Lyrics?; let reachable: Bool }
 
     return await withTaskGroup(of: Outcome.self) { group in
         group.addTask {
-            let lyrics = try? await provider.lyrics(for: track.id)
-            return Outcome(source: .server, lyrics: lyrics)
+            // Treat a URLError thrown by the server as a transport failure
+            // (offline / DNS / TLS / timeout) rather than a real "no lyrics"
+            // answer. Any other error (auth, decode, server bug) we treat as
+            // a real verdict — better than re-querying forever on a broken
+            // backend that's still online enough to return 5xx.
+            do {
+                let lyrics = try await provider.lyrics(for: track.id)
+                return Outcome(source: .server, lyrics: lyrics, reachable: true)
+            } catch is URLError {
+                return Outcome(source: .server, lyrics: nil, reachable: false)
+            } catch {
+                return Outcome(source: .server, lyrics: nil, reachable: true)
+            }
         }
         if lrclibAvailable, let artist {
             group.addTask {
-                let lyrics = await LRCLIBLyricsProvider().lyrics(
+                let result = await LRCLIBLyricsProvider().lyricsWithStatus(
                     title: track.title,
                     artist: artist,
                     album: track.albumTitle,
                     duration: track.duration
                 )
-                return Outcome(source: .lrclib, lyrics: lyrics)
+                return Outcome(source: .lrclib, lyrics: result.lyrics, reachable: result.reachable)
             }
         }
 
         var pendingLRCLIB: Lyrics?
         var sawServer = false
+        var anyReachable = false
         for await outcome in group {
+            if outcome.reachable { anyReachable = true }
             let synced = (outcome.lyrics?.isSynced == true && outcome.lyrics?.isEmpty == false)
                 ? outcome.lyrics
                 : nil
@@ -246,13 +273,13 @@ private func resolveSyncedLyrics(
                 sawServer = true
                 if let synced {
                     group.cancelAll()
-                    return synced
+                    return (synced, true)
                 }
                 // Server said "no synced lyrics" — if LRCLIB already finished
                 // with a synced copy, use it; otherwise keep waiting on LRCLIB.
                 if let pendingLRCLIB {
                     group.cancelAll()
-                    return pendingLRCLIB
+                    return (pendingLRCLIB, true)
                 }
             case .lrclib:
                 if let synced {
@@ -260,16 +287,16 @@ private func resolveSyncedLyrics(
                     // its (preferred) attribution a chance to land first.
                     if sawServer {
                         group.cancelAll()
-                        return synced
+                        return (synced, true)
                     }
                     pendingLRCLIB = synced
                 } else if sawServer {
                     // Both sources finished without synced lyrics.
-                    return nil
+                    return (nil, anyReachable)
                 }
             }
         }
-        return pendingLRCLIB
+        return (pendingLRCLIB, anyReachable)
     }
 }
 #endif

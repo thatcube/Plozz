@@ -18,6 +18,11 @@
 
 const BASE_URL = "https://plozz.app";
 const CODE_TTL = 600; // 10 minutes
+// Redeem is bound to a 32-char TV secret carried in the auth QR, so the 4-digit
+// code alone is useless to an attacker. A small per-IP failure budget backs that
+// up defensively against blind enumeration.
+const REDEEM_FAIL_WINDOW = 60; // seconds
+const REDEEM_FAIL_MAX = 20; // failed redeems per IP per window before lockout
 
 // Inline logos as data URIs for instant loading
 const PLOZZ_LOGO = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgY2xpcC1wYXRoPSJ1cmwoI2NsaXAwXzEyNF8xMjU1KSI+CjxwYXRoIGQ9Ik00IDExSDNWMTNWMjNWMjVINFYyN0g1VjI4SDdIMjVIMjZWMjdIMjdWMjZIMjhWMjVIMjlWMjJWMTNWMTFIMjhWOUgyN1Y4SDI2SDI0SDhIN0g1VjlINFYxMVoiIGZpbGw9IiMwMEE0REMiLz4KPHJlY3QgeD0iNSIgeT0iMjkiIHdpZHRoPSIyMiIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIyNyIgeT0iMjgiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjI4IiB5PSIyNyIgd2lkdGg9IjEiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMjkiIHk9IjI1IiB3aWR0aD0iMSIgaGVpZ2h0PSIyIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIyOSIgeT0iOSIgd2lkdGg9IjEiIGhlaWdodD0iMTYiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjI4IiB5PSI4IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIyNyIgeT0iNyIgd2lkdGg9IjEiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMjUiIHk9IjYiIHdpZHRoPSIyIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjciIHk9IjYiIHdpZHRoPSIxOCIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSI1IiB5PSI2IiB3aWR0aD0iMiIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSI0IiB5PSI3IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxMyIgeT0iNSIgd2lkdGg9IjEiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTQiIHk9IjUiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjE1IiB5PSI0IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxNiIgeT0iMyIgd2lkdGg9IjEiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTciIHk9IjIiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjE4IiB5PSIyIiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxNyIgeT0iMyIgd2lkdGg9IjEiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTYiIHk9IjQiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjE1IiB5PSI1IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxMiIgeT0iNSIgd2lkdGg9IjEiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTEiIHk9IjQiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjEwIiB5PSIzIiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSI5IiB5PSIyIiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxMiIgeT0iNCIgd2lkdGg9IjEiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTEiIHk9IjMiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjEwIiB5PSIyIiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIzIiB5PSI4IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIyIiB5PSI5IiB3aWR0aD0iMSIgaGVpZ2h0PSIxNiIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMiIgeT0iMjUiIHdpZHRoPSIxIiBoZWlnaHQ9IjIiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjMiIHk9IjI3IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSI0IiB5PSIyOCIgd2lkdGg9IjEiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMyIgeT0iMjUiIHdpZHRoPSIxIiBoZWlnaHQ9IjIiIGZpbGw9IiMwMDdBQUYiLz4KPHJlY3QgeD0iNCIgeT0iMjciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiMwMDdBQUYiLz4KPHJlY3QgeD0iMjgiIHk9IjI1IiB3aWR0aD0iMSIgaGVpZ2h0PSIyIiBmaWxsPSIjMDA3QUFGIi8+CjxyZWN0IHg9IjI3IiB5PSIyNiIgd2lkdGg9IjEiIGhlaWdodD0iMiIgZmlsbD0iIzAwN0FBRiIvPgo8cmVjdCB4PSIyNiIgeT0iMjciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiMwMDdBQUYiLz4KPHJlY3QgeD0iMjYiIHk9IjI4IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSIjMDA3QUFGIi8+CjxyZWN0IHg9IjI0IiB5PSIyOCIgd2lkdGg9IjIiIGhlaWdodD0iMSIgZmlsbD0iIzAwN0FBRiIvPgo8cmVjdCB4PSI1IiB5PSIyOCIgd2lkdGg9IjE5IiBoZWlnaHQ9IjEiIGZpbGw9IiMwMEE0REMiLz4KPHJlY3QgeD0iNSIgeT0iMjgiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiMwMDdBQUYiLz4KPHJlY3QgeD0iNiIgeT0iMjgiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiMwMDdBQUYiLz4KPHJlY3QgeD0iNyIgeT0iMjgiIHdpZHRoPSIxNyIgaGVpZ2h0PSIxIiBmaWxsPSIjMDA3QUFGIi8+CjxyZWN0IHg9IjMiIHk9IjkiIHdpZHRoPSIxIiBoZWlnaHQ9IjIiIGZpbGw9IiM0MUM2RjUiLz4KPHJlY3QgeD0iNCIgeT0iOCIgd2lkdGg9IjEiIGhlaWdodD0iMSIgZmlsbD0iIzQxQzZGNSIvPgo8cmVjdCB4PSI1IiB5PSI3IiB3aWR0aD0iMiIgaGVpZ2h0PSIxIiBmaWxsPSIjNDFDNkY1Ii8+CjxyZWN0IHg9IjciIHk9IjciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxIiBmaWxsPSIjMDBBNERDIi8+CjxyZWN0IHg9IjciIHk9IjciIHdpZHRoPSIyMCIgaGVpZ2h0PSIxIiBmaWxsPSIjNDFDNkY1Ii8+CjxyZWN0IHg9IjI3IiB5PSI4IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSIjNDFDNkY1Ii8+CjxyZWN0IHg9IjI4IiB5PSI5IiB3aWR0aD0iMSIgaGVpZ2h0PSIyIiBmaWxsPSIjNDFDNkY1Ii8+CjxyZWN0IHg9IjE3IiB5PSIxMyIgd2lkdGg9IjQiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTkiIHk9IjE0IiB3aWR0aD0iMiIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxOCIgeT0iMTUiIHdpZHRoPSIyIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjE3IiB5PSIxNiIgd2lkdGg9IjIiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTciIHk9IjE3IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxNyIgeT0iMTciIHdpZHRoPSI0IiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjExIiB5PSIxMyIgd2lkdGg9IjQiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTMiIHk9IjE0IiB3aWR0aD0iMiIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxMiIgeT0iMTUiIHdpZHRoPSIyIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjExIiB5PSIxNiIgd2lkdGg9IjIiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTEiIHk9IjE3IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxMSIgeT0iMTciIHdpZHRoPSI0IiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjEyIiB5PSIyMCIgd2lkdGg9IjEiIGhlaWdodD0iMiIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTMiIHk9IjIxIiB3aWR0aD0iMSIgaGVpZ2h0PSIyIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIxOCIgeT0iMjEiIHdpZHRoPSIxIiBoZWlnaHQ9IjIiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjE5IiB5PSIyMCIgd2lkdGg9IjEiIGhlaWdodD0iMiIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iMTQiIHk9IjIyIiB3aWR0aD0iNCIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSI1IiB5PSIxMSIgd2lkdGg9IjEiIGhlaWdodD0iMTQiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjI2IiB5PSIxMSIgd2lkdGg9IjEiIGhlaWdodD0iMTQiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjYiIHk9IjI1IiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIyNSIgeT0iMjUiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjYiIHk9IjEwIiB3aWR0aD0iMSIgaGVpZ2h0PSIxIiBmaWxsPSJibGFjayIvPgo8cmVjdCB4PSIyNSIgeT0iMTAiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjxyZWN0IHg9IjciIHk9IjI2IiB3aWR0aD0iMTgiIGhlaWdodD0iMSIgZmlsbD0iYmxhY2siLz4KPHJlY3QgeD0iNyIgeT0iOSIgd2lkdGg9IjE4IiBoZWlnaHQ9IjEiIGZpbGw9ImJsYWNrIi8+CjwvZz4KPGRlZnM+CjxjbGlwUGF0aCBpZD0iY2xpcDBfMTI0XzEyNTUiPgo8cmVjdCB3aWR0aD0iMjgiIGhlaWdodD0iMjgiIGZpbGw9IndoaXRlIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyIDIpIi8+CjwvY2xpcFBhdGg+CjwvZGVmcz4KPC9zdmc+Cg==";
@@ -229,11 +234,12 @@ function anilistImplicitPage() {
         const hash = window.location.hash.substring(1);
         const params = new URLSearchParams(hash);
         const accessToken = params.get('access_token');
+        const tvSecret = params.get('state') || '';
         if (!accessToken) throw new Error('No access token received from AniList.');
         const storeResp = await fetch('${BASE_URL}/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ service: 'anilist', accessToken }),
+          body: JSON.stringify({ service: 'anilist', accessToken, tvSecret }),
         });
         if (!storeResp.ok) throw new Error('Failed to store token');
         const { code } = await storeResp.json();
@@ -257,11 +263,13 @@ export default {
     if (path === "/myanimelist") {
       const codeVerifier = generateCodeVerifier();
       const sessionId = randomString(32);
+      const tvSecret = url.searchParams.get("tv") || "";
 
       // Store PKCE verifier in KV (needed for callback)
       await env.AUTH_KV.put(`session:${sessionId}`, JSON.stringify({
         service: "mal",
         codeVerifier,
+        tvSecret,
         createdAt: Date.now(),
       }), { expirationTtl: CODE_TTL });
 
@@ -319,13 +327,14 @@ export default {
 
       const tokens = await tokenResp.json();
 
-      // Generate short redeem code and store tokens
+      // Generate short redeem code and store tokens (bound to the TV secret)
       const redeemCode = generateRedeemCode();
       await env.AUTH_KV.put(`redeem:${redeemCode}`, JSON.stringify({
         service: "mal",
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         expiresIn: tokens.expires_in,
+        tvSecret: sessionData.tvSecret || "",
       }), { expirationTtl: CODE_TTL });
 
       // Clean up session
@@ -341,6 +350,9 @@ export default {
       const aniAuthURL = new URL("https://anilist.co/api/v2/oauth/authorize");
       aniAuthURL.searchParams.set("client_id", env.ANILIST_CLIENT_ID);
       aniAuthURL.searchParams.set("response_type", "token");
+      // Carry the TV secret through OAuth state so it returns in the fragment.
+      const tvSecret = url.searchParams.get("tv") || "";
+      if (tvSecret) aniAuthURL.searchParams.set("state", tvSecret);
 
       return Response.redirect(aniAuthURL.toString(), 302);
     }
@@ -367,6 +379,7 @@ export default {
           accessToken: body.accessToken,
           refreshToken: body.refreshToken || null,
           expiresIn: body.expiresIn || null,
+          tvSecret: body.tvSecret || "",
         }), { expirationTtl: CODE_TTL });
         return Response.json({ code: redeemCode }, {
           headers: { "Access-Control-Allow-Origin": "*" }
@@ -390,13 +403,29 @@ export default {
     // --- Redeem: TV calls this to get the token ---
     if (path === "/api/redeem") {
       const code = url.searchParams.get("code");
+      const tvSecret = url.searchParams.get("tv") || "";
       if (!code) {
         return Response.json({ error: "missing_code" }, { status: 400 });
       }
 
+      // Per-IP failure budget: blind code enumeration is locked out quickly.
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      const failKey = `fail:${ip}`;
+      const fails = parseInt((await env.AUTH_KV.get(failKey)) || "0", 10);
+      if (fails >= REDEEM_FAIL_MAX) {
+        return Response.json({ error: "rate_limited" }, {
+          status: 429, headers: { "Access-Control-Allow-Origin": "*" }
+        });
+      }
+
       const data = await env.AUTH_KV.get(`redeem:${code.toUpperCase()}`, "json");
-      if (!data) {
-        return Response.json({ error: "invalid_or_expired" }, { status: 404 });
+      // Reject unknown codes AND codes whose stored TV secret doesn't match the
+      // caller's. Brute-forcing the 4 digits is useless without the 32-char tv.
+      if (!data || (data.tvSecret && data.tvSecret !== tvSecret)) {
+        await env.AUTH_KV.put(failKey, String(fails + 1), { expirationTtl: REDEEM_FAIL_WINDOW });
+        return Response.json({ error: "invalid_or_expired" }, {
+          status: 404, headers: { "Access-Control-Allow-Origin": "*" }
+        });
       }
 
       // One-time use: delete after retrieval

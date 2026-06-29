@@ -29,6 +29,9 @@ public final class AniListService {
     @ObservationIgnored private let config: AniListConfig
     @ObservationIgnored private let tokenStore: AniListTokenStoring
     @ObservationIgnored private let http: HTTPClient
+    /// Per-attempt secret carried in the auth QR and required to redeem, so the
+    /// 4-digit code alone can't be brute-forced against the relay.
+    @ObservationIgnored private var tvSecret = ""
 
     public init(config: AniListConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: AniListTokenStoring) {
         self.config = config
@@ -68,7 +71,8 @@ public final class AniListService {
     public func connect() {
         guard config.isConfigured else { phase = .unavailable; return }
         guard let url = config.authorizationURL else { phase = .unavailable; return }
-        phase = .awaitingToken(authorizationURL: url)
+        tvSecret = RelaySecret.generate()
+        phase = .awaitingToken(authorizationURL: "\(url)?tv=\(tvSecret)")
     }
 
     /// Completes the connection by redeeming a short code from the auth relay.
@@ -80,7 +84,7 @@ public final class AniListService {
         }
 
         do {
-            let redeemURL = URL(string: "\(config.relayBaseURL)/api/redeem?code=\(trimmed)")!
+            let redeemURL = URL(string: "\(config.relayBaseURL)/api/redeem?code=\(trimmed)&tv=\(tvSecret)")!
             let (data, _) = try await URLSession.shared.data(from: redeemURL)
             let result = try JSONDecoder().decode(RelayRedeemResponse.self, from: data)
 

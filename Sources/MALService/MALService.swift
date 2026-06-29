@@ -25,6 +25,9 @@ public final class MALService {
     @ObservationIgnored private let auth: MALAuthService
     @ObservationIgnored private let tokenStore: MALTokenStoring
     @ObservationIgnored private var connectTask: Task<Void, Never>?
+    /// Per-attempt secret carried in the auth QR and required to redeem, so the
+    /// 4-digit code alone can't be brute-forced against the relay.
+    @ObservationIgnored private var tvSecret = ""
 
     public init(config: MALConfig, http: HTTPClient = URLSessionHTTPClient(), tokenStore: MALTokenStoring) {
         self.config = config
@@ -67,7 +70,8 @@ public final class MALService {
         connectTask?.cancel()
         connectTask = nil
         // Show the relay auth URL — Worker handles PKCE and exchange
-        phase = .awaitingAuthorizationCode(authorizationURL: "\(config.relayBaseURL)/myanimelist")
+        tvSecret = RelaySecret.generate()
+        phase = .awaitingAuthorizationCode(authorizationURL: "\(config.relayBaseURL)/myanimelist?tv=\(tvSecret)")
     }
 
     /// Redeems a short code from the auth relay to get the access token.
@@ -84,7 +88,7 @@ public final class MALService {
         connectTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let redeemURL = URL(string: "\(self.config.relayBaseURL)/api/redeem?code=\(trimmed)")!
+                let redeemURL = URL(string: "\(self.config.relayBaseURL)/api/redeem?code=\(trimmed)&tv=\(self.tvSecret)")!
                 let (data, _) = try await URLSession.shared.data(from: redeemURL)
                 let result = try JSONDecoder().decode(RelayRedeemResponse.self, from: data)
 

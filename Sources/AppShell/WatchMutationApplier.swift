@@ -1,6 +1,9 @@
 import Foundation
 import CoreModels
 import TraktService
+import SimklService
+import AniListService
+import MALService
 
 /// Concrete ``WatchMutationApplying`` for the app: resolves an `accountID` to its
 /// live `MediaProvider` (on the main actor) and performs the played / resume write,
@@ -17,6 +20,12 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     let resolveProvider: @Sendable (String) async -> (any MediaProvider)?
     /// The active Trakt scrobbler (durable, throwing variant used).
     let traktScrobbler: @Sendable () async -> any TraktScrobbling
+    /// The active Simkl scrobbler.
+    let simklScrobbler: @Sendable () async -> any SimklScrobbling
+    /// The active AniList scrobbler.
+    let anilistScrobbler: @Sendable () async -> any AniListScrobbling
+    /// The active MAL scrobbler.
+    let malScrobbler: @Sendable () async -> any MALScrobbling
     /// Every signed-in `Account.id`, so episode twin expansion knows which *other*
     /// servers to probe. Resolved live (main-actor) so a sign-in/out is reflected.
     var allAccountIDs: @Sendable () async -> [String] = { [] }
@@ -82,6 +91,33 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
 
     func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws {
         let scrobbler = await traktScrobbler()
+        try await scrobbler.scrobbleResult(
+            item: intent.makeScrobbleItem(),
+            progress: intent.progress,
+            event: .stop
+        )
+    }
+
+    func scrobbleSimkl(_ intent: TraktScrobbleIntent) async throws {
+        let scrobbler = await simklScrobbler()
+        try await scrobbler.scrobbleResult(
+            item: intent.makeScrobbleItem(),
+            progress: intent.progress,
+            event: .stop
+        )
+    }
+
+    func scrobbleAniList(_ intent: TraktScrobbleIntent) async throws {
+        let scrobbler = await anilistScrobbler()
+        try await scrobbler.scrobbleResult(
+            item: intent.makeScrobbleItem(),
+            progress: intent.progress,
+            event: .stop
+        )
+    }
+
+    func scrobbleMAL(_ intent: TraktScrobbleIntent) async throws {
+        let scrobbler = await malScrobbler()
         try await scrobbler.scrobbleResult(
             item: intent.makeScrobbleItem(),
             progress: intent.progress,
@@ -241,6 +277,7 @@ extension TraktScrobbleIntent {
             id: "trakt-intent",
             title: title ?? "",
             kind: kind,
+            parentTitle: seriesTitle,
             seasonNumber: seasonNumber,
             episodeNumber: episodeNumber,
             productionYear: year,

@@ -1,0 +1,16 @@
+name = "plozz-auth-relay"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+MAL_CLIENT_ID = "453e05d6355620ecc1047e9dac4dd184"
+ANILIST_CLIENT_ID = "44569"
+
+# Secrets (set via `wrangler secret put` — never commit these):
+#   MAL_CLIENT_SECRET      (required — MAL token exchange)
+#   ANILIST_CLIENT_SECRET  (reserved/unused — AniList uses implicit grant)
+# See README.md for details.
+
+[[kv_namespaces]]
+binding = "AUTH_KV"
+id = "152ec5bca6e1429d82e5b93e0fc549c3"

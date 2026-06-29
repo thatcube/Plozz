@@ -31,6 +31,9 @@ let package = Package(
         .library(name: "ProviderTrailers", targets: ["ProviderTrailers"]),
         .library(name: "RatingsService", targets: ["RatingsService"]),
         .library(name: "TraktService", targets: ["TraktService"]),
+        .library(name: "SimklService", targets: ["SimklService"]),
+        .library(name: "AniListService", targets: ["AniListService"]),
+        .library(name: "MALService", targets: ["MALService"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
@@ -265,6 +268,18 @@ let package = Package(
             name: "TraktService",
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
+        .target(
+            name: "SimklService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        .target(
+            name: "AniListService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
+        .target(
+            name: "MALService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
 
         // MARK: Features
         .target(
@@ -298,7 +313,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService"]
         ),
         .target(
             name: "FeatureProfiles",
@@ -363,6 +378,9 @@ let package = Package(
                 "ProviderTrailers",
                 "RatingsService",
                 "TraktService",
+                "SimklService",
+                "AniListService",
+                "MALService",
                 "FeatureHome",
                 "FeaturePlayback",
                 "FeatureSearch",

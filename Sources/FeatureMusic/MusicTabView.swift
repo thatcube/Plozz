@@ -142,19 +142,46 @@ func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackControll
 /// Resolves a track's lyrics, returning **only a synced (scrollable/karaoke)
 /// version**. On a TV there's no way to manually scroll plain lyrics, so an
 /// unsynced result is treated as "no lyrics": we just show the centered song.
-/// Races the user's server and the keyless LRCLIB fallback **in parallel** —
-/// previously the LRCLIB call only started after the server call had finished,
-/// which doubled the worst-case wait. Each result carries its own source tag
-/// (Jellyfin/Plex/LRCLIB) for the attribution badge, and results are memoised
-/// per-session in `LyricsMemoCache` so re-opening Now Playing for a recently
-/// played track is instant.
+/// Races the user's server and the keyless LRCLIB fallback **in parallel** for
+/// the first synced result. Three layers of caching collapse the visible wait
+/// to ~instant on a repeat play of the same track:
+///
+///  1. `LyricsMemoCache` (in-memory, this session) — covers track ↔ track
+///     hand-offs and the next-track prefetch.
+///  2. `LyricsDiskCache` (persistent, across launches) — covers re-playing a
+///     track you've played any time in the last month, including remembering
+///     that an instrumental piece like Escala's *Palladio* has no lyrics so
+///     we never search for it again.
+///  3. Title heuristic (`isExplicitlyInstrumental`) — short-circuits tracks
+///     whose own title says they're instrumental/karaoke without touching the
+///     network at all.
+///
+/// Each result carries its own source tag (Jellyfin/Plex/LRCLIB) for the
+/// attribution badge.
 func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
     { track in
+        // L1: in-memory memo for this session.
         if let cached = await LyricsMemoCache.shared.value(for: track.id) {
             return cached
         }
+        // L2: on-disk cache from previous sessions. A negative hit here is the
+        // big saving for instrumental tracks — once we've ever asked and found
+        // nothing, we skip every network round-trip on future plays.
+        if let cached = await LyricsDiskCache.shared.cached(track.id) {
+            await LyricsMemoCache.shared.set(cached, for: track.id)
+            return cached
+        }
+        // L3: title heuristic for explicitly-marked instrumental/karaoke
+        // tracks. We still persist this through the cache layers so we don't
+        // re-evaluate it on every play.
+        if isExplicitlyInstrumental(title: track.title) {
+            await LyricsMemoCache.shared.set(nil, for: track.id)
+            await LyricsDiskCache.shared.store(nil, for: track.id)
+            return nil
+        }
         let resolved = await resolveSyncedLyrics(for: track, provider: provider)
         await LyricsMemoCache.shared.set(resolved, for: track.id)
+        await LyricsDiskCache.shared.store(resolved, for: track.id)
         return resolved
     }
 }
@@ -243,34 +270,6 @@ private func resolveSyncedLyrics(
             }
         }
         return pendingLRCLIB
-    }
-}
-
-/// Per-session memo of resolved lyrics, keyed by `MusicTrack.id`. Bounded so a
-/// long listening session can't grow it without limit. Crossing a track off the
-/// front when it overflows is fine — lyrics rarely change for the same track,
-/// and a miss just re-issues the (now parallelised) network lookup.
-actor LyricsMemoCache {
-    static let shared = LyricsMemoCache()
-
-    private var entries: [String: Lyrics?] = [:]
-    private var order: [String] = []
-    private let limit = 64
-
-    func value(for key: String) -> Lyrics?? {
-        guard let entry = entries[key] else { return nil }
-        return .some(entry)
-    }
-
-    func set(_ value: Lyrics?, for key: String) {
-        if entries[key] == nil {
-            order.append(key)
-            if order.count > limit, let evicted = order.first {
-                order.removeFirst()
-                entries.removeValue(forKey: evicted)
-            }
-        }
-        entries[key] = value
     }
 }
 #endif

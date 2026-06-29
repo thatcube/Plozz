@@ -30,9 +30,9 @@ struct PlaybackDiagnosticsOverlay: View {
                     .padding(.top, 8)
             }
         }
-        .padding(16)
+        .padding(40)
         .frame(maxWidth: 740, alignment: .leading)
-        .plozzGlassPanel(cornerRadius: 14)
+        .plozzGlassPanel(cornerRadius: 64, scrimOpacity: 0.45, refractEdgesOnly: true)
         .padding(36)
     }
 
@@ -46,6 +46,21 @@ struct PlaybackDiagnosticsOverlay: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(palette.primaryText)
                 Spacer()
+                if let provider = diagnostics?.sourceProvider {
+                    HStack(spacing: 6) {
+                        Image(provider == .plex ? "PlexLogo" : "JellyfinLogo")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
+                            .foregroundStyle(providerTint(provider))
+                            .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
+                        Text("Playing from \(diagnostics?.serverName ?? provider.displayName)")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(palette.primaryText)
+                            .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
+                    }
+                }
                 if let engine = diagnostics?.engineName {
                     Text(engine)
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
@@ -53,19 +68,6 @@ struct PlaybackDiagnosticsOverlay: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(palette.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                }
-            }
-            if let provider = diagnostics?.sourceProvider {
-                HStack(spacing: 6) {
-                    Image(provider == .plex ? "PlexLogo" : "JellyfinLogo")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 14, height: 14)
-                        .foregroundStyle(providerTint(provider))
-                    Text("Playing from \(diagnostics?.serverName ?? provider.displayName)")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(palette.secondaryText)
                 }
             }
         }
@@ -140,6 +142,7 @@ struct PlaybackDiagnosticsOverlay: View {
             optionalRow("State", d.playbackStateText)
             row("Buffer", d.bufferStatusText)
             row("Dropped", "\(d.droppedFramesText) frames")
+            optionalRow("Live FPS", d.observedFpsText)
             optionalRow("Network", d.observedBitrateText)
         }
     }
@@ -220,8 +223,24 @@ struct PlaybackDiagnosticsOverlay: View {
     private func providerTint(_ provider: ProviderKind) -> Color {
         switch provider {
         case .jellyfin: return Color(red: 0.53, green: 0.38, blue: 0.95)
-        case .plex: return Color(red: 0xE5 / 255, green: 0xA0 / 255, blue: 0x0D / 255)
+        case .plex: return Color(red: 0xF5 / 255, green: 0xC5 / 255, blue: 0x18 / 255)
         }
     }
+}
+
+#Preview("Diagnostics HUD") {
+    var d = PlaybackDiagnostics(
+        videoCodec: "HEVC", audioCodec: "EAC3", audioChannels: 6, container: "mkv",
+        mode: .directPlay, engineName: "Plozzigen",
+        droppedVideoFrames: 0, frameRate: 23.976, observedFps: 23.9
+    )
+    d.serverName = "Brandoland"
+    d.sourceProvider = .plex
+    d.observedBitrate = 11_900_000
+    return ZStack {
+        LinearGradient(colors: [.cyan, .white, .orange], startPoint: .topLeading, endPoint: .bottomTrailing)
+        PlaybackDiagnosticsOverlay(diagnostics: d)
+    }
+    .ignoresSafeArea()
 }
 #endif

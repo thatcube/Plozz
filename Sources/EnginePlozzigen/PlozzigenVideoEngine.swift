@@ -39,6 +39,18 @@ public final class PlozzigenVideoEngine: VideoEngine {
     public var duration: TimeInterval { engine.duration }
     public var bufferedPosition: TimeInterval { engine.clock.bufferedPosition }
 
+    /// Bridge AetherEngine's live telemetry into the diagnostics overlay so the
+    /// Plozzigen path shows real dropped frames / observed FPS / bitrate instead
+    /// of `-` (it has no `AVPlayer`, so the access-log path never fires).
+    public var liveTelemetry: EngineLiveTelemetry? {
+        guard let t = engine.liveTelemetry else { return nil }
+        return EngineLiveTelemetry(
+            droppedFrameCount: t.droppedFrameCount,
+            observedFps: t.observedFps,
+            observedBitrate: t.instantBitrateMbps.map { $0 * 1_000_000 }
+        )
+    }
+
     public var preventsDisplaySleep: Bool {
         engine.state == .playing
     }

@@ -30,6 +30,9 @@ public final class PlaybackDiagnosticsSampler {
     /// into every dynamic sample.
     private var staticDiagnostics = PlaybackDiagnostics()
     private var remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)?
+    /// Live engine telemetry source (dropped frames / FPS / bitrate). Used to fill
+    /// the per-tick metrics on engines with no `AVPlayer` access log (Plozzigen).
+    private var engineTelemetry: (@MainActor () -> EngineLiveTelemetry?)?
     private var timerTask: Task<Void, Never>?
 
     /// Last AVPlayer access-log stall count we logged, so a `remux-stall:` marker
@@ -75,11 +78,13 @@ public final class PlaybackDiagnosticsSampler {
         streamURL: URL? = nil,
         remuxEligible: Bool? = nil,
         remuxEligibilityDetail: String? = nil,
-        remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)? = nil
+        remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)? = nil,
+        engineTelemetry: (@MainActor () -> EngineLiveTelemetry?)? = nil
     ) {
         stop()
         self.player = player
         self.remuxSnapshot = remuxSnapshot
+        self.engineTelemetry = engineTelemetry
         self.lastLoggedStallCount = 0
         var base = PlaybackDiagnostics.base(
             from: metadata,
@@ -117,6 +122,7 @@ public final class PlaybackDiagnosticsSampler {
         timerTask = nil
         player = nil
         remuxSnapshot = nil
+        engineTelemetry = nil
     }
 
     // MARK: Dynamic (per-tick) sampling
@@ -203,6 +209,21 @@ public final class PlaybackDiagnosticsSampler {
 
         if diagnostics.remux == nil {
             diagnostics.remux = remuxSnapshot?()
+        }
+
+        // Engines without an AVPlayer (Plozzigen/mpv) have no access log, so the
+        // dropped-frames/FPS/bitrate fields stay blank above. Fill them from the
+        // engine's own live telemetry; only overwrite where the access log didn't.
+        if let t = engineTelemetry?() {
+            if let drops = t.droppedFrameCount, diagnostics.droppedVideoFrames == nil {
+                diagnostics.droppedVideoFrames = drops
+            }
+            if let fps = t.observedFps, diagnostics.observedFps == nil {
+                diagnostics.observedFps = fps
+            }
+            if let bitrate = t.observedBitrate, diagnostics.observedBitrate == nil {
+                diagnostics.observedBitrate = bitrate
+            }
         }
 
         // System metrics refresh on every engine so a leak is visible on the

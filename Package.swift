@@ -1,5 +1,6 @@
 // swift-tools-version:5.9
 import PackageDescription
+import Foundation
 
 // MARK: - Plozz modular package
 //
@@ -584,3 +585,20 @@ let package = Package(
         )
     ]
 )
+
+// InjectionNext hot-reload: every local Swift target must link `-interposable`
+// so saved function bodies can be swapped live on-device. Gated on PLOZZ_INJECT
+// so it only applies to dev injection builds — Release/TestFlight never gets it.
+if ProcessInfo.processInfo.environment["PLOZZ_INJECT"] != nil {
+    for target in package.targets where target.type == .regular {
+        var flags = target.linkerSettings ?? []
+        flags.append(.unsafeFlags(["-Xlinker", "-interposable"]))
+        target.linkerSettings = flags
+        // InjectionNext recompiles ONE saved file, which requires per-file
+        // (batch/incremental) compiles in the build log; whole-module has no
+        // -primary-file line for it to copy. Force batch mode on every target.
+        var sflags = target.swiftSettings ?? []
+        sflags.append(.unsafeFlags(["-enable-batch-mode", "-no-whole-module-optimization"]))
+        target.swiftSettings = sflags
+    }
+}

@@ -1198,6 +1198,11 @@ public final class PlayerViewModel {
     /// Returns `nil` for a non-AVFoundation engine (diagnostics is best-effort).
     public var player: AVPlayer? { (engine as? NativeVideoEngine)?.underlyingPlayer }
 
+    /// Live engine telemetry (dropped frames / FPS / bitrate) for diagnostics.
+    /// `nil` on the native engine (the sampler uses the AVPlayer access log); the
+    /// Plozzigen/mpv engines vend it so those fields aren't blank.
+    public var engineLiveTelemetry: EngineLiveTelemetry? { engine.liveTelemetry }
+
     /// A stable identity for the active player instance, so views can restart
     /// player-bound work (e.g. the diagnostics sampler) when the transcode
     /// fallback swaps in a new player.

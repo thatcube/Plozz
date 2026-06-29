@@ -242,6 +242,10 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var droppedVideoFrames: Int?
     /// Nominal frame rate of the video track, in frames/sec.
     public var frameRate: Double?
+    /// Live frame rate the engine is actually presenting, in frames/sec. From a
+    /// non-AVFoundation engine's telemetry; a value far below `frameRate` while
+    /// dropped frames climb is the on-device decode/compositor-stutter signal.
+    public var observedFps: Double?
     /// Friendly device model, e.g. `Apple TV 4K (3rd gen)`.
     public var deviceModel: String?
     /// Physical memory, in bytes.
@@ -330,6 +334,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         bufferedSecondsAhead: Double? = nil,
         droppedVideoFrames: Int? = nil,
         frameRate: Double? = nil,
+        observedFps: Double? = nil,
         deviceModel: String? = nil,
         deviceMemoryBytes: Int64? = nil,
         freeDiskBytes: Int64? = nil,
@@ -376,6 +381,7 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.bufferedSecondsAhead = bufferedSecondsAhead
         self.droppedVideoFrames = droppedVideoFrames
         self.frameRate = frameRate
+        self.observedFps = observedFps
         self.deviceModel = deviceModel
         self.deviceMemoryBytes = deviceMemoryBytes
         self.freeDiskBytes = freeDiskBytes
@@ -856,6 +862,7 @@ public extension PlaybackDiagnostics {
     var videoCodecText: String { videoCodec ?? Self.placeholder }
     var audioCodecText: String { audioCodec ?? Self.placeholder }
     var droppedFramesText: String { droppedVideoFrames.map(String.init) ?? Self.placeholder }
+    var observedFpsText: String { observedFps.map { String(format: "%.0f fps", $0) } ?? Self.placeholder }
 
     /// Friendly container name, e.g. `Matroska (MKV)`.
     var containerText: String { Self.containerLabel(container) ?? Self.placeholder }

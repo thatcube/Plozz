@@ -28,6 +28,9 @@ settings:
 packages:
   Plozz:
     path: .
+  Inject:
+    url: https://github.com/krzysztofzablocki/Inject
+    from: "1.5.2"
 
 targets:
   Plozz:
@@ -128,15 +131,41 @@ targets:
         # display-mode switch), so the linker's default `-dead_strip_dylibs`
         # otherwise drops it and the selector is unrecognized at runtime (crash).
         OTHER_LDFLAGS: "-Wl,-needed_framework,AVKit"
+      configs:
+        # `-interposable` lets InjectionNext swap function bodies at runtime for
+        # live UI hot-reload. Debug only — never ship it in Release.
+        Debug:
+          OTHER_LDFLAGS: "-Wl,-needed_framework,AVKit -Xlinker -interposable"
+          # InjectionNext (Cursor/VS Code, no-Xcode mode) parses build logs to
+          # learn how to recompile a saved file; Xcode 16.3+ needs this to keep
+          # emitting the frontend command lines it reads.
+          EMIT_FRONTEND_COMMAND_LINES: YES
+          # InjectionNext recompiles ONE saved file; whole-module mode breaks that.
+          SWIFT_COMPILATION_MODE: incremental
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          # copy_bundle.sh (below) writes + codesigns the on-device injection
+          # bundle into the .app, which the script sandbox blocks.
+          ENABLE_USER_SCRIPT_SANDBOXING: NO
     configFiles:
       Debug: Config/Secrets.xcconfig
-      Release: Config/Secrets.xcconfig
       Release: Config/Secrets.xcconfig
     dependencies:
       - package: Plozz
         product: AppShell
+      - package: Inject
       - target: PlozzTopShelf
         embed: true
+    postBuildScripts:
+      # On-device InjectionNext hot-reload: copy the prebuilt tvOS device
+      # injection bundle into the .app and codesign it so the running app can
+      # connect back to the InjectionNext server. The script self-gates to Debug
+      # (Release/TestFlight builds skip it), so this never ships.
+      - script: |
+          RESOURCES="/Applications/InjectionNext.app/Contents/Resources"
+          if [ -f "$RESOURCES/copy_bundle.sh" ]; then
+            "$RESOURCES/copy_bundle.sh"
+          fi
+        name: "InjectionNext: copy device bundle (Debug only)"
 
   PlozzTopShelf:
     type: com.apple.product-type.tv-app-extension

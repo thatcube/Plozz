@@ -237,7 +237,8 @@ public struct PlayerView: View {
             streamURL: viewModel.diagnosticsStreamURL,
             remuxEligible: viewModel.remuxEligibilitySummary?.eligible,
             remuxEligibilityDetail: viewModel.remuxEligibilitySummary?.detail,
-            remuxSnapshot: { viewModel.localRemuxDiagnostics }
+            remuxSnapshot: { viewModel.localRemuxDiagnostics },
+            engineTelemetry: { viewModel.engineLiveTelemetry }
         )
     }
 }

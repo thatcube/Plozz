@@ -77,6 +77,16 @@ targets:
         # no-op). Create an app at https://trakt.tv/oauth/applications to get these.
         TraktClientID: "$(TRAKT_CLIENT_ID)"
         TraktClientSecret: "$(TRAKT_CLIENT_SECRET)"
+        # MyAnimeList client ID for anime tracking (device-code OAuth). Substituted
+        # from MAL_CLIENT_ID build setting (gitignored Config/Secrets.local.xcconfig).
+        # Empty by default, which disables MAL sync.
+        MALClientID: "$(MAL_CLIENT_ID)"
+        # Simkl client credentials for watch tracking. Register at simkl.com/apps.
+        SimklClientID: "$(SIMKL_CLIENT_ID)"
+        SimklClientSecret: "$(SIMKL_CLIENT_SECRET)"
+        # AniList client ID/secret for anime tracking (authorization code grant).
+        AniListClientID: "$(ANILIST_CLIENT_ID)"
+        AniListClientSecret: "$(ANILIST_CLIENT_SECRET)"
         # Local network access is required for LAN server discovery on tvOS.
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:
@@ -205,6 +215,16 @@ schemes:
     build:
       targets:
         Plozz: all
+      preActions:
+        - script: |
+            # Auto-link local secrets if missing (worktrees don't inherit gitignored files).
+            SECRETS_FILE="${PROJECT_DIR}/Config/Secrets.local.xcconfig"
+            CANONICAL="$HOME/.config/plozz/Secrets.local.xcconfig"
+            if [ ! -e "$SECRETS_FILE" ] && [ -f "$CANONICAL" ]; then
+              ln -s "$CANONICAL" "$SECRETS_FILE"
+            fi
+          name: Link secrets from ~/.config/plozz
+          settingsTarget: Plozz
     run:
       config: Debug
     test:

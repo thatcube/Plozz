@@ -96,6 +96,9 @@ public struct RootView: View {
                         homeLayoutStore: HomeLayoutStore(namespace: appState.profilesModel.activeNamespace),
                         ratingsProvider: appState.ratingsProvider,
                         trakt: appState.traktService,
+                        simkl: appState.simklService,
+                        anilist: appState.anilistService,
+                        mal: appState.malService,
                         mediaItemActionHandler: appState.mediaItemActionHandler,
                         enqueueWatchMutation: { appState.enqueueWatchMutation($0) },
                         watchBridge: WatchOutboxBridge(

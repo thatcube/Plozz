@@ -81,11 +81,8 @@ public struct TraktUserSettings: Decodable, Sendable, Equatable {
         public let name: String?
     }
 
-    /// A friendly display name, falling back to the username.
+    /// Prefer the username over the display name.
     public var displayName: String {
-        if let name = user.name, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-            return name
-        }
         return user.username
     }
 }

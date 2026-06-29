@@ -187,12 +187,6 @@ struct SpoilersDetailView: View {
 struct PlaybackDetailView: View {
     @Bindable var playback: PlaybackSettingsModel
 
-    private var syncExplanation: String {
-        playback.settings.syncWatchAcrossServers
-            ? "When you finish, resume, or mark a title, Plozz updates every server that has it — so your progress follows you no matter which server you watch on next."
-            : "Plozz only updates the server you actually watched on. Other servers that have the same title are left untouched."
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -238,50 +232,27 @@ struct PlaybackDetailView: View {
                     }
                 }
 
-                SettingsPanel(
-                    title: "Skip Intervals (left/right on remote)"
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        LabeledSettingRow("Skip Backward", labelWidth: 220) {
-                            SettingsOptionPicker(
-                                options: SkipInterval.allCases,
-                                selection: $playback.settings.skipBackwardInterval,
-                                title: { $0.title }
-                            )
-                        }
+            SettingsPanel(
+                title: "Skip Intervals (left/right on remote)"
+            ) {
+                VStack(alignment: .leading, spacing: 18) {
+                    LabeledSettingRow("Skip Backward", labelWidth: 220) {
+                        SettingsOptionPicker(
+                            options: SkipInterval.allCases,
+                            selection: $playback.settings.skipBackwardInterval,
+                            title: { $0.title }
+                        )
+                    }
 
-                        LabeledSettingRow("Skip Forward", labelWidth: 220) {
-                            SettingsOptionPicker(
-                                options: SkipInterval.allCases,
-                                selection: $playback.settings.skipForwardInterval,
-                                title: { $0.title }
-                            )
-                        }
+                    LabeledSettingRow("Skip Forward", labelWidth: 220) {
+                        SettingsOptionPicker(
+                            options: SkipInterval.allCases,
+                            selection: $playback.settings.skipForwardInterval,
+                            title: { $0.title }
+                        )
                     }
                 }
-
-                SettingsPanel(
-                    title: "Watch Status Sync",
-                    footer: "Applies to this profile only and takes effect immediately — no need to restart. Trakt scrobbling is unaffected either way."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Toggle("Sync watch status across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
-
-                        HStack(alignment: .top, spacing: 14) {
-                            Image(systemName: playback.settings.syncWatchAcrossServers ? "arrow.triangle.2.circlepath" : "externaldrive")
-                                .font(.title3)
-                                .foregroundStyle(playback.settings.syncWatchAcrossServers ? Color.accentColor : .secondary)
-                                .frame(width: 36)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(playback.settings.syncWatchAcrossServers ? "All servers" : "This server only")
-                                    .font(.callout.weight(.semibold))
-                                Text(syncExplanation)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+            }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)

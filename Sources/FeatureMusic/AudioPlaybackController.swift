@@ -163,6 +163,18 @@ public final class AudioPlaybackController {
     /// replaced on every track change so a runaway skip-skip-skip session
     /// only ever has one prefetch in flight.
     private var lyricsPrefetchTask: Task<Void, Never>?
+    /// Slow background sweep that walks the *rest* of the queue after the
+    /// immediate next track, warming the lyrics cache one track at a time
+    /// with a small delay between each so we don't hammer LRCLIB or the
+    /// user's server. Cancelled and replaced on every track / queue change.
+    /// Cache hits cost ~0ms so a re-played album finishes its sweep almost
+    /// instantly; a fresh album incurs ~one polite request per track.
+    private var lyricsBulkPrefetchTask: Task<Void, Never>?
+    /// Pause between successive bulk-prefetch lookups. Tuned to keep
+    /// LRCLIB-friendly pacing (well under 1 req/sec including the per-track
+    /// fan-out) without making the warm-up so slow that a long playlist
+    /// hasn't finished by the time the user reaches its end.
+    private static let bulkPrefetchSpacing: Duration = .milliseconds(1500)
     /// The unshuffled queue, so toggling shuffle off restores original order.
     private var orderedQueue: [MusicTrack] = []
     private var playSessionID: String?
@@ -325,6 +337,7 @@ public final class AudioPlaybackController {
         lyricsLoadTask?.cancel()
         lyricsRefreshTask?.cancel()
         lyricsPrefetchTask?.cancel()
+        lyricsBulkPrefetchTask?.cancel()
         lyricsState = .idle
         // Relinquish the system Play/Pause button so the video player can
         // receive it again once music is no longer playing.
@@ -445,6 +458,7 @@ public final class AudioPlaybackController {
         lyricsLoadTask?.cancel()
         lyricsRefreshTask?.cancel()
         lyricsPrefetchTask?.cancel()
+        lyricsBulkPrefetchTask?.cancel()
         guard let lyricsResolver else {
             lyricsState = .unavailable
             return
@@ -472,10 +486,11 @@ public final class AudioPlaybackController {
                 // answer. Future plays will be silent.
                 self.lyricsState = .unavailable
             }
-            // Warm the cache for the next queued track so advancing is instant.
-            // Fire-and-forget — the result is discarded; the resolver itself
-            // memoises it in LyricsMemoCache.
+            // Warm the cache for the next queued track so advancing is instant,
+            // then a slow background sweep walks the rest of the queue so a
+            // long album/playlist gets fully cached before the user reaches it.
             self.prefetchNextTrackLyrics()
+            self.prefetchRestOfQueueLyrics()
         }
     }
 
@@ -510,6 +525,35 @@ public final class AudioPlaybackController {
         let nextTrack = queue[nextIndex]
         lyricsPrefetchTask = Task { @MainActor in
             _ = await lyricsResolver(nextTrack)
+        }
+    }
+
+    /// Walks the rest of the queue past the immediate-next track and warms
+    /// the lyrics cache for each, one at a time with a small spacing between
+    /// requests. By the time the user reaches the middle of an album every
+    /// track ahead is already a cache hit, so the panel snaps in on advance
+    /// with no spinner.
+    ///
+    /// The resolver itself short-circuits on L1/L2/L3 cache hits, so a
+    /// re-played album costs essentially nothing — the loop blasts through
+    /// the queue in milliseconds. Only previously-unseen tracks actually
+    /// touch the network, and even those are paced to be a polite trickle
+    /// rather than a burst.
+    private func prefetchRestOfQueueLyrics() {
+        guard let lyricsResolver else { return }
+        let startIndex = index + 2 // immediate-next is handled separately
+        guard startIndex < queue.count else { return }
+        let upcoming = Array(queue[startIndex...])
+        lyricsBulkPrefetchTask = Task { @MainActor [weak self] in
+            for track in upcoming {
+                guard !Task.isCancelled else { return }
+                _ = await lyricsResolver(track)
+                guard !Task.isCancelled else { return }
+                // Bail if the playback context changed under us (skip, stop,
+                // new album) — `loadLyrics` will have replaced this task.
+                guard let self, self.queue.contains(where: { $0.id == track.id }) else { return }
+                try? await Task.sleep(for: Self.bulkPrefetchSpacing)
+            }
         }
     }
 

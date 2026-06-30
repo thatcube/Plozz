@@ -194,7 +194,11 @@ private struct SettingsSwitchToggleBody: View {
             HStack(spacing: 20) {
                 configuration.label
                     .font(.headline.weight(.semibold))
-                    .multilineTextAlignment(.leading)
+                    // Keep every detail-pane toggle label on a single line — it
+                    // shrinks slightly to fit rather than wrapping to a second
+                    // row (which looked ragged next to the switch).
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Spacer(minLength: 20)
                 SettingsSwitchIndicator(isOn: configuration.isOn)
             }
@@ -208,29 +212,42 @@ private struct SettingsSwitchToggleBody: View {
 }
 
 /// The track-and-knob graphic plus the On/Off state word. Reads the shared
-/// settings focus environment so the word stays legible against the inverted
-/// (white-in-dark-mode) focus card while the track keeps its fixed colours.
+/// settings focus environment so it stays legible against the inverted
+/// (white-in-dark-mode) focus card.
+///
+/// The switch is monochrome — the same theme-aware ink/paper vocabulary as the
+/// segmented picker and stepper thumbs — rather than the stock green. The state
+/// word is neutral; the *switch* alone communicates on/off, with the filled ink
+/// track reading clearly as "on".
 private struct SettingsSwitchIndicator: View {
     let isOn: Bool
     @Environment(\.settingsRowIsFocused) private var isFocused
     @Environment(\.settingsRowFocusForeground) private var focusFg
-    @Environment(\.themePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
 
     private let trackWidth: CGFloat = 84
     private let trackHeight: CGFloat = 46
     private var knobSize: CGFloat { trackHeight - 10 }
     private var travel: CGFloat { (trackWidth - knobSize) / 2 - 4 }
 
-    /// Iconic "switch is on" green, fixed so it never inverts with focus.
-    private var onColor: Color { Color(red: 0.20, green: 0.78, blue: 0.36) }
-
-    private var offTrack: Color {
-        if isFocused { return focusFg.opacity(0.20) }
-        return palette.isLight ? Color.black.opacity(0.16) : Color.white.opacity(0.24)
+    /// Whether the surface *behind* the switch reads as dark. On a focus card
+    /// the surface flips — a dark-mode focus card is white — so ink and paper
+    /// invert to stay legible.
+    private var surfaceIsDark: Bool {
+        isFocused ? (colorScheme == .light) : (colorScheme == .dark)
     }
 
+    /// High-contrast "ink" (the filled on-track) and its "paper" opposite (the
+    /// knob), so the knob reads as a cutout on the filled track.
+    private var ink: Color { surfaceIsDark ? .white : .black }
+    private var paper: Color { surfaceIsDark ? .black : .white }
+
+    private var trackColor: Color {
+        isOn ? ink : ink.opacity(isFocused ? 0.22 : 0.18)
+    }
+    private var knobColor: Color { isOn ? paper : ink }
+
     private var stateWordColor: AnyShapeStyle {
-        if isOn { return AnyShapeStyle(onColor) }
         if isFocused { return AnyShapeStyle(focusFg.opacity(0.7)) }
         return AnyShapeStyle(.secondary)
     }
@@ -244,11 +261,11 @@ private struct SettingsSwitchIndicator: View {
 
             ZStack {
                 Capsule(style: .continuous)
-                    .fill(isOn ? onColor : offTrack)
+                    .fill(trackColor)
                 Circle()
-                    .fill(Color.white)
+                    .fill(knobColor)
                     .frame(width: knobSize, height: knobSize)
-                    .shadow(color: .black.opacity(0.28), radius: 2, y: 1)
+                    .shadow(color: .black.opacity(0.22), radius: 2, y: 1)
                     .offset(x: isOn ? travel : -travel)
             }
             .frame(width: trackWidth, height: trackHeight)

@@ -90,7 +90,7 @@ struct AppearanceDetailView: View {
                     description: "Show album name, audio quality & lyrics source on the now-playing screen.",
                     valueSummary: musicPlayer.showTrackDetails ? "On" : "Off"
                 ) {
-                    Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
+                    Toggle("Show track details", isOn: $musicPlayer.showTrackDetails)
                 }
             ])
         ]
@@ -321,7 +321,7 @@ struct PlaybackDetailView: View {
             ) {
                 SettingsRevealSection(
                     isOn: perContentTypeBinding,
-                    masterLabel: "Use a different default per content type",
+                    masterLabel: "Use a different default per type",
                     revealedHeader: "Per Content Type"
                 ) {
                     ForEach(Self.policyCategories, id: \.self) { category in
@@ -397,7 +397,7 @@ struct PlaybackDetailView: View {
             ) {
                 SettingsRevealSection(
                     isOn: audioPerContentTypeBinding,
-                    masterLabel: "Use a different default per content type",
+                    masterLabel: "Use a different default per type",
                     revealedHeader: "Per Content Type"
                 ) {
                     ForEach(Self.policyCategories, id: \.self) { category in

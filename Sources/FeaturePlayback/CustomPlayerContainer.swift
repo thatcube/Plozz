@@ -137,6 +137,21 @@ final class PlayerInputViewController: UIViewController {
     private var scrubSmoothedSpeed: Double = 0
     private var resumeAfterScrub = false
 
+    /// Pending debounced commit for a *flick*-ended scrub. A fast flick lift
+    /// keeps the scrub session alive instead of seeking immediately, so a quick
+    /// follow-up swipe can cancel this and continue the same session — turning a
+    /// multi-swipe traversal into one fluid scrub that seeks (and resumes) only
+    /// once, instead of fighting a seek + rebuffer + play/pause on every swipe.
+    private var scrubCommitTask: Task<Void, Never>?
+    /// Lift speed (points/sec) above which a scrub is treated as a mid-traversal
+    /// flick (defer the commit to bridge to the next swipe) rather than a
+    /// deliberate landing (commit + resume playback immediately).
+    private let scrubFlickCommitThreshold: Double = 1000
+    /// How long after a flick lift to wait for a follow-up swipe before
+    /// committing. Long enough to bridge the gap between rapid swipes, short
+    /// enough that a final flick still lands without a noticeable delay.
+    private let scrubFlickBridgeWindow: TimeInterval = 0.3
+
     /// Suppresses the tvOS screensaver / Apple TV sleep while video is actively
     /// playing, and releases it the instant playback pauses, ends, or this host
     /// goes away. Driven every refresh tick off `engine.preventsDisplaySleep`, so
@@ -202,6 +217,7 @@ final class PlayerInputViewController: UIViewController {
         super.viewDidDisappear(animated)
         refreshTask?.cancel()
         refreshTask = nil
+        cancelScrubCommit()
         // Leaving playback: let the screensaver / Apple TV sleep resume.
         idleSleepGuard.allowSleep()
     }
@@ -229,6 +245,21 @@ final class PlayerInputViewController: UIViewController {
         case .plexBIF(let url):
             thumbnailLoader = PlexBIFThumbnailLoader(url: url)
             PlozzLog.playback.debug("Configured Plex BIF scrub preview url=\(PlozzLog.redact(url: url))")
+        }
+        prefetchThumbnailsSoon()
+    }
+
+    /// Warms the trickplay source (e.g. downloads the Plex BIF blob) a beat after
+    /// it's configured, so the first scrub already has previews instead of feeling
+    /// like it's fighting an empty timeline while the data loads. Delayed slightly
+    /// so initial video buffering gets first claim on bandwidth.
+    private func prefetchThumbnailsSoon() {
+        let loader = thumbnailLoader
+        guard loader != nil else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let self, self.thumbnailLoader === loader else { return }
+            loader?.prefetch()
         }
     }
 
@@ -543,7 +574,17 @@ final class PlayerInputViewController: UIViewController {
                 guard max(absX, absY) >= panAxisDeadZone else { return }
                 if absX >= absY {
                     panAxis = .horizontal
-                    beginScrub()
+                    if model.isScrubbing {
+                        // Continuing a multi-swipe traversal: a previous flick
+                        // left the scrub session alive with a commit pending.
+                        // Cancel that pending commit and keep scrubbing from here,
+                        // carrying the smoothed speed so momentum builds across
+                        // swipes instead of resetting to a crawl on each one.
+                        cancelScrubCommit()
+                    } else {
+                        beginScrub()
+                        scrubSmoothedSpeed = 0
+                    }
                     // Seed the incremental anchor at *this* translation so the
                     // axis-decision dead-zone travel is excluded (the first
                     // scrub sample moves by zero, not the cumulative pan
@@ -553,7 +594,6 @@ final class PlayerInputViewController: UIViewController {
                     // reset-to-tiny translation next event — stepping the bar
                     // backward by the gap.
                     scrubLastTranslationX = translation.x
-                    scrubSmoothedSpeed = 0
                 } else {
                     panAxis = .verticalIgnored
                     // A deliberate downward swipe reveals the controls and drops
@@ -584,11 +624,19 @@ final class PlayerInputViewController: UIViewController {
             updatePreviewThumbnail()
         case .ended, .cancelled, .failed:
             // Auto-commit a horizontal scrub on lift, like Apple's own
-            // AVPlayerViewController: the user expects the bar's final position
-            // to take effect without a separate Select press. A vertical-only
-            // gesture never started a scrub, so nothing to commit.
+            // AVPlayerViewController. But distinguish *intent*: a deliberate slow
+            // landing commits now so playback resumes the instant you settle (the
+            // play-on-landing feel), while a fast flick is mid-traversal — keep
+            // the scrub session alive and bridge to the next swipe so we don't
+            // seek + rebuffer + resume between every swipe (the "fighting it"
+            // churn, which also steals bandwidth from the trickplay download).
             if panAxis == .horizontal, model.isScrubbing {
-                commitScrub()
+                let liftSpeed = abs(Double(gesture.velocity(in: view).x))
+                if gesture.state == .ended, liftSpeed >= scrubFlickCommitThreshold {
+                    scheduleScrubCommit()
+                } else {
+                    commitScrub()
+                }
             }
             panAxis = .undecided
         default:
@@ -609,6 +657,8 @@ final class PlayerInputViewController: UIViewController {
 
     private func commitScrub() {
         guard model.isScrubbing else { return }
+        // Any pending flick bridge is now resolved by this commit.
+        cancelScrubCommit()
         let target = model.scrubSeconds
         // Commit the optimistic target BEFORE leaving scrub mode. While
         // scrubbing, `displaySeconds` reads `scrubSeconds` (== target); once
@@ -622,6 +672,26 @@ final class PlayerInputViewController: UIViewController {
         model.seekIndicatorOnLeft = false
         if resumeAfterScrub { actions.togglePlayPause() }
         scheduleAutoHide()
+    }
+
+    /// Defers a flick-ended scrub's commit by `scrubFlickBridgeWindow`. If a
+    /// follow-up swipe arrives first it cancels this (continuing the session);
+    /// otherwise the timer fires and the scrub commits — seeking + resuming once
+    /// the traversal has actually settled.
+    private func scheduleScrubCommit() {
+        scrubCommitTask?.cancel()
+        let window = scrubFlickBridgeWindow
+        scrubCommitTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(window * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.scrubCommitTask = nil
+            self.commitScrub()
+        }
+    }
+
+    private func cancelScrubCommit() {
+        scrubCommitTask?.cancel()
+        scrubCommitTask = nil
     }
 
     private func cancelScrub() {

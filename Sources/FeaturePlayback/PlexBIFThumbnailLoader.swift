@@ -66,6 +66,11 @@ final class PlexBIFThumbnailLoader: ScrubThumbnailProviding {
         return decoded[frameIndex]
     }
 
+    func prefetch() {
+        // Kick the (coalesced) blob download so the first scrub has data ready.
+        Task { _ = await ensureLoaded() }
+    }
+
     /// Slices the JPEG bytes for a frame out of the in-memory blob. Cheap (a
     /// `Data` subrange copy) and safe to run on the main actor; the expensive
     /// decode is done separately, off-main.

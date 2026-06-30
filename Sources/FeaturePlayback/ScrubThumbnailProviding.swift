@@ -18,5 +18,13 @@ protocol ScrubThumbnailProviding: AnyObject {
     /// in memory; `nil` otherwise (the caller should fall back to the async
     /// path). Lets the overlay swap frames instantly while scrubbing.
     func cachedThumbnail(forSeconds seconds: TimeInterval) -> CGImage?
+
+    /// Optionally begins fetching/parsing the backing data ahead of the first
+    /// scrub, so previews are ready when the viewer starts dragging. Idempotent.
+    func prefetch()
+}
+
+extension ScrubThumbnailProviding {
+    func prefetch() {}
 }
 #endif

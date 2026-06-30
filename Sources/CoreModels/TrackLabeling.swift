@@ -175,11 +175,15 @@ public enum TrackLabeling {
         return "\(base) (\(qualifiers.joined(separator: ", ")))"
     }
 
-    /// Builds the audio menu label. Provider audio titles are usually rich
-    /// ("English - Dolby Digital - 5.1"), so a meaningful one is kept as-is; only
-    /// generic ones are replaced with the resolved language name (or "Track N"),
-    /// then annotated with the audio format ("DTS 7.1") and a Commentary marker
-    /// when known.
+    /// Builds the audio menu label. Leads with the resolved **language** (like
+    /// Plex's "Japanese (OPUS 5.1)") because provider audio titles are often a
+    /// release/encoder tag that omits the language entirely ("[HR] 5.1 Channels
+    /// (Doc_Ramen)") — returning such a title wholesale would hide the language.
+    /// A provider title that already *names* the language is kept as-is (it's a
+    /// complete human label, e.g. "English - Dolby Digital - 5.1"); otherwise the
+    /// language leads and is annotated with the audio format ("DTS 7.1") and a
+    /// Commentary marker. Falls back to a meaningful title, then "Track N", only
+    /// when no language resolves.
     public static func audioLabel(
         displayTitle: String,
         language: String?,
@@ -189,10 +193,25 @@ public enum TrackLabeling {
         isCommentary: Bool = false,
         trackID: Int
     ) -> String {
-        // A meaningful provider title already carries codec/channel detail.
-        if !isGenericTitle(displayTitle) { return displayTitle }
+        let languageNm = languageName(forCode: language)
 
-        let base = languageName(forCode: language) ?? "Track \(trackID)"
+        // A provider title that already names the language is a complete label.
+        if let languageNm,
+           !isGenericTitle(displayTitle),
+           displayTitle.range(of: languageNm, options: .caseInsensitive) != nil {
+            return displayTitle
+        }
+
+        let base: String
+        if let languageNm {
+            base = languageNm
+        } else if !isGenericTitle(displayTitle) {
+            // No language, but the title says something real — trust it as-is.
+            return displayTitle
+        } else {
+            base = "Track \(trackID)"
+        }
+
         var qualifiers: [String] = []
         if let hint = audioFormatHint(codec: codec, channels: channels, isAtmos: isAtmos) {
             qualifiers.append(hint)

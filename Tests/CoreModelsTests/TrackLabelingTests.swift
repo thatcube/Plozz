@@ -104,6 +104,43 @@ final class TrackLabelingTests: XCTestCase {
         XCTAssertEqual(label, "English - Dolby Digital - 5.1")
     }
 
+    func testAudioLabelLeadsWithLanguageWhenTitleOmitsIt() {
+        // Release-group/encoder titles ("[HR] 5.1 Channels (Doc_Ramen)") look
+        // "rich" but carry no language, so the resolved language must lead instead
+        // of the raw title being shown wholesale.
+        XCTAssertEqual(
+            TrackLabeling.audioLabel(
+                displayTitle: "[HR] 5.1 Channels (Doc_Ramen)",
+                language: "ja", codec: "opus", channels: 6, trackID: 1
+            ),
+            "Japanese (Opus 5.1)"
+        )
+        XCTAssertEqual(
+            TrackLabeling.audioLabel(
+                displayTitle: "[HR] 5.1 Channels (Doc_Ramen)",
+                language: "en", codec: "opus", channels: 6, trackID: 2
+            ),
+            "English (Opus 5.1)"
+        )
+        XCTAssertEqual(
+            TrackLabeling.audioLabel(
+                displayTitle: "[HR] 5.1 Channels (Doc_Ramen)",
+                language: "fr", codec: "opus", channels: 6, trackID: 3
+            ),
+            "French (Opus 5.1)"
+        )
+    }
+
+    func testAudioLabelKeepsDescriptiveTitleThatNamesLanguage() {
+        // A title that already names the language is a complete human label.
+        XCTAssertEqual(
+            TrackLabeling.audioLabel(
+                displayTitle: "Japanese Commentary", language: "ja", codec: "aac", channels: 2, trackID: 1
+            ),
+            "Japanese Commentary"
+        )
+    }
+
     func testAudioLabelReplacesGenericWithLanguage() {
         XCTAssertEqual(
             TrackLabeling.audioLabel(displayTitle: "Track 2", language: "fra", trackID: 2),

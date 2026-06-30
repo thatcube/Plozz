@@ -886,6 +886,15 @@ public final class PlayerViewModel {
                 let kind: VideoSeekKind = isFinal ? .exact : .fast
                 await self.engine.seek(to: next, kind: kind)
             }
+            // The seek has landed. AVPlayer can settle at rate 0 once a seek
+            // resolves on a buffering edge — the data is ready but playback never
+            // resumes on its own (a manual pause→play would start it instantly).
+            // Re-assert the intended play state so a committed seek always resumes
+            // without the viewer nudging it. Skipped when the user is paused, so
+            // scrubbing while paused stays paused after landing.
+            if !self.controls.isPaused {
+                self.engine.play()
+            }
             self.seekTask = nil
             self.controls.isSeeking = false
             // `pendingSeekTarget` is cleared by the refresh poll once the

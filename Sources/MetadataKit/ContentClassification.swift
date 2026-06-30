@@ -45,6 +45,16 @@ public enum ContentClassifier {
         }
     }
 
+    /// The subtitle-policy content category for `item` (design §5.0). Bridges the
+    /// routing-oriented ``ContentType`` onto the persistence-friendly
+    /// ``SubtitleContentCategory`` the per-content-type subtitle policy is keyed
+    /// on, so the player can resolve "forced-only on movies, full subs on anime"
+    /// without the playback layer re-running classification logic. `music` and
+    /// `unknown` map to ``SubtitleContentCategory/other`` (the profile base).
+    public static func subtitleCategory(for item: MediaItem) -> SubtitleContentCategory {
+        classify(item).subtitleCategory
+    }
+
     /// `true` when the provider-id key names an anime database (AniList / AniDB /
     /// MyAnimeList / Shoko / Kitsu), tolerant of the casing/punctuation each
     /// backend uses. Lets callers copy just a series' anime ids onto its episodes.

@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Per-profile persistence of the subtitle policy's per-content-type overrides
 /// (design §5.0). Only the *overrides* are stored; the base rule is derived live
@@ -19,9 +20,7 @@ public extension SubtitlePolicyStoring {
     /// come from this store. Resolving it for any category yields exactly today's
     /// behaviour when no overrides are set.
     func resolvedPolicy(caption: CaptionSettings) -> SubtitlePolicy {
-        var policy = SubtitlePolicy.inheriting(from: caption)
-        policy.overrides = overrides()
-        return policy
+        SubtitlePolicy.resolved(caption: caption, overrides: overrides())
     }
 }
 
@@ -76,5 +75,35 @@ public final class SubtitlePolicyStore: SubtitlePolicyStoring, @unchecked Sendab
         if let data = try? JSONEncoder().encode(map) {
             defaults.set(data, forKey: key)
         }
+    }
+}
+
+// MARK: - Observable model
+
+/// Observable wrapper so SwiftUI settings screens can two-way bind the
+/// per-content-type subtitle overrides and have changes persisted. Mirrors
+/// `CaptionSettingsModel`/`PlaybackSettingsModel`. The profile base mode/language
+/// still lives in `CaptionSettings`; this only owns the *overrides* (design §5.0),
+/// so the two can never drift.
+@MainActor
+@Observable
+public final class SubtitlePolicyModel {
+    /// Per-content-type overrides. An empty map means "inherit the profile base
+    /// everywhere" — exactly today's single global behaviour.
+    public var overrides: [SubtitleContentCategory: SubtitlePolicy.Rule] {
+        didSet { store.setOverrides(overrides) }
+    }
+
+    private let store: any SubtitlePolicyStoring
+
+    public init(store: any SubtitlePolicyStoring = SubtitlePolicyStore()) {
+        self.store = store
+        self.overrides = store.overrides()
+    }
+
+    /// The fully-resolved policy for the current profile: base mirrors `caption`,
+    /// overrides come from this model. Fed into the player at load time.
+    public func resolvedPolicy(caption: CaptionSettings) -> SubtitlePolicy {
+        SubtitlePolicy.resolved(caption: caption, overrides: overrides)
     }
 }

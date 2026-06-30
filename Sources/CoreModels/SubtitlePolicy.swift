@@ -12,6 +12,16 @@ public enum SubtitleContentCategory: String, Codable, CaseIterable, Sendable, Ha
     case tvShow
     /// Music, mixed, or unclassifiable content — always uses the profile base.
     case other
+
+    /// Human-readable label for the Settings per-content-type rule rows.
+    public var displayName: String {
+        switch self {
+        case .anime: return "Anime"
+        case .movie: return "Movies"
+        case .tvShow: return "TV Shows"
+        case .other: return "Other"
+        }
+    }
 }
 
 // MARK: - Policy
@@ -99,6 +109,29 @@ public struct SubtitlePolicy: Codable, Equatable, Sendable {
                 autoDownloadIfMissing: caption.autoDownloadSubtitles
             )
         )
+    }
+
+    /// The live policy for a profile: the base mirrors `caption`, and each stored
+    /// override keeps its per-category `mode`/auto-download intent but always
+    /// adopts the base's *current* preferred languages. The Settings UI only edits
+    /// a category's `mode`, so an override's stored language is a frozen copy of
+    /// the base from when it was created; resolving against the current caption
+    /// language here means changing the profile's preferred subtitle language
+    /// immediately re-targets overridden categories instead of using a stale value.
+    /// (When per-category language controls are added, this refresh should become
+    /// conditional on the override carrying an explicit language.)
+    public static func resolved(
+        caption: CaptionSettings,
+        overrides: [SubtitleContentCategory: Rule]
+    ) -> SubtitlePolicy {
+        var policy = inheriting(from: caption)
+        let baseLanguages = policy.basePolicy.preferredLanguages
+        policy.overrides = overrides.mapValues { rule in
+            var refreshed = rule
+            refreshed.preferredLanguages = baseLanguages
+            return refreshed
+        }
+        return policy
     }
 
     /// The user's example matrix as an opt-in seed (design §5.3): forced-only for

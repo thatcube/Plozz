@@ -86,6 +86,7 @@ public struct RootView: View {
                         captionModel: appState.captionModel,
                         spoilerModel: appState.spoilerModel,
                         playbackModel: appState.playbackModel,
+                        subtitlePolicyModel: appState.subtitlePolicyModel,
                         themeModel: appState.themeModel,
                         seriesTrackStore: SeriesTrackPreferenceStore(namespace: appState.profilesModel.activeNamespace),
                         diagnosticsModel: appState.diagnosticsModel,

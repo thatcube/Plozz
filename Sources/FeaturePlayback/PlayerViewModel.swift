@@ -88,6 +88,13 @@ public final class PlayerViewModel {
     /// to play when the title has multiple versions; `nil` plays the default.
     private let mediaSourceID: String?
     private let captionSettings: CaptionSettings
+    /// The resolved per-content-type subtitle policy for this profile (design
+    /// §5.0/§5.3): base mirrors `captionSettings`, with optional per-category
+    /// overrides ("forced-only on movies, full subs on anime"). Read-only here —
+    /// the Settings UI owns edits — and resolved once per playback, so it's a
+    /// value, not a live store. Defaults to inheriting the caption settings, so a
+    /// profile that set no overrides behaves exactly as before.
+    private let subtitlePolicy: SubtitlePolicy
     /// Per-profile playback prefs. Today: whether to offer the Skip Intro/Credits
     /// button. When `skipIntros` is off, segments are never fetched or shown.
     private let playbackSettings: PlaybackSettings
@@ -299,6 +306,7 @@ public final class PlayerViewModel {
         itemID: String,
         mediaSourceID: String? = nil,
         captionSettings: CaptionSettings = .default,
+        subtitlePolicy: SubtitlePolicy? = nil,
         playbackSettings: PlaybackSettings = .default,
         seriesTrackStore: (any SeriesTrackPreferenceStoring)? = nil,
         seriesAccountFallbackID: String? = nil,
@@ -319,6 +327,7 @@ public final class PlayerViewModel {
         self.itemID = itemID
         self.mediaSourceID = mediaSourceID
         self.captionSettings = captionSettings
+        self.subtitlePolicy = subtitlePolicy ?? .inheriting(from: captionSettings)
         self.playbackSettings = playbackSettings
         self.seriesTrackStore = seriesTrackStore
         self.seriesAccountFallbackID = seriesAccountFallbackID
@@ -625,17 +634,19 @@ public final class PlayerViewModel {
             // so it appears, but only when we're direct-playing and a hybrid
             // engine is available. (A file with a text-subtitle equivalent stays
             // native; see `defaultSubtitleNeedsHybridEngine`.) Plozzigen also
-            // can't render bitmap subtitles, so it overrides too.
+            // can't render bitmap subtitles, so it overrides too. Use the
+            // per-content-type rule so this prediction matches the on-load default.
+            let subtitleRule = effectiveSubtitleRule(for: request.item)
             if (kind == .native || kind == .plozzigen), !request.isTranscoding, engineFactory.hybridAvailable,
                request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
-                   mode: captionSettings.subtitleMode,
-                   preferredLanguage: captionSettings.resolvedPreferredLanguage) {
+                   mode: subtitleRule.mode,
+                   preferredLanguage: subtitleRule.preferredLanguage) {
                 PlozzLog.playback.info("Default subtitle is image-based; routing to the hybrid engine so it can be rendered")
                 kind = .hybrid
                 // Reflect the auto-selected image subtitle in the track menu.
                 selectedSubtitleTrackID = request.subtitleTracks.defaultSubtitleSelection(
-                    mode: captionSettings.subtitleMode,
-                    preferredLanguage: captionSettings.resolvedPreferredLanguage)?.id
+                    mode: subtitleRule.mode,
+                    preferredLanguage: subtitleRule.preferredLanguage)?.id
             }
 
             try Task.checkCancellation()
@@ -663,6 +674,14 @@ public final class PlayerViewModel {
             originalLanguage: ContentClassifier.originalAudioLanguage(for: item),
             deviceLanguage: LanguageMatch.deviceLanguageCode
         )
+    }
+
+    /// The subtitle rule that applies to `item` (design §5.0): the profile's
+    /// per-content-type override for the item's category if set, else the profile
+    /// base. Feeds the on-load default selection, the image-sub engine-routing
+    /// prediction, and the auto-download decision so all three agree.
+    private func effectiveSubtitleRule(for item: MediaItem) -> SubtitlePolicy.Rule {
+        subtitlePolicy.effectiveRule(for: ContentClassifier.subtitleCategory(for: item))
     }
 
     // MARK: - Per-series remembered track selections
@@ -1585,9 +1604,10 @@ public final class PlayerViewModel {
             }
         }
 
+        let rule = request.map { effectiveSubtitleRule(for: $0.item) }
         let chosen = tracks.defaultSubtitleSelection(
-            mode: captionSettings.subtitleMode,
-            preferredLanguage: captionSettings.resolvedPreferredLanguage
+            mode: rule?.mode ?? captionSettings.subtitleMode,
+            preferredLanguage: rule?.preferredLanguage ?? captionSettings.resolvedPreferredLanguage
         )
         guard let chosen, !chosen.isImageBasedSubtitle else {
             engine.selectSubtitleTrack(nil)
@@ -1766,14 +1786,22 @@ public final class PlayerViewModel {
     /// preferred language, kicks off a detached background search+download so the
     /// server fetches one. Never blocks or affects the current playback session.
     private func startAutoSubtitleDownloadIfNeeded(request: PlaybackRequest) {
-        guard captionSettings.autoDownloadSubtitles else { return }
-        let language = captionSettings.resolvedPreferredLanguage
+        // Per-content-type rule decides whether to auto-download, the language to
+        // fetch, and forced-vs-full preference — so "auto-download a missing match
+        // for anime only" works. For un-overridden categories the rule already
+        // mirrors the caption base (`autoDownloadSubtitles`), so gate solely on the
+        // resolved rule: ORing the global flag back in would make a category
+        // override that sets `autoDownloadIfMissing: false` (e.g. movies) unable to
+        // turn the behaviour off while the profile-wide toggle is on.
+        let rule = effectiveSubtitleRule(for: request.item)
+        guard rule.autoDownloadIfMissing else { return }
+        let language = rule.preferredLanguage ?? captionSettings.resolvedPreferredLanguage
         guard !request.subtitleTracks.hasSuitableSubtitle(forLanguage: language) else { return }
         guard let language, !language.isEmpty else { return }
 
         let provider = self.provider
         let itemID = self.itemID
-        let mode = captionSettings.subtitleMode
+        let mode = rule.mode
         subtitleDownloadTask = Task.detached(priority: .background) {
             do {
                 let results = try await provider.remoteSubtitleSearch(itemID: itemID, language: language)

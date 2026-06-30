@@ -179,4 +179,56 @@ final class SubtitlePolicyTests: XCTestCase {
         store.setOverrides([:])
         XCTAssertTrue(store.overrides().isEmpty, "clearing to empty removes the persisted entry")
     }
+
+    // MARK: - resolved(caption:overrides:) refreshes override language
+
+    func testResolvedRefreshesOverrideLanguageFromCurrentCaption() {
+        // An override created while the base language was English…
+        let staleOverride = SubtitlePolicy.Rule(mode: .forcedOnly, preferredLanguages: ["en"], autoDownloadIfMissing: false)
+        // …must adopt the profile's *current* language once it changes to German,
+        // rather than keep serving the frozen "en".
+        let caption = CaptionSettings(subtitleMode: .all, preferredSubtitleLanguage: "de")
+        let resolved = SubtitlePolicy.resolved(caption: caption, overrides: [.movie: staleOverride])
+        let movieRule = resolved.effectiveRule(for: .movie)
+        XCTAssertEqual(movieRule.preferredLanguages, ["de"], "override language tracks the current caption base")
+        XCTAssertEqual(movieRule.mode, .forcedOnly, "the per-category mode is preserved")
+        XCTAssertFalse(movieRule.autoDownloadIfMissing, "the per-category auto-download intent is preserved")
+    }
+
+    func testResolvedKeepsOverrideAutoDownloadIndependentOfCaption() {
+        // Global auto-download ON, but the movie override says don't auto-download.
+        let caption = CaptionSettings(autoDownloadSubtitles: true, subtitleMode: .all, preferredSubtitleLanguage: "en")
+        let overrides = SubtitlePolicy.smartDefaultOverrides(base: SubtitlePolicy.Rule(preferredLanguages: ["en"]))
+        let resolved = SubtitlePolicy.resolved(caption: caption, overrides: overrides)
+        XCTAssertFalse(resolved.effectiveRule(for: .movie).autoDownloadIfMissing, "movie override can disable auto-download even when the global flag is on")
+        XCTAssertTrue(resolved.effectiveRule(for: .anime).autoDownloadIfMissing, "anime override keeps auto-download on")
+        XCTAssertTrue(resolved.effectiveRule(for: .other).autoDownloadIfMissing, "un-overridden categories follow the caption base")
+    }
+
+    // MARK: - Observable model
+
+    @MainActor
+    func testModelPersistsOverridesThroughStore() {
+        let defaults = makeDefaults()
+        let model = SubtitlePolicyModel(store: SubtitlePolicyStore(defaults: defaults))
+        XCTAssertTrue(model.overrides.isEmpty)
+
+        model.overrides = SubtitlePolicy.smartDefaultOverrides(
+            base: SubtitlePolicy.Rule(preferredLanguages: ["en"])
+        )
+        // A fresh store over the same defaults sees the persisted overrides.
+        let reopened = SubtitlePolicyStore(defaults: defaults)
+        XCTAssertEqual(reopened.overrides()[.movie]?.mode, .forcedOnly)
+        XCTAssertEqual(reopened.overrides()[.anime]?.mode, .all)
+    }
+
+    @MainActor
+    func testModelResolvedPolicyCombinesBaseAndOverrides() {
+        let model = SubtitlePolicyModel(store: SubtitlePolicyStore(defaults: makeDefaults()))
+        model.overrides = [.movie: SubtitlePolicy.Rule(mode: .forcedOnly, preferredLanguages: ["en"])]
+        let caption = CaptionSettings(subtitleMode: .all, preferredSubtitleLanguage: "en")
+        let resolved = model.resolvedPolicy(caption: caption)
+        XCTAssertEqual(resolved.effectiveRule(for: .movie).mode, .forcedOnly)
+        XCTAssertEqual(resolved.effectiveRule(for: .anime).mode, .all, "anime inherits the caption base")
+    }
 }

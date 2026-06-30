@@ -186,6 +186,49 @@ struct SpoilersDetailView: View {
 }
 struct PlaybackDetailView: View {
     @Bindable var playback: PlaybackSettingsModel
+    /// The profile base subtitle mode/language lives in `CaptionSettings`.
+    @Bindable var captions: CaptionSettingsModel
+    /// Per-content-type overrides ("forced-only on movies, full subs on anime").
+    @Bindable var subtitlePolicy: SubtitlePolicyModel
+
+    /// The three classifiable content types the per-type rules apply to (`.other`
+    /// always follows the base, so it isn't shown as its own row).
+    private static let policyCategories: [SubtitleContentCategory] = [.anime, .movie, .tvShow]
+
+    /// Whether the profile has opted into per-content-type rules (any override set).
+    private var perContentTypeEnabled: Bool { !subtitlePolicy.overrides.isEmpty }
+
+    /// The profile base rule, derived live from the caption settings.
+    private var baseRule: SubtitlePolicy.Rule {
+        SubtitlePolicy.inheriting(from: captions.settings).basePolicy
+    }
+
+    /// Toggles the whole per-content-type matrix: adopting the smart seed
+    /// (forced-only movies, full anime/TV) on, or clearing back to the single
+    /// base everywhere off.
+    private var perContentTypeBinding: Binding<Bool> {
+        Binding(
+            get: { perContentTypeEnabled },
+            set: { on in
+                subtitlePolicy.overrides = on
+                    ? SubtitlePolicy.smartDefaultOverrides(base: baseRule)
+                    : [:]
+            }
+        )
+    }
+
+    /// A picker binding for one category's subtitle mode, falling back to the
+    /// base mode when no override is stored yet.
+    private func modeBinding(for category: SubtitleContentCategory) -> Binding<CaptionSettings.SubtitleMode> {
+        Binding(
+            get: { subtitlePolicy.overrides[category]?.mode ?? baseRule.mode },
+            set: { newMode in
+                var rule = subtitlePolicy.overrides[category] ?? baseRule
+                rule.mode = newMode
+                subtitlePolicy.overrides[category] = rule
+            }
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -211,6 +254,47 @@ struct PlaybackDetailView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(SettingsFocusButtonStyle())
+                }
+
+                SettingsPanel(
+                    title: "Subtitles",
+                    footer: "“Forced only” shows just the subtitles a title flags for foreign-language passages — handy if you don't want full subtitles but still want translations for the occasional non-English scene. Turn on per-content-type rules to mix this with full subtitles for, say, anime."
+                ) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        LabeledSettingRow("Show by default", labelWidth: 220) {
+                            SettingsOptionPicker(
+                                options: CaptionSettings.SubtitleMode.allCases,
+                                selection: $captions.settings.subtitleMode,
+                                title: { $0.displayName }
+                            )
+                        }
+
+                        Text(perContentTypeEnabled
+                             ? "Used for anything without its own rule below (e.g. music videos)."
+                             : "Applies to everything. Switch on per-content-type rules to vary it by anime, movies and TV.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Divider()
+
+                        Toggle("Different rules for anime, movies & TV", isOn: perContentTypeBinding)
+
+                        if perContentTypeEnabled {
+                            ForEach(Self.policyCategories, id: \.self) { category in
+                                LabeledSettingRow(category.displayName, labelWidth: 220) {
+                                    SettingsOptionPicker(
+                                        options: CaptionSettings.SubtitleMode.allCases,
+                                        selection: modeBinding(for: category),
+                                        title: { $0.displayName }
+                                    )
+                                }
+                            }
+
+                            Text("Each content type picks its own default — for example forced-only on movies but full subtitles on anime.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 SettingsPanel(

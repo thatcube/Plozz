@@ -329,14 +329,15 @@ struct PlayerControls: View {
                 if row.isSelected {
                     Image(systemName: "checkmark")
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(palette.accent)
+                        .playerMenuRowMark(isSelected: true, accent: palette.accent)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
         .focused($focus, equals: .row(row.id))
     }
 
@@ -348,20 +349,21 @@ struct PlayerControls: View {
                     if !row.subtitle.isEmpty {
                         Text(row.subtitle)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .playerMenuRowSecondary()
                             .lineLimit(2)
                     }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: row.isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.body)
-                    .foregroundStyle(row.isSelected ? palette.accent : .secondary)
+                    .playerMenuRowMark(isSelected: row.isSelected, accent: palette.accent)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
         .focused($focus, equals: .row(row.id))
     }
 
@@ -502,14 +504,15 @@ struct PlayerControls: View {
                 if isSelected {
                     Image(systemName: "checkmark")
                         .font(.headline)
-                        .foregroundStyle(palette.accent)
+                        .playerMenuRowMark(isSelected: true, accent: palette.accent)
                 }
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
         .focused($focus, equals: .row(index))
     }
 
@@ -525,19 +528,20 @@ struct PlayerControls: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.title3.weight(.medium))
                     if !subtitle.isEmpty {
-                        Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+                        Text(subtitle).font(.footnote).playerMenuRowSecondary()
                     }
                 }
                 Spacer()
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(isOn ? palette.accent : .secondary)
+                    .playerMenuRowMark(isSelected: isOn, accent: palette.accent)
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
         .focused($focus, equals: .row(index))
     }
 

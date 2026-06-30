@@ -84,9 +84,6 @@ struct PlaybackDiagnosticsOverlay: View {
             audioSection(d)
             subtitleSection(d)
             playbackSection(d)
-            if d.mode == .localRemux {
-                remuxSection(d)
-            }
             systemSection(d)
         }
     }
@@ -148,21 +145,6 @@ struct PlaybackDiagnosticsOverlay: View {
     }
 
     @ViewBuilder
-    private func remuxSection(_ d: PlaybackDiagnostics) -> some View {
-        section("LOCAL REMUX") {
-            optionalRow("Strategy", d.remuxStrategyText)
-            optionalRow("Transport", d.remuxTransportText)
-            optionalRow("TTFF", d.remuxTimeToFirstFrameText)
-            optionalRow("Seek", d.remuxSeekLatencyText)
-            optionalRow("Stalls", d.remuxStallsText)
-            optionalRow("Segments", d.remuxSegmentsText)
-            optionalRow("Bytes", d.remuxBytesText)
-            optionalRow("Cache", d.remuxUsageText)
-            optionalRow("Harness", d.remuxHarnessText)
-        }
-    }
-
-    @ViewBuilder
     private func systemSection(_ d: PlaybackDiagnostics) -> some View {
         section("SYSTEM") {
             optionalRow("Device", d.deviceText)
@@ -191,9 +173,6 @@ struct PlaybackDiagnosticsOverlay: View {
     // MARK: - Rows
 
     private func sourceText(_ d: PlaybackDiagnostics) -> String {
-        if d.mode == .localRemux, d.remux?.strategyID == LocalRemuxStrategyChoice.referenceServerRemuxID {
-            return "Server HLS baseline"
-        }
         return d.mode.displayName
     }
 

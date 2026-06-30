@@ -70,7 +70,7 @@ public final class MALService {
         // Mint a 32-char TV session so the short redeem code is bound to this TV.
         let session = Self.randomSession()
         pendingSession = session
-        // Show the relay auth URL — Worker handles PKCE and exchange
+        // Show the relay auth URL — relay handles PKCE and exchange
         phase = .awaitingAuthorizationCode(authorizationURL: "\(config.relayBaseURL)/myanimelist?s=\(session)")
     }
 

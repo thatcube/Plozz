@@ -29,7 +29,6 @@ public final class PlaybackDiagnosticsSampler {
     /// Immutable per-stream facts (codec/HDR/fps/mode/container/device) merged
     /// into every dynamic sample.
     private var staticDiagnostics = PlaybackDiagnostics()
-    private var remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)?
     /// Live engine telemetry source (dropped frames / FPS / bitrate). Used to fill
     /// the per-tick metrics on engines with no `AVPlayer` access log (Plozzigen).
     private var engineTelemetry: (@MainActor () -> EngineLiveTelemetry?)?
@@ -42,9 +41,8 @@ public final class PlaybackDiagnosticsSampler {
     private static let playbackLog = Logger(subsystem: "com.thatcube.Plozz", category: "Playback")
 
     /// `REMUX_STDOUT=1` mirrors the `remux-stall:` marker to stdout (prefixed
-    /// `PLZREMUX `) so `devicectl --console` captures it alongside LocalRemux's
-    /// remux-av / remux-tput stdout mirror — os_log alone isn't readable off a
-    /// network-paired Apple TV on this toolchain. Same seam as LocalRemux.RemuxLog.
+    /// `PLZREMUX `) so `devicectl --console` captures it — os_log alone isn't
+    /// readable off a network-paired Apple TV on this toolchain.
     private static let mirrorsStandardOut: Bool =
         ProcessInfo.processInfo.environment["REMUX_STDOUT"] == "1"
 
@@ -76,14 +74,10 @@ public final class PlaybackDiagnosticsSampler {
         sourceProvider: ProviderKind? = nil,
         serverName: String? = nil,
         streamURL: URL? = nil,
-        remuxEligible: Bool? = nil,
-        remuxEligibilityDetail: String? = nil,
-        remuxSnapshot: (@MainActor () -> PlaybackDiagnostics.RemuxDiagnostics?)? = nil,
         engineTelemetry: (@MainActor () -> EngineLiveTelemetry?)? = nil
     ) {
         stop()
         self.player = player
-        self.remuxSnapshot = remuxSnapshot
         self.engineTelemetry = engineTelemetry
         self.lastLoggedStallCount = 0
         var base = PlaybackDiagnostics.base(
@@ -95,8 +89,6 @@ public final class PlaybackDiagnosticsSampler {
         )
         base.engineName = engineName
         base.streamTransport = PlaybackDiagnostics.streamTransportSummary(url: streamURL)
-        base.remuxEligible = remuxEligible
-        base.remuxEligibilityDetail = remuxEligibilityDetail
         Self.fillDeviceInfo(into: &base)
         staticDiagnostics = base
         latest = staticDiagnostics
@@ -121,7 +113,6 @@ public final class PlaybackDiagnosticsSampler {
         timerTask?.cancel()
         timerTask = nil
         player = nil
-        remuxSnapshot = nil
         engineTelemetry = nil
     }
 
@@ -176,18 +167,14 @@ public final class PlaybackDiagnosticsSampler {
                 if event.numberOfDroppedVideoFrames >= 0 {
                     diagnostics.droppedVideoFrames = event.numberOfDroppedVideoFrames
                 }
-                if var remux = remuxSnapshot?(), event.numberOfStalls >= 0 {
-                    remux.stallCount = max(remux.stallCount ?? 0, event.numberOfStalls)
-                    diagnostics.remux = remux
-                }
                 logNewStalls(event: event, item: item)
             }
 
             diagnostics.bufferedSecondsAhead = bufferedSecondsAhead(in: item)
 
             // Timeline + seek window: the key seek diagnostic. A throttled server
-            // HLS stream reports a small trailing seekable window; a true app-owned
-            // remux should report the whole duration as seekable.
+            // HLS stream reports a small trailing seekable window; an app-owned
+            // stream reports the whole duration as seekable.
             let duration = item.duration.seconds
             if duration.isFinite, duration > 0 { diagnostics.durationSeconds = duration }
             let position = item.currentTime().seconds
@@ -205,10 +192,6 @@ public final class PlaybackDiagnosticsSampler {
             if diagnostics.streamTransport == nil, let urlAsset = item.asset as? AVURLAsset {
                 diagnostics.streamTransport = PlaybackDiagnostics.streamTransportSummary(url: urlAsset.url)
             }
-        }
-
-        if diagnostics.remux == nil {
-            diagnostics.remux = remuxSnapshot?()
         }
 
         // Engines without an AVPlayer (Plozzigen/mpv) have no access log, so the

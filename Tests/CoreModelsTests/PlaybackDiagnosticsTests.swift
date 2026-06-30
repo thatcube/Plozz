@@ -179,7 +179,6 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
     func testModeAndHDRDisplayNames() {
         XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.directPlay.displayName, "Direct Play")
         XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.remux.displayName, "Remux (server, lossless)")
-        XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.localRemux.displayName, "Local Remux")
         XCTAssertEqual(PlaybackDiagnostics.PlaybackMode.transcode.displayName, "Transcode (server)")
         XCTAssertEqual(PlaybackDiagnostics.HDRFormat.dolbyVision.displayName, "Dolby Vision")
         XCTAssertEqual(PlaybackDiagnostics.HDRFormat.hdr10.displayName, "HDR10 (PQ)")
@@ -270,38 +269,6 @@ final class PlaybackDiagnosticsFormattingTests: XCTestCase {
         XCTAssertEqual(d.containerText, "—")
         XCTAssertEqual(d.subtitleText, "—")
     }
-
-    func testRemuxFormattingConveniences() {
-        let remux = PlaybackDiagnostics.RemuxDiagnostics(
-            strategyID: "reference.server-remux",
-            strategyName: "Reference",
-            timeToFirstFrameMs: 840,
-            lastSeekLatencyMs: 125,
-            stallCount: 2,
-            segmentCount: 18,
-            bytesPulled: 1_073_741_824,
-            cacheDiskBytes: 524_288_000,
-            cacheMemoryBytes: 67_108_864,
-            harnessState: .failed,
-            lastHarnessResult: .init(
-                state: .failed,
-                summary: "Failed · Seek near EOF timed out",
-                startedAt: .distantPast,
-                finishedAt: .distantFuture
-            )
-        )
-        let diagnostics = PlaybackDiagnostics(mode: .localRemux, remux: remux)
-
-        XCTAssertEqual(diagnostics.remuxStrategyText, "Reference")
-        XCTAssertEqual(diagnostics.remuxTransportText, "Server-owned HLS · seek still depends on provider")
-        XCTAssertEqual(diagnostics.remuxTimeToFirstFrameText, "840 ms")
-        XCTAssertEqual(diagnostics.remuxSeekLatencyText, "125 ms")
-        XCTAssertEqual(diagnostics.remuxStallsText, "2")
-        XCTAssertEqual(diagnostics.remuxSegmentsText, "18")
-        XCTAssertEqual(diagnostics.remuxBytesText, "1.00 GB")
-        XCTAssertEqual(diagnostics.remuxUsageText, "RAM 64 MB · Disk 500 MB")
-        XCTAssertEqual(diagnostics.remuxHarnessText, "Failed · Seek near EOF timed out")
-    }
 }
 
 final class PlaybackDiagnosticsEnrichedTests: XCTestCase {
@@ -382,20 +349,6 @@ final class PlaybackDiagnosticsEnrichedTests: XCTestCase {
             "App-local 127.0.0.1:8888 · fMP4/MP4"
         )
         XCTAssertNil(PlaybackDiagnostics.streamTransportSummary(url: nil))
-    }
-
-    func testRemuxEligibilityText() {
-        var eligible = PlaybackDiagnostics(mode: .localRemux)
-        eligible.remuxEligible = true
-        eligible.remuxEligibilityDetail = "MKV · HEVC · DoVi P8 · EAC3"
-        XCTAssertEqual(eligible.remuxEligibilityText, "Eligible · MKV · HEVC · DoVi P8 · EAC3")
-
-        var ineligible = PlaybackDiagnostics(mode: .directPlay)
-        ineligible.remuxEligible = false
-        ineligible.remuxEligibilityDetail = "TrueHD stays on the hybrid engine"
-        XCTAssertEqual(ineligible.remuxEligibilityText, "Not eligible · TrueHD stays on the hybrid engine")
-
-        XCTAssertEqual(PlaybackDiagnostics(mode: .directPlay).remuxEligibilityText, "—")
     }
 
     func testCodecTagFlagsHev1BlackScreenRisk() {

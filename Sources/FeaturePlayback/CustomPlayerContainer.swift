@@ -19,9 +19,6 @@ struct PlayerActions {
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
-    var selectLocalRemuxStrategy: (String) -> Void = { _ in }
-    var reloadLocalRemuxPlayback: () -> Void = {}
-    var runRemuxSeekTortureTest: () -> Void = {}
     /// Seek past the active intro/credits segment (Skip button Select).
     var skipSegment: () -> Void = {}
     /// Auto-seek past the active segment (no button) when Auto-skip is enabled.
@@ -260,10 +257,7 @@ final class PlayerInputViewController: UIViewController {
             setPlaybackSpeed: { [weak self] in self?.actions.setPlaybackSpeed($0) },
             setAudioDelay: { [weak self] in self?.actions.setAudioDelay($0) },
             setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
-            setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) },
-            selectLocalRemuxStrategy: { [weak self] in self?.actions.selectLocalRemuxStrategy($0) },
-            reloadLocalRemuxPlayback: { [weak self] in self?.actions.reloadLocalRemuxPlayback() },
-            runRemuxSeekTortureTest: { [weak self] in self?.actions.runRemuxSeekTortureTest() }
+            setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) }
         )
         let host = UIHostingController(rootView: themePalette.makeControls(model, actions, exitToSurface))
         host.view.backgroundColor = .clear

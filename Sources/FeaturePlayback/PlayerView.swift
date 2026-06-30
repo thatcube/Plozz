@@ -65,9 +65,6 @@ public struct PlayerView: View {
                         setAudioDelay: { viewModel.setAudioDelay($0) },
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
-                        selectLocalRemuxStrategy: { viewModel.selectLocalRemuxStrategy($0) },
-                        reloadLocalRemuxPlayback: { viewModel.reloadWithSelectedLocalRemuxStrategy() },
-                        runRemuxSeekTortureTest: { viewModel.runLocalRemuxSeekTortureTest() },
                         skipSegment: { viewModel.skipActiveSegment() },
                         autoSkipSegment: { viewModel.autoSkipActiveSegment() },
                         dismissSkip: { viewModel.dismissActiveSkipSegment() },
@@ -239,9 +236,6 @@ public struct PlayerView: View {
             sourceProvider: viewModel.sourceProvider,
             serverName: viewModel.serverName,
             streamURL: viewModel.diagnosticsStreamURL,
-            remuxEligible: viewModel.remuxEligibilitySummary?.eligible,
-            remuxEligibilityDetail: viewModel.remuxEligibilitySummary?.detail,
-            remuxSnapshot: { viewModel.localRemuxDiagnostics },
             engineTelemetry: { viewModel.engineLiveTelemetry }
         )
     }

@@ -154,13 +154,20 @@ public struct LRCLIBLyricsProvider: Sendable {
             }
             if let best = bestMatch(in: nearEnough, duration: knownDuration),
                let lyrics = best.lyrics() {
+                if let knownDuration, let bd = best.duration {
+                    LyricsTrace.emit("[lrclib] '\(title)' artist held-version accepted Δ=\(String(format: "%.1f", abs(bd - knownDuration)))s (≤\(Self.durationVersionCeiling)s)")
+                }
                 return (lyrics, true)
+            }
+            if !syncedRecords.isEmpty {
+                LyricsTrace.emit("[lrclib] '\(title)' artist held \(syncedRecords.count) synced ver(s), all >\(Self.durationVersionCeiling)s off — rejected (M2)")
             }
             return (plainFallback, anyReachable)
         }
 
         // A synced hit from the artist-qualified pass wins outright.
         if let lyrics = artistQualified.lyrics, lyrics.isSynced {
+            LyricsTrace.emit("[lrclib] '\(title)' artist-qualified synced match")
             return (lyrics, true)
         }
 
@@ -180,15 +187,18 @@ public struct LRCLIBLyricsProvider: Sendable {
         var bestPlain = artistQualified.lyrics
         var reachable = artistQualified.reachable
         if allowTitleOnlyFallback, artistQualified.lyrics == nil, let duration, duration > 0 {
+            LyricsTrace.emit("[lrclib] '\(title)' artist pass empty → running title-only fallback (\(candidates.count) candidate(s))")
             for candidate in candidates {
                 let result = await searchByTitleOnly(title: candidate, duration: duration)
                 if result.reachable { reachable = true }
                 guard let lyrics = result.record?.lyrics() else { continue }
                 if lyrics.isSynced {
+                    LyricsTrace.emit("[lrclib] '\(candidate)' title-only fallback → SYNCED")
                     return (lyrics, true)
                 }
                 if bestPlain == nil { bestPlain = lyrics }
             }
+            LyricsTrace.emit("[lrclib] '\(title)' title-only fallback → no synced")
         }
         return (bestPlain, reachable)
     }

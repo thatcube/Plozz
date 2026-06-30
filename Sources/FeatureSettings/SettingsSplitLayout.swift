@@ -263,4 +263,45 @@ private struct SettingsMasterRowLabel: View {
         .contentShape(Rectangle())
     }
 }
+
+/// A master switch that gates a group of dependent controls inside a single
+/// detail pane — the iOS "form section" idiom. The switch sits on top; flipping
+/// it on reveals an optional uppercase subhead and the `content` (e.g. the
+/// per-content-type Movies / TV Shows / Anime rows) directly beneath it.
+///
+/// This replaces dynamically inserting indented child rows into the *master*
+/// list (which made the left index feel unstable and mis-indented). Children
+/// now live where they belong — inside their parent setting's detail — and the
+/// master list keeps one stable row per setting.
+struct SettingsRevealSection<Content: View>: View {
+    @Binding var isOn: Bool
+    let masterLabel: String
+    var revealedHeader: String? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Toggle(masterLabel, isOn: $isOn)
+
+            if isOn {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let revealedHeader {
+                        Text(revealedHeader)
+                            .font(.subheadline.weight(.semibold))
+                            .textCase(.uppercase)
+                            .tracking(1.0)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                            .padding(.horizontal, 4)
+                    }
+                    content()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.22), value: isOn)
+    }
+}
 #endif

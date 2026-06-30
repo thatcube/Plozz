@@ -503,14 +503,14 @@ struct PlaybackDetailView: View {
     }
 
     private var subtitlesSection: SettingsSplitSection {
-        var rows: [SettingsSplitRow] = [
+        SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: [
             SettingsSplitRow(
                 id: "subtitle-default",
                 title: "Default",
                 description: "How subtitles behave by default for everything you play.",
                 valueSummary: captions.settings.subtitleMode.displayName
             ) {
-                SettingsOptionPicker(
+                SettingsSegmentedPicker(
                     options: CaptionSettings.SubtitleMode.allCases,
                     selection: $captions.settings.subtitleMode,
                     title: { $0.displayName }
@@ -518,34 +518,26 @@ struct PlaybackDetailView: View {
             },
             SettingsSplitRow(
                 id: "subtitle-per-type",
-                title: "Different default for movies, TV shows & anime",
+                title: "Different subtitle default per type",
                 description: "Use a separate subtitle default for each kind of content — for example forced-only on movies but full subtitles on anime.",
                 valueSummary: perContentTypeEnabled ? "On" : "Off"
             ) {
-                Toggle("Use a different default per content type", isOn: perContentTypeBinding)
-            }
-        ]
-
-        if perContentTypeEnabled {
-            for category in Self.policyCategories {
-                rows.append(
-                    SettingsSplitRow(
-                        id: "subtitle-\(category.rawValue)",
-                        title: category.displayName,
-                        valueSummary: (subtitlePolicy.overrides[category]?.mode ?? baseRule.mode).displayName,
-                        indented: true
-                    ) {
-                        SettingsOptionPicker(
-                            options: CaptionSettings.SubtitleMode.allCases,
-                            selection: modeBinding(for: category),
-                            title: { $0.displayName }
-                        )
+                SettingsRevealSection(
+                    isOn: perContentTypeBinding,
+                    masterLabel: "Use a different default per content type",
+                    revealedHeader: "Per Content Type"
+                ) {
+                    ForEach(Self.policyCategories, id: \.self) { category in
+                        LabeledSettingRow(category.displayName) {
+                            SettingsSegmentedPicker(
+                                options: CaptionSettings.SubtitleMode.allCases,
+                                selection: modeBinding(for: category),
+                                title: { $0.displayName }
+                            )
+                        }
                     }
-                )
-            }
-        }
-
-        rows.append(
+                }
+            },
             SettingsSplitRow(
                 id: "subtitle-remember",
                 title: "Remember subtitles per series",
@@ -554,13 +546,11 @@ struct PlaybackDetailView: View {
             ) {
                 Toggle("Remember subtitle choice per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
             }
-        )
-
-        return SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: rows)
+        ])
     }
 
     private var audioSection: SettingsSplitSection {
-        var rows: [SettingsSplitRow] = [
+        SettingsSplitSection(id: "audio", header: "Audio Language", rows: [
             SettingsSplitRow(
                 id: "audio-preferred",
                 title: "Preferred language",
@@ -571,30 +561,22 @@ struct PlaybackDetailView: View {
             },
             SettingsSplitRow(
                 id: "audio-per-type",
-                title: "Different default for movies, TV shows & anime",
+                title: "Different audio default per type",
                 description: "Use a separate preferred audio language for each kind of content — for example original audio for anime but your device language elsewhere.",
                 valueSummary: audioPerContentTypeEnabled ? "On" : "Off"
             ) {
-                Toggle("Use a different default per content type", isOn: audioPerContentTypeBinding)
-            }
-        ]
-
-        if audioPerContentTypeEnabled {
-            for category in Self.policyCategories {
-                rows.append(
-                    SettingsSplitRow(
-                        id: "audio-\(category.rawValue)",
-                        title: category.displayName,
-                        valueSummary: Self.audioPreferenceName(audioPreferenceBinding(for: category).wrappedValue),
-                        indented: true
-                    ) {
-                        audioLanguageMenu(audioPreferenceBinding(for: category))
+                SettingsRevealSection(
+                    isOn: audioPerContentTypeBinding,
+                    masterLabel: "Use a different default per content type",
+                    revealedHeader: "Per Content Type"
+                ) {
+                    ForEach(Self.policyCategories, id: \.self) { category in
+                        LabeledSettingRow(category.displayName) {
+                            audioLanguageMenu(audioPreferenceBinding(for: category))
+                        }
                     }
-                )
-            }
-        }
-
-        rows.append(
+                }
+            },
             SettingsSplitRow(
                 id: "audio-remember",
                 title: "Remember audio per series",
@@ -603,9 +585,7 @@ struct PlaybackDetailView: View {
             ) {
                 Toggle("Remember audio choice per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
             }
-        )
-
-        return SettingsSplitSection(id: "audio", header: "Audio Language", rows: rows)
+        ])
     }
 
     private var skipIntrosSection: SettingsSplitSection {

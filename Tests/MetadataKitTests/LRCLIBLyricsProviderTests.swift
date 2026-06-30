@@ -52,4 +52,25 @@ final class LRCLIBLyricsProviderTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Artist-path duration version ceiling (M2)
+
+    /// The artist-qualified "nearest held version" fallback must reject a synced
+    /// record whose length is far from the track's — a different mix (radio edit
+    /// vs 12"/extended) whose timestamps would drift the panel out of sync.
+    func testVersionDurationCeilingRejectsWrongLengthVersions() {
+        let track: TimeInterval = 240 // 4:00
+        // Same recording, minor metadata/gapless slack — accept.
+        XCTAssertTrue(LRCLIBLyricsProvider.versionDurationAcceptable(recordDuration: 242, trackDuration: track))
+        XCTAssertTrue(LRCLIBLyricsProvider.versionDurationAcceptable(recordDuration: 234, trackDuration: track))
+        // Exactly at the ceiling is still acceptable.
+        XCTAssertTrue(LRCLIBLyricsProvider.versionDurationAcceptable(
+            recordDuration: track + LRCLIBLyricsProvider.durationVersionCeiling, trackDuration: track))
+        // Different cut (radio edit / extended mix) — reject so we show nothing
+        // rather than drifting lyrics.
+        XCTAssertFalse(LRCLIBLyricsProvider.versionDurationAcceptable(recordDuration: 210, trackDuration: track))
+        XCTAssertFalse(LRCLIBLyricsProvider.versionDurationAcceptable(recordDuration: 360, trackDuration: track))
+        // A record with no duration of its own can't be matched safely.
+        XCTAssertFalse(LRCLIBLyricsProvider.versionDurationAcceptable(recordDuration: nil, trackDuration: track))
+    }
 }

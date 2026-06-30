@@ -367,6 +367,7 @@ struct NowPlayingView: View {
                 asyncFallbackURL: trackFallback(controller.currentTrack)
             )
                 .frame(width: 420, height: 420)
+                .overlay(alignment: .bottomTrailing) { nowPlayingBadge }
                 .shadow(radius: 30)
 
             trackTextBlock
@@ -382,6 +383,26 @@ struct NowPlayingView: View {
                 .frame(height: showTrackDetails ? 236 : 156, alignment: .top)
                 .frame(maxWidth: .infinity)
         }
+    }
+
+    /// A small animated equalizer pinned to the artwork's bottom-trailing corner
+    /// — the one on-screen cue that audio is *actively* playing once the transport
+    /// controls auto-hide (artwork + title alone look identical paused vs playing).
+    /// Reuses the same `NowPlayingEqualizer` shown in track lists and the mini
+    /// player for visual consistency, sitting on a soft frosted scrim so the bars
+    /// stay legible over any artwork. Fades out when playback is paused, so its
+    /// presence *is* the "playing now" signal; respects Reduce Motion by holding
+    /// the bars still (the badge still shows) rather than animating.
+    private var nowPlayingBadge: some View {
+        NowPlayingEqualizer(isAnimating: controller.isPlaying && !reduceMotion)
+            .frame(width: 26)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(16)
+            .opacity(controller.isPlaying ? 1 : 0)
+            .animation(.easeInOut(duration: 0.3), value: controller.isPlaying)
+            .allowsHitTesting(false)
     }
 
     /// The title/artist (+ album & quality badge when "show track details" is on)

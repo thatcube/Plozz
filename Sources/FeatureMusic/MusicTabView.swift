@@ -287,6 +287,47 @@ func lyricsRefresher(for provider: any MusicProvider) -> AudioPlaybackController
     }
 }
 
+/// Pure decision for whether a *negative* (no synced lyrics) resolve may be
+/// trusted — i.e. cached and allowed to surface the one-time "No lyrics found"
+/// message. Extracted as a static, dependency-free function so the authority
+/// matrix — the source of the v2→v5 cache-poisoning regression history — is
+/// directly unit-testable without SwiftUI/AVFoundation or the network fan-out.
+///
+/// A negative is authoritative only when every source we needed actually
+/// answered *and* we used full effort:
+///   - the server must have been reachable (it's always consulted);
+///   - LRCLIB must not have been skipped purely for a missing artist;
+///   - if LRCLIB was available it must have been reachable (not throttled /
+///     offline / cancelled mid-skip);
+///   - and if LRCLIB ran with its title-only fallback disabled (background
+///     prefetch) while a usable duration was available, the resolve was
+///     reduced-effort: the fallback that finds tracks filed under a *different*
+///     artist (a duo/group credit like "Bad Meets Evil", a "Various Artists"
+///     soundtrack, a composer-vs-performer classical entry) never ran. Such a
+///     negative is INCOMPLETE — trusting it would cache "no lyrics" AND reset
+///     the 7-day refresh clock, suppressing the visible play's full fallback for
+///     a week on every queue-advanced track. So it must not be authoritative;
+///     the visible resolve re-runs the fallback instead of reading a poisoned
+///     negative. (No usable duration ⇒ the visible resolve couldn't run the
+///     fallback either, so that negative is as complete as it'll get and stays
+///     authoritative.)
+enum LyricsNegativeAuthority {
+    static func isAuthoritative(
+        serverReachable: Bool,
+        lrclibSkippedForMissingArtist: Bool,
+        lrclibAvailable: Bool,
+        lrclibReachable: Bool,
+        allowedTitleOnlyFallback: Bool,
+        hasUsableDuration: Bool
+    ) -> Bool {
+        guard serverReachable else { return false }
+        if lrclibSkippedForMissingArtist { return false }
+        if lrclibAvailable && !lrclibReachable { return false }
+        if lrclibAvailable && !allowedTitleOnlyFallback && hasUsableDuration { return false }
+        return true
+    }
+}
+
 /// Fans the server lookup and the LRCLIB fallback out concurrently and returns
 /// the **first synced** result from either source. Previously this awaited the
 /// server before even peeking at LRCLIB, so a slow server pinned the visible
@@ -386,10 +427,14 @@ private func resolveSyncedLyrics(
         // the LAN server answered "none" first while the LRCLIB request flaked
         // under load.
         func negativeIsAuthoritative() -> Bool {
-            guard serverReachable else { return false }
-            if lrclibSkippedForMissingArtist { return false }
-            if lrclibAvailable && !lrclibReachable { return false }
-            return true
+            LyricsNegativeAuthority.isAuthoritative(
+                serverReachable: serverReachable,
+                lrclibSkippedForMissingArtist: lrclibSkippedForMissingArtist,
+                lrclibAvailable: lrclibAvailable,
+                lrclibReachable: lrclibReachable,
+                allowedTitleOnlyFallback: allowTitleOnlyFallback,
+                hasUsableDuration: (track.duration ?? 0) > 0
+            )
         }
         for await outcome in group {
             if outcome.reachable {

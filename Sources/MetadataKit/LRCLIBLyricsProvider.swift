@@ -29,6 +29,16 @@ public struct LRCLIBLyricsProvider: Sendable {
     /// differences between the same master without bleeding into a different cut.
     static let durationMatchTolerance: TimeInterval = 2.5
 
+    /// Upper bound on how far a *held* synced version's length may differ from
+    /// the playing track before the artist-qualified path rejects it rather than
+    /// show drifting lyrics. Only the "nearest held version" fallback consults it
+    /// (the title-only path keeps its own tighter 3s window). A touch more lenient
+    /// than `durationMatchTolerance`'s immediate-accept because the artist already
+    /// matched, so the risk here is a wrong *mix*, not a wrong *song* — but still
+    /// tight enough to reject radio-edit-vs-extended-mix mismatches whose
+    /// timestamps would visibly drift out of sync as the track plays.
+    static let durationVersionCeiling: TimeInterval = 6
+
     public init() {}
 
     /// Looks up lyrics for a track, **preferring a synced version**. Tries the
@@ -124,9 +134,25 @@ public struct LRCLIBLyricsProvider: Sendable {
                     plainFallback = lyrics
                 }
             }
-            // No tight match arrived; among whatever synced versions we saw,
-            // prefer the one whose duration is closest to the track.
-            if let best = bestMatch(in: syncedRecords, duration: knownDuration),
+            // No tight match arrived; among whatever synced versions we held,
+            // prefer the one whose duration is closest to the track — but accept
+            // it only when that nearest version is still within a sane ceiling.
+            // Every held record is by definition >durationMatchTolerance off; if
+            // the closest is *wildly* off (a radio edit vs a 12"/extended/"summer"
+            // mix), its timestamps would drift the panel progressively out of sync
+            // as the song plays — worse than showing nothing. The artist already
+            // matched here, so the ceiling is a touch more lenient than the
+            // title-only path's tighter window. (`syncedRecords` is only populated
+            // when a duration is known, so there's always one to compare against.)
+            let nearEnough: [LRCLIBRecord]
+            if let knownDuration {
+                nearEnough = syncedRecords.filter {
+                    Self.versionDurationAcceptable(recordDuration: $0.duration, trackDuration: knownDuration)
+                }
+            } else {
+                nearEnough = syncedRecords
+            }
+            if let best = bestMatch(in: nearEnough, duration: knownDuration),
                let lyrics = best.lyrics() {
                 return (lyrics, true)
             }
@@ -254,6 +280,20 @@ public struct LRCLIBLyricsProvider: Sendable {
             return abs(recordDuration - duration) <= tolerance
         }
         return (bestMatch(in: inWindow, duration: duration), result.reachable)
+    }
+
+    /// Whether a held synced version whose own length is `recordDuration` is close
+    /// enough to the playing track's `trackDuration` to display without visibly
+    /// drifting. Pure and static so the artist-path version ceiling (the guard
+    /// against showing a wrong-length mix's timestamps) has direct test coverage.
+    /// A record with no duration of its own can't be safely matched, so it fails.
+    static func versionDurationAcceptable(
+        recordDuration: TimeInterval?,
+        trackDuration: TimeInterval,
+        ceiling: TimeInterval = durationVersionCeiling
+    ) -> Bool {
+        guard let recordDuration else { return false }
+        return abs(recordDuration - trackDuration) <= ceiling
     }
 
     /// Picks the best record: first prefer ones with **synced** lyrics, then —

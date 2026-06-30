@@ -258,9 +258,15 @@ struct PlayerControls: View {
         if columns.audio.isEmpty && columns.subtitles.isEmpty {
             emptyRow("No alternate tracks")
         } else {
-            HStack(alignment: .top, spacing: 0) {
-                if !columns.audio.isEmpty {
-                    trackColumn(title: "Audio", rows: columns.audio)
+            // 14pt of breathing room on BOTH sides of the center divider so a
+            // focused row's fitted card keeps an equal gutter to the divider as
+            // it does to the panel's outer edge (which carries the same 14pt
+            // pane margin below). With spacing:0 the columns butted the divider
+            // and the card sat ~6pt from it but ~20pt from the panel edge, which
+            // read as "too close to the middle divider".
+            HStack(alignment: .top, spacing: 14) {
+                if !columns.subtitles.isEmpty {
+                    trackColumn(title: "Subtitles", rows: columns.subtitles)
                 }
                 if !columns.audio.isEmpty && !columns.subtitles.isEmpty {
                     Rectangle()
@@ -268,8 +274,8 @@ struct PlayerControls: View {
                         .frame(width: 1)
                         .padding(.vertical, 6)
                 }
-                if !columns.subtitles.isEmpty {
-                    trackColumn(title: "Subtitles", rows: columns.subtitles)
+                if !columns.audio.isEmpty {
+                    trackColumn(title: "Audio", rows: columns.audio)
                 }
             }
             .padding(.horizontal, 14)
@@ -426,17 +432,17 @@ struct PlayerControls: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack {
-                Text(title).font(.title3)
-                Spacer()
+            HStack(spacing: 10) {
+                Text(title).font(.body).lineLimit(1)
+                Spacer(minLength: 8)
                 if isSelected {
                     Image(systemName: "checkmark")
-                        .font(.headline)
+                        .font(.body.weight(.semibold))
                         .playerMenuRowMark(isSelected: true, accent: palette.accent)
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(PlayerMenuRowButtonStyle())
@@ -595,7 +601,11 @@ struct PlayerControls: View {
     private func selectedRowIndex(for category: Category) -> Int {
         switch category {
         case .audioSubtitles:
-            let all = audioSubtitleColumns.audio + audioSubtitleColumns.subtitles
+            // Prefer the Subtitles column for default focus (it's the left/primary
+            // column). first(where: isSelected) over subtitles-then-audio lands on
+            // the active subtitle (incl. "Off"), falling back to audio only if no
+            // subtitle row reports selected.
+            let all = audioSubtitleColumns.subtitles + audioSubtitleColumns.audio
             return all.first(where: { $0.isSelected })?.id
                 ?? all.first?.id ?? 0
         case .speed:

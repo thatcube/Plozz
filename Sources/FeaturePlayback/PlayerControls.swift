@@ -241,14 +241,21 @@ struct PlayerControls: View {
             }
         }
         .frame(width: category == .audioSubtitles ? 860 : 760, alignment: .leading)
-        // NB: deliberately a flat opaque fill, NOT `.ultraThinMaterial`. A live
-        // backdrop-blur material here re-blurs full-motion (often HDR) video every
-        // frame the panel is open, which tanks the whole UI on Apple TV. A solid
-        // colour is GPU-cheap and stays perfectly readable over video.
-        .background(Color.black.opacity(0.92))
+        // Composite cheaply over Dolby Vision / HDR video. The frame-dropping
+        // culprit was the soft drop `.shadow` (a per-frame offscreen blur pass
+        // recomposited over the moving DV signal), so that stays gone. A simple
+        // translucent fill is fine — it's a single per-pixel blend per frame, far
+        // cheaper than a shadow blur — so we keep a little video showing through.
+        // (A `.ultraThinMaterial` here would be worst of all: a live backdrop blur
+        // of full-motion HDR every frame.) A 1px stroke gives edge separation for
+        // free, replacing the shadow.
+        .background(Color.black.opacity(0.8))
         .colorScheme(.dark)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(radius: 24)
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        )
     }
 
     @ViewBuilder

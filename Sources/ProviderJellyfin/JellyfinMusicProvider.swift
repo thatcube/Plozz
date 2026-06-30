@@ -357,10 +357,20 @@ extension JellyfinProvider: MusicProvider {
     // MARK: Lyrics
 
     public func lyrics(for trackID: String) async throws -> Lyrics? {
-        // The server answers 404 when a track has no lyrics; treat any failure as
-        // "no lyrics" so the UI shows its empty state rather than an error.
-        guard let dto = try? await client.lyrics(itemID: trackID),
-              let rawLines = dto.Lyrics, !rawLines.isEmpty else {
+        // The server answers 404 when a track has no lyrics. We must distinguish
+        // that authoritative "no lyrics" from a transport failure (offline / DNS /
+        // timeout / expired session): the former is a real verdict the caller may
+        // cache, the latter must be retried later. So we re-throw transport-level
+        // `AppError`s and only return `nil` for a genuine empty/absent result.
+        let dto: LyricDto
+        do {
+            dto = try await client.lyrics(itemID: trackID)
+        } catch let error as AppError where error.isTransportFailure {
+            throw error
+        } catch {
+            return nil
+        }
+        guard let rawLines = dto.Lyrics, !rawLines.isEmpty else {
             return nil
         }
         var lines = rawLines.map { line in

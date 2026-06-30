@@ -24,8 +24,6 @@ let package = Package(
         .library(name: "CoreUI", targets: ["CoreUI"]),
         .library(name: "MetadataKit", targets: ["MetadataKit"]),
         .library(name: "EngineMPV", targets: ["EngineMPV"]),
-        .library(name: "CRemuxCore", targets: ["CRemuxCore"]),
-        .library(name: "LocalRemux", targets: ["LocalRemux"]),
         .library(name: "FeatureDiscovery", targets: ["FeatureDiscovery"]),
         .library(name: "ProviderJellyfin", targets: ["ProviderJellyfin"]),
         .library(name: "ProviderPlex", targets: ["ProviderPlex"]),
@@ -58,8 +56,8 @@ let package = Package(
         // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
         .package(url: "https://github.com/superuser404notfound/AetherEngine", from: "4.6.3"),
         // AetherEngine's FFmpeg build (n8.1.2, minimal LGPL decode-only). Shared
-        // by AetherEngine, CRemuxCore, EngineMPV, and LocalRemux — replaces the
-        // locally-staged Frameworks/mpv/Libav*.xcframework set (same n8.1 ABI).
+        // by AetherEngine and EngineMPV — replaces the locally-staged
+        // Frameworks/mpv/Libav*.xcframework set (same n8.1 ABI).
         .package(url: "https://github.com/superuser404notfound/FFmpegBuild", from: "1.0.1"),
         // Dolby Vision RPU parser/converter (prebuilt xcframework, no Rust at
         // build time). Used by AetherEngine for DV P7→8.1 NAL surgery; also
@@ -133,89 +131,6 @@ let package = Package(
                 // libdovi from AetherEngine's LibDovi package.
                 .product(name: "Dovi", package: "LibDovi"),
                 // Prebuilt dependency xcframeworks (MPVKit-published, hosted).
-                "Libssl", "Libcrypto", "Libass", "Libfreetype", "Libfribidi",
-                "Libharfbuzz", "MoltenVK", "Libshaderc_combined", "lcms2",
-                "Libplacebo", "Libunibreak", "gmp", "nettle",
-                "hogweed", "gnutls",
-                .product(name: "Libdav1d", package: "FFmpegBuild"),
-                "Libuavs3d", "Libuchardet", "Libbluray"
-            ],
-            linkerSettings: [
-                .linkedFramework("AVFoundation"),
-                .linkedFramework("AVKit"),
-                .linkedFramework("CoreAudio"),
-                .linkedFramework("AudioToolbox"),
-                .linkedFramework("CoreVideo"),
-                .linkedFramework("CoreFoundation"),
-                .linkedFramework("CoreMedia"),
-                .linkedFramework("Metal"),
-                .linkedFramework("VideoToolbox"),
-                .linkedLibrary("bz2"),
-                .linkedLibrary("iconv"),
-                .linkedLibrary("expat"),
-                .linkedLibrary("resolv"),
-                .linkedLibrary("xml2"),
-                .linkedLibrary("z"),
-                .linkedLibrary("c++")
-            ]
-        ),
-
-        // MARK: Local remux (Infuse-style localhost HLS origin)
-        //
-        // `CRemuxCore` is a thin C core over libavformat/libavcodec that demuxes
-        // the ORIGINAL Matroska bytes (delivered lazily via Swift HTTP range-read
-        // callbacks) and produces, on demand, one shared fMP4 init segment plus
-        // each `-c copy` media segment cut on the source's real IDR keyframes —
-        // no re-encode, so true Dolby Vision (dvcC/dvvC, sample entry dvh1) +
-        // E-AC-3 JOC Atmos (dec3) pass through untouched. It reuses the SAME
-        // locally-built, LGPL-clean FFmpeg binary targets EngineMPV already links
-        // (no new dependency); the public header is FFmpeg-free so the Swift layer
-        // never sees FFmpeg.
-        .target(
-            name: "CRemuxCore",
-            dependencies: [
-                .product(name: "Libavformat", package: "FFmpegBuild"),
-                .product(name: "Libavcodec", package: "FFmpegBuild"),
-                .product(name: "Libavutil", package: "FFmpegBuild"),
-                .product(name: "Libswresample", package: "FFmpegBuild"),
-            ],
-            cSettings: [
-                // Compile the FFmpeg `#include`s TEXTUALLY rather than as implicit
-                // Clang module imports. The av* frameworks ship an umbrella module
-                // map, but FFmpeg n8's `libavutil` umbrella pulls in
-                // `hwcontext_amf.h`, which unconditionally `#include <AMF/core/…>`
-                // (an external GPU SDK absent on tvOS) and so fails to build as a
-                // module. We never touch AMF: `avformat.h`/`avcodec.h` only
-                // include the avutil basics, so a textual compile resolves cleanly
-                // (the framework `Headers/` are found via `-F`, and FFmpeg's
-                // lowercase cross-includes like `"libavutil/dict.h"` resolve to
-                // `Libavutil.framework` on the case-insensitive filesystem).
-                .unsafeFlags(["-fno-modules"])
-            ]
-        ),
-        // `LocalRemux` is the Swift layer: the pure VOD-playlist planner + route
-        // parser, the `HTTPRangeReader` backing the C AVIO, the `RemuxSegmenter`
-        // bridge, the hardened loopback `NWListener` HLS origin (caching, keep-
-        // alive, concurrency, never-404-a-declared-segment), and the
-        // `LocalRemuxStreamer`/`Session` that hands AVPlayer a
-        // `http://127.0.0.1:<port>/master.m3u8` so it owns the stream + seeks
-        // natively. Depends on FeaturePlayback for the local-remux seam protocols
-        // and CoreModels for the strategy/source types; it is never linked FROM
-        // FeaturePlayback (its factory is registered at the AppShell composition
-        // root), so there is no dependency cycle.
-        .target(
-            name: "LocalRemux",
-            dependencies: [
-                "CoreModels", "FeaturePlayback", "CRemuxCore",
-                // FFmpeg from the shared FFmpegBuild package.
-                .product(name: "Libavcodec", package: "FFmpegBuild"),
-                "Libavdevice",
-                .product(name: "Libavfilter", package: "FFmpegBuild"),
-                .product(name: "Libavformat", package: "FFmpegBuild"),
-                .product(name: "Libavutil", package: "FFmpegBuild"),
-                .product(name: "Libswresample", package: "FFmpegBuild"),
-                .product(name: "Libswscale", package: "FFmpegBuild"),
-                .product(name: "Dovi", package: "LibDovi"),
                 "Libssl", "Libcrypto", "Libass", "Libfreetype", "Libfribidi",
                 "Libharfbuzz", "MoltenVK", "Libshaderc_combined", "lcms2",
                 "Libplacebo", "Libunibreak", "gmp", "nettle",
@@ -373,7 +288,6 @@ let package = Package(
                 "CoreUI",
                 "EngineMPV",
                 "EnginePlozzigen",
-                "LocalRemux",
                 "FeatureDiscovery",
                 "FeatureAuth",
                 "MetadataKit",
@@ -472,15 +386,6 @@ let package = Package(
         .testTarget(
             name: "EngineMPVTests",
             dependencies: ["EngineMPV", "CoreModels"]
-        ),
-        // LocalRemux's pure logic (VOD-playlist planner, route parser, segment
-        // index/cache math) is exercised here. Like EngineMPVTests it links the
-        // FFmpeg binary targets transitively, so it builds/runs on the tvOS
-        // Simulator (where the framework slices exist) via tools/run-tests.sh; the
-        // assertions themselves are platform-independent pure logic.
-        .testTarget(
-            name: "LocalRemuxTests",
-            dependencies: ["LocalRemux", "CoreModels", "CRemuxCore"]
         ),
 
         // MARK: - EngineMPV binary dependencies

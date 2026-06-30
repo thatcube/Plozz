@@ -2,7 +2,7 @@ import Foundation
 
 /// Configuration for the MyAnimeList integration.
 ///
-/// MAL auth is handled by the plozz.app relay worker. The TV app just shows
+/// MAL auth is handled by the plozz.app relay. The TV app just shows
 /// the relay URL and a text field for the short redeem code.
 public struct MALConfig: Sendable, Equatable {
     public var clientID: String?
@@ -27,7 +27,7 @@ public struct MALConfig: Sendable, Equatable {
         clientID != nil
     }
 
-    /// Redirect URI used by the relay Worker for OAuth callbacks.
+    /// Redirect URI used by the relay for OAuth callbacks.
     public var redirectURI: String {
         "\(relayBaseURL)/auth/mal/callback"
     }

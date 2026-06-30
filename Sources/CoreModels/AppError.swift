@@ -32,6 +32,26 @@ public enum AppError: Error, Equatable, Sendable {
     /// Anything else, with a non-sensitive message.
     case unknown(String)
 
+    /// Whether this represents a *transport-level* failure — we never reached a
+    /// server that could give us a real answer (offline, DNS, TLS, timeout,
+    /// connection refused), the request was cancelled, or the session token was
+    /// rejected (which a re-auth will fix). It is **not** a definitive verdict
+    /// about the resource.
+    ///
+    /// Used by the lyrics layer to decide whether a "no lyrics" outcome is
+    /// trustworthy enough to cache: a `notFound`/`invalidResponse` from a
+    /// reachable server is authoritative, but a `serverUnreachable` is just
+    /// noise we must retry later rather than remember.
+    public var isTransportFailure: Bool {
+        switch self {
+        case .serverUnreachable, .cancelled, .unauthorized:
+            return true
+        case .invalidResponse, .invalidCredentials, .notFound, .conflict,
+             .quickConnectUnavailable, .quickConnectExpired, .decoding, .unknown:
+            return false
+        }
+    }
+
     /// A short, user-facing message safe to display on tvOS.
     public var userMessage: String {
         switch self {

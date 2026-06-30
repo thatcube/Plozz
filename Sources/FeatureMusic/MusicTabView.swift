@@ -177,8 +177,11 @@ private func lyricsCacheKey(for track: MusicTrack) -> String {
 func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
     { track, context in
         let key = lyricsCacheKey(for: track)
+        let traceLabel = "\"\(track.title)\" — \(track.artistName ?? "?") [\(context)]"
+        LyricsTrace.emit("[resolve] \(traceLabel)")
         // L1: in-memory memo for this session.
         if let cached = await LyricsMemoCache.shared.value(for: key) {
+            LyricsTrace.emit("[cache L1] \(traceLabel) -> \(cached == nil ? "none (silent)" : "synced")")
             return AudioPlaybackController.LyricsResolution(
                 lyrics: cached,
                 staySilent: cached == nil
@@ -191,6 +194,7 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         // background (debounced) so a song that *later* gains an LRCLIB upload
         // still surfaces without the user doing anything.
         if let cached = await LyricsDiskCache.shared.cached(key) {
+            LyricsTrace.emit("[cache L2] \(traceLabel) -> \(cached == nil ? "none (silent)" : "synced")")
             await LyricsMemoCache.shared.set(cached, for: key)
             return AudioPlaybackController.LyricsResolution(
                 lyrics: cached,
@@ -201,6 +205,7 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         // tracks. We still persist this through the cache layers so we don't
         // re-evaluate it on every play.
         if isExplicitlyInstrumental(title: track.title) {
+            LyricsTrace.emit("[cache L3] \(traceLabel) -> instrumental title, silent")
             await LyricsMemoCache.shared.set(nil, for: key)
             await LyricsDiskCache.shared.store(nil, for: key)
             return AudioPlaybackController.LyricsResolution(
@@ -223,6 +228,7 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         // memo for the session and a longer outage would burn "no lyrics" onto
         // disk for every song played during it.
         let trustworthy = resolution.lyrics != nil || resolution.isAuthoritative
+        LyricsTrace.emit("[resolved] \(traceLabel) -> \(resolution.lyrics == nil ? "none" : "synced") authoritative=\(resolution.isAuthoritative) fallback=\(context == .visible) -> \(trustworthy ? "CACHED" : "not cached")")
         if trustworthy {
             await LyricsMemoCache.shared.set(resolution.lyrics, for: key)
             await LyricsDiskCache.shared.store(resolution.lyrics, for: key)
@@ -297,6 +303,12 @@ func lyricsRefresher(for provider: any MusicProvider) -> AudioPlaybackController
 /// answered *and* we used full effort:
 ///   - the server must have been reachable (it's always consulted);
 ///   - LRCLIB must not have been skipped purely for a missing artist;
+///   - LRCLIB must not have been skipped because the user has lyrics turned OFF
+///     (that skip is a temporary setting, not a verdict: the user can flip lyrics
+///     back on and expect a fresh LRCLIB lookup, so a server-only negative formed
+///     while disabled is incomplete and must not be baked in — otherwise enabling
+///     lyrics and replaying the track would keep reading that poisoned negative
+///     for up to 7 days);
 ///   - if LRCLIB was available it must have been reachable (not throttled /
 ///     offline / cancelled mid-skip);
 ///   - and if LRCLIB ran with its title-only fallback disabled (background
@@ -315,6 +327,7 @@ enum LyricsNegativeAuthority {
     static func isAuthoritative(
         serverReachable: Bool,
         lrclibSkippedForMissingArtist: Bool,
+        lrclibSkippedForDisabled: Bool,
         lrclibAvailable: Bool,
         lrclibReachable: Bool,
         allowedTitleOnlyFallback: Bool,
@@ -322,6 +335,7 @@ enum LyricsNegativeAuthority {
     ) -> Bool {
         guard serverReachable else { return false }
         if lrclibSkippedForMissingArtist { return false }
+        if lrclibSkippedForDisabled { return false }
         if lrclibAvailable && !lrclibReachable { return false }
         if lrclibAvailable && !allowedTitleOnlyFallback && hasUsableDuration { return false }
         return true
@@ -430,6 +444,7 @@ private func resolveSyncedLyrics(
             LyricsNegativeAuthority.isAuthoritative(
                 serverReachable: serverReachable,
                 lrclibSkippedForMissingArtist: lrclibSkippedForMissingArtist,
+                lrclibSkippedForDisabled: !lyricsEnabled,
                 lrclibAvailable: lrclibAvailable,
                 lrclibReachable: lrclibReachable,
                 allowedTitleOnlyFallback: allowTitleOnlyFallback,

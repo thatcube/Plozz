@@ -235,7 +235,15 @@ struct NowPlayingView: View {
         // doesn't fly to center and snap back between two songs that both have
         // lyrics. See `latchedShowsLyricsPanel`.
         .onChange(of: controller.lyricsState) { _, _ in updateLyricsPanelLatch() }
-        .onChange(of: lyricsEnabled) { _, _ in updateLyricsPanelLatch() }
+        .onChange(of: lyricsEnabled) { wasEnabled, isEnabled in
+            updateLyricsPanelLatch()
+            // Turning lyrics back on must re-resolve the current track: the
+            // resolve that ran while they were off skipped LRCLIB, so its negative
+            // is stale and the panel would otherwise stay empty until the next skip.
+            if isEnabled && !wasEnabled {
+                controller.reloadCurrentTrackLyrics()
+            }
+        }
         // Back/Menu first dismisses the controls if they're showing; pressing it
         // again (with the controls already hidden) closes the player.
         .onExitCommand {
@@ -367,7 +375,6 @@ struct NowPlayingView: View {
                 asyncFallbackURL: trackFallback(controller.currentTrack)
             )
                 .frame(width: 420, height: 420)
-                .overlay(alignment: .bottomTrailing) { nowPlayingBadge }
                 .shadow(radius: 30)
 
             trackTextBlock
@@ -385,24 +392,22 @@ struct NowPlayingView: View {
         }
     }
 
-    /// A small animated equalizer pinned to the artwork's bottom-trailing corner
-    /// — the one on-screen cue that audio is *actively* playing once the transport
-    /// controls auto-hide (artwork + title alone look identical paused vs playing).
-    /// Reuses the same `NowPlayingEqualizer` shown in track lists and the mini
-    /// player for visual consistency, sitting on a soft frosted scrim so the bars
-    /// stay legible over any artwork. Fades out when playback is paused, so its
-    /// presence *is* the "playing now" signal; respects Reduce Motion by holding
-    /// the bars still (the badge still shows) rather than animating.
-    private var nowPlayingBadge: some View {
+    /// A small animated equalizer shown immediately to the left of the playing
+    /// track's title — the one on-screen cue that audio is *actively* playing once
+    /// the transport controls auto-hide (artwork + title alone look identical
+    /// paused vs playing). Reuses the same `NowPlayingEqualizer` shown in track
+    /// lists and the mini player for visual consistency. Fades out when playback
+    /// is paused, so its presence *is* the "playing now" signal; respects Reduce
+    /// Motion by holding the bars still (still visible) rather than animating.
+    /// Hidden from accessibility — it's a decorative state cue, and "is playing"
+    /// is already exposed by the transport controls.
+    private var nowPlayingTitleIndicator: some View {
         NowPlayingEqualizer(isAnimating: controller.isPlaying && !reduceMotion)
             .frame(width: 26)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .padding(16)
             .opacity(controller.isPlaying ? 1 : 0)
             .animation(.easeInOut(duration: 0.3), value: controller.isPlaying)
             .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     /// The title/artist (+ album & quality badge when "show track details" is on)
@@ -412,11 +417,21 @@ struct NowPlayingView: View {
     /// only its visibility changes.
     private var trackTextBlock: some View {
         VStack(spacing: 10) {
-            Text(controller.currentTrack?.title ?? "Not Playing")
-                .font(.system(size: 46, weight: .bold))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
+            // Title with the "now playing" equalizer to its left. The trailing
+            // clear spacer matches the indicator's width so the title stays
+            // centered whether playing (indicator visible) or paused (faded but
+            // still occupying its slot) — no horizontal shift on play/pause.
+            HStack(spacing: 14) {
+                nowPlayingTitleIndicator
+                Text(controller.currentTrack?.title ?? "Not Playing")
+                    .font(.system(size: 46, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
+                Color.clear
+                    .frame(width: 26)
+                    .accessibilityHidden(true)
+            }
             if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
                 Text(artist)
                     .font(.system(size: 26, weight: .medium))
@@ -627,18 +642,23 @@ struct NowPlayingView: View {
         .focused($focus, equals: .playPause)
     }
 
-    /// Toggles the lyrics panel. Highlighted when on; disabled (and dimmed) while
-    /// the current track has no lyrics, so it can't be turned on for nothing.
+    /// Toggles the lyrics panel. Highlighted when on; disabled (and dimmed) only
+    /// while lyrics are ON but the current track genuinely has none — turning it
+    /// "on" again would do nothing. While lyrics are OFF the toggle stays enabled
+    /// so the user can always turn them back on, even on a track that resolved to
+    /// "no lyrics" *while disabled* — that resolve deliberately skipped LRCLIB
+    /// (our main source) and didn't truly look, so re-enabling re-resolves it.
     private var lyricsToggleButton: some View {
         let hasLyrics = controller.lyricsState.hasLyrics
+        let blocked = lyricsEnabled && !hasLyrics
         return transportButton(
             icon: lyricsEnabled ? "quote.bubble.fill" : "quote.bubble",
             tint: (lyricsEnabled && hasLyrics) ? Color.accentColor : .primary
         ) {
             lyricsEnabled.toggle()
         }
-        .disabled(!hasLyrics)
-        .opacity(hasLyrics ? 1 : 0.4)
+        .disabled(blocked)
+        .opacity(blocked ? 0.4 : 1)
     }
 
     /// A secondary transport control. Its glass button style is **constant** —

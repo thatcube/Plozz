@@ -81,6 +81,34 @@ public struct Lyrics: Codable, Hashable, Sendable {
         self.init(lines: lines)
     }
 
+    /// Parses a Plex lyrics payload, which arrives either as Plex's own
+    /// timed-JSON or as an `.lrc`/plain-text sidecar. It deliberately does **not**
+    /// treat a leading `[` as "this is JSON": **every** valid `.lrc` file also
+    /// begins with `[` — a timestamp (`[00:12.50]`) or a metadata tag (`[ar:…]`) —
+    /// so the old sniff sent every LRC sidecar to the JSON parser, which failed,
+    /// and the lyrics were silently dropped. Routing:
+    ///
+    /// - A `{`-prefixed body is object-shaped, so it can only be Plex timed-JSON
+    ///   (possibly an `{"Lyrics":…}` wrapper). If it doesn't parse it's malformed
+    ///   JSON, not lyrics, and we return `nil` rather than rendering braces raw —
+    ///   the lenient LRC/plain parsers would otherwise echo the JSON as text.
+    /// - Anything else — including a `[`-prefixed body, which may be a timed-JSON
+    ///   *array* or (far more often) an `.lrc` sidecar — tries timed-JSON, then
+    ///   LRC, then plain text, taking the first that yields lines.
+    ///
+    /// Returns `nil` when nothing parses or the result is empty.
+    public init?(plexLyricsText text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed: Lyrics?
+        if trimmed.hasPrefix("{") {
+            parsed = Lyrics(plexTimedJSON: text)
+        } else {
+            parsed = Lyrics(plexTimedJSON: text) ?? Lyrics(lrc: text) ?? Lyrics(plainText: text)
+        }
+        guard let parsed, !parsed.isEmpty else { return nil }
+        self = parsed
+    }
+
     /// Parses Plex's timed-lyrics JSON (returned by a `streamType == 4` lyric
     /// stream when the words came from Plex's own provider rather than an `.lrc`
     /// sidecar). The payload is an array of line objects — possibly wrapped in a

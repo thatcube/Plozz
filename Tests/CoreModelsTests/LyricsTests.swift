@@ -90,4 +90,53 @@ final class LyricsTests: XCTestCase {
         let lyrics = Lyrics(plainText: "A\rB\rC")
         XCTAssertEqual(lyrics.lines.map(\.text), ["A", "B", "C"])
     }
+
+    // MARK: Plex payload routing (plexLyricsText)
+
+    /// Regression: an `.lrc` sidecar starting with a metadata tag (`[ar:…]`) must
+    /// be parsed as LRC, not misrouted to the JSON parser by its leading `[`.
+    func testPlexLyricsTextParsesLRCSidecarWithMetadataTag() throws {
+        let lrc = "[ar:Some Artist]\n[00:01.00]First\n[00:02.00]Second"
+        let lyrics = try XCTUnwrap(Lyrics(plexLyricsText: lrc))
+        XCTAssertTrue(lyrics.isSynced)
+        XCTAssertEqual(lyrics.lines.map(\.text), ["First", "Second"])
+    }
+
+    /// An `.lrc` sidecar whose very first character is a timestamp `[` — the
+    /// common case that the old `{`/`[` sniff sent to the failing JSON parser.
+    func testPlexLyricsTextParsesLRCSidecarStartingWithTimestamp() throws {
+        let lrc = "[00:01.00]First\n[00:02.00]Second"
+        let lyrics = try XCTUnwrap(Lyrics(plexLyricsText: lrc))
+        XCTAssertTrue(lyrics.isSynced)
+        XCTAssertEqual(lyrics.lines.map(\.text), ["First", "Second"])
+    }
+
+    /// Plex's own timed-JSON payload still parses (synced) through the same entry.
+    func testPlexLyricsTextParsesTimedJSON() throws {
+        let json = """
+        [{"startOffset":1000,"endOffset":2000,"Span":[{"text":"Hello"}]},
+         {"startOffset":2000,"endOffset":3000,"Span":[{"text":"World"}]}]
+        """
+        let lyrics = try XCTUnwrap(Lyrics(plexLyricsText: json))
+        XCTAssertTrue(lyrics.isSynced)
+        XCTAssertEqual(lyrics.lines.map(\.text), ["Hello", "World"])
+    }
+
+    /// A non-JSON, non-LRC body falls back to plain text (unsynced).
+    func testPlexLyricsTextParsesPlainText() throws {
+        let lyrics = try XCTUnwrap(Lyrics(plexLyricsText: "Just a line\nAnd another"))
+        XCTAssertFalse(lyrics.isSynced)
+        XCTAssertEqual(lyrics.lines.map(\.text), ["Just a line", "And another"])
+    }
+
+    /// Malformed JSON-shaped input (`{…}`) is never rendered raw as plain text:
+    /// when no parser succeeds the initializer returns nil.
+    func testPlexLyricsTextRejectsMalformedJSON() {
+        XCTAssertNil(Lyrics(plexLyricsText: "{ not valid json"))
+    }
+
+    /// Empty / whitespace-only input yields nil rather than an empty Lyrics.
+    func testPlexLyricsTextRejectsEmptyInput() {
+        XCTAssertNil(Lyrics(plexLyricsText: "   \n  "))
+    }
 }

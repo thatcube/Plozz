@@ -471,6 +471,17 @@ public final class AudioPlaybackController {
         #endif
     }
 
+    /// Re-resolves the current track's lyrics from scratch. Used when the user
+    /// turns the lyrics setting back ON from Now Playing: the resolve that ran
+    /// while lyrics were disabled deliberately skipped LRCLIB (our main source),
+    /// so the current `.silent`/`.unavailable` verdict is stale — a fresh lookup
+    /// now consults LRCLIB and can surface lyrics for the track on screen without
+    /// waiting for the user to skip to the next one. No-op when nothing's playing.
+    public func reloadCurrentTrackLyrics() {
+        guard let track = currentTrack else { return }
+        loadLyrics(for: track)
+    }
+
     /// Fetches lyrics for `track` off the critical path, publishing `lyricsState`
     /// as it resolves. Cancels any in-flight load so a fast next/previous never
     /// shows a stale track's lyrics. With no resolver wired, stays `.unavailable`.

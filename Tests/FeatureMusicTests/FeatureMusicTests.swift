@@ -65,6 +65,7 @@ final class LyricsNegativeAuthorityTests: XCTestCase {
         XCTAssertTrue(LyricsNegativeAuthority.isAuthoritative(
             serverReachable: true,
             lrclibSkippedForMissingArtist: false,
+            lrclibSkippedForDisabled: false,
             lrclibAvailable: true,
             lrclibReachable: true,
             allowedTitleOnlyFallback: true,
@@ -79,6 +80,7 @@ final class LyricsNegativeAuthorityTests: XCTestCase {
         XCTAssertFalse(LyricsNegativeAuthority.isAuthoritative(
             serverReachable: true,
             lrclibSkippedForMissingArtist: false,
+            lrclibSkippedForDisabled: false,
             lrclibAvailable: true,
             lrclibReachable: true,
             allowedTitleOnlyFallback: false,
@@ -93,6 +95,7 @@ final class LyricsNegativeAuthorityTests: XCTestCase {
         XCTAssertTrue(LyricsNegativeAuthority.isAuthoritative(
             serverReachable: true,
             lrclibSkippedForMissingArtist: false,
+            lrclibSkippedForDisabled: false,
             lrclibAvailable: true,
             lrclibReachable: true,
             allowedTitleOnlyFallback: false,
@@ -106,6 +109,7 @@ final class LyricsNegativeAuthorityTests: XCTestCase {
         XCTAssertFalse(LyricsNegativeAuthority.isAuthoritative(
             serverReachable: false,
             lrclibSkippedForMissingArtist: false,
+            lrclibSkippedForDisabled: false,
             lrclibAvailable: true,
             lrclibReachable: true,
             allowedTitleOnlyFallback: true,
@@ -118,6 +122,7 @@ final class LyricsNegativeAuthorityTests: XCTestCase {
         XCTAssertFalse(LyricsNegativeAuthority.isAuthoritative(
             serverReachable: true,
             lrclibSkippedForMissingArtist: true,
+            lrclibSkippedForDisabled: false,
             lrclibAvailable: false,
             lrclibReachable: false,
             allowedTitleOnlyFallback: true,
@@ -131,10 +136,42 @@ final class LyricsNegativeAuthorityTests: XCTestCase {
         XCTAssertFalse(LyricsNegativeAuthority.isAuthoritative(
             serverReachable: true,
             lrclibSkippedForMissingArtist: false,
+            lrclibSkippedForDisabled: false,
             lrclibAvailable: true,
             lrclibReachable: false,
             allowedTitleOnlyFallback: true,
             hasUsableDuration: true
+        ))
+    }
+
+    /// B / H1b: lyrics were turned OFF, so LRCLIB was skipped and only the server
+    /// was consulted. That skip is a temporary user setting, not a verdict — the
+    /// server-only negative must NOT be cached as authoritative, or enabling
+    /// lyrics and replaying would keep reading the poisoned negative for 7 days.
+    func testLyricsDisabledServerOnlyNegativeIsNotAuthoritative() {
+        XCTAssertFalse(LyricsNegativeAuthority.isAuthoritative(
+            serverReachable: true,
+            lrclibSkippedForMissingArtist: false,
+            lrclibSkippedForDisabled: true,
+            lrclibAvailable: false,
+            lrclibReachable: false,
+            allowedTitleOnlyFallback: true,
+            hasUsableDuration: true
+        ))
+    }
+
+    /// The disabled-skip guard holds even with no usable duration: re-enabling
+    /// lyrics should still trigger a fresh LRCLIB lookup, so the negative formed
+    /// while disabled is never authoritative.
+    func testLyricsDisabledStaysNonAuthoritativeWithoutDuration() {
+        XCTAssertFalse(LyricsNegativeAuthority.isAuthoritative(
+            serverReachable: true,
+            lrclibSkippedForMissingArtist: false,
+            lrclibSkippedForDisabled: true,
+            lrclibAvailable: false,
+            lrclibReachable: false,
+            allowedTitleOnlyFallback: true,
+            hasUsableDuration: false
         ))
     }
 }

@@ -14,96 +14,189 @@ struct IntegrationsDetailView: View {
     let mal: MALService
     @Bindable var playback: PlaybackSettingsModel
     let serverCount: Int
-    @Namespace private var trackerFocus
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Trackers").font(.largeTitle.bold())
-                    Text("Connected per profile. Watches are tracked no matter which server you're on.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        SettingsSplitLayout(title: "Trackers", sections: sections)
+            .task {
+                // Load all four statuses up front so the left list's value
+                // summaries are correct before any row is focused.
+                async let t: Void = trakt.refreshStatus()
+                async let s: Void = simkl.refreshStatus()
+                async let a: Void = anilist.refreshStatus()
+                async let m: Void = mal.refreshStatus()
+                _ = await (t, s, a, m)
+            }
+    }
+
+    private var sections: [SettingsSplitSection] {
+        @Bindable var playback = playback
+
+        let trackers = SettingsSplitSection(id: "trackers", header: "Trackers", rows: [
+            SettingsSplitRow(
+                id: "trakt",
+                title: "Trakt",
+                description: "Scrobble and sync your Jellyfin watch history to Trakt.",
+                valueSummary: statusSummary(traktRowPhase)
+            ) {
+                if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
+                    DeviceCodeConnectingView(
+                        serviceName: "Trakt",
+                        userCode: userCode,
+                        verificationURL: verificationURL,
+                        expiresAt: expiresAt,
+                        codeLifetime: trakt.codeLifetime,
+                        onCancel: { trakt.cancelConnect() }
+                    )
+                } else {
+                    trackerActionBar(
+                        phase: traktRowPhase,
+                        onConnect: { trakt.connect() },
+                        onCancel: { trakt.cancelConnect() },
+                        onDisconnect: { Task { await trakt.disconnect() } }
+                    )
                 }
-
-                // Unified tracker card — all services in one dense panel
-                VStack(alignment: .leading, spacing: 0) {
-                    // Trakt
-                    VStack(alignment: .leading, spacing: 24) {
-                        TrackerRow(name: "Trakt", phase: traktRowPhase, onConnect: { trakt.connect() }, onCancel: { trakt.cancelConnect() }, onDisconnect: { Task { await trakt.disconnect() } })
-                            .task { await trakt.refreshStatus() }
-                        if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
-                            DeviceCodeConnectingView(serviceName: "Trakt", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: trakt.codeLifetime, onCancel: { trakt.cancelConnect() })
-                        }
-                        sectionDivider
-                    }
-                    .padding(.bottom, 24)
-                    .prefersDefaultFocus(true, in: trackerFocus)
-                    .focusSection()
-
-                    // Simkl
-                    VStack(alignment: .leading, spacing: 24) {
-                        TrackerRow(name: "Simkl", phase: simklRowPhase, onConnect: { simkl.connect() }, onCancel: { simkl.cancelConnect() }, onDisconnect: { Task { await simkl.disconnect() } })
-                            .task { await simkl.refreshStatus() }
-                        if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
-                            DeviceCodeConnectingView(serviceName: "Simkl", userCode: userCode, verificationURL: verificationURL, expiresAt: expiresAt, codeLifetime: simkl.codeLifetime, onCancel: { simkl.cancelConnect() })
-                        }
-                        sectionDivider
-                    }
-                    .padding(.bottom, 24)
-                    .focusSection()
-
-                    // AniList
-                    VStack(alignment: .leading, spacing: 24) {
-                        TrackerRow(name: "AniList", phase: anilistRowPhase, onConnect: { anilist.connect() }, onCancel: { anilist.cancelConnect() }, onDisconnect: { Task { await anilist.disconnect() } })
-                            .task { await anilist.refreshStatus() }
-                        if case .awaitingToken = anilist.phase {
-                            AniListTokenEntryView(anilist: anilist)
-                        }
-                        sectionDivider
-                    }
-                    .padding(.bottom, 24)
-                    .focusSection()
-
-                    // MyAnimeList
-                    VStack(alignment: .leading, spacing: 24) {
-                        TrackerRow(name: "MyAnimeList", phase: malRowPhase, onConnect: { mal.connect() }, onCancel: { mal.cancelConnect() }, onDisconnect: { Task { await mal.disconnect() } })
-                            .task { await mal.refreshStatus() }
-                        if case .awaitingAuthorizationCode = mal.phase {
-                            MALAuthorizationCodeEntryView(mal: mal)
-                        }
-                    }
-                    .focusSection()
+            },
+            SettingsSplitRow(
+                id: "simkl",
+                title: "Simkl",
+                description: "Sync your watch history and track what to watch next with Simkl.",
+                valueSummary: statusSummary(simklRowPhase)
+            ) {
+                if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
+                    DeviceCodeConnectingView(
+                        serviceName: "Simkl",
+                        userCode: userCode,
+                        verificationURL: verificationURL,
+                        expiresAt: expiresAt,
+                        codeLifetime: simkl.codeLifetime,
+                        onCancel: { simkl.cancelConnect() }
+                    )
+                } else {
+                    trackerActionBar(
+                        phase: simklRowPhase,
+                        onConnect: { simkl.connect() },
+                        onCancel: { simkl.cancelConnect() },
+                        onDisconnect: { Task { await simkl.disconnect() } }
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(28)
-                .background(
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                )
-
-                SettingsPanel(
-                    title: "Watch Status",
-                    footer: canSyncAcrossServers
-                        ? (playback.settings.syncWatchAcrossServers
-                            ? "Marking or resuming a title updates every server that has it."
-                            : "Only the server you watched on is updated.")
-                        : "Add another server to sync watch status across servers."
-                ) {
-                    Toggle("Sync across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
-                        .disabled(!canSyncAcrossServers)
+            },
+            SettingsSplitRow(
+                id: "anilist",
+                title: "AniList",
+                description: "Track anime and manga progress on your AniList profile.",
+                valueSummary: statusSummary(anilistRowPhase)
+            ) {
+                if case .awaitingToken = anilist.phase {
+                    AniListTokenEntryView(anilist: anilist)
+                } else {
+                    trackerActionBar(
+                        phase: anilistRowPhase,
+                        onConnect: { anilist.connect() },
+                        onCancel: { anilist.cancelConnect() },
+                        onDisconnect: { Task { await anilist.disconnect() } }
+                    )
+                }
+            },
+            SettingsSplitRow(
+                id: "mal",
+                title: "MyAnimeList",
+                description: "Track anime and manga progress on your MyAnimeList profile.",
+                valueSummary: statusSummary(malRowPhase)
+            ) {
+                if case .awaitingAuthorizationCode = mal.phase {
+                    MALAuthorizationCodeEntryView(mal: mal)
+                } else {
+                    trackerActionBar(
+                        phase: malRowPhase,
+                        onConnect: { mal.connect() },
+                        onCancel: { mal.cancelConnect() },
+                        onDisconnect: { Task { await mal.disconnect() } }
+                    )
                 }
             }
-            .focusScope(trackerFocus)
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+        ])
+
+        let watchStatus = SettingsSplitSection(id: "watch-status", header: "Watch Status", rows: [
+            SettingsSplitRow(
+                id: "sync-across-servers",
+                title: "Sync across all my servers",
+                description: canSyncAcrossServers
+                    ? (playback.settings.syncWatchAcrossServers
+                        ? "Marking or resuming a title updates every server that has it."
+                        : "Only the server you watched on is updated.")
+                    : "Add another server to sync watch status across servers.",
+                valueSummary: !canSyncAcrossServers ? "Unavailable" : (playback.settings.syncWatchAcrossServers ? "On" : "Off")
+            ) {
+                Toggle("Sync across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
+                    .disabled(!canSyncAcrossServers)
+            }
+        ])
+
+        return [trackers, watchStatus]
+    }
+
+    /// The status + action controls shown in a tracker's detail pane for every
+    /// phase except the active connecting flow (which renders its own QR / code
+    /// entry with its own Cancel). Reuses the same phase vocabulary as the old
+    /// `TrackerRow` so behaviour is unchanged — just relocated to the detail pane.
+    @ViewBuilder
+    private func trackerActionBar(
+        phase: TrackerRowPhase,
+        onConnect: @escaping () -> Void,
+        onCancel: @escaping () -> Void,
+        onDisconnect: @escaping () -> Void
+    ) -> some View {
+        switch phase {
+        case .loading:
+            HStack(spacing: 12) {
+                ProgressView().controlSize(.small)
+                Text("Checking status…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        case .unavailable:
+            Text("This tracker isn't configured in this build.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        case .disconnected:
+            Button(action: onConnect) {
+                Label("Connect", systemImage: "link")
+            }
+        case .connecting:
+            Button(role: .cancel, action: onCancel) {
+                Text("Cancel")
+            }
+        case let .connected(username):
+            VStack(alignment: .leading, spacing: 18) {
+                Label("Connected as \(username)", systemImage: "checkmark.seal.fill")
+                    .font(.headline)
+                    .foregroundStyle(.green)
+                Button(role: .destructive, action: onDisconnect) {
+                    Label("Disconnect", systemImage: "xmark.circle")
+                }
+            }
+        case .error:
+            VStack(alignment: .leading, spacing: 18) {
+                Label("Couldn't connect", systemImage: "exclamationmark.triangle.fill")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+                Button(action: onConnect) {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+            }
         }
-        .scrollClipDisabled()
+    }
+
+    /// Compact current-status hint shown on a tracker row's trailing edge.
+    private func statusSummary(_ phase: TrackerRowPhase) -> String {
+        switch phase {
+        case .loading: return "…"
+        case .unavailable: return "Not configured"
+        case .disconnected: return "Not connected"
+        case .connecting: return "Connecting…"
+        case let .connected(name): return name
+        case .error: return "Error"
+        }
     }
 
     // MARK: - Row phase mapping
@@ -153,16 +246,9 @@ struct IntegrationsDetailView: View {
         case .error: .error
         }
     }
-
-    private var sectionDivider: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.1))
-            .frame(height: 1)
-            .padding(.horizontal, -27)
-    }
 }
 
-// MARK: - Unified Tracker Row
+// MARK: - Tracker phase
 
 /// The state a tracker row can be in (abstracted from service-specific enums).
 enum TrackerRowPhase: Equatable {
@@ -172,85 +258,6 @@ enum TrackerRowPhase: Equatable {
     case connecting
     case connected(String)
     case error
-}
-
-/// A single row inside the unified tracker card. Shows the service name, a
-/// status badge, and a connect/disconnect action — all on one line. Mirrors the
-/// `LabeledSettingRow` density pattern from Appearance.
-struct TrackerRow: View {
-    let name: String
-    let phase: TrackerRowPhase
-    let onConnect: () -> Void
-    let onCancel: () -> Void
-    let onDisconnect: () -> Void
-
-    var body: some View {
-        HStack(spacing: 16) {
-            Text(name)
-                .font(.headline.weight(.semibold))
-                .frame(width: 180, alignment: .leading)
-
-            switch phase {
-            case .loading:
-                ProgressView()
-                    .controlSize(.small)
-                Spacer()
-
-            case .unavailable:
-                Text("Not configured")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
-                Spacer()
-
-            case .disconnected:
-                Spacer()
-                Button(action: onConnect) {
-                    Label("Connect", systemImage: "link")
-                }
-
-            case .connecting:
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Connecting…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button(role: .cancel, action: onCancel) {
-                    Text("Cancel")
-                        .font(.subheadline)
-                }
-
-            case let .connected(username):
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
-                    Text(username)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button(role: .destructive, action: onDisconnect) {
-                    Label("Disconnect", systemImage: "xmark.circle")
-                        .font(.subheadline)
-                }
-
-            case .error:
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text("Error")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button(action: onConnect) {
-                    Label("Retry", systemImage: "arrow.clockwise")
-                        .font(.subheadline)
-                }
-            }
-        }
-    }
 }
 
 // MARK: - AniList Relay Code Entry (expanded panel)

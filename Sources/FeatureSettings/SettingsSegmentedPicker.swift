@@ -68,20 +68,36 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
         .fixedSize()
     }
 
-    /// The contents of one segment: label + an always-reserved trailing
-    /// checkmark slot. Reserving the slot (hidden when unselected) keeps each
-    /// segment a constant width, so the track never reflows as the choice moves.
+    /// The contents of one segment: the label, plus a trailing checkmark shown
+    /// only on the selected segment. The label always reserves its *semibold*
+    /// width (via a hidden sizing copy) so changing weight never reflows the
+    /// text, and the checkmark is laid out inline only when present so unselected
+    /// segments don't carry an empty gap.
     private struct SegmentLabel: View {
         let text: String
         let isSelected: Bool
 
         var body: some View {
             HStack(spacing: 8) {
-                Text(text).lineLimit(1).fixedSize()
-                Image(systemName: "checkmark")
-                    .font(.subheadline.weight(.bold))
-                    .opacity(isSelected ? 1 : 0)
-                    .accessibilityHidden(true)
+                Text(text)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .background(
+                        // Reserve the bold metrics in every state so the label
+                        // is sized as if always semibold — the visible weight can
+                        // change without nudging the content.
+                        Text(text)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .hidden()
+                    )
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.subheadline.weight(.bold))
+                        .accessibilityHidden(true)
+                }
             }
         }
     }
@@ -125,7 +141,7 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
 
             var body: some View {
                 configuration.label
-                    .font(.headline.weight(isFocused || isSelected ? .semibold : .regular))
+                    .font(.headline)
                     .foregroundStyle(foreground)
                     .padding(.horizontal, 22)
                     .padding(.vertical, 12)

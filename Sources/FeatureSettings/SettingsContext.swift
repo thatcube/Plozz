@@ -48,7 +48,6 @@ enum SettingsRoute: Hashable {
     case appearance
     case nightShift
     case playback
-    case captions
     case spoilers
     case integrations
     case attributions

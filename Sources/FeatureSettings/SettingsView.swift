@@ -372,8 +372,6 @@ public struct SettingsView: View {
             NightShiftDetailView(model: nightShift)
         case .playback:
             PlaybackDetailView(playback: playback, captions: captions, subtitlePolicy: subtitlePolicy, audioPolicy: audioPolicy)
-        case .captions:
-            CaptionsDetailView(captions: captions)
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:

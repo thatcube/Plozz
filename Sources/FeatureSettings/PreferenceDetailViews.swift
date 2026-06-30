@@ -97,150 +97,6 @@ struct AppearanceDetailView: View {
     }
 }
 
-struct CaptionsDetailView: View {
-    @Bindable var captions: CaptionSettingsModel
-
-    private let fontScales: [Double] = [0.75, 1.0, 1.25, 1.5, 2.0]
-    private let backgroundOpacities: [Double] = [0.0, 0.25, 0.5, 0.75, 1.0]
-
-    var body: some View {
-        SettingsSplitLayout(title: "Subtitle Style", sections: sections)
-    }
-
-    private var sections: [SettingsSplitSection] {
-        @Bindable var captions = captions
-
-        var styleRows: [SettingsSplitRow] = [
-            SettingsSplitRow(
-                id: "follows-system-style",
-                title: "Use system subtitle style",
-                description: "Defer entirely to the system subtitle style set in tvOS Accessibility settings. Turn this off to customise size, colour, background and edges below.",
-                valueSummary: captions.settings.followsSystemStyle ? "On" : "Off"
-            ) {
-                Toggle("Use system subtitle style", isOn: $captions.settings.followsSystemStyle)
-            }
-        ]
-
-        if !captions.settings.followsSystemStyle {
-            styleRows.append(
-                SettingsSplitRow(
-                    id: "text-size",
-                    title: "Text size",
-                    description: "How large subtitle text appears, as a multiple of the default size.",
-                    valueSummary: "\(Int(captions.settings.fontScale * 100))%",
-                    indented: true
-                ) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        OptionCardRow(options: fontScales, selection: $captions.settings.fontScale) {
-                            optionLabel("\(Int($0 * 100))%")
-                        }
-                        captionPreview
-                    }
-                }
-            )
-            styleRows.append(
-                SettingsSplitRow(
-                    id: "text-color",
-                    title: "Text color",
-                    description: "The fill colour used for subtitle text.",
-                    valueSummary: colorName(for: captions.settings.textColor),
-                    indented: true
-                ) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        OptionCardRow(options: textColorOptions, selection: $captions.settings.textColor) {
-                            colorLabel($0)
-                        }
-                        captionPreview
-                    }
-                }
-            )
-            styleRows.append(
-                SettingsSplitRow(
-                    id: "background",
-                    title: "Background",
-                    description: "Opacity of the panel drawn behind subtitle text for legibility.",
-                    valueSummary: captions.settings.backgroundColor.alpha == 0 ? "Off" : "\(Int(captions.settings.backgroundColor.alpha * 100))%",
-                    indented: true
-                ) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        OptionCardRow(options: backgroundOpacities, selection: $captions.settings.backgroundColor.alpha) {
-                            optionLabel($0 == 0 ? "Off" : "\(Int($0 * 100))%")
-                        }
-                        captionPreview
-                    }
-                }
-            )
-            styleRows.append(
-                SettingsSplitRow(
-                    id: "edge-style",
-                    title: "Edge style",
-                    description: "The outline or shadow applied to subtitle text to separate it from the picture.",
-                    valueSummary: captions.settings.edgeStyle.displayName,
-                    indented: true
-                ) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        OptionCardRow(
-                            options: CaptionSettings.EdgeStyle.allCases,
-                            selection: $captions.settings.edgeStyle
-                        ) { optionLabel($0.displayName) }
-                        captionPreview
-                    }
-                }
-            )
-        }
-
-        let style = SettingsSplitSection(id: "style", header: nil, rows: styleRows)
-        return [style]
-    }
-
-    // MARK: Option data
-
-    private var textColorOptions: [CaptionSettings.RGBAColor] {
-        CaptionSettings.RGBAColor.presets.map(\.color)
-    }
-
-    private func colorName(for color: CaptionSettings.RGBAColor) -> String {
-        CaptionSettings.RGBAColor.presets.first(where: { $0.color == color })?.name ?? "Custom"
-    }
-
-    // MARK: Label helpers
-
-    private func optionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.headline)
-            .multilineTextAlignment(.center)
-    }
-
-    private func colorLabel(_ color: CaptionSettings.RGBAColor) -> some View {
-        VStack(spacing: 10) {
-            Circle()
-                .fill(color.swiftUIColor)
-                .frame(width: 36, height: 36)
-                .overlay(Circle().strokeBorder(Color.primary.opacity(0.4), lineWidth: 1))
-            Text(colorName(for: color)).font(.headline)
-        }
-    }
-
-    /// Local live preview (mirrors CoreUI's `CaptionPreview`, which is internal to
-    /// that module) so the style rows show the current look without touching the
-    /// shared `CaptionSettingsCard`.
-    private var captionPreview: some View {
-        VStack {
-            Spacer()
-            Text("The quick brown fox")
-                .font(.system(size: 32 * captions.settings.fontScale))
-                .foregroundStyle(captions.settings.textColor.swiftUIColor)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(captions.settings.backgroundColor.swiftUIColor)
-                .shadow(radius: captions.settings.edgeStyle == .dropShadow ? 4 : 0)
-        }
-        .frame(maxWidth: .infinity, minHeight: 160)
-        .background(LinearGradient(colors: [.blue, .purple], startPoint: .top, endPoint: .bottom))
-        .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
-    }
-}
-
 struct SpoilersDetailView: View {
     @Bindable var spoilers: SpoilerSettingsModel
 
@@ -515,18 +371,10 @@ struct PlaybackDetailView: View {
             SettingsSplitRow(
                 id: "subtitle-style",
                 title: "Subtitle style",
-                description: "Adjust subtitle font, size and colours. These settings are also available from the player while you watch."
+                description: "Adjust subtitle font, size and colours. These settings are also available from the player while you watch.",
+                valueSummary: captions.settings.followsSystemStyle ? "System" : "Custom"
             ) {
-                NavigationLink(value: SettingsRoute.captions) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "captions.bubble")
-                        Text("Open Subtitle Style")
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                    }
-                    .font(.headline)
-                    .padding(.horizontal, 4)
-                }
-                .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
+                SubtitleStyleEditor(settings: $captions.settings)
             }
         ])
     }

@@ -151,6 +151,15 @@ public final class PlayerViewModel {
     private var selectedAudioTrackID: Int?
     private var selectedSubtitleTrackID: Int?
 
+    /// Whether the load-time *default* subtitle has been routed through the
+    /// overlay yet for the current `playResolved`. Native tracks are known
+    /// synchronously, but Plozzigen demuxes its track list asynchronously (it
+    /// arrives via `onTracksChanged` after `playResolved` has returned), so this
+    /// guards the auto-selection to run exactly once per load — on whichever of
+    /// the two moments has the tracks — without re-applying on every subsequent
+    /// `onTracksChanged` or clobbering a manual menu pick made afterwards.
+    private var initialSubtitleApplied = false
+
     /// Seek-coordinator state. `latestSeekTarget` is the most-recently-requested
     /// committed seek time; `seekTask` is the single in-flight loop that drains
     /// it. Together they guarantee rapid presses ACCUMULATE and resolve to the
@@ -319,9 +328,15 @@ public final class PlayerViewModel {
         }
         // Engines that discover tracks asynchronously (Plozzigen) tell us to
         // rebuild the options menu once their lists arrive — otherwise the menu,
-        // built once at playResolved, stays empty for the whole session.
+        // built once at playResolved, stays empty for the whole session. This is
+        // also the moment Plozzigen's tracks first become known, so it's where we
+        // route its load-time default subtitle through the overlay.
         engine.onTracksChanged = { [weak self] in
-            self?.loadTrackOptions()
+            guard let self else { return }
+            self.loadTrackOptions()
+            if let request = self.request {
+                self.applyInitialSubtitleSelectionIfReady(for: request)
+            }
         }
         // Engines that decode subtitles themselves (Plozzigen) push their active
         // cues here; the live overlay model draws them on the same SDR renderer as
@@ -647,6 +662,17 @@ public final class PlayerViewModel {
         subtitleCueLoadTask = nil
         liveSubtitles.offset = 0
         liveSubtitles.clear()
+
+        // Route the load-time DEFAULT subtitle through Plozz's own overlay (same
+        // as a manual pick) instead of letting AVPlayer / the engine draw it, so
+        // the default lane gets identical HDR-safe styling + live offset. Native
+        // tracks are ready now; Plozzigen's arrive later via `onTracksChanged`,
+        // which calls this again. The per-load flag makes it fire exactly once.
+        // (selectedSubtitleTrackID is intentionally NOT reset here: the image-sub
+        // resolve path seeds it before playResolved so the menu reflects the
+        // bitmap track mpv draws; the routing below sets it for native/Plozzigen.)
+        initialSubtitleApplied = false
+        applyInitialSubtitleSelectionIfReady(for: request)
 
         // Load skip markers once playback is live (opt-in, best-effort).
         loadSkipSegmentsIfEnabled()
@@ -1157,6 +1183,58 @@ public final class PlayerViewModel {
         engine.selectAudioTrack(track)
         selectedAudioTrackID = id
         loadTrackOptions()
+    }
+
+    /// Routes the load-time **default** subtitle through Plozz's owned overlay so
+    /// it renders identically to a manual menu pick (HDR-safe SDR overlay, full
+    /// styling, live offset) instead of being drawn by AVPlayer's legible group
+    /// or the engine. Runs once per `playResolved`:
+    /// - **native** — provider tracks are known synchronously, so it applies
+    ///   immediately from `playResolved`.
+    /// - **Plozzigen** — the engine demuxes its track list asynchronously, so
+    ///   this no-ops until the tracks arrive via `onTracksChanged`, then applies.
+    /// - **hybrid (mpv)** — draws its own subtitles (including bitmap defaults
+    ///   routed to it at resolve time), so it's left untouched.
+    private func applyInitialSubtitleSelectionIfReady(for request: PlaybackRequest) {
+        guard !initialSubtitleApplied else { return }
+        switch currentEngineKind {
+        case .native:
+            // engine.subtitleTracks == request.subtitleTracks for the native
+            // engine; both share the provider id space selectSubtitleOption uses.
+            initialSubtitleApplied = true
+            applyDefaultSubtitleThroughOverlay(from: request.subtitleTracks)
+        case .plozzigen:
+            // AetherEngine reports tracks (with its own index id space) only after
+            // demux; wait for them rather than applying against an empty list.
+            let tracks = engine.subtitleTracks
+            guard !tracks.isEmpty else { return }
+            initialSubtitleApplied = true
+            applyDefaultSubtitleThroughOverlay(from: tracks)
+        default:
+            // hybrid (mpv) keeps drawing its own subtitles.
+            initialSubtitleApplied = true
+        }
+    }
+
+    /// Picks the default subtitle for the user's mode + preferred language from
+    /// `tracks` and routes it through the overlay via `selectSubtitleOption`, or
+    /// clears subtitles when there is no default text track. Image-based defaults
+    /// are skipped here (they were routed to the hybrid engine at resolve time and
+    /// that engine draws them); routing them through the overlay arrives with the
+    /// bitmap-cue work.
+    private func applyDefaultSubtitleThroughOverlay(from tracks: [MediaTrack]) {
+        let chosen = tracks.defaultSubtitleSelection(
+            mode: captionSettings.subtitleMode,
+            preferredLanguage: captionSettings.resolvedPreferredLanguage
+        )
+        guard let chosen, !chosen.isImageBasedSubtitle else {
+            engine.selectSubtitleTrack(nil)
+            clearOverlaySubtitle()
+            selectedSubtitleTrackID = nil
+            loadTrackOptions()
+            return
+        }
+        selectSubtitleOption(id: chosen.id)
     }
 
     /// Selects a subtitle track, or turns subtitles off (`PlayerTrackOption.offID`).

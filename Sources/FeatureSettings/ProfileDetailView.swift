@@ -82,7 +82,7 @@ struct ProfileDetailView: View {
     private var activeProfilePanel: some View {
         SettingsPanel(
             title: "Current profile",
-            footer: "Switching profiles swaps every setting on this Settings screen (theme, captions, spoilers, Trakt) and which servers/libraries you watch. The last-used profile is remembered for this Apple TV user."
+            footer: "Switching profiles swaps every setting on this Settings screen (theme, subtitles, spoilers, Trakt) and which servers/libraries you watch. The last-used profile is remembered for this Apple TV user."
         ) {
             HStack(spacing: 20) {
                 ProfileAvatarView(profile: context.activeProfile, size: 64)

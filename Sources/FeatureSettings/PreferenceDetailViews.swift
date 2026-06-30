@@ -104,59 +104,20 @@ struct CaptionsDetailView: View {
     private let backgroundOpacities: [Double] = [0.0, 0.25, 0.5, 0.75, 1.0]
 
     var body: some View {
-        SettingsSplitLayout(title: "Captions", sections: sections)
+        SettingsSplitLayout(title: "Subtitle Style", sections: sections)
     }
 
     private var sections: [SettingsSplitSection] {
         @Bindable var captions = captions
 
-        let subtitles = SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: [
-            SettingsSplitRow(
-                id: "auto-download",
-                title: "Automatically download subtitles",
-                description: "When an item has no suitable subtitle in your preferred language, Plozz asks the Jellyfin server to fetch the best match so every client benefits.",
-                valueSummary: captions.settings.autoDownloadSubtitles ? "On" : "Off"
-            ) {
-                Toggle("Automatically download subtitles", isOn: $captions.settings.autoDownloadSubtitles)
-            },
-            SettingsSplitRow(
-                id: "show-subtitles",
-                title: "Show subtitles",
-                description: "Choose whether subtitles turn on automatically — full subtitles, only forced passages, or off — when an item loads.",
-                valueSummary: captions.settings.subtitleMode.displayName
-            ) {
-                OptionCardRow(
-                    options: CaptionSettings.SubtitleMode.allCases,
-                    selection: $captions.settings.subtitleMode
-                ) { optionLabel($0.displayName) }
-            },
-            SettingsSplitRow(
-                id: "subtitle-language",
-                title: "Subtitle language",
-                description: "The language Plozz prefers when auto-selecting or downloading subtitles.",
-                valueSummary: languageName(for: languageSelection.wrappedValue)
-            ) {
-                Menu {
-                    Picker("Subtitle language", selection: languageSelection) {
-                        ForEach(languageOptions, id: \.self) { code in
-                            Text(languageName(for: code)).tag(code)
-                        }
-                    }
-                } label: {
-                    Label(languageName(for: languageSelection.wrappedValue), systemImage: "globe")
-                }
-                .menuStyle(.button)
-            }
-        ])
-
         var styleRows: [SettingsSplitRow] = [
             SettingsSplitRow(
                 id: "follows-system-style",
-                title: "Use system caption style",
-                description: "Defer entirely to the tvOS caption style set in Settings → Accessibility. Turn this off to customise size, colour, background and edges below.",
+                title: "Use system subtitle style",
+                description: "Defer entirely to the system subtitle style set in tvOS Accessibility settings. Turn this off to customise size, colour, background and edges below.",
                 valueSummary: captions.settings.followsSystemStyle ? "On" : "Off"
             ) {
-                Toggle("Use system caption style", isOn: $captions.settings.followsSystemStyle)
+                Toggle("Use system subtitle style", isOn: $captions.settings.followsSystemStyle)
             }
         ]
 
@@ -165,7 +126,7 @@ struct CaptionsDetailView: View {
                 SettingsSplitRow(
                     id: "text-size",
                     title: "Text size",
-                    description: "How large caption text appears, as a multiple of the default size.",
+                    description: "How large subtitle text appears, as a multiple of the default size.",
                     valueSummary: "\(Int(captions.settings.fontScale * 100))%",
                     indented: true
                 ) {
@@ -181,7 +142,7 @@ struct CaptionsDetailView: View {
                 SettingsSplitRow(
                     id: "text-color",
                     title: "Text color",
-                    description: "The fill colour used for caption text.",
+                    description: "The fill colour used for subtitle text.",
                     valueSummary: colorName(for: captions.settings.textColor),
                     indented: true
                 ) {
@@ -197,7 +158,7 @@ struct CaptionsDetailView: View {
                 SettingsSplitRow(
                     id: "background",
                     title: "Background",
-                    description: "Opacity of the panel drawn behind caption text for legibility.",
+                    description: "Opacity of the panel drawn behind subtitle text for legibility.",
                     valueSummary: captions.settings.backgroundColor.alpha == 0 ? "Off" : "\(Int(captions.settings.backgroundColor.alpha * 100))%",
                     indented: true
                 ) {
@@ -213,7 +174,7 @@ struct CaptionsDetailView: View {
                 SettingsSplitRow(
                     id: "edge-style",
                     title: "Edge style",
-                    description: "The outline or shadow applied to caption text to separate it from the picture.",
+                    description: "The outline or shadow applied to subtitle text to separate it from the picture.",
                     valueSummary: captions.settings.edgeStyle.displayName,
                     indented: true
                 ) {
@@ -228,27 +189,11 @@ struct CaptionsDetailView: View {
             )
         }
 
-        let style = SettingsSplitSection(id: "caption-style", header: "Caption Style", rows: styleRows)
-        return [subtitles, style]
+        let style = SettingsSplitSection(id: "style", header: nil, rows: styleRows)
+        return [style]
     }
 
     // MARK: Option data
-
-    private var languageOptions: [String] {
-        [""] + CaptionSettingsCard.subtitleLanguages.map(\.code)
-    }
-
-    private var languageSelection: Binding<String> {
-        Binding(
-            get: { captions.settings.preferredSubtitleLanguage ?? "" },
-            set: { captions.settings.preferredSubtitleLanguage = $0.isEmpty ? nil : $0 }
-        )
-    }
-
-    private func languageName(for code: String) -> String {
-        guard !code.isEmpty else { return "Device Default" }
-        return CaptionSettingsCard.subtitleLanguages.first(where: { $0.code == code })?.name ?? code
-    }
 
     private var textColorOptions: [CaptionSettings.RGBAColor] {
         CaptionSettings.RGBAColor.presets.map(\.color)
@@ -406,6 +351,24 @@ struct PlaybackDetailView: View {
         )
     }
 
+    // MARK: Subtitle-language helpers
+
+    private var subtitleLanguageOptions: [String] {
+        [""] + CaptionSettingsCard.subtitleLanguages.map(\.code)
+    }
+
+    private var subtitleLanguageSelection: Binding<String> {
+        Binding(
+            get: { captions.settings.preferredSubtitleLanguage ?? "" },
+            set: { captions.settings.preferredSubtitleLanguage = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private func subtitleLanguageName(for code: String) -> String {
+        guard !code.isEmpty else { return "Device Default" }
+        return CaptionSettingsCard.subtitleLanguages.first(where: { $0.code == code })?.name ?? code
+    }
+
     // MARK: Audio-language policy helpers
 
     /// The selectable audio-language preferences for the dropdowns: Original /
@@ -473,7 +436,6 @@ struct PlaybackDetailView: View {
 
     private var sections: [SettingsSplitSection] {
         [
-            captionsSection,
             subtitlesSection,
             audioSection,
             skipIntrosSection,
@@ -481,33 +443,12 @@ struct PlaybackDetailView: View {
         ]
     }
 
-    private var captionsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "captions", header: "Captions", rows: [
-            SettingsSplitRow(
-                id: "caption-style",
-                title: "Caption style",
-                description: "Adjust caption font, size and colours. These settings are also available from the player while you watch."
-            ) {
-                NavigationLink(value: SettingsRoute.captions) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "captions.bubble")
-                        Text("Open Caption Style")
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                    }
-                    .font(.headline)
-                    .padding(.horizontal, 4)
-                }
-                .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
-            }
-        ])
-    }
-
     private var subtitlesSection: SettingsSplitSection {
         SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: [
             SettingsSplitRow(
                 id: "subtitle-default",
-                title: "Default",
-                description: "How subtitles behave by default for everything you play.",
+                title: "Show subtitles",
+                description: "How subtitles behave by default for everything you play — full subtitles, only forced passages, or off.",
                 valueSummary: captions.settings.subtitleMode.displayName
             ) {
                 SettingsSegmentedPicker(
@@ -539,12 +480,53 @@ struct PlaybackDetailView: View {
                 }
             },
             SettingsSplitRow(
+                id: "subtitle-language",
+                title: "Subtitle language",
+                description: "The language Plozz prefers when auto-selecting or downloading subtitles.",
+                valueSummary: subtitleLanguageName(for: subtitleLanguageSelection.wrappedValue)
+            ) {
+                Menu {
+                    Picker("Subtitle language", selection: subtitleLanguageSelection) {
+                        ForEach(subtitleLanguageOptions, id: \.self) { code in
+                            Text(subtitleLanguageName(for: code)).tag(code)
+                        }
+                    }
+                } label: {
+                    Label(subtitleLanguageName(for: subtitleLanguageSelection.wrappedValue), systemImage: "globe")
+                }
+                .menuStyle(.button)
+            },
+            SettingsSplitRow(
+                id: "subtitle-auto-download",
+                title: "Automatically download subtitles",
+                description: "When an item has no suitable subtitle in your preferred language, Plozz asks the Jellyfin server to fetch the best match so every client benefits.",
+                valueSummary: captions.settings.autoDownloadSubtitles ? "On" : "Off"
+            ) {
+                Toggle("Automatically download subtitles", isOn: $captions.settings.autoDownloadSubtitles)
+            },
+            SettingsSplitRow(
                 id: "subtitle-remember",
                 title: "Remember subtitles per series",
                 description: "When you change the subtitle track while watching a series, reuse that choice for the rest of the series.",
                 valueSummary: playback.settings.rememberSubtitleTrackPerSeries ? "On" : "Off"
             ) {
                 Toggle("Remember subtitle choice per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
+            },
+            SettingsSplitRow(
+                id: "subtitle-style",
+                title: "Subtitle style",
+                description: "Adjust subtitle font, size and colours. These settings are also available from the player while you watch."
+            ) {
+                NavigationLink(value: SettingsRoute.captions) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "captions.bubble")
+                        Text("Open Subtitle Style")
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                    }
+                    .font(.headline)
+                    .padding(.horizontal, 4)
+                }
+                .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
             }
         ])
     }

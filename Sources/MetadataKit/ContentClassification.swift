@@ -87,6 +87,21 @@ public enum ContentClassifier {
     }
 }
 
+public extension ContentType {
+    /// Maps a routing `ContentType` onto the CoreModels-local subtitle-policy
+    /// axis, so the per-content-type subtitle policy can key off the same
+    /// classification without CoreModels depending on MetadataKit. Music and
+    /// unclassified content fall to `.other`, which always uses the profile base.
+    var subtitleCategory: SubtitleContentCategory {
+        switch self {
+        case .anime: return .anime
+        case .movie: return .movie
+        case .tvShow: return .tvShow
+        case .music, .unknown: return .other
+        }
+    }
+}
+
 /// The anime-database identifiers extracted from a ``MediaItem``'s provider ids,
 /// tolerating the differing key casing each backend uses. Used to query AniList by
 /// a stable id (far more reliable than a fuzzy romaji/english title search).

@@ -53,6 +53,20 @@ final class MetadataKitTests: XCTestCase {
         XCTAssertNil(ContentClassifier.originalAudioLanguage(for: item(kind: .episode)))
     }
 
+    func testContentTypeMapsToSubtitleCategory() {
+        XCTAssertEqual(ContentType.anime.subtitleCategory, .anime)
+        XCTAssertEqual(ContentType.movie.subtitleCategory, .movie)
+        XCTAssertEqual(ContentType.tvShow.subtitleCategory, .tvShow)
+        XCTAssertEqual(ContentType.music.subtitleCategory, .other)
+        XCTAssertEqual(ContentType.unknown.subtitleCategory, .other)
+    }
+
+    func testClassifiedItemResolvesSubtitleCategory() {
+        XCTAssertEqual(ContentClassifier.classify(item(providerIDs: ["AniList": "21"])).subtitleCategory, .anime)
+        XCTAssertEqual(ContentClassifier.classify(item(kind: .movie)).subtitleCategory, .movie)
+        XCTAssertEqual(ContentClassifier.classify(item(kind: .episode)).subtitleCategory, .tvShow)
+    }
+
     func testAnimeIDsExtraction() {
         let ids = AnimeIDs(from: item(providerIDs: ["AniList": "21", "MyAnimeList": "20", "AniDB": "5"]))
         XCTAssertEqual(ids.anilist, 21)

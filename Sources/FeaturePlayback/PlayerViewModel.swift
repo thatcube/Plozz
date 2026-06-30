@@ -1427,11 +1427,13 @@ public final class PlayerViewModel {
         }
         guard let track = engine.subtitleTracks.first(where: { $0.id == id }) else { return }
 
-        // Image-based subtitles (no text delivery URL — PGS/VOBSUB) can't be
-        // rendered by AVPlayer. If the user picks one while on the native engine,
-        // swap to the hybrid engine at the current position and apply the
-        // selection there so the subtitle actually shows.
-        if track.deliveryURL == nil, currentEngineKind == .native,
+        // Image-based subtitles (PGS/VOBSUB/DVDSUB) can't be rendered by AVPlayer
+        // or any on-device text renderer. If the user picks one while on the
+        // native engine, swap to the hybrid engine at the current position and
+        // apply the selection there so the subtitle actually shows. Key off
+        // `isImageBasedSubtitle` — NOT `deliveryURL == nil` — so an embedded text
+        // SRT (no sidecar URL, but renderable) stays on the native engine.
+        if track.isImageBasedSubtitle, currentEngineKind == .native,
            let request, !request.isTranscoding, engineFactory.hybridAvailable {
             selectedSubtitleTrackID = id
             Task { await swapEngineForImageSubtitle(track) }

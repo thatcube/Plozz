@@ -67,21 +67,26 @@ extension SubtitleCue: Equatable {
 
 /// The text payload of a cue. A struct (not a bare `String`) so the model can
 /// grow additively: today it carries the plain string, italic/bold emphasis, an
-/// optional positional alignment parsed from ASS `\an` tags, and — crucially —
-/// the **raw ASS event** so rich styling is preserved rather than flattened.
-/// Tomorrow it can carry per-word karaoke timing or resolved inline colour runs
-/// **without** changing the `SubtitleCue.Body` enum or any call site that only
-/// reads `.string`.
+/// optional ``SubtitleCueLayout`` describing where a *source-positioned* cue
+/// wants to sit, and — crucially — the **raw ASS event** so rich styling is
+/// preserved rather than flattened. Tomorrow it can carry per-word karaoke
+/// timing or resolved inline colour runs **without** changing the
+/// `SubtitleCue.Body` enum or any call site that only reads `.string`.
 public struct SubtitleText: Sendable, Equatable {
     /// Display text with markup stripped (newlines preserved). Always renderable
     /// by the current renderer, regardless of the source format.
     public var string: String
     public var isItalic: Bool
     public var isBold: Bool
-    /// Where the cue wants to sit, when the source positions it (ASS `\an`/`\pos`
-    /// signs, VTT line/position, captions). `nil` means "use the user's
-    /// configured default position".
-    public var alignment: SubtitleAlignment?
+    /// Where the cue wants to sit when the source positions it (ASS
+    /// `\an`/`\pos`/`MarginL/R/V`, VTT `line`/`position`/`region`, captions).
+    /// `nil` means "use the user's configured default dialogue position".
+    ///
+    /// This supersedes the old bare `\an` enum: it preserves an explicit anchor
+    /// point and per-edge margins so a positioned sign is reconstructed exactly,
+    /// not snapped to one of nine planes. The convenience ``alignment`` accessor
+    /// still returns the plane for call sites that only need it.
+    public var layout: SubtitleCueLayout?
     /// The **raw ASS/SSA event line** (`Layer,Start,End,Style,…,Text` *including*
     /// override tags) when the source is ASS and the engine was asked to preserve
     /// markup (AetherEngine `LoadOptions.preserveASSMarkup`, whose `.text` carries
@@ -91,11 +96,19 @@ public struct SubtitleText: Sendable, Equatable {
     /// colour/karaoke/positioning **without** the cue pipeline having flattened
     /// the data away first — the single most expensive-to-reverse mistake in a
     /// subtitle stack. The matching track-level `[Script Info]`/`[V4+ Styles]`
-    /// header (`TrackInfo.assHeader`) and font attachments travel with the cue
-    /// stream's *track descriptor* (introduced with the Plozzigen adapter), not on
-    /// every cue.
+    /// header (`SubtitleCueStream.metadata.assHeader`) and font attachments travel
+    /// with the cue stream's *metadata* (introduced with the Plozzigen adapter),
+    /// not on every cue.
     public var rawASS: String?
 
+    /// The `\an`-style plane of this cue's layout, or `nil` for default-lane
+    /// dialogue. Computed passthrough so existing call sites keep working while
+    /// the richer ``layout`` carries anchor/margins underneath.
+    public var alignment: SubtitleAlignment? { layout?.alignment }
+
+    /// Back-compatible initializer: a bare ``SubtitleAlignment`` (or `nil`) is
+    /// wrapped into a source-positioned ``SubtitleCueLayout``. Used by simple
+    /// sources (SRT/VTT) and the preview harness.
     public init(
         _ string: String,
         isItalic: Bool = false,
@@ -106,7 +119,23 @@ public struct SubtitleText: Sendable, Equatable {
         self.string = string
         self.isItalic = isItalic
         self.isBold = isBold
-        self.alignment = alignment
+        self.layout = alignment.map { SubtitleCueLayout(alignment: $0) }
+        self.rawASS = rawASS
+    }
+
+    /// Rich initializer for sources that carry a full ``SubtitleCueLayout``
+    /// (ASS `\pos`/margins, VTT regions, bitmap absolute placement).
+    public init(
+        _ string: String,
+        isItalic: Bool = false,
+        isBold: Bool = false,
+        layout: SubtitleCueLayout?,
+        rawASS: String? = nil
+    ) {
+        self.string = string
+        self.isItalic = isItalic
+        self.isBold = isBold
+        self.layout = layout
         self.rawASS = rawASS
     }
 }
@@ -153,12 +182,82 @@ public enum SubtitleAlignment: Int, Sendable, Equatable, CaseIterable {
     }
 }
 
+/// Normalized per-edge insets in `[0, 1]` against the video rect. Mirrors ASS
+/// `MarginL`/`MarginR`/`MarginV` and a WebVTT region box, kept resolution-neutral
+/// so the renderer multiplies by the on-screen video rect at draw time.
+public struct SubtitleEdgeInsets: Sendable, Equatable {
+    public var top: Double
+    public var leading: Double
+    public var bottom: Double
+    public var trailing: Double
+
+    public init(top: Double = 0, leading: Double = 0, bottom: Double = 0, trailing: Double = 0) {
+        self.top = top
+        self.leading = leading
+        self.bottom = bottom
+        self.trailing = trailing
+    }
+
+    public static let zero = SubtitleEdgeInsets()
+
+    public var isZero: Bool { top == 0 && leading == 0 && bottom == 0 && trailing == 0 }
+}
+
+/// Where a *source-positioned* cue wants to sit, normalized across subtitle
+/// formats so the renderer can place a sign/caption without knowing whether it
+/// came from ASS (`\an` + `\pos` + `MarginL/R/V`), WebVTT (`line`/`position`/
+/// `region`) or a bitmap track (absolute rect, carried separately on
+/// ``SubtitleImage``). A cue's text carries a layout only when the source
+/// positions it; a `nil` layout means "default dialogue lane", which the
+/// renderer seats at the user's configured, freely-movable position.
+///
+/// This is the vocabulary the renderer reasons in: it splits the active cues
+/// into **planes/lanes** — source-positioned cues drawn independently at their
+/// anchor against the video rect, default dialogue stacked in the user lane, and
+/// dual-subtitle tracks in their own lane — instead of collapsing everything to
+/// one block alignment.
+public struct SubtitleCueLayout: Sendable, Equatable {
+    /// The numpad plane (ASS `\an`; a bucketed WebVTT `line`/`position`). Drives
+    /// which corner of the cue box the anchor pins and multi-line justification.
+    public var alignment: SubtitleAlignment
+    /// An explicit normalized anchor point in `[0, 1]` against the *video rect*
+    /// (ASS `\pos`, WebVTT `position`/`line` percentages). When set it wins over
+    /// the `alignment` plane for *placement*; `alignment` still governs text
+    /// justification and which point of the box sits on the anchor. `nil` = place
+    /// by plane + `margins` only.
+    public var anchor: CGPoint?
+    /// Per-edge insets applied on top of the plane (ASS `MarginL/R/V`, VTT region).
+    public var margins: SubtitleEdgeInsets
+    /// `true` when the *source* explicitly placed this cue (a sign/caption), vs.
+    /// the renderer choosing the default lane. The renderer keeps source-placed
+    /// cues pinned to their plane while letting the user move dialogue, so a top
+    /// sign never drags dialogue with it.
+    public var isSourcePositioned: Bool
+
+    public init(
+        alignment: SubtitleAlignment = .bottomCenter,
+        anchor: CGPoint? = nil,
+        margins: SubtitleEdgeInsets = .zero,
+        isSourcePositioned: Bool = true
+    ) {
+        self.alignment = alignment
+        self.anchor = anchor
+        self.margins = margins
+        self.isSourcePositioned = isSourcePositioned
+    }
+}
+
 // MARK: - Active-cue selection (pure, testable)
 
 public extension Sequence where Element == SubtitleCue {
     /// The cues visible at `time` (seconds), after applying an optional global
     /// `offset` (positive = show subtitles later). Overlapping cues are allowed
     /// (e.g. a positioned sign on top of dialogue), so this returns all matches.
+    ///
+    /// This is the **simple O(n) path** kept for the preview harness and unit
+    /// tests. Live playback drives an indexed ``SubtitleCueStore`` /
+    /// ``SubtitleCueTimeline`` instead, which answers the same question in
+    /// O(log n + k) and only re-emits on cue-boundary crossings.
     func active(at time: Double, offset: Double = 0) -> [SubtitleCue] {
         let t = time - offset
         return filter { t >= $0.start && t < $0.end }

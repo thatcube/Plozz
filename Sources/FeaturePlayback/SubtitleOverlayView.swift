@@ -65,7 +65,7 @@ public struct SubtitleOverlayView: View {
             let rect = videoRect ?? CGRect(origin: .zero, size: geo.size)
             ZStack {
                 bitmapLayer(in: rect)
-                textLayer(in: geo.size)
+                textLayer(in: geo.size, videoRect: rect)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
@@ -104,13 +104,14 @@ public struct SubtitleOverlayView: View {
     private static let titleSafeFraction: CGFloat = 0.05
 
     @ViewBuilder
-    private func textLayer(in size: CGSize) -> some View {
+    private func textLayer(in size: CGSize, videoRect: CGRect) -> some View {
         let text = primary.filter { !$0.isImage }
-        // A cue with an explicit alignment is a positioned sign/caption and is
-        // placed independently. Everything else is dialogue and shares the user's
-        // configured default seat — so a top sign never drags dialogue with it.
-        let positioned = text.filter { cueAlignment($0) != nil }
-        let dialogue = text.filter { cueAlignment($0) == nil }
+        // A cue whose layout is source-positioned is a sign/caption placed
+        // independently in its own plane (against the video rect). Everything
+        // else is dialogue and shares the user's configured default seat — so a
+        // top sign never drags dialogue with it.
+        let positioned = text.filter { isSourcePositioned($0) }
+        let dialogue = text.filter { !isSourcePositioned($0) }
 
         ZStack {
             // Default dialogue: primary dialogue lines + the dual-sub secondary,
@@ -122,22 +123,48 @@ public struct SubtitleOverlayView: View {
                 .padding(.bottom, size.height * style.verticalPosition)
                 .offset(x: style.horizontalOffset * (size.width * 0.25))
 
-            // Positioned cues (ASS signs / captions): each honours its own `\an`
-            // plane independently, inset from the edges by a title-safe margin.
+            // Positioned cues (ASS signs / captions): each honours its own
+            // layout independently, placed against the video rect.
             ForEach(positioned) { cue in
-                if case .text(let t) = cue.body, let a = t.alignment {
-                    StyledCueText(
-                        text: t,
-                        fontSize: Self.baseFontSize * style.fontScale,
-                        fillColor: scaled(style.textColor),
-                        textAlignment: a.textAlignment,
-                        style: style
-                    )
-                    .frame(maxWidth: size.width * 0.92, alignment: a.frameTextAlignment)
-                    .padding(.horizontal, size.width * Self.titleSafeFraction)
-                    .padding(.vertical, size.height * Self.titleSafeFraction)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: a.planeAlignment)
-                }
+                positionedCue(cue, videoRect: videoRect)
+            }
+        }
+    }
+
+    /// Places one source-positioned cue against the video rect: at its explicit
+    /// normalized `anchor` when present (ASS `\pos`, VTT position), otherwise on
+    /// its `\an` plane inset by the title-safe margin plus any source margins.
+    @ViewBuilder
+    private func positionedCue(_ cue: SubtitleCue, videoRect: CGRect) -> some View {
+        if case .text(let t) = cue.body, let layout = t.layout {
+            let a = layout.alignment
+            let styled = StyledCueText(
+                text: t,
+                fontSize: Self.baseFontSize * style.fontScale,
+                fillColor: scaled(style.textColor),
+                textAlignment: a.textAlignment,
+                style: style
+            )
+            .frame(maxWidth: videoRect.width * 0.92, alignment: a.frameTextAlignment)
+
+            if let anchor = layout.anchor {
+                // Explicit point placement: pin the box on the normalized anchor
+                // against the video rect. (Centre-on-point today; corner-accurate
+                // pinning per `alignment` is a future measured-size refinement.)
+                styled.position(
+                    x: videoRect.minX + anchor.x * videoRect.width,
+                    y: videoRect.minY + anchor.y * videoRect.height
+                )
+            } else {
+                // Plane placement inside the video rect, inset by the title-safe
+                // margin plus any source-declared margins.
+                styled
+                    .padding(.leading, videoRect.width * (Self.titleSafeFraction + layout.margins.leading))
+                    .padding(.trailing, videoRect.width * (Self.titleSafeFraction + layout.margins.trailing))
+                    .padding(.top, videoRect.height * (Self.titleSafeFraction + layout.margins.top))
+                    .padding(.bottom, videoRect.height * (Self.titleSafeFraction + layout.margins.bottom))
+                    .frame(width: videoRect.width, height: videoRect.height, alignment: a.planeAlignment)
+                    .position(x: videoRect.midX, y: videoRect.midY)
             }
         }
     }
@@ -198,9 +225,9 @@ public struct SubtitleOverlayView: View {
 
     // MARK: - Helpers
 
-    private func cueAlignment(_ cue: SubtitleCue) -> SubtitleAlignment? {
-        if case .text(let t) = cue.body { return t.alignment }
-        return nil
+    private func isSourcePositioned(_ cue: SubtitleCue) -> Bool {
+        if case .text(let t) = cue.body { return t.layout?.isSourcePositioned == true }
+        return false
     }
 
     /// Apply the HDR luminance scale to a colour (no-op on SDR frames).

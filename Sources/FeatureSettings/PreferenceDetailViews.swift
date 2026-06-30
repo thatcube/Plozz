@@ -190,6 +190,9 @@ struct PlaybackDetailView: View {
     @Bindable var captions: CaptionSettingsModel
     /// Per-content-type overrides ("forced-only on movies, full subs on anime").
     @Bindable var subtitlePolicy: SubtitlePolicyModel
+    /// Per-content-type audio-language overrides ("original audio for anime,
+    /// device language for everything else").
+    @Bindable var audioPolicy: AudioPolicyModel
 
     /// The three classifiable content types the per-type rules apply to, in the
     /// order shown in Settings (`.other` always follows the base, so it isn't
@@ -229,6 +232,65 @@ struct PlaybackDetailView: View {
                 subtitlePolicy.overrides[category] = rule
             }
         )
+    }
+
+    // MARK: Audio-language policy helpers
+
+    /// The selectable audio-language preferences for the dropdowns: Original /
+    /// Device, then the shared common-language list reused from the caption card.
+    private static let audioPreferenceOptions: [AudioLanguagePreference] =
+        [.original, .device] + CaptionSettingsCard.subtitleLanguages.map { .language($0.code) }
+
+    /// Human-readable label for an audio-language preference.
+    private static func audioPreferenceName(_ preference: AudioLanguagePreference) -> String {
+        switch preference {
+        case .original: return "Original"
+        case .device: return "Device"
+        case .language(let code):
+            return CaptionSettingsCard.subtitleLanguages.first(where: { $0.code == code })?.name ?? code
+        }
+    }
+
+    /// Whether the profile has opted into per-content-type audio rules.
+    private var audioPerContentTypeEnabled: Bool { !audioPolicy.overrides.isEmpty }
+
+    /// Toggles the whole per-content-type audio matrix: adopting the smart seed
+    /// (original audio for anime, device language for movies/TV) on, or clearing
+    /// back to the single base preference everywhere off.
+    private var audioPerContentTypeBinding: Binding<Bool> {
+        Binding(
+            get: { audioPerContentTypeEnabled },
+            set: { on in
+                audioPolicy.overrides = on
+                    ? AudioPolicy.smartDefaultOverrides()
+                    : [:]
+            }
+        )
+    }
+
+    /// A dropdown binding for one category's audio-language preference, falling
+    /// back to the base preference when no override is stored yet.
+    private func audioPreferenceBinding(for category: ContentCategory) -> Binding<AudioLanguagePreference> {
+        Binding(
+            get: { audioPolicy.overrides[category] ?? playback.settings.audioLanguagePreference },
+            set: { audioPolicy.overrides[category] = $0 }
+        )
+    }
+
+    /// A native pop-up menu for choosing an audio-language preference (the
+    /// common-language list is too long for the inline pill picker).
+    @ViewBuilder
+    private func audioLanguageMenu(_ selection: Binding<AudioLanguagePreference>) -> some View {
+        Menu {
+            Picker("Audio language", selection: selection) {
+                ForEach(Self.audioPreferenceOptions, id: \.self) { preference in
+                    Text(Self.audioPreferenceName(preference)).tag(preference)
+                }
+            }
+        } label: {
+            Label(Self.audioPreferenceName(selection.wrappedValue), systemImage: "globe")
+        }
+        .menuStyle(.button)
     }
 
     var body: some View {
@@ -289,12 +351,23 @@ struct PlaybackDetailView: View {
                     }
                 }
 
-                SettingsPanel(
-                    title: "Audio Language",
-                    footer: "Plozz can start each title in its original spoken language — so anime defaults to Japanese audio instead of the dub — and remember the audio language you pick for a series so the rest of that show follows suit."
-                ) {
+                SettingsPanel(title: "Audio Language") {
                     VStack(alignment: .leading, spacing: 18) {
-                        Toggle("Prefer original language audio", isOn: $playback.settings.preferOriginalLanguageAudio)
+                        LabeledSettingRow("Preferred language", labelWidth: 220) {
+                            audioLanguageMenu($playback.settings.audioLanguagePreference)
+                        }
+
+                        Divider()
+
+                        Toggle("Different default audio for movies, TV shows, and anime", isOn: audioPerContentTypeBinding)
+
+                        if audioPerContentTypeEnabled {
+                            ForEach(Self.policyCategories, id: \.self) { category in
+                                LabeledSettingRow(category.displayName, labelWidth: 220) {
+                                    audioLanguageMenu(audioPreferenceBinding(for: category))
+                                }
+                            }
+                        }
 
                         Divider()
 

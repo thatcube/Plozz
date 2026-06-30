@@ -74,6 +74,9 @@ struct MainTabView: View {
     /// Per-profile per-content-type subtitle policy overrides, threaded into the
     /// player (resolved against the caption base) and into Settings for editing.
     let subtitlePolicyModel: SubtitlePolicyModel
+    /// Per-profile per-content-type audio-language overrides, threaded into the
+    /// player (resolved against the playback base) and into Settings for editing.
+    let audioPolicyModel: AudioPolicyModel
     let themeModel: ThemeSettingsModel
     /// Per-profile remembered per-series audio/subtitle selections, threaded into
     /// the player so a manual track switch sticks across that show's episodes.
@@ -148,6 +151,7 @@ struct MainTabView: View {
                 captionSettings: captionModel.settings,
                 playbackSettings: playbackModel.settings,
                 subtitlePolicy: subtitlePolicyModel.resolvedPolicy(caption: captionModel.settings),
+                audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
                 seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
@@ -166,6 +170,7 @@ struct MainTabView: View {
                 captionSettings: captionModel.settings,
                 playbackSettings: playbackModel.settings,
                 subtitlePolicy: subtitlePolicyModel.resolvedPolicy(caption: captionModel.settings),
+                audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
                 seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
@@ -197,6 +202,7 @@ struct MainTabView: View {
                 spoilers: spoilerModel,
                 playback: playbackModel,
                 subtitlePolicy: subtitlePolicyModel,
+                audioPolicy: audioPolicyModel,
                 theme: themeModel,
                 nightShift: nightShiftModel,
                 homeVisibility: homeVisibility,
@@ -436,6 +442,7 @@ private func makePlayerViewModel(
     captionSettings: CaptionSettings,
     playbackSettings: PlaybackSettings,
     subtitlePolicy: SubtitlePolicy,
+    audioPolicy: AudioPolicy,
     seriesTrackStore: any SeriesTrackPreferenceStoring,
     scrobbler: any TraktScrobbling,
     watchBridge: WatchOutboxBridge,
@@ -466,6 +473,7 @@ private func makePlayerViewModel(
             itemID: videoID,
             captionSettings: captionSettings,
             subtitlePolicy: subtitlePolicy,
+            audioPolicy: audioPolicy,
             playbackSettings: playbackSettings,
             seriesTrackStore: seriesTrackStore,
             startPosition: request.startPosition,
@@ -518,6 +526,7 @@ private func makePlayerViewModel(
         mediaSourceID: request.item.selectedVersionID,
         captionSettings: captionSettings,
         subtitlePolicy: subtitlePolicy,
+        audioPolicy: audioPolicy,
         playbackSettings: playbackSettings,
         seriesTrackStore: seriesTrackStore,
         seriesAccountFallbackID: primaryAccountID,
@@ -716,6 +725,7 @@ private struct HomeTab: View {
     let captionSettings: CaptionSettings
     let playbackSettings: PlaybackSettings
     let subtitlePolicy: SubtitlePolicy
+    let audioPolicy: AudioPolicy
     let seriesTrackStore: any SeriesTrackPreferenceStoring
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
@@ -829,6 +839,7 @@ private struct HomeTab: View {
             captionSettings: captionSettings,
             playbackSettings: playbackSettings,
             subtitlePolicy: subtitlePolicy,
+            audioPolicy: audioPolicy,
             seriesTrackStore: seriesTrackStore,
             scrobbler: scrobbler,
             watchBridge: watchBridge,
@@ -935,6 +946,7 @@ private extension View {
         captionSettings: CaptionSettings,
         playbackSettings: PlaybackSettings,
         subtitlePolicy: SubtitlePolicy,
+        audioPolicy: AudioPolicy,
         seriesTrackStore: any SeriesTrackPreferenceStoring,
         scrobbler: any TraktScrobbling,
         watchBridge: WatchOutboxBridge,
@@ -952,6 +964,7 @@ private extension View {
                         captionSettings: captionSettings,
                         playbackSettings: playbackSettings,
                         subtitlePolicy: subtitlePolicy,
+                        audioPolicy: audioPolicy,
                         seriesTrackStore: seriesTrackStore,
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
@@ -1043,6 +1056,7 @@ private struct SearchTab: View {
     let captionSettings: CaptionSettings
     let playbackSettings: PlaybackSettings
     let subtitlePolicy: SubtitlePolicy
+    let audioPolicy: AudioPolicy
     let seriesTrackStore: any SeriesTrackPreferenceStoring
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
@@ -1146,6 +1160,7 @@ private struct SearchTab: View {
             captionSettings: captionSettings,
             playbackSettings: playbackSettings,
             subtitlePolicy: subtitlePolicy,
+            audioPolicy: audioPolicy,
             seriesTrackStore: seriesTrackStore,
             scrobbler: scrobbler,
             watchBridge: watchBridge,

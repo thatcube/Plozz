@@ -95,6 +95,13 @@ public final class PlayerViewModel {
     /// value, not a live store. Defaults to inheriting the caption settings, so a
     /// profile that set no overrides behaves exactly as before.
     private let subtitlePolicy: SubtitlePolicy
+    /// The resolved per-content-type audio-language policy for this profile: base
+    /// preference mirrors `playbackSettings.audioLanguagePreference`, with optional
+    /// per-category overrides ("original audio for anime, device language for
+    /// everything else"). Read-only here — the Settings UI owns edits — and
+    /// resolved once per playback. Defaults to inheriting the playback settings, so
+    /// a profile that set no overrides behaves exactly as before.
+    private let audioPolicy: AudioPolicy
     /// Per-profile playback prefs. Today: whether to offer the Skip Intro/Credits
     /// button. When `skipIntros` is off, segments are never fetched or shown.
     private let playbackSettings: PlaybackSettings
@@ -307,6 +314,7 @@ public final class PlayerViewModel {
         mediaSourceID: String? = nil,
         captionSettings: CaptionSettings = .default,
         subtitlePolicy: SubtitlePolicy? = nil,
+        audioPolicy: AudioPolicy? = nil,
         playbackSettings: PlaybackSettings = .default,
         seriesTrackStore: (any SeriesTrackPreferenceStoring)? = nil,
         seriesAccountFallbackID: String? = nil,
@@ -328,6 +336,7 @@ public final class PlayerViewModel {
         self.mediaSourceID = mediaSourceID
         self.captionSettings = captionSettings
         self.subtitlePolicy = subtitlePolicy ?? .inheriting(from: captionSettings)
+        self.audioPolicy = audioPolicy ?? .inheriting(from: playbackSettings)
         self.playbackSettings = playbackSettings
         self.seriesTrackStore = seriesTrackStore
         self.seriesAccountFallbackID = seriesAccountFallbackID
@@ -665,15 +674,22 @@ public final class PlayerViewModel {
     }
 
     /// Resolves the ordered audio-language preference for a load from per-series
-    /// memory (when enabled) and the prefer-original-language policy. A remembered
-    /// per-series language takes precedence ahead of prefer-original.
+    /// memory (when enabled) and the per-content-type audio policy. A remembered
+    /// per-series language takes precedence ahead of the policy preference.
     private func preferredAudioLanguages(for item: MediaItem) -> [String] {
         AudioLanguagePolicy.preferredAudioLanguages(
             remembered: rememberedAudioLanguage(for: item),
-            preferOriginal: playbackSettings.preferOriginalLanguageAudio,
+            preference: effectiveAudioPreference(for: item),
             originalLanguage: ContentClassifier.originalAudioLanguage(for: item),
             deviceLanguage: LanguageMatch.deviceLanguageCode
         )
+    }
+
+    /// The audio-language preference that applies to `item`: the profile's
+    /// per-content-type override for the item's category if set, else the profile
+    /// base preference.
+    private func effectiveAudioPreference(for item: MediaItem) -> AudioLanguagePreference {
+        audioPolicy.effectivePreference(for: ContentClassifier.audioCategory(for: item))
     }
 
     /// The subtitle rule that applies to `item` (design §5.0): the profile's

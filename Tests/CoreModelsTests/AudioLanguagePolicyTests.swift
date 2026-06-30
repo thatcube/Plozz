@@ -8,84 +8,106 @@ final class AudioLanguagePolicyTests: XCTestCase {
     func testRememberedLanguageTakesPrecedence() {
         let result = AudioLanguagePolicy.preferredAudioLanguages(
             remembered: "en",
-            preferOriginal: true,
+            preference: .original,
             originalLanguage: "ja",
             deviceLanguage: "de"
         )
-        XCTAssertEqual(result, ["en"], "A remembered per-series language overrides prefer-original and device.")
+        XCTAssertEqual(result, ["en"], "A remembered per-series language overrides the policy preference and device.")
     }
 
     func testRememberedWhitespaceIsIgnored() {
         let result = AudioLanguagePolicy.preferredAudioLanguages(
             remembered: "   ",
-            preferOriginal: false,
+            preference: .device,
             originalLanguage: nil,
             deviceLanguage: "fr"
         )
         XCTAssertEqual(result, ["fr"], "A blank remembered value is treated as no memory and falls through.")
     }
 
-    // MARK: Prefer-original
+    // MARK: Original preference
 
-    func testPreferOriginalWithKnownOriginalLanguage() {
+    func testOriginalWithKnownOriginalLanguage() {
         let result = AudioLanguagePolicy.preferredAudioLanguages(
             remembered: nil,
-            preferOriginal: true,
+            preference: .original,
             originalLanguage: "ja",
             deviceLanguage: "en"
         )
-        XCTAssertEqual(result, ["ja"], "Anime (original ja) with prefer-original on requests Japanese, not the device language.")
+        XCTAssertEqual(result, ["ja"], "Anime (original ja) with .original requests Japanese, not the device language.")
     }
 
-    func testPreferOriginalWithUnknownOriginalDefersToContainer() {
+    func testOriginalWithUnknownOriginalDefersToContainer() {
         let result = AudioLanguagePolicy.preferredAudioLanguages(
             remembered: nil,
-            preferOriginal: true,
+            preference: .original,
             originalLanguage: nil,
             deviceLanguage: "en"
         )
         XCTAssertEqual(result, [], "Unknown original language expresses no preference so the container default (≈ original) wins.")
     }
 
-    func testPreferOriginalIgnoresBlankOriginal() {
+    func testOriginalIgnoresBlankOriginal() {
         let result = AudioLanguagePolicy.preferredAudioLanguages(
             remembered: nil,
-            preferOriginal: true,
+            preference: .original,
             originalLanguage: "  ",
             deviceLanguage: "en"
         )
         XCTAssertEqual(result, [], "A blank original language is treated as unknown.")
     }
 
-    // MARK: Device-language fallback (prefer-original off)
+    // MARK: Device preference
 
-    func testDeviceLanguageUsedWhenNotPreferringOriginal() {
+    func testDeviceLanguageUsedForDevicePreference() {
         let result = AudioLanguagePolicy.preferredAudioLanguages(
             remembered: nil,
-            preferOriginal: false,
+            preference: .device,
             originalLanguage: "ja",
             deviceLanguage: "en"
         )
-        XCTAssertEqual(result, ["en"], "With prefer-original off, the device language drives dub selection.")
+        XCTAssertEqual(result, ["en"], "With .device the device language drives dub selection.")
     }
 
-    func testEmptyWhenNoSignalsAtAll() {
+    func testEmptyWhenDevicePreferenceAndNoDeviceLanguage() {
         let result = AudioLanguagePolicy.preferredAudioLanguages(
             remembered: nil,
-            preferOriginal: false,
-            originalLanguage: nil,
+            preference: .device,
+            originalLanguage: "ja",
             deviceLanguage: nil
         )
-        XCTAssertEqual(result, [], "No remembered, no original, no device → no preference (container default).")
+        XCTAssertEqual(result, [], "No device language → no preference (container default).")
     }
 
     func testEmptyWhenDeviceLanguageBlank() {
         let result = AudioLanguagePolicy.preferredAudioLanguages(
             remembered: nil,
-            preferOriginal: false,
+            preference: .device,
             originalLanguage: nil,
             deviceLanguage: ""
         )
         XCTAssertEqual(result, [], "A blank device language yields no preference.")
+    }
+
+    // MARK: Explicit language preference
+
+    func testExplicitLanguageWins() {
+        let result = AudioLanguagePolicy.preferredAudioLanguages(
+            remembered: nil,
+            preference: .language("es"),
+            originalLanguage: "ja",
+            deviceLanguage: "en"
+        )
+        XCTAssertEqual(result, ["es"], "An explicit language preference requests that language regardless of original/device.")
+    }
+
+    func testExplicitBlankLanguageExpressesNoPreference() {
+        let result = AudioLanguagePolicy.preferredAudioLanguages(
+            remembered: nil,
+            preference: .language("  "),
+            originalLanguage: "ja",
+            deviceLanguage: "en"
+        )
+        XCTAssertEqual(result, [], "A blank explicit language is treated as no preference.")
     }
 }

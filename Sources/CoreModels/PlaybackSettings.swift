@@ -25,13 +25,16 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     /// integration and keeps scrobbling either way.
     public var syncWatchAcrossServers: Bool
 
-    /// Prefer the **original-language** audio track by default (e.g. Japanese for
-    /// anime) rather than pushing the viewer's device language (which favors
-    /// dubs). When on and the item's original language is known, that language is
-    /// requested at load; when unknown, playback defers to the container's default
-    /// track (the best available proxy for "original"). ON by default — the
-    /// maintainer's primary user watches mostly anime and wants subbed originals.
-    public var preferOriginalLanguageAudio: Bool
+    /// The profile's default audio-language preference: original spoken language
+    /// (e.g. Japanese for anime), the viewer's device language (dub-friendly), or
+    /// an explicit language. `.original` by default — the maintainer's primary
+    /// user watches mostly anime and wants subbed originals. Per-content-type
+    /// overrides ("original for anime, device for everything else") live in
+    /// `AudioPolicy`; this is the base they fall back to.
+    ///
+    /// Replaces the legacy `preferOriginalLanguageAudio` boolean (`true` →
+    /// `.original`, `false` → `.device`), migrated in the decoder below.
+    public var audioLanguagePreference: AudioLanguagePreference
 
     /// Remember the chosen **audio language** per series: switching audio on any
     /// episode makes that language stick for every other episode of that series
@@ -48,7 +51,7 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         skipBackwardInterval: SkipInterval = .ten,
         skipForwardInterval: SkipInterval = .ten,
         syncWatchAcrossServers: Bool = true,
-        preferOriginalLanguageAudio: Bool = true,
+        audioLanguagePreference: AudioLanguagePreference = .original,
         rememberAudioTrackPerSeries: Bool = true,
         rememberSubtitleTrackPerSeries: Bool = true
     ) {
@@ -56,7 +59,7 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         self.skipBackwardInterval = skipBackwardInterval
         self.skipForwardInterval = skipForwardInterval
         self.syncWatchAcrossServers = syncWatchAcrossServers
-        self.preferOriginalLanguageAudio = preferOriginalLanguageAudio
+        self.audioLanguagePreference = audioLanguagePreference
         self.rememberAudioTrackPerSeries = rememberAudioTrackPerSeries
         self.rememberSubtitleTrackPerSeries = rememberSubtitleTrackPerSeries
     }
@@ -72,6 +75,9 @@ public extension PlaybackSettings {
         case skipBackwardInterval
         case skipForwardInterval
         case syncWatchAcrossServers
+        case audioLanguagePreference
+        /// Legacy boolean predecessor of `audioLanguagePreference`, still read for
+        /// migration (`true` → `.original`, `false` → `.device`).
         case preferOriginalLanguageAudio
         case rememberAudioTrackPerSeries
         case rememberSubtitleTrackPerSeries
@@ -103,14 +109,36 @@ public extension PlaybackSettings {
         self.syncWatchAcrossServers =
             (try? container.decodeIfPresent(Bool.self, forKey: .syncWatchAcrossServers))
             .flatMap { $0 } ?? defaults.syncWatchAcrossServers
-        self.preferOriginalLanguageAudio =
-            (try? container.decodeIfPresent(Bool.self, forKey: .preferOriginalLanguageAudio))
-            .flatMap { $0 } ?? defaults.preferOriginalLanguageAudio
+        // Prefer the new preference; fall back to the legacy boolean (true →
+        // original, false → device) so installs that predate the dropdown keep
+        // their prefer-original choice; default to `.original` when neither is set.
+        if let preference = try? container.decodeIfPresent(AudioLanguagePreference.self, forKey: .audioLanguagePreference) {
+            self.audioLanguagePreference = preference
+        } else if let legacy = try? container.decodeIfPresent(Bool.self, forKey: .preferOriginalLanguageAudio) {
+            self.audioLanguagePreference = legacy ? .original : .device
+        } else {
+            self.audioLanguagePreference = defaults.audioLanguagePreference
+        }
         self.rememberAudioTrackPerSeries =
             (try? container.decodeIfPresent(Bool.self, forKey: .rememberAudioTrackPerSeries))
             .flatMap { $0 } ?? defaults.rememberAudioTrackPerSeries
         self.rememberSubtitleTrackPerSeries =
             (try? container.decodeIfPresent(Bool.self, forKey: .rememberSubtitleTrackPerSeries))
             .flatMap { $0 } ?? defaults.rememberSubtitleTrackPerSeries
+    }
+
+    /// Explicit encoder so the legacy-only `preferOriginalLanguageAudio` coding
+    /// key (kept for decode-time migration) doesn't break Encodable synthesis and
+    /// is never written back — only the current `audioLanguagePreference` is
+    /// persisted.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(skipIntros, forKey: .skipIntros)
+        try container.encode(skipBackwardInterval, forKey: .skipBackwardInterval)
+        try container.encode(skipForwardInterval, forKey: .skipForwardInterval)
+        try container.encode(syncWatchAcrossServers, forKey: .syncWatchAcrossServers)
+        try container.encode(audioLanguagePreference, forKey: .audioLanguagePreference)
+        try container.encode(rememberAudioTrackPerSeries, forKey: .rememberAudioTrackPerSeries)
+        try container.encode(rememberSubtitleTrackPerSeries, forKey: .rememberSubtitleTrackPerSeries)
     }
 }

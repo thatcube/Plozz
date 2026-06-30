@@ -55,6 +55,15 @@ public enum ContentClassifier {
         classify(item).subtitleCategory
     }
 
+    /// The per-content-type **audio** policy category for `item` — the same
+    /// content taxonomy the subtitle policy uses (anime vs movie vs TV), surfaced
+    /// under an audio-named accessor so the audio path reads cleanly. Lets the
+    /// player resolve "original audio for anime, device language for everything
+    /// else" without re-running classification logic.
+    public static func audioCategory(for item: MediaItem) -> ContentCategory {
+        classify(item).subtitleCategory
+    }
+
     /// `true` when the provider-id key names an anime database (AniList / AniDB /
     /// MyAnimeList / Shoko / Kitsu), tolerant of the casing/punctuation each
     /// backend uses. Lets callers copy just a series' anime ids onto its episodes.

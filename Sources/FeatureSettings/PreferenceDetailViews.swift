@@ -269,7 +269,7 @@ struct PlaybackDetailView: View {
 
                         Divider()
 
-                        Toggle("Different defaults for movies, TV shows & anime", isOn: perContentTypeBinding)
+                        Toggle("Different default subtitles for movies, TV shows, and anime", isOn: perContentTypeBinding)
 
                         if perContentTypeEnabled {
                             ForEach(Self.policyCategories, id: \.self) { category in
@@ -285,7 +285,7 @@ struct PlaybackDetailView: View {
 
                         Divider()
 
-                        Toggle("Remember choice per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
+                        Toggle("Remember subtitles per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
                     }
                 }
 
@@ -298,7 +298,7 @@ struct PlaybackDetailView: View {
 
                         Divider()
 
-                        Toggle("Remember choice per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
+                        Toggle("Remember audio per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
                     }
                 }
 

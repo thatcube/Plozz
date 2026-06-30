@@ -11,20 +11,23 @@ import CoreUI
 /// one multiple-choice control, distinct from the chevroned navigation rows and
 /// the switch toggles.
 ///
-/// ## Interaction (selection follows focus)
-/// The whole control reads as one element. Spatial-right from the master list
-/// enters it **on the current choice** (so entering never changes the value);
-/// left/right then slide a **single thumb** between options and commit the new
-/// value live; a left press at the leading edge leaves the control back to the
-/// list. Because the thumb moves *with* your input, the slide is always visible.
+/// ## Interaction (press to commit — focus and selection are decoupled)
+/// This behaves like every other tvOS control, because on tvOS focus is purely
+/// spatial: moving focus across the segments changes **nothing**; you press
+/// **Select** to commit the focused segment. A left press at the leading edge
+/// just leaves the control back to the master list (standard), and moving
+/// up/down to a neighbouring control never grabs the wrong value because focus
+/// doesn't drive selection.
 ///
 /// ## Look (monochrome, theme-aware)
-/// There is exactly one indicator — no accent colour (colour is reserved for the
-/// rare true call-to-action, and the on/off switches). The thumb wears the same
-/// theme-aware focus treatment as every other Settings row: a WHITE thumb with
-/// black text in dark themes, a BLACK thumb with white text in light themes.
-/// When focus leaves the control the thumb dims to a quiet neutral fill so the
-/// current choice is still legible from the master list.
+/// Two independent, non-competing indicators:
+/// * **Focus** — the segment you're on wears the same theme-aware bright thumb
+///   as every other Settings row (WHITE thumb + black text in dark themes, BLACK
+///   thumb + white text in light themes), with a soft lift.
+/// * **Selection** — the chosen segment carries a trailing checkmark (matching
+///   ``SettingsOptionPicker``) and brighter label, with no colour. The checkmark
+///   slot is always reserved, so committing a choice never resizes the track or
+///   disturbs focus geometry.
 ///
 /// Best for 2–5 short options. For long labels or many options prefer a menu or
 /// a vertical list instead.
@@ -35,33 +38,24 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
 
     @Environment(\.themePalette) private var palette
     @Environment(\.colorScheme) private var colorScheme
-    /// Shared namespace so the single thumb glides between segments.
-    @Namespace private var thumbNamespace
-    /// Which segment currently holds focus (nil when focus is elsewhere).
-    @FocusState private var focusedOption: Option?
-
-    private var controlIsFocused: Bool { focusedOption != nil }
-
-    /// The segment the thumb sits under: the focused one while we're inside the
-    /// control, otherwise the committed selection.
-    private var thumbOption: Option { focusedOption ?? selection }
-
-    // Theme-aware focus thumb, mirroring `SettingsFocusButtonStyle`: invert
-    // against the background so the highlight reads in every theme.
-    private var focusThumbFill: Color { colorScheme == .dark ? .white : .black }
-    private var focusThumbText: Color { colorScheme == .dark ? .black : .white }
-    /// Quiet thumb shown when the control isn't focused — enough to mark the
-    /// current choice from across the room without shouting.
-    private var idleThumbFill: Color { palette.primaryText.opacity(0.16) }
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(options, id: \.self) { option in
-                segment(option)
+                Button {
+                    selection = option
+                } label: {
+                    SegmentLabel(
+                        text: title(option),
+                        isSelected: option == selection
+                    )
+                }
+                .buttonStyle(SegmentButtonStyle(isSelected: option == selection))
+                .accessibilityValue(option == selection ? "Selected" : "")
             }
         }
-        // Generous inset so the thumb (and its lift shadow) has room to breathe
-        // inside the track instead of crowding the rim or its neighbours.
+        // Generous inset so a focused segment's bright thumb and lift have room
+        // to breathe inside the track instead of crowding the rim.
         .padding(8)
         .background(
             Capsule(style: .continuous)
@@ -72,61 +66,73 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
                 .strokeBorder(palette.cardBorder.opacity(0.8), lineWidth: 1)
         )
         .fixedSize()
-        // Entering the control lands on the current choice, so just arriving
-        // never mutates the value.
-        .defaultFocus($focusedOption, selection)
-        // Selection follows focus: moving between segments commits live.
-        .onChange(of: focusedOption) { _, newValue in
-            if let newValue { selection = newValue }
-        }
-        .animation(.spring(response: 0.34, dampingFraction: 0.78), value: thumbOption)
-        .animation(.easeOut(duration: 0.16), value: controlIsFocused)
     }
 
-    @ViewBuilder
-    private func segment(_ option: Option) -> some View {
-        let isThumb = option == thumbOption
+    /// The contents of one segment: label + an always-reserved trailing
+    /// checkmark slot. Reserving the slot (hidden when unselected) keeps each
+    /// segment a constant width, so the track never reflows as the choice moves.
+    private struct SegmentLabel: View {
+        let text: String
+        let isSelected: Bool
 
-        Button {
-            selection = option
-        } label: {
-            Text(title(option))
-                .lineLimit(1)
-                .fixedSize()
-                .font(.headline.weight(isThumb ? .semibold : .regular))
-                .foregroundStyle(segmentForeground(isThumb: isThumb))
-                .padding(.horizontal, 22)
-                .padding(.vertical, 12)
-                .background {
-                    if isThumb {
+        var body: some View {
+            HStack(spacing: 8) {
+                Text(text).lineLimit(1).fixedSize()
+                Image(systemName: "checkmark")
+                    .font(.subheadline.weight(.bold))
+                    .opacity(isSelected ? 1 : 0)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    /// Press-to-commit segment styling. Focus draws the theme-aware bright thumb
+    /// (decoupled from selection); a merely-selected segment keeps a brighter
+    /// label + checkmark on the plain track.
+    private struct SegmentButtonStyle: ButtonStyle {
+        let isSelected: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            SegmentBody(configuration: configuration, isSelected: isSelected)
+        }
+
+        private struct SegmentBody: View {
+            let configuration: ButtonStyle.Configuration
+            let isSelected: Bool
+            @Environment(\.isFocused) private var isFocused
+            @Environment(\.colorScheme) private var colorScheme
+            @Environment(\.themePalette) private var palette
+
+            // Theme-aware focus thumb, mirroring `SettingsFocusButtonStyle`:
+            // invert against the background so the highlight reads in every theme.
+            private var focusThumbFill: Color { colorScheme == .dark ? .white : .black }
+            private var focusThumbText: Color { colorScheme == .dark ? .black : .white }
+
+            private var foreground: Color {
+                if isFocused { return focusThumbText }
+                if isSelected { return palette.primaryText }
+                return palette.secondaryText
+            }
+
+            var body: some View {
+                configuration.label
+                    .font(.headline.weight(isFocused || isSelected ? .semibold : .regular))
+                    .foregroundStyle(foreground)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+                    .background {
                         Capsule(style: .continuous)
-                            .fill(controlIsFocused ? focusThumbFill : idleThumbFill)
-                            .matchedGeometryEffect(id: "segment-thumb", in: thumbNamespace)
+                            .fill(isFocused ? focusThumbFill : .clear)
                             .shadow(
-                                color: .black.opacity(controlIsFocused ? 0.25 : 0),
-                                radius: controlIsFocused ? 8 : 0,
-                                y: controlIsFocused ? 3 : 0
+                                color: .black.opacity(isFocused ? 0.25 : 0),
+                                radius: isFocused ? 8 : 0,
+                                y: isFocused ? 3 : 0
                             )
                     }
-                }
-                .contentShape(Capsule())
-        }
-        .buttonStyle(SegmentButtonStyle())
-        .focused($focusedOption, equals: option)
-        .accessibilityValue(option == selection ? "Selected" : "")
-    }
-
-    private func segmentForeground(isThumb: Bool) -> Color {
-        guard isThumb else { return palette.secondaryText }
-        return controlIsFocused ? focusThumbText : palette.primaryText
-    }
-
-    /// Minimal style: keeps the segment focusable on tvOS without layering the
-    /// system "card" lift on top of our own thumb.
-    private struct SegmentButtonStyle: ButtonStyle {
-        func makeBody(configuration: Configuration) -> some View {
-            configuration.label
-                .opacity(configuration.isPressed ? 0.9 : 1)
+                    .scaleEffect(configuration.isPressed ? 0.97 : (isFocused ? 1.04 : 1.0))
+                    .animation(.easeOut(duration: 0.16), value: isFocused)
+                    .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            }
         }
     }
 }

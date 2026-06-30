@@ -579,7 +579,7 @@ struct PlaybackDetailView: View {
                     + "\n\nWhen your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin.",
                 valueSummary: playback.settings.skipIntros.title
             ) {
-                SettingsOptionPicker(
+                SettingsSegmentedPicker(
                     options: SkipIntrosMode.allCases,
                     selection: $playback.settings.skipIntros,
                     title: { $0.title }
@@ -589,30 +589,29 @@ struct PlaybackDetailView: View {
     }
 
     private var skipIntervalsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "skip-intervals", header: "Skip Intervals (left/right on remote)", rows: [
+        SettingsSplitSection(id: "skip-intervals", header: "Skip Intervals", rows: [
             SettingsSplitRow(
-                id: "skip-backward",
-                title: "Skip Backward",
-                description: "How far the left button on the remote jumps back during playback.",
-                valueSummary: playback.settings.skipBackwardInterval.title
+                id: "skip-intervals",
+                title: "Skip Intervals",
+                description: "How far the remote's left and right buttons jump during playback.",
+                valueSummary: "\(playback.settings.skipBackwardInterval.title) / \(playback.settings.skipForwardInterval.title)"
             ) {
-                SettingsOptionPicker(
-                    options: SkipInterval.allCases,
-                    selection: $playback.settings.skipBackwardInterval,
-                    title: { $0.title }
-                )
-            },
-            SettingsSplitRow(
-                id: "skip-forward",
-                title: "Skip Forward",
-                description: "How far the right button on the remote jumps forward during playback.",
-                valueSummary: playback.settings.skipForwardInterval.title
-            ) {
-                SettingsOptionPicker(
-                    options: SkipInterval.allCases,
-                    selection: $playback.settings.skipForwardInterval,
-                    title: { $0.title }
-                )
+                VStack(alignment: .leading, spacing: 28) {
+                    LabeledSettingRow("Skip Backward") {
+                        SettingsStepper(
+                            options: SkipInterval.allCases,
+                            selection: $playback.settings.skipBackwardInterval,
+                            title: { $0.title }
+                        )
+                    }
+                    LabeledSettingRow("Skip Forward") {
+                        SettingsStepper(
+                            options: SkipInterval.allCases,
+                            selection: $playback.settings.skipForwardInterval,
+                            title: { $0.title }
+                        )
+                    }
+                }
             }
         ])
     }

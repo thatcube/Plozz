@@ -75,6 +75,15 @@ struct SettingsSplitLayout: View {
     /// page) then lands back on the row the user came in from, rather than the
     /// geometrically-nearest row.
     @Namespace private var masterScope
+    /// Scopes the detail pane so entering it always snaps to its first/topmost
+    /// control, instead of whichever control happens to sit nearest the row.
+    @Namespace private var detailScope
+    /// True while focus lives in the detail pane. While set, every master row
+    /// *except* the selected one is pulled out of the focus order — so a
+    /// left-press out of a control has exactly one place to land (the row you
+    /// came in from), with no geometrically-nearer row to steal it.
+    @State private var focusInDetail = false
+    @Environment(\.resetFocus) private var resetFocus
 
     private var allRows: [SettingsSplitRow] { sections.flatMap(\.rows) }
     private var allRowIDs: [String] { allRows.map(\.id) }
@@ -144,10 +153,17 @@ struct SettingsSplitLayout: View {
         }
         .scrollClipDisabled()
         // Moving focus up/down the list drives the live preview on the right.
-        // Focus leaving the list (into the detail pane) leaves the selection
-        // frozen on the row being edited.
+        // When focus leaves the list it has gone into the detail pane: park the
+        // list (so the only way back is the row we came from) and snap focus to
+        // the detail's top control. When it returns, unpark and resume preview.
         .onChange(of: focusedRow) { _, newID in
-            if let newID { selectedRowID = newID }
+            if let newID {
+                focusInDetail = false
+                selectedRowID = newID
+            } else {
+                focusInDetail = true
+                DispatchQueue.main.async { resetFocus(in: detailScope) }
+            }
         }
         .focusScope(masterScope)
         .focusSection()
@@ -155,15 +171,16 @@ struct SettingsSplitLayout: View {
 
     private func masterRow(_ row: SettingsSplitRow) -> some View {
         Button {
-            // Selection follows focus; the primary "enter the control" gesture
-            // is a spatial right-press into the detail focus section. Keeping a
-            // real Button (vs a bare focusable) gives us the shared inverted
-            // focus card and a Select press that nudges toward the detail.
+            // Select drills into the detail pane and lands on its top control.
             selectedRowID = row.id
+            resetFocus(in: detailScope)
         } label: {
             SettingsMasterRowLabel(row: row, isSelected: selectedRowID == row.id)
         }
         .buttonStyle(SettingsFocusButtonStyle())
+        // While editing in the detail pane, take every other row out of the
+        // focus order so a left-press can only return to where we came in from.
+        .disabled(focusInDetail && selectedRowID != row.id)
     }
 
     // MARK: - Detail pane (right)
@@ -204,6 +221,7 @@ struct SettingsSplitLayout: View {
         // Cross-fade the control as the live selection changes while the user
         // scrolls the list, so the pane updates smoothly rather than snapping.
         .animation(.easeInOut(duration: 0.18), value: selectedRowID)
+        .focusScope(detailScope)
         .focusSection()
     }
 }

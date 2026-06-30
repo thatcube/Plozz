@@ -95,6 +95,13 @@ public final class PlayerViewModel {
     /// disables the feature (tests, previews). Read at load to steer the initial
     /// tracks and written when the viewer manually switches a track.
     private let seriesTrackStore: (any SeriesTrackPreferenceStoring)?
+    /// A stable fallback account id (the profile's primary account) used to scope
+    /// per-series memory when the played item carries no `sourceAccountID`. Mirrors
+    /// the `liveAccountID` fallback the watch reconciler uses. Without it, two
+    /// servers' identically-numbered series (e.g. Plex per-server ratingKeys) would
+    /// collapse to one key and bleed remembered tracks across servers within a
+    /// profile.
+    private let seriesAccountFallbackID: String?
     /// Loads server-detected skip segments once playback is ready; cancelled on
     /// stop. Best-effort — a failure leaves the skip button simply unavailable.
     private var segmentsTask: Task<Void, Never>?
@@ -279,6 +286,7 @@ public final class PlayerViewModel {
         captionSettings: CaptionSettings = .default,
         playbackSettings: PlaybackSettings = .default,
         seriesTrackStore: (any SeriesTrackPreferenceStoring)? = nil,
+        seriesAccountFallbackID: String? = nil,
         startPosition: TimeInterval? = nil,
         scrobbler: any TraktScrobbling = DisabledTraktScrobbler(),
         engineFactory: EngineFactory = .native,
@@ -298,6 +306,7 @@ public final class PlayerViewModel {
         self.captionSettings = captionSettings
         self.playbackSettings = playbackSettings
         self.seriesTrackStore = seriesTrackStore
+        self.seriesAccountFallbackID = seriesAccountFallbackID
         self.startPositionOverride = startPosition
         self.scrobbler = scrobbler
         self.engineFactory = engineFactory
@@ -639,7 +648,10 @@ public final class PlayerViewModel {
     /// default policy) or the feature has no store wired in.
     private func seriesPreferenceKey(for item: MediaItem) -> String? {
         guard item.kind == .episode, let seriesID = item.seriesID else { return nil }
-        return SeriesTrackPreferenceKey.make(sourceAccountID: item.sourceAccountID, seriesID: seriesID)
+        return SeriesTrackPreferenceKey.make(
+            sourceAccountID: item.sourceAccountID ?? seriesAccountFallbackID,
+            seriesID: seriesID
+        )
     }
 
     /// The remembered audio language for this item's series, gated on the toggle.

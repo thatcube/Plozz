@@ -108,6 +108,12 @@ public final class NativeVideoEngine: VideoEngine {
     /// time-to-first-frame; cancelled on teardown so a stale selection never
     /// applies to a replaced player item.
     @ObservationIgnored private var defaultSubtitleSelectionTask: Task<Void, Never>?
+    /// Off-critical-path preferred-audio-language pick (per-series memory /
+    /// prefer-original-language). AVPlayer otherwise just plays the asset's default
+    /// audio track, so without this the audio half of those features no-ops on the
+    /// native engine. Cancelled on teardown so a stale selection never applies to a
+    /// replaced player item.
+    @ObservationIgnored private var preferredAudioSelectionTask: Task<Void, Never>?
     #if !os(macOS)
     @ObservationIgnored private var routeChangeObserver: NSObjectProtocol?
     @ObservationIgnored private var endOfPlaybackObserver: NSObjectProtocol?
@@ -213,6 +219,24 @@ public final class NativeVideoEngine: VideoEngine {
         defaultSubtitleSelectionTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.disableLegibleSubtitleSelection(for: item)
+        }
+
+        // Apply the resolved audio-language preference (per-series memory /
+        // prefer-original-language) the same off-critical-path way. AVPlayer has no
+        // load-time language option, so we select the best-matching audible track
+        // once its `AVMediaSelectionGroup` resolves. Empty preference => leave the
+        // asset's default audio untouched (the no-feature common case). The viewer's
+        // later manual pick (`selectAudioTrack`) still overrides this freely.
+        preferredAudioSelectionTask?.cancel()
+        let preferredAudioLanguages = request.preferredAudioLanguages
+        if !preferredAudioLanguages.isEmpty {
+            preferredAudioSelectionTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.applyPreferredAudioSelection(
+                    for: item,
+                    preferredLanguages: preferredAudioLanguages
+                )
+            }
         }
     }
 
@@ -594,6 +618,8 @@ public final class NativeVideoEngine: VideoEngine {
         formatInspectTask = nil
         defaultSubtitleSelectionTask?.cancel()
         defaultSubtitleSelectionTask = nil
+        preferredAudioSelectionTask?.cancel()
+        preferredAudioSelectionTask = nil
         subtitleLoader = nil
         if let endOfPlaybackObserver {
             NotificationCenter.default.removeObserver(endOfPlaybackObserver)
@@ -700,6 +726,28 @@ public final class NativeVideoEngine: VideoEngine {
     private func disableLegibleSubtitleSelection(for item: AVPlayerItem) async {
         guard let group = await legibleGroup(for: item.asset) else { return }
         item.select(nil, in: group)
+    }
+
+    /// Selects the audible track best matching an ordered list of preferred
+    /// languages (per-series memory / prefer-original-language). Uses
+    /// `mediaSelectionOptions(from:filteredAndSortedAccordingToPreferredLanguages:)`
+    /// so language identifiers are canonicalised — a preference of `"jpn"` matches
+    /// an option tagged `"ja"`, and vice versa — and the result is ordered by the
+    /// preference list. Best-effort: no match (or no audible group) leaves the
+    /// asset's default audio untouched and never affects playback.
+    private func applyPreferredAudioSelection(
+        for item: AVPlayerItem,
+        preferredLanguages: [String]
+    ) async {
+        guard !preferredLanguages.isEmpty,
+              let group = try? await item.asset.loadMediaSelectionGroup(for: .audible)
+        else { return }
+        let ranked = AVMediaSelectionGroup.mediaSelectionOptions(
+            from: group.options,
+            filteredAndSortedAccordingToPreferredLanguages: preferredLanguages
+        )
+        guard let best = ranked.first else { return }
+        item.select(best, in: group)
     }
 
     private func legibleGroup(for asset: AVAsset) async -> AVMediaSelectionGroup? {

@@ -511,6 +511,7 @@ private func makePlayerViewModel(
         captionSettings: captionSettings,
         playbackSettings: playbackSettings,
         seriesTrackStore: seriesTrackStore,
+        seriesAccountFallbackID: primaryAccountID,
         startPosition: request.startPosition,
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(),

@@ -25,6 +25,63 @@ final class SeriesTrackPreferenceStoreTests: XCTestCase {
         XCTAssertEqual(SeriesTrackPreferenceKey.make(sourceAccountID: nil, seriesID: "s"), "_:s")
     }
 
+    // MARK: - Cross-server identity keys
+
+    func testCrossServerKeysFromSeriesExternalIDs() {
+        let keys = SeriesTrackPreferenceKey.crossServerKeys(providerIDs: [
+            "SeriesTvdb": "12345",
+            "SeriesImdb": "tt67890"
+        ])
+        XCTAssertEqual(keys, ["show:tvdb:12345", "show:imdb:tt67890"],
+                       "one key per available external id, in priority order")
+    }
+
+    func testCrossServerKeysLowercaseAndTrim() {
+        let keys = SeriesTrackPreferenceKey.crossServerKeys(providerIDs: [
+            "SeriesImdb": "  TT00042  "
+        ])
+        XCTAssertEqual(keys, ["show:imdb:tt00042"], "values are trimmed and lowercased to match cross-server")
+    }
+
+    func testCrossServerKeysEmptyWithoutSeriesIDs() {
+        // Episode-level ids (no Series* prefix) must NOT produce a cross-server key.
+        XCTAssertTrue(SeriesTrackPreferenceKey.crossServerKeys(providerIDs: [
+            "Tvdb": "999",
+            "Imdb": "tt1"
+        ]).isEmpty)
+    }
+
+    func testCrossServerKeysIgnoreEmptyValues() {
+        XCTAssertTrue(SeriesTrackPreferenceKey.crossServerKeys(providerIDs: [
+            "SeriesTvdb": "   "
+        ]).isEmpty)
+    }
+
+    func testCrossServerKeyStableAcrossServers() {
+        // The same show served by Plex (with TVDB) and Jellyfin (with TVDB+TMDB)
+        // shares the TVDB key, so a preference written under one is found by the other.
+        let plex = SeriesTrackPreferenceKey.crossServerKeys(providerIDs: ["SeriesTvdb": "555"])
+        let jellyfin = SeriesTrackPreferenceKey.crossServerKeys(providerIDs: [
+            "SeriesTvdb": "555", "SeriesTmdb": "888"
+        ])
+        XCTAssertEqual(plex.first, "show:tvdb:555")
+        XCTAssertTrue(jellyfin.contains("show:tvdb:555"), "a shared external id keeps the key stable across servers")
+    }
+
+    func testCrossServerTransferReadsPreferenceWrittenUnderSharedKey() {
+        let store = SeriesTrackPreferenceStore(defaults: makeDefaults())
+        // Watched on Plex: choice stored under the shared cross-server key.
+        let plexKeys = SeriesTrackPreferenceKey.crossServerKeys(providerIDs: ["SeriesTvdb": "555"])
+        for key in plexKeys { store.setAudioLanguage("ja", forKey: key) }
+
+        // Next episode only on Jellyfin: it resolves the same TVDB key and finds the choice.
+        let jellyfinKeys = SeriesTrackPreferenceKey.crossServerKeys(providerIDs: [
+            "SeriesTvdb": "555", "SeriesTmdb": "888"
+        ])
+        let found = jellyfinKeys.compactMap { store.preference(forKey: $0)?.audioLanguage }.first
+        XCTAssertEqual(found, "ja", "audio choice transfers between servers via the shared series id")
+    }
+
     // MARK: - Audio
 
     func testRecordsAndReadsAudioLanguage() {

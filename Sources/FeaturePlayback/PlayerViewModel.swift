@@ -181,6 +181,17 @@ public final class PlayerViewModel {
     /// `onTracksChanged` or clobbering a manual menu pick made afterwards.
     private var initialSubtitleApplied = false
 
+    /// True once the viewer manually changed an audio or subtitle track this
+    /// playback session. Used by cross-server reconcile to decide whether the
+    /// stored memory or this session's pick is the newer truth.
+    private var viewerChangedTracksThisSession = false
+
+    /// A cross-server-imported audio language awaiting application — set when
+    /// reconcile finds a remembered choice from another server but the engine's
+    /// audio tracks aren't known yet (Plozzigen pre-demux). Applied on the next
+    /// `onTracksChanged`.
+    private var crossServerAudioImportLanguage: String?
+
     /// Content-detected subtitle languages, keyed by track id. Filled
     /// opportunistically when a *text* subtitle with no provider language tag is
     /// parsed for the overlay: `NLLanguageRecognizer` guesses the language from
@@ -368,6 +379,7 @@ public final class PlayerViewModel {
         engine.onTracksChanged = { [weak self] in
             guard let self else { return }
             self.loadTrackOptions()
+            self.applyImportedAudioIfPossible()
             if let request = self.request {
                 self.applyInitialSubtitleSelectionIfReady(for: request)
             }
@@ -414,19 +426,24 @@ public final class PlayerViewModel {
     /// need the show's id (Simkl) can match an episode that only carried
     /// episode-level ids. Best-effort: a miss leaves scrobble behavior unchanged.
     private func enrichSeriesIDs() async {
-        guard let seriesIDResolver, var current = request else { return }
-        guard let raw = await seriesIDResolver(), !raw.isEmpty else { return }
-        let map: [(ProviderIDNamespace, String)] = [
-            (.imdb, "SeriesImdb"), (.tmdb, "SeriesTmdb"), (.tvdb, "SeriesTvdb"),
-            (.myAnimeList, "SeriesMal"), (.aniList, "SeriesAniList")
-        ]
-        var merged = current.item.providerIDs
-        for (namespace, key) in map {
-            guard let value = raw.providerID(namespace) else { continue }
-            if merged[key] == nil { merged[key] = value }
+        if let seriesIDResolver, var current = request,
+           let raw = await seriesIDResolver(), !raw.isEmpty {
+            let map: [(ProviderIDNamespace, String)] = [
+                (.imdb, "SeriesImdb"), (.tmdb, "SeriesTmdb"), (.tvdb, "SeriesTvdb"),
+                (.myAnimeList, "SeriesMal"), (.aniList, "SeriesAniList")
+            ]
+            var merged = current.item.providerIDs
+            for (namespace, key) in map {
+                guard let value = raw.providerID(namespace) else { continue }
+                if merged[key] == nil { merged[key] = value }
+            }
+            current.item.providerIDs = merged
+            request = current
         }
-        current.item.providerIDs = merged
-        request = current
+        // Now that the series' cross-server ids are resolved (or were already
+        // present), reconcile per-series memory so a choice made on another
+        // server transfers to this episode.
+        reconcileSeriesMemoryAcrossServers()
     }
 
     // MARK: - Engine selection / swapping
@@ -549,8 +566,10 @@ public final class PlayerViewModel {
             self.request = request
 
             // Enrich the episode with its series-level ids in the background so the
-            // first scrobble can identify the show on trackers that require it.
-            if request.item.kind == .episode, seriesIDResolver != nil {
+            // first scrobble can identify the show on trackers that require it, then
+            // reconcile cross-server per-series memory. Runs for any episode: even
+            // without a resolver the item may already carry series ids to reconcile.
+            if request.item.kind == .episode {
                 enrichTask = Task { @MainActor [weak self] in await self?.enrichSeriesIDs() }
             }
 
@@ -643,10 +662,10 @@ public final class PlayerViewModel {
 
     // MARK: - Per-series remembered track selections
 
-    /// The per-series store key for an item, or `nil` when the item isn't an
-    /// episode of a series (movies/trailers never participate — they use the
-    /// default policy) or the feature has no store wired in.
-    private func seriesPreferenceKey(for item: MediaItem) -> String? {
+    /// The per-server fallback key for an item, or `nil` when the item isn't an
+    /// episode of a series (movies/trailers use the default policy) — used only
+    /// when no cross-server identity is available.
+    private func seriesLocalKey(for item: MediaItem) -> String? {
         guard item.kind == .episode, let seriesID = item.seriesID else { return nil }
         return SeriesTrackPreferenceKey.make(
             sourceAccountID: item.sourceAccountID ?? seriesAccountFallbackID,
@@ -654,44 +673,141 @@ public final class PlayerViewModel {
         )
     }
 
+    /// Cross-server show identity keys for an item (episodes only). May be empty
+    /// at first load and become non-empty once `enrichSeriesIDs` folds the
+    /// series-level external ids onto the item.
+    private func seriesCrossServerKeys(for item: MediaItem) -> [String] {
+        guard item.kind == .episode else { return [] }
+        return SeriesTrackPreferenceKey.crossServerKeys(providerIDs: item.providerIDs)
+    }
+
+    /// Ordered keys to read/write remembered preferences: cross-server identity
+    /// first (so a choice transfers between servers) then the per-server fallback.
+    private func seriesPreferenceKeys(for item: MediaItem) -> [String] {
+        seriesCrossServerKeys(for: item) + [seriesLocalKey(for: item)].compactMap { $0 }
+    }
+
+    /// First stored preference among `keys`, in order.
+    private func firstSeriesPreference(_ keys: [String]) -> SeriesTrackPreference? {
+        guard let store = seriesTrackStore else { return nil }
+        for key in keys {
+            if let preference = store.preference(forKey: key) { return preference }
+        }
+        return nil
+    }
+
     /// The remembered audio language for this item's series, gated on the toggle.
     private func rememberedAudioLanguage(for item: MediaItem) -> String? {
-        guard playbackSettings.rememberAudioTrackPerSeries,
-              let store = seriesTrackStore,
-              let key = seriesPreferenceKey(for: item) else { return nil }
-        return store.preference(forKey: key)?.audioLanguage
+        guard playbackSettings.rememberAudioTrackPerSeries else { return nil }
+        return firstSeriesPreference(seriesPreferenceKeys(for: item))?.audioLanguage
     }
 
     /// The remembered subtitle decision for this item's series, gated on the toggle.
     private func rememberedSubtitle(for item: MediaItem) -> RememberedSubtitleSelection? {
-        guard playbackSettings.rememberSubtitleTrackPerSeries,
-              let store = seriesTrackStore,
-              let key = seriesPreferenceKey(for: item) else { return nil }
-        return store.preference(forKey: key)?.subtitle
+        guard playbackSettings.rememberSubtitleTrackPerSeries else { return nil }
+        return firstSeriesPreference(seriesPreferenceKeys(for: item))?.subtitle
     }
 
     /// Records the viewer's manual audio-language pick for the current series
-    /// (gated on the toggle). Only a language-tagged track is remembered — an
-    /// untagged track can't be re-resolved on the next episode.
+    /// (gated on the toggle), fanned out to every key (cross-server + per-server)
+    /// so the choice follows the show to any server. Only a language-tagged track
+    /// is remembered — an untagged track can't be re-resolved on the next episode.
+    /// The language is normalized (`eng` → `en`) so a code that differs in form
+    /// between servers still matches.
     private func recordSeriesAudioSelection(language: String?) {
         guard playbackSettings.rememberAudioTrackPerSeries,
               let store = seriesTrackStore,
               let item = request?.item,
-              let key = seriesPreferenceKey(for: item),
               let language, !language.isEmpty else { return }
-        store.setAudioLanguage(language, forKey: key)
+        let normalized = LanguageMatch.normalized(language) ?? language
+        for key in seriesPreferenceKeys(for: item) {
+            store.setAudioLanguage(normalized, forKey: key)
+        }
     }
 
     /// Records the viewer's manual subtitle pick (a language, or Off) for the
-    /// current series, gated on the toggle. A selected track with no language is
-    /// not remembered (it can't be re-matched next episode); Off always is.
+    /// current series, gated on the toggle and fanned out to every key. A selected
+    /// track with no language is not remembered (it can't be re-matched next
+    /// episode); Off always is. A language is normalized so it matches cross-server.
     private func recordSeriesSubtitleSelection(_ selection: RememberedSubtitleSelection?) {
         guard playbackSettings.rememberSubtitleTrackPerSeries,
               let store = seriesTrackStore,
               let item = request?.item,
-              let key = seriesPreferenceKey(for: item),
               let selection else { return }
-        store.setSubtitle(selection, forKey: key)
+        let normalized: RememberedSubtitleSelection
+        switch selection {
+        case .off:
+            normalized = .off
+        case .language(let code):
+            normalized = .language(LanguageMatch.normalized(code) ?? code)
+        }
+        for key in seriesPreferenceKeys(for: item) {
+            store.setSubtitle(normalized, forKey: key)
+        }
+    }
+
+    /// Reconciles per-series memory across servers once `enrichSeriesIDs` has
+    /// folded the series' external ids onto the item (making the cross-server keys
+    /// resolvable). Two directions:
+    /// - **Viewer changed a track this session** → their choice is the newest
+    ///   truth; mirror it onto every cross-server key (a switch made before enrich
+    ///   resolved them would have written only the per-server key).
+    /// - **Fresh load** → if a cross-server key carries a remembered choice that
+    ///   the per-server key lacked (i.e. the show was watched on another server),
+    ///   import it: apply it to this playback and backfill the per-server key so
+    ///   later same-server episodes resolve it synchronously (no mid-play switch).
+    private func reconcileSeriesMemoryAcrossServers() {
+        guard let store = seriesTrackStore,
+              let item = request?.item,
+              item.kind == .episode else { return }
+        let crossKeys = seriesCrossServerKeys(for: item)
+        guard !crossKeys.isEmpty else { return }
+        let localKeys = [seriesLocalKey(for: item)].compactMap { $0 }
+
+        if viewerChangedTracksThisSession {
+            guard let pref = firstSeriesPreference(localKeys + crossKeys) else { return }
+            for key in crossKeys + localKeys {
+                if let lang = pref.audioLanguage { store.setAudioLanguage(lang, forKey: key) }
+                if let sub = pref.subtitle { store.setSubtitle(sub, forKey: key) }
+            }
+            return
+        }
+
+        let localPref = firstSeriesPreference(localKeys)
+        guard let crossPref = firstSeriesPreference(crossKeys) else { return }
+
+        if playbackSettings.rememberAudioTrackPerSeries,
+           localPref?.audioLanguage == nil, let language = crossPref.audioLanguage {
+            for key in localKeys { store.setAudioLanguage(language, forKey: key) }
+            crossServerAudioImportLanguage = language
+            applyImportedAudioIfPossible()
+        }
+
+        if playbackSettings.rememberSubtitleTrackPerSeries,
+           localPref?.subtitle == nil, let subtitle = crossPref.subtitle {
+            for key in localKeys { store.setSubtitle(subtitle, forKey: key) }
+            // Re-route the load-time subtitle now that the remembered value
+            // resolves. Works for native (tracks present → applies now) and
+            // Plozzigen (tracks arrive later → onTracksChanged re-applies).
+            initialSubtitleApplied = false
+            if let request { applyInitialSubtitleSelectionIfReady(for: request) }
+        }
+    }
+
+    /// Applies a pending cross-server audio import once the engine's audio tracks
+    /// are known (immediately for native, on `onTracksChanged` for Plozzigen).
+    /// No-ops when the matching track is already active.
+    private func applyImportedAudioIfPossible() {
+        guard let language = crossServerAudioImportLanguage else { return }
+        guard let track = engine.audioTracks.first(where: {
+            LanguageMatch.matches($0.language, language)
+        }) else { return }
+        crossServerAudioImportLanguage = nil
+        guard track.id != engine.currentAudioTrackID, track.id != pendingAudioTrackID else { return }
+        engine.selectAudioTrack(track)
+        pendingAudioTrackID = track.id
+        selectedAudioTrackID = track.id
+        loadTrackOptions()
     }
 
     /// Loads an already-resolved request on the routed engine and finishes the
@@ -1360,6 +1476,7 @@ public final class PlayerViewModel {
     /// Selects an audio track from the menu, routed through the engine.
     public func selectAudioOption(id: Int) {
         guard let track = engine.audioTracks.first(where: { $0.id == id }) else { return }
+        viewerChangedTracksThisSession = true
         engine.selectAudioTrack(track)
         // Remember this language for the series so later episodes start here.
         recordSeriesAudioSelection(language: track.language)
@@ -1450,6 +1567,7 @@ public final class PlayerViewModel {
     /// `userInitiated` is `true` for a real menu pick (which is remembered for the
     /// series) and `false` for the programmatic load-time default.
     public func selectSubtitleOption(id: Int, userInitiated: Bool = true) {
+        if userInitiated { viewerChangedTracksThisSession = true }
         if id == PlayerTrackOption.offID {
             if userInitiated { recordSeriesSubtitleSelection(.off) }
             engine.selectSubtitleTrack(nil)

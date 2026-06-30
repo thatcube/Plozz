@@ -5,6 +5,10 @@ import Observation
 import CoreModels
 import CoreNetworking
 import TraktService
+import MetadataKit
+#if canImport(NaturalLanguage)
+import NaturalLanguage
+#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -68,15 +72,50 @@ public final class PlayerViewModel {
     /// scrub state; the SwiftUI overlay reads.
     public let controls = PlayerControlsModel()
 
+    /// Drives Plozz's **owned** subtitle overlay during playback. The view model
+    /// parses a selected text sidecar into cues, loads them here, and suppresses
+    /// the engine's own subtitle draw — so our renderer (full styling, HDR
+    /// luminance, live offset) owns every text-subtitle pixel. Image-based
+    /// subtitles still route to the hybrid engine.
+    public let liveSubtitles = LiveSubtitleModel()
+    /// Fetches + parses the selected sidecar into cues off the main actor; one at
+    /// a time, cancelled when the selection changes or playback stops.
+    @ObservationIgnored private var subtitleCueLoadTask: Task<Void, Never>?
+
     private let provider: any MediaProvider
     private let itemID: String
     /// The chosen `MediaVersion.id` (Jellyfin `MediaSourceId` / Plex `Media` id)
     /// to play when the title has multiple versions; `nil` plays the default.
     private let mediaSourceID: String?
     private let captionSettings: CaptionSettings
+    /// The resolved per-content-type subtitle policy for this profile (design
+    /// §5.0/§5.3): base mirrors `captionSettings`, with optional per-category
+    /// overrides ("forced-only on movies, full subs on anime"). Read-only here —
+    /// the Settings UI owns edits — and resolved once per playback, so it's a
+    /// value, not a live store. Defaults to inheriting the caption settings, so a
+    /// profile that set no overrides behaves exactly as before.
+    private let subtitlePolicy: SubtitlePolicy
+    /// The resolved per-content-type audio-language policy for this profile: base
+    /// preference mirrors `playbackSettings.audioLanguagePreference`, with optional
+    /// per-category overrides ("original audio for anime, device language for
+    /// everything else"). Read-only here — the Settings UI owns edits — and
+    /// resolved once per playback. Defaults to inheriting the playback settings, so
+    /// a profile that set no overrides behaves exactly as before.
+    private let audioPolicy: AudioPolicy
     /// Per-profile playback prefs. Today: whether to offer the Skip Intro/Credits
     /// button. When `skipIntros` is off, segments are never fetched or shown.
     private let playbackSettings: PlaybackSettings
+    /// Per-profile remembered per-series audio/subtitle language choices. `nil`
+    /// disables the feature (tests, previews). Read at load to steer the initial
+    /// tracks and written when the viewer manually switches a track.
+    private let seriesTrackStore: (any SeriesTrackPreferenceStoring)?
+    /// A stable fallback account id (the profile's primary account) used to scope
+    /// per-series memory when the played item carries no `sourceAccountID`. Mirrors
+    /// the `liveAccountID` fallback the watch reconciler uses. Without it, two
+    /// servers' identically-numbered series (e.g. Plex per-server ratingKeys) would
+    /// collapse to one key and bleed remembered tracks across servers within a
+    /// profile.
+    private let seriesAccountFallbackID: String?
     /// Loads server-detected skip segments once playback is ready; cancelled on
     /// stop. Best-effort — a failure leaves the skip button simply unavailable.
     private var segmentsTask: Task<Void, Never>?
@@ -140,6 +179,45 @@ public final class PlayerViewModel {
     /// `selectedSubtitleTrackID == nil` represents "Off".
     private var selectedAudioTrackID: Int?
     private var selectedSubtitleTrackID: Int?
+
+    /// A just-requested audio track id whose engine switch is still in flight.
+    /// AetherEngine reloads to change audio, so `currentAudioTrackID` lags the
+    /// pick by a beat; we show the target optimistically until the engine
+    /// confirms it, then clear this and let engine truth govern the indicator.
+    private var pendingAudioTrackID: Int?
+
+    /// Whether the load-time *default* subtitle has been routed through the
+    /// overlay yet for the current `playResolved`. Native tracks are known
+    /// synchronously, but Plozzigen demuxes its track list asynchronously (it
+    /// arrives via `onTracksChanged` after `playResolved` has returned), so this
+    /// guards the auto-selection to run exactly once per load — on whichever of
+    /// the two moments has the tracks — without re-applying on every subsequent
+    /// `onTracksChanged` or clobbering a manual menu pick made afterwards.
+    private var initialSubtitleApplied = false
+
+    /// True once the viewer manually changed the **audio** track this playback
+    /// session. Used by cross-server reconcile to decide whether the stored memory
+    /// or this session's audio pick is the newer truth (resolved per dimension so
+    /// changing only one track doesn't suppress importing the other).
+    private var viewerChangedAudioThisSession = false
+
+    /// True once the viewer manually changed the **subtitle** track this session.
+    private var viewerChangedSubtitleThisSession = false
+
+    /// A cross-server-imported audio language awaiting application — set when
+    /// reconcile finds a remembered choice from another server but the engine's
+    /// audio tracks aren't known yet (Plozzigen pre-demux). Applied on the next
+    /// `onTracksChanged`.
+    private var crossServerAudioImportLanguage: String?
+
+    /// Content-detected subtitle languages, keyed by track id. Filled
+    /// opportunistically when a *text* subtitle with no provider language tag is
+    /// parsed for the overlay: `NLLanguageRecognizer` guesses the language from
+    /// the cue text so the menu can label an otherwise-anonymous "Track 8" as
+    /// e.g. "English (auto)". Bitmap subs (PGS) can't be detected without OCR, so
+    /// they stay provider-tagged. Cached so a second selection is instant and the
+    /// menu label persists for the session.
+    private var detectedSubtitleLanguages: [Int: String] = [:]
 
     /// Seek-coordinator state. `latestSeekTarget` is the most-recently-requested
     /// committed seek time; `seekTask` is the single in-flight loop that drains
@@ -235,7 +313,11 @@ public final class PlayerViewModel {
         itemID: String,
         mediaSourceID: String? = nil,
         captionSettings: CaptionSettings = .default,
+        subtitlePolicy: SubtitlePolicy? = nil,
+        audioPolicy: AudioPolicy? = nil,
         playbackSettings: PlaybackSettings = .default,
+        seriesTrackStore: (any SeriesTrackPreferenceStoring)? = nil,
+        seriesAccountFallbackID: String? = nil,
         startPosition: TimeInterval? = nil,
         scrobbler: any TraktScrobbling = DisabledTraktScrobbler(),
         engineFactory: EngineFactory = .native,
@@ -253,7 +335,11 @@ public final class PlayerViewModel {
         self.itemID = itemID
         self.mediaSourceID = mediaSourceID
         self.captionSettings = captionSettings
+        self.subtitlePolicy = subtitlePolicy ?? .inheriting(from: captionSettings)
+        self.audioPolicy = audioPolicy ?? .inheriting(from: playbackSettings)
         self.playbackSettings = playbackSettings
+        self.seriesTrackStore = seriesTrackStore
+        self.seriesAccountFallbackID = seriesAccountFallbackID
         self.startPositionOverride = startPosition
         self.scrobbler = scrobbler
         self.engineFactory = engineFactory
@@ -273,6 +359,9 @@ public final class PlayerViewModel {
         self.controls.playbackSpeed = preferencesStore.loadPlaybackSpeed()
         self.controls.skipBackwardInterval = playbackSettings.skipBackwardInterval
         self.controls.skipForwardInterval = playbackSettings.skipForwardInterval
+        // Seed the overlay with the profile's persisted caption appearance so a
+        // selected subtitle renders in the user's style from the first cue.
+        self.liveSubtitles.style = SubtitleStyle(from: captionSettings)
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
@@ -303,6 +392,26 @@ public final class PlayerViewModel {
         }
         engine.onEnded = { [weak self] in
             self?.handlePlaybackEnded()
+        }
+        // Engines that discover tracks asynchronously (Plozzigen) tell us to
+        // rebuild the options menu once their lists arrive — otherwise the menu,
+        // built once at playResolved, stays empty for the whole session. This is
+        // also the moment Plozzigen's tracks first become known, so it's where we
+        // route its load-time default subtitle through the overlay.
+        engine.onTracksChanged = { [weak self] in
+            guard let self else { return }
+            self.loadTrackOptions()
+            self.applyImportedAudioIfPossible()
+            if let request = self.request {
+                self.applyInitialSubtitleSelectionIfReady(for: request)
+            }
+        }
+        // Engines that decode subtitles themselves (Plozzigen) push their active
+        // cues here; the live overlay model draws them on the same SDR renderer as
+        // native. Guarded by live-feed mode inside the model, so it's inert unless
+        // a Plozzigen subtitle is actually selected.
+        engine.onSubtitleCues = { [weak self] cues in
+            self?.liveSubtitles.updateLiveCues(cues)
         }
     }
 
@@ -339,19 +448,25 @@ public final class PlayerViewModel {
     /// need the show's id (Simkl) can match an episode that only carried
     /// episode-level ids. Best-effort: a miss leaves scrobble behavior unchanged.
     private func enrichSeriesIDs() async {
-        guard let seriesIDResolver, var current = request else { return }
-        guard let raw = await seriesIDResolver(), !raw.isEmpty else { return }
-        let map: [(ProviderIDNamespace, String)] = [
-            (.imdb, "SeriesImdb"), (.tmdb, "SeriesTmdb"), (.tvdb, "SeriesTvdb"),
-            (.myAnimeList, "SeriesMal"), (.aniList, "SeriesAniList")
-        ]
-        var merged = current.item.providerIDs
-        for (namespace, key) in map {
-            guard let value = raw.providerID(namespace) else { continue }
-            if merged[key] == nil { merged[key] = value }
+        if let seriesIDResolver, var current = request,
+           let raw = await seriesIDResolver(), !raw.isEmpty {
+            let map: [(ProviderIDNamespace, String)] = [
+                (.imdb, "SeriesImdb"), (.tmdb, "SeriesTmdb"), (.tvdb, "SeriesTvdb"),
+                (.myAnimeList, "SeriesMal"), (.aniList, "SeriesAniList"),
+                (.aniDB, "SeriesAniDB")
+            ]
+            var merged = current.item.providerIDs
+            for (namespace, key) in map {
+                guard let value = raw.providerID(namespace) else { continue }
+                if merged[key] == nil { merged[key] = value }
+            }
+            current.item.providerIDs = merged
+            request = current
         }
-        current.item.providerIDs = merged
-        request = current
+        // Now that the series' cross-server ids are resolved (or were already
+        // present), reconcile per-series memory so a choice made on another
+        // server transfers to this episode.
+        reconcileSeriesMemoryAcrossServers()
     }
 
     // MARK: - Engine selection / swapping
@@ -464,9 +579,20 @@ public final class PlayerViewModel {
             self.request = request
             configureControls(for: request)
 
+            // Steer the engine's INITIAL active audio track by language (no reload)
+            // from the prefer-original-language policy. Computed once here so every
+            // playResolved entry (initial + cross-engine fallback, which reuse
+            // self.request) inherits it. Subtitle language steering is intentionally
+            // left empty — Plozz owns subtitle selection via the SDR overlay, so the
+            // engine must not activate its own subtitle track here.
+            request.preferredAudioLanguages = preferredAudioLanguages(for: request.item)
+            self.request = request
+
             // Enrich the episode with its series-level ids in the background so the
-            // first scrobble can identify the show on trackers that require it.
-            if request.item.kind == .episode, seriesIDResolver != nil {
+            // first scrobble can identify the show on trackers that require it, then
+            // reconcile cross-server per-series memory. Runs for any episode: even
+            // without a resolver the item may already carry series ids to reconcile.
+            if request.item.kind == .episode {
                 enrichTask = Task { @MainActor [weak self] in await self?.enrichSeriesIDs() }
             }
 
@@ -517,17 +643,19 @@ public final class PlayerViewModel {
             // so it appears, but only when we're direct-playing and a hybrid
             // engine is available. (A file with a text-subtitle equivalent stays
             // native; see `defaultSubtitleNeedsHybridEngine`.) Plozzigen also
-            // can't render bitmap subtitles, so it overrides too.
+            // can't render bitmap subtitles, so it overrides too. Use the
+            // per-content-type rule so this prediction matches the on-load default.
+            let subtitleRule = effectiveSubtitleRule(for: request.item)
             if (kind == .native || kind == .plozzigen), !request.isTranscoding, engineFactory.hybridAvailable,
                request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
-                   mode: captionSettings.subtitleMode,
-                   preferredLanguage: captionSettings.resolvedPreferredLanguage) {
+                   mode: subtitleRule.mode,
+                   preferredLanguage: subtitleRule.preferredLanguage) {
                 PlozzLog.playback.info("Default subtitle is image-based; routing to the hybrid engine so it can be rendered")
                 kind = .hybrid
                 // Reflect the auto-selected image subtitle in the track menu.
                 selectedSubtitleTrackID = request.subtitleTracks.defaultSubtitleSelection(
-                    mode: captionSettings.subtitleMode,
-                    preferredLanguage: captionSettings.resolvedPreferredLanguage)?.id
+                    mode: subtitleRule.mode,
+                    preferredLanguage: subtitleRule.preferredLanguage)?.id
             }
 
             try Task.checkCancellation()
@@ -543,6 +671,208 @@ public final class PlayerViewModel {
         } catch {
             phase = .failed(.unknown(""))
         }
+    }
+
+    /// Resolves the ordered audio-language preference for a load from per-series
+    /// memory (when enabled) and the per-content-type audio policy. A remembered
+    /// per-series language takes precedence ahead of the policy preference.
+    private func preferredAudioLanguages(for item: MediaItem) -> [String] {
+        AudioLanguagePolicy.preferredAudioLanguages(
+            remembered: rememberedAudioLanguage(for: item),
+            preference: effectiveAudioPreference(for: item),
+            originalLanguage: ContentClassifier.originalAudioLanguage(for: item),
+            deviceLanguage: LanguageMatch.deviceLanguageCode
+        )
+    }
+
+    /// The audio-language preference that applies to `item`: the profile's
+    /// per-content-type override for the item's category if set, else the profile
+    /// base preference.
+    private func effectiveAudioPreference(for item: MediaItem) -> AudioLanguagePreference {
+        audioPolicy.effectivePreference(for: ContentClassifier.audioCategory(for: item))
+    }
+
+    /// The subtitle rule that applies to `item` (design §5.0): the profile's
+    /// per-content-type override for the item's category if set, else the profile
+    /// base. Feeds the on-load default selection, the image-sub engine-routing
+    /// prediction, and the auto-download decision so all three agree.
+    private func effectiveSubtitleRule(for item: MediaItem) -> SubtitlePolicy.Rule {
+        subtitlePolicy.effectiveRule(for: ContentClassifier.subtitleCategory(for: item))
+    }
+
+    // MARK: - Per-series remembered track selections
+
+    /// The per-server fallback key for an item, or `nil` when the item isn't an
+    /// episode of a series (movies/trailers use the default policy) — used only
+    /// when no cross-server identity is available.
+    private func seriesLocalKey(for item: MediaItem) -> String? {
+        guard item.kind == .episode, let seriesID = item.seriesID else { return nil }
+        return SeriesTrackPreferenceKey.make(
+            sourceAccountID: item.sourceAccountID ?? seriesAccountFallbackID,
+            seriesID: seriesID
+        )
+    }
+
+    /// Cross-server show identity keys for an item (episodes only). May be empty
+    /// at first load and become non-empty once `enrichSeriesIDs` folds the
+    /// series-level external ids onto the item.
+    private func seriesCrossServerKeys(for item: MediaItem) -> [String] {
+        guard item.kind == .episode else { return [] }
+        return SeriesTrackPreferenceKey.crossServerKeys(providerIDs: item.providerIDs)
+    }
+
+    /// Ordered keys to read/write remembered preferences: cross-server identity
+    /// first (so a choice transfers between servers) then the per-server fallback.
+    private func seriesPreferenceKeys(for item: MediaItem) -> [String] {
+        seriesCrossServerKeys(for: item) + [seriesLocalKey(for: item)].compactMap { $0 }
+    }
+
+    /// First remembered audio language across `keys`, in order. Resolved per
+    /// field (not per stored object): a show whose external-id coverage differs
+    /// across servers can hold audio under one cross-server key and subtitle under
+    /// another, so we must scan every key for the field rather than return the
+    /// first non-empty object wholesale.
+    private func firstSeriesAudioLanguage(_ keys: [String]) -> String? {
+        guard let store = seriesTrackStore else { return nil }
+        for key in keys {
+            if let language = store.preference(forKey: key)?.audioLanguage { return language }
+        }
+        return nil
+    }
+
+    /// First remembered subtitle decision across `keys`, in order. Resolved per
+    /// field for the same reason as ``firstSeriesAudioLanguage``.
+    private func firstSeriesSubtitle(_ keys: [String]) -> RememberedSubtitleSelection? {
+        guard let store = seriesTrackStore else { return nil }
+        for key in keys {
+            if let subtitle = store.preference(forKey: key)?.subtitle { return subtitle }
+        }
+        return nil
+    }
+
+    /// The remembered audio language for this item's series, gated on the toggle.
+    private func rememberedAudioLanguage(for item: MediaItem) -> String? {
+        guard playbackSettings.rememberAudioTrackPerSeries else { return nil }
+        return firstSeriesAudioLanguage(seriesPreferenceKeys(for: item))
+    }
+
+    /// The remembered subtitle decision for this item's series, gated on the toggle.
+    private func rememberedSubtitle(for item: MediaItem) -> RememberedSubtitleSelection? {
+        guard playbackSettings.rememberSubtitleTrackPerSeries else { return nil }
+        return firstSeriesSubtitle(seriesPreferenceKeys(for: item))
+    }
+
+    /// Records the viewer's manual audio-language pick for the current series
+    /// (gated on the toggle), fanned out to every key (cross-server + per-server)
+    /// so the choice follows the show to any server. Only a language-tagged track
+    /// is remembered — an untagged track can't be re-resolved on the next episode.
+    /// The language is normalized (`eng` → `en`) so a code that differs in form
+    /// between servers still matches.
+    private func recordSeriesAudioSelection(language: String?) {
+        guard playbackSettings.rememberAudioTrackPerSeries,
+              let store = seriesTrackStore,
+              let item = request?.item,
+              let language, !language.isEmpty else { return }
+        let normalized = LanguageMatch.normalized(language) ?? language
+        for key in seriesPreferenceKeys(for: item) {
+            store.setAudioLanguage(normalized, forKey: key)
+        }
+    }
+
+    /// Records the viewer's manual subtitle pick (a language, or Off) for the
+    /// current series, gated on the toggle and fanned out to every key. A selected
+    /// track with no language is not remembered (it can't be re-matched next
+    /// episode); Off always is. A language is normalized so it matches cross-server.
+    private func recordSeriesSubtitleSelection(_ selection: RememberedSubtitleSelection?) {
+        guard playbackSettings.rememberSubtitleTrackPerSeries,
+              let store = seriesTrackStore,
+              let item = request?.item,
+              let selection else { return }
+        let normalized: RememberedSubtitleSelection
+        switch selection {
+        case .off:
+            normalized = .off
+        case .language(let code):
+            normalized = .language(LanguageMatch.normalized(code) ?? code)
+        }
+        for key in seriesPreferenceKeys(for: item) {
+            store.setSubtitle(normalized, forKey: key)
+        }
+    }
+
+    /// Reconciles per-series memory across servers once `enrichSeriesIDs` has
+    /// folded the series' external ids onto the item (making the cross-server keys
+    /// resolvable). Audio and subtitle are reconciled **independently** — the
+    /// viewer may have changed only one this session, and the two fields can live
+    /// under different keys when servers expose different external-id subsets:
+    /// - **Viewer changed this dimension this session** → their pick is the newest
+    ///   truth; mirror it onto every key (a switch made before enrich resolved the
+    ///   cross-server keys would have written only the per-server key).
+    /// - **Otherwise** → if a cross-server key carries a value that differs from
+    ///   the per-server key (the show was watched on another server, possibly more
+    ///   recently), import it: apply it to this playback and backfill the
+    ///   per-server key so later same-server episodes resolve it synchronously.
+    private func reconcileSeriesMemoryAcrossServers() {
+        guard let store = seriesTrackStore,
+              let item = request?.item,
+              item.kind == .episode else { return }
+        let crossKeys = seriesCrossServerKeys(for: item)
+        guard !crossKeys.isEmpty else { return }
+        let localKeys = [seriesLocalKey(for: item)].compactMap { $0 }
+        let allKeys = crossKeys + localKeys
+
+        if playbackSettings.rememberAudioTrackPerSeries {
+            if viewerChangedAudioThisSession {
+                if let language = firstSeriesAudioLanguage(localKeys) {
+                    for key in allKeys { store.setAudioLanguage(language, forKey: key) }
+                }
+            } else {
+                let localLanguage = firstSeriesAudioLanguage(localKeys)
+                if let crossLanguage = firstSeriesAudioLanguage(crossKeys),
+                   crossLanguage != localLanguage {
+                    for key in localKeys { store.setAudioLanguage(crossLanguage, forKey: key) }
+                    crossServerAudioImportLanguage = crossLanguage
+                    applyImportedAudioIfPossible()
+                }
+            }
+        }
+
+        if playbackSettings.rememberSubtitleTrackPerSeries {
+            if viewerChangedSubtitleThisSession {
+                if let subtitle = firstSeriesSubtitle(localKeys) {
+                    for key in allKeys { store.setSubtitle(subtitle, forKey: key) }
+                }
+            } else {
+                let localSubtitle = firstSeriesSubtitle(localKeys)
+                if let crossSubtitle = firstSeriesSubtitle(crossKeys),
+                   crossSubtitle != localSubtitle {
+                    for key in localKeys { store.setSubtitle(crossSubtitle, forKey: key) }
+                    // Re-route the load-time subtitle now that the remembered value
+                    // resolves. Works for native (tracks present → applies now) and
+                    // Plozzigen (tracks arrive later → onTracksChanged re-applies).
+                    initialSubtitleApplied = false
+                    if let request { applyInitialSubtitleSelectionIfReady(for: request) }
+                }
+            }
+        }
+    }
+
+    /// Applies a pending cross-server audio import once the engine's audio tracks
+    /// are known. Retried from `onTracksChanged` (Plozzigen's async arrival) and at
+    /// the end of `playResolved` (native, which never fires `onTracksChanged` and
+    /// only populates `audioTracks` after `engine.load`). No-ops when the matching
+    /// track is already active or no pending import is set.
+    private func applyImportedAudioIfPossible() {
+        guard let language = crossServerAudioImportLanguage else { return }
+        guard let track = engine.audioTracks.first(where: {
+            LanguageMatch.matches($0.language, language)
+        }) else { return }
+        crossServerAudioImportLanguage = nil
+        guard track.id != engine.currentAudioTrackID, track.id != pendingAudioTrackID else { return }
+        engine.selectAudioTrack(track)
+        pendingAudioTrackID = track.id
+        selectedAudioTrackID = track.id
+        loadTrackOptions()
     }
 
     /// Loads an already-resolved request on the routed engine and finishes the
@@ -564,6 +894,9 @@ public final class PlayerViewModel {
         // engine's teardown restores SDR — a real switch the view should veil),
         // and hybrid→native rises to HDR (the new switch the view should veil).
         displayMode = engineKind == .native ? HDRDisplayMode(request.sourceMetadata) : .sdr
+        // The overlay clamps its white point on HDR frames; mirror the range the
+        // panel is actually being driven to (native HDR content → HDR display).
+        liveSubtitles.isHDR = displayMode != .sdr
         // Engine-independent: tracks the *content's* range so the exit veil can
         // cover a panel HDR/DV → SDR switch even when mpv (which stays `.sdr`
         // above) drove the panel into HDR on this TV.
@@ -612,6 +945,29 @@ public final class PlayerViewModel {
         engine.setAudioDelay(0)
         engine.setSubtitleDelay(0)
         engine.setDialogEnhanceEnabled(false)
+        // Drop any overlay cues from a previous stream/engine and reset the sync
+        // offset; a fresh selection re-seeds them.
+        subtitleCueLoadTask?.cancel()
+        subtitleCueLoadTask = nil
+        liveSubtitles.offset = 0
+        liveSubtitles.clear()
+
+        // Route the load-time DEFAULT subtitle through Plozz's own overlay (same
+        // as a manual pick) instead of letting AVPlayer / the engine draw it, so
+        // the default lane gets identical HDR-safe styling + live offset. Native
+        // tracks are ready now; Plozzigen's arrive later via `onTracksChanged`,
+        // which calls this again. The per-load flag makes it fire exactly once.
+        // (selectedSubtitleTrackID is intentionally NOT reset here: the image-sub
+        // resolve path seeds it before playResolved so the menu reflects the
+        // bitmap track mpv draws; the routing below sets it for native/Plozzigen.)
+        initialSubtitleApplied = false
+        applyInitialSubtitleSelectionIfReady(for: request)
+
+        // Apply any cross-server audio import that reconcile queued before the
+        // engine's audio tracks were known. Native populates `audioTracks` only
+        // after `engine.load` (here) and never fires `onTracksChanged`, so this is
+        // its retry point; a no-op when nothing is pending or already correct.
+        applyImportedAudioIfPossible()
 
         // Load skip markers once playback is live (opt-in, best-effort).
         loadSkipSegmentsIfEnabled()
@@ -929,6 +1285,10 @@ public final class PlayerViewModel {
         let clamped = max(-10, min(10, seconds))
         controls.subtitleDelaySeconds = clamped
         engine.setSubtitleDelay(clamped)
+        // The overlay applies the same offset to its cue timeline. AVPlayer can't
+        // shift an injected sidecar, so when our overlay owns the track this is
+        // what actually makes "Subtitle delay" work for text subtitles.
+        liveSubtitles.offset = clamped
     }
 
     public func setDialogEnhanceEnabled(_ enabled: Bool) {
@@ -973,6 +1333,8 @@ public final class PlayerViewModel {
         cancelWatchdog()
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = nil
+        subtitleCueLoadTask?.cancel()
+        subtitleCueLoadTask = nil
         // Silence the engine *before* the final server report. The report is a
         // network round-trip that can take a second or two; stopping first means
         // leaving the player never keeps playing audio while it completes. Grab
@@ -1090,21 +1452,93 @@ public final class PlayerViewModel {
     /// in-player track menu. Switching is routed back through the engine so the
     /// menu behaves identically across engines.
     private func loadTrackOptions() {
-        let audio = engine.audioTracks
-        if selectedAudioTrackID == nil {
+        // Enrich the engine's demuxed tracks with the provider's probe of the
+        // same file (matched by stream id), filling in any language/codec/title
+        // the demuxer dropped. For the native engine the two lists are identical,
+        // so this is a no-op there; it only adds data on the advanced engine.
+        let providerAudio = request?.audioTracks ?? []
+        let providerSubs = request?.subtitleTracks ?? []
+
+        let audio = engine.audioTracks.map { track in
+            track.enriched(withProvider: providerAudio.first { $0.id == track.id })
+        }
+        // The "selected audio" indicator must reflect the track the engine is
+        // *actually* decoding, not a re-derived default-flag guess (those can
+        // disagree: e.g. a dual-audio anime whose container defaults to Japanese
+        // while the engine starts the English track per the viewer's audio-language
+        // preference — the menu was highlighting Japanese while English played).
+        // Priority: an in-flight pick (optimistic) → the engine's resolved active
+        // track (ground truth) → the default-flag heuristic only before either is
+        // known.
+        if let pending = pendingAudioTrackID, audio.contains(where: { $0.id == pending }) {
+            selectedAudioTrackID = pending
+            if engine.currentAudioTrackID == pending { pendingAudioTrackID = nil }
+        } else if let active = engine.currentAudioTrackID,
+                  audio.contains(where: { $0.id == active }) {
+            selectedAudioTrackID = active
+            pendingAudioTrackID = nil
+        } else if selectedAudioTrackID == nil {
             selectedAudioTrackID = audio.first(where: { $0.isDefault })?.id ?? audio.first?.id
         }
-        controls.audioOptions = audio.map { track in
-            PlayerTrackOption(id: track.id, title: track.displayTitle, isSelected: track.id == selectedAudioTrackID)
-        }
+        // Preferred languages, highest priority first: the viewer's explicit
+        // choice (or device language) leads, the device language backs it up.
+        let preferred: [String?] = [
+            captionSettings.resolvedPreferredLanguage,
+            LanguageMatch.deviceLanguageCode
+        ]
+        controls.audioOptions = audio
+            .sortedByPreferredLanguage(preferred)
+            .map { track in
+                PlayerTrackOption(
+                    id: track.id,
+                    title: TrackLabeling.audioLabel(
+                        displayTitle: track.displayTitle,
+                        language: track.language,
+                        codec: track.codec,
+                        channels: track.channels,
+                        isAtmos: track.isAtmos,
+                        isCommentary: track.isCommentary,
+                        trackID: track.id
+                    ),
+                    isSelected: track.id == selectedAudioTrackID
+                )
+            }
 
-        let subtitles = engine.subtitleTracks
+        let subtitles = engine.subtitleTracks.map { track in
+            track.enriched(withProvider: providerSubs.first { $0.id == track.id })
+        }
+        #if DEBUG
+        // One-line ground truth for untagged-track triage: how many subtitle
+        // tracks still lack a language after enrichment, and whether the provider
+        // had any languages to lend. If both are zero/empty the file is genuinely
+        // untagged (only OCR could do better); a gap here means an id-space miss.
+        let unresolved = subtitles.filter { $0.language == nil }.count
+        let providerWithLang = providerSubs.filter { $0.language != nil }.count
+        PlozzLog.playback.debug(
+            "Track labels: \(subtitles.count) subs, \(unresolved) still no language; provider probe had \(providerSubs.count) subs (\(providerWithLang) with a language)"
+        )
+        #endif
         if subtitles.isEmpty {
             controls.subtitleOptions = []
         } else {
+            // "Off" stays pinned first; real tracks sort preferred-language-first.
             var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: "Off", isSelected: selectedSubtitleTrackID == nil)]
-            options.append(contentsOf: subtitles.map { track in
-                PlayerTrackOption(id: track.id, title: track.displayTitle, isSelected: track.id == selectedSubtitleTrackID)
+            options.append(contentsOf: subtitles.sortedByPreferredLanguage(preferred).map { track in
+                PlayerTrackOption(
+                    id: track.id,
+                    title: TrackLabeling.subtitleLabel(
+                        displayTitle: track.displayTitle,
+                        language: track.language,
+                        codec: track.codec,
+                        isForced: track.isForced,
+                        isImageBased: track.isImageBasedSubtitle,
+                        isHearingImpaired: track.isHearingImpaired,
+                        isCommentary: track.isCommentary,
+                        detectedLanguage: detectedSubtitleLanguages[track.id],
+                        trackID: track.id
+                    ),
+                    isSelected: track.id == selectedSubtitleTrackID
+                )
             })
             controls.subtitleOptions = options
         }
@@ -1113,35 +1547,241 @@ public final class PlayerViewModel {
     /// Selects an audio track from the menu, routed through the engine.
     public func selectAudioOption(id: Int) {
         guard let track = engine.audioTracks.first(where: { $0.id == id }) else { return }
+        viewerChangedAudioThisSession = true
         engine.selectAudioTrack(track)
+        // Remember this language for the series so later episodes start here.
+        recordSeriesAudioSelection(language: track.language)
+        // Show the target immediately; the engine's reload-to-switch lags, so we
+        // hold this optimistic pick until `currentAudioTrackID` confirms it (see
+        // loadTrackOptions) to avoid the indicator snapping back to the old track.
+        pendingAudioTrackID = id
         selectedAudioTrackID = id
         loadTrackOptions()
     }
 
-    /// Selects a subtitle track, or turns subtitles off (`PlayerTrackOption.offID`).
-    public func selectSubtitleOption(id: Int) {
-        if id == PlayerTrackOption.offID {
+    /// Routes the load-time **default** subtitle through Plozz's owned overlay so
+    /// it renders identically to a manual menu pick (HDR-safe SDR overlay, full
+    /// styling, live offset) instead of being drawn by AVPlayer's legible group
+    /// or the engine. Runs once per `playResolved`:
+    /// - **native** — provider tracks are known synchronously, so it applies
+    ///   immediately from `playResolved`.
+    /// - **Plozzigen** — the engine demuxes its track list asynchronously, so
+    ///   this no-ops until the tracks arrive via `onTracksChanged`, then applies.
+    /// - **hybrid (mpv)** — draws its own subtitles (including bitmap defaults
+    ///   routed to it at resolve time), so it's left untouched.
+    private func applyInitialSubtitleSelectionIfReady(for request: PlaybackRequest) {
+        guard !initialSubtitleApplied else { return }
+        switch currentEngineKind {
+        case .native:
+            // engine.subtitleTracks == request.subtitleTracks for the native
+            // engine; both share the provider id space selectSubtitleOption uses.
+            initialSubtitleApplied = true
+            applyDefaultSubtitleThroughOverlay(from: request.subtitleTracks)
+        case .plozzigen:
+            // AetherEngine reports tracks (with its own index id space) only after
+            // demux; wait for them rather than applying against an empty list.
+            let tracks = engine.subtitleTracks
+            guard !tracks.isEmpty else { return }
+            initialSubtitleApplied = true
+            applyDefaultSubtitleThroughOverlay(from: tracks)
+        default:
+            // hybrid (mpv) keeps drawing its own subtitles.
+            initialSubtitleApplied = true
+        }
+    }
+
+    /// Picks the default subtitle for the user's mode + preferred language from
+    /// `tracks` and routes it through the overlay via `selectSubtitleOption`, or
+    /// clears subtitles when there is no default text track. Image-based defaults
+    /// are skipped here (they were routed to the hybrid engine at resolve time and
+    /// that engine draws them); routing them through the overlay arrives with the
+    /// bitmap-cue work.
+    private func applyDefaultSubtitleThroughOverlay(from tracks: [MediaTrack]) {
+        // A remembered per-series subtitle decision overrides the default rule.
+        if let remembered = request.map({ rememberedSubtitle(for: $0.item) }) ?? nil {
+            switch remembered {
+            case .off:
+                engine.selectSubtitleTrack(nil)
+                clearOverlaySubtitle()
+                selectedSubtitleTrackID = nil
+                loadTrackOptions()
+                return
+            case .language(let language):
+                // Honor the remembered language explicitly (mode `.all`, since the
+                // viewer chose to see this language for the show), but only when a
+                // matching, renderable text track exists; otherwise fall through to
+                // the default rule.
+                if tracks.hasSuitableSubtitle(forLanguage: language),
+                   let chosen = tracks.defaultSubtitleSelection(mode: .all, preferredLanguage: language),
+                   !chosen.isImageBasedSubtitle {
+                    selectSubtitleOption(id: chosen.id, userInitiated: false)
+                    return
+                }
+            }
+        }
+
+        let rule = request.map { effectiveSubtitleRule(for: $0.item) }
+        let chosen = tracks.defaultSubtitleSelection(
+            mode: rule?.mode ?? captionSettings.subtitleMode,
+            preferredLanguage: rule?.preferredLanguage ?? captionSettings.resolvedPreferredLanguage
+        )
+        guard let chosen, !chosen.isImageBasedSubtitle else {
             engine.selectSubtitleTrack(nil)
+            clearOverlaySubtitle()
+            selectedSubtitleTrackID = nil
+            loadTrackOptions()
+            return
+        }
+        selectSubtitleOption(id: chosen.id, userInitiated: false)
+    }
+
+    /// Selects a subtitle track, or turns subtitles off (`PlayerTrackOption.offID`).
+    /// `userInitiated` is `true` for a real menu pick (which is remembered for the
+    /// series) and `false` for the programmatic load-time default.
+    public func selectSubtitleOption(id: Int, userInitiated: Bool = true) {
+        if userInitiated { viewerChangedSubtitleThisSession = true }
+        if id == PlayerTrackOption.offID {
+            if userInitiated { recordSeriesSubtitleSelection(.off) }
+            engine.selectSubtitleTrack(nil)
+            clearOverlaySubtitle()
             selectedSubtitleTrackID = nil
             loadTrackOptions()
             return
         }
         guard let track = engine.subtitleTracks.first(where: { $0.id == id }) else { return }
+        if userInitiated { recordSeriesSubtitleSelection(track.language.map(RememberedSubtitleSelection.language)) }
 
-        // Image-based subtitles (no text delivery URL — PGS/VOBSUB) can't be
-        // rendered by AVPlayer. If the user picks one while on the native engine,
-        // swap to the hybrid engine at the current position and apply the
-        // selection there so the subtitle actually shows.
-        if track.deliveryURL == nil, currentEngineKind == .native,
+        // Image-based subtitles (PGS/VOBSUB/DVDSUB) can't be rendered by AVPlayer
+        // or any on-device text renderer. If the user picks one while on the
+        // native engine, swap to the hybrid engine at the current position and
+        // apply the selection there so the subtitle actually shows. Key off
+        // `isImageBasedSubtitle` — NOT `deliveryURL == nil` — so an embedded text
+        // SRT (no sidecar URL, but renderable) stays on the native engine.
+        if track.isImageBasedSubtitle, currentEngineKind == .native,
            let request, !request.isTranscoding, engineFactory.hybridAvailable {
+            clearOverlaySubtitle()
             selectedSubtitleTrackID = id
             Task { await swapEngineForImageSubtitle(track) }
             return
         }
 
+        // Text subtitle on the native engine. With a sidecar URL we render it
+        // through Plozz's own overlay (styling, HDR luminance, live offset all
+        // apply), suppressing AVPlayer's legible draw. WITHOUT a sidecar URL
+        // (embedded text track, e.g. an MKV SRT on Plex direct-play) the overlay
+        // has no cue source, so we let AVPlayer draw the track natively rather
+        // than suppressing it and showing nothing — routing embedded text through
+        // the overlay is a later Plozzigen-extraction task.
+        if !track.isImageBasedSubtitle, currentEngineKind == .native {
+            selectedSubtitleTrackID = id
+            if track.deliveryURL != nil {
+                engine.selectSubtitleTrack(nil)
+                loadOverlaySubtitle(track)
+            } else {
+                clearOverlaySubtitle()
+                engine.selectSubtitleTrack(track)
+            }
+            loadTrackOptions()
+            return
+        }
+
+        // Plozzigen (AetherEngine) decodes the selected subtitle and publishes its
+        // active cues; route them through Plozz's owned overlay (live-feed mode)
+        // so text *and* bitmap subs draw on the same SDR renderer as native. The
+        // `onSubtitleCues` callback (wired in configureEngineCallbacks) does the
+        // feeding. Other engines that draw their own subs (mpv) get an empty live
+        // feed and keep drawing themselves — harmless.
+        subtitleCueLoadTask?.cancel()
+        subtitleCueLoadTask = nil
+        liveSubtitles.beginLiveFeed()
         engine.selectSubtitleTrack(track)
         selectedSubtitleTrackID = id
         loadTrackOptions()
+    }
+
+    /// Cancels any in-flight cue fetch and clears the overlay (subtitles off, or
+    /// switching to an engine that draws its own).
+    private func clearOverlaySubtitle() {
+        subtitleCueLoadTask?.cancel()
+        subtitleCueLoadTask = nil
+        liveSubtitles.clear()
+    }
+
+    /// Fetches the selected text sidecar, parses it to cues off the main actor,
+    /// and loads it into the overlay — unless the selection changed mid-fetch.
+    /// Best-effort: a failure simply leaves no overlay cues rather than wedging.
+    private func loadOverlaySubtitle(_ track: MediaTrack) {
+        subtitleCueLoadTask?.cancel()
+        liveSubtitles.clear()
+        guard let url = track.deliveryURL else {
+            // Embedded text without a sidecar URL: container extraction arrives
+            // with the Plozzigen cue path; leave nothing showing until then.
+            PlozzLog.playback.debug("Selected subtitle has no sidecar URL; overlay not loaded")
+            return
+        }
+        let id = track.id
+        let language = track.language
+        let title = track.displayTitle
+        let forced = track.isForced
+        // Only spend a detection pass when the provider gave us no language tag
+        // and we haven't already guessed one for this track this session.
+        let needsDetection = (language == nil) && detectedSubtitleLanguages[id] == nil
+        subtitleCueLoadTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                try Task.checkCancellation()
+                guard let text = SubtitleCueParser.decodeText(data) else {
+                    PlozzLog.playback.error("Subtitle sidecar decode failed (\(data.count) bytes); unknown text encoding")
+                    return
+                }
+                let stream = SubtitleCueParser.parse(
+                    text, id: id, language: language, title: title,
+                    sourceTrackID: id, isForced: forced
+                )
+                try Task.checkCancellation()
+                let detected = needsDetection ? Self.detectLanguage(in: stream.cues) : nil
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    let storedNew = detected != nil && self.detectedSubtitleLanguages[id] == nil
+                    if let detected, storedNew { self.detectedSubtitleLanguages[id] = detected }
+                    if self.selectedSubtitleTrackID == id {
+                        self.liveSubtitles.loadPrimary(stream)
+                    }
+                    // A fresh guess changes a track's menu label, so rebuild.
+                    if storedNew { self.loadTrackOptions() }
+                }
+            } catch is CancellationError {
+                // Selection changed; the newer selection owns the overlay.
+            } catch {
+                PlozzLog.playback.debug("Overlay subtitle fetch failed (non-fatal)")
+            }
+        }
+    }
+
+    /// Best-effort on-device language guess for an untagged text subtitle, from a
+    /// sample of its parsed cue text. Runs off the main actor (`nonisolated`).
+    /// Returns a BCP-47-ish code (e.g. `en`, `es`, `zh-Hans`) or `nil` when there
+    /// isn't enough text to be confident. Bitmap cues have no `text`, so they
+    /// naturally yield `nil` (they need OCR, out of scope here).
+    private nonisolated static func detectLanguage(in cues: [SubtitleCue]) -> String? {
+        #if canImport(NaturalLanguage)
+        var sample = ""
+        for cue in cues {
+            guard let line = cue.text, !line.isEmpty else { continue }
+            sample += line
+            sample += "\n"
+            if sample.count > 4000 { break }
+        }
+        let trimmed = sample.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Too little text to classify reliably — don't risk a wrong label.
+        guard trimmed.count >= 24 else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        guard let language = recognizer.dominantLanguage, language != .undetermined else { return nil }
+        return language.rawValue
+        #else
+        return nil
+        #endif
     }
 
     /// Swaps from the native engine to the hybrid engine (preserving position) so
@@ -1162,14 +1802,24 @@ public final class PlayerViewModel {
     /// preferred language, kicks off a detached background search+download so the
     /// server fetches one. Never blocks or affects the current playback session.
     private func startAutoSubtitleDownloadIfNeeded(request: PlaybackRequest) {
-        guard captionSettings.autoDownloadSubtitles else { return }
-        let language = captionSettings.resolvedPreferredLanguage
+        // Per-content-type rule decides whether to auto-download, the language to
+        // fetch, and forced-vs-full preference — so "auto-download a missing match
+        // for anime only" works. For un-overridden categories the rule already
+        // mirrors the caption base (`autoDownloadSubtitles`), so gate solely on the
+        // resolved rule: ORing the global flag back in would make a category
+        // override that sets `autoDownloadIfMissing: false` (e.g. movies) unable to
+        // turn the behaviour off while the profile-wide toggle is on.
+        let rule = effectiveSubtitleRule(for: request.item)
+        // No point fetching a subtitle the viewer won't see: "Off" suppresses the
+        // background download just as it suppresses the on-load selection.
+        guard rule.mode != .off, rule.autoDownloadIfMissing else { return }
+        let language = rule.preferredLanguage ?? captionSettings.resolvedPreferredLanguage
         guard !request.subtitleTracks.hasSuitableSubtitle(forLanguage: language) else { return }
         guard let language, !language.isEmpty else { return }
 
         let provider = self.provider
         let itemID = self.itemID
-        let mode = captionSettings.subtitleMode
+        let mode = rule.mode
         subtitleDownloadTask = Task.detached(priority: .background) {
             do {
                 let results = try await provider.remoteSubtitleSearch(itemID: itemID, language: language)

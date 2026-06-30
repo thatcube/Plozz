@@ -176,6 +176,17 @@ public protocol VideoEngine: AnyObject {
     /// Selectable subtitle tracks for the active stream.
     var subtitleTracks: [MediaTrack] { get }
 
+    /// The id of the audio track the engine is *actually* decoding right now,
+    /// when the engine can report it authoritatively (AetherEngine publishes its
+    /// resolved `activeAudioTrackIndex`, which may differ from the container's
+    /// `isDefault` flag because the engine honors the viewer's audio-language
+    /// preference). The owner uses this to drive the menu's "selected" indicator
+    /// from ground truth instead of guessing from a default flag. `nil` means the
+    /// engine can't say — fall back to the default-flag heuristic. Changes are
+    /// announced via `onTracksChanged` so the menu re-syncs after the engine
+    /// resolves or switches its active track.
+    var currentAudioTrackID: Int? { get }
+
     /// Selects an audio track (or `nil` to leave the engine default).
     func selectAudioTrack(_ track: MediaTrack?)
 
@@ -199,6 +210,25 @@ public protocol VideoEngine: AnyObject {
     /// main actor.
     var onEnded: (@MainActor () -> Void)? { get set }
 
+    /// Fired when the engine's selectable track lists (`audioTracks` /
+    /// `subtitleTracks`) change *after* load — for engines that discover tracks
+    /// asynchronously (AetherEngine publishes them via Combine once its demuxer
+    /// has probed the source). The owner re-reads the lists and rebuilds its
+    /// options menu, so a track list that arrives a beat after playback starts no
+    /// longer leaves the menu empty. Engines whose tracks are known synchronously
+    /// at load never fire it. Invoked on the main actor.
+    var onTracksChanged: (@MainActor () -> Void)? { get set }
+
+    /// Fired with the engine's decoded subtitle cues for engines that decode
+    /// subtitles themselves and want Plozz's owned overlay to draw them rather than
+    /// drawing their own. AetherEngine emits text *and* bitmap cues here. NOTE:
+    /// this is the engine's decoded *read-ahead* buffer (not just the on-screen
+    /// line), so the owner must time-filter it against the playhead before
+    /// drawing — `LiveSubtitleModel` does this in its clock tick. Engines whose
+    /// subtitles are drawn elsewhere — the AVPlayer legible group, an mpv overlay,
+    /// or a parsed sidecar timeline — never fire it. Invoked on the main actor.
+    var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)? { get set }
+
     // MARK: View
 
     #if canImport(UIKit)
@@ -219,6 +249,11 @@ public protocol VideoEngine: AnyObject {
 public extension VideoEngine {
     /// Default: engines that don't track buffering report no buffer fill.
     var bufferedPosition: TimeInterval { 0 }
+
+    /// Default: the engine can't authoritatively name its active audio track, so
+    /// the owner falls back to the container `isDefault` heuristic. Engines that
+    /// publish a resolved active-track index (AetherEngine) override this.
+    var currentAudioTrackID: Int? { nil }
 
     /// Default: native (`AVPlayer`) engines have no separate telemetry — the
     /// sampler reads the access log. Engines without an `AVPlayer` override this.

@@ -38,6 +38,7 @@ struct PlayerActions {
 struct CustomPlayerContainer: UIViewControllerRepresentable {
     let engine: any VideoEngine
     let model: PlayerControlsModel
+    let subtitleModel: LiveSubtitleModel
     let actions: PlayerActions
     let scrubPreview: ScrubPreviewSource?
     let themePalette: ThemePaletteBox
@@ -46,6 +47,7 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
         let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
         controller.configureScrubPreview(scrubPreview)
         controller.attachVideoSurface()
+        controller.attachSubtitleOverlay(subtitleModel)
         controller.attachControls(themePalette: themePalette)
         return controller
     }
@@ -166,6 +168,15 @@ final class PlayerInputViewController: UIViewController {
     /// Surface gesture recognizers we toggle off while the control bar owns focus.
     private var surfaceRecognizers: [UIGestureRecognizer] = []
 
+    /// Hosts the owned subtitle overlay above the video surface and below the
+    /// transport controls. Present for the player's lifetime; renders nothing
+    /// until the view model loads a cue stream into `subtitleModel`.
+    private var subtitleOverlayHost: UIHostingController<LiveSubtitleOverlay>?
+    private var subtitleModel: LiveSubtitleModel?
+    /// Drives the subtitle timeline off the engine clock every frame. The model
+    /// only republishes on cue-boundary crossings, so this stays cheap.
+    private var subtitleClock: CADisplayLink?
+
     private var playerInputView: PlayerInputView? { view as? PlayerInputView }
 
     init(engine: any VideoEngine, model: PlayerControlsModel, actions: PlayerActions) {
@@ -196,12 +207,15 @@ final class PlayerInputViewController: UIViewController {
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
         startRefreshLoop()
+        startSubtitleClock()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         refreshTask?.cancel()
         refreshTask = nil
+        subtitleClock?.invalidate()
+        subtitleClock = nil
         // Leaving playback: let the screensaver / Apple TV sleep resume.
         idleSleepGuard.allowSleep()
     }
@@ -240,6 +254,38 @@ final class PlayerInputViewController: UIViewController {
         surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         surface.isUserInteractionEnabled = false
         view.insertSubview(surface, at: 0)
+    }
+
+    /// Mounts the owned subtitle overlay directly above the video surface (and
+    /// below the transport controls, which are attached afterwards). The overlay
+    /// is non-interactive so Siri Remote pans still reach the scrub surface. A
+    /// display-link then drives the cue timeline off the engine clock.
+    func attachSubtitleOverlay(_ model: LiveSubtitleModel) {
+        subtitleModel = model
+        let host = UIHostingController(rootView: LiveSubtitleOverlay(model: model))
+        host.view.backgroundColor = .clear
+        host.view.isUserInteractionEnabled = false
+        host.view.frame = view.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addChild(host)
+        // Index 1: above the video surface (index 0), below the controls/skip
+        // hosts that `attachControls` adds on top afterwards.
+        view.insertSubview(host.view, at: 1)
+        host.didMove(toParent: self)
+        subtitleOverlayHost = host
+    }
+
+    /// Starts the per-frame subtitle clock. Cheap when no cues are loaded (the
+    /// model no-ops) and when a line is held (no boundary crossing → no publish).
+    private func startSubtitleClock() {
+        subtitleClock?.invalidate()
+        let link = CADisplayLink(target: self, selector: #selector(tickSubtitleClock))
+        link.add(to: .main, forMode: .common)
+        subtitleClock = link
+    }
+
+    @objc private func tickSubtitleClock() {
+        subtitleModel?.tick(engine.currentTime)
     }
 
     /// Hosts the combined transport + focusable control bar. It stays attached

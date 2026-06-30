@@ -43,11 +43,12 @@ struct PlayerControls: View {
     let onExitToSurface: () -> Void
 
     enum Category: Hashable {
-        case audioSubtitles, speed, sync
+        case subtitles, audio, speed, sync
 
         var title: String {
             switch self {
-            case .audioSubtitles: return "Audio & Subtitles"
+            case .subtitles: return "Subtitles"
+            case .audio: return "Audio"
             case .speed: return "Speed"
             case .sync: return "A/V Sync"
             }
@@ -55,7 +56,8 @@ struct PlayerControls: View {
 
         var icon: String {
             switch self {
-            case .audioSubtitles: return "captions.bubble"
+            case .subtitles: return "captions.bubble"
+            case .audio: return "waveform"
             case .speed: return "speedometer"
             case .sync: return "slider.horizontal.below.square.and.square.filled"
             }
@@ -217,7 +219,8 @@ struct PlayerControls: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     switch category {
-                    case .audioSubtitles: audioSubtitlesPane
+                    case .subtitles: subtitlePane
+                    case .audio: audioPane
                     case .speed: speedPane
                     case .sync: syncPane
                     }
@@ -227,40 +230,106 @@ struct PlayerControls: View {
             .frame(maxHeight: 440)
         }
         .frame(width: 760, alignment: .leading)
-        .background(.ultraThinMaterial)
+        // Composite cheaply over Dolby Vision / HDR video. The frame-dropping
+        // culprit was the soft drop `.shadow` (a per-frame offscreen blur pass
+        // recomposited over the moving DV signal), so that stays gone. A simple
+        // translucent fill is fine — it's a single per-pixel blend per frame, far
+        // cheaper than a shadow blur — so we keep a little video showing through.
+        // (A `.ultraThinMaterial` here would be worst of all: a live backdrop blur
+        // of full-motion HDR every frame.) A 1px stroke gives edge separation for
+        // free, replacing the shadow.
+        .background(Color.black.opacity(0.8))
         .colorScheme(.dark)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(radius: 24)
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    /// The Subtitles menu: one full-width column of selectable tracks (incl.
+    /// "Off"). Full width so a rich label ("Spanish (SDH, PGS)") never truncates.
+    @ViewBuilder
+    private var subtitlePane: some View {
+        let rows = subtitleRows
+        if rows.isEmpty {
+            emptyRow("No subtitles")
+        } else {
+            trackRowStack(rows).padding(.horizontal, 14)
+        }
+    }
+
+    /// The Audio menu: one full-width column of selectable tracks plus the
+    /// Dialog Enhance toggle when the engine supports it.
+    @ViewBuilder
+    private var audioPane: some View {
+        let rows = audioRows
+        if rows.isEmpty {
+            emptyRow("No alternate audio")
+        } else {
+            trackRowStack(rows).padding(.horizontal, 14)
+        }
     }
 
     @ViewBuilder
-    private var audioSubtitlesPane: some View {
-        let rows = audioSubtitleRows
-        if rows.isEmpty {
-            emptyRow("No alternate tracks")
-        } else {
+    private func trackRowStack(_ rows: [TrackRow]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(rows) { row in
-                if let header = row.header {
-                    sectionHeader(header)
-                }
                 if row.isToggle {
-                    toggleRow(
-                        title: row.title,
-                        subtitle: row.subtitle,
-                        isOn: row.isSelected,
-                        index: row.id,
-                        action: row.action
-                    )
+                    compactToggleRow(row)
                 } else {
-                    selectableRow(
-                        title: row.title,
-                        isSelected: row.isSelected,
-                        index: row.id,
-                        action: row.action
-                    )
+                    compactSelectableRow(row)
                 }
             }
         }
+    }
+
+    private func compactSelectableRow(_ row: TrackRow) -> some View {
+        Button(action: row.action) {
+            HStack(spacing: 10) {
+                Text(row.title)
+                    .font(.body)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if row.isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .playerMenuRowMark(isSelected: true, accent: palette.accent)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .row(row.id))
+    }
+
+    private func compactToggleRow(_ row: TrackRow) -> some View {
+        Button(action: row.action) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title).font(.body.weight(.medium)).lineLimit(1)
+                    if !row.subtitle.isEmpty {
+                        Text(row.subtitle)
+                            .font(.caption2)
+                            .playerMenuRowSecondary()
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 8)
+                Image(systemName: row.isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .playerMenuRowMark(isSelected: row.isSelected, accent: palette.accent)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .row(row.id))
     }
 
     @ViewBuilder
@@ -328,20 +397,21 @@ struct PlayerControls: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack {
-                Text(title).font(.title3)
-                Spacer()
+            HStack(spacing: 10) {
+                Text(title).font(.body).lineLimit(1)
+                Spacer(minLength: 8)
                 if isSelected {
                     Image(systemName: "checkmark")
-                        .font(.headline)
-                        .foregroundStyle(palette.accent)
+                        .font(.body.weight(.semibold))
+                        .playerMenuRowMark(isSelected: true, accent: palette.accent)
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
         .focused($focus, equals: .row(index))
     }
 
@@ -357,19 +427,20 @@ struct PlayerControls: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.title3.weight(.medium))
                     if !subtitle.isEmpty {
-                        Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+                        Text(subtitle).font(.footnote).playerMenuRowSecondary()
                     }
                 }
                 Spacer()
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(isOn ? palette.accent : .secondary)
+                    .playerMenuRowMark(isSelected: isOn, accent: palette.accent)
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
         .focused($focus, equals: .row(index))
     }
 
@@ -409,10 +480,12 @@ struct PlayerControls: View {
 
     private var availableCategories: [Category] {
         var result: [Category] = []
+        if model.hasSelectableSubtitles {
+            result.append(.subtitles)
+        }
         if model.hasSelectableAudio
-            || model.hasSelectableSubtitles
             || model.engineCapabilities.contains(.dialogEnhance) {
-            result.append(.audioSubtitles)
+            result.append(.audio)
         }
         if model.engineCapabilities.contains(.playbackSpeed) {
             result.append(.speed)
@@ -441,14 +514,34 @@ struct PlayerControls: View {
         let action: () -> Void
     }
 
-    private var audioSubtitleRows: [TrackRow] {
+    /// Subtitle menu rows (one full-width column, including "Off"). Indexed from
+    /// 0 in their own focus-slot space — safe because only one panel is open at a
+    /// time, so audio and subtitle `.row` ids never coexist.
+    private var subtitleRows: [TrackRow] {
+        guard model.hasSelectableSubtitles else { return [] }
+        return model.subtitleOptions.enumerated().map { index, option in
+            TrackRow(
+                id: index,
+                header: nil,
+                title: option.title,
+                subtitle: "",
+                isSelected: option.isSelected,
+                isToggle: false,
+                action: { actions.selectSubtitle(option.id) }
+            )
+        }
+    }
+
+    /// Audio menu rows: selectable tracks followed by the Dialog Enhance toggle
+    /// when supported. Indexed from 0 in their own focus-slot space.
+    private var audioRows: [TrackRow] {
         var rows: [TrackRow] = []
         var index = 0
         if model.hasSelectableAudio {
-            for (offset, option) in model.audioOptions.enumerated() {
+            for option in model.audioOptions {
                 rows.append(TrackRow(
                     id: index,
-                    header: offset == 0 ? "Audio" : nil,
+                    header: nil,
                     title: option.title,
                     subtitle: "",
                     isSelected: option.isSelected,
@@ -461,7 +554,7 @@ struct PlayerControls: View {
         if model.engineCapabilities.contains(.dialogEnhance) {
             rows.append(TrackRow(
                 id: index,
-                header: model.hasSelectableAudio ? nil : "Audio",
+                header: nil,
                 title: "Dialog Enhance",
                 subtitle: "Boost speech clarity in loud mixes",
                 isSelected: model.dialogEnhanceEnabled,
@@ -470,28 +563,16 @@ struct PlayerControls: View {
             ))
             index += 1
         }
-        if model.hasSelectableSubtitles {
-            for (offset, option) in model.subtitleOptions.enumerated() {
-                rows.append(TrackRow(
-                    id: index,
-                    header: offset == 0 ? "Subtitles" : nil,
-                    title: option.title,
-                    subtitle: "",
-                    isSelected: option.isSelected,
-                    isToggle: false,
-                    action: { actions.selectSubtitle(option.id) }
-                ))
-                index += 1
-            }
-        }
         return rows
     }
 
     private func selectedRowIndex(for category: Category) -> Int {
         switch category {
-        case .audioSubtitles:
-            return audioSubtitleRows.first(where: { $0.isSelected })?.id
-                ?? audioSubtitleRows.first?.id ?? 0
+        case .subtitles:
+            // Open focused on the active subtitle (incl. "Off"), else the top row.
+            return subtitleRows.first(where: { $0.isSelected })?.id ?? 0
+        case .audio:
+            return audioRows.first(where: { $0.isSelected })?.id ?? 0
         case .speed:
             return Self.speedPresets.firstIndex(where: { abs(model.playbackSpeed - $0) < 0.001 }) ?? 0
         case .sync:

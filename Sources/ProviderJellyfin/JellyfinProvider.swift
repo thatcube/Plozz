@@ -894,8 +894,10 @@ public struct JellyfinProvider: MediaProvider {
             kind: isSubtitle ? .subtitle : .audio,
             displayTitle: dto.DisplayTitle ?? dto.Language ?? dto.Codec ?? "Track \(dto.Index)",
             language: dto.Language,
+            codec: dto.Codec,
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false,
+            channels: isSubtitle ? nil : dto.Channels,
             isImageBasedSubtitle: isSubtitle
                 && !(dto.IsTextSubtitleStream ?? isTextSubtitleCodec(dto.Codec))
         )
@@ -913,6 +915,7 @@ public struct JellyfinProvider: MediaProvider {
             kind: .subtitle,
             displayTitle: dto.DisplayTitle ?? dto.Language ?? dto.Codec ?? "Track \(dto.Index)",
             language: dto.Language,
+            codec: dto.Codec,
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false,
             deliveryURL: deliveryURL,

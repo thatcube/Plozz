@@ -13,8 +13,26 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     public var displayTitle: String
     /// BCP-47 / ISO language code if known (e.g. `en`, `fra`).
     public var language: String?
+    /// Raw codec token from the source/demuxer, lowercased where known
+    /// (e.g. `subrip`, `ass`, `pgssub`, `ac3`, `eac3`, `dts`). Drives format
+    /// hints in the track menu ("PGS", "SRT") and image-vs-text reasoning.
+    /// `nil` when the provider/engine didn't report one.
+    public var codec: String?
     public var isDefault: Bool
     public var isForced: Bool
+    /// Audio channel count where known (`2` stereo, `6` 5.1, `8` 7.1). `nil` for
+    /// subtitles and when the source/engine didn't report one. Drives the audio
+    /// format hint ("5.1"/"7.1") in the track menu.
+    public var channels: Int?
+    /// `true` for Dolby Atmos audio (object-based; the channel count is just the
+    /// bed). When set, the menu shows "Dolby Atmos" instead of the bed layout.
+    public var isAtmos: Bool
+    /// `true` for hearing-impaired / SDH tracks (container disposition). A
+    /// reliable signal that supersedes the title-text "SDH" heuristic.
+    public var isHearingImpaired: Bool
+    /// `true` for commentary tracks (director/cast). Surfaces a "Commentary"
+    /// qualifier on audio and subtitle labels.
+    public var isCommentary: Bool
     /// For subtitle tracks: an absolute URL that yields the subtitle text
     /// (WebVTT, or SRT which the player normalises to WebVTT). When non-`nil`
     /// the player can inject this track into the native picker even on direct
@@ -34,8 +52,13 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         kind: Kind,
         displayTitle: String,
         language: String? = nil,
+        codec: String? = nil,
         isDefault: Bool = false,
         isForced: Bool = false,
+        channels: Int? = nil,
+        isAtmos: Bool = false,
+        isHearingImpaired: Bool = false,
+        isCommentary: Bool = false,
         deliveryURL: URL? = nil,
         isImageBasedSubtitle: Bool = false
     ) {
@@ -43,8 +66,13 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.kind = kind
         self.displayTitle = displayTitle
         self.language = language
+        self.codec = codec
         self.isDefault = isDefault
         self.isForced = isForced
+        self.channels = channels
+        self.isAtmos = isAtmos
+        self.isHearingImpaired = isHearingImpaired
+        self.isCommentary = isCommentary
         self.deliveryURL = deliveryURL
         self.isImageBasedSubtitle = isImageBasedSubtitle
     }
@@ -245,6 +273,16 @@ public struct PlaybackRequest: Hashable, Sendable {
     public var sourceProvider: ProviderKind?
     /// Friendly name of the media server (e.g. "Allie's Jellyfin", "Living Room").
     public var serverName: String?
+    /// Ordered ISO-639 audio languages to steer the engine's INITIAL active audio
+    /// track at load (AetherEngine `LoadOptions.preferredAudioLanguages` — first
+    /// match wins, no reload). Computed by `PlayerViewModel` from per-series
+    /// memory / prefer-original-language policy just before `engine.load`. Empty =
+    /// express no preference (engine uses the container default). Not part of the
+    /// memberwise init so the many provider construction sites stay untouched.
+    public var preferredAudioLanguages: [String] = []
+    /// Ordered ISO-639 subtitle languages to steer the engine's initial subtitle
+    /// selection at load, the subtitle counterpart to `preferredAudioLanguages`.
+    public var preferredSubtitleLanguages: [String] = []
 
     public init(
         item: MediaItem,

@@ -1,7 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
-import Inject
 
 /// tvOS server picker: discovered servers, last-used reconnect, and manual entry.
 ///
@@ -21,7 +20,6 @@ public struct ServerPickerView: View {
         self.onSelect = onSelect
     }
 
-    @ObserveInjection var inject
 
     public var body: some View {
         NavigationStack {
@@ -89,7 +87,6 @@ public struct ServerPickerView: View {
         }
         .onAppear { viewModel.startScan() }
         .onDisappear { viewModel.stopScan() }
-        .enableInjection()
     }
 
     private var discoveredPlaceholder: some View {

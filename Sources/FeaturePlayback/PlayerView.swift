@@ -1,6 +1,5 @@
 #if canImport(SwiftUI)
 import SwiftUI
-import Inject
 import AVFoundation
 #if canImport(AVKit)
 import AVKit
@@ -37,7 +36,6 @@ public struct PlayerView: View {
         self.themePalette = themePalette
     }
 
-    @ObserveInjection var inject
 
     public var body: some View {
         ZStack {
@@ -56,6 +54,7 @@ public struct PlayerView: View {
                 CustomPlayerContainer(
                     engine: viewModel.videoEngine,
                     model: viewModel.controls,
+                    subtitleModel: viewModel.liveSubtitles,
                     actions: PlayerActions(
                         seek: { target in viewModel.requestSeek(to: target) },
                         togglePlayPause: { viewModel.togglePlayPause() },
@@ -171,7 +170,6 @@ public struct PlayerView: View {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }
         }
-        .enableInjection()
     }
 
     /// Dismiss with an HDR-aware fade that keeps the screen fully black from the

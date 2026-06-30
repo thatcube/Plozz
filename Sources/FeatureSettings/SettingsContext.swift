@@ -73,7 +73,10 @@ struct SettingsPanel<Content: View>: View {
         VStack(alignment: .leading, spacing: 16) {
             if let title {
                 Text(title)
-                    .font(.headline.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
+                    .textCase(.uppercase)
+                    .tracking(1.0)
+                    .foregroundStyle(.secondary)
             }
             content
             if let footer {

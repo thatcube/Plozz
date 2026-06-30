@@ -2,7 +2,6 @@
 import SwiftUI
 import CoreModels
 import CoreUI
-import Inject
 import FeatureProfiles
 import TraktService
 import SimklService
@@ -168,7 +167,6 @@ public struct SettingsView: View {
         )
     }
 
-    @ObserveInjection var inject
 
     public var body: some View {
         NavigationStack(path: $path) {
@@ -210,7 +208,6 @@ public struct SettingsView: View {
         } message: {
             Text("This removes every Plex and Jellyfin sign-in on this Apple TV. You'll need to sign in again.")
         }
-        .enableInjection()
     }
 
     // MARK: - Profile container (header + all settings this profile owns)

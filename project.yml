@@ -23,23 +23,11 @@ settings:
     # CFBundleShortVersionString must match the parent app's). Bump by hand for a
     # real release.
     MARKETING_VERSION: "0.1"
-  configs:
-    # Project-wide Debug: InjectionNext needs per-file frontend command lines in
-    # the build log to recompile a single saved file. Set here (not just on the
-    # app target) so SPM package targets (RootView etc.) also emit them and can
-    # hot-reload. Debug-only, so Release/TestFlight is unaffected.
-    Debug:
-      EMIT_FRONTEND_COMMAND_LINES: YES
-      SWIFT_COMPILATION_MODE: incremental
-      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
 
 # Local Swift package providing all modular feature/code libraries.
 packages:
   Plozz:
     path: .
-  Inject:
-    url: https://github.com/krzysztofzablocki/Inject
-    from: "1.5.2"
 
 targets:
   Plozz:
@@ -64,6 +52,16 @@ targets:
           - audio
         UIAppFonts:
           - "Bungee-Regular.ttf"
+          # Atkinson Hyperlegible (SIL OFL) — the default subtitle font. Designed
+          # by the Braille Institute for maximum legibility and character
+          # disambiguation (I/l/1, 0/O), which is exactly what 10-foot captions
+          # need. Latin-only; the renderer cascades to the tvOS system CJK fonts
+          # (Hiragino / PingFang / Apple SD Gothic Neo) for mixed-language lines.
+          # License: App/Resources/Fonts/OFL.txt.
+          - "AtkinsonHyperlegible-Regular.ttf"
+          - "AtkinsonHyperlegible-Italic.ttf"
+          - "AtkinsonHyperlegible-Bold.ttf"
+          - "AtkinsonHyperlegible-BoldItalic.ttf"
         # OMDb API key for external ratings enrichment (IMDb/RT/Metacritic).
         # Substituted from the OMDB_API_KEY build setting (see Config/Secrets.xcconfig
         # → optional, gitignored Config/Secrets.local.xcconfig). Empty by default,
@@ -140,41 +138,14 @@ targets:
         # display-mode switch), so the linker's default `-dead_strip_dylibs`
         # otherwise drops it and the selector is unrecognized at runtime (crash).
         OTHER_LDFLAGS: "-Wl,-needed_framework,AVKit"
-      configs:
-        # `-interposable` lets InjectionNext swap function bodies at runtime for
-        # live UI hot-reload. Debug only — never ship it in Release.
-        Debug:
-          OTHER_LDFLAGS: "-Wl,-needed_framework,AVKit -Xlinker -interposable"
-          # InjectionNext (Cursor/VS Code, no-Xcode mode) parses build logs to
-          # learn how to recompile a saved file; Xcode 16.3+ needs this to keep
-          # emitting the frontend command lines it reads.
-          EMIT_FRONTEND_COMMAND_LINES: YES
-          # InjectionNext recompiles ONE saved file; whole-module mode breaks that.
-          SWIFT_COMPILATION_MODE: incremental
-          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
-          # copy_bundle.sh (below) writes + codesigns the on-device injection
-          # bundle into the .app, which the script sandbox blocks.
-          ENABLE_USER_SCRIPT_SANDBOXING: NO
     configFiles:
       Debug: Config/Secrets.xcconfig
       Release: Config/Secrets.xcconfig
     dependencies:
       - package: Plozz
         product: AppShell
-      - package: Inject
       - target: PlozzTopShelf
         embed: true
-    postBuildScripts:
-      # On-device InjectionNext hot-reload: copy the prebuilt tvOS device
-      # injection bundle into the .app and codesign it so the running app can
-      # connect back to the InjectionNext server. The script self-gates to Debug
-      # (Release/TestFlight builds skip it), so this never ships.
-      - script: |
-          RESOURCES="/Applications/InjectionNext.app/Contents/Resources"
-          if [ -f "$RESOURCES/copy_bundle.sh" ]; then
-            "$RESOURCES/copy_bundle.sh"
-          fi
-        name: "InjectionNext: copy device bundle (Debug only)"
 
   PlozzTopShelf:
     type: com.apple.product-type.tv-app-extension

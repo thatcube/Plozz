@@ -123,12 +123,12 @@ fi
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")"
 
 # --- Work around the Xcode swift-testing overlay duplicate-id install bug -----
-# Xcode embeds the swift-testing overlay frameworks in Debug, and two of them
+# Xcode can embed the swift-testing overlay frameworks in Debug, and two of them
 # ship with the SAME CFBundleIdentifier (`_Testing_CoreTransferable` wrongly
 # claims CoreGraphics'), so installd rejects the bundle with DuplicateIdentifier.
-# The project deliberately KEEPS these frameworks — hot-reload's Testing.framework
-# load chain depends on them (see docs/hot-reload.md) — so we patch the one bad
-# id and re-seal the app rather than delete anything. No-op if absent.
+# If they're present we patch the one bad id and re-seal the app rather than
+# delete anything (deleting Testing.framework breaks dependent load chains).
+# No-op if absent — the normal case now that nothing force-embeds them.
 CT="$APP_PATH/Frameworks/_Testing_CoreTransferable.framework"
 if [[ -d "$CT" ]]; then
   CT_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CT/Info.plist" 2>/dev/null || true)"
@@ -142,7 +142,7 @@ if [[ -d "$CT" ]]; then
     /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.apple.dt.swift-testing.overlay.CoreTransferable' "$CT/Info.plist"
     codesign --force --sign "$SIGN_ID" --timestamp=none "$CT" >/dev/null
     # Re-seal the app (its seal covers Frameworks/). Use the build's .xcent —
-    # NEVER --deep, which strips entitlements (see docs/hot-reload.md).
+    # NEVER --deep, which strips entitlements.
     XCENT="$(dirname "$(dirname "$APP_PATH")")/../Intermediates.noindex/${SCHEME}.build/${CONFIG}-appletvos/${SCHEME}.build/${SCHEME}.app.xcent"
     if [[ ! -f "$XCENT" ]]; then
       echo "✗ Entitlements (.xcent) not found at $XCENT — cannot safely re-seal." >&2

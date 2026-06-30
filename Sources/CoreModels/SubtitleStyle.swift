@@ -1,6 +1,37 @@
 import Foundation
 
-/// The complete, renderer-facing subtitle appearance model.
+/// The user-selectable subtitle typeface.
+///
+/// We default to **Atkinson Hyperlegible** — an SIL OFL font from the Braille
+/// Institute engineered for legibility and character disambiguation (I/l/1, 0/O),
+/// which is exactly what captions viewed from a couch need. It is bundled with the
+/// app (Latin glyphs only); the renderer cascades to the tvOS system CJK fonts for
+/// Japanese/Korean/Chinese so mixed-language and dual-subtitle lines still render.
+/// `system` falls back to SF (no bundle). The enum is deliberately small and
+/// additive — more bundled faces (e.g. a neutral grotesque) can be appended.
+public enum SubtitleFontFamily: String, Codable, Sendable, Equatable, CaseIterable {
+    case atkinson
+    case system
+
+    public var displayName: String {
+        switch self {
+        case .atkinson: return "Atkinson Hyperlegible"
+        case .system: return "System (SF)"
+        }
+    }
+
+    /// The PostScript family stem of the bundled face, or `nil` to use the system
+    /// font. The renderer appends the weight/slant suffix (`-Regular`/`-Bold`/
+    /// `-Italic`/`-BoldItalic`).
+    public var postScriptStem: String? {
+        switch self {
+        case .atkinson: return "AtkinsonHyperlegible"
+        case .system: return nil
+        }
+    }
+}
+
+
 ///
 /// This is the **forward** style model for Plozz's owned subtitle renderer. It
 /// is intentionally richer than the currently-persisted ``CaptionSettings`` and
@@ -29,6 +60,8 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
 
     // MARK: Size & placement
 
+    /// The subtitle typeface. Defaults to bundled Atkinson Hyperlegible.
+    public var fontFamily: SubtitleFontFamily
     /// Multiplier on the base caption size (1.0 == default).
     public var fontScale: Double
     /// Vertical seat of the subtitle block, `0` = bottom safe edge … `1` = top.
@@ -168,6 +201,7 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
     public var followsSystemStyle: Bool
 
     public init(
+        fontFamily: SubtitleFontFamily = .atkinson,
         fontScale: Double = 1.0,
         verticalPosition: Double = 0.06,
         horizontalOffset: Double = 0,
@@ -180,6 +214,7 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
         secondary: Secondary? = nil,
         followsSystemStyle: Bool = false
     ) {
+        self.fontFamily = fontFamily
         self.fontScale = fontScale
         self.verticalPosition = verticalPosition
         self.horizontalOffset = horizontalOffset
@@ -193,7 +228,17 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
         self.followsSystemStyle = followsSystemStyle
     }
 
-    public static let `default` = SubtitleStyle()
+    /// The curated default look: white Atkinson with a **true outer outline** and
+    /// a soft drop shadow, no background box — the modern, clean, highly-legible
+    /// baseline. Users can switch on the box (one toggle) for the BBC/high-contrast
+    /// style. The outline width is in points at the base size and the renderer
+    /// scales it with the font, landing at roughly 5–6% of the glyph height as the
+    /// subtitle-rendering research recommends.
+    public static let `default` = SubtitleStyle(
+        background: Background(isEnabled: false),
+        edge: Edge(style: .dropShadow, color: Color(red: 0, green: 0, blue: 0, alpha: 0.75), thickness: 2.5),
+        border: Border(isEnabled: true, color: .black, width: 2.5)
+    )
 }
 
 // MARK: - Bridge from the persisted CaptionSettings (non-destructive)
@@ -252,7 +297,7 @@ public extension SubtitleStyle {
 
 extension SubtitleStyle {
     private enum CodingKeys: String, CodingKey {
-        case fontScale, verticalPosition, horizontalOffset
+        case fontFamily, fontScale, verticalPosition, horizontalOffset
         case textColor, opacity, hdrLuminanceScale
         case background, edge, border, secondary, followsSystemStyle
     }
@@ -263,6 +308,7 @@ extension SubtitleStyle {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = SubtitleStyle.default
         self.init(
+            fontFamily: try c.decodeIfPresent(SubtitleFontFamily.self, forKey: .fontFamily) ?? d.fontFamily,
             fontScale: try c.decodeIfPresent(Double.self, forKey: .fontScale) ?? d.fontScale,
             verticalPosition: try c.decodeIfPresent(Double.self, forKey: .verticalPosition) ?? d.verticalPosition,
             horizontalOffset: try c.decodeIfPresent(Double.self, forKey: .horizontalOffset) ?? d.horizontalOffset,

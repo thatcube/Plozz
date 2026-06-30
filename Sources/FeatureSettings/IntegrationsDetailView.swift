@@ -518,6 +518,11 @@ struct AttributionsDetailView: View {
                     licenses: [.cc0()]
                 )
                 attribution(
+                    "Fonts",
+                    "The default subtitle typeface is Atkinson Hyperlegible, © 2020 Braille Institute of America, Inc., chosen for its legibility from a distance. UI accent type uses Bungee by David Jonathan Ross. Both are used under the SIL Open Font License 1.1.",
+                    licenses: [.ofl()]
+                )
+                attribution(
                     "YouTubeKit",
                     "Trailer playback uses YouTubeKit by Alexander Eichhorn.",
                     licenses: [.mit()]
@@ -620,6 +625,9 @@ private struct LicenseBadge: Identifiable {
     }
     static func isc() -> LicenseBadge {
         LicenseBadge(id: "ISC", label: "ISC", tint: Color(red: 0.3, green: 0.6, blue: 0.5))
+    }
+    static func ofl() -> LicenseBadge {
+        LicenseBadge(id: "OFL-1.1", label: "OFL-1.1", tint: Color(red: 0.45, green: 0.45, blue: 0.8))
     }
     static func api() -> LicenseBadge {
         LicenseBadge(id: "API", label: "API", tint: Color(red: 0.55, green: 0.4, blue: 0.7))

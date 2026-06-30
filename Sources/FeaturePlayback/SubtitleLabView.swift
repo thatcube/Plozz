@@ -81,6 +81,9 @@ public struct SubtitleLabView: View {
                     presetIndex = (presetIndex + 1) % SubtitleStyle.presets.count
                     style = SubtitleStyle.presets[presetIndex].style
                 }
+                cycleRow("Font", value: style.fontFamily.displayName) {
+                    style.fontFamily = nextFont(after: style.fontFamily)
+                }
 
                 group("Size & position") {
                     adjust("Font scale", style.fontScale, "%.2f×", 0.5, 2.5, 0.05, set: { style.fontScale = $0 })
@@ -207,6 +210,12 @@ public struct SubtitleLabView: View {
     private func nextEdge(after e: SubtitleStyle.EdgeStyle) -> SubtitleStyle.EdgeStyle {
         let all = SubtitleStyle.EdgeStyle.allCases
         guard let i = all.firstIndex(of: e) else { return .none }
+        return all[(i + 1) % all.count]
+    }
+
+    private func nextFont(after f: SubtitleFontFamily) -> SubtitleFontFamily {
+        let all = SubtitleFontFamily.allCases
+        guard let i = all.firstIndex(of: f) else { return .atkinson }
         return all[(i + 1) % all.count]
     }
 }

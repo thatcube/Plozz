@@ -56,7 +56,7 @@ public struct SubtitleOverlayView: View {
 
     /// Base point size of subtitle text at `fontScale == 1.0`, tuned for the
     /// 10-foot tvOS experience.
-    private static let baseFontSize: CGFloat = 42
+    static let baseFontSize: CGFloat = 42
 
     private var lumaScale: Double { isHDR ? style.hdrLuminanceScale : 1.0 }
 
@@ -249,12 +249,18 @@ private extension SubtitleAlignment {
     }
 }
 
-// MARK: - A single styled cue line (background, edge, border, glyphs)
+// MARK: - A single styled cue line (background, outline, shadow, glyphs)
 
-/// Draws one text cue with background box, edge treatment and optional explicit
-/// border. Outlines use a **true continuous stroke** (UIKit `NSAttributedString`
-/// stroke attributes) so they stay clean at any thickness, and read well at
-/// couch distance.
+/// Draws one text cue: an optional background box (SwiftUI) wrapping the glyphs,
+/// which are rendered by ``CoreTextSubtitleLine`` with a **true outer outline**
+/// and shadow. This maps the high-level ``SubtitleStyle`` (border + edge) onto the
+/// renderer's outline/shadow inputs:
+///
+/// * **Outline** — enabled by an explicit border *or* a `.uniform` edge; colour
+///   from whichever is set, width = the larger of the two, scaled with the font
+///   so it stays a constant fraction of the glyph height.
+/// * **Shadow** — the directional edge styles (`.dropShadow` / `.raised` /
+///   `.depressed`) become a soft or hard offset shadow drawn behind the outline.
 private struct StyledCueText: View {
     let text: SubtitleText
     let fontSize: CGFloat
@@ -274,136 +280,64 @@ private struct StyledCueText: View {
             }
     }
 
-    /// The glyphs with a **true continuous outline** (explicit border / `.uniform`
-    /// edge) plus the directional edge (drop shadow / raised / depressed). The
-    /// outline is drawn by UIKit via `NSAttributedString` stroke attributes —
-    /// unlike the old eight-way offset-stamp, this stays an unbroken stroke at
-    /// any thickness instead of separating into dots.
     @ViewBuilder
     private var content: some View {
-        applyDirectionalEdge(
-            OutlinedText(
-                text: text.string,
-                fontSize: fontSize,
-                isBold: text.isBold,
-                isItalic: text.isItalic,
-                fill: fillColor,
-                stroke: outlineColor,
-                strokeWidth: uniformOutlineWidth,
-                alignment: textAlignment,
-                maxLines: 4
-            )
+        CoreTextSubtitleLine(
+            text: text.string,
+            family: style.fontFamily,
+            fontSize: fontSize,
+            isBold: text.isBold,
+            isItalic: text.isItalic,
+            fill: UIColor(fillColor),
+            outline: outlineUIColor,
+            outlineWidth: visibleOutlineWidth,
+            shadow: shadowSpec,
+            alignment: nsAlignment
         )
     }
 
-    /// Width of a uniform outline, taken from an explicit border or a `.uniform`
-    /// edge style (whichever is larger).
-    private var uniformOutlineWidth: CGFloat {
-        var w: CGFloat = 0
-        if style.border.isEnabled { w = max(w, style.border.width) }
-        if style.edge.style == .uniform { w = max(w, style.edge.thickness) }
-        return w
-    }
-
-    private var outlineColor: Color? {
-        if style.border.isEnabled { return style.border.color.swiftUIColor }
-        if style.edge.style == .uniform { return style.edge.color.swiftUIColor }
+    /// Colour of the uniform outline (explicit border wins over a `.uniform` edge).
+    private var outlineUIColor: UIColor? {
+        if style.border.isEnabled { return uiColor(style.border.color) }
+        if style.edge.style == .uniform { return uiColor(style.edge.color) }
         return nil
     }
 
-    /// Drop-shadow / raised / depressed edges are directional and ride on top of
-    /// any uniform outline.
-    @ViewBuilder
-    private func applyDirectionalEdge(_ v: some View) -> some View {
-        let c = style.edge.color.swiftUIColor
-        let t = style.edge.thickness
+    /// Visible outline width: the larger of the explicit border and a `.uniform`
+    /// edge, scaled with the font so it tracks the glyph size (≈ a constant % of
+    /// the text height) instead of being fixed in points at every scale.
+    private var visibleOutlineWidth: CGFloat {
+        var w: CGFloat = 0
+        if style.border.isEnabled { w = max(w, style.border.width) }
+        if style.edge.style == .uniform { w = max(w, style.edge.thickness) }
+        guard w > 0 else { return 0 }
+        return w * (fontSize / SubtitleOverlayView.baseFontSize)
+    }
+
+    /// Directional edge → a shadow spec (the `.uniform` edge is an outline, not a
+    /// shadow, so it produces none here).
+    private var shadowSpec: SubtitleShadowSpec? {
+        let c = uiColor(style.edge.color)
+        let t = CGFloat(style.edge.thickness) * (fontSize / SubtitleOverlayView.baseFontSize)
+        guard t > 0 else { return nil }
         switch style.edge.style {
-        case .none, .uniform:
-            v
-        case .dropShadow:
-            v.shadow(color: c, radius: t, x: t * 0.6, y: t * 0.6)
-        case .raised:
-            v.shadow(color: c, radius: 0, x: t, y: t)
-        case .depressed:
-            v.shadow(color: c, radius: 0, x: -t, y: -t)
+        case .dropShadow: return SubtitleShadowSpec(offset: CGSize(width: t * 0.6, height: t * 0.6), blur: t, color: c)
+        case .raised:     return SubtitleShadowSpec(offset: CGSize(width: t, height: t), blur: 0, color: c)
+        case .depressed:  return SubtitleShadowSpec(offset: CGSize(width: -t, height: -t), blur: 0, color: c)
+        case .none, .uniform: return nil
         }
-    }
-}
-
-// MARK: - UIKit-backed outlined text (true continuous stroke)
-
-/// Renders a subtitle line with a real, continuous outline via
-/// `NSAttributedString` stroke attributes — the only way to get a clean stroke at
-/// any width on tvOS, since SwiftUI `Text` cannot stroke. Self-sizes (wrapping at
-/// the proposed width) so the background box and surrounding layout still fit the
-/// glyphs exactly.
-private struct OutlinedText: UIViewRepresentable {
-    let text: String
-    let fontSize: CGFloat
-    let isBold: Bool
-    let isItalic: Bool
-    let fill: Color
-    let stroke: Color?
-    let strokeWidth: CGFloat
-    let alignment: TextAlignment
-    let maxLines: Int
-
-    func makeUIView(context: Context) -> UILabel {
-        let l = UILabel()
-        l.backgroundColor = .clear
-        l.isOpaque = false
-        l.lineBreakMode = .byWordWrapping
-        l.setContentHuggingPriority(.required, for: .horizontal)
-        l.setContentHuggingPriority(.required, for: .vertical)
-        return l
-    }
-
-    func updateUIView(_ l: UILabel, context: Context) {
-        l.numberOfLines = maxLines
-        l.textAlignment = nsAlignment
-        l.attributedText = attributed
-        l.invalidateIntrinsicContentSize()
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
-        let maxW = proposal.width.map { $0.isFinite ? $0 : 10_000 } ?? 10_000
-        uiView.preferredMaxLayoutWidth = maxW
-        let fit = uiView.sizeThatFits(CGSize(width: maxW, height: .greatestFiniteMagnitude))
-        return CGSize(width: min(fit.width, maxW), height: fit.height)
-    }
-
-    private var uiFont: UIFont {
-        var f = UIFont.systemFont(ofSize: fontSize, weight: isBold ? .heavy : .semibold)
-        if isItalic, let d = f.fontDescriptor.withSymbolicTraits(.traitItalic) {
-            f = UIFont(descriptor: d, size: fontSize)
-        }
-        return f
     }
 
     private var nsAlignment: NSTextAlignment {
-        switch alignment {
+        switch textAlignment {
         case .leading: return .left
         case .trailing: return .right
         default: return .center
         }
     }
 
-    private var attributed: NSAttributedString {
-        let para = NSMutableParagraphStyle()
-        para.alignment = nsAlignment
-        para.lineBreakMode = .byWordWrapping
-        var attrs: [NSAttributedString.Key: Any] = [
-            .font: uiFont,
-            .foregroundColor: UIColor(fill),
-            .paragraphStyle: para
-        ]
-        if let stroke, strokeWidth > 0 {
-            attrs[.strokeColor] = UIColor(stroke)
-            // `.strokeWidth` is a percentage of font size; a *negative* value
-            // means "fill *and* stroke" (positive would hollow the glyphs).
-            attrs[.strokeWidth] = -Double(strokeWidth / fontSize * 100)
-        }
-        return NSAttributedString(string: text, attributes: attrs)
+    private func uiColor(_ c: SubtitleStyle.Color) -> UIColor {
+        UIColor(red: c.red, green: c.green, blue: c.blue, alpha: c.alpha)
     }
 }
 #endif

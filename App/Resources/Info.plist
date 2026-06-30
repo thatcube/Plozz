@@ -65,6 +65,10 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>Bungee-Regular.ttf</string>
+		<string>AtkinsonHyperlegible-Regular.ttf</string>
+		<string>AtkinsonHyperlegible-Italic.ttf</string>
+		<string>AtkinsonHyperlegible-Bold.ttf</string>
+		<string>AtkinsonHyperlegible-BoldItalic.ttf</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

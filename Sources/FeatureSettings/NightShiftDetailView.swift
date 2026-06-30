@@ -12,78 +12,163 @@ struct NightShiftDetailView: View {
     @Bindable var model: NightShiftSettingsModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Night Shift").font(.largeTitle.bold())
-
-                SettingsPanel(footer: model.scheduleSummary()) {
-                    Toggle("Enable Night Shift", isOn: $model.settings.isEnabled)
-                        .font(.callout.weight(.medium))
-                }
-
-                if model.settings.isEnabled {
-                    schedulePanel
-                    appearancePanel
-                }
+        SettingsSplitLayout(title: "Night Shift", sections: sections)
+            .onChange(of: model.settings.isEnabled) { _, enabled in
+                if !enabled { model.isPreviewing = false }
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+            .onDisappear { model.isPreviewing = false }
+    }
+
+    private var sections: [SettingsSplitSection] {
+        @Bindable var model = model
+
+        var sections: [SettingsSplitSection] = [
+            SettingsSplitSection(id: "night-shift", header: nil, rows: [
+                SettingsSplitRow(
+                    id: "enable",
+                    title: "Enable Night Shift",
+                    description: model.scheduleSummary(),
+                    valueSummary: model.settings.isEnabled ? "On" : "Off"
+                ) {
+                    Toggle("Enable Night Shift", isOn: $model.settings.isEnabled)
+                }
+            ])
+        ]
+
+        guard model.settings.isEnabled else { return sections }
+
+        var scheduleRows: [SettingsSplitRow] = [
+            SettingsSplitRow(
+                id: "schedule-mode",
+                title: "Schedule",
+                description: "When the warm tint switches on — at sunset for your location, on a manual clock, or always on.",
+                valueSummary: model.settings.scheduleMode.displayName
+            ) {
+                SettingsOptionPicker(
+                    options: NightShiftScheduleMode.allCases,
+                    selection: $model.settings.scheduleMode,
+                    title: { $0.displayName }
+                )
+            }
+        ]
+
+        switch model.settings.scheduleMode {
+        case .solar:
+            scheduleRows.append(
+                SettingsSplitRow(
+                    id: "location",
+                    title: "Location",
+                    description: "Used to calculate local sunset and sunrise times.",
+                    valueSummary: model.region.name,
+                    indented: true
+                ) { locationMenu }
+            )
+        case .manual:
+            scheduleRows.append(
+                SettingsSplitRow(
+                    id: "turns-on",
+                    title: "Turns on",
+                    description: "The time each evening the warm tint begins to fade in.",
+                    valueSummary: model.clockLabel(minutes: model.settings.manualOnMinutes),
+                    indented: true
+                ) {
+                    timeStepper(minutes: model.settings.manualOnMinutes) {
+                        model.settings.manualOnMinutes = $0
+                    }
+                }
+            )
+            scheduleRows.append(
+                SettingsSplitRow(
+                    id: "turns-off",
+                    title: "Turns off",
+                    description: "The time each morning the warm tint finishes fading out.",
+                    valueSummary: model.clockLabel(minutes: model.settings.manualOffMinutes),
+                    indented: true
+                ) {
+                    timeStepper(minutes: model.settings.manualOffMinutes) {
+                        model.settings.manualOffMinutes = $0
+                    }
+                }
+            )
+        case .alwaysOn:
+            break
         }
-        .scrollClipDisabled()
-        .onChange(of: model.settings.isEnabled) { _, enabled in
-            if !enabled { model.isPreviewing = false }
+
+        // Fade only governs the schedule's on/off transition, so it is
+        // irrelevant when the tint is always on.
+        if model.settings.scheduleMode != .alwaysOn {
+            scheduleRows.append(
+                SettingsSplitRow(
+                    id: "fade",
+                    title: "Fade",
+                    description: "How gradually the tint ramps on and off around the scheduled times.",
+                    valueSummary: NightShiftSettingsModel.fadeLabel(minutes: clampedFade)
+                ) {
+                    SettingsOptionPicker(
+                        options: NightShiftSettingsModel.fadeOptions,
+                        selection: Binding(
+                            get: { clampedFade },
+                            set: { model.settings.fadeMinutes = $0 }
+                        ),
+                        title: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
+                    )
+                }
+            )
         }
-        .onDisappear { model.isPreviewing = false }
+
+        sections.append(SettingsSplitSection(id: "schedule", header: "Schedule", rows: scheduleRows))
+
+        sections.append(
+            SettingsSplitSection(id: "look", header: "Look", rows: [
+                SettingsSplitRow(
+                    id: "darkness",
+                    title: "Darkness",
+                    description: "Dims the whole picture like sunglasses. Focus this row's options to preview at full night strength.",
+                    valueSummary: model.settings.dimness.displayName
+                ) {
+                    SettingsOptionPicker(
+                        options: NightShiftDimness.allCases,
+                        selection: $model.settings.dimness,
+                        onFocusChange: { model.isPreviewing = $0 },
+                        title: { $0.displayName }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "warmth",
+                    title: "Warmth",
+                    description: "Tints the picture toward amber and red. Focus this row's options to preview at full night strength.",
+                    valueSummary: model.settings.warmth.displayName
+                ) {
+                    SettingsOptionPicker(
+                        options: NightShiftWarmth.allCases,
+                        selection: $model.settings.warmth,
+                        onFocusChange: { model.isPreviewing = $0 },
+                        title: { $0.displayName }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "preview",
+                    title: "Preview",
+                    description: "Play a whole simulated day to see how the tint moves from daytime through sunset to night."
+                ) {
+                    HStack(spacing: 28) {
+                        DayNightDial(
+                            intensity: model.currentIntensity,
+                            progress: model.previewProgress
+                        )
+                        .frame(width: 160, height: 84)
+
+                        previewButton
+                        Spacer(minLength: 0)
+                    }
+                }
+            ])
+        )
+
+        return sections
     }
 
     // MARK: - Schedule
-
-    private var schedulePanel: some View {
-        SettingsPanel {
-            VStack(alignment: .leading, spacing: 20) {
-                LabeledSettingRow("Schedule") {
-                    SettingsOptionPicker(
-                        options: NightShiftScheduleMode.allCases,
-                        selection: $model.settings.scheduleMode,
-                        title: { $0.displayName }
-                    )
-                }
-
-                switch model.settings.scheduleMode {
-                case .solar:
-                    LabeledSettingRow("Location") { locationMenu }
-                case .manual:
-                    LabeledSettingRow("Turns on") {
-                        timeStepper(minutes: model.settings.manualOnMinutes) {
-                            model.settings.manualOnMinutes = $0
-                        }
-                    }
-                    LabeledSettingRow("Turns off") {
-                        timeStepper(minutes: model.settings.manualOffMinutes) {
-                            model.settings.manualOffMinutes = $0
-                        }
-                    }
-                case .alwaysOn:
-                    EmptyView()
-                }
-
-                // Fade only governs the schedule's on/off transition, so it is
-                // irrelevant when the tint is always on.
-                if model.settings.scheduleMode != .alwaysOn {
-                    LabeledSettingRow("Fade") {
-                        SettingsOptionPicker(
-                            options: NightShiftSettingsModel.fadeOptions,
-                            selection: Binding(
-                                get: { clampedFade },
-                                set: { model.settings.fadeMinutes = $0 }
-                            ),
-                            title: { NightShiftSettingsModel.fadeLabel(minutes: $0) }
-                        )
-                    }
-                }
-            }
-        }
-    }
 
     private var locationMenu: some View {
         Menu {
@@ -106,45 +191,6 @@ struct NightShiftDetailView: View {
     }
 
     // MARK: - Appearance
-
-    private var appearancePanel: some View {
-        SettingsPanel(
-            title: "Look",
-            footer: "Darkness dims the whole picture like sunglasses; Warmth tints it toward amber and red. Focus Darkness or Warmth to preview at full night strength, or play a whole day below."
-        ) {
-            VStack(alignment: .leading, spacing: 20) {
-                LabeledSettingRow("Darkness") {
-                    SettingsOptionPicker(
-                        options: NightShiftDimness.allCases,
-                        selection: $model.settings.dimness,
-                        onFocusChange: { model.isPreviewing = $0 },
-                        title: { $0.displayName }
-                    )
-                }
-                LabeledSettingRow("Warmth") {
-                    SettingsOptionPicker(
-                        options: NightShiftWarmth.allCases,
-                        selection: $model.settings.warmth,
-                        onFocusChange: { model.isPreviewing = $0 },
-                        title: { $0.displayName }
-                    )
-                }
-
-                LabeledSettingRow("Preview") {
-                    HStack(spacing: 28) {
-                        DayNightDial(
-                            intensity: model.currentIntensity,
-                            progress: model.previewProgress
-                        )
-                        .frame(width: 160, height: 84)
-
-                        previewButton
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
-        }
-    }
 
     private var previewButton: some View {
         Button {

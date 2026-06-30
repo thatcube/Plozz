@@ -54,6 +54,7 @@ public struct PlayerView: View {
                 CustomPlayerContainer(
                     engine: viewModel.videoEngine,
                     model: viewModel.controls,
+                    subtitleModel: viewModel.liveSubtitles,
                     actions: PlayerActions(
                         seek: { target in viewModel.requestSeek(to: target) },
                         togglePlayPause: { viewModel.togglePlayPause() },

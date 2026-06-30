@@ -68,6 +68,16 @@ public final class PlayerViewModel {
     /// scrub state; the SwiftUI overlay reads.
     public let controls = PlayerControlsModel()
 
+    /// Drives Plozz's **owned** subtitle overlay during playback. The view model
+    /// parses a selected text sidecar into cues, loads them here, and suppresses
+    /// the engine's own subtitle draw — so our renderer (full styling, HDR
+    /// luminance, live offset) owns every text-subtitle pixel. Image-based
+    /// subtitles still route to the hybrid engine.
+    public let liveSubtitles = LiveSubtitleModel()
+    /// Fetches + parses the selected sidecar into cues off the main actor; one at
+    /// a time, cancelled when the selection changes or playback stops.
+    @ObservationIgnored private var subtitleCueLoadTask: Task<Void, Never>?
+
     private let provider: any MediaProvider
     private let itemID: String
     /// The chosen `MediaVersion.id` (Jellyfin `MediaSourceId` / Plex `Media` id)
@@ -294,6 +304,9 @@ public final class PlayerViewModel {
         self.controls.selectedLocalRemuxStrategyID = preferencesStore.loadLocalRemuxStrategyID()
         self.controls.skipBackwardInterval = playbackSettings.skipBackwardInterval
         self.controls.skipForwardInterval = playbackSettings.skipForwardInterval
+        // Seed the overlay with the profile's persisted caption appearance so a
+        // selected subtitle renders in the user's style from the first cue.
+        self.liveSubtitles.style = SubtitleStyle(from: captionSettings)
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
@@ -591,6 +604,9 @@ public final class PlayerViewModel {
         // engine's teardown restores SDR — a real switch the view should veil),
         // and hybrid→native rises to HDR (the new switch the view should veil).
         displayMode = engineKind == .native ? HDRDisplayMode(request.sourceMetadata) : .sdr
+        // The overlay clamps its white point on HDR frames; mirror the range the
+        // panel is actually being driven to (native HDR content → HDR display).
+        liveSubtitles.isHDR = displayMode != .sdr
         // Engine-independent: tracks the *content's* range so the exit veil can
         // cover a panel HDR/DV → SDR switch even when mpv (which stays `.sdr`
         // above) drove the panel into HDR on this TV.
@@ -640,6 +656,12 @@ public final class PlayerViewModel {
         engine.setAudioDelay(0)
         engine.setSubtitleDelay(0)
         engine.setDialogEnhanceEnabled(false)
+        // Drop any overlay cues from a previous stream/engine and reset the sync
+        // offset; a fresh selection re-seeds them.
+        subtitleCueLoadTask?.cancel()
+        subtitleCueLoadTask = nil
+        liveSubtitles.offset = 0
+        liveSubtitles.clear()
 
         // Load skip markers once playback is live (opt-in, best-effort).
         loadSkipSegmentsIfEnabled()
@@ -1141,6 +1163,10 @@ public final class PlayerViewModel {
         let clamped = max(-10, min(10, seconds))
         controls.subtitleDelaySeconds = clamped
         engine.setSubtitleDelay(clamped)
+        // The overlay applies the same offset to its cue timeline. AVPlayer can't
+        // shift an injected sidecar, so when our overlay owns the track this is
+        // what actually makes "Subtitle delay" work for text subtitles.
+        liveSubtitles.offset = clamped
     }
 
     public func setDialogEnhanceEnabled(_ enabled: Bool) {
@@ -1187,6 +1213,8 @@ public final class PlayerViewModel {
         cancelWatchdog()
         subtitleDownloadTask?.cancel()
         subtitleDownloadTask = nil
+        subtitleCueLoadTask?.cancel()
+        subtitleCueLoadTask = nil
         // Silence the engine *before* the final server report. The report is a
         // network round-trip that can take a second or two; stopping first means
         // leaving the player never keeps playing audio while it completes. Grab
@@ -1421,6 +1449,7 @@ public final class PlayerViewModel {
     public func selectSubtitleOption(id: Int) {
         if id == PlayerTrackOption.offID {
             engine.selectSubtitleTrack(nil)
+            clearOverlaySubtitle()
             selectedSubtitleTrackID = nil
             loadTrackOptions()
             return
@@ -1435,14 +1464,75 @@ public final class PlayerViewModel {
         // SRT (no sidecar URL, but renderable) stays on the native engine.
         if track.isImageBasedSubtitle, currentEngineKind == .native,
            let request, !request.isTranscoding, engineFactory.hybridAvailable {
+            clearOverlaySubtitle()
             selectedSubtitleTrackID = id
             Task { await swapEngineForImageSubtitle(track) }
             return
         }
 
+        // Text subtitle on the native engine: render it with Plozz's own overlay.
+        // Suppress AVPlayer's legible draw and load the parsed sidecar cues into
+        // the overlay, so styling, HDR luminance and live offset all apply.
+        if !track.isImageBasedSubtitle, currentEngineKind == .native {
+            engine.selectSubtitleTrack(nil)
+            selectedSubtitleTrackID = id
+            loadOverlaySubtitle(track)
+            loadTrackOptions()
+            return
+        }
+
+        // Other engines (hybrid/Plozzigen) keep drawing the track themselves for
+        // now; routing their cues through the overlay too is a later step.
+        clearOverlaySubtitle()
         engine.selectSubtitleTrack(track)
         selectedSubtitleTrackID = id
         loadTrackOptions()
+    }
+
+    /// Cancels any in-flight cue fetch and clears the overlay (subtitles off, or
+    /// switching to an engine that draws its own).
+    private func clearOverlaySubtitle() {
+        subtitleCueLoadTask?.cancel()
+        subtitleCueLoadTask = nil
+        liveSubtitles.clear()
+    }
+
+    /// Fetches the selected text sidecar, parses it to cues off the main actor,
+    /// and loads it into the overlay — unless the selection changed mid-fetch.
+    /// Best-effort: a failure simply leaves no overlay cues rather than wedging.
+    private func loadOverlaySubtitle(_ track: MediaTrack) {
+        subtitleCueLoadTask?.cancel()
+        liveSubtitles.clear()
+        guard let url = track.deliveryURL else {
+            // Embedded text without a sidecar URL: container extraction arrives
+            // with the Plozzigen cue path; leave nothing showing until then.
+            PlozzLog.playback.debug("Selected subtitle has no sidecar URL; overlay not loaded")
+            return
+        }
+        let id = track.id
+        let language = track.language
+        let title = track.displayTitle
+        let forced = track.isForced
+        subtitleCueLoadTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                try Task.checkCancellation()
+                guard let text = String(data: data, encoding: .utf8) else { return }
+                let stream = SubtitleCueParser.parse(
+                    text, id: id, language: language, title: title,
+                    sourceTrackID: id, isForced: forced
+                )
+                try Task.checkCancellation()
+                await MainActor.run { [weak self] in
+                    guard let self, self.selectedSubtitleTrackID == id else { return }
+                    self.liveSubtitles.loadPrimary(stream)
+                }
+            } catch is CancellationError {
+                // Selection changed; the newer selection owns the overlay.
+            } catch {
+                PlozzLog.playback.debug("Overlay subtitle fetch failed (non-fatal)")
+            }
+        }
     }
 
     /// Swaps from the native engine to the hybrid engine (preserving position) so

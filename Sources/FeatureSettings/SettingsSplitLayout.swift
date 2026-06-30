@@ -203,12 +203,16 @@ struct SettingsSplitLayout: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(32)
         }
-        .scrollClipDisabled()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .fill(.ultraThinMaterial)
         )
+        // Keep scrolling content inside the card from every edge — without this
+        // the controls scroll out past the top/bottom and the wide horizontal
+        // rows run off the side. Clip to the card shape, then stroke on top so
+        // the border itself isn't clipped away.
+        .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)

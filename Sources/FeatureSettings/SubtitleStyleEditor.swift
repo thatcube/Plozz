@@ -22,30 +22,35 @@ struct SubtitleStyleEditor: View {
             Toggle("Use system subtitle style", isOn: $settings.followsSystemStyle)
 
             if !settings.followsSystemStyle {
-                VStack(alignment: .leading, spacing: 28) {
-                    labeledControl("Text size") {
-                        OptionCardRow(options: fontScales, selection: $settings.fontScale) {
-                            optionLabel("\(Int($0 * 100))%")
-                        }
+                VStack(alignment: .leading, spacing: 24) {
+                    LabeledSettingRow("Text size") {
+                        SettingsStepper(
+                            options: fontScales,
+                            selection: $settings.fontScale,
+                            title: { "\(Int($0 * 100))%" }
+                        )
+                    }
+
+                    LabeledSettingRow("Background") {
+                        SettingsStepper(
+                            options: backgroundOpacities,
+                            selection: $settings.backgroundColor.alpha,
+                            title: { $0 == 0 ? "Off" : "\(Int($0 * 100))%" }
+                        )
+                    }
+
+                    LabeledSettingRow("Edge style") {
+                        SettingsStepper(
+                            options: CaptionSettings.EdgeStyle.allCases,
+                            selection: $settings.edgeStyle,
+                            title: { $0.displayName }
+                        )
                     }
 
                     labeledControl("Text color") {
                         OptionCardRow(options: textColorOptions, selection: $settings.textColor) {
                             colorLabel($0)
                         }
-                    }
-
-                    labeledControl("Background") {
-                        OptionCardRow(options: backgroundOpacities, selection: $settings.backgroundColor.alpha) {
-                            optionLabel($0 == 0 ? "Off" : "\(Int($0 * 100))%")
-                        }
-                    }
-
-                    labeledControl("Edge style") {
-                        OptionCardRow(
-                            options: CaptionSettings.EdgeStyle.allCases,
-                            selection: $settings.edgeStyle
-                        ) { optionLabel($0.displayName) }
                     }
 
                     preview
@@ -79,12 +84,6 @@ struct SubtitleStyleEditor: View {
                 .foregroundStyle(.secondary)
             content()
         }
-    }
-
-    private func optionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.headline)
-            .multilineTextAlignment(.center)
     }
 
     private func colorLabel(_ color: CaptionSettings.RGBAColor) -> some View {

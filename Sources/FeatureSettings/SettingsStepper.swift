@@ -27,19 +27,33 @@ struct SettingsStepper<Value: Hashable>: View {
                 if canDecrement { selection = options[index - 1] }
             }
 
-            Text(title(selection))
-                .font(.title3.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(palette.primaryText)
-                .frame(minWidth: 128)
-                .contentTransition(.numericText())
-                .animation(.easeOut(duration: 0.16), value: index)
+            // Reserve the widest option's width (hidden sizers behind the live
+            // value) so stepping between variable-width labels — e.g. "None" vs
+            // "Drop Shadow" — never nudges the − / + buttons.
+            ZStack {
+                ForEach(options.indices, id: \.self) { i in
+                    valueLabel(title(options[i])).hidden()
+                }
+                valueLabel(title(selection))
+                    .contentTransition(.numericText())
+            }
+            .frame(minWidth: 96)
+            .animation(.easeOut(duration: 0.16), value: index)
 
             stepButton(symbol: "plus", dimmed: !canIncrement) {
                 if canIncrement { selection = options[index + 1] }
             }
         }
         .fixedSize()
+    }
+
+    private func valueLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.title3.weight(.semibold))
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundStyle(palette.primaryText)
     }
 
     private func stepButton(symbol: String, dimmed: Bool, action: @escaping () -> Void) -> some View {

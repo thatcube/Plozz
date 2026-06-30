@@ -294,132 +294,193 @@ struct PlaybackDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Playback").font(.largeTitle.bold())
+        SettingsSplitLayout(title: "Playback", sections: sections)
+    }
 
-                SettingsPanel(
-                    title: "Captions",
-                    footer: "Adjust caption font, size and colours. These settings are also available from the player while you watch."
-                ) {
-                    NavigationLink(value: SettingsRoute.captions) {
-                        HStack(spacing: 16) {
-                            Image(systemName: "captions.bubble")
-                                .font(.title3)
-                                .frame(width: 44)
-                            Text("Caption style").font(.callout.weight(.medium))
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(SettingsFocusButtonStyle())
-                }
+    // MARK: - Split sections
 
-                SettingsPanel(title: "Subtitles") {
-                    VStack(alignment: .leading, spacing: 18) {
-                        LabeledSettingRow("Default", labelWidth: 220) {
-                            SettingsOptionPicker(
-                                options: CaptionSettings.SubtitleMode.allCases,
-                                selection: $captions.settings.subtitleMode,
-                                title: { $0.displayName }
-                            )
-                        }
+    private var sections: [SettingsSplitSection] {
+        [
+            captionsSection,
+            subtitlesSection,
+            audioSection,
+            skipIntrosSection,
+            skipIntervalsSection
+        ]
+    }
 
-                        Divider()
-
-                        Toggle("Different default subtitles for movies, TV shows, and anime", isOn: perContentTypeBinding)
-
-                        if perContentTypeEnabled {
-                            ForEach(Self.policyCategories, id: \.self) { category in
-                                LabeledSettingRow(category.displayName, labelWidth: 220) {
-                                    SettingsOptionPicker(
-                                        options: CaptionSettings.SubtitleMode.allCases,
-                                        selection: modeBinding(for: category),
-                                        title: { $0.displayName }
-                                    )
-                                }
-                            }
-                        }
-
-                        Divider()
-
-                        Toggle("Remember subtitles per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
-                    }
-                }
-
-                SettingsPanel(title: "Audio Language") {
-                    VStack(alignment: .leading, spacing: 18) {
-                        LabeledSettingRow("Preferred language", labelWidth: 220) {
-                            audioLanguageMenu($playback.settings.audioLanguagePreference)
-                        }
-
-                        Divider()
-
-                        Toggle("Different default audio for movies, TV shows, and anime", isOn: audioPerContentTypeBinding)
-
-                        if audioPerContentTypeEnabled {
-                            ForEach(Self.policyCategories, id: \.self) { category in
-                                LabeledSettingRow(category.displayName, labelWidth: 220) {
-                                    audioLanguageMenu(audioPreferenceBinding(for: category))
-                                }
-                            }
-                        }
-
-                        Divider()
-
-                        Toggle("Remember audio per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
-                    }
-                }
-
-                SettingsPanel(
-                    title: "Skip Intros & Credits",
-                    footer: "When your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin."
-                ) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        LabeledSettingRow("Skip Intros", labelWidth: 220) {
-                            SettingsOptionPicker(
-                                options: SkipIntrosMode.allCases,
-                                selection: $playback.settings.skipIntros,
-                                title: { $0.title }
-                            )
-                        }
-
-                        Text(playback.settings.skipIntros.detail)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-            SettingsPanel(
-                title: "Skip Intervals (left/right on remote)"
+    private var captionsSection: SettingsSplitSection {
+        SettingsSplitSection(id: "captions", header: "Captions", rows: [
+            SettingsSplitRow(
+                id: "caption-style",
+                title: "Caption style",
+                description: "Adjust caption font, size and colours. These settings are also available from the player while you watch."
             ) {
-                VStack(alignment: .leading, spacing: 18) {
-                    LabeledSettingRow("Skip Backward", labelWidth: 220) {
-                        SettingsOptionPicker(
-                            options: SkipInterval.allCases,
-                            selection: $playback.settings.skipBackwardInterval,
-                            title: { $0.title }
-                        )
+                NavigationLink(value: SettingsRoute.captions) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "captions.bubble")
+                        Text("Open Caption Style")
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
                     }
-
-                    LabeledSettingRow("Skip Forward", labelWidth: 220) {
-                        SettingsOptionPicker(
-                            options: SkipInterval.allCases,
-                            selection: $playback.settings.skipForwardInterval,
-                            title: { $0.title }
-                        )
-                    }
+                    .font(.headline)
+                    .padding(.horizontal, 4)
                 }
+                .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
             }
+        ])
+    }
+
+    private var subtitlesSection: SettingsSplitSection {
+        var rows: [SettingsSplitRow] = [
+            SettingsSplitRow(
+                id: "subtitle-default",
+                title: "Default",
+                description: "How subtitles behave by default for everything you play.",
+                valueSummary: captions.settings.subtitleMode.displayName
+            ) {
+                SettingsOptionPicker(
+                    options: CaptionSettings.SubtitleMode.allCases,
+                    selection: $captions.settings.subtitleMode,
+                    title: { $0.displayName }
+                )
+            },
+            SettingsSplitRow(
+                id: "subtitle-per-type",
+                title: "Different default for movies, TV shows & anime",
+                description: "Use a separate subtitle default for each kind of content — for example forced-only on movies but full subtitles on anime.",
+                valueSummary: perContentTypeEnabled ? "On" : "Off"
+            ) {
+                Toggle("Use a different default per content type", isOn: perContentTypeBinding)
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+        ]
+
+        if perContentTypeEnabled {
+            for category in Self.policyCategories {
+                rows.append(
+                    SettingsSplitRow(
+                        id: "subtitle-\(category.rawValue)",
+                        title: category.displayName,
+                        valueSummary: (subtitlePolicy.overrides[category]?.mode ?? baseRule.mode).displayName,
+                        indented: true
+                    ) {
+                        SettingsOptionPicker(
+                            options: CaptionSettings.SubtitleMode.allCases,
+                            selection: modeBinding(for: category),
+                            title: { $0.displayName }
+                        )
+                    }
+                )
+            }
         }
-        .scrollClipDisabled()
+
+        rows.append(
+            SettingsSplitRow(
+                id: "subtitle-remember",
+                title: "Remember subtitles per series",
+                description: "When you change the subtitle track while watching a series, reuse that choice for the rest of the series.",
+                valueSummary: playback.settings.rememberSubtitleTrackPerSeries ? "On" : "Off"
+            ) {
+                Toggle("Remember subtitle choice per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
+            }
+        )
+
+        return SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: rows)
+    }
+
+    private var audioSection: SettingsSplitSection {
+        var rows: [SettingsSplitRow] = [
+            SettingsSplitRow(
+                id: "audio-preferred",
+                title: "Preferred language",
+                description: "The audio language Plozz selects automatically when a title offers more than one.",
+                valueSummary: Self.audioPreferenceName(playback.settings.audioLanguagePreference)
+            ) {
+                audioLanguageMenu($playback.settings.audioLanguagePreference)
+            },
+            SettingsSplitRow(
+                id: "audio-per-type",
+                title: "Different default for movies, TV shows & anime",
+                description: "Use a separate preferred audio language for each kind of content — for example original audio for anime but your device language elsewhere.",
+                valueSummary: audioPerContentTypeEnabled ? "On" : "Off"
+            ) {
+                Toggle("Use a different default per content type", isOn: audioPerContentTypeBinding)
+            }
+        ]
+
+        if audioPerContentTypeEnabled {
+            for category in Self.policyCategories {
+                rows.append(
+                    SettingsSplitRow(
+                        id: "audio-\(category.rawValue)",
+                        title: category.displayName,
+                        valueSummary: Self.audioPreferenceName(audioPreferenceBinding(for: category).wrappedValue),
+                        indented: true
+                    ) {
+                        audioLanguageMenu(audioPreferenceBinding(for: category))
+                    }
+                )
+            }
+        }
+
+        rows.append(
+            SettingsSplitRow(
+                id: "audio-remember",
+                title: "Remember audio per series",
+                description: "When you change the audio track while watching a series, reuse that choice for the rest of the series.",
+                valueSummary: playback.settings.rememberAudioTrackPerSeries ? "On" : "Off"
+            ) {
+                Toggle("Remember audio choice per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
+            }
+        )
+
+        return SettingsSplitSection(id: "audio", header: "Audio Language", rows: rows)
+    }
+
+    private var skipIntrosSection: SettingsSplitSection {
+        SettingsSplitSection(id: "skip-intros", header: "Skip Intros & Credits", rows: [
+            SettingsSplitRow(
+                id: "skip-intros-mode",
+                title: "Skip Intros",
+                description: playback.settings.skipIntros.detail
+                    + "\n\nWhen your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin.",
+                valueSummary: playback.settings.skipIntros.title
+            ) {
+                SettingsOptionPicker(
+                    options: SkipIntrosMode.allCases,
+                    selection: $playback.settings.skipIntros,
+                    title: { $0.title }
+                )
+            }
+        ])
+    }
+
+    private var skipIntervalsSection: SettingsSplitSection {
+        SettingsSplitSection(id: "skip-intervals", header: "Skip Intervals (left/right on remote)", rows: [
+            SettingsSplitRow(
+                id: "skip-backward",
+                title: "Skip Backward",
+                description: "How far the left button on the remote jumps back during playback.",
+                valueSummary: playback.settings.skipBackwardInterval.title
+            ) {
+                SettingsOptionPicker(
+                    options: SkipInterval.allCases,
+                    selection: $playback.settings.skipBackwardInterval,
+                    title: { $0.title }
+                )
+            },
+            SettingsSplitRow(
+                id: "skip-forward",
+                title: "Skip Forward",
+                description: "How far the right button on the remote jumps forward during playback.",
+                valueSummary: playback.settings.skipForwardInterval.title
+            ) {
+                SettingsOptionPicker(
+                    options: SkipInterval.allCases,
+                    selection: $playback.settings.skipForwardInterval,
+                    title: { $0.title }
+                )
+            }
+        ])
     }
 }
 #endif

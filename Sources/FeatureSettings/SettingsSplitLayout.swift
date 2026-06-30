@@ -70,6 +70,11 @@ struct SettingsSplitLayout: View {
 
     @State private var selectedRowID: String?
     @FocusState private var focusedRow: String?
+    /// Scopes the master list so the selected row can be its *preferred* default
+    /// focus. Pressing left out of the detail pane (or returning from a pushed
+    /// page) then lands back on the row the user came in from, rather than the
+    /// geometrically-nearest row.
+    @Namespace private var masterScope
 
     private var allRows: [SettingsSplitRow] { sections.flatMap(\.rows) }
     private var allRowIDs: [String] { allRows.map(\.id) }
@@ -130,6 +135,7 @@ struct SettingsSplitLayout: View {
                     ForEach(section.rows) { row in
                         masterRow(row)
                             .focused($focusedRow, equals: row.id)
+                            .prefersDefaultFocus(selectedRowID == row.id, in: masterScope)
                             .id(row.id)
                     }
                 }
@@ -143,6 +149,7 @@ struct SettingsSplitLayout: View {
         .onChange(of: focusedRow) { _, newID in
             if let newID { selectedRowID = newID }
         }
+        .focusScope(masterScope)
         .focusSection()
     }
 

@@ -37,6 +37,14 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
     public var currentTime: TimeInterval { engine.currentTime }
     public var duration: TimeInterval { engine.duration }
+
+    /// Ground truth for the menu's "selected audio" indicator: the AVStream index
+    /// AetherEngine is actually decoding (its resolved `activeAudioTrackIndex`),
+    /// which can differ from the container `isDefault` flag because the engine
+    /// honors the viewer's audio-language preference at load. `TrackInfo.id`,
+    /// `selectAudioTrack(index:)`, and `activeAudioTrackIndex` all share the
+    /// FFmpeg AVStream-index space, so this maps directly onto `MediaTrack.id`.
+    public var currentAudioTrackID: Int? { engine.activeAudioTrackIndex }
     public var bufferedPosition: TimeInterval { engine.clock.bufferedPosition }
 
     /// Bridge AetherEngine's live telemetry into the diagnostics overlay so the
@@ -252,6 +260,17 @@ public final class PlozzigenVideoEngine: VideoEngine {
             .sink { [weak self] _ in self?.syncTracks() }
             .store(in: &cancellables)
 
+        // AetherEngine resolves its active audio track asynchronously at load
+        // (honoring the viewer's audio-language preference, which may override the
+        // container default) and again on every track switch. Re-emit so the host
+        // rebuilds its menu and highlights the track that's *actually* decoding —
+        // otherwise the indicator stays on the default-flag guess and lies about
+        // what's playing.
+        engine.$activeAudioTrackIndex
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.onTracksChanged?() }
+            .store(in: &cancellables)
+
         // Bridge AetherEngine's decoded cues into Plozz's owned overlay.
         // AetherEngine publishes its decoded *read-ahead* cue buffer (text +
         // bitmap) — not just the on-screen line — so `LiveSubtitleModel` filters it
@@ -309,7 +328,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 language: track.language,
                 codec: track.codec,
                 isDefault: track.isDefault,
-                isForced: track.isForced
+                isForced: track.isForced,
+                channels: track.channels > 0 ? track.channels : nil,
+                isAtmos: track.isAtmos,
+                isHearingImpaired: track.isHearingImpaired,
+                isCommentary: track.isCommentary
             )
         }
         subtitleTracks = engine.subtitleTracks.map { track in
@@ -320,7 +343,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 language: track.language,
                 codec: track.codec,
                 isDefault: track.isDefault,
-                isForced: track.isForced
+                isForced: track.isForced,
+                isHearingImpaired: track.isHearingImpaired,
+                isCommentary: track.isCommentary
                 // NOTE: `isImageBasedSubtitle` is intentionally left at its
                 // default (false) here. The menu's "(PGS)" format hint is derived
                 // from `codec` instead, so labeling is accurate without changing

@@ -76,6 +76,62 @@ public enum TrackLabeling {
             || token.range(of: #"(^|\W)cc(\W|$)"#, options: .regularExpression) != nil
     }
 
+    /// A short, human audio **format** hint from codec + channel layout, e.g.
+    /// "DTS 7.1", "Dolby TrueHD 5.1", "AAC Stereo", or "Dolby Atmos". Lets an
+    /// untagged track read as "Track 1 (DTS 7.1)" instead of a bare "Track 1".
+    /// Returns `nil` only when neither codec nor channel count is known.
+    public static func audioFormatHint(codec: String?, channels: Int?, isAtmos: Bool) -> String? {
+        let codecName = audioCodecName(codec)
+        // Atmos is object-based; the bed channel count is misleading, so surface
+        // the format alone (matching how Plex/AppleTV present it).
+        if isAtmos { return "Dolby Atmos" }
+        let layout = channelLayoutName(channels)
+        switch (codecName, layout) {
+        case let (codec?, layout?): return "\(codec) \(layout)"
+        case let (codec?, nil): return codec
+        case let (nil, layout?): return layout
+        case (nil, nil): return nil
+        }
+    }
+
+    /// Recognizable display name for a libavcodec/container audio codec token.
+    private static func audioCodecName(_ codec: String?) -> String? {
+        guard let token = codec?.lowercased(), !token.isEmpty else { return nil }
+        switch token {
+        case "ac3": return "Dolby Digital"
+        case "eac3", "ec3", "ec-3": return "Dolby Digital+"
+        case "truehd", "mlp": return "Dolby TrueHD"
+        case "dts", "dca", "dts-hd", "dtshd": return "DTS"
+        case "aac", "aac_latm": return "AAC"
+        case "flac": return "FLAC"
+        case "alac": return "ALAC"
+        case "opus": return "Opus"
+        case "vorbis": return "Vorbis"
+        case "mp3", "mp2", "mp1": return token.uppercased()
+        case "wmav2", "wmapro", "wmav1": return "WMA"
+        default:
+            if token.hasPrefix("pcm") { return "PCM" }
+            return token.uppercased()
+        }
+    }
+
+    /// Friendly channel-layout label for a channel count (`2` → "Stereo",
+    /// `6` → "5.1"). `nil`/`0` yields no label.
+    private static func channelLayoutName(_ channels: Int?) -> String? {
+        guard let channels, channels > 0 else { return nil }
+        switch channels {
+        case 1: return "Mono"
+        case 2: return "Stereo"
+        case 3: return "2.1"
+        case 4: return "4.0"
+        case 5: return "5.0"
+        case 6: return "5.1"
+        case 7: return "6.1"
+        case 8: return "7.1"
+        default: return "\(channels) ch"
+        }
+    }
+
     /// Builds the subtitle menu label for a track. Prefers a resolved language
     /// name (provider language first, else a content-detected guess), then a
     /// meaningful provider title, else "Track N". Appends qualifiers in
@@ -87,6 +143,8 @@ public enum TrackLabeling {
         codec: String?,
         isForced: Bool,
         isImageBased: Bool,
+        isHearingImpaired: Bool = false,
+        isCommentary: Bool = false,
         detectedLanguage: String? = nil,
         trackID: Int
     ) -> String {
@@ -105,7 +163,9 @@ public enum TrackLabeling {
 
         var qualifiers: [String] = []
         if isForced { qualifiers.append("Forced") }
-        if isHearingImpaired(displayTitle) { qualifiers.append("SDH") }
+        // Prefer the reliable container flag; fall back to the title-text heuristic.
+        if isHearingImpaired || Self.isHearingImpaired(displayTitle) { qualifiers.append("SDH") }
+        if isCommentary { qualifiers.append("Commentary") }
         if let hint = subtitleFormatHint(codec: codec, isImageBased: isImageBased) {
             qualifiers.append(hint)
         }
@@ -117,15 +177,64 @@ public enum TrackLabeling {
 
     /// Builds the audio menu label. Provider audio titles are usually rich
     /// ("English - Dolby Digital - 5.1"), so a meaningful one is kept as-is; only
-    /// generic ones are replaced with the resolved language name (or "Track N").
+    /// generic ones are replaced with the resolved language name (or "Track N"),
+    /// then annotated with the audio format ("DTS 7.1") and a Commentary marker
+    /// when known.
     public static func audioLabel(
         displayTitle: String,
         language: String?,
+        codec: String? = nil,
+        channels: Int? = nil,
+        isAtmos: Bool = false,
+        isCommentary: Bool = false,
         trackID: Int
     ) -> String {
+        // A meaningful provider title already carries codec/channel detail.
         if !isGenericTitle(displayTitle) { return displayTitle }
-        if let name = languageName(forCode: language) { return name }
-        return "Track \(trackID)"
+
+        let base = languageName(forCode: language) ?? "Track \(trackID)"
+        var qualifiers: [String] = []
+        if let hint = audioFormatHint(codec: codec, channels: channels, isAtmos: isAtmos) {
+            qualifiers.append(hint)
+        }
+        if isCommentary { qualifiers.append("Commentary") }
+
+        guard !qualifiers.isEmpty else { return base }
+        return "\(base) (\(qualifiers.joined(separator: ", ")))"
+    }
+}
+
+// MARK: - Enriching demuxer tracks with provider metadata
+
+public extension MediaTrack {
+    /// Returns a copy of this demuxer/engine track enriched with metadata from a
+    /// matching provider track (the media server's probe of the *same* file).
+    ///
+    /// The advanced engine demuxes tracks straight from the container, so an
+    /// untagged file yields bare names ("Track 8") and a `nil` language. The
+    /// provider (Plex/Jellyfin) frequently probes the same streams with richer
+    /// tags. We trust the engine wherever it already has a value and only *fill
+    /// gaps* from the provider — never overwriting real engine data — so an
+    /// already-labelled track is left untouched. Callers match the provider track
+    /// by stream `id`; when the two id spaces don't line up there is simply no
+    /// match (`provider == nil`) and nothing changes.
+    func enriched(withProvider provider: MediaTrack?) -> MediaTrack {
+        guard let provider else { return self }
+        var merged = self
+        if merged.language == nil { merged.language = provider.language }
+        if merged.codec == nil { merged.codec = provider.codec }
+        if merged.channels == nil { merged.channels = provider.channels }
+        if !merged.isForced { merged.isForced = provider.isForced }
+        if !merged.isAtmos { merged.isAtmos = provider.isAtmos }
+        if !merged.isHearingImpaired { merged.isHearingImpaired = provider.isHearingImpaired }
+        if !merged.isCommentary { merged.isCommentary = provider.isCommentary }
+        // Only adopt the provider's title to replace a *generic* engine title,
+        // and only when the provider's own title actually says something.
+        if TrackLabeling.isGenericTitle(merged.displayTitle),
+           !TrackLabeling.isGenericTitle(provider.displayTitle) {
+            merged.displayTitle = provider.displayTitle
+        }
+        return merged
     }
 }
 

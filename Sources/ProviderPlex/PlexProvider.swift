@@ -882,6 +882,7 @@ public struct PlexProvider: MediaProvider {
             codec: dto.codec,
             isDefault: dto.default ?? dto.selected ?? false,
             isForced: dto.forced ?? false,
+            channels: isSubtitle ? nil : dto.channels,
             deliveryURL: deliveryURL,
             isImageBasedSubtitle: isSubtitle && !isTextSubtitleCodec(dto.codec)
         )

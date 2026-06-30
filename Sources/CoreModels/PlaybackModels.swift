@@ -20,6 +20,19 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     public var codec: String?
     public var isDefault: Bool
     public var isForced: Bool
+    /// Audio channel count where known (`2` stereo, `6` 5.1, `8` 7.1). `nil` for
+    /// subtitles and when the source/engine didn't report one. Drives the audio
+    /// format hint ("5.1"/"7.1") in the track menu.
+    public var channels: Int?
+    /// `true` for Dolby Atmos audio (object-based; the channel count is just the
+    /// bed). When set, the menu shows "Dolby Atmos" instead of the bed layout.
+    public var isAtmos: Bool
+    /// `true` for hearing-impaired / SDH tracks (container disposition). A
+    /// reliable signal that supersedes the title-text "SDH" heuristic.
+    public var isHearingImpaired: Bool
+    /// `true` for commentary tracks (director/cast). Surfaces a "Commentary"
+    /// qualifier on audio and subtitle labels.
+    public var isCommentary: Bool
     /// For subtitle tracks: an absolute URL that yields the subtitle text
     /// (WebVTT, or SRT which the player normalises to WebVTT). When non-`nil`
     /// the player can inject this track into the native picker even on direct
@@ -42,6 +55,10 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         codec: String? = nil,
         isDefault: Bool = false,
         isForced: Bool = false,
+        channels: Int? = nil,
+        isAtmos: Bool = false,
+        isHearingImpaired: Bool = false,
+        isCommentary: Bool = false,
         deliveryURL: URL? = nil,
         isImageBasedSubtitle: Bool = false
     ) {
@@ -52,6 +69,10 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.codec = codec
         self.isDefault = isDefault
         self.isForced = isForced
+        self.channels = channels
+        self.isAtmos = isAtmos
+        self.isHearingImpaired = isHearingImpaired
+        self.isCommentary = isCommentary
         self.deliveryURL = deliveryURL
         self.isImageBasedSubtitle = isImageBasedSubtitle
     }

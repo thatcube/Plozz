@@ -280,4 +280,162 @@ final class SubtitleCueParserTests: XCTestCase {
         XCTAssertEqual(cues[0].start, 1.5, accuracy: 0.0001)
         XCTAssertEqual(cues[0].end, 2.05, accuracy: 0.0001)
     }
+
+    // MARK: - ASS / SSA
+
+    func testBasicASSDialogueParsed() {
+        let ass = """
+        [Script Info]
+        Title: Sample
+        ScriptType: v4.00+
+
+        [V4+ Styles]
+        Format: Name, Fontname, Fontsize
+        Style: Default,Arial,40
+
+        [Events]
+        Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+        Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,Hello world
+        Dialogue: 0,0:00:05.00,0:00:06.25,Default,,0,0,0,,Second line
+        """
+        let stream = SubtitleCueParser.parse(ass, id: 4)
+        XCTAssertEqual(stream.metadata.format, .ass)
+        XCTAssertEqual(stream.cues.count, 2)
+        XCTAssertEqual(stream.cues[0].start, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(stream.cues[0].end, 3.5, accuracy: 0.0001)
+        XCTAssertEqual(stream.cues[0].text, "Hello world")
+        XCTAssertEqual(stream.cues[0].id, 0)
+        XCTAssertEqual(stream.cues[1].start, 5.0, accuracy: 0.0001)
+        XCTAssertEqual(stream.cues[1].text, "Second line")
+    }
+
+    func testASSStripsOverrideTagsAndKeepsRawEvent() {
+        let ass = """
+        [Script Info]
+        [Events]
+        Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+        Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\pos(960,540)}{\\i1}Whisper{\\i0}
+        """
+        let cues = SubtitleCueParser.parseCues(ass)
+        XCTAssertEqual(cues.count, 1)
+        XCTAssertEqual(cues[0].text, "Whisper")
+        if case let .text(t) = cues[0].body {
+            XCTAssertTrue(t.isItalic, "whole-cue italic should come from {\\i1}")
+            XCTAssertEqual(t.rawASS, "{\\pos(960,540)}{\\i1}Whisper{\\i0}")
+        } else {
+            XCTFail("expected a text body")
+        }
+    }
+
+    func testASSConvertsHardLineBreaks() {
+        let ass = """
+        [Script Info]
+        [Events]
+        Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+        Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Line one\\NLine two
+        """
+        let cues = SubtitleCueParser.parseCues(ass)
+        XCTAssertEqual(cues.count, 1)
+        XCTAssertEqual(cues[0].text, "Line one\nLine two")
+    }
+
+    func testASSTextWithCommasPreserved() {
+        // The Text column is last and may contain commas; they must survive the
+        // capped split rather than truncating the line.
+        let ass = """
+        [Script Info]
+        [Events]
+        Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+        Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Yes, of course, sir
+        """
+        let cues = SubtitleCueParser.parseCues(ass)
+        XCTAssertEqual(cues.count, 1)
+        XCTAssertEqual(cues[0].text, "Yes, of course, sir")
+    }
+
+    func testASSSkipsCommentEvents() {
+        let ass = """
+        [Script Info]
+        [Events]
+        Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+        Comment: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,not shown
+        Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,shown
+        """
+        let cues = SubtitleCueParser.parseCues(ass)
+        XCTAssertEqual(cues.count, 1)
+        XCTAssertEqual(cues[0].text, "shown")
+    }
+
+    func testASSRespectsReorderedFormatColumns() {
+        let ass = """
+        [Script Info]
+        [Events]
+        Format: Start, End, Style, Text
+        Dialogue: 0:00:02.00,0:00:04.00,Default,Reordered
+        """
+        let cues = SubtitleCueParser.parseCues(ass)
+        XCTAssertEqual(cues.count, 1)
+        XCTAssertEqual(cues[0].start, 2.0, accuracy: 0.0001)
+        XCTAssertEqual(cues[0].end, 4.0, accuracy: 0.0001)
+        XCTAssertEqual(cues[0].text, "Reordered")
+    }
+
+    func testSSADetectedAsASSFamily() {
+        let ssa = """
+        [Script Info]
+        ScriptType: v4.00
+
+        [V4 Styles]
+        Format: Name, Fontname
+
+        [Events]
+        Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+        Dialogue: Marked=0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Legacy SSA
+        """
+        let stream = SubtitleCueParser.parse(ssa)
+        XCTAssertEqual(stream.metadata.format, .ssa)
+        XCTAssertEqual(stream.cues.count, 1)
+        XCTAssertEqual(stream.cues[0].text, "Legacy SSA")
+        XCTAssertEqual(stream.cues[0].start, 1.0, accuracy: 0.0001)
+    }
+
+    // MARK: - Byte decoding (encoding tolerance)
+
+    func testDecodeUTF8() {
+        XCTAssertEqual(SubtitleCueParser.decodeText(Data("Héllo".utf8)), "Héllo")
+    }
+
+    func testDecodeWindows1252SmartQuotes() {
+        // 0x93/0x94 are curly quotes in Windows-1252 and invalid as bare UTF-8.
+        let bytes: [UInt8] = [0x93, 0x48, 0x69, 0x94]
+        XCTAssertEqual(SubtitleCueParser.decodeText(Data(bytes)), "\u{201C}Hi\u{201D}")
+    }
+
+    func testDecodeLatin1Accent() {
+        // "café" with 0xE9 (é): invalid UTF-8, decoded by the Western fallbacks.
+        let bytes: [UInt8] = [0x63, 0x61, 0x66, 0xE9]
+        XCTAssertEqual(SubtitleCueParser.decodeText(Data(bytes)), "café")
+    }
+
+    func testDecodeUTF16BOM() {
+        var data = Data([0xFF, 0xFE])
+        data.append("Hi".data(using: .utf16LittleEndian)!)
+        XCTAssertEqual(SubtitleCueParser.decodeText(data), "Hi")
+    }
+
+    func testDecodeEmptyReturnsNil() {
+        XCTAssertNil(SubtitleCueParser.decodeText(Data()))
+    }
+
+    func testDecodedNonUTF8SRTParsesEndToEnd() {
+        // The actual production bug: a non-UTF-8 SRT must decode AND parse, not
+        // silently vanish.
+        let srt = "1\n00:00:01,000 --> 00:00:02,000\ncafé\n"
+        let latin1 = srt.data(using: .isoLatin1)!
+        let text = SubtitleCueParser.decodeText(latin1)
+        XCTAssertNotNil(text)
+        let cues = SubtitleCueParser.parseCues(text!)
+        XCTAssertEqual(cues.count, 1)
+        XCTAssertEqual(cues[0].text, "café")
+    }
 }

@@ -154,6 +154,12 @@ public final class PlayerViewModel {
     private var selectedAudioTrackID: Int?
     private var selectedSubtitleTrackID: Int?
 
+    /// A just-requested audio track id whose engine switch is still in flight.
+    /// AetherEngine reloads to change audio, so `currentAudioTrackID` lags the
+    /// pick by a beat; we show the target optimistically until the engine
+    /// confirms it, then clear this and let engine truth govern the indicator.
+    private var pendingAudioTrackID: Int?
+
     /// Whether the load-time *default* subtitle has been routed through the
     /// overlay yet for the current `playResolved`. Native tracks are known
     /// synchronously, but Plozzigen demuxes its track list asynchronously (it
@@ -1169,8 +1175,32 @@ public final class PlayerViewModel {
     /// in-player track menu. Switching is routed back through the engine so the
     /// menu behaves identically across engines.
     private func loadTrackOptions() {
-        let audio = engine.audioTracks
-        if selectedAudioTrackID == nil {
+        // Enrich the engine's demuxed tracks with the provider's probe of the
+        // same file (matched by stream id), filling in any language/codec/title
+        // the demuxer dropped. For the native engine the two lists are identical,
+        // so this is a no-op there; it only adds data on the advanced engine.
+        let providerAudio = request?.audioTracks ?? []
+        let providerSubs = request?.subtitleTracks ?? []
+
+        let audio = engine.audioTracks.map { track in
+            track.enriched(withProvider: providerAudio.first { $0.id == track.id })
+        }
+        // The "selected audio" indicator must reflect the track the engine is
+        // *actually* decoding, not a re-derived default-flag guess (those can
+        // disagree: e.g. a dual-audio anime whose container defaults to Japanese
+        // while the engine starts the English track per the viewer's audio-language
+        // preference — the menu was highlighting Japanese while English played).
+        // Priority: an in-flight pick (optimistic) → the engine's resolved active
+        // track (ground truth) → the default-flag heuristic only before either is
+        // known.
+        if let pending = pendingAudioTrackID, audio.contains(where: { $0.id == pending }) {
+            selectedAudioTrackID = pending
+            if engine.currentAudioTrackID == pending { pendingAudioTrackID = nil }
+        } else if let active = engine.currentAudioTrackID,
+                  audio.contains(where: { $0.id == active }) {
+            selectedAudioTrackID = active
+            pendingAudioTrackID = nil
+        } else if selectedAudioTrackID == nil {
             selectedAudioTrackID = audio.first(where: { $0.isDefault })?.id ?? audio.first?.id
         }
         // Preferred languages, highest priority first: the viewer's explicit
@@ -1187,13 +1217,30 @@ public final class PlayerViewModel {
                     title: TrackLabeling.audioLabel(
                         displayTitle: track.displayTitle,
                         language: track.language,
+                        codec: track.codec,
+                        channels: track.channels,
+                        isAtmos: track.isAtmos,
+                        isCommentary: track.isCommentary,
                         trackID: track.id
                     ),
                     isSelected: track.id == selectedAudioTrackID
                 )
             }
 
-        let subtitles = engine.subtitleTracks
+        let subtitles = engine.subtitleTracks.map { track in
+            track.enriched(withProvider: providerSubs.first { $0.id == track.id })
+        }
+        #if DEBUG
+        // One-line ground truth for untagged-track triage: how many subtitle
+        // tracks still lack a language after enrichment, and whether the provider
+        // had any languages to lend. If both are zero/empty the file is genuinely
+        // untagged (only OCR could do better); a gap here means an id-space miss.
+        let unresolved = subtitles.filter { $0.language == nil }.count
+        let providerWithLang = providerSubs.filter { $0.language != nil }.count
+        PlozzLog.playback.debug(
+            "Track labels: \(subtitles.count) subs, \(unresolved) still no language; provider probe had \(providerSubs.count) subs (\(providerWithLang) with a language)"
+        )
+        #endif
         if subtitles.isEmpty {
             controls.subtitleOptions = []
         } else {
@@ -1208,6 +1255,8 @@ public final class PlayerViewModel {
                         codec: track.codec,
                         isForced: track.isForced,
                         isImageBased: track.isImageBasedSubtitle,
+                        isHearingImpaired: track.isHearingImpaired,
+                        isCommentary: track.isCommentary,
                         detectedLanguage: detectedSubtitleLanguages[track.id],
                         trackID: track.id
                     ),
@@ -1222,6 +1271,10 @@ public final class PlayerViewModel {
     public func selectAudioOption(id: Int) {
         guard let track = engine.audioTracks.first(where: { $0.id == id }) else { return }
         engine.selectAudioTrack(track)
+        // Show the target immediately; the engine's reload-to-switch lags, so we
+        // hold this optimistic pick until `currentAudioTrackID` confirms it (see
+        // loadTrackOptions) to avoid the indicator snapping back to the old track.
+        pendingAudioTrackID = id
         selectedAudioTrackID = id
         loadTrackOptions()
     }
@@ -1303,13 +1356,22 @@ public final class PlayerViewModel {
             return
         }
 
-        // Text subtitle on the native engine: render it with Plozz's own overlay.
-        // Suppress AVPlayer's legible draw and load the parsed sidecar cues into
-        // the overlay, so styling, HDR luminance and live offset all apply.
+        // Text subtitle on the native engine. With a sidecar URL we render it
+        // through Plozz's own overlay (styling, HDR luminance, live offset all
+        // apply), suppressing AVPlayer's legible draw. WITHOUT a sidecar URL
+        // (embedded text track, e.g. an MKV SRT on Plex direct-play) the overlay
+        // has no cue source, so we let AVPlayer draw the track natively rather
+        // than suppressing it and showing nothing — routing embedded text through
+        // the overlay is a later Plozzigen-extraction task.
         if !track.isImageBasedSubtitle, currentEngineKind == .native {
-            engine.selectSubtitleTrack(nil)
             selectedSubtitleTrackID = id
-            loadOverlaySubtitle(track)
+            if track.deliveryURL != nil {
+                engine.selectSubtitleTrack(nil)
+                loadOverlaySubtitle(track)
+            } else {
+                clearOverlaySubtitle()
+                engine.selectSubtitleTrack(track)
+            }
             loadTrackOptions()
             return
         }
@@ -1359,7 +1421,10 @@ public final class PlayerViewModel {
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
                 try Task.checkCancellation()
-                guard let text = String(data: data, encoding: .utf8) else { return }
+                guard let text = SubtitleCueParser.decodeText(data) else {
+                    PlozzLog.playback.error("Subtitle sidecar decode failed (\(data.count) bytes); unknown text encoding")
+                    return
+                }
                 let stream = SubtitleCueParser.parse(
                     text, id: id, language: language, title: title,
                     sourceTrackID: id, isForced: forced

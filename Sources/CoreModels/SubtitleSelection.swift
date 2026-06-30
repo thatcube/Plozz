@@ -107,8 +107,10 @@ public enum SubtitleSelector {
     /// * `.forcedOnly` → prefer a forced option in the preferred language, then
     ///   any forced option, else nothing.
     /// * `.all` → prefer a non-forced option in the preferred language, then a
-    ///   forced option in that language, then the stream's default option, else
-    ///   nothing (auto-download, if enabled, will fetch a better match later).
+    ///   forced option in that language, then — only for an *untagged* default
+    ///   track — the stream's default option, else nothing (a tagged
+    ///   foreign-language default is never auto-enabled; auto-download, if
+    ///   enabled, fetches a real match later).
     public static func decide(
         candidates: [SubtitleCandidate],
         mode: CaptionSettings.SubtitleMode,
@@ -139,7 +141,16 @@ public enum SubtitleSelector {
             if let forced = inLanguage.first {
                 return .select(id: forced.id)
             }
-            if let preset = candidates.first(where: { $0.isDefault && !$0.isForced }) {
+            // No subtitle in the preferred language. Honor the container's default
+            // flag ONLY when that default track carries no language tag — a flagged
+            // default is the best guess for genuinely *untagged* content, and we
+            // can't prove it's a language the viewer doesn't want. Never auto-enable
+            // a *tagged* foreign-language subtitle the viewer didn't ask for (e.g. a
+            // Chinese default for a Spanish speaker); leave subtitles off and let a
+            // manual pick or background auto-download supply a real match instead.
+            if let preset = candidates.first(where: {
+                $0.isDefault && !$0.isForced && LanguageMatch.normalized($0.languageCode) == nil
+            }) {
                 return .select(id: preset.id)
             }
             return .none

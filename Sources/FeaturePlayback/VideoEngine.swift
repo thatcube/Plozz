@@ -176,6 +176,17 @@ public protocol VideoEngine: AnyObject {
     /// Selectable subtitle tracks for the active stream.
     var subtitleTracks: [MediaTrack] { get }
 
+    /// The id of the audio track the engine is *actually* decoding right now,
+    /// when the engine can report it authoritatively (AetherEngine publishes its
+    /// resolved `activeAudioTrackIndex`, which may differ from the container's
+    /// `isDefault` flag because the engine honors the viewer's audio-language
+    /// preference). The owner uses this to drive the menu's "selected" indicator
+    /// from ground truth instead of guessing from a default flag. `nil` means the
+    /// engine can't say — fall back to the default-flag heuristic. Changes are
+    /// announced via `onTracksChanged` so the menu re-syncs after the engine
+    /// resolves or switches its active track.
+    var currentAudioTrackID: Int? { get }
+
     /// Selects an audio track (or `nil` to leave the engine default).
     func selectAudioTrack(_ track: MediaTrack?)
 
@@ -238,6 +249,11 @@ public protocol VideoEngine: AnyObject {
 public extension VideoEngine {
     /// Default: engines that don't track buffering report no buffer fill.
     var bufferedPosition: TimeInterval { 0 }
+
+    /// Default: the engine can't authoritatively name its active audio track, so
+    /// the owner falls back to the container `isDefault` heuristic. Engines that
+    /// publish a resolved active-track index (AetherEngine) override this.
+    var currentAudioTrackID: Int? { nil }
 
     /// Default: native (`AVPlayer`) engines have no separate telemetry — the
     /// sampler reads the access log. Engines without an `AVPlayer` override this.

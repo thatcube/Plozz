@@ -4,13 +4,14 @@ import Foundation
 /// ``SubtitleCueStream`` the renderer consumes.
 ///
 /// This is the canonical text-cue producer for the v2 subtitle architecture: a
-/// provider sidecar (Jellyfin `Stream.vtt`, Plex `.srt`/`.vtt`), a searched and
-/// downloaded subtitle file, or any embedded text track the host hands us as a
-/// string all flow through here into one normalized model. Bitmap (PGS/DVB/DVD)
-/// and rich ASS/SSA streams are produced elsewhere (engine adapters), so this
-/// parser deliberately handles only the two line-based text formats — which
-/// differ, in practice, by just their header and the `,` vs `.` millisecond
-/// separator.
+/// provider sidecar (Jellyfin `Stream.vtt`, Plex `.srt`/`.vtt`/`.ass`), a
+/// searched and downloaded subtitle file, or any embedded text track the host
+/// hands us as a string all flow through here into one normalized model. It
+/// handles SubRip and WebVTT (which differ, in practice, by just their header
+/// and the `,` vs `.` millisecond separator) plus a **plain-text** extraction of
+/// ASS/SSA `[Events]` (timing + text with override tags stripped; full styling
+/// is a later `rawASS` pass). Bitmap (PGS/DVB/DVD) streams are produced elsewhere
+/// (engine adapters).
 ///
 /// It is **pure** (Foundation only, no AVFoundation/UIKit), so it lives in
 /// CoreModels next to the model it builds and is exhaustively unit-tested.
@@ -40,7 +41,7 @@ public enum SubtitleCueParser {
     ) -> SubtitleCueStream {
         let unified = normalizeLineEndings(text)
         let format = detectFormat(unified)
-        let cues = parseCuesNormalized(unified)
+        let cues = format.isASSFamily ? parseASSCues(unified) : parseCuesNormalized(unified)
         let metadata = SubtitleStreamMetadata(
             format: format,
             language: language,
@@ -55,14 +56,45 @@ public enum SubtitleCueParser {
     /// Convenience: just the cues, for callers that don't need stream metadata
     /// (the preview harness, tests, quick checks).
     public static func parseCues(_ text: String) -> [SubtitleCue] {
-        parseCuesNormalized(normalizeLineEndings(text))
+        let unified = normalizeLineEndings(text)
+        return detectFormat(unified).isASSFamily
+            ? parseASSCues(unified)
+            : parseCuesNormalized(unified)
+    }
+
+    // MARK: - Byte decoding
+
+    /// Decodes raw subtitle-file bytes into text, tolerating the encodings
+    /// sidecar files actually appear in. Tries, in order: an explicit BOM
+    /// (UTF-8 / UTF-16), then strict UTF-8, then Windows-1252, then ISO Latin-1 —
+    /// the last of which decodes *any* byte sequence, so a non-empty input never
+    /// returns `nil`. Many real-world `.srt` files (older/European subs, and the
+    /// raw sidecar parts Plex serves) are Windows-1252/Latin-1 rather than UTF-8;
+    /// decoding them as UTF-8 only would fail and silently show no subtitles.
+    public static func decodeText(_ data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        if data.starts(with: [0xEF, 0xBB, 0xBF]),
+           let utf8 = String(data: data, encoding: .utf8) { return utf8 }
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
+           let utf16 = String(data: data, encoding: .utf16) { return utf16 }
+        for encoding: String.Encoding in [.utf8, .windowsCP1252, .isoLatin1] {
+            if let decoded = String(data: data, encoding: encoding) { return decoded }
+        }
+        return nil
     }
 
     // MARK: - Format detection
 
     private static func detectFormat(_ unified: String) -> SubtitleFormat {
         let head = unified.drop(while: { $0 == "\u{FEFF}" || $0 == "\n" || $0 == " " || $0 == "\t" })
-        return head.hasPrefix("WEBVTT") ? .webVTT : .srt
+        if head.hasPrefix("WEBVTT") { return .webVTT }
+        // ASS/SSA script files open with a `[Script Info]` (or another bracketed)
+        // section header. `[V4+ Styles]` denotes ASS, `[V4 Styles]` legacy SSA;
+        // both parse identically here, so the split is purely cosmetic metadata.
+        if head.hasPrefix("[Script Info]") || head.hasPrefix("[V4") || head.hasPrefix("[Events]") {
+            return unified.contains("[V4 Styles]") && !unified.contains("[V4+ Styles]") ? .ssa : .ass
+        }
+        return .srt
     }
 
     // MARK: - Cue parsing
@@ -279,6 +311,112 @@ public enum SubtitleCueParser {
             result = result.replacingOccurrences(of: entity, with: replacement)
         }
         return result
+    }
+
+    // MARK: - ASS / SSA events
+
+    /// Extracts plain, renderable cues from an ASS/SSA script's `[Events]`
+    /// section. This is deliberately a **plain-text** extraction: it reads each
+    /// `Dialogue:` line's timing and text, strips `{\…}` override blocks, and
+    /// converts `\N`/`\n` line breaks — enough to actually display an ASS sidecar
+    /// (common on anime, and served raw by Plex) instead of nothing. The full,
+    /// untouched event text is preserved on each cue's ``SubtitleText/rawASS`` so
+    /// a later styling pass can reconstruct inline colour/karaoke/positioning
+    /// without this stage having flattened it away.
+    private static func parseASSCues(_ unified: String) -> [SubtitleCue] {
+        let clean = unified.replacingOccurrences(of: "\u{FEFF}", with: "")
+        let lines = clean.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        // ASS v4+ default Events column order, overridden by the section's
+        // `Format:` line (SSA orders Start/End/Text the same, so the defaults
+        // also cover headerless files).
+        var startIdx = 1, endIdx = 2, textIdx = 9
+        var inEvents = false
+        var parsed: [(start: Double, end: Double, text: SubtitleText)] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") {
+                inEvents = trimmed.caseInsensitiveCompare("[Events]") == .orderedSame
+                continue
+            }
+            guard inEvents, let colon = trimmed.firstIndex(of: ":") else { continue }
+            let descriptor = trimmed[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            let payload = String(trimmed[trimmed.index(after: colon)...])
+
+            if descriptor == "format" {
+                let cols = payload.split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+                if let i = cols.firstIndex(of: "start") { startIdx = i }
+                if let i = cols.firstIndex(of: "end") { endIdx = i }
+                if let i = cols.firstIndex(of: "text") { textIdx = i }
+                continue
+            }
+            // Only spoken events; skip `Comment:`, `Picture:`, `Sound:`, etc.
+            guard descriptor == "dialogue" else { continue }
+
+            // Text is the final column and may itself contain commas, so cap the
+            // split at `textIdx` — everything past it stays in one piece.
+            let fields = payload.split(separator: ",", maxSplits: textIdx,
+                                       omittingEmptySubsequences: false).map(String.init)
+            guard fields.count > textIdx,
+                  let start = parseASSTimestamp(fields[startIdx]),
+                  let end = parseASSTimestamp(fields[endIdx]),
+                  end > start else { continue }
+
+            let body = cleanASSText(fields[textIdx])
+            guard !body.string.isEmpty else { continue }
+            parsed.append((start, end, body))
+        }
+
+        let sorted = parsed.sorted { $0.start < $1.start }
+        return sorted.enumerated().map { index, cue in
+            SubtitleCue(id: index, start: cue.start, end: cue.end, body: .text(cue.text))
+        }
+    }
+
+    /// Parses an ASS timestamp `H:MM:SS.cc` (centiseconds) into seconds.
+    private static func parseASSTimestamp(_ token: String) -> Double? {
+        let parts = token.trimmingCharacters(in: .whitespaces).split(separator: ":")
+        guard parts.count == 3,
+              let h = Double(parts[0]),
+              let m = Double(parts[1]),
+              let s = Double(parts[2]),
+              m < 60, s < 60 else { return nil }
+        return h * 3600 + m * 60 + s
+    }
+
+    /// Strips ASS override blocks (`{\…}`) and converts ASS line breaks to plain
+    /// display text, capturing whole-cue italic/bold (`{\i1}`/`{\b1}`) the way the
+    /// SRT/VTT path captures `<i>`/`<b>`. The untouched event text is kept as
+    /// `rawASS` for a future rich pass.
+    private static func cleanASSText(_ raw: String) -> SubtitleText {
+        let lowered = raw.lowercased()
+        let isItalic = lowered.contains("\\i1")
+        let isBold = lowered.contains("\\b1")
+
+        // Drop `{...}` override blocks (depth-counted for the rare nested case).
+        var withoutOverrides = ""
+        withoutOverrides.reserveCapacity(raw.count)
+        var depth = 0
+        for ch in raw {
+            if ch == "{" {
+                depth += 1
+            } else if ch == "}" {
+                if depth > 0 { depth -= 1 }
+            } else if depth == 0 {
+                withoutOverrides.append(ch)
+            }
+        }
+
+        // ASS line breaks: `\N` (hard) and `\n` (soft) → newline; `\h` → NBSP.
+        let text = withoutOverrides
+            .replacingOccurrences(of: "\\N", with: "\n")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\h", with: "\u{00A0}")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return SubtitleText(text, isItalic: isItalic, isBold: isBold, rawASS: raw)
     }
 }
 

@@ -43,11 +43,12 @@ struct PlayerControls: View {
     let onExitToSurface: () -> Void
 
     enum Category: Hashable {
-        case audioSubtitles, speed, sync
+        case subtitles, audio, speed, sync
 
         var title: String {
             switch self {
-            case .audioSubtitles: return "Audio & Subtitles"
+            case .subtitles: return "Subtitles"
+            case .audio: return "Audio"
             case .speed: return "Speed"
             case .sync: return "A/V Sync"
             }
@@ -55,7 +56,8 @@ struct PlayerControls: View {
 
         var icon: String {
             switch self {
-            case .audioSubtitles: return "captions.bubble"
+            case .subtitles: return "captions.bubble"
+            case .audio: return "waveform"
             case .speed: return "speedometer"
             case .sync: return "slider.horizontal.below.square.and.square.filled"
             }
@@ -214,27 +216,20 @@ struct PlayerControls: View {
                 .padding(.top, 22)
                 .padding(.bottom, 12)
             Divider().background(.white.opacity(0.15))
-            if category == .audioSubtitles {
-                // Compact two-column card (Audio | Subtitles) — each side scrolls
-                // on its own only when long, so a big track list stays a tidy pair
-                // of columns instead of one giant scrolling wall.
-                audioSubtitlesPane
-                    .padding(.vertical, 10)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        switch category {
-                        case .speed: speedPane
-                        case .sync: syncPane
-                        case .audioSubtitles: EmptyView()
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    switch category {
+                    case .subtitles: subtitlePane
+                    case .audio: audioPane
+                    case .speed: speedPane
+                    case .sync: syncPane
                     }
-                    .padding(.vertical, 10)
                 }
-                .frame(maxHeight: 440)
+                .padding(.vertical, 10)
             }
+            .frame(maxHeight: 440)
         }
-        .frame(width: category == .audioSubtitles ? 860 : 760, alignment: .leading)
+        .frame(width: 760, alignment: .leading)
         // Composite cheaply over Dolby Vision / HDR video. The frame-dropping
         // culprit was the soft drop `.shadow` (a per-frame offscreen blur pass
         // recomposited over the moving DV signal), so that stays gone. A simple
@@ -252,58 +247,28 @@ struct PlayerControls: View {
         )
     }
 
+    /// The Subtitles menu: one full-width column of selectable tracks (incl.
+    /// "Off"). Full width so a rich label ("Spanish (SDH, PGS)") never truncates.
     @ViewBuilder
-    private var audioSubtitlesPane: some View {
-        let columns = audioSubtitleColumns
-        if columns.audio.isEmpty && columns.subtitles.isEmpty {
-            emptyRow("No alternate tracks")
+    private var subtitlePane: some View {
+        let rows = subtitleRows
+        if rows.isEmpty {
+            emptyRow("No subtitles")
         } else {
-            // 14pt of breathing room on BOTH sides of the center divider so a
-            // focused row's fitted card keeps an equal gutter to the divider as
-            // it does to the panel's outer edge (which carries the same 14pt
-            // pane margin below). With spacing:0 the columns butted the divider
-            // and the card sat ~6pt from it but ~20pt from the panel edge, which
-            // read as "too close to the middle divider".
-            HStack(alignment: .top, spacing: 14) {
-                if !columns.subtitles.isEmpty {
-                    trackColumn(title: "Subtitles", rows: columns.subtitles)
-                }
-                if !columns.audio.isEmpty && !columns.subtitles.isEmpty {
-                    Rectangle()
-                        .fill(.white.opacity(0.12))
-                        .frame(width: 1)
-                        .padding(.vertical, 6)
-                }
-                if !columns.audio.isEmpty {
-                    trackColumn(title: "Audio", rows: columns.audio)
-                }
-            }
-            .padding(.horizontal, 14)
+            trackRowStack(rows).padding(.horizontal, 14)
         }
     }
 
-    /// One side of the Audio & Subtitles card. Short lists render inline (so a
-    /// 2-track column doesn't reserve a tall empty box); long lists get their own
-    /// scroller capped well under the panel height.
+    /// The Audio menu: one full-width column of selectable tracks plus the
+    /// Dialog Enhance toggle when the engine supports it.
     @ViewBuilder
-    private func trackColumn(title: String, rows: [TrackRow]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title.uppercased())
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.5))
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 8)
-            if rows.count > 7 {
-                ScrollView {
-                    trackRowStack(rows).padding(.bottom, 6)
-                }
-                .frame(maxHeight: 360)
-            } else {
-                trackRowStack(rows)
-            }
+    private var audioPane: some View {
+        let rows = audioRows
+        if rows.isEmpty {
+            emptyRow("No alternate audio")
+        } else {
+            trackRowStack(rows).padding(.horizontal, 14)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -515,10 +480,12 @@ struct PlayerControls: View {
 
     private var availableCategories: [Category] {
         var result: [Category] = []
+        if model.hasSelectableSubtitles {
+            result.append(.subtitles)
+        }
         if model.hasSelectableAudio
-            || model.hasSelectableSubtitles
             || model.engineCapabilities.contains(.dialogEnhance) {
-            result.append(.audioSubtitles)
+            result.append(.audio)
         }
         if model.engineCapabilities.contains(.playbackSpeed) {
             result.append(.speed)
@@ -547,17 +514,32 @@ struct PlayerControls: View {
         let action: () -> Void
     }
 
-    /// Audio & Subtitles split into two independently-id'd columns. IDs stay
-    /// globally unique across both columns so each maps to a distinct `.row`
-    /// focus slot (audio first, then subtitles), which the tvOS focus engine
-    /// walks left↔right between columns.
-    private var audioSubtitleColumns: (audio: [TrackRow], subtitles: [TrackRow]) {
-        var audio: [TrackRow] = []
-        var subtitles: [TrackRow] = []
+    /// Subtitle menu rows (one full-width column, including "Off"). Indexed from
+    /// 0 in their own focus-slot space — safe because only one panel is open at a
+    /// time, so audio and subtitle `.row` ids never coexist.
+    private var subtitleRows: [TrackRow] {
+        guard model.hasSelectableSubtitles else { return [] }
+        return model.subtitleOptions.enumerated().map { index, option in
+            TrackRow(
+                id: index,
+                header: nil,
+                title: option.title,
+                subtitle: "",
+                isSelected: option.isSelected,
+                isToggle: false,
+                action: { actions.selectSubtitle(option.id) }
+            )
+        }
+    }
+
+    /// Audio menu rows: selectable tracks followed by the Dialog Enhance toggle
+    /// when supported. Indexed from 0 in their own focus-slot space.
+    private var audioRows: [TrackRow] {
+        var rows: [TrackRow] = []
         var index = 0
         if model.hasSelectableAudio {
             for option in model.audioOptions {
-                audio.append(TrackRow(
+                rows.append(TrackRow(
                     id: index,
                     header: nil,
                     title: option.title,
@@ -570,7 +552,7 @@ struct PlayerControls: View {
             }
         }
         if model.engineCapabilities.contains(.dialogEnhance) {
-            audio.append(TrackRow(
+            rows.append(TrackRow(
                 id: index,
                 header: nil,
                 title: "Dialog Enhance",
@@ -581,33 +563,16 @@ struct PlayerControls: View {
             ))
             index += 1
         }
-        if model.hasSelectableSubtitles {
-            for option in model.subtitleOptions {
-                subtitles.append(TrackRow(
-                    id: index,
-                    header: nil,
-                    title: option.title,
-                    subtitle: "",
-                    isSelected: option.isSelected,
-                    isToggle: false,
-                    action: { actions.selectSubtitle(option.id) }
-                ))
-                index += 1
-            }
-        }
-        return (audio, subtitles)
+        return rows
     }
 
     private func selectedRowIndex(for category: Category) -> Int {
         switch category {
-        case .audioSubtitles:
-            // Prefer the Subtitles column for default focus (it's the left/primary
-            // column). first(where: isSelected) over subtitles-then-audio lands on
-            // the active subtitle (incl. "Off"), falling back to audio only if no
-            // subtitle row reports selected.
-            let all = audioSubtitleColumns.subtitles + audioSubtitleColumns.audio
-            return all.first(where: { $0.isSelected })?.id
-                ?? all.first?.id ?? 0
+        case .subtitles:
+            // Open focused on the active subtitle (incl. "Off"), else the top row.
+            return subtitleRows.first(where: { $0.isSelected })?.id ?? 0
+        case .audio:
+            return audioRows.first(where: { $0.isSelected })?.id ?? 0
         case .speed:
             return Self.speedPresets.firstIndex(where: { abs(model.playbackSpeed - $0) < 0.001 }) ?? 0
         case .sync:

@@ -50,8 +50,21 @@ final class SubtitleSelectionTests: XCTestCase {
         )
     }
 
-    func testAllFallsBackToDefaultWhenNoLanguageMatch() {
+    func testAllDoesNotSelectTaggedForeignDefaultWhenNoLanguageMatch() {
+        // A tagged foreign-language default (German) must NOT be auto-enabled for
+        // an English preference — picking a language the viewer didn't ask for is
+        // the bug. Leave subtitles off.
         let candidates = [sub(0, "fr"), sub(1, "de", isDefault: true)]
+        XCTAssertEqual(
+            SubtitleSelector.decide(candidates: candidates, mode: .all, preferredLanguage: "en"),
+            .none
+        )
+    }
+
+    func testAllFallsBackToUntaggedDefaultWhenNoLanguageMatch() {
+        // An *untagged* default is the best guess for genuinely untagged content,
+        // so it is still honored.
+        let candidates = [sub(0, "fr"), sub(1, nil, isDefault: true)]
         XCTAssertEqual(
             SubtitleSelector.decide(candidates: candidates, mode: .all, preferredLanguage: "en"),
             .select(id: 1)

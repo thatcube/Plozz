@@ -897,6 +897,7 @@ public struct JellyfinProvider: MediaProvider {
             codec: dto.Codec,
             isDefault: dto.IsDefault ?? false,
             isForced: dto.IsForced ?? false,
+            channels: isSubtitle ? nil : dto.Channels,
             isImageBasedSubtitle: isSubtitle
                 && !(dto.IsTextSubtitleStream ?? isTextSubtitleCodec(dto.Codec))
         )

@@ -91,6 +91,10 @@ public final class PlayerViewModel {
     /// Per-profile playback prefs. Today: whether to offer the Skip Intro/Credits
     /// button. When `skipIntros` is off, segments are never fetched or shown.
     private let playbackSettings: PlaybackSettings
+    /// Per-profile remembered per-series audio/subtitle language choices. `nil`
+    /// disables the feature (tests, previews). Read at load to steer the initial
+    /// tracks and written when the viewer manually switches a track.
+    private let seriesTrackStore: (any SeriesTrackPreferenceStoring)?
     /// Loads server-detected skip segments once playback is ready; cancelled on
     /// stop. Best-effort — a failure leaves the skip button simply unavailable.
     private var segmentsTask: Task<Void, Never>?
@@ -274,6 +278,7 @@ public final class PlayerViewModel {
         mediaSourceID: String? = nil,
         captionSettings: CaptionSettings = .default,
         playbackSettings: PlaybackSettings = .default,
+        seriesTrackStore: (any SeriesTrackPreferenceStoring)? = nil,
         startPosition: TimeInterval? = nil,
         scrobbler: any TraktScrobbling = DisabledTraktScrobbler(),
         engineFactory: EngineFactory = .native,
@@ -292,6 +297,7 @@ public final class PlayerViewModel {
         self.mediaSourceID = mediaSourceID
         self.captionSettings = captionSettings
         self.playbackSettings = playbackSettings
+        self.seriesTrackStore = seriesTrackStore
         self.startPositionOverride = startPosition
         self.scrobbler = scrobbler
         self.engineFactory = engineFactory
@@ -614,16 +620,66 @@ public final class PlayerViewModel {
         }
     }
 
-    /// Resolves the ordered audio-language preference for a load from the
-    /// prefer-original-language policy. Per-series remembered audio (when that
-    /// feature lands) will take precedence ahead of this by supplying `remembered`.
+    /// Resolves the ordered audio-language preference for a load from per-series
+    /// memory (when enabled) and the prefer-original-language policy. A remembered
+    /// per-series language takes precedence ahead of prefer-original.
     private func preferredAudioLanguages(for item: MediaItem) -> [String] {
         AudioLanguagePolicy.preferredAudioLanguages(
-            remembered: nil,
+            remembered: rememberedAudioLanguage(for: item),
             preferOriginal: playbackSettings.preferOriginalLanguageAudio,
             originalLanguage: ContentClassifier.originalAudioLanguage(for: item),
             deviceLanguage: LanguageMatch.deviceLanguageCode
         )
+    }
+
+    // MARK: - Per-series remembered track selections
+
+    /// The per-series store key for an item, or `nil` when the item isn't an
+    /// episode of a series (movies/trailers never participate — they use the
+    /// default policy) or the feature has no store wired in.
+    private func seriesPreferenceKey(for item: MediaItem) -> String? {
+        guard item.kind == .episode, let seriesID = item.seriesID else { return nil }
+        return SeriesTrackPreferenceKey.make(sourceAccountID: item.sourceAccountID, seriesID: seriesID)
+    }
+
+    /// The remembered audio language for this item's series, gated on the toggle.
+    private func rememberedAudioLanguage(for item: MediaItem) -> String? {
+        guard playbackSettings.rememberAudioTrackPerSeries,
+              let store = seriesTrackStore,
+              let key = seriesPreferenceKey(for: item) else { return nil }
+        return store.preference(forKey: key)?.audioLanguage
+    }
+
+    /// The remembered subtitle decision for this item's series, gated on the toggle.
+    private func rememberedSubtitle(for item: MediaItem) -> RememberedSubtitleSelection? {
+        guard playbackSettings.rememberSubtitleTrackPerSeries,
+              let store = seriesTrackStore,
+              let key = seriesPreferenceKey(for: item) else { return nil }
+        return store.preference(forKey: key)?.subtitle
+    }
+
+    /// Records the viewer's manual audio-language pick for the current series
+    /// (gated on the toggle). Only a language-tagged track is remembered — an
+    /// untagged track can't be re-resolved on the next episode.
+    private func recordSeriesAudioSelection(language: String?) {
+        guard playbackSettings.rememberAudioTrackPerSeries,
+              let store = seriesTrackStore,
+              let item = request?.item,
+              let key = seriesPreferenceKey(for: item),
+              let language, !language.isEmpty else { return }
+        store.setAudioLanguage(language, forKey: key)
+    }
+
+    /// Records the viewer's manual subtitle pick (a language, or Off) for the
+    /// current series, gated on the toggle. A selected track with no language is
+    /// not remembered (it can't be re-matched next episode); Off always is.
+    private func recordSeriesSubtitleSelection(_ selection: RememberedSubtitleSelection?) {
+        guard playbackSettings.rememberSubtitleTrackPerSeries,
+              let store = seriesTrackStore,
+              let item = request?.item,
+              let key = seriesPreferenceKey(for: item),
+              let selection else { return }
+        store.setSubtitle(selection, forKey: key)
     }
 
     /// Loads an already-resolved request on the routed engine and finishes the
@@ -1293,6 +1349,8 @@ public final class PlayerViewModel {
     public func selectAudioOption(id: Int) {
         guard let track = engine.audioTracks.first(where: { $0.id == id }) else { return }
         engine.selectAudioTrack(track)
+        // Remember this language for the series so later episodes start here.
+        recordSeriesAudioSelection(language: track.language)
         // Show the target immediately; the engine's reload-to-switch lags, so we
         // hold this optimistic pick until `currentAudioTrackID` confirms it (see
         // loadTrackOptions) to avoid the indicator snapping back to the old track.
@@ -1339,6 +1397,29 @@ public final class PlayerViewModel {
     /// that engine draws them); routing them through the overlay arrives with the
     /// bitmap-cue work.
     private func applyDefaultSubtitleThroughOverlay(from tracks: [MediaTrack]) {
+        // A remembered per-series subtitle decision overrides the default rule.
+        if let remembered = request.map({ rememberedSubtitle(for: $0.item) }) ?? nil {
+            switch remembered {
+            case .off:
+                engine.selectSubtitleTrack(nil)
+                clearOverlaySubtitle()
+                selectedSubtitleTrackID = nil
+                loadTrackOptions()
+                return
+            case .language(let language):
+                // Honor the remembered language explicitly (mode `.all`, since the
+                // viewer chose to see this language for the show), but only when a
+                // matching, renderable text track exists; otherwise fall through to
+                // the default rule.
+                if tracks.hasSuitableSubtitle(forLanguage: language),
+                   let chosen = tracks.defaultSubtitleSelection(mode: .all, preferredLanguage: language),
+                   !chosen.isImageBasedSubtitle {
+                    selectSubtitleOption(id: chosen.id, userInitiated: false)
+                    return
+                }
+            }
+        }
+
         let chosen = tracks.defaultSubtitleSelection(
             mode: captionSettings.subtitleMode,
             preferredLanguage: captionSettings.resolvedPreferredLanguage
@@ -1350,12 +1431,15 @@ public final class PlayerViewModel {
             loadTrackOptions()
             return
         }
-        selectSubtitleOption(id: chosen.id)
+        selectSubtitleOption(id: chosen.id, userInitiated: false)
     }
 
     /// Selects a subtitle track, or turns subtitles off (`PlayerTrackOption.offID`).
-    public func selectSubtitleOption(id: Int) {
+    /// `userInitiated` is `true` for a real menu pick (which is remembered for the
+    /// series) and `false` for the programmatic load-time default.
+    public func selectSubtitleOption(id: Int, userInitiated: Bool = true) {
         if id == PlayerTrackOption.offID {
+            if userInitiated { recordSeriesSubtitleSelection(.off) }
             engine.selectSubtitleTrack(nil)
             clearOverlaySubtitle()
             selectedSubtitleTrackID = nil
@@ -1363,6 +1447,7 @@ public final class PlayerViewModel {
             return
         }
         guard let track = engine.subtitleTracks.first(where: { $0.id == id }) else { return }
+        if userInitiated { recordSeriesSubtitleSelection(track.language.map(RememberedSubtitleSelection.language)) }
 
         // Image-based subtitles (PGS/VOBSUB/DVDSUB) can't be rendered by AVPlayer
         // or any on-device text renderer. If the user picks one while on the

@@ -72,6 +72,9 @@ struct MainTabView: View {
     let spoilerModel: SpoilerSettingsModel
     let playbackModel: PlaybackSettingsModel
     let themeModel: ThemeSettingsModel
+    /// Per-profile remembered per-series audio/subtitle selections, threaded into
+    /// the player so a manual track switch sticks across that show's episodes.
+    let seriesTrackStore: any SeriesTrackPreferenceStoring
     let diagnosticsModel: DiagnosticsSettingsModel
     let musicPlayerModel: MusicPlayerSettingsModel
     /// Per-profile UI density, injected into the environment below so the
@@ -141,6 +144,7 @@ struct MainTabView: View {
                 homeLayoutStore: homeLayoutStore,
                 captionSettings: captionModel.settings,
                 playbackSettings: playbackModel.settings,
+                seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
                 themePalette: resolvedPalette,
@@ -157,6 +161,7 @@ struct MainTabView: View {
                 accounts: accounts,
                 captionSettings: captionModel.settings,
                 playbackSettings: playbackModel.settings,
+                seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
                 showDiagnostics: diagnosticsModel.settings.isEnabled,
                 themePalette: resolvedPalette,
@@ -424,6 +429,7 @@ private func makePlayerViewModel(
     accounts: [ResolvedAccount],
     captionSettings: CaptionSettings,
     playbackSettings: PlaybackSettings,
+    seriesTrackStore: any SeriesTrackPreferenceStoring,
     scrobbler: any TraktScrobbling,
     watchBridge: WatchOutboxBridge,
     identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
@@ -453,6 +459,7 @@ private func makePlayerViewModel(
             itemID: videoID,
             captionSettings: captionSettings,
             playbackSettings: playbackSettings,
+            seriesTrackStore: seriesTrackStore,
             startPosition: request.startPosition,
             scrobbler: scrobbler,
             engineFactory: engineFactory,
@@ -503,6 +510,7 @@ private func makePlayerViewModel(
         mediaSourceID: request.item.selectedVersionID,
         captionSettings: captionSettings,
         playbackSettings: playbackSettings,
+        seriesTrackStore: seriesTrackStore,
         startPosition: request.startPosition,
         scrobbler: scrobbler,
         engineFactory: HybridPlayback.engineFactory(),
@@ -697,6 +705,7 @@ private struct HomeTab: View {
     let homeLayoutStore: HomeLayoutStoring
     let captionSettings: CaptionSettings
     let playbackSettings: PlaybackSettings
+    let seriesTrackStore: any SeriesTrackPreferenceStoring
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
     let themePalette: ThemePalette
@@ -808,6 +817,7 @@ private struct HomeTab: View {
             accounts: accounts,
             captionSettings: captionSettings,
             playbackSettings: playbackSettings,
+            seriesTrackStore: seriesTrackStore,
             scrobbler: scrobbler,
             watchBridge: watchBridge,
             identitySources: identitySources,
@@ -912,6 +922,7 @@ private extension View {
         accounts: [ResolvedAccount],
         captionSettings: CaptionSettings,
         playbackSettings: PlaybackSettings,
+        seriesTrackStore: any SeriesTrackPreferenceStoring,
         scrobbler: any TraktScrobbling,
         watchBridge: WatchOutboxBridge,
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
@@ -927,6 +938,7 @@ private extension View {
                         accounts: accounts,
                         captionSettings: captionSettings,
                         playbackSettings: playbackSettings,
+                        seriesTrackStore: seriesTrackStore,
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
                         identitySources: identitySources
@@ -1016,6 +1028,7 @@ private struct SearchTab: View {
     let accounts: [ResolvedAccount]
     let captionSettings: CaptionSettings
     let playbackSettings: PlaybackSettings
+    let seriesTrackStore: any SeriesTrackPreferenceStoring
     let spoilerSettings: SpoilerSettings
     let showDiagnostics: Bool
     let themePalette: ThemePalette
@@ -1117,6 +1130,7 @@ private struct SearchTab: View {
             accounts: accounts,
             captionSettings: captionSettings,
             playbackSettings: playbackSettings,
+            seriesTrackStore: seriesTrackStore,
             scrobbler: scrobbler,
             watchBridge: watchBridge,
             identitySources: identitySources,

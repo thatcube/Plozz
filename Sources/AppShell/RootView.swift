@@ -87,6 +87,7 @@ public struct RootView: View {
                         spoilerModel: appState.spoilerModel,
                         playbackModel: appState.playbackModel,
                         themeModel: appState.themeModel,
+                        seriesTrackStore: SeriesTrackPreferenceStore(namespace: appState.profilesModel.activeNamespace),
                         diagnosticsModel: appState.diagnosticsModel,
                         musicPlayerModel: appState.musicPlayerModel,
                         uiDensityModel: appState.uiDensityModel,

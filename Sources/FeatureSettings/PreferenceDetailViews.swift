@@ -214,6 +214,29 @@ struct PlaybackDetailView: View {
                 }
 
                 SettingsPanel(
+                    title: "Audio Language",
+                    footer: "Plozz can start each title in its original spoken language — so anime defaults to Japanese audio instead of the dub — and remember the audio and subtitle language you pick for a series so the rest of that show follows suit."
+                ) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Toggle("Prefer original language audio", isOn: $playback.settings.preferOriginalLanguageAudio)
+
+                        Text("When a title has multiple audio tracks, start in the original language (e.g. Japanese for anime) rather than the file's default, which is often a dub.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Divider()
+
+                        Toggle("Remember audio choice per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
+
+                        Toggle("Remember subtitle choice per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
+
+                        Text("Switching the audio or subtitle track while watching an episode applies that language to the rest of the series automatically.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                SettingsPanel(
                     title: "Skip Intros & Credits",
                     footer: "When your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin."
                 ) {

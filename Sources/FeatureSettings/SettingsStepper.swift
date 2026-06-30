@@ -22,16 +22,16 @@ struct SettingsStepper<Value: Hashable>: View {
     private var canIncrement: Bool { index < options.count - 1 }
 
     var body: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 24) {
             stepButton(symbol: "minus", dimmed: !canDecrement) {
                 if canDecrement { selection = options[index - 1] }
             }
 
             Text(title(selection))
-                .font(.headline)
+                .font(.title3.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(palette.primaryText)
-                .frame(minWidth: 96)
+                .frame(minWidth: 128)
                 .contentTransition(.numericText())
                 .animation(.easeOut(duration: 0.16), value: index)
 
@@ -45,8 +45,8 @@ struct SettingsStepper<Value: Hashable>: View {
     private func stepButton(symbol: String, dimmed: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.title3.weight(.bold))
-                .frame(width: 46, height: 46)
+                .font(.system(size: 26, weight: .semibold))
+                .frame(width: 72, height: 72)
                 // Dim the glyph at the ends, but keep the button focusable so the
                 // left-exit point stays consistent (always the − button).
                 .opacity(dimmed ? 0.35 : 1)

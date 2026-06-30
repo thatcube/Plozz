@@ -75,15 +75,11 @@ struct SettingsSplitLayout: View {
     /// page) then lands back on the row the user came in from, rather than the
     /// geometrically-nearest row.
     @Namespace private var masterScope
-    /// Scopes the detail pane so entering it always snaps to its first/topmost
-    /// control, instead of whichever control happens to sit nearest the row.
-    @Namespace private var detailScope
     /// True while focus lives in the detail pane. While set, every master row
     /// *except* the selected one is pulled out of the focus order — so a
     /// left-press out of a control has exactly one place to land (the row you
     /// came in from), with no geometrically-nearer row to steal it.
     @State private var focusInDetail = false
-    @Environment(\.resetFocus) private var resetFocus
 
     private var allRows: [SettingsSplitRow] { sections.flatMap(\.rows) }
     private var allRowIDs: [String] { allRows.map(\.id) }
@@ -154,15 +150,14 @@ struct SettingsSplitLayout: View {
         .scrollClipDisabled()
         // Moving focus up/down the list drives the live preview on the right.
         // When focus leaves the list it has gone into the detail pane: park the
-        // list (so the only way back is the row we came from) and snap focus to
-        // the detail's top control. When it returns, unpark and resume preview.
+        // list (so the only way back is the row we came from). When it returns,
+        // unpark and resume the live preview.
         .onChange(of: focusedRow) { _, newID in
             if let newID {
                 focusInDetail = false
                 selectedRowID = newID
             } else {
                 focusInDetail = true
-                DispatchQueue.main.async { resetFocus(in: detailScope) }
             }
         }
         .focusScope(masterScope)
@@ -171,9 +166,9 @@ struct SettingsSplitLayout: View {
 
     private func masterRow(_ row: SettingsSplitRow) -> some View {
         Button {
-            // Select drills into the detail pane and lands on its top control.
+            // Tapping a row just pins it as the live selection; press right to
+            // drill focus into its control in the detail pane.
             selectedRowID = row.id
-            resetFocus(in: detailScope)
         } label: {
             SettingsMasterRowLabel(row: row, isSelected: selectedRowID == row.id)
         }
@@ -221,7 +216,6 @@ struct SettingsSplitLayout: View {
         // Cross-fade the control as the live selection changes while the user
         // scrolls the list, so the pane updates smoothly rather than snapping.
         .animation(.easeInOut(duration: 0.18), value: selectedRowID)
-        .focusScope(detailScope)
         .focusSection()
     }
 }

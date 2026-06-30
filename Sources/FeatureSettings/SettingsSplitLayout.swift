@@ -165,9 +165,9 @@ struct SettingsSplitLayout: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 if let row = selectedRow {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(row.title)
-                            .font(.title2.weight(.semibold))
+                            .font(.title3.weight(.semibold))
                         if let description = row.description {
                             Text(description)
                                 .font(.callout)

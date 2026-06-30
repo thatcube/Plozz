@@ -219,21 +219,33 @@ struct PlayerControls: View {
                 .padding(.top, 22)
                 .padding(.bottom, 12)
             Divider().background(.white.opacity(0.15))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    switch category {
-                    case .audioSubtitles: audioSubtitlesPane
-                    case .speed: speedPane
-                    case .sync: syncPane
-                    case .remux: remuxPane
+            if category == .audioSubtitles {
+                // Compact two-column card (Audio | Subtitles) — each side scrolls
+                // on its own only when long, so a big track list stays a tidy pair
+                // of columns instead of one giant scrolling wall.
+                audioSubtitlesPane
+                    .padding(.vertical, 10)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        switch category {
+                        case .speed: speedPane
+                        case .sync: syncPane
+                        case .remux: remuxPane
+                        case .audioSubtitles: EmptyView()
+                        }
                     }
+                    .padding(.vertical, 10)
                 }
-                .padding(.vertical, 10)
+                .frame(maxHeight: 440)
             }
-            .frame(maxHeight: 440)
         }
-        .frame(width: 760, alignment: .leading)
-        .background(.ultraThinMaterial)
+        .frame(width: category == .audioSubtitles ? 860 : 760, alignment: .leading)
+        // NB: deliberately a flat opaque fill, NOT `.ultraThinMaterial`. A live
+        // backdrop-blur material here re-blurs full-motion (often HDR) video every
+        // frame the panel is open, which tanks the whole UI on Apple TV. A solid
+        // colour is GPU-cheap and stays perfectly readable over video.
+        .background(Color.black.opacity(0.92))
         .colorScheme(.dark)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(radius: 24)
@@ -241,32 +253,109 @@ struct PlayerControls: View {
 
     @ViewBuilder
     private var audioSubtitlesPane: some View {
-        let rows = audioSubtitleRows
-        if rows.isEmpty {
+        let columns = audioSubtitleColumns
+        if columns.audio.isEmpty && columns.subtitles.isEmpty {
             emptyRow("No alternate tracks")
         } else {
-            ForEach(rows) { row in
-                if let header = row.header {
-                    sectionHeader(header)
+            HStack(alignment: .top, spacing: 0) {
+                if !columns.audio.isEmpty {
+                    trackColumn(title: "Audio", rows: columns.audio)
                 }
+                if !columns.audio.isEmpty && !columns.subtitles.isEmpty {
+                    Rectangle()
+                        .fill(.white.opacity(0.12))
+                        .frame(width: 1)
+                        .padding(.vertical, 6)
+                }
+                if !columns.subtitles.isEmpty {
+                    trackColumn(title: "Subtitles", rows: columns.subtitles)
+                }
+            }
+            .padding(.horizontal, 14)
+        }
+    }
+
+    /// One side of the Audio & Subtitles card. Short lists render inline (so a
+    /// 2-track column doesn't reserve a tall empty box); long lists get their own
+    /// scroller capped well under the panel height.
+    @ViewBuilder
+    private func trackColumn(title: String, rows: [TrackRow]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title.uppercased())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.5))
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 8)
+            if rows.count > 7 {
+                ScrollView {
+                    trackRowStack(rows).padding(.bottom, 6)
+                }
+                .frame(maxHeight: 360)
+            } else {
+                trackRowStack(rows)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func trackRowStack(_ rows: [TrackRow]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(rows) { row in
                 if row.isToggle {
-                    toggleRow(
-                        title: row.title,
-                        subtitle: row.subtitle,
-                        isOn: row.isSelected,
-                        index: row.id,
-                        action: row.action
-                    )
+                    compactToggleRow(row)
                 } else {
-                    selectableRow(
-                        title: row.title,
-                        isSelected: row.isSelected,
-                        index: row.id,
-                        action: row.action
-                    )
+                    compactSelectableRow(row)
                 }
             }
         }
+    }
+
+    private func compactSelectableRow(_ row: TrackRow) -> some View {
+        Button(action: row.action) {
+            HStack(spacing: 10) {
+                Text(row.title)
+                    .font(.body)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if row.isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(palette.accent)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($focus, equals: .row(row.id))
+    }
+
+    private func compactToggleRow(_ row: TrackRow) -> some View {
+        Button(action: row.action) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title).font(.body.weight(.medium)).lineLimit(1)
+                    if !row.subtitle.isEmpty {
+                        Text(row.subtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 8)
+                Image(systemName: row.isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .foregroundStyle(row.isSelected ? palette.accent : .secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($focus, equals: .row(row.id))
     }
 
     @ViewBuilder
@@ -516,14 +605,19 @@ struct PlayerControls: View {
         let action: () -> Void
     }
 
-    private var audioSubtitleRows: [TrackRow] {
-        var rows: [TrackRow] = []
+    /// Audio & Subtitles split into two independently-id'd columns. IDs stay
+    /// globally unique across both columns so each maps to a distinct `.row`
+    /// focus slot (audio first, then subtitles), which the tvOS focus engine
+    /// walks left↔right between columns.
+    private var audioSubtitleColumns: (audio: [TrackRow], subtitles: [TrackRow]) {
+        var audio: [TrackRow] = []
+        var subtitles: [TrackRow] = []
         var index = 0
         if model.hasSelectableAudio {
-            for (offset, option) in model.audioOptions.enumerated() {
-                rows.append(TrackRow(
+            for option in model.audioOptions {
+                audio.append(TrackRow(
                     id: index,
-                    header: offset == 0 ? "Audio" : nil,
+                    header: nil,
                     title: option.title,
                     subtitle: "",
                     isSelected: option.isSelected,
@@ -534,9 +628,9 @@ struct PlayerControls: View {
             }
         }
         if model.engineCapabilities.contains(.dialogEnhance) {
-            rows.append(TrackRow(
+            audio.append(TrackRow(
                 id: index,
-                header: model.hasSelectableAudio ? nil : "Audio",
+                header: nil,
                 title: "Dialog Enhance",
                 subtitle: "Boost speech clarity in loud mixes",
                 isSelected: model.dialogEnhanceEnabled,
@@ -546,10 +640,10 @@ struct PlayerControls: View {
             index += 1
         }
         if model.hasSelectableSubtitles {
-            for (offset, option) in model.subtitleOptions.enumerated() {
-                rows.append(TrackRow(
+            for option in model.subtitleOptions {
+                subtitles.append(TrackRow(
                     id: index,
-                    header: offset == 0 ? "Subtitles" : nil,
+                    header: nil,
                     title: option.title,
                     subtitle: "",
                     isSelected: option.isSelected,
@@ -559,7 +653,7 @@ struct PlayerControls: View {
                 index += 1
             }
         }
-        return rows
+        return (audio, subtitles)
     }
 
     private var remuxStrategyRows: [TrackRow] {
@@ -587,8 +681,9 @@ struct PlayerControls: View {
     private func selectedRowIndex(for category: Category) -> Int {
         switch category {
         case .audioSubtitles:
-            return audioSubtitleRows.first(where: { $0.isSelected })?.id
-                ?? audioSubtitleRows.first?.id ?? 0
+            let all = audioSubtitleColumns.audio + audioSubtitleColumns.subtitles
+            return all.first(where: { $0.isSelected })?.id
+                ?? all.first?.id ?? 0
         case .speed:
             return Self.speedPresets.firstIndex(where: { abs(model.playbackSpeed - $0) < 0.001 }) ?? 0
         case .sync:

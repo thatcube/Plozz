@@ -71,6 +71,12 @@ public final class NativeVideoEngine: VideoEngine {
     public var onProgress: (@MainActor () -> Void)?
     public var onFailure: (@MainActor (AppError) -> Void)?
     public var onEnded: (@MainActor () -> Void)?
+    /// Native tracks are known synchronously and AVPlayer draws its own
+    /// subtitles (legible group) / Plozz draws sidecar cues via the VM, so the
+    /// native engine never fires either of these. Declared to satisfy the
+    /// protocol.
+    public var onTracksChanged: (@MainActor () -> Void)?
+    public var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 
     // MARK: Configuration
 

@@ -338,6 +338,19 @@ public final class PlayerViewModel {
         engine.onEnded = { [weak self] in
             self?.handlePlaybackEnded()
         }
+        // Engines that discover tracks asynchronously (Plozzigen) tell us to
+        // rebuild the options menu once their lists arrive — otherwise the menu,
+        // built once at playResolved, stays empty for the whole session.
+        engine.onTracksChanged = { [weak self] in
+            self?.loadTrackOptions()
+        }
+        // Engines that decode subtitles themselves (Plozzigen) push their active
+        // cues here; the live overlay model draws them on the same SDR renderer as
+        // native. Guarded by live-feed mode inside the model, so it's inert unless
+        // a Plozzigen subtitle is actually selected.
+        engine.onSubtitleCues = { [weak self] cues in
+            self?.liveSubtitles.updateLiveCues(cues)
+        }
     }
 
     /// Called when the active engine reports a clean playthrough to the end of the
@@ -1481,9 +1494,15 @@ public final class PlayerViewModel {
             return
         }
 
-        // Other engines (hybrid/Plozzigen) keep drawing the track themselves for
-        // now; routing their cues through the overlay too is a later step.
-        clearOverlaySubtitle()
+        // Plozzigen (AetherEngine) decodes the selected subtitle and publishes its
+        // active cues; route them through Plozz's owned overlay (live-feed mode)
+        // so text *and* bitmap subs draw on the same SDR renderer as native. The
+        // `onSubtitleCues` callback (wired in configureEngineCallbacks) does the
+        // feeding. Other engines that draw their own subs (mpv) get an empty live
+        // feed and keep drawing themselves — harmless.
+        subtitleCueLoadTask?.cancel()
+        subtitleCueLoadTask = nil
+        liveSubtitles.beginLiveFeed()
         engine.selectSubtitleTrack(track)
         selectedSubtitleTrackID = id
         loadTrackOptions()

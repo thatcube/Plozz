@@ -199,6 +199,25 @@ public protocol VideoEngine: AnyObject {
     /// main actor.
     var onEnded: (@MainActor () -> Void)? { get set }
 
+    /// Fired when the engine's selectable track lists (`audioTracks` /
+    /// `subtitleTracks`) change *after* load — for engines that discover tracks
+    /// asynchronously (AetherEngine publishes them via Combine once its demuxer
+    /// has probed the source). The owner re-reads the lists and rebuilds its
+    /// options menu, so a track list that arrives a beat after playback starts no
+    /// longer leaves the menu empty. Engines whose tracks are known synchronously
+    /// at load never fire it. Invoked on the main actor.
+    var onTracksChanged: (@MainActor () -> Void)? { get set }
+
+    /// Fired with the engine's decoded subtitle cues for engines that decode
+    /// subtitles themselves and want Plozz's owned overlay to draw them rather than
+    /// drawing their own. AetherEngine emits text *and* bitmap cues here. NOTE:
+    /// this is the engine's decoded *read-ahead* buffer (not just the on-screen
+    /// line), so the owner must time-filter it against the playhead before
+    /// drawing — `LiveSubtitleModel` does this in its clock tick. Engines whose
+    /// subtitles are drawn elsewhere — the AVPlayer legible group, an mpv overlay,
+    /// or a parsed sidecar timeline — never fire it. Invoked on the main actor.
+    var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)? { get set }
+
     // MARK: View
 
     #if canImport(UIKit)

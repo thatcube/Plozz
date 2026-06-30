@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreGraphics
 import CoreModels
+import CoreNetworking
 
 /// The live bridge between parsed subtitle cues and the owned
 /// ``SubtitleOverlayView`` during real playback.
@@ -37,12 +38,26 @@ public final class LiveSubtitleModel {
     @ObservationIgnored private var primaryTimeline: SubtitleCueTimeline?
     @ObservationIgnored private var secondaryTimeline: SubtitleCueTimeline?
     @ObservationIgnored private var storedOffset: Double = 0
+    /// `true` when an engine pushes its own already-windowed active cues
+    /// (AetherEngine/Plozzigen) instead of us driving a sidecar timeline. In this
+    /// mode there is no `SubtitleCueTimeline` and ``tick(_:)`` time-filters the
+    /// pushed buffer — the engine emits the decoded *read-ahead* cue set (not just
+    /// the on-screen line), so the model selects the cues active at the playhead.
+    @ObservationIgnored private var isLiveFeed = false
+    /// The full decoded cue buffer most recently pushed by a live engine feed.
+    @ObservationIgnored private var liveCues: [SubtitleCue] = []
+    /// IDs of the currently-seated live cues, so we only republish `primary` when
+    /// the active set actually changes (not every 60 Hz tick).
+    @ObservationIgnored private var liveActiveIDs: [Int] = []
+    /// Last clock value seen by ``tick(_:)``, so a fresh ``updateLiveCues(_:)``
+    /// push can re-seat against the current playhead between ticks.
+    @ObservationIgnored private var lastTickTime: Double = 0
 
     public init() {}
 
-    /// `true` when a primary (or secondary) cue stream is loaded, so the host can
-    /// decide whether the overlay needs to be driven at all.
-    public var hasContent: Bool { primaryTimeline != nil || secondaryTimeline != nil }
+    /// `true` when a primary (or secondary) cue stream is loaded, or an engine is
+    /// live-feeding cues, so the host can decide whether the overlay needs driving.
+    public var hasContent: Bool { primaryTimeline != nil || secondaryTimeline != nil || isLiveFeed }
 
     /// Global sync offset in seconds (positive = show subtitles later). Applied to
     /// both tracks and forces the next ``tick(_:)`` to recompute.
@@ -58,12 +73,48 @@ public final class LiveSubtitleModel {
     /// Loads (or, with `nil`, clears) the primary cue stream. The on-screen set is
     /// reset to empty until the next ``tick(_:)`` seats the active cues.
     public func loadPrimary(_ stream: SubtitleCueStream?) {
+        isLiveFeed = false
         if let stream {
             primaryTimeline = SubtitleCueTimeline(stream: stream, offset: storedOffset)
         } else {
             primaryTimeline = nil
         }
         primary = []
+    }
+
+    /// Switches the model into **live-feed** mode: drops any sidecar timeline and
+    /// lets an engine push its decoded cue buffer via ``updateLiveCues(_:)``, which
+    /// ``tick(_:)`` then time-filters against the playhead. Used by Plozzigen
+    /// (AetherEngine), which decodes subtitles itself.
+    public func beginLiveFeed() {
+        isLiveFeed = true
+        primaryTimeline = nil
+        secondaryTimeline = nil
+        liveCues = []
+        liveActiveIDs = []
+        primary = []
+        secondary = []
+    }
+
+    /// Replaces the live cue buffer from an engine feed and re-seats the on-screen
+    /// set against the current playhead. No-op unless ``beginLiveFeed()`` is
+    /// active, so a stray late callback can't draw over a sidecar timeline or a
+    /// cleared overlay.
+    public func updateLiveCues(_ cues: [SubtitleCue]) {
+        guard isLiveFeed else { return }
+        liveCues = cues
+        recomputeLiveActive(at: lastTickTime)
+    }
+
+    /// Seats the live cues visible at `time` (engine playhead), republishing
+    /// `primary` only when the active set changes.
+    private func recomputeLiveActive(at time: Double) {
+        let active = liveCues.active(at: time, offset: storedOffset)
+        let ids = active.map(\.id)
+        if ids != liveActiveIDs {
+            liveActiveIDs = ids
+            primary = active
+        }
     }
 
     /// Loads (or clears) the secondary/dual cue stream.
@@ -78,8 +129,11 @@ public final class LiveSubtitleModel {
 
     /// Drops all cue streams and clears the screen.
     public func clear() {
+        isLiveFeed = false
         primaryTimeline = nil
         secondaryTimeline = nil
+        liveCues = []
+        liveActiveIDs = []
         primary = []
         secondary = []
     }
@@ -87,7 +141,14 @@ public final class LiveSubtitleModel {
     /// Advance to playback `time` (seconds). Republishes the active cues for a
     /// track only when its on-screen set changes, so a 60 Hz call is cheap.
     public func tick(_ time: Double) {
-        if let p = primaryTimeline, p.update(to: time) { primary = p.active }
+        lastTickTime = time
+        if isLiveFeed {
+            recomputeLiveActive(at: time)
+            return
+        }
+        if let p = primaryTimeline, p.update(to: time) {
+            primary = p.active
+        }
         if let s = secondaryTimeline, s.update(to: time) { secondary = s.active }
     }
 }

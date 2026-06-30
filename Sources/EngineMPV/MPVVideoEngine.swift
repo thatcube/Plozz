@@ -95,6 +95,11 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     public var onProgress: (@MainActor () -> Void)?
     public var onFailure: (@MainActor (AppError) -> Void)?
     public var onEnded: (@MainActor () -> Void)?
+    /// mpv discovers its tracks synchronously after load and renders its own
+    /// subtitle overlay, so it fires neither of these. Declared to satisfy the
+    /// protocol.
+    public var onTracksChanged: (@MainActor () -> Void)?
+    public var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 
     // MARK: Configuration
 

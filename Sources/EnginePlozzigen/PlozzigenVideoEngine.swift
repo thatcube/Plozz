@@ -70,6 +70,13 @@ public final class PlozzigenVideoEngine: VideoEngine {
     public var onProgress: (@MainActor () -> Void)?
     public var onFailure: (@MainActor (AppError) -> Void)?
     public var onEnded: (@MainActor () -> Void)?
+    /// Fired after `syncTracks()` re-reads AetherEngine's async-published track
+    /// lists, so the VM can repopulate its (otherwise-empty-at-load) options menu.
+    public var onTracksChanged: (@MainActor () -> Void)?
+    /// Fired with AetherEngine's decoded subtitle cues (text + bitmap), mapped to
+    /// Plozz's cue model, so the owned overlay draws them. This is the decoded
+    /// read-ahead buffer — the host time-filters it against the playhead.
+    public var onSubtitleCues: (@MainActor ([CoreModels.SubtitleCue]) -> Void)?
 
     // MARK: - Private
 
@@ -244,6 +251,42 @@ public final class PlozzigenVideoEngine: VideoEngine {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.syncTracks() }
             .store(in: &cancellables)
+
+        // Bridge AetherEngine's decoded cues into Plozz's owned overlay.
+        // AetherEngine publishes its decoded *read-ahead* cue buffer (text +
+        // bitmap) — not just the on-screen line — so `LiveSubtitleModel` filters it
+        // by the playhead before drawing. Without this bridge, a selected
+        // Plozzigen subtitle decodes but nothing is ever rendered — the "no
+        // subtitles on Plozzigen" bug.
+        engine.$subtitleCues
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] cues in
+                guard let self else { return }
+                // Map AetherEngine cues → Plozz's cue model inline so the
+                // element type is inferred (the module and the engine class share
+                // the name `AetherEngine`, so naming `AetherEngine.SubtitleCue`
+                // explicitly is ambiguous here).
+                let mapped: [CoreModels.SubtitleCue] = cues.map { cue in
+                    let body: CoreModels.SubtitleCue.Body
+                    switch cue.body {
+                    case .text(let string):
+                        body = .text(CoreModels.SubtitleText(string))
+                    case .image(let image):
+                        body = .image(CoreModels.SubtitleImage(
+                            cgImage: image.cgImage,
+                            normalizedRect: image.position
+                        ))
+                    }
+                    return CoreModels.SubtitleCue(
+                        id: cue.id,
+                        start: cue.startTime,
+                        end: cue.endTime,
+                        body: body
+                    )
+                }
+                self.onSubtitleCues?(mapped)
+            }
+            .store(in: &cancellables)
     }
 
     private func startProgressTimer() {
@@ -276,6 +319,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 isDefault: track.isDefault
             )
         }
+        // Tracks arrive asynchronously (Combine) after `loadTrackOptions()` has
+        // already run once at playResolved, so tell the VM to rebuild the menu now
+        // that the lists are populated — otherwise the subtitle/audio menu is
+        // empty for the whole session.
+        onTracksChanged?()
     }
 }
 

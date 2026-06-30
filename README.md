@@ -19,6 +19,7 @@
 Servers & sign-in:
 
 - **Jellyfin or Plex** — one experience over either backend; Home, detail, and playback work the same.
+- **Multiple servers, one library** — connect several Jellyfin and Plex servers; Home and libraries merge into a single view.
 - **Auto-discovery** — finds Jellyfin servers on your LAN (UDP), with manual URL entry as a fallback.
 - **Remote-free sign-in** — Jellyfin **Quick Connect** and Plex **Link**: enter a code, no password typing.
 - **Persistent session** — relaunch restores your login. Tokens live in the Keychain and are never logged.
@@ -29,17 +30,20 @@ Browse & detail:
 - **Detail pages** — full-bleed backdrop, logo, overview, ratings, and a Play/Resume button.
 - **Series** — focus-driven season tabs and an episode rail, with per-episode watched badges and "mark watched up to here."
 - **Trailers** — plays library trailers, with a TMDb → YouTube fallback when the server has none.
+- **Music** — browse artists and albums with a mini-player, queue, and background audio.
 
 Playback:
 
 - **Direct play first** — `AVPlayer` plays what it can; tricky formats (AV1, some HEVC/10-bit, image-based PGS/VOBSUB subtitles) route to an on-device engine automatically.
 - **Resume** — position is restored and reported back to the server.
+- **Skip intros & credits** — skip buttons appear automatically from your server's media segments.
 - **Track selection** — audio and subtitles when available.
 - **Caption customization** — font, size, color, opacity, background, and edge style.
 
 Appearance:
 
-- **Themes** — System, Dark, OLED, and Light.
+- **Themes & display size** — System, Dark, OLED, and Light, plus adjustable interface sizing.
+- **Night mode** — warms the display on a schedule to cut blue light at night.
 - **Profiles** — multiple local profiles with their own settings.
 
 ## Architecture

@@ -114,6 +114,15 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
                 return palette.secondaryText
             }
 
+            // Selection wears a subtle neutral fill (no colour) so the chosen
+            // segment reads as a soft inset chip even from across the room; the
+            // focus thumb still overrides it as the bright theme-aware highlight.
+            private var segmentFill: Color {
+                if isFocused { return focusThumbFill }
+                if isSelected { return palette.primaryText.opacity(0.14) }
+                return .clear
+            }
+
             var body: some View {
                 configuration.label
                     .font(.headline.weight(isFocused || isSelected ? .semibold : .regular))
@@ -122,7 +131,7 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
                     .padding(.vertical, 12)
                     .background {
                         Capsule(style: .continuous)
-                            .fill(isFocused ? focusThumbFill : .clear)
+                            .fill(segmentFill)
                             .shadow(
                                 color: .black.opacity(isFocused ? 0.25 : 0),
                                 radius: isFocused ? 8 : 0,
@@ -131,6 +140,7 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
                     }
                     .scaleEffect(configuration.isPressed ? 0.97 : (isFocused ? 1.04 : 1.0))
                     .animation(.easeOut(duration: 0.16), value: isFocused)
+                    .animation(.easeOut(duration: 0.16), value: isSelected)
                     .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
             }
         }

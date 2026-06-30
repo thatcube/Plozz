@@ -181,13 +181,18 @@ public struct LRCLIBLyricsProvider: Sendable {
     }
 
     /// Strips trailing/embedded `(...)` and `[...]` groups and `feat.`/`ft.`
-    /// segments so a verbose store title collapses to the core song name.
+    /// segments so a verbose store title collapses to the core song name. The
+    /// `\b` word boundary before `feat`/`ft` is load-bearing: without it the
+    /// pattern matches *inside* ordinary words that merely end in those letters
+    /// (e.g. "Soft Rock" → "So", "Lift Me Up" → "Li", "Defeat the Villain" →
+    /// "De"), spawning a garbage second query that wastes rate-limited requests
+    /// and can even match a different same-artist song.
     static func cleanedTitle(_ title: String) -> String {
         var result = title
         result = result.replacingOccurrences(of: "\\([^)]*\\)", with: "", options: .regularExpression)
         result = result.replacingOccurrences(of: "\\[[^\\]]*\\]", with: "", options: .regularExpression)
-        result = result.replacingOccurrences(of: "(?i)\\s*[-–—]?\\s*feat\\.?\\s.*$", with: "", options: .regularExpression)
-        result = result.replacingOccurrences(of: "(?i)\\s*[-–—]?\\s*ft\\.?\\s.*$", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "(?i)\\s*[-–—]?\\s*\\bfeat\\.?\\s.*$", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "(?i)\\s*[-–—]?\\s*\\bft\\.?\\s.*$", with: "", options: .regularExpression)
         result = result.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }

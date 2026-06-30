@@ -299,7 +299,14 @@ final class PlayerInputViewController: UIViewController {
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 self?.refreshFromEngine()
-                try? await Task.sleep(nanoseconds: 300_000_000)
+                // Poll fast while a committed seek is settling so the bar
+                // releases its optimistic pin and resumes mirroring engine time
+                // the instant the seek lands — that's what makes a seek feel like
+                // it "sticks" immediately. Relax to a cheaper cadence during
+                // steady playback, where a tighter loop buys nothing.
+                let settling = (self?.model.pendingSeekTarget != nil)
+                let interval: UInt64 = settling ? 60_000_000 : 250_000_000
+                try? await Task.sleep(nanoseconds: interval)
             }
         }
     }
@@ -320,8 +327,13 @@ final class PlayerInputViewController: UIViewController {
             // entire fix for the "press right → snap back" feel: a poll arriving
             // between the optimistic update and the engine catching up would
             // otherwise overwrite `currentSeconds` with the stale pre-seek time.
-            // Once the engine's position is within tolerance, release.
-            if abs(engineTime - pending) < 0.75 {
+            // Once the engine's position is within tolerance, release. The
+            // window must exceed the engine's `.exact` seek tolerance (1s): a
+            // seek can legally land up to 1s *ahead* of the target by snapping to
+            // the next keyframe, and a tighter window than that would leave the
+            // bar pinned forever in that case. A real seek jump is many seconds,
+            // so this stays comfortably clear of a false early release.
+            if abs(engineTime - pending) < 1.25 {
                 model.pendingSeekTarget = nil
                 model.currentSeconds = engineTime
             }

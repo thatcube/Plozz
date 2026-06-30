@@ -270,14 +270,6 @@ private struct StyledCueText: View {
 
     var body: some View {
         content
-            .padding(.horizontal, style.background.isEnabled ? style.background.horizontalPadding : 0)
-            .padding(.vertical, style.background.isEnabled ? style.background.verticalPadding : 0)
-            .background {
-                if style.background.isEnabled {
-                    RoundedRectangle(cornerRadius: style.background.cornerRadius, style: .continuous)
-                        .fill(style.background.color.swiftUIColor)
-                }
-            }
     }
 
     @ViewBuilder
@@ -292,8 +284,20 @@ private struct StyledCueText: View {
             outline: outlineUIColor,
             outlineWidth: visibleOutlineWidth,
             shadow: shadowSpec,
+            background: backgroundSpec,
             alignment: nsAlignment
         )
+    }
+
+    /// The rounded background box, drawn inside the renderer so it hugs the text
+    /// box at the user's padding while big outlines/shadows can overflow freely.
+    private var backgroundSpec: SubtitleBackgroundSpec? {
+        guard style.background.isEnabled else { return nil }
+        return SubtitleBackgroundSpec(
+            color: uiColor(style.background.color),
+            cornerRadius: style.background.cornerRadius,
+            horizontalPadding: style.background.horizontalPadding,
+            verticalPadding: style.background.verticalPadding)
     }
 
     /// Colour of the uniform outline (explicit border wins over a `.uniform` edge).

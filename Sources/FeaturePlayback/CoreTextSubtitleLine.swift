@@ -12,6 +12,17 @@ struct SubtitleShadowSpec: Equatable {
     var color: UIColor
 }
 
+/// An optional rounded background box drawn *behind* one subtitle line. It is
+/// rendered inside ``CoreTextSubtitleLine`` (not as a SwiftUI `.background`) so it
+/// hugs the text box at the user's padding while the view itself can extend well
+/// past it for big outlines/shadows without clipping or a loose-looking box.
+struct SubtitleBackgroundSpec: Equatable {
+    var color: UIColor
+    var cornerRadius: CGFloat
+    var horizontalPadding: CGFloat
+    var verticalPadding: CGFloat
+}
+
 /// SwiftUI wrapper around a Core Text **glyph-path** subtitle line.
 ///
 /// Outlines are drawn with the canonical **stroke-behind / fill-on-top**
@@ -39,6 +50,7 @@ struct CoreTextSubtitleLine: UIViewRepresentable {
     /// Visible outline width in points (the renderer strokes at 2× this).
     let outlineWidth: CGFloat
     let shadow: SubtitleShadowSpec?
+    let background: SubtitleBackgroundSpec?
     let alignment: NSTextAlignment
 
     func makeUIView(context: Context) -> SubtitleLineView { SubtitleLineView() }
@@ -48,7 +60,7 @@ struct CoreTextSubtitleLine: UIViewRepresentable {
             text: text, family: family, fontSize: fontSize,
             isBold: isBold, isItalic: isItalic,
             fill: fill, outline: outline, outlineWidth: outlineWidth,
-            shadow: shadow, alignment: alignment))
+            shadow: shadow, background: background, alignment: alignment))
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: SubtitleLineView, context: Context) -> CGSize? {
@@ -73,13 +85,22 @@ final class SubtitleLineView: UIView {
         var outline: UIColor?
         var outlineWidth: CGFloat
         var shadow: SubtitleShadowSpec?
+        var background: SubtitleBackgroundSpec?
         var alignment: NSTextAlignment
     }
 
     private struct Layout {
         var path: CGPath          // combined glyph outline, positioned in flipped coords
-        var totalSize: CGSize     // text size + outline/shadow insets
+        var totalSize: CGSize     // text size + outline/shadow/background insets
         var colorGlyphs: [ColorGlyph]  // emoji / colour glyphs (no vector path) drawn on top
+        var background: BackgroundFill?  // rounded box hugging the text, drawn first
+    }
+
+    /// A resolved background box in the line's flipped drawing coordinates.
+    private struct BackgroundFill {
+        var rect: CGRect
+        var color: UIColor
+        var cornerRadius: CGFloat
     }
 
     /// A colour/bitmap glyph (e.g. emoji) that exposes no vector outline and so
@@ -150,6 +171,16 @@ final class SubtitleLineView: UIView {
 
         let path = l.path
 
+        // 0. Background box: drawn first so the shadow, outline and fill all sit
+        //    on top. It hugs the text at the user's padding regardless of how far
+        //    the outline/shadow overflow extends the view bounds.
+        if let bg = l.background {
+            let box = UIBezierPath(roundedRect: bg.rect, cornerRadius: bg.cornerRadius).cgPath
+            ctx.addPath(box)
+            ctx.setFillColor(bg.color.cgColor)
+            ctx.fillPath()
+        }
+
         // 1. Soft shadow: fill the glyph silhouette with a live shadow so the
         //    blurred/offset copy shows behind everything else.
         if let sh = c.shadow {
@@ -196,40 +227,99 @@ final class SubtitleLineView: UIView {
     // MARK: - Layout
 
     private func buildLayout(_ c: Config, maxWidth: CGFloat) -> Layout {
-        let ins = insets(for: c)
         let font = makeCTFont(c)
         let attr = makeAttributed(c, font: font)
         let fs = CTFramesetterCreateWithAttributedString(attr)
 
-        let textMax = max(1, maxWidth - ins.left - ins.right)
+        // How far drawing reaches beyond the glyph ink, per side: the outline is
+        // stroked at 2× width centred on the contour, so it extends `outlineWidth`
+        // outward; the shadow extends by its blur plus its directional offset; and
+        // a generous margin (scaled with the font) absorbs glyph ink that spills
+        // past the typographic box — italic lean, CJK/accent side bearings — and
+        // gives big borders/shadows room so they are never clipped.
+        let strokeOut = max(0, c.outlineWidth)
+        let sh = shadowOutsets(c)
+        let margin = max(ceil(c.fontSize * 0.2), 8)
+        let padL = strokeOut + sh.left + margin
+        let padR = strokeOut + sh.right + margin
+        let padT = strokeOut + sh.top + margin
+        let padB = strokeOut + sh.bottom + margin
+
+        // Reserve the horizontal pad so a full-width line plus its overflow still
+        // fits the proposed width (the view never has to exceed `maxWidth`).
+        let textMax = max(1, maxWidth - padL - padR)
         var fitRange = CFRange()
         let suggested = CTFramesetterSuggestFrameSizeWithConstraints(
             fs, CFRange(location: 0, length: attr.length), nil,
             CGSize(width: textMax, height: .greatestFiniteMagnitude), &fitRange)
         let textSize = CGSize(width: ceil(min(suggested.width, textMax)),
                               height: ceil(suggested.height))
-        let total = CGSize(width: textSize.width + ins.left + ins.right,
-                           height: textSize.height + ins.top + ins.bottom)
 
-        // Frame path placed so the text box sits inset from the bottom-left; in
-        // flipped coords the box bottom is at y = ins.bottom.
-        let boxRect = CGRect(x: ins.left, y: ins.bottom, width: textSize.width, height: textSize.height)
-        let framePath = CGPath(rect: boxRect, transform: nil)
-        let frame = CTFramesetterCreateFrame(fs, CFRange(location: 0, length: attr.length), framePath, nil)
+        // Lay the text out at the origin, then read the *actual* ink bounds.
+        let boxRect = CGRect(origin: .zero, size: textSize)
+        let frame = CTFramesetterCreateFrame(
+            fs, CFRange(location: 0, length: attr.length),
+            CGPath(rect: boxRect, transform: nil), nil)
+        let (rawPath, rawColorGlyphs) = Self.combinedGlyphPath(frame: frame)
 
-        let (glyphPath, colorGlyphs) = Self.combinedGlyphPath(frame: frame)
-        return Layout(path: glyphPath, totalSize: total, colorGlyphs: colorGlyphs)
+        // Real drawn extent = the typographic box unioned with the vector-glyph
+        // ink and any colour-glyph (emoji) boxes. Glyph ink routinely exceeds the
+        // advance box, which is the root cause of the edge clipping.
+        var ink = boxRect
+        if !rawPath.isEmpty { ink = ink.union(rawPath.boundingBoxOfPath) }
+        for cg in rawColorGlyphs {
+            var g = cg.glyph
+            var b = CGRect.zero
+            CTFontGetBoundingRectsForGlyphs(cg.font, .default, &g, &b, 1)
+            if !b.isNull, b.width > 0, b.height > 0 {
+                ink = ink.union(b.offsetBy(dx: cg.position.x, dy: cg.position.y))
+            }
+        }
+
+        // Grow the ink by the per-side reach to get the full drawn rect, union in
+        // the optional background box (which hugs the text box at the user's
+        // padding), then shift everything so the result starts at the origin.
+        var drawn = CGRect(
+            x: ink.minX - padL,
+            y: ink.minY - padB,                       // flipped coords: bottom = min y
+            width:  ink.width  + padL + padR,
+            height: ink.height + padT + padB)
+        var bgPre: CGRect?
+        if let bg = c.background {
+            let r = boxRect.insetBy(dx: -bg.horizontalPadding, dy: -bg.verticalPadding)
+            bgPre = r
+            drawn = drawn.union(r)
+        }
+        var shift = CGAffineTransform(translationX: -drawn.minX, y: -drawn.minY)
+        let path = rawPath.copy(using: &shift) ?? rawPath
+        let colorGlyphs = rawColorGlyphs.map {
+            ColorGlyph(font: $0.font, glyph: $0.glyph,
+                       position: CGPoint(x: $0.position.x - drawn.minX,
+                                         y: $0.position.y - drawn.minY))
+        }
+        var background: BackgroundFill?
+        if let bg = c.background, let r = bgPre {
+            background = BackgroundFill(
+                rect: r.offsetBy(dx: -drawn.minX, dy: -drawn.minY),
+                color: bg.color, cornerRadius: bg.cornerRadius)
+        }
+        return Layout(path: path,
+                      totalSize: CGSize(width: ceil(drawn.width), height: ceil(drawn.height)),
+                      colorGlyphs: colorGlyphs,
+                      background: background)
     }
 
-    /// Symmetric padding so the outer outline and the shadow never clip.
-    private func insets(for c: Config) -> UIEdgeInsets {
-        let o = max(0, c.outlineWidth)
-        var shadowExtent: CGFloat = 0
-        if let sh = c.shadow {
-            shadowExtent = sh.blur + max(abs(sh.offset.width), abs(sh.offset.height))
-        }
-        let pad = ceil(o + shadowExtent) + 3
-        return UIEdgeInsets(top: pad, left: pad, bottom: pad, right: pad)
+    /// How far the soft shadow reaches beyond the glyph ink on each side. `draw`
+    /// negates the vertical offset (UIKit→Core Text flip), so a positive
+    /// `offset.height` pushes the shadow toward the view's bottom.
+    private func shadowOutsets(_ c: Config) -> UIEdgeInsets {
+        guard let sh = c.shadow else { return .zero }
+        let blur = max(0, sh.blur)
+        return UIEdgeInsets(
+            top:    blur + max(0, -sh.offset.height),
+            left:   blur + max(0, -sh.offset.width),
+            bottom: blur + max(0,  sh.offset.height),
+            right:  blur + max(0,  sh.offset.width))
     }
 
     private static func combinedGlyphPath(frame: CTFrame) -> (CGPath, [ColorGlyph]) {
@@ -305,6 +395,16 @@ final class SubtitleLineView: UIView {
         let baseDescriptor: CTFontDescriptor
         if let ps = postScriptName(c) {
             baseDescriptor = CTFontDescriptorCreateWithNameAndSize(ps as CFString, size)
+            #if DEBUG
+            // Core Text silently substitutes a fallback when a named font isn't
+            // registered, so a missing UIAppFonts entry / unbundled face would
+            // render every cue in the wrong font with no error. Surface it.
+            let resolved = CTFontCopyPostScriptName(
+                CTFontCreateWithFontDescriptor(baseDescriptor, size, nil)) as String
+            if resolved.caseInsensitiveCompare(ps) != .orderedSame {
+                print("⚠️ [Subtitle] requested font '\(ps)' but Core Text resolved '\(resolved)' — check UIAppFonts + that the TTF is bundled; subtitles are NOT using the intended face.")
+            }
+            #endif
         } else {
             var ui = UIFont.systemFont(ofSize: size, weight: c.isBold ? .heavy : .semibold)
             if c.isItalic,

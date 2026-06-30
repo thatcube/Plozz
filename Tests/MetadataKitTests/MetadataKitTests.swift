@@ -44,6 +44,15 @@ final class MetadataKitTests: XCTestCase {
         XCTAssertEqual(ContentClassifier.classify(item(kind: .episode)), .tvShow)
     }
 
+    func testOriginalAudioLanguageHeuristic() {
+        // Anime → Japanese original; everything else is unknown (nil) so the
+        // prefer-original policy defers to the container default.
+        XCTAssertEqual(ContentClassifier.originalAudioLanguage(for: item(providerIDs: ["AniList": "21"])), "ja")
+        XCTAssertEqual(ContentClassifier.originalAudioLanguage(for: item(genres: ["Anime"])), "ja")
+        XCTAssertNil(ContentClassifier.originalAudioLanguage(for: item(kind: .movie, providerIDs: ["Tmdb": "1"])))
+        XCTAssertNil(ContentClassifier.originalAudioLanguage(for: item(kind: .episode)))
+    }
+
     func testAnimeIDsExtraction() {
         let ids = AnimeIDs(from: item(providerIDs: ["AniList": "21", "MyAnimeList": "20", "AniDB": "5"]))
         XCTAssertEqual(ids.anilist, 21)

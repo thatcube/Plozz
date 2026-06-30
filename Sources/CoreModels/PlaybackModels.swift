@@ -273,6 +273,16 @@ public struct PlaybackRequest: Hashable, Sendable {
     public var sourceProvider: ProviderKind?
     /// Friendly name of the media server (e.g. "Allie's Jellyfin", "Living Room").
     public var serverName: String?
+    /// Ordered ISO-639 audio languages to steer the engine's INITIAL active audio
+    /// track at load (AetherEngine `LoadOptions.preferredAudioLanguages` — first
+    /// match wins, no reload). Computed by `PlayerViewModel` from per-series
+    /// memory / prefer-original-language policy just before `engine.load`. Empty =
+    /// express no preference (engine uses the container default). Not part of the
+    /// memberwise init so the many provider construction sites stay untouched.
+    public var preferredAudioLanguages: [String] = []
+    /// Ordered ISO-639 subtitle languages to steer the engine's initial subtitle
+    /// selection at load, the subtitle counterpart to `preferredAudioLanguages`.
+    public var preferredSubtitleLanguages: [String] = []
 
     public init(
         item: MediaItem,

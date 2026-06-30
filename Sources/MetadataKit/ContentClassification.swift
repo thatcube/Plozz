@@ -73,6 +73,18 @@ public enum ContentClassifier {
         let labels = (item.genres + item.tags).map { $0.lowercased() }
         return labels.contains { label in animeLabels.contains { label.contains($0) } }
     }
+
+    /// Best-effort ORIGINAL audio language (ISO-639, lowercased) for the
+    /// "prefer original language" audio policy. Providers expose no explicit
+    /// original-language field today, so this is heuristic: anime is
+    /// overwhelmingly Japanese-original, so `.anime` → `"ja"`. Everything else
+    /// returns `nil`, letting the caller defer to the container's default track
+    /// (the best available proxy for "original"). Seam: fill from real
+    /// provider/TMDB `original_language` metadata here for live-action foreign
+    /// films later.
+    public static func originalAudioLanguage(for item: MediaItem) -> String? {
+        classify(item) == .anime ? "ja" : nil
+    }
 }
 
 /// The anime-database identifiers extracted from a ``MediaItem``'s provider ids,

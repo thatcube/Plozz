@@ -25,16 +25,40 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     /// integration and keeps scrobbling either way.
     public var syncWatchAcrossServers: Bool
 
+    /// Prefer the **original-language** audio track by default (e.g. Japanese for
+    /// anime) rather than pushing the viewer's device language (which favors
+    /// dubs). When on and the item's original language is known, that language is
+    /// requested at load; when unknown, playback defers to the container's default
+    /// track (the best available proxy for "original"). ON by default — the
+    /// maintainer's primary user watches mostly anime and wants subbed originals.
+    public var preferOriginalLanguageAudio: Bool
+
+    /// Remember the chosen **audio language** per series: switching audio on any
+    /// episode makes that language stick for every other episode of that series
+    /// (per profile). Stored by language, re-resolved to a concrete track per
+    /// episode. ON by default (mirrors Plex/Jellyfin).
+    public var rememberAudioTrackPerSeries: Bool
+
+    /// Remember the chosen **subtitle language (or Off)** per series, the subtitle
+    /// counterpart to `rememberAudioTrackPerSeries`. ON by default.
+    public var rememberSubtitleTrackPerSeries: Bool
+
     public init(
         skipIntros: SkipIntrosMode = .off,
         skipBackwardInterval: SkipInterval = .ten,
         skipForwardInterval: SkipInterval = .ten,
-        syncWatchAcrossServers: Bool = true
+        syncWatchAcrossServers: Bool = true,
+        preferOriginalLanguageAudio: Bool = true,
+        rememberAudioTrackPerSeries: Bool = true,
+        rememberSubtitleTrackPerSeries: Bool = true
     ) {
         self.skipIntros = skipIntros
         self.skipBackwardInterval = skipBackwardInterval
         self.skipForwardInterval = skipForwardInterval
         self.syncWatchAcrossServers = syncWatchAcrossServers
+        self.preferOriginalLanguageAudio = preferOriginalLanguageAudio
+        self.rememberAudioTrackPerSeries = rememberAudioTrackPerSeries
+        self.rememberSubtitleTrackPerSeries = rememberSubtitleTrackPerSeries
     }
 
     public static let `default` = PlaybackSettings()
@@ -48,6 +72,9 @@ public extension PlaybackSettings {
         case skipBackwardInterval
         case skipForwardInterval
         case syncWatchAcrossServers
+        case preferOriginalLanguageAudio
+        case rememberAudioTrackPerSeries
+        case rememberSubtitleTrackPerSeries
     }
 
     /// Decodes leniently so a payload written before a field existed (or in the
@@ -76,5 +103,14 @@ public extension PlaybackSettings {
         self.syncWatchAcrossServers =
             (try? container.decodeIfPresent(Bool.self, forKey: .syncWatchAcrossServers))
             .flatMap { $0 } ?? defaults.syncWatchAcrossServers
+        self.preferOriginalLanguageAudio =
+            (try? container.decodeIfPresent(Bool.self, forKey: .preferOriginalLanguageAudio))
+            .flatMap { $0 } ?? defaults.preferOriginalLanguageAudio
+        self.rememberAudioTrackPerSeries =
+            (try? container.decodeIfPresent(Bool.self, forKey: .rememberAudioTrackPerSeries))
+            .flatMap { $0 } ?? defaults.rememberAudioTrackPerSeries
+        self.rememberSubtitleTrackPerSeries =
+            (try? container.decodeIfPresent(Bool.self, forKey: .rememberSubtitleTrackPerSeries))
+            .flatMap { $0 } ?? defaults.rememberSubtitleTrackPerSeries
     }
 }

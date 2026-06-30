@@ -212,7 +212,7 @@ let package = Package(
         ),
         .target(
             name: "FeaturePlayback",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService"],
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService", "MetadataKit"],
             linkerSettings: [
                 // Force-link AVKit on tvOS so its `UIWindow (AVAdditions)`
                 // category (which adds `avDisplayManager`, used to drive the

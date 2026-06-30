@@ -126,10 +126,15 @@ public final class PlozzigenVideoEngine: VideoEngine {
         // gracefully. Either way it's an on-device bridge, never a server transcode.
         let channels = request.localRemuxSource?.sourceMetadata.audio?.channels
             ?? request.sourceMetadata?.audio?.channels ?? 0
-        let options = LoadOptions(
+        var options = LoadOptions(
             matchContentEnabled: true,
             audioBridgeMode: channels > 6 ? .lossless : .surroundCompat
         )
+        // Steer the INITIAL active audio/subtitle track via language preference
+        // (no reload). Computed upstream from per-series memory / prefer-original
+        // policy. Empty arrays express no preference (container default wins).
+        options.preferredAudioLanguages = request.preferredAudioLanguages
+        options.preferredSubtitleLanguages = request.preferredSubtitleLanguages
 
         do {
             try await engine.load(

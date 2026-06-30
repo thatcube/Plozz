@@ -5,6 +5,7 @@ import Observation
 import CoreModels
 import CoreNetworking
 import TraktService
+import MetadataKit
 #if canImport(NaturalLanguage)
 import NaturalLanguage
 #endif
@@ -523,6 +524,15 @@ public final class PlayerViewModel {
             self.request = request
             configureControls(for: request)
 
+            // Steer the engine's INITIAL active audio track by language (no reload)
+            // from the prefer-original-language policy. Computed once here so every
+            // playResolved entry (initial + cross-engine fallback, which reuse
+            // self.request) inherits it. Subtitle language steering is intentionally
+            // left empty — Plozz owns subtitle selection via the SDR overlay, so the
+            // engine must not activate its own subtitle track here.
+            request.preferredAudioLanguages = preferredAudioLanguages(for: request.item)
+            self.request = request
+
             // Enrich the episode with its series-level ids in the background so the
             // first scrobble can identify the show on trackers that require it.
             if request.item.kind == .episode, seriesIDResolver != nil {
@@ -602,6 +612,18 @@ public final class PlayerViewModel {
         } catch {
             phase = .failed(.unknown(""))
         }
+    }
+
+    /// Resolves the ordered audio-language preference for a load from the
+    /// prefer-original-language policy. Per-series remembered audio (when that
+    /// feature lands) will take precedence ahead of this by supplying `remembered`.
+    private func preferredAudioLanguages(for item: MediaItem) -> [String] {
+        AudioLanguagePolicy.preferredAudioLanguages(
+            remembered: nil,
+            preferOriginal: playbackSettings.preferOriginalLanguageAudio,
+            originalLanguage: ContentClassifier.originalAudioLanguage(for: item),
+            deviceLanguage: LanguageMatch.deviceLanguageCode
+        )
     }
 
     /// Loads an already-resolved request on the routed engine and finishes the

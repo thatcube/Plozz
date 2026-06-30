@@ -154,27 +154,7 @@ struct SettingsSplitLayout: View {
             // focus card and a Select press that nudges toward the detail.
             selectedRowID = row.id
         } label: {
-            HStack(spacing: 14) {
-                if row.indented {
-                    Rectangle()
-                        .fill(Color.clear)
-                        .frame(width: 26)
-                }
-                Text(row.title)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 12)
-                if let value = row.valueSummary {
-                    Text(value)
-                        .font(.subheadline)
-                        .settingsRowSecondary()
-                        .lineLimit(1)
-                }
-            }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
-            .contentShape(Rectangle())
+            SettingsMasterRowLabel(row: row, isSelected: selectedRowID == row.id)
         }
         .buttonStyle(SettingsFocusButtonStyle())
     }
@@ -197,6 +177,7 @@ struct SettingsSplitLayout: View {
                     }
 
                     row.detail()
+                        .toggleStyle(SettingsSwitchToggleStyle())
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -217,6 +198,69 @@ struct SettingsSplitLayout: View {
         // scrolls the list, so the pane updates smoothly rather than snapping.
         .animation(.easeInOut(duration: 0.18), value: selectedRowID)
         .focusSection()
+    }
+}
+
+/// One left-list row. Adds a trailing chevron (it always drills into a control)
+/// and a *persistent* accent selection treatment so the row mirrored in the
+/// detail pane stays visibly marked even while focus is over in the detail
+/// (where the user is editing its control). The white inverted focus card takes
+/// over the moment the row itself is focused, so selection and focus never
+/// fight: chevroned text-rows on the left read as navigation, switch/pill
+/// controls on the right read as controls.
+private struct SettingsMasterRowLabel: View {
+    let row: SettingsSplitRow
+    let isSelected: Bool
+    @Environment(\.settingsRowIsFocused) private var isFocused
+    @Environment(\.settingsRowFocusForeground) private var focusFg
+    @Environment(\.themePalette) private var palette
+
+    /// Accent selection only shows when this row is the live selection AND the
+    /// list does not currently hold focus (focus is in the detail pane).
+    private var showSelection: Bool { isSelected && !isFocused }
+
+    private var chevronColor: AnyShapeStyle {
+        if isFocused { return AnyShapeStyle(focusFg.opacity(0.65)) }
+        if isSelected { return AnyShapeStyle(palette.accent) }
+        return AnyShapeStyle(.secondary)
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if row.indented {
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(width: 26)
+            }
+            Text(row.title)
+                .font(.callout.weight(.medium))
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 12)
+            if let value = row.valueSummary {
+                Text(value)
+                    .font(.subheadline)
+                    .settingsRowSecondary()
+                    .lineLimit(1)
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(chevronColor)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(showSelection ? palette.accent.opacity(0.16) : Color.clear)
+        )
+        .overlay(alignment: .leading) {
+            if showSelection {
+                Capsule(style: .continuous)
+                    .fill(palette.accent)
+                    .frame(width: 4, height: 24)
+            }
+        }
+        .contentShape(Rectangle())
     }
 }
 #endif

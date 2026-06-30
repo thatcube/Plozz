@@ -1794,7 +1794,9 @@ public final class PlayerViewModel {
         // override that sets `autoDownloadIfMissing: false` (e.g. movies) unable to
         // turn the behaviour off while the profile-wide toggle is on.
         let rule = effectiveSubtitleRule(for: request.item)
-        guard rule.autoDownloadIfMissing else { return }
+        // No point fetching a subtitle the viewer won't see: "Off" suppresses the
+        // background download just as it suppresses the on-load selection.
+        guard rule.mode != .off, rule.autoDownloadIfMissing else { return }
         let language = rule.preferredLanguage ?? captionSettings.resolvedPreferredLanguage
         guard !request.subtitleTracks.hasSuitableSubtitle(forLanguage: language) else { return }
         guard let language, !language.isEmpty else { return }

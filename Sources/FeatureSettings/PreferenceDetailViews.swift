@@ -191,9 +191,10 @@ struct PlaybackDetailView: View {
     /// Per-content-type overrides ("forced-only on movies, full subs on anime").
     @Bindable var subtitlePolicy: SubtitlePolicyModel
 
-    /// The three classifiable content types the per-type rules apply to (`.other`
-    /// always follows the base, so it isn't shown as its own row).
-    private static let policyCategories: [SubtitleContentCategory] = [.anime, .movie, .tvShow]
+    /// The three classifiable content types the per-type rules apply to, in the
+    /// order shown in Settings (`.other` always follows the base, so it isn't
+    /// shown as its own row).
+    private static let policyCategories: [SubtitleContentCategory] = [.movie, .tvShow, .anime]
 
     /// Whether the profile has opted into per-content-type rules (any override set).
     private var perContentTypeEnabled: Bool { !subtitlePolicy.overrides.isEmpty }
@@ -256,12 +257,9 @@ struct PlaybackDetailView: View {
                     .buttonStyle(SettingsFocusButtonStyle())
                 }
 
-                SettingsPanel(
-                    title: "Subtitles",
-                    footer: "“Forced only” shows just the subtitles a title flags for foreign-language passages — handy if you don't want full subtitles but still want translations for the occasional non-English scene. Turn on per-content-type rules to mix this with full subtitles for, say, anime."
-                ) {
+                SettingsPanel(title: "Subtitles") {
                     VStack(alignment: .leading, spacing: 18) {
-                        LabeledSettingRow("Show by default", labelWidth: 220) {
+                        LabeledSettingRow("Default", labelWidth: 220) {
                             SettingsOptionPicker(
                                 options: CaptionSettings.SubtitleMode.allCases,
                                 selection: $captions.settings.subtitleMode,
@@ -269,15 +267,9 @@ struct PlaybackDetailView: View {
                             )
                         }
 
-                        Text(perContentTypeEnabled
-                             ? "Used for anything without its own rule below (e.g. music videos)."
-                             : "Applies to everything. Switch on per-content-type rules to vary it by anime, movies and TV.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-
                         Divider()
 
-                        Toggle("Different rules for anime, movies & TV", isOn: perContentTypeBinding)
+                        Toggle("Different defaults for movies, TV shows & anime", isOn: perContentTypeBinding)
 
                         if perContentTypeEnabled {
                             ForEach(Self.policyCategories, id: \.self) { category in
@@ -289,34 +281,24 @@ struct PlaybackDetailView: View {
                                     )
                                 }
                             }
-
-                            Text("Each content type picks its own default — for example forced-only on movies but full subtitles on anime.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
                         }
+
+                        Divider()
+
+                        Toggle("Remember choice per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
                     }
                 }
 
                 SettingsPanel(
                     title: "Audio Language",
-                    footer: "Plozz can start each title in its original spoken language — so anime defaults to Japanese audio instead of the dub — and remember the audio and subtitle language you pick for a series so the rest of that show follows suit."
+                    footer: "Plozz can start each title in its original spoken language — so anime defaults to Japanese audio instead of the dub — and remember the audio language you pick for a series so the rest of that show follows suit."
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
                         Toggle("Prefer original language audio", isOn: $playback.settings.preferOriginalLanguageAudio)
 
-                        Text("When a title has multiple audio tracks, start in the original language (e.g. Japanese for anime) rather than the file's default, which is often a dub.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-
                         Divider()
 
-                        Toggle("Remember audio choice per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
-
-                        Toggle("Remember subtitle choice per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
-
-                        Text("Switching the audio or subtitle track while watching an episode applies that language to the rest of the series automatically.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        Toggle("Remember choice per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
                     }
                 }
 

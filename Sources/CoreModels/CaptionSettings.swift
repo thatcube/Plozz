@@ -23,6 +23,9 @@ public struct CaptionSettings: Codable, Equatable, Sendable {
 
     /// Which subtitles to surface automatically when subtitles are desired.
     public enum SubtitleMode: String, Codable, CaseIterable, Sendable {
+        /// Don't auto-enable any subtitle on load (the viewer can still pick one
+        /// manually, and a per-series remembered choice still applies).
+        case off
         /// Show full subtitles in the preferred language whenever available.
         case all
         /// Only show "forced" subtitles (e.g. for foreign-language passages),
@@ -31,7 +34,8 @@ public struct CaptionSettings: Codable, Equatable, Sendable {
 
         public var displayName: String {
             switch self {
-            case .all: return "All"
+            case .off: return "Off"
+            case .all: return "On"
             case .forcedOnly: return "Forced Only"
             }
         }

@@ -10,6 +10,13 @@ final class SubtitleSelectionTests: XCTestCase {
         XCTAssertEqual(SubtitleSelector.decide(candidates: [], mode: .all, preferredLanguage: "en"), .none)
     }
 
+    func testOffNeverSelectsEvenWithMatches() {
+        // Off must win over any candidate, including a forced or default track in
+        // the preferred language.
+        let candidates = [sub(0, "en"), sub(1, "en", forced: true), sub(2, "en", isDefault: true)]
+        XCTAssertEqual(SubtitleSelector.decide(candidates: candidates, mode: .off, preferredLanguage: "en"), .none)
+    }
+
     func testForcedOnlyPrefersForcedInPreferredLanguage() {
         let candidates = [sub(0, "en"), sub(1, "fr", forced: true), sub(2, "en", forced: true)]
         XCTAssertEqual(

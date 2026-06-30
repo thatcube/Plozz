@@ -104,6 +104,7 @@ public enum SubtitleSelector {
     /// Decides which subtitle option (if any) to enable by default for a freshly
     /// loaded item, given the user's mode and preferred language.
     ///
+    /// * `.off` → never auto-enable anything (the viewer can still pick manually).
     /// * `.forcedOnly` → prefer a forced option in the preferred language, then
     ///   any forced option, else nothing.
     /// * `.all` → prefer a non-forced option in the preferred language, then a
@@ -123,6 +124,9 @@ public enum SubtitleSelector {
         }
 
         switch mode {
+        case .off:
+            return .none
+
         case .forcedOnly:
             let forced = candidates.filter(\.isForced)
             if let inLanguage = forced.first(where: matchingLanguage) {

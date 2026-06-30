@@ -506,14 +506,16 @@ final class PlayerInputViewController: UIViewController {
 
     private var scrubTuning: ScrubGeometry.Tuning {
         // Base seconds-per-point scales with runtime so the *fraction* of the
-        // content a swipe covers stays roughly consistent. The reference is a 2h
-        // film (scale 1.0 → ~0.18 s/pt, the silky fine-scrub feel). The floor is
-        // low (0.3) so short TV episodes scale right down — otherwise the same
-        // s/pt crosses a much bigger fraction of a 25-min episode and feels way
-        // too fast. A fast flick accelerates up to maxAccelMultiplier via a
-        // smoothstep curve (see ScrubGeometry); the ceiling is modest so flicks
-        // stay controllable.
-        let durationScale = min(max(model.duration / 7200, 0.3), 1.6)
+        // content a swipe covers stays consistent across lengths — a fast flick
+        // crosses the same percentage of a 5-min clip as a 2h film. The reference
+        // is a 2h film (scale 1.0 → ~0.18 s/pt). The floor is kept very low (0.05,
+        // ≈ a 6-min runtime) purely to stop sub-minute clips from scrubbing
+        // imperceptibly; above that it's pure fraction-consistency. Lowering the
+        // base on short content also makes fine drags there *finer*, never
+        // coarser, so the precise slow-finger feel is preserved everywhere. A fast
+        // flick accelerates up to maxAccelMultiplier via a smoothstep curve (see
+        // ScrubGeometry); the ceiling is modest so flicks stay controllable.
+        let durationScale = min(max(model.duration / 7200, 0.05), 1.6)
         return ScrubGeometry.Tuning(
             baseSecondsPerPoint: 0.18 * durationScale,
             accelOnsetSpeed: 500,

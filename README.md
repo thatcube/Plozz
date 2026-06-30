@@ -5,7 +5,7 @@
 <h1 align="center">Plozz</h1>
 
 <p align="center">
-  A free, open-source Apple TV app for your own media — connect a Jellyfin or Plex server and watch your library with native tvOS controls.
+  A free and open source native Apple TV app for Jellyfin or Plex servers.
 </p>
 
 <p align="center">
@@ -18,9 +18,9 @@
 
 Servers & sign-in:
 
-- **Jellyfin or Plex** — one experience over either backend; Home, detail, and playback work the same.
-- **Multiple servers, one library** — connect several Jellyfin and Plex servers; Home and libraries merge into a single view.
-- **Auto-discovery** — finds Jellyfin servers on your LAN (UDP), with manual URL entry as a fallback.
+- **Jellyfin and Plex** — one experience over either backend; Home, detail, and playback work the same.
+- **Multiple servers, one library** — Together or separate - you can connect multiple Jellyfin and Plex servers; Everything optionally merges together.
+- **Auto-discovery** — finds Jellyfin servers on your LAN (UDP) automatically, with manual URL entry as a fallback.
 - **Remote-free sign-in** — Jellyfin **Quick Connect** and Plex **Link**: enter a code, no password typing.
 - **Persistent session** — relaunch restores your login. Tokens live in the Keychain and are never logged.
 
@@ -43,8 +43,8 @@ Playback:
 Appearance:
 
 - **Themes & display size** — System, Dark, OLED, and Light, plus adjustable interface sizing.
-- **Night mode** — warms the display on a schedule to cut blue light at night.
-- **Profiles** — multiple local profiles with their own settings.
+- **Night mode** — highly adjustable settings to warm and dim the display automatically to protect your circadian rhythm
+- **Profiles** — all settings are per-profile, allowing you to customize the experience to your own preferences while grandma can do as she pleases
 
 ## Architecture
 
@@ -136,11 +136,12 @@ current art is a placeholder — replace it before a public App Store release.
 ## Roadmap
 
 - **Overseerr** integration (request media).
+- iOS and/or iPadOS app depending on demand
 
 ## Donate
 
 Plozz is free and open source, with no paywall, ads, or obligation. If it's
-useful to you, donations toward upkeep (mainly the Apple Developer Program fee)
+useful to you, donations toward upkeep
 are welcome — and not donating is completely fine.
 
 **[Donate via GitHub Sponsors](https://github.com/sponsors/thatcube)** — one-time or recurring.

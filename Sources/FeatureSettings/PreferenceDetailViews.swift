@@ -17,120 +17,282 @@ struct AppearanceDetailView: View {
     }
 
     var body: some View {
-        @Bindable var musicPlayer = musicPlayer
-        @Bindable var density = density
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Appearance").font(.largeTitle.bold())
-
-                VStack(alignment: .leading, spacing: 24) {
-                    // Theme
-                    LabeledSettingRow("Theme", labelWidth: 300) {
-                        SettingsOptionPicker(
-                            options: AppTheme.allCases,
-                            selection: $theme.theme,
-                            icon: { $0.symbolName },
-                            title: { $0.displayName }
-                        )
-                    }
-
-                    sectionDivider
-
-                    // Display Size
-                    LabeledSettingRow(
-                        "Display Size",
-                        subtitle: "Scales card size, columns and spacing.",
-                        labelWidth: 300
-                    ) {
-                        SettingsOptionPicker(
-                            options: UIDensity.allCases,
-                            selection: $density.density,
-                            icon: { $0.symbolName },
-                            title: { $0.displayName }
-                        )
-                    }
-
-                    sectionDivider
-
-                    // Transparency
-                    LabeledSettingRow("Transparency", subtitle: "Liquid glass", labelWidth: 300) {
-                        SettingsOptionPicker(
-                            options: TransparencyPreference.allCases,
-                            selection: Binding(
-                                get: { transparencyPreference },
-                                set: { transparencyPreferenceRaw = $0.rawValue }
-                            ),
-                            icon: { $0.symbolName },
-                            title: { $0.displayName }
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(28)
-                .background(
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                )
-
-                SettingsPanel(
-                    title: "Music Player"
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        LabeledSettingRow("Style", labelWidth: 300) {
-                            SettingsOptionPicker(
-                                options: MusicPlayerAppearance.allCases,
-                                selection: $musicPlayer.appearance,
-                                icon: { $0.symbolName },
-                                title: { $0.displayName }
-                            )
-                        }
-
-                        Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
-                    }
-                }
-            }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
-        }
-        .scrollClipDisabled()
+        SettingsSplitLayout(title: "Appearance", sections: sections)
     }
 
-    /// Hairline rule between the joined Appearance sections so they read as one
-    /// grouped container rather than separate cards. The negative horizontal
-    /// padding cancels the container's 28 pt content inset *minus* the 1 pt
-    /// border stroke, so the rule meets the inner edge of the border exactly
-    /// without overlapping it (overlapping would stack the two translucent
-    /// fills into a darker dot at each end).
-    private var sectionDivider: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.1))
-            .frame(height: 1)
-            .padding(.horizontal, -27)
+    private var sections: [SettingsSplitSection] {
+        @Bindable var musicPlayer = musicPlayer
+        @Bindable var density = density
+        let transparencyBinding = Binding(
+            get: { transparencyPreference },
+            set: { transparencyPreferenceRaw = $0.rawValue }
+        )
+
+        return [
+            SettingsSplitSection(id: "display", header: "Display", rows: [
+                SettingsSplitRow(
+                    id: "theme",
+                    title: "Theme",
+                    description: "The overall light or dark appearance of the app.",
+                    valueSummary: theme.theme.displayName
+                ) {
+                    SettingsOptionPicker(
+                        options: AppTheme.allCases,
+                        selection: $theme.theme,
+                        icon: { $0.symbolName },
+                        title: { $0.displayName }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "display-size",
+                    title: "Display Size",
+                    description: "Scales card size, columns and spacing across the app.",
+                    valueSummary: density.density.displayName
+                ) {
+                    SettingsOptionPicker(
+                        options: UIDensity.allCases,
+                        selection: $density.density,
+                        icon: { $0.symbolName },
+                        title: { $0.displayName }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "transparency",
+                    title: "Transparency",
+                    description: "Liquid glass — translucent panels and cards. Turn off for solid backgrounds.",
+                    valueSummary: transparencyPreference.displayName
+                ) {
+                    SettingsOptionPicker(
+                        options: TransparencyPreference.allCases,
+                        selection: transparencyBinding,
+                        icon: { $0.symbolName },
+                        title: { $0.displayName }
+                    )
+                }
+            ]),
+            SettingsSplitSection(id: "music", header: "Music Player", rows: [
+                SettingsSplitRow(
+                    id: "music-style",
+                    title: "Style",
+                    description: "How the now-playing music screen is presented.",
+                    valueSummary: musicPlayer.appearance.displayName
+                ) {
+                    SettingsOptionPicker(
+                        options: MusicPlayerAppearance.allCases,
+                        selection: $musicPlayer.appearance,
+                        icon: { $0.symbolName },
+                        title: { $0.displayName }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "music-track-details",
+                    title: "Track details",
+                    description: "Show album name, audio quality & lyrics source on the now-playing screen.",
+                    valueSummary: musicPlayer.showTrackDetails ? "On" : "Off"
+                ) {
+                    Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
+                }
+            ])
+        ]
     }
 }
 
 struct CaptionsDetailView: View {
     @Bindable var captions: CaptionSettingsModel
 
+    private let fontScales: [Double] = [0.75, 1.0, 1.25, 1.5, 2.0]
+    private let backgroundOpacities: [Double] = [0.0, 0.25, 0.5, 0.75, 1.0]
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Captions").font(.largeTitle.bold())
-                SettingsPanel(
-                    title: "Caption style",
-                    footer: "These caption settings are also available from the player while you watch."
-                ) {
-                    CaptionSettingsCard(settings: $captions.settings)
+        SettingsSplitLayout(title: "Captions", sections: sections)
+    }
+
+    private var sections: [SettingsSplitSection] {
+        @Bindable var captions = captions
+
+        let subtitles = SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: [
+            SettingsSplitRow(
+                id: "auto-download",
+                title: "Automatically download subtitles",
+                description: "When an item has no suitable subtitle in your preferred language, Plozz asks the Jellyfin server to fetch the best match so every client benefits.",
+                valueSummary: captions.settings.autoDownloadSubtitles ? "On" : "Off"
+            ) {
+                Toggle("Automatically download subtitles", isOn: $captions.settings.autoDownloadSubtitles)
+            },
+            SettingsSplitRow(
+                id: "show-subtitles",
+                title: "Show subtitles",
+                description: "Choose whether subtitles turn on automatically — full subtitles, only forced passages, or off — when an item loads.",
+                valueSummary: captions.settings.subtitleMode.displayName
+            ) {
+                OptionCardRow(
+                    options: CaptionSettings.SubtitleMode.allCases,
+                    selection: $captions.settings.subtitleMode
+                ) { optionLabel($0.displayName) }
+            },
+            SettingsSplitRow(
+                id: "subtitle-language",
+                title: "Subtitle language",
+                description: "The language Plozz prefers when auto-selecting or downloading subtitles.",
+                valueSummary: languageName(for: languageSelection.wrappedValue)
+            ) {
+                Menu {
+                    Picker("Subtitle language", selection: languageSelection) {
+                        ForEach(languageOptions, id: \.self) { code in
+                            Text(languageName(for: code)).tag(code)
+                        }
+                    }
+                } label: {
+                    Label(languageName(for: languageSelection.wrappedValue), systemImage: "globe")
                 }
+                .menuStyle(.button)
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+        ])
+
+        var styleRows: [SettingsSplitRow] = [
+            SettingsSplitRow(
+                id: "follows-system-style",
+                title: "Use system caption style",
+                description: "Defer entirely to the tvOS caption style set in Settings → Accessibility. Turn this off to customise size, colour, background and edges below.",
+                valueSummary: captions.settings.followsSystemStyle ? "On" : "Off"
+            ) {
+                Toggle("Use system caption style", isOn: $captions.settings.followsSystemStyle)
+            }
+        ]
+
+        if !captions.settings.followsSystemStyle {
+            styleRows.append(
+                SettingsSplitRow(
+                    id: "text-size",
+                    title: "Text size",
+                    description: "How large caption text appears, as a multiple of the default size.",
+                    valueSummary: "\(Int(captions.settings.fontScale * 100))%",
+                    indented: true
+                ) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        OptionCardRow(options: fontScales, selection: $captions.settings.fontScale) {
+                            optionLabel("\(Int($0 * 100))%")
+                        }
+                        captionPreview
+                    }
+                }
+            )
+            styleRows.append(
+                SettingsSplitRow(
+                    id: "text-color",
+                    title: "Text color",
+                    description: "The fill colour used for caption text.",
+                    valueSummary: colorName(for: captions.settings.textColor),
+                    indented: true
+                ) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        OptionCardRow(options: textColorOptions, selection: $captions.settings.textColor) {
+                            colorLabel($0)
+                        }
+                        captionPreview
+                    }
+                }
+            )
+            styleRows.append(
+                SettingsSplitRow(
+                    id: "background",
+                    title: "Background",
+                    description: "Opacity of the panel drawn behind caption text for legibility.",
+                    valueSummary: captions.settings.backgroundColor.alpha == 0 ? "Off" : "\(Int(captions.settings.backgroundColor.alpha * 100))%",
+                    indented: true
+                ) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        OptionCardRow(options: backgroundOpacities, selection: $captions.settings.backgroundColor.alpha) {
+                            optionLabel($0 == 0 ? "Off" : "\(Int($0 * 100))%")
+                        }
+                        captionPreview
+                    }
+                }
+            )
+            styleRows.append(
+                SettingsSplitRow(
+                    id: "edge-style",
+                    title: "Edge style",
+                    description: "The outline or shadow applied to caption text to separate it from the picture.",
+                    valueSummary: captions.settings.edgeStyle.displayName,
+                    indented: true
+                ) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        OptionCardRow(
+                            options: CaptionSettings.EdgeStyle.allCases,
+                            selection: $captions.settings.edgeStyle
+                        ) { optionLabel($0.displayName) }
+                        captionPreview
+                    }
+                }
+            )
         }
-        .scrollClipDisabled()
+
+        let style = SettingsSplitSection(id: "caption-style", header: "Caption Style", rows: styleRows)
+        return [subtitles, style]
+    }
+
+    // MARK: Option data
+
+    private var languageOptions: [String] {
+        [""] + CaptionSettingsCard.subtitleLanguages.map(\.code)
+    }
+
+    private var languageSelection: Binding<String> {
+        Binding(
+            get: { captions.settings.preferredSubtitleLanguage ?? "" },
+            set: { captions.settings.preferredSubtitleLanguage = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private func languageName(for code: String) -> String {
+        guard !code.isEmpty else { return "Device Default" }
+        return CaptionSettingsCard.subtitleLanguages.first(where: { $0.code == code })?.name ?? code
+    }
+
+    private var textColorOptions: [CaptionSettings.RGBAColor] {
+        CaptionSettings.RGBAColor.presets.map(\.color)
+    }
+
+    private func colorName(for color: CaptionSettings.RGBAColor) -> String {
+        CaptionSettings.RGBAColor.presets.first(where: { $0.color == color })?.name ?? "Custom"
+    }
+
+    // MARK: Label helpers
+
+    private func optionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.headline)
+            .multilineTextAlignment(.center)
+    }
+
+    private func colorLabel(_ color: CaptionSettings.RGBAColor) -> some View {
+        VStack(spacing: 10) {
+            Circle()
+                .fill(color.swiftUIColor)
+                .frame(width: 36, height: 36)
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.4), lineWidth: 1))
+            Text(colorName(for: color)).font(.headline)
+        }
+    }
+
+    /// Local live preview (mirrors CoreUI's `CaptionPreview`, which is internal to
+    /// that module) so the style rows show the current look without touching the
+    /// shared `CaptionSettingsCard`.
+    private var captionPreview: some View {
+        VStack {
+            Spacer()
+            Text("The quick brown fox")
+                .font(.system(size: 32 * captions.settings.fontScale))
+                .foregroundStyle(captions.settings.textColor.swiftUIColor)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(captions.settings.backgroundColor.swiftUIColor)
+                .shadow(radius: captions.settings.edgeStyle == .dropShadow ? 4 : 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 160)
+        .background(LinearGradient(colors: [.blue, .purple], startPoint: .top, endPoint: .bottom))
+        .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.cornerRadius))
     }
 }
 
@@ -147,41 +309,51 @@ struct SpoilersDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Spoiler Protection").font(.largeTitle.bold())
-                SettingsPanel {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Toggle("Hide spoilers for unwatched episodes", isOn: $spoilers.settings.isEnabled)
+        SettingsSplitLayout(title: "Spoiler Protection", sections: sections)
+    }
 
-                        if spoilers.settings.isEnabled {
-                            LabeledSettingRow("Mode", labelWidth: 220) {
-                                SettingsOptionPicker(
-                                    options: SpoilerSettings.Mode.allCases,
-                                    selection: $spoilers.settings.mode,
-                                    title: { $0.displayName }
-                                )
-                            }
-
-                            Text(modeExplanation)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Divider()
-
-                        Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
-
-                        Text("Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+    private var sections: [SettingsSplitSection] {
+        var rows: [SettingsSplitRow] = [
+            SettingsSplitRow(
+                id: "hide-spoilers",
+                title: "Hide spoilers for unwatched episodes",
+                description: "Blur or replace episode thumbnails and keep titles and descriptions hidden until you finish an episode.",
+                valueSummary: spoilers.settings.isEnabled ? "On" : "Off"
+            ) {
+                Toggle("Hide spoilers for unwatched episodes", isOn: $spoilers.settings.isEnabled)
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+        ]
+
+        if spoilers.settings.isEnabled {
+            rows.append(
+                SettingsSplitRow(
+                    id: "spoiler-mode",
+                    title: "Mode",
+                    description: modeExplanation,
+                    valueSummary: spoilers.settings.mode.displayName,
+                    indented: true
+                ) {
+                    SettingsOptionPicker(
+                        options: SpoilerSettings.Mode.allCases,
+                        selection: $spoilers.settings.mode,
+                        title: { $0.displayName }
+                    )
+                }
+            )
         }
-        .scrollClipDisabled()
+
+        rows.append(
+            SettingsSplitRow(
+                id: "hide-ratings",
+                title: "Hide ratings until watched",
+                description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.",
+                valueSummary: spoilers.settings.hideRatingsUntilWatched ? "On" : "Off"
+            ) {
+                Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
+            }
+        )
+
+        return [SettingsSplitSection(id: "spoilers", header: "Spoiler Protection", rows: rows)]
     }
 }
 struct PlaybackDetailView: View {

@@ -177,11 +177,8 @@ private func lyricsCacheKey(for track: MusicTrack) -> String {
 func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.LyricsResolver {
     { track, context in
         let key = lyricsCacheKey(for: track)
-        let traceLabel = "\"\(track.title)\" — \(track.artistName ?? "?") [\(context)]"
-        LyricsTrace.emit("[resolve] \(traceLabel)")
         // L1: in-memory memo for this session.
         if let cached = await LyricsMemoCache.shared.value(for: key) {
-            LyricsTrace.emit("[cache L1] \(traceLabel) -> \(cached == nil ? "none (silent)" : "synced")")
             return AudioPlaybackController.LyricsResolution(
                 lyrics: cached,
                 staySilent: cached == nil
@@ -194,7 +191,6 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         // background (debounced) so a song that *later* gains an LRCLIB upload
         // still surfaces without the user doing anything.
         if let cached = await LyricsDiskCache.shared.cached(key) {
-            LyricsTrace.emit("[cache L2] \(traceLabel) -> \(cached == nil ? "none (silent)" : "synced")")
             await LyricsMemoCache.shared.set(cached, for: key)
             return AudioPlaybackController.LyricsResolution(
                 lyrics: cached,
@@ -205,7 +201,6 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         // tracks. We still persist this through the cache layers so we don't
         // re-evaluate it on every play.
         if isExplicitlyInstrumental(title: track.title) {
-            LyricsTrace.emit("[cache L3] \(traceLabel) -> instrumental title, silent")
             await LyricsMemoCache.shared.set(nil, for: key)
             await LyricsDiskCache.shared.store(nil, for: key)
             return AudioPlaybackController.LyricsResolution(
@@ -228,7 +223,6 @@ func lyricsResolver(for provider: any MusicProvider) -> AudioPlaybackController.
         // memo for the session and a longer outage would burn "no lyrics" onto
         // disk for every song played during it.
         let trustworthy = resolution.lyrics != nil || resolution.isAuthoritative
-        LyricsTrace.emit("[resolved] \(traceLabel) -> \(resolution.lyrics == nil ? "none" : "synced") authoritative=\(resolution.isAuthoritative) fallback=\(context == .visible) -> \(trustworthy ? "CACHED" : "not cached")")
         if trustworthy {
             await LyricsMemoCache.shared.set(resolution.lyrics, for: key)
             await LyricsDiskCache.shared.store(resolution.lyrics, for: key)

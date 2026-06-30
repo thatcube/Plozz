@@ -13,6 +13,11 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
     public var displayTitle: String
     /// BCP-47 / ISO language code if known (e.g. `en`, `fra`).
     public var language: String?
+    /// Raw codec token from the source/demuxer, lowercased where known
+    /// (e.g. `subrip`, `ass`, `pgssub`, `ac3`, `eac3`, `dts`). Drives format
+    /// hints in the track menu ("PGS", "SRT") and image-vs-text reasoning.
+    /// `nil` when the provider/engine didn't report one.
+    public var codec: String?
     public var isDefault: Bool
     public var isForced: Bool
     /// For subtitle tracks: an absolute URL that yields the subtitle text
@@ -34,6 +39,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         kind: Kind,
         displayTitle: String,
         language: String? = nil,
+        codec: String? = nil,
         isDefault: Bool = false,
         isForced: Bool = false,
         deliveryURL: URL? = nil,
@@ -43,6 +49,7 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.kind = kind
         self.displayTitle = displayTitle
         self.language = language
+        self.codec = codec
         self.isDefault = isDefault
         self.isForced = isForced
         self.deliveryURL = deliveryURL

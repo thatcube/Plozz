@@ -307,7 +307,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 kind: .audio,
                 displayTitle: track.name,
                 language: track.language,
-                isDefault: track.isDefault
+                codec: track.codec,
+                isDefault: track.isDefault,
+                isForced: track.isForced
             )
         }
         subtitleTracks = engine.subtitleTracks.map { track in
@@ -316,7 +318,14 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 kind: .subtitle,
                 displayTitle: track.name,
                 language: track.language,
-                isDefault: track.isDefault
+                codec: track.codec,
+                isDefault: track.isDefault,
+                isForced: track.isForced
+                // NOTE: `isImageBasedSubtitle` is intentionally left at its
+                // default (false) here. The menu's "(PGS)" format hint is derived
+                // from `codec` instead, so labeling is accurate without changing
+                // default-subtitle routing (which keys off this flag). Flipping it
+                // to true belongs with the bitmap-through-overlay work, not here.
             )
         }
         // Tracks arrive asynchronously (Combine) after `loadTrackOptions()` has

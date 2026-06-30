@@ -879,6 +879,7 @@ public struct PlexProvider: MediaProvider {
             kind: isSubtitle ? .subtitle : .audio,
             displayTitle: dto.extendedDisplayTitle ?? dto.displayTitle ?? language ?? dto.codec ?? "Track",
             language: language,
+            codec: dto.codec,
             isDefault: dto.default ?? dto.selected ?? false,
             isForced: dto.forced ?? false,
             deliveryURL: deliveryURL,

@@ -5,6 +5,9 @@ import Observation
 import CoreModels
 import CoreNetworking
 import TraktService
+#if canImport(NaturalLanguage)
+import NaturalLanguage
+#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -159,6 +162,15 @@ public final class PlayerViewModel {
     /// the two moments has the tracks — without re-applying on every subsequent
     /// `onTracksChanged` or clobbering a manual menu pick made afterwards.
     private var initialSubtitleApplied = false
+
+    /// Content-detected subtitle languages, keyed by track id. Filled
+    /// opportunistically when a *text* subtitle with no provider language tag is
+    /// parsed for the overlay: `NLLanguageRecognizer` guesses the language from
+    /// the cue text so the menu can label an otherwise-anonymous "Track 8" as
+    /// e.g. "English (auto)". Bitmap subs (PGS) can't be detected without OCR, so
+    /// they stay provider-tagged. Cached so a second selection is instant and the
+    /// menu label persists for the session.
+    private var detectedSubtitleLanguages: [Int: String] = [:]
 
     /// Seek-coordinator state. `latestSeekTarget` is the most-recently-requested
     /// committed seek time; `seekTask` is the single in-flight loop that drains
@@ -1161,17 +1173,46 @@ public final class PlayerViewModel {
         if selectedAudioTrackID == nil {
             selectedAudioTrackID = audio.first(where: { $0.isDefault })?.id ?? audio.first?.id
         }
-        controls.audioOptions = audio.map { track in
-            PlayerTrackOption(id: track.id, title: track.displayTitle, isSelected: track.id == selectedAudioTrackID)
-        }
+        // Preferred languages, highest priority first: the viewer's explicit
+        // choice (or device language) leads, the device language backs it up.
+        let preferred: [String?] = [
+            captionSettings.resolvedPreferredLanguage,
+            LanguageMatch.deviceLanguageCode
+        ]
+        controls.audioOptions = audio
+            .sortedByPreferredLanguage(preferred)
+            .map { track in
+                PlayerTrackOption(
+                    id: track.id,
+                    title: TrackLabeling.audioLabel(
+                        displayTitle: track.displayTitle,
+                        language: track.language,
+                        trackID: track.id
+                    ),
+                    isSelected: track.id == selectedAudioTrackID
+                )
+            }
 
         let subtitles = engine.subtitleTracks
         if subtitles.isEmpty {
             controls.subtitleOptions = []
         } else {
+            // "Off" stays pinned first; real tracks sort preferred-language-first.
             var options = [PlayerTrackOption(id: PlayerTrackOption.offID, title: "Off", isSelected: selectedSubtitleTrackID == nil)]
-            options.append(contentsOf: subtitles.map { track in
-                PlayerTrackOption(id: track.id, title: track.displayTitle, isSelected: track.id == selectedSubtitleTrackID)
+            options.append(contentsOf: subtitles.sortedByPreferredLanguage(preferred).map { track in
+                PlayerTrackOption(
+                    id: track.id,
+                    title: TrackLabeling.subtitleLabel(
+                        displayTitle: track.displayTitle,
+                        language: track.language,
+                        codec: track.codec,
+                        isForced: track.isForced,
+                        isImageBased: track.isImageBasedSubtitle,
+                        detectedLanguage: detectedSubtitleLanguages[track.id],
+                        trackID: track.id
+                    ),
+                    isSelected: track.id == selectedSubtitleTrackID
+                )
             })
             controls.subtitleOptions = options
         }
@@ -1311,6 +1352,9 @@ public final class PlayerViewModel {
         let language = track.language
         let title = track.displayTitle
         let forced = track.isForced
+        // Only spend a detection pass when the provider gave us no language tag
+        // and we haven't already guessed one for this track this session.
+        let needsDetection = (language == nil) && detectedSubtitleLanguages[id] == nil
         subtitleCueLoadTask = Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
@@ -1321,9 +1365,16 @@ public final class PlayerViewModel {
                     sourceTrackID: id, isForced: forced
                 )
                 try Task.checkCancellation()
+                let detected = needsDetection ? Self.detectLanguage(in: stream.cues) : nil
                 await MainActor.run { [weak self] in
-                    guard let self, self.selectedSubtitleTrackID == id else { return }
-                    self.liveSubtitles.loadPrimary(stream)
+                    guard let self else { return }
+                    let storedNew = detected != nil && self.detectedSubtitleLanguages[id] == nil
+                    if let detected, storedNew { self.detectedSubtitleLanguages[id] = detected }
+                    if self.selectedSubtitleTrackID == id {
+                        self.liveSubtitles.loadPrimary(stream)
+                    }
+                    // A fresh guess changes a track's menu label, so rebuild.
+                    if storedNew { self.loadTrackOptions() }
                 }
             } catch is CancellationError {
                 // Selection changed; the newer selection owns the overlay.
@@ -1331,6 +1382,32 @@ public final class PlayerViewModel {
                 PlozzLog.playback.debug("Overlay subtitle fetch failed (non-fatal)")
             }
         }
+    }
+
+    /// Best-effort on-device language guess for an untagged text subtitle, from a
+    /// sample of its parsed cue text. Runs off the main actor (`nonisolated`).
+    /// Returns a BCP-47-ish code (e.g. `en`, `es`, `zh-Hans`) or `nil` when there
+    /// isn't enough text to be confident. Bitmap cues have no `text`, so they
+    /// naturally yield `nil` (they need OCR, out of scope here).
+    private nonisolated static func detectLanguage(in cues: [SubtitleCue]) -> String? {
+        #if canImport(NaturalLanguage)
+        var sample = ""
+        for cue in cues {
+            guard let line = cue.text, !line.isEmpty else { continue }
+            sample += line
+            sample += "\n"
+            if sample.count > 4000 { break }
+        }
+        let trimmed = sample.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Too little text to classify reliably — don't risk a wrong label.
+        guard trimmed.count >= 24 else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        guard let language = recognizer.dominantLanguage, language != .undetermined else { return nil }
+        return language.rawValue
+        #else
+        return nil
+        #endif
     }
 
     /// Swaps from the native engine to the hybrid engine (preserving position) so

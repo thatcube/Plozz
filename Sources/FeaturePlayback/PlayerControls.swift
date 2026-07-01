@@ -798,11 +798,12 @@ struct PlayerControls: View {
                         get: { Self.nearestSpeedIndex(model.playbackSpeed) },
                         set: { actions.setPlaybackSpeed(Self.speedGridValue($0)) }
                     ),
+                    compact: true,
                     title: { Self.speedLabel(Self.speedGridValue($0)) }
                 )
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 14)
+            .padding(.vertical, 8)
 
             Divider()
                 .background(.white.opacity(0.12))

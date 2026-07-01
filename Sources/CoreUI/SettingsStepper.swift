@@ -13,12 +13,23 @@ public struct SettingsStepper<Value: Hashable>: View {
     public let options: [Value]
     @Binding public var selection: Value
     public let title: (Value) -> String
+    /// Compact styling for tight surfaces (e.g. the in-player Speed menu): smaller
+    /// − / + buttons and a body-size value that matches the preset rows beside it,
+    /// so the stepper doesn't tower over the list. Defaults to the roomy style used
+    /// on the full Settings pages.
+    public let compact: Bool
 
     @Environment(\.themePalette) private var palette
 
-    public init(options: [Value], selection: Binding<Value>, title: @escaping (Value) -> String) {
+    public init(
+        options: [Value],
+        selection: Binding<Value>,
+        compact: Bool = false,
+        title: @escaping (Value) -> String
+    ) {
         self.options = options
         self._selection = selection
+        self.compact = compact
         self.title = title
     }
 
@@ -26,8 +37,14 @@ public struct SettingsStepper<Value: Hashable>: View {
     private var canDecrement: Bool { index > 0 }
     private var canIncrement: Bool { index < options.count - 1 }
 
+    private var buttonSize: CGFloat { compact ? 46 : 72 }
+    private var glyphSize: CGFloat { compact ? 16 : 26 }
+    private var rowSpacing: CGFloat { compact ? 12 : 24 }
+    private var valueMinWidth: CGFloat { compact ? 52 : 96 }
+    private var valueFont: Font { compact ? .body : .title3.weight(.semibold) }
+
     public var body: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: rowSpacing) {
             stepButton(symbol: "minus", dimmed: !canDecrement) {
                 if canDecrement { selection = options[index - 1] }
             }
@@ -42,7 +59,7 @@ public struct SettingsStepper<Value: Hashable>: View {
                 valueLabel(title(selection))
                     .contentTransition(.numericText())
             }
-            .frame(minWidth: 96)
+            .frame(minWidth: valueMinWidth)
             .animation(.easeOut(duration: 0.16), value: index)
 
             stepButton(symbol: "plus", dimmed: !canIncrement) {
@@ -54,7 +71,7 @@ public struct SettingsStepper<Value: Hashable>: View {
 
     private func valueLabel(_ text: String) -> some View {
         Text(text)
-            .font(.title3.weight(.semibold))
+            .font(valueFont)
             .monospacedDigit()
             .lineLimit(1)
             .fixedSize()
@@ -64,8 +81,8 @@ public struct SettingsStepper<Value: Hashable>: View {
     private func stepButton(symbol: String, dimmed: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 26, weight: .semibold))
-                .frame(width: 72, height: 72)
+                .font(.system(size: glyphSize, weight: .semibold))
+                .frame(width: buttonSize, height: buttonSize)
                 // Dim the glyph at the ends, but keep the button focusable so the
                 // left-exit point stays consistent (always the − button).
                 .opacity(dimmed ? 0.35 : 1)

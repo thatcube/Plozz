@@ -3,6 +3,7 @@ import Foundation
 import AVFoundation
 import Observation
 import CoreModels
+import CoreNetworking
 #if canImport(MediaPlayer)
 import MediaPlayer
 #endif
@@ -42,6 +43,15 @@ public final class AudioPlaybackController {
     /// (provider-backed), allowing the engine to stay decoupled from any concrete
     /// provider.
     public typealias StreamURLResolver = @MainActor (MusicTrack) async -> ResolvedStream?
+
+    /// Reports a playback lifecycle event (`start`/`progress`/`pause`/`unpause`/
+    /// `stop`) for a track to its owning server, so listening in Plozz stamps the
+    /// user's server-side play history — which is what feeds the "Recently
+    /// Played" rail. Bound to the play session's provider (a queue is
+    /// single-account, exactly like `StreamURLResolver`). Best-effort: the
+    /// implementation swallows failures, so a reporting error never disrupts
+    /// playback (mirrors the video player's non-fatal reporting).
+    public typealias PlaybackReporter = @MainActor (MusicTrack, PlaybackEvent, TimeInterval, TimeInterval) async -> Void
 
     /// Resolves a track's lyrics (provider-backed). The result reports both
     /// the lyrics (or `nil` when none are available) and whether the UI should
@@ -153,6 +163,11 @@ public final class AudioPlaybackController {
     /// `playShuffled` call). The Music tab observes this to auto-present the
     /// full-screen Now Playing player when the user starts a song.
     public private(set) var playbackStartToken: Int = 0
+    /// Increments once a track's **stop** report has actually been delivered to
+    /// its server — the moment the play is recorded (Jellyfin marks it played,
+    /// Plex scrobbles it). The Music landing view observes this to refresh its
+    /// "Recently Played" rail so listening shows up without an app relaunch.
+    public private(set) var recentPlayReportToken: Int = 0
     /// Whether anything is loaded — drives mini-player visibility. The
     /// mini-player and Music tab are absent whenever this is `false`.
     public var hasActivePlayback: Bool { !queue.isEmpty }
@@ -202,9 +217,34 @@ public final class AudioPlaybackController {
     /// this point are warmed lazily as the user advances (each track change
     /// re-runs the sweep from the new position).
     private static let maxBulkPrefetch = 30
+    /// How often to emit a periodic `.progress` report while a track plays. Keeps
+    /// the server's now-playing position fresh and lets Plex auto-scrobble as the
+    /// timeline nears the end, without spamming (the time observer fires 4×/sec).
+    private static let progressReportInterval: TimeInterval = 10
     /// The unshuffled queue, so toggling shuffle off restores original order.
     private var orderedQueue: [MusicTrack] = []
     private var playSessionID: String?
+    /// Reports play lifecycle events to the current session's server
+    /// (best-effort). Bound to the play session's provider; `nil` disables
+    /// reporting (e.g. a provider that isn't a `MediaProvider`).
+    private var reporter: PlaybackReporter?
+    /// A second, provider-INDEPENDENT reporter for the global Last.fm scrobbler.
+    /// Last.fm is one account per user (not tied to Plex/Jellyfin), so it fans out
+    /// from the same lifecycle events as `reporter` but is set once (by AppShell,
+    /// capturing the stable scrobbler) rather than rebound per play session.
+    public var scrobbleObserver: PlaybackReporter?
+    /// The track we've reported a `.start` for and not yet a `.stop`. Guards the
+    /// stop/pause/progress helpers so they only ever fire for a live, started
+    /// track, and lets us stop the OUTGOING track before starting the next one
+    /// (so the server's now-playing/history stays coherent across a hand-off).
+    private var reportedTrack: MusicTrack?
+    /// Bumped on every `startCurrent` transition. A resolving transition captures
+    /// this value and aborts if a newer transition superseded it, so rapid skips
+    /// don't leave intermediate tracks with a `.start` and no matching `.stop`.
+    private var trackTransitionGeneration = 0
+    /// When we last emitted a throttled `.progress` report. The time observer
+    /// fires 4×/sec but we only ping the server every `progressReportInterval`.
+    private var lastProgressReportAt: Date?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var sessionConfigured = false
@@ -232,7 +272,8 @@ public final class AudioPlaybackController {
         playSessionID: String? = nil,
         resolveStreamURL: @escaping StreamURLResolver,
         resolveLyrics: LyricsResolver? = nil,
-        refreshLyrics: LyricsRefresher? = nil
+        refreshLyrics: LyricsRefresher? = nil,
+        reportPlayback: PlaybackReporter? = nil
     ) {
         guard !tracks.isEmpty else { return }
         let clampedStart = min(max(startIndex, 0), tracks.count - 1)
@@ -242,9 +283,14 @@ public final class AudioPlaybackController {
             playbackStartToken &+= 1
             return
         }
+        // Close the outgoing queue's live track on ITS OWN provider before we swap
+        // in the new queue's reporter — otherwise a cross-account hand-off would
+        // route its stop (and any scrobble) to the wrong server.
+        reportStopIfNeeded(position: currentTime)
         self.resolver = resolveStreamURL
         self.lyricsResolver = resolveLyrics
         self.lyricsRefresher = refreshLyrics
+        self.reporter = reportPlayback
         self.playSessionID = playSessionID
         self.orderedQueue = tracks
         self.isShuffled = false
@@ -261,12 +307,18 @@ public final class AudioPlaybackController {
         playSessionID: String? = nil,
         resolveStreamURL: @escaping StreamURLResolver,
         resolveLyrics: LyricsResolver? = nil,
-        refreshLyrics: LyricsRefresher? = nil
+        refreshLyrics: LyricsRefresher? = nil,
+        reportPlayback: PlaybackReporter? = nil
     ) {
         guard !tracks.isEmpty else { return }
+        // Close the outgoing queue's live track on ITS OWN provider before we swap
+        // in the new queue's reporter — otherwise a cross-account hand-off would
+        // route its stop (and any scrobble) to the wrong server.
+        reportStopIfNeeded(position: currentTime)
         self.resolver = resolveStreamURL
         self.lyricsResolver = resolveLyrics
         self.lyricsRefresher = refreshLyrics
+        self.reporter = reportPlayback
         self.playSessionID = playSessionID
         self.orderedQueue = tracks
         self.isShuffled = true
@@ -291,6 +343,7 @@ public final class AudioPlaybackController {
         #endif
         player.playImmediately(atRate: 1.0)
         isPlaying = true
+        reportPauseState(paused: false)
         #if canImport(MediaPlayer)
         updateNowPlayingInfo()
         #endif
@@ -299,6 +352,7 @@ public final class AudioPlaybackController {
     public func pause() {
         player.pause()
         isPlaying = false
+        reportPauseState(paused: true)
         #if canImport(MediaPlayer)
         updateNowPlayingInfo()
         #endif
@@ -352,6 +406,9 @@ public final class AudioPlaybackController {
 
     /// Stops playback and clears the queue — hides the mini-player.
     public func stop() {
+        // Report the current track's stop before we tear down so the server
+        // closes its now-playing session and records the play position.
+        reportStopIfNeeded(position: currentTime)
         player.pause()
         player.removeAllItems()
         isPlaying = false
@@ -421,6 +478,11 @@ public final class AudioPlaybackController {
 
     /// Called when the current item finishes on its own.
     private func handleItemDidEnd() {
+        // A natural end means the track played to completion — report a stop at
+        // full duration so the server marks it *played* (the signal that feeds
+        // "Recently Played"). Do it before advancing; startCurrent's own stop
+        // then no-ops because reportedTrack is already cleared.
+        reportStopIfNeeded(position: duration > 0 ? duration : currentTime)
         if repeatMode == .one {
             Task { await startCurrent() }
         } else {
@@ -430,9 +492,23 @@ public final class AudioPlaybackController {
 
     private func startCurrent() async {
         guard let track = currentTrack, let resolver else { return }
+        // Supersede guard: a rapid skip or a new queue spawns another startCurrent
+        // while this one is still resolving. Capture this transition's generation so
+        // a stale task bails after the await instead of stopping/starting a track the
+        // user has already skipped past (which would leak a start with no stop).
+        trackTransitionGeneration &+= 1
+        let generation = trackTransitionGeneration
         currentQuality = nil
         loadLyrics(for: track)
-        guard let resolved = await resolver(track) else { return }
+        guard let resolved = await resolver(track),
+              generation == trackTransitionGeneration else { return }
+        // Resolve succeeded and we're still the current transition — now close the
+        // OUTGOING track's session (its skip point on a manual next/previous, or
+        // ≈duration when a track ended naturally, in which case handleItemDidEnd
+        // already reported it and this no-ops) and swap in the new item. Doing the
+        // stop here, after a successful resolve, means a failed resolve leaves the
+        // previous track playing with its reporting intact.
+        reportStopIfNeeded(position: currentTime)
         let url = resolved.url
         currentQuality = resolved.quality
         // Claim the system remote/Now Playing controls only once music is
@@ -449,6 +525,8 @@ public final class AudioPlaybackController {
         isPlaying = true
         currentTime = 0
         duration = track.duration ?? 0
+        // The new track is now playing — open its server-side now-playing session.
+        reportStart(track)
         #if canImport(MediaPlayer)
         currentArtwork = nil
         // Try to have artwork ready BEFORE the first publish so tvOS's transient
@@ -612,6 +690,77 @@ public final class AudioPlaybackController {
         }
     }
 
+    // MARK: Play reporting
+
+    /// Fires a single best-effort report for `track` to its owning server. All
+    /// state bookkeeping (which track is live, throttle timestamp) is handled by
+    /// the callers below; this just logs and dispatches. The network report runs
+    /// on a detached task so a slow server never blocks the controller. Once a
+    /// `.stop` has been delivered — the point where the server records the play —
+    /// we bump `recentPlayReportToken` so the landing rail can refresh.
+    private func fireReport(_ event: PlaybackEvent, for track: MusicTrack, position: TimeInterval) {
+        // Either sink (the provider reporter or the global Last.fm observer) is
+        // enough to warrant dispatching; Last.fm can be connected even when the
+        // active provider isn't a reporting `MediaProvider`.
+        guard reporter != nil || scrobbleObserver != nil else { return }
+        // Prefer the duration the engine actually learned from the AVPlayerItem —
+        // some servers omit it from track metadata, and the Plex scrobble decision
+        // needs a real length (a missing/zero duration would suppress it entirely).
+        let resolvedDuration = duration > 0 ? duration : (track.duration ?? 0)
+        MusicReportDiagnostics.emit(
+            "dispatch \(event.rawValue) pos=\(Int(position))s id=\(track.id) '\(track.title)'"
+        )
+        Task {
+            await reporter?(track, event, position, resolvedDuration)
+            await scrobbleObserver?(track, event, position, resolvedDuration)
+            if event == .stop { self.recentPlayReportToken &+= 1 }
+        }
+    }
+
+    /// Opens a server-side now-playing session for the freshly-started `track`.
+    /// Records it as the live/reported track so subsequent progress/pause/stop
+    /// reports target the right item.
+    private func reportStart(_ track: MusicTrack) {
+        reportedTrack = track
+        lastProgressReportAt = Date()
+        fireReport(.start, for: track, position: 0)
+    }
+
+    /// Closes the live track's now-playing session at `position` (marking it
+    /// played when the position is at/near its duration). No-op when there's no
+    /// live reported track, so it's safe to call speculatively before a hand-off.
+    private func reportStopIfNeeded(position: TimeInterval) {
+        guard let track = reportedTrack else { return }
+        reportedTrack = nil
+        lastProgressReportAt = nil
+        fireReport(.stop, for: track, position: position)
+    }
+
+    /// Reports a pause/unpause for the live track (Jellyfin: an `IsPaused`
+    /// progress ping; Plex: a `paused`/`playing` timeline). No-op when nothing is
+    /// reported, which keeps the end-of-queue auto-`pause()` from emitting a
+    /// spurious pause after `handleItemDidEnd` already reported the stop.
+    private func reportPauseState(paused: Bool) {
+        guard let track = reportedTrack else { return }
+        if !paused { lastProgressReportAt = Date() }
+        fireReport(paused ? .pause : .unpause, for: track, position: currentTime)
+    }
+
+    /// Emits a throttled `.progress` heartbeat off the 4×/sec time observer —
+    /// at most once per `progressReportInterval` — so the server's position stays
+    /// fresh and Plex can auto-scrobble as the timeline nears the end. Only fires
+    /// while actually playing a live reported track.
+    private func maybeReportProgress() {
+        guard isPlaying, let track = reportedTrack else { return }
+        let now = Date()
+        if let last = lastProgressReportAt,
+           now.timeIntervalSince(last) < Self.progressReportInterval {
+            return
+        }
+        lastProgressReportAt = now
+        fireReport(.progress, for: track, position: currentTime)
+    }
+
     // MARK: Observers
 
     private func installTimeObserver() {
@@ -628,6 +777,7 @@ public final class AudioPlaybackController {
                 if self.duration == 0, let d = self.player.currentItem?.duration.seconds, d.isFinite, d > 0 {
                     self.duration = d
                 }
+                self.maybeReportProgress()
             }
         }
     }

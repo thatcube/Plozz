@@ -31,6 +31,17 @@ struct MusicLandingView: View {
             .scrollClipDisabled()
         }
         .task { if case .idle = viewModel.state { await viewModel.load() } }
+        // Refresh the rails once a play has actually been recorded on the server,
+        // so "Recently Played" reflects what was just listened to without needing
+        // an app relaunch. `.task(id:)` coalesces a burst of finished tracks into a
+        // single trailing refresh, and the initial token value (0) is skipped so
+        // this never double-fetches on first appearance. The short delay gives the
+        // server a moment to index the play before we re-query.
+        .task(id: controller.recentPlayReportToken) {
+            guard controller.recentPlayReportToken > 0 else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            await viewModel.load()
+        }
     }
 
     /// The first section that will actually render given the loaded content, so
@@ -457,7 +468,8 @@ struct AlbumDetailView: View {
             startIndex: start,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 
@@ -467,7 +479,8 @@ struct AlbumDetailView: View {
             tracks: viewModel.tracks,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 }
@@ -528,7 +541,8 @@ struct PlaylistDetailView: View {
             startIndex: start,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 
@@ -538,7 +552,8 @@ struct PlaylistDetailView: View {
             tracks: viewModel.tracks,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 }

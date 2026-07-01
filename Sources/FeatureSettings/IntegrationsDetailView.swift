@@ -6,25 +6,28 @@ import TraktService
 import SimklService
 import AniListService
 import MALService
+import LastFmService
 
 struct IntegrationsDetailView: View {
     let trakt: TraktService
     let simkl: SimklService
     let anilist: AniListService
     let mal: MALService
+    let lastfm: LastFmService
     @Bindable var playback: PlaybackSettingsModel
     let serverCount: Int
 
     var body: some View {
         SettingsSplitLayout(sections: sections)
             .task {
-                // Load all four statuses up front so the left list's value
+                // Load all statuses up front so the left list's value
                 // summaries are correct before any row is focused.
                 async let t: Void = trakt.refreshStatus()
                 async let s: Void = simkl.refreshStatus()
                 async let a: Void = anilist.refreshStatus()
                 async let m: Void = mal.refreshStatus()
-                _ = await (t, s, a, m)
+                async let l: Void = lastfm.refreshStatus()
+                _ = await (t, s, a, m, l)
             }
     }
 
@@ -116,6 +119,29 @@ struct IntegrationsDetailView: View {
             }
         ])
 
+        let music = SettingsSplitSection(id: "music", header: "Music", rows: [
+            SettingsSplitRow(
+                id: "lastfm",
+                title: "Last.fm",
+                description: "Scrobble the music you play in Plozz to your Last.fm profile.",
+                valueSummary: statusSummary(lastfmRowPhase)
+            ) {
+                if case let .connecting(authURL, _) = lastfm.phase {
+                    LastFmConnectingView(
+                        authURL: authURL,
+                        onCancel: { lastfm.cancelConnect() }
+                    )
+                } else {
+                    trackerActionBar(
+                        phase: lastfmRowPhase,
+                        onConnect: { lastfm.connect() },
+                        onCancel: { lastfm.cancelConnect() },
+                        onDisconnect: { Task { await lastfm.disconnect() } }
+                    )
+                }
+            }
+        ])
+
         let watchStatus = SettingsSplitSection(id: "watch-status", header: "Watch Status", rows: [
             SettingsSplitRow(
                 id: "sync-across-servers",
@@ -132,7 +158,7 @@ struct IntegrationsDetailView: View {
             }
         ])
 
-        return [trackers, watchStatus]
+        return [trackers, music, watchStatus]
     }
 
     /// The status + action controls shown in a tracker's detail pane for every
@@ -246,6 +272,17 @@ struct IntegrationsDetailView: View {
         case .error: .error
         }
     }
+
+    private var lastfmRowPhase: TrackerRowPhase {
+        switch lastfm.phase {
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .connecting: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
+        }
+    }
 }
 
 // MARK: - Tracker phase
@@ -337,6 +374,45 @@ struct MALAuthorizationCodeEntryView: View {
 }
 
 // MARK: - Shared Components
+
+/// Last.fm desktop-auth connecting view. Shows a QR to the Last.fm approval page;
+/// the user scans it and approves on their phone (NO code typed on the TV), and
+/// the service polls in the background until it flips to Connected.
+struct LastFmConnectingView: View {
+    let authURL: String
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 32) {
+            QRCodeView(authURL)
+                .frame(width: 180, height: 180)
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Scan to connect Last.fm")
+                    .font(.title2.weight(.semibold))
+                Text("Scan the code with your phone and approve access on Last.fm. There's no code to type — this screen updates automatically once you approve.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 460, alignment: .leading)
+                HStack(spacing: 14) {
+                    ProgressView().controlSize(.small)
+                    Text("Waiting for approval…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 4)
+                Button(role: .cancel, action: onCancel) {
+                    Text("Cancel")
+                }
+                .padding(.top, 16)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}
 
 /// Reusable device-code connecting view (QR + code + countdown) for Trakt/Simkl.
 struct DeviceCodeConnectingView: View {

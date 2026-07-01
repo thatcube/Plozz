@@ -3,6 +3,7 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import MetadataKit
+import CoreNetworking
 
 /// Navigation routes inside the Music tab's stack.
 enum MusicRoute: Hashable {
@@ -81,7 +82,8 @@ public struct MusicTabView: View {
             startIndex: 0,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 
@@ -130,6 +132,78 @@ func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackControll
             return nil
         }
         return AudioPlaybackController.ResolvedStream(url: info.streamURL, quality: info.quality)
+    }
+}
+
+/// Builds a playback reporter bound to a music provider, mirroring
+/// `streamURLResolver`, so the audio engine can report play lifecycle events
+/// (start / periodic progress / pause / unpause / stop) to the server that owns
+/// the track. This is what stamps the user's server-side play history — which in
+/// turn feeds the "Recently Played" rail. (Plozz's video player already reports;
+/// the music engine historically never did, so listening in Plozz was invisible
+/// to both Jellyfin and Plex.)
+///
+/// The music providers are the *same* concrete types as the video providers —
+/// `JellyfinProvider` and `PlexProvider` conform to both `MusicProvider` and
+/// `MediaProvider` — so we reach the existing `reportPlayback(_:event:)` by
+/// casting. Returns `nil` for a provider that isn't a `MediaProvider` (reporting
+/// simply stays off for that session).
+///
+/// Reporting is best-effort: a failure is logged and swallowed so it can never
+/// surface as a playback error (matching the video player's tolerance).
+@MainActor
+func playbackReporter(for provider: any MusicProvider) -> AudioPlaybackController.PlaybackReporter? {
+    guard let media = provider as? MediaProvider else {
+        // Every real provider (Jellyfin/Plex) is also a MediaProvider, so this
+        // should never happen — log it if it ever does, so a silent absence of
+        // "Music report …" lines has an explanation.
+        PlozzLog.playback.debug("Music playback reporting disabled — provider is not a MediaProvider")
+        return nil
+    }
+    // Plex's /:/timeline keeps the now-playing dashboard and resume point fresh
+    // but never increments a track's play count / lastViewedAt — so timeline pings
+    // alone never surface a track in "Recently Played". Plex needs an explicit
+    // /:/scrobble once the track is played past ~80% of its length. Jellyfin, by
+    // contrast, marks a track played from its /Sessions/Playing/Stopped report, so
+    // scrobbling it again would double-count — hence this is Plex-only.
+    let plexScrobbler: WatchStateProviding? =
+        media.kind == .plex ? provider as? WatchStateProviding : nil
+    let scrobbleThreshold = 0.80
+
+    return { track, event, positionSeconds, durationSeconds in
+        let progress = PlaybackProgress(
+            itemID: track.id,
+            playSessionID: nil,
+            positionSeconds: positionSeconds,
+            isPaused: event == .pause
+        )
+        do {
+            try await media.reportPlayback(progress, event: event)
+            MusicReportDiagnostics.emit(
+                "sent OK \(event.rawValue) pos=\(Int(positionSeconds))s id=\(track.id)"
+            )
+        } catch {
+            MusicReportDiagnostics.emit(
+                "send THREW \(event.rawValue) id=\(track.id): \(error)"
+            )
+        }
+        // A completed play (Plex only): scrobble so the track counts as played and
+        // appears in Recently Played. A natural end reports position == duration
+        // (100%); a near-complete skip still crosses the ~80% bar. `durationSeconds`
+        // is the engine-resolved length, so a track whose metadata omitted a
+        // duration still scrobbles. Best-effort.
+        if event == .stop, let scrobbler = plexScrobbler,
+           durationSeconds > 0,
+           positionSeconds >= durationSeconds * scrobbleThreshold {
+            do {
+                try await scrobbler.setPlayed(true, itemID: track.id)
+                MusicReportDiagnostics.emit(
+                    "scrobble OK id=\(track.id) pos=\(Int(positionSeconds))s/\(Int(durationSeconds))s"
+                )
+            } catch {
+                MusicReportDiagnostics.emit("scrobble THREW id=\(track.id): \(error)")
+            }
+        }
     }
 }
 

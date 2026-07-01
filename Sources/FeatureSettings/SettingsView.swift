@@ -7,6 +7,7 @@ import TraktService
 import SimklService
 import AniListService
 import MALService
+import LastFmService
 
 /// Settings root — a hierarchical list of top-level rows that each push a
 /// dedicated detail page.
@@ -46,6 +47,7 @@ public struct SettingsView: View {
     private let simkl: SimklService
     private let anilist: AniListService
     private let mal: MALService
+    private let lastfm: LastFmService
     private let discoveredLibraries: LoadState<[AggregatedLibrary]>
     private let reloadLibraries: () async -> Void
     private let accounts: [Account]
@@ -84,6 +86,7 @@ public struct SettingsView: View {
         simkl: SimklService,
         anilist: AniListService,
         mal: MALService,
+        lastfm: LastFmService,
         discoveredLibraries: LoadState<[AggregatedLibrary]>,
         reloadLibraries: @escaping () async -> Void,
         accounts: [Account],
@@ -121,6 +124,7 @@ public struct SettingsView: View {
         self.simkl = simkl
         self.anilist = anilist
         self.mal = mal
+        self.lastfm = lastfm
         self.discoveredLibraries = discoveredLibraries
         self.reloadLibraries = reloadLibraries
         self.accounts = accounts
@@ -446,7 +450,7 @@ public struct SettingsView: View {
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:
-            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, playback: playback, serverCount: activeProfileServerCount)
+            IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount)
         case .attributions:
             AttributionsDetailView()
         case let .plexUser(accountID):

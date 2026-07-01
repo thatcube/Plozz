@@ -11,6 +11,7 @@ import ProviderPlex
 import RatingsService
 import TraktService
 import SimklService
+import LastFmService
 import AniListService
 import MALService
 import TopShelfKit
@@ -151,6 +152,11 @@ public final class AppState {
 
     /// MyAnimeList sync: device-code OAuth + list update (anime only).
     public let malService: MALService
+
+    /// Last.fm music scrobbling: on-device desktop-auth poll + track.scrobble.
+    /// User-scoped (not tied to a media provider); its scrobbler is fanned into
+    /// the audio controller so listening in Plozz shows up on the user's Last.fm.
+    public let lastfmService: LastFmService
 
     /// The handler behind every card's press-and-hold context menu. Lazily
     /// created so it can capture `self`; resolves the owning provider per item
@@ -627,7 +633,8 @@ public final class AppState {
         traktService: TraktService? = nil,
         simklService: SimklService? = nil,
         anilistService: AniListService? = nil,
-        malService: MALService? = nil
+        malService: MALService? = nil,
+        lastfmService: LastFmService? = nil
     ) {
         self.accountStore = accountStore ?? Self.makeDefaultAccountStore()
         self.registry = registry ?? Self.makeDefaultRegistry()
@@ -654,6 +661,9 @@ public final class AppState {
         self.simklService = simklService ?? SimklServiceFactory.make(namespace: ns)
         self.anilistService = anilistService ?? AniListServiceFactory.make(namespace: ns)
         self.malService = malService ?? MALServiceFactory.make(namespace: ns)
+        // Last.fm is user-scoped like the trackers; seed it with the active
+        // profile's namespace so each profile links its own Last.fm account.
+        self.lastfmService = lastfmService ?? LastFmServiceFactory.make(namespace: ns)
         self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         self.playbackModel = playbackModel ?? PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
@@ -668,6 +678,19 @@ public final class AppState {
             ?? UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
         self.nightShiftModel = nightShiftModel
             ?? NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
+
+        // Fan the Last.fm scrobbler into the audio controller's reporting seam.
+        // The scrobbler is a stable handle (never rebuilt on profile switch — only
+        // its token store's namespace changes), so capturing it once here is safe
+        // across profile changes. It runs alongside the provider-bound reporter;
+        // the scrobbler itself applies Last.fm's own eligibility rule and no-ops
+        // when Last.fm is unconfigured/disconnected.
+        let lastfmScrobbler = self.lastfmService.scrobbler
+        self.audioController.scrobbleObserver = { track, event, position, duration in
+            await lastfmScrobbler.handle(
+                track: track, event: event, position: position, duration: duration
+            )
+        }
     }
 
     private static func makeDefaultAccountStore() -> AccountPersisting {
@@ -1319,6 +1342,7 @@ public final class AppState {
             await simklService.setActiveProfile(namespace: ns)
             await anilistService.setActiveProfile(namespace: ns)
             await malService.setActiveProfile(namespace: ns)
+            await lastfmService.setActiveProfile(namespace: ns)
         }
     }
 

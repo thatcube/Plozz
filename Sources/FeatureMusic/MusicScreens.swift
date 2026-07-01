@@ -812,28 +812,32 @@ struct NowPlayingEqualizer: View {
     /// passes the inverted focus foreground so the bars stay legible on the
     /// contrast-flipped focused card.
     var tint: Color? = nil
+    /// Multiplier on the intrinsic bar/frame dimensions. Defaults to 1 so the
+    /// track-list and mini-player instances keep their established size; the
+    /// Now Playing title cue passes a larger value to read at a distance.
+    var scale: CGFloat = 1
     private let barCount = 4
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 0.08, paused: !isAnimating)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .bottom, spacing: 3) {
+            HStack(alignment: .bottom, spacing: 3 * scale) {
                 ForEach(0..<barCount, id: \.self) { i in
                     Capsule()
                         .fill(tint ?? Color.accentColor)
-                        .frame(width: 4, height: height(bar: i, at: t))
+                        .frame(width: 4 * scale, height: height(bar: i, at: t))
                 }
             }
-            .frame(height: 24, alignment: .bottom)
+            .frame(height: 24 * scale, alignment: .bottom)
         }
     }
 
     private func height(bar i: Int, at t: TimeInterval) -> CGFloat {
-        guard isAnimating else { return 9 }
+        guard isAnimating else { return 9 * scale }
         let speed = 6.0
         let phase = Double(i) * 0.8
         let v = (sin(t * speed + phase) + 1) / 2 // 0...1
-        return 5 + CGFloat(v) * 17 // 5...22
+        return (5 + CGFloat(v) * 17) * scale // (5...22) * scale
     }
 }
 #endif

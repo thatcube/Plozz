@@ -1393,17 +1393,22 @@ private struct PanelGlassBackground: ViewModifier {
 }
 
 /// Horizontally positions an open control panel within the bottom cluster.
-/// `leadingInset` non-nil → left-align the panel at that inset (Speed, so it
-/// opens directly under its own button); nil → pin to the trailing edge above
-/// the track-button cluster (Subtitles/Audio/Sync).
+/// `leadingInset` non-nil → shift the panel right to sit under its own button
+/// (Speed); nil → pin to the trailing edge above the track-button cluster
+/// (Subtitles/Audio/Sync).
 private struct PanelHorizontalPlacement: ViewModifier {
     let leadingInset: CGFloat?
 
     func body(content: Content) -> some View {
         if let leadingInset {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, max(0, leadingInset))
+            // Use `.offset` — NOT `.padding(.leading,)` — so aligning the Speed
+            // panel to its button has zero effect on the bottom cluster's layout.
+            // Leading padding applied after a fill frame grows the panel's own
+            // width by `leadingInset`, overflowing the row and dragging the whole
+            // control cluster sideways as the panel opens. Offset only moves the
+            // drawn panel; the measured cluster (and the button we align to) stay
+            // put, so there's no layout feedback loop.
+            content.offset(x: max(0, leadingInset))
         } else {
             content
                 .frame(maxWidth: .infinity, alignment: .trailing)

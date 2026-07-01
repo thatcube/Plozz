@@ -460,12 +460,23 @@ struct PlayerControls: View {
                 }
                 .frame(maxHeight: 440)
             }
-            .frame(width: 520, alignment: .leading)
+            .frame(width: panelWidth(for: category), alignment: .leading)
             .colorScheme(.dark)
             .modifier(PanelGlassBackground())
             // The track controls live on the right of the button row, so the panel
             // opens against the trailing edge above them rather than on the left.
             .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    /// Fixed width for an open control panel, per category. Most menus share a
+    /// roomy 520pt column; the Speed menu only holds short preset labels
+    /// ("1.25×") and a compact stepper, so it uses roughly half the width to
+    /// avoid a mostly-empty panel.
+    private func panelWidth(for category: Category) -> CGFloat {
+        switch category {
+        case .speed: return 260
+        default: return 520
         }
     }
 

@@ -780,7 +780,7 @@ struct PlayerControls: View {
             }
         }
         .padding(.horizontal, 28)
-        .padding(.top, 16)
+        .padding(.top, 10)
         .padding(.bottom, 10)
     }
 
@@ -1173,14 +1173,20 @@ struct PlayerControls: View {
     /// Background box: colour, its own opacity, corner radius and padding.
     private var styleBackgroundRows: [StyleRowSpec] {
         let s = model.subtitleStyle
-        return [
+        var rows: [StyleRowSpec] = [
             StyleRowSpec(slot: 0, title: "Show Box", kind: .toggle(isOn: s.background.isEnabled, flip: { updateStyle { $0.background.isEnabled.toggle() } })),
-            colorRow(1, "Colour", options: Self.boxColorOptions, current: s.background.color, label: Self.boxColorLabel) { c in updateStyle { $0.background.color = c } },
-            numberRow(2, "Box Opacity", options: Self.boxOpacityOptions, current: Int((s.background.color.alpha * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.background.color.alpha = Double(v) / 100 } },
-            numberRow(3, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: Self.cornerLabel) { v in updateStyle { $0.background.cornerRadius = Double(v) } },
-            numberRow(4, "Horizontal Padding", options: Self.paddingOptions, current: Int(s.background.horizontalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.horizontalPadding = Double(v) } },
-            numberRow(5, "Vertical Padding", options: Self.paddingOptions, current: Int(s.background.verticalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.verticalPadding = Double(v) } },
         ]
+        // The box's colour/opacity/shape only matter when it's shown; hide them
+        // while it's off so focus never lands on a control with no visible effect
+        // (matching the Outline and Dual screens' gating).
+        guard s.background.isEnabled else { return rows }
+        var slot = 1
+        rows.append(colorRow(slot, "Colour", options: Self.boxColorOptions, current: s.background.color, label: Self.boxColorLabel) { c in updateStyle { $0.background.color = c } }); slot += 1
+        rows.append(numberRow(slot, "Box Opacity", options: Self.boxOpacityOptions, current: Int((s.background.color.alpha * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.background.color.alpha = Double(v) / 100 } }); slot += 1
+        rows.append(numberRow(slot, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: Self.cornerLabel) { v in updateStyle { $0.background.cornerRadius = Double(v) } }); slot += 1
+        rows.append(numberRow(slot, "Horizontal Padding", options: Self.paddingOptions, current: Int(s.background.horizontalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.horizontalPadding = Double(v) } }); slot += 1
+        rows.append(numberRow(slot, "Vertical Padding", options: Self.paddingOptions, current: Int(s.background.verticalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.verticalPadding = Double(v) } }); slot += 1
+        return rows
     }
 
     /// True when a real (non-"Off") second subtitle track is currently selected,
@@ -1228,11 +1234,18 @@ struct PlayerControls: View {
             )),
         ]
         if hasTrack, let sec = s.secondary {
-            rows.append(choiceRow(1, "Placement", options: SubtitleStyle.Secondary.Placement.allCases, current: sec.placement, label: { $0 == .above ? "Above" : "Below" }) { v in updateStyle { $0.secondary?.placement = v } })
-            rows.append(StyleRowSpec(slot: 2, title: "Distinct Style", kind: .toggle(isOn: sec.differentiate, flip: { updateStyle { $0.secondary?.differentiate.toggle() } })))
-            rows.append(numberRow(3, "Size", options: Self.secondarySizeOptions, current: Int((sec.relativeScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.secondary?.relativeScale = Double(v) / 100 } })
-            rows.append(colorRow(4, "Colour", options: Self.textColorOptions, current: sec.textColor, label: Self.colorLabel) { c in updateStyle { $0.secondary?.textColor = c } })
-            rows.append(numberRow(5, "Gap", options: Self.gapOptions, current: Int(sec.gap.rounded()), label: { "\($0)" }) { v in updateStyle { $0.secondary?.gap = Double(v) } })
+            var slot = 1
+            rows.append(choiceRow(slot, "Placement", options: SubtitleStyle.Secondary.Placement.allCases, current: sec.placement, label: { $0 == .above ? "Above" : "Below" }) { v in updateStyle { $0.secondary?.placement = v } }); slot += 1
+            rows.append(StyleRowSpec(slot: slot, title: "Distinct Style", kind: .toggle(isOn: sec.differentiate, flip: { updateStyle { $0.secondary?.differentiate.toggle() } }))); slot += 1
+            // Size + Colour only take effect when the secondary uses a distinct
+            // style — otherwise the renderer mirrors the primary's size/colour
+            // (see SubtitleOverlayView). Hide them while Distinct Style is off so
+            // they're not dead controls.
+            if sec.differentiate {
+                rows.append(numberRow(slot, "Size", options: Self.secondarySizeOptions, current: Int((sec.relativeScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.secondary?.relativeScale = Double(v) / 100 } }); slot += 1
+                rows.append(colorRow(slot, "Colour", options: Self.textColorOptions, current: sec.textColor, label: Self.colorLabel) { c in updateStyle { $0.secondary?.textColor = c } }); slot += 1
+            }
+            rows.append(numberRow(slot, "Gap", options: Self.gapOptions, current: Int(sec.gap.rounded()), label: { "\($0)" }) { v in updateStyle { $0.secondary?.gap = Double(v) } }); slot += 1
         }
         return rows
     }

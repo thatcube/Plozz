@@ -11,7 +11,8 @@ language every other module speaks.
   `ProviderRegistry` / `ProviderResolving`, `ResolvedAccount`.
 - Cross-cutting UI state: `LoadState`, `AppError`.
 - Shared decode/encode helpers: `JSONDecoder.plozz`, `JSONEncoder.plozz`.
-- Caption / subtitle data model: `CaptionSettings`, `CaptionStyle…`.
+- Subtitle behaviour + appearance model: `SubtitleBehavior`, `SubtitleStyle`,
+  plus the neutral `SubtitleColor` / `SubtitleEdgeStyle` / `SubtitleMode` primitives.
 - Profiles persistence contract: `ProfilePersisting`, `ProfileStore`,
   `ProfilesModel`, plus the Plex Home-user mapping (`PlexHomeUser`).
 
@@ -33,7 +34,7 @@ language every other module speaks.
 | Multi-account | `Account`, `ResolvedAccount`, `AggregatedLibrary` |
 | Profiles | `Profile`, `ProfileStore`, `ProfilesModel`, `PlexHomeUser` |
 | UI state | `LoadState`, `AppError` |
-| Captions | `CaptionSettings`, `CaptionStyleRules` (consumed by `FeaturePlayback`) |
+| Subtitles | `SubtitleBehavior`, `SubtitleStyle` (rendered by `FeaturePlayback`) |
 
 ## Where to look first
 

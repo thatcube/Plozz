@@ -1025,16 +1025,21 @@ public final class PlayerViewModel {
         // engine's teardown restores SDR — a real switch the view should veil),
         // and hybrid→native rises to HDR (the new switch the view should veil).
         displayMode = engineKind == .native ? HDRDisplayMode(request.sourceMetadata) : .sdr
-        // The overlay clamps its white point on HDR frames; mirror the range the
-        // panel is actually being driven to (native HDR content → HDR display).
-        liveSubtitles.isHDR = displayMode != .sdr
+        // Engine-independent: tracks the *content's* range so the exit veil can
+        // cover a panel HDR/DV → SDR switch even when a match-content engine
+        // (Plozzigen, formerly mpv) — which keeps `displayMode` `.sdr` above —
+        // drove the panel into HDR on this TV.
+        contentDisplayMode = HDRDisplayMode(request.sourceMetadata)
+        // The overlay clamps its white point on HDR frames; mirror whether the
+        // panel is actually being driven to HDR by ANY engine (Plozzigen also
+        // match-content-switches the display), not just the native display-mode
+        // transition above — otherwise HDR subtitle brightness is dead on the
+        // Plozzigen HDR path. Neutral by default (scale 1.0 = no change); this
+        // just unlocks the HDR Brightness row so it can actually take effect.
+        liveSubtitles.isHDR = contentDisplayMode.isHDR
         // Mirror to the controls model so the style menu can show the HDR
         // Brightness row only while it actually affects the picture.
         controls.subtitlesRenderHDR = liveSubtitles.isHDR
-        // Engine-independent: tracks the *content's* range so the exit veil can
-        // cover a panel HDR/DV → SDR switch even when mpv (which stays `.sdr`
-        // above) drove the panel into HDR on this TV.
-        contentDisplayMode = HDRDisplayMode(request.sourceMetadata)
         // Arm the stall watchdog around load() so a hang that never reports an
         // error still triggers the fallback chain instead of spinning forever.
         armPlaybackWatchdog(startPosition: startPosition)
@@ -1718,6 +1723,8 @@ public final class PlayerViewModel {
         subtitleDownloadTask = nil
         subtitleCueLoadTask?.cancel()
         subtitleCueLoadTask = nil
+        secondaryCueLoadTask?.cancel()
+        secondaryCueLoadTask = nil
         // Silence the engine *before* the final server report. The report is a
         // network round-trip that can take a second or two; stopping first means
         // leaving the player never keeps playing audio while it completes. Grab

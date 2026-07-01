@@ -16,8 +16,9 @@ cache that every feature module reuses. tvOS-only — guarded behind
   the `MetadataKit` fallback only runs when needed.
 - **Content state** — `ContentStateView` renders the `LoadState`
   loading / loaded / empty / failed states identically across features.
-- **Caption customization UI** — the surfaces in `FeatureSettings` reuse
-  `CaptionSettingsCard` from here so the live preview is identical.
+- **Subtitle appearance** — editing the live subtitle look now happens in
+  the player (`FeaturePlayback`'s in-player Style screen), not via a shared
+  Settings card.
 - **Cast & metadata cards** — `CastRowView` and friends, used by Home /
   detail.
 

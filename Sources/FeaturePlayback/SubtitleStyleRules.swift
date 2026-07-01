@@ -21,7 +21,14 @@ extension SubtitleStyle {
         styles[kCMTextMarkupAttribute_BackgroundColorARGB as String] = backgroundColor.argbArray
         styles[kCMTextMarkupAttribute_BaseFontSizePercentageRelativeToVideoHeight as String] =
             max(1.0, 5.0 * fontScale)
-        styles[kCMTextMarkupAttribute_CharacterEdgeStyle as String] = edge.style.cmEdgeStyle
+        // AVFoundation supports only ONE character edge style, so this fallback
+        // path (the native engine drawing an embedded track itself) can't render
+        // a shadow AND an outline together like the custom overlay. When an
+        // explicit outline is enabled, prefer it — it's the higher-contrast
+        // legibility feature — so the default look and migrated `.uniform` users
+        // stay outlined here instead of silently losing the stroke.
+        styles[kCMTextMarkupAttribute_CharacterEdgeStyle as String] =
+            border.isEnabled ? kCMTextMarkupCharacterEdgeStyle_Uniform as String : edge.style.cmEdgeStyle
 
         guard let rule = AVTextStyleRule(textMarkupAttributes: styles) else { return nil }
         return [rule]

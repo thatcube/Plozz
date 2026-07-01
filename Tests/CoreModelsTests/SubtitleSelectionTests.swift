@@ -269,10 +269,13 @@ final class SubtitleBehaviorTests: XCTestCase {
         XCTAssertEqual(behavior.subtitleMode, .forcedOnly)
         XCTAssertEqual(behavior.preferredSubtitleLanguage, "fr")
 
-        // Appearance half of the migration.
+        // Appearance half of the migration. The legacy `.uniform` edge folds
+        // into the single Outline (border) control (see SubtitleStyle), so the
+        // migrated style carries the outline via `border`, not the edge.
         let style = SubtitleStyle(from: legacy)
         XCTAssertEqual(style.fontScale, 1.5)
-        XCTAssertEqual(style.edge.style, .uniform)
+        XCTAssertEqual(style.edge.style, .none)
+        XCTAssertTrue(style.border.isEnabled)
         XCTAssertFalse(style.followsSystemStyle)
     }
 

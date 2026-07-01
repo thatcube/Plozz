@@ -50,11 +50,33 @@ final class SubtitleStyleCodableTests: XCTestCase {
         style.followsSystemStyle = false
         style.fontScale = 1.5
         style.textColor = .yellow
-        style.edge.style = .uniform
+        // Use a persisting edge style: `.uniform` is intentionally folded into
+        // the Outline (border) control on decode, so it wouldn't round-trip as
+        // an edge — that folding is covered by its own test below.
+        style.edge.style = .raised
 
         let data = try JSONEncoder().encode(style)
         let decoded = try JSONDecoder().decode(SubtitleStyle.self, from: data)
         XCTAssertEqual(decoded, style)
+    }
+
+    func testUniformEdgeFoldsIntoOutlineOnDecode() throws {
+        // Shadow and outline are two independent concerns now. A persisted style
+        // (or migrated legacy data) that expressed an outline via the legacy
+        // `.uniform` edge decodes into the single Outline (border) control: the
+        // edge becomes `.none` and the border turns on carrying the old edge's
+        // colour + thickness, so old data keeps its outline through one control.
+        var style = SubtitleStyle.default
+        style.border = SubtitleStyle.Border(isEnabled: false)
+        style.edge = SubtitleStyle.Edge(style: .uniform, color: .yellow, thickness: 3)
+
+        let data = try JSONEncoder().encode(style)
+        let decoded = try JSONDecoder().decode(SubtitleStyle.self, from: data)
+
+        XCTAssertEqual(decoded.edge.style, .none)
+        XCTAssertTrue(decoded.border.isEnabled)
+        XCTAssertEqual(decoded.border.color, .yellow)
+        XCTAssertEqual(decoded.border.width, 3)
     }
 
     func testDefaultUsesOwnRenderer() {

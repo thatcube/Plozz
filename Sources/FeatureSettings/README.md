@@ -18,10 +18,10 @@ and the single place caption customization lives.
 - `IntegrationsDetailView` — "Trackers" page: connect/disconnect for Trakt,
   Simkl, AniList & MyAnimeList (delegates to each tracker service) plus the
   Watch Status across-servers sync toggle.
-- `PreferenceDetailViews` — captions / spoiler / diagnostics /
-  Home-customization preferences. Caption customization renders the
-  live preview via `CoreUI.CaptionSettingsCard` so what you see in
-  Settings is what plays back.
+- `PreferenceDetailViews` — subtitle behaviour / spoiler / diagnostics /
+  Home-customization preferences. Subtitle *behaviour* (mode, language,
+  auto-download) lives here; the subtitle *look* is now adjusted in the
+  player while watching.
 - `SettingsAboutSection` — credits / attributions / version.
 
 ## Invariants

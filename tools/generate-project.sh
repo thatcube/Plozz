@@ -26,6 +26,18 @@ xcodegen generate
 
 proj="Plozz.xcodeproj/project.pbxproj"
 
+# If PLOZZ_SENTRY_DSN wasn't provided in the environment, read it from the local,
+# gitignored .env.fastlane so one file feeds both local device builds and
+# `fastlane` (which also exports it). An explicit env override always wins.
+if [ -z "${PLOZZ_SENTRY_DSN:-}" ] && [ -f ".env.fastlane" ]; then
+  dsn_line=$(grep -E '^[[:space:]]*PLOZZ_SENTRY_DSN=' ".env.fastlane" | tail -n1 || true)
+  if [ -n "$dsn_line" ]; then
+    PLOZZ_SENTRY_DSN=$(printf '%s' "$dsn_line" \
+      | sed -E "s/^[[:space:]]*PLOZZ_SENTRY_DSN=//; s/^\"//; s/\"$//; s/^'//; s/'$//")
+    export PLOZZ_SENTRY_DSN
+  fi
+fi
+
 # --- Opt-in crash-reporting DSN bake -----------------------------------------
 # If PLOZZ_SENTRY_DSN is set in the environment, bake it into the generated
 # project so CrashReporting can read it from Info.plist at runtime. When unset

@@ -413,6 +413,9 @@ struct NowPlayingView: View {
         NowPlayingEqualizer(isAnimating: controller.isPlaying && !reduceMotion,
                             scale: nowPlayingIndicatorScale)
             .frame(width: nowPlayingIndicatorWidth)
+            // Nudge the equalizer up a touch so it reads as vertically centered
+            // against the large title cap height rather than sitting low.
+            .offset(y: -2)
             .opacity(controller.isPlaying ? 1 : 0)
             .animation(.easeInOut(duration: 0.3), value: controller.isPlaying)
             .allowsHitTesting(false)
@@ -428,17 +431,16 @@ struct NowPlayingView: View {
         VStack(spacing: 10) {
             // Title with the "now playing" equalizer to its left, baseline-aligned
             // to the title's top line so it sits beside the first line (not floating
-            // to the vertical middle) when a long title wraps to two lines. Leading
-            // text alignment keeps the top line's left edge flush under the
-            // equalizer; the width-matched trailing clear spacer keeps the whole
-            // block centered and prevents any horizontal shift on play/pause
-            // (indicator visible when playing, faded but still occupying its slot
-            // when paused).
+            // to the vertical middle) when a long title wraps to two lines. The
+            // title is center-aligned; the width-matched leading equalizer and
+            // trailing clear spacer keep the whole block centered and prevent any
+            // horizontal shift on play/pause (indicator visible when playing, faded
+            // but still occupying its slot when paused).
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 nowPlayingTitleIndicator
                 Text(controller.currentTrack?.title ?? "Not Playing")
                     .font(.system(size: 46, weight: .bold))
-                    .multilineTextAlignment(.leading)
+                    .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
                 Color.clear

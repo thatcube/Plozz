@@ -98,4 +98,4 @@ find dist -name '*.xcframework' -maxdepth 3 ! -name '*-GPL*' -exec cp -Rv {} "$O
 
 echo "==> Done. Artifacts in: $OUT_DIR"
 echo "    Next: zip each .xcframework, run 'swift package compute-checksum',"
-echo "    and reference them from a SwiftPM .binaryTarget (see spikes/README.md §1A)."
+echo "    and reference them from a SwiftPM .binaryTarget."

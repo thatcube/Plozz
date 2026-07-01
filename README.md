@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Branding/plozz_logo.svg" alt="Plozz logo" width="128" />
+  <img src="App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg" alt="Plozz logo" width="128" />
 </p>
 
 <h1 align="center">Plozz</h1>

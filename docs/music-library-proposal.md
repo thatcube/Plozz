@@ -1,6 +1,7 @@
 # Music Library Support — Design & UX Proposal
 
-**Status:** Proposal / investigation (no behavioural change shipped)
+**Status:** Implemented — this is the design record for the shipped Music library
+feature (`FeatureMusic`, `CoreModels/MusicProvider.swift`).
 **Scope:** Add support for browsing and playing a **music** library (artists,
 albums, tracks, playlists, genres) from Plex **or** Jellyfin, alongside the
 existing TV & Movies experience.

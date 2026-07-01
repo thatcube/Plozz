@@ -10,9 +10,16 @@ so audio keeps playing as the user navigates the rest of the app.
   `MusicAggregator`: artist / album / track screens that aggregate
   across the active accounts via `MediaProvider`.
 - **Audio engine** — `AudioPlaybackController`:
-  - owns an `AVQueuePlayer` + manually-managed queue so it can resolve
-    each track's stream URL on demand and support shuffle / repeat /
-    next / previous;
+  - owns a single long-lived `AVQueuePlayer` + manually-managed queue so it
+    can resolve each track's stream URL on demand and support shuffle /
+    repeat / next / previous; the upcoming track is resolved and
+    *pre-enqueued* behind the current one (the "treadmill") so it prerolls
+    while the current song plays, and track changes advance the queue
+    (`advanceToNextItem()`) onto that already-buffered item rather than
+    emptying/replacing the item, so the output route stays alive across songs
+    (keeps AirPlay 2 from dropping to silence on skip); route-change /
+    interruption observers recover playback if the system parks it after a
+    jump the treadmill couldn't preroll;
   - configures `AVAudioSession` `.playback` + `setActive(true)` so audio
     keeps playing across screens / screensaver;
   - publishes `MPNowPlayingInfoCenter` (title / artist / album / artwork
@@ -46,3 +53,13 @@ so audio keeps playing as the user navigates the rest of the app.
   / Now-Playing wiring.
 - `MusicArtworkFallback.swift` — how `MetadataKit` art is plugged in.
 - `MusicViewModels.swift` — screen state coordination.
+
+## AirPlay 2 / HomePod audio-drop recovery
+
+Seeks, skips, and network blips could silently drop audio on a HomePod over
+AirPlay 2. The root cause (progressive-download `AVPlayer` items forcing an
+AirPlay stream renegotiation) and every mechanism that fixed it — the
+deactivate→reactivate session cycle, gapless-vs-reactivate gating, the `.failed`
+retry, and the self-heal watchdog — are documented in
+[`docs/airplay-audio-recovery.md`](../../docs/airplay-audio-recovery.md). Read it
+before touching the transition/seek/recovery paths in `AudioPlaybackController`.

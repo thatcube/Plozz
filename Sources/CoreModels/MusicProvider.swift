@@ -64,6 +64,19 @@ public protocol MusicProvider: Sendable {
     /// method.
     func recentlyPlayedTracks(limit: Int, libraryIDs: [String]?) async throws -> [MusicTrack]
 
+    /// Recently played **playlists** across the user's music libraries, most-
+    /// recent first, excluding never-played playlists. Each returned playlist
+    /// carries a `lastPlayedAt` timestamp so callers can merge-sort recency
+    /// across libraries/servers and interleave playlists with recently-played
+    /// albums and songs. Optional capability — providers without it inherit the
+    /// empty default.
+    func recentlyPlayedPlaylists(limit: Int) async throws -> [MusicPlaylist]
+
+    /// Library-scoped variant of `recentlyPlayedPlaylists`, restricted to the
+    /// visible `libraryIDs` (`nil` = all). The default delegates to the unscoped
+    /// method.
+    func recentlyPlayedPlaylists(limit: Int, libraryIDs: [String]?) async throws -> [MusicPlaylist]
+
     /// Full detail for a single artist.
     func artist(id: String) async throws -> MusicArtist
 
@@ -127,6 +140,12 @@ public extension MusicProvider {
 
     func recentlyPlayedTracks(limit: Int, libraryIDs: [String]?) async throws -> [MusicTrack] {
         try await recentlyPlayedTracks(limit: limit)
+    }
+
+    func recentlyPlayedPlaylists(limit: Int) async throws -> [MusicPlaylist] { [] }
+
+    func recentlyPlayedPlaylists(limit: Int, libraryIDs: [String]?) async throws -> [MusicPlaylist] {
+        try await recentlyPlayedPlaylists(limit: limit)
     }
 
     func musicImageURL(id: String, maxWidth: Int?) -> URL? { nil }

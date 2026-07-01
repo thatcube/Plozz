@@ -175,14 +175,37 @@ public enum MusicMerge {
         return Array(tracks(sorted).prefix(max(0, limit)))
     }
 
+    /// Builds the recently-played **playlists** rail: order by real last-played
+    /// time (most recent first), de-dup the same playlist across servers, then
+    /// trim. Playlists without a timestamp sort last but are still included.
+    public static func recentlyPlayedPlaylists(_ input: [MusicPlaylist], limit: Int) -> [MusicPlaylist] {
+        let sorted = input.sorted { lhs, rhs in
+            switch (lhs.lastPlayedAt, rhs.lastPlayedAt) {
+            case let (l?, r?): return l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return false
+            }
+        }
+        return Array(playlists(sorted).prefix(max(0, limit)))
+    }
+
     /// Builds the unified "Recently Played" rail by interleaving recently-played
-    /// **songs and albums** ordered by real play recency (most recent first).
-    /// Each side is de-duplicated first, then the two are merged and trimmed so
-    /// the rail stays at most `limit` cards regardless of the songs/albums split.
-    public static func recentlyPlayedItems(albums: [MusicAlbum], tracks: [MusicTrack], limit: Int) -> [RecentlyPlayedItem] {
+    /// **songs, albums and playlists** ordered by real play recency (most recent
+    /// first). Each side is de-duplicated first, then all three are merged and
+    /// trimmed so the rail stays at most `limit` cards regardless of the split.
+    public static func recentlyPlayedItems(
+        albums: [MusicAlbum],
+        tracks: [MusicTrack],
+        playlists: [MusicPlaylist] = [],
+        limit: Int
+    ) -> [RecentlyPlayedItem] {
         let trimmedAlbums = recentlyPlayedAlbums(albums, limit: max(0, limit))
         let trimmedTracks = recentlyPlayedTracks(tracks, limit: max(0, limit))
-        let items = trimmedAlbums.map(RecentlyPlayedItem.album) + trimmedTracks.map(RecentlyPlayedItem.track)
+        let trimmedPlaylists = recentlyPlayedPlaylists(playlists, limit: max(0, limit))
+        let items = trimmedAlbums.map(RecentlyPlayedItem.album)
+            + trimmedTracks.map(RecentlyPlayedItem.track)
+            + trimmedPlaylists.map(RecentlyPlayedItem.playlist)
         let sorted = items.sorted { lhs, rhs in
             switch (lhs.lastPlayedAt, rhs.lastPlayedAt) {
             case let (l?, r?): return l > r

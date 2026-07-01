@@ -138,6 +138,10 @@ public final class MusicLandingViewModel {
                     let tracks = (try? await account.provider.recentlyPlayedTracks(limit: sampleSize, libraryIDs: account.libraryIDs)) ?? []
                     return .recentTracks(account: index, tracks: tracks)
                 }
+                group.addTask {
+                    let playlists = (try? await account.provider.recentlyPlayedPlaylists(limit: sampleSize, libraryIDs: account.libraryIDs)) ?? []
+                    return .recentPlaylists(account: index, playlists: playlists)
+                }
             }
             var results: [Partial] = []
             for await result in group { results.append(result) }
@@ -152,6 +156,7 @@ public final class MusicLandingViewModel {
         var playlists: [MusicPlaylist] = []
         var recents: [MusicAlbum] = []
         var recentTracks: [MusicTrack] = []
+        var recentPlaylists: [MusicPlaylist] = []
         for (index, account) in accounts.enumerated() {
             for entry in fetched {
                 switch entry {
@@ -167,6 +172,8 @@ public final class MusicLandingViewModel {
                     recents += recentAlbums.map { $0.taggingSource(account.accountID) }
                 case let .recentTracks(acc, tracks) where acc == index:
                     recentTracks += tracks.map { $0.taggingSource(account.accountID) }
+                case let .recentPlaylists(acc, recentPls) where acc == index:
+                    recentPlaylists += recentPls.map { $0.taggingSource(account.accountID) }
                 default:
                     break
                 }
@@ -174,11 +181,11 @@ public final class MusicLandingViewModel {
         }
 
         // Collapse cross-server duplicates through the single identity/merge seam.
-        // The Recently Played rail interleaves recently-played songs *and* albums
-        // ordered by real play recency, so Plex + Jellyfin read as one combined,
-        // de-duplicated library.
+        // The Recently Played rail interleaves recently-played songs, albums *and*
+        // playlists ordered by real play recency, so Plex + Jellyfin read as one
+        // combined, de-duplicated library.
         return Content(
-            recentlyPlayed: MusicMerge.recentlyPlayedItems(albums: recents, tracks: recentTracks, limit: sampleSize),
+            recentlyPlayed: MusicMerge.recentlyPlayedItems(albums: recents, tracks: recentTracks, playlists: recentPlaylists, limit: sampleSize),
             albums: Array(MusicMerge.albums(albums).prefix(sampleSize)),
             artists: Array(MusicMerge.artists(artists).prefix(sampleSize)),
             playlists: Array(MusicMerge.playlists(playlists).prefix(sampleSize))
@@ -190,6 +197,7 @@ public final class MusicLandingViewModel {
         case items(account: Int, kind: MusicItemKind, page: MusicPage?)
         case recent(account: Int, albums: [MusicAlbum])
         case recentTracks(account: Int, tracks: [MusicTrack])
+        case recentPlaylists(account: Int, playlists: [MusicPlaylist])
     }
 }
 

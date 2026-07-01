@@ -1081,7 +1081,10 @@ struct PlayerControls: View {
     /// face — bundled faces via their PostScript name, SF via the system font, and
     /// SF Rounded via the rounded system design.
     private static func fontPreviewFont(for family: SubtitleFontFamily) -> Font {
-        let size: CGFloat = 34
+        // OpenDyslexic's wide, heavy letterforms already read large, so it gets a
+        // smaller preview; every other family is bumped up for a bolder, more
+        // legible list.
+        let size: CGFloat = family == .openDyslexic ? 30 : 40
         if family.usesRoundedDesign { return .system(size: size, design: .rounded) }
         if let stem = family.postScriptStem { return .custom("\(stem)-Regular", size: size) }
         return .system(size: size)

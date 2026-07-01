@@ -266,6 +266,10 @@ public final class AudioPlaybackController {
     private var endObserver: NSObjectProtocol?
     private var sessionConfigured = false
     private var remoteCommandsActive = false
+    /// Retry loop that re-claims the audio session after an interruption `.began`
+    /// when `.ended` never arrives (the AirPlay/HomePod drop fingerprint on
+    /// tvOS 27). Cancelled when a new one starts or an `.ended` fires.
+    private var interruptionRecoveryTask: Task<Void, Never>?
     #if canImport(MediaPlayer)
     /// Current track artwork, retained so each `nowPlayingInfo` rebuild can
     /// re-attach it (assigning `nowPlayingInfo` replaces the whole dictionary).
@@ -1292,11 +1296,23 @@ public final class AudioPlaybackController {
             // dropping) arrives here as reason `.routeDisconnected` — the exact
             // fingerprint of the AirPlay skip bug, so log the reason.
             diag("interrupt", "BEGAN reason=\(interruptionReasonName(info)) route=\(routeSummary()) isPlaying=\(isPlaying) state=[\(playerStateSummary())]")
+            // On tvOS the matching `.ended` for an AirPlay/HomePod drop frequently
+            // NEVER arrives (or arrives minutes later), so waiting for it — as we
+            // used to — leaves the HomePod silent while the player still reports
+            // `.playing`. When we still intend to play, proactively re-claim the
+            // session and re-negotiate the output sinks with a bounded retry loop.
+            if isPlaying, hasActivePlayback {
+                scheduleInterruptionRecovery()
+            }
         case .ended:
             let options = AVAudioSession.InterruptionOptions(
                 rawValue: info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             )
             diag("interrupt", "ENDED reason=\(interruptionReasonName(info)) shouldResume=\(options.contains(.shouldResume)) route=\(routeSummary()) isPlaying=\(isPlaying) state=[\(playerStateSummary())]")
+            // A real `.ended` arrived, so cancel any in-flight began-recovery loop
+            // and take the documented-safe recovery path below.
+            interruptionRecoveryTask?.cancel()
+            interruptionRecoveryTask = nil
             // tvOS 27 DEPRECATES `AVAudioSession.InterruptionOptions` (including
             // `.shouldResume`) in favour of a separate resumption-recommendation
             // notification, so the `.shouldResume` flag may be absent on tvOS 27
@@ -1335,6 +1351,44 @@ public final class AudioPlaybackController {
         try? AVAudioSession.sharedInstance().setActive(true)
         if player.timeControlStatus != .playing {
             player.play()
+        }
+    }
+
+    /// Recovery loop for an interruption `.began` whose `.ended` never arrives —
+    /// the tvOS AirPlay/HomePod drop fingerprint. While we still intend to play,
+    /// repeatedly try to re-activate the audio session and re-negotiate the output
+    /// sinks (including the HomePod pipe) via `playImmediately(atRate:)`. Each
+    /// `setActive(true)` throws while the session is still interrupted, so a clean
+    /// (non-throwing) activation is our signal the session is reclaimed; we nudge
+    /// playback once more and stop. Bounded so a genuine, brief interruption
+    /// (e.g. Siri) that ends on its own doesn't get fought.
+    private func scheduleInterruptionRecovery() {
+        interruptionRecoveryTask?.cancel()
+        interruptionRecoveryTask = Task { @MainActor [weak self] in
+            let session = AVAudioSession.sharedInstance()
+            for attempt in 1...8 {
+                try? await Task.sleep(nanoseconds: 600_000_000) // 0.6s between tries
+                guard let self, !Task.isCancelled else { return }
+                guard self.isPlaying, self.hasActivePlayback else {
+                    self.diag("recover", "began-recovery stop (isPlaying=\(self.isPlaying) hasActivePlayback=\(self.hasActivePlayback))")
+                    return
+                }
+                do {
+                    try session.setActive(true)
+                    // Session reclaimed. Force AVFoundation to re-establish every
+                    // output sink (the HomePod pipe included) by re-issuing an
+                    // explicit start; `playImmediately` re-negotiates even when the
+                    // player already reports `.playing`.
+                    self.player.playImmediately(atRate: 1.0)
+                    self.diag("recover", "began-recovery attempt=\(attempt) reclaimed+nudged route=\(self.routeSummary()) state=[\(self.playerStateSummary())]")
+                    self.interruptionRecoveryTask = nil
+                    return
+                } catch {
+                    self.diag("recover", "began-recovery attempt=\(attempt) setActive failed=\(error.localizedDescription) route=\(self.routeSummary())")
+                }
+            }
+            self?.diag("recover", "began-recovery exhausted (8 attempts)")
+            self?.interruptionRecoveryTask = nil
         }
     }
     #endif

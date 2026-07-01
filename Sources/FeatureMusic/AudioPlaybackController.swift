@@ -228,6 +228,11 @@ public final class AudioPlaybackController {
     /// (best-effort). Bound to the play session's provider; `nil` disables
     /// reporting (e.g. a provider that isn't a `MediaProvider`).
     private var reporter: PlaybackReporter?
+    /// A second, provider-INDEPENDENT reporter for the global Last.fm scrobbler.
+    /// Last.fm is one account per user (not tied to Plex/Jellyfin), so it fans out
+    /// from the same lifecycle events as `reporter` but is set once (by AppShell,
+    /// capturing the stable scrobbler) rather than rebound per play session.
+    public var scrobbleObserver: PlaybackReporter?
     /// The track we've reported a `.start` for and not yet a `.stop`. Guards the
     /// stop/pause/progress helpers so they only ever fire for a live, started
     /// track, and lets us stop the OUTGOING track before starting the next one
@@ -694,7 +699,10 @@ public final class AudioPlaybackController {
     /// `.stop` has been delivered — the point where the server records the play —
     /// we bump `recentPlayReportToken` so the landing rail can refresh.
     private func fireReport(_ event: PlaybackEvent, for track: MusicTrack, position: TimeInterval) {
-        guard let reporter else { return }
+        // Either sink (the provider reporter or the global Last.fm observer) is
+        // enough to warrant dispatching; Last.fm can be connected even when the
+        // active provider isn't a reporting `MediaProvider`.
+        guard reporter != nil || scrobbleObserver != nil else { return }
         // Prefer the duration the engine actually learned from the AVPlayerItem —
         // some servers omit it from track metadata, and the Plex scrobble decision
         // needs a real length (a missing/zero duration would suppress it entirely).
@@ -703,7 +711,8 @@ public final class AudioPlaybackController {
             "dispatch \(event.rawValue) pos=\(Int(position))s id=\(track.id) '\(track.title)'"
         )
         Task {
-            await reporter(track, event, position, resolvedDuration)
+            await reporter?(track, event, position, resolvedDuration)
+            await scrobbleObserver?(track, event, position, resolvedDuration)
             if event == .stop { self.recentPlayReportToken &+= 1 }
         }
     }

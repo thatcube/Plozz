@@ -15,6 +15,7 @@ import TraktService
 import SimklService
 import AniListService
 import MALService
+import LastFmService
 
 /// Bundles the watch-outbox interactions the full-screen player needs: live-
 /// session registration (so the convergence reconciler defers writes against the
@@ -103,6 +104,7 @@ struct MainTabView: View {
     let simkl: SimklService
     let anilist: AniListService
     let mal: MALService
+    let lastfm: LastFmService
     let mediaItemActionHandler: any MediaItemActionHandling
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
@@ -210,6 +212,7 @@ struct MainTabView: View {
                 simkl: simkl,
                 anilist: anilist,
                 mal: mal,
+                lastfm: lastfm,
                 discoveredLibraries: discovery.state,
                 reloadLibraries: { await discovery.load(from: accounts) },
                 accounts: displayAccounts,

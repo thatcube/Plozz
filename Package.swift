@@ -33,6 +33,7 @@ let package = Package(
         .library(name: "SimklService", targets: ["SimklService"]),
         .library(name: "AniListService", targets: ["AniListService"]),
         .library(name: "MALService", targets: ["MALService"]),
+        .library(name: "LastFmService", targets: ["LastFmService"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
@@ -210,6 +211,10 @@ let package = Package(
             name: "MALService",
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
+        .target(
+            name: "LastFmService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
 
         // MARK: Features
         .target(
@@ -243,7 +248,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", "LastFmService"]
         ),
         .target(
             name: "FeatureProfiles",
@@ -310,6 +315,7 @@ let package = Package(
                 "SimklService",
                 "AniListService",
                 "MALService",
+                "LastFmService",
                 "FeatureHome",
                 "FeaturePlayback",
                 "FeatureSearch",

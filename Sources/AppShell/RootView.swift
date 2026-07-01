@@ -102,6 +102,7 @@ public struct RootView: View {
                         simkl: appState.simklService,
                         anilist: appState.anilistService,
                         mal: appState.malService,
+                        lastfm: appState.lastfmService,
                         mediaItemActionHandler: appState.mediaItemActionHandler,
                         enqueueWatchMutation: { appState.enqueueWatchMutation($0) },
                         watchBridge: WatchOutboxBridge(

@@ -1086,13 +1086,14 @@ struct PlayerControls: View {
     }
 
     /// A short suffix annotating the selected second track with its load state.
-    /// Empty while a track is loaded and actually has lines (the healthy case), so
-    /// the row stays clean; otherwise it flags loading / no-lines / unavailable.
+    /// Always shows the outcome (loading / cue count / no lines / unavailable) so a
+    /// track that fetched cues but still won't draw is distinguishable on-screen
+    /// from one that genuinely returned nothing.
     private static func secondaryStatusSuffix(_ status: SecondarySubtitleStatus) -> String {
         switch status {
         case .idle: return ""
         case .loading: return "  ·  loading…"
-        case .loaded(let n): return n > 0 ? "" : "  ·  no lines"
+        case .loaded(let n): return n > 0 ? "  ·  \(n) cues" : "  ·  no lines"
         case .unavailable: return "  ·  unavailable"
         }
     }

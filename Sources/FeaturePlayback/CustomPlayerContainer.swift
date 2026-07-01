@@ -20,6 +20,9 @@ struct PlayerActions {
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
+    /// Apply an edited subtitle appearance (in-player Style screen), for live
+    /// preview + persistence.
+    var setSubtitleStyle: (SubtitleStyle) -> Void = { _ in }
     /// Advance to the next episode (Info card → Next Episode).
     var playNextEpisode: () -> Void = {}
     /// Return to the previous episode (Info card → Previous).
@@ -372,6 +375,7 @@ final class PlayerInputViewController: UIViewController {
             setAudioDelay: { [weak self] in self?.actions.setAudioDelay($0) },
             setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
             setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) },
+            setSubtitleStyle: { [weak self] in self?.actions.setSubtitleStyle($0) },
             playNextEpisode: { [weak self] in self?.actions.playNextEpisode() },
             playPreviousEpisode: { [weak self] in self?.actions.playPreviousEpisode() },
             restart: { [weak self] in self?.actions.restart() }

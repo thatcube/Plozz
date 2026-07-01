@@ -78,6 +78,12 @@ public final class PlayerViewModel {
     /// luminance, live offset) owns every text-subtitle pixel. Image-based
     /// subtitles still route to the hybrid engine.
     public let liveSubtitles = LiveSubtitleModel()
+
+    /// Invoked when the viewer edits the subtitle **appearance** in the in-player
+    /// Style screen, so the host (AppShell) can persist the new look to the
+    /// profile's appearance store. Set by whoever constructs the view model;
+    /// defaults to a no-op (e.g. previews / tests). See ``applySubtitleStyle(_:)``.
+    public var onSubtitleStyleChanged: (SubtitleStyle) -> Void = { _ in }
     /// Fetches + parses the selected sidecar into cues off the main actor; one at
     /// a time, cancelled when the selection changes or playback stops.
     @ObservationIgnored private var subtitleCueLoadTask: Task<Void, Never>?
@@ -88,7 +94,7 @@ public final class PlayerViewModel {
     /// to play when the title has multiple versions; `nil` plays the default.
     private let mediaSourceID: String?
     private let behavior: SubtitleBehavior
-    private let style: SubtitleStyle
+    private var style: SubtitleStyle
     /// The resolved per-content-type subtitle policy for this profile (design
     /// §5.0/§5.3): base mirrors `behavior`, with optional per-category
     /// overrides ("forced-only on movies, full subs on anime"). Read-only here —
@@ -389,7 +395,7 @@ public final class PlayerViewModel {
         self.onPlaybackStarted = onPlaybackStarted
         self.onPlaybackCheckpoint = onPlaybackCheckpoint
         self.checkpointInterval = checkpointInterval
-        self.engine = engineFactory.makeNative(self.style)
+        self.engine = engineFactory.makeNative(style)
         self.currentEngineKind = .native
         PlaybackInstrumentation.increment(.viewModel)
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
@@ -399,7 +405,10 @@ public final class PlayerViewModel {
         self.controls.seekWithoutPausing = playbackSettings.seekWithoutPausing
         // Seed the overlay with the profile's persisted subtitle appearance so a
         // selected subtitle renders in the user's style from the first cue.
-        self.liveSubtitles.style = self.style
+        self.liveSubtitles.style = style
+        // Seed the controls mirror so the in-player appearance editor opens on the
+        // viewer's current style rather than the bare default.
+        self.controls.subtitleStyle = style
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
@@ -1607,6 +1616,18 @@ public final class PlayerViewModel {
     public func setDialogEnhanceEnabled(_ enabled: Bool) {
         controls.dialogEnhanceEnabled = enabled
         engine.setDialogEnhanceEnabled(enabled)
+    }
+
+    /// Applies a subtitle **appearance** edit from the in-player Style screen.
+    /// Updates the live overlay for instant preview, keeps the controls mirror
+    /// (which the editor binds) in sync, and notifies the host so the new look is
+    /// persisted to the profile's appearance store. Kept as the single funnel so
+    /// live preview and persistence can never drift apart.
+    public func applySubtitleStyle(_ newStyle: SubtitleStyle) {
+        style = newStyle
+        liveSubtitles.style = newStyle
+        controls.subtitleStyle = newStyle
+        onSubtitleStyleChanged(newStyle)
     }
 
     /// Toggles play/pause from the custom transport, keeping `controls` and the

@@ -64,6 +64,7 @@ public struct PlayerView: View {
                         setAudioDelay: { viewModel.setAudioDelay($0) },
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
+                        setSubtitleStyle: { viewModel.applySubtitleStyle($0) },
                         playNextEpisode: { if let next = viewModel.nextEpisode { viewModel.playEpisode(next) } },
                         playPreviousEpisode: { if let prev = viewModel.previousEpisode { viewModel.playEpisode(prev) } },
                         restart: { viewModel.requestSeek(to: 0) },

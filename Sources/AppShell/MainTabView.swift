@@ -166,7 +166,8 @@ struct MainTabView: View {
                 enqueueWatchMutation: enqueueWatchMutation,
                 watchBridge: watchBridge,
                 identitySources: identitySources,
-                pendingPlayItemID: $pendingPlayItemID
+                pendingPlayItemID: $pendingPlayItemID,
+                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
 
@@ -185,7 +186,8 @@ struct MainTabView: View {
                 scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),
                 enqueueWatchMutation: enqueueWatchMutation,
                 watchBridge: watchBridge,
-                identitySources: identitySources
+                identitySources: identitySources,
+                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
@@ -454,13 +456,14 @@ private func makePlayerViewModel(
     seriesTrackStore: any SeriesTrackPreferenceStoring,
     scrobbler: any TraktScrobbling,
     watchBridge: WatchOutboxBridge,
-    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+    onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void = { _ in }
 ) -> PlayerViewModel {
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
         let onlineTrailerResolver = ItemDetailViewModel.defaultOnlineTrailerResolver
         let engineFactory = HybridPlayback.engineFactory()
-        return PlayerViewModel(
+        let trailerViewModel = PlayerViewModel(
             provider: YouTubeTrailerProvider(
                 item: trailerItem,
                 videoID: videoID,
@@ -491,6 +494,8 @@ private func makePlayerViewModel(
             engineFactory: engineFactory,
             autoDismissOnEnd: true
         )
+        trailerViewModel.onSubtitleStyleChanged = onSubtitleStyleChanged
+        return trailerViewModel
     }
     // Capture only Sendable value types / closures for the durable convergence hook
     // so it can run off the main actor when the player stops. The eager identity
@@ -530,7 +535,7 @@ private func makePlayerViewModel(
     } else {
         seriesIDResolver = nil
     }
-    return PlayerViewModel(
+    let episodeViewModel = PlayerViewModel(
         provider: episodeProvider,
         itemID: request.item.id,
         mediaSourceID: request.item.selectedVersionID,
@@ -569,6 +574,8 @@ private func makePlayerViewModel(
             identitySources: identitySources
         )
     )
+    episodeViewModel.onSubtitleStyleChanged = onSubtitleStyleChanged
+    return episodeViewModel
 }
 
 /// Builds the periodic mid-play convergence hook. Mirrors
@@ -749,6 +756,8 @@ private struct HomeTab: View {
     let watchBridge: WatchOutboxBridge
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
     @Binding var pendingPlayItemID: String?
+    /// Persist an in-player subtitle-appearance edit to the profile store.
+    let onSubtitleStyleChanged: (SubtitleStyle) -> Void
 
     @State private var path = NavigationPath()
     @State private var playRequest: PlayRequest?
@@ -860,7 +869,8 @@ private struct HomeTab: View {
             watchBridge: watchBridge,
             identitySources: identitySources,
             showDiagnostics: showDiagnostics,
-            themePalette: themePalette
+            themePalette: themePalette,
+            onSubtitleStyleChanged: onSubtitleStyleChanged
         )
         .task(id: pendingPlayItemID) { await handleDeepLink() }
         .mediaItemNavigator { navigate($0) }
@@ -969,7 +979,8 @@ private extension View {
         watchBridge: WatchOutboxBridge,
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
         showDiagnostics: Bool,
-        themePalette: ThemePalette
+        themePalette: ThemePalette,
+        onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void
     ) -> some View {
         fullScreenCover(item: playRequest) { request in
             PlayerPresentation(
@@ -987,7 +998,8 @@ private extension View {
                         seriesTrackStore: seriesTrackStore,
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
-                        identitySources: identitySources
+                        identitySources: identitySources,
+                        onSubtitleStyleChanged: onSubtitleStyleChanged
                     )
                 },
                 showDiagnostics: showDiagnostics,
@@ -1086,6 +1098,8 @@ private struct SearchTab: View {
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
+    /// Persist an in-player subtitle-appearance edit to the profile store.
+    let onSubtitleStyleChanged: (SubtitleStyle) -> Void
 
     @State private var path = NavigationPath()
     @State private var playRequest: PlayRequest?
@@ -1188,7 +1202,8 @@ private struct SearchTab: View {
             watchBridge: watchBridge,
             identitySources: identitySources,
             showDiagnostics: showDiagnostics,
-            themePalette: themePalette
+            themePalette: themePalette,
+            onSubtitleStyleChanged: onSubtitleStyleChanged
         )
     }
 

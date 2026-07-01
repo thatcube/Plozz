@@ -15,6 +15,9 @@ struct PlayerOptionsActions {
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
+    /// Apply an edited subtitle **appearance** (from the in-player Style screen):
+    /// the host updates the live overlay for instant preview and persists it.
+    var setSubtitleStyle: (SubtitleStyle) -> Void = { _ in }
     var playNextEpisode: () -> Void = {}
     var playPreviousEpisode: () -> Void = {}
     var restart: () -> Void = {}
@@ -626,7 +629,7 @@ struct PlayerControls: View {
         switch subtitleScreen {
         case .tracks: subtitlePane
         case .download: subtitleDownloadStub
-        case .style: subtitleStyleStub
+        case .style: subtitleStyleEditor
         }
     }
 
@@ -672,14 +675,35 @@ struct PlayerControls: View {
         .focused($focus, equals: .download)
     }
 
-    // MARK: Subtitles sub-screens (Download / Style) — stubs for now
+    // MARK: Subtitles sub-screens (Download stub / live Style editor)
 
     private var subtitleDownloadStub: some View {
         subScreenStub(message: "Search the server's providers for a subtitle in your language and load it right here.")
     }
 
-    private var subtitleStyleStub: some View {
-        subScreenStub(message: "Adjust size, position, colour, background and outline — previewed live over the video.")
+    /// The live subtitle-appearance editor, hosted over the running video so every
+    /// tweak previews instantly on the real subtitles behind the panel. Edits are
+    /// routed through `actions.setSubtitleStyle`, which the view model applies to
+    /// the live overlay and persists to the profile's appearance store. A Back
+    /// button (top, focus-seated on open) returns to the track list.
+    private var subtitleStyleEditor: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Button {
+                openSubtitleScreen(.tracks)
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+            }
+            .playerGlassButton(prominent: false)
+            .focused($focus, equals: .subBack)
+
+            SubtitleAppearanceEditor(style: Binding(
+                get: { model.subtitleStyle },
+                set: { actions.setSubtitleStyle($0) }
+            ))
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func subScreenStub(message: String) -> some View {

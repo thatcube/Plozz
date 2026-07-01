@@ -94,6 +94,13 @@ public final class PlayerControlsModel {
     public var audioOptions: [PlayerTrackOption] = []
     public var subtitleOptions: [PlayerTrackOption] = []
 
+    /// The current subtitle **appearance**, mirrored here so the in-player
+    /// appearance editor (hosted in `PlayerControls`) can two-way bind it. The
+    /// view model seeds this from the profile's persisted style and updates it
+    /// on every edit, keeping the live overlay, this mirror, and persistence in
+    /// lock-step.
+    public var subtitleStyle: SubtitleStyle = .default
+
     // MARK: Live tunables (mirrors of engine state)
     /// What the active engine supports — drives which rows the options menu
     /// renders so AVPlayer doesn't show fake delay sliders, etc.

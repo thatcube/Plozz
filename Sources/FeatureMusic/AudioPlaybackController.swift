@@ -1083,16 +1083,24 @@ public final class AudioPlaybackController {
 
     #if canImport(AVFoundation) && !os(macOS)
     private func handleRouteChange(_ note: Notification) {
-        guard let info = note.userInfo,
-              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-        // An AirPlay 2 group can reconfigure its route as part of an item
-        // transition; if the player parked while that happened, nudge it. We
-        // deliberately do NOT resume on `.oldDeviceUnavailable` (an intentional
-        // disconnect should stay paused, matching headphone-unplug behaviour).
-        if reason == .routeConfigurationChange {
-            attemptPlaybackRecovery()
-        }
+        // IMPORTANT: We deliberately do NOTHING actionable here — reacting to
+        // route changes is what was intermittently BREAKING AirPlay 2 skips.
+        //
+        // `.routeConfigurationChange` is a benign, frequent notification that an
+        // AirPlay 2 device fires *during* a normal track transition as it
+        // reconfigures its long-form-audio pipeline for the next item. The old
+        // code responded by forcing `AVAudioSession.setActive(true)` (via
+        // attemptPlaybackRecovery). Re-activating the session in the middle of
+        // that reconfiguration races the system's own route management and tears
+        // the speaker down — the exact "skipping breaks playback, silent until
+        // physical reconnect" symptom, and intermittent because it depends on
+        // where our setActive lands in the negotiation.
+        //
+        // A genuine route loss instead arrives as an AVAudioSession INTERRUPTION
+        // (tvOS 17+), which `handleInterruption` recovers from at the documented-
+        // safe moment (`.ended` + `.shouldResume`). We also do not resume on
+        // `.oldDeviceUnavailable`: an intentional disconnect should stay paused,
+        // matching headphone-unplug behaviour. So there is nothing to do here.
     }
 
     private func handleInterruption(_ note: Notification) {

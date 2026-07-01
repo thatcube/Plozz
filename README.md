@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://testflight.apple.com/join/EKfReNMu"><img src="docs/assets/testflight-button.png" alt="Join the TestFlight beta" width="292" /></a>
+  <a href="https://testflight.apple.com/join/EKfReNMu"><img src="docs/assets/testflight-button.png" alt="Join the TestFlight beta" width="210" /></a>
 </p>
 
 <p align="center">

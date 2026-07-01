@@ -45,7 +45,6 @@ public final class AppState {
     /// switching profiles swaps the active theme/spoiler/caption/diagnostics
     /// state cleanly. When the caller injects models (tests), they're used
     /// as-is and not rebuilt.
-    public private(set) var captionModel: CaptionSettingsModel
     /// Subtitle behaviour + appearance split out of the retired `CaptionSettings`.
     /// Behaviour (mode / language / auto-download) is the policy base input;
     /// appearance (`SubtitleStyle`) is the persisted look. Rebuilt on profile switch.
@@ -55,7 +54,7 @@ public final class AppState {
     public private(set) var playbackModel: PlaybackSettingsModel
     /// Per-profile per-content-type subtitle policy overrides (forced-only on
     /// movies, full subs on anime, …). The profile base mode/language lives in
-    /// `captionModel`; this only owns the overrides. Rebuilt on profile switch.
+    /// `subtitleBehaviorModel`; this only owns the overrides. Rebuilt on profile switch.
     public private(set) var subtitlePolicyModel: SubtitlePolicyModel
     /// Per-profile per-content-type audio-language overrides ("original audio for
     /// anime, device language for everything else"). The profile base preference
@@ -619,7 +618,6 @@ public final class AppState {
         registry: ProviderRegistry? = nil,
         profilesModel: ProfilesModel? = nil,
         systemBridge: SystemProfileBridging? = nil,
-        captionModel: CaptionSettingsModel? = nil,
         subtitleBehaviorModel: SubtitleBehaviorModel? = nil,
         subtitleStyleModel: SubtitleStyleModel? = nil,
         spoilerModel: SpoilerSettingsModel? = nil,
@@ -646,7 +644,7 @@ public final class AppState {
         // If the caller supplied any settings model, treat them all as injected
         // (test path) and don't rebuild them on profile switch. Otherwise build
         // them scoped to the active profile's namespace.
-        let injected = captionModel != nil || spoilerModel != nil
+        let injected = spoilerModel != nil
             || subtitleBehaviorModel != nil || subtitleStyleModel != nil
             || playbackModel != nil
             || themeModel != nil || diagnosticsModel != nil
@@ -662,7 +660,6 @@ public final class AppState {
         self.simklService = simklService ?? SimklServiceFactory.make(namespace: ns)
         self.anilistService = anilistService ?? AniListServiceFactory.make(namespace: ns)
         self.malService = malService ?? MALServiceFactory.make(namespace: ns)
-        self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         self.subtitleBehaviorModel = subtitleBehaviorModel ?? SubtitleBehaviorModel(store: SubtitleBehaviorStore(namespace: ns))
         self.subtitleStyleModel = subtitleStyleModel ?? SubtitleStyleModel(store: SubtitleStyleStore(namespace: ns))
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
@@ -1303,7 +1300,6 @@ public final class AppState {
     private func rebuildSettingsModels() {
         guard !usesInjectedModels else { return }
         let ns = profilesModel.activeNamespace
-        captionModel = CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         subtitleBehaviorModel = SubtitleBehaviorModel(store: SubtitleBehaviorStore(namespace: ns))
         subtitleStyleModel = SubtitleStyleModel(store: SubtitleStyleStore(namespace: ns))
         spoilerModel = SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))

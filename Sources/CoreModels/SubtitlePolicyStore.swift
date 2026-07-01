@@ -22,11 +22,6 @@ public extension SubtitlePolicyStoring {
     func resolvedPolicy(behavior: SubtitleBehavior) -> SubtitlePolicy {
         SubtitlePolicy.resolved(behavior: behavior, overrides: overrides())
     }
-
-    /// Transitional overload bridging the retired `CaptionSettings`.
-    func resolvedPolicy(caption: CaptionSettings) -> SubtitlePolicy {
-        SubtitlePolicy.resolved(caption: caption, overrides: overrides())
-    }
 }
 
 public final class SubtitlePolicyStore: SubtitlePolicyStoring, @unchecked Sendable {
@@ -110,10 +105,5 @@ public final class SubtitlePolicyModel {
     /// overrides come from this model. Fed into the player at load time.
     public func resolvedPolicy(behavior: SubtitleBehavior) -> SubtitlePolicy {
         SubtitlePolicy.resolved(behavior: behavior, overrides: overrides)
-    }
-
-    /// Transitional overload bridging the retired `CaptionSettings`.
-    public func resolvedPolicy(caption: CaptionSettings) -> SubtitlePolicy {
-        SubtitlePolicy.resolved(caption: caption, overrides: overrides)
     }
 }

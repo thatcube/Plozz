@@ -159,8 +159,9 @@ struct SpoilersDetailView: View {
 }
 struct PlaybackDetailView: View {
     @Bindable var playback: PlaybackSettingsModel
-    /// The profile base subtitle mode/language lives in `CaptionSettings`.
-    @Bindable var captions: CaptionSettingsModel
+    /// The profile base subtitle mode/language now lives in `SubtitleBehavior`
+    /// (behaviour half of the retired `CaptionSettings`).
+    @Bindable var subtitleBehavior: SubtitleBehaviorModel
     /// Per-content-type overrides ("forced-only on movies, full subs on anime").
     @Bindable var subtitlePolicy: SubtitlePolicyModel
     /// Per-content-type audio-language overrides ("original audio for anime,
@@ -175,9 +176,9 @@ struct PlaybackDetailView: View {
     /// Whether the profile has opted into per-content-type rules (any override set).
     private var perContentTypeEnabled: Bool { !subtitlePolicy.overrides.isEmpty }
 
-    /// The profile base rule, derived live from the caption settings.
+    /// The profile base rule, derived live from the subtitle behaviour settings.
     private var baseRule: SubtitlePolicy.Rule {
-        SubtitlePolicy.inheriting(from: captions.settings).basePolicy
+        SubtitlePolicy.inheriting(from: subtitleBehavior.settings).basePolicy
     }
 
     /// Toggles the whole per-content-type matrix: adopting the smart seed
@@ -210,27 +211,27 @@ struct PlaybackDetailView: View {
     // MARK: Subtitle-language helpers
 
     private var subtitleLanguageOptions: [String] {
-        [""] + CaptionSettingsCard.subtitleLanguages.map(\.code)
+        [""] + SubtitleLanguageCatalog.languages.map(\.code)
     }
 
     private var subtitleLanguageSelection: Binding<String> {
         Binding(
-            get: { captions.settings.preferredSubtitleLanguage ?? "" },
-            set: { captions.settings.preferredSubtitleLanguage = $0.isEmpty ? nil : $0 }
+            get: { subtitleBehavior.settings.preferredSubtitleLanguage ?? "" },
+            set: { subtitleBehavior.settings.preferredSubtitleLanguage = $0.isEmpty ? nil : $0 }
         )
     }
 
     private func subtitleLanguageName(for code: String) -> String {
         guard !code.isEmpty else { return "Device Default" }
-        return CaptionSettingsCard.subtitleLanguages.first(where: { $0.code == code })?.name ?? code
+        return SubtitleLanguageCatalog.languages.first(where: { $0.code == code })?.name ?? code
     }
 
     // MARK: Audio-language policy helpers
 
     /// The selectable audio-language preferences for the dropdowns: Original /
-    /// Device, then the shared common-language list reused from the caption card.
+    /// Device, then the shared common-language list.
     private static let audioPreferenceOptions: [AudioLanguagePreference] =
-        [.original, .device] + CaptionSettingsCard.subtitleLanguages.map { .language($0.code) }
+        [.original, .device] + SubtitleLanguageCatalog.languages.map { .language($0.code) }
 
     /// Human-readable label for an audio-language preference.
     private static func audioPreferenceName(_ preference: AudioLanguagePreference) -> String {
@@ -238,7 +239,7 @@ struct PlaybackDetailView: View {
         case .original: return "Original"
         case .device: return "Device"
         case .language(let code):
-            return CaptionSettingsCard.subtitleLanguages.first(where: { $0.code == code })?.name ?? code
+            return SubtitleLanguageCatalog.languages.first(where: { $0.code == code })?.name ?? code
         }
     }
 
@@ -309,10 +310,10 @@ struct PlaybackDetailView: View {
                 description: "What Plozz does with subtitles when playback starts. You can still change them while watching.",
                 valueSummary: perContentTypeEnabled
                     ? "Per type"
-                    : captions.settings.subtitleMode.displayName
+                    : subtitleBehavior.settings.subtitleMode.displayName
             ) {
                 SubtitleModeControl(
-                    baseMode: $captions.settings.subtitleMode,
+                    baseMode: $subtitleBehavior.settings.subtitleMode,
                     perTypeEnabled: perContentTypeBinding,
                     categories: Self.policyCategories,
                     categoryName: { $0.displayName },
@@ -340,9 +341,9 @@ struct PlaybackDetailView: View {
                 id: "subtitle-auto-download",
                 title: "Automatically download subtitles",
                 description: "When an item has no suitable subtitle in your preferred language, Plozz asks the Jellyfin server to fetch the best match so every client benefits.",
-                valueSummary: captions.settings.autoDownloadSubtitles ? "On" : "Off"
+                valueSummary: subtitleBehavior.settings.autoDownloadSubtitles ? "On" : "Off"
             ) {
-                Toggle("Auto-download subtitles", isOn: $captions.settings.autoDownloadSubtitles)
+                Toggle("Auto-download subtitles", isOn: $subtitleBehavior.settings.autoDownloadSubtitles)
             },
             SettingsSplitRow(
                 id: "subtitle-remember",
@@ -353,12 +354,15 @@ struct PlaybackDetailView: View {
                 Toggle("Remember per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
             },
             SettingsSplitRow(
-                id: "subtitle-style",
-                title: "Subtitle style",
-                description: "Adjust subtitle font, size and colours. These settings are also available from the player while you watch.",
-                valueSummary: captions.settings.followsSystemStyle ? "System" : "Custom"
+                id: "subtitle-style-note",
+                title: "Subtitle appearance",
+                description: "Font, size, colour, position and background are adjusted from the player while you watch — open the subtitle menu during playback to fine-tune the look with a live preview.",
+                valueSummary: "In player"
             ) {
-                SubtitleStyleEditor(settings: $captions.settings)
+                Text("Adjust subtitle appearance from the player while watching, so you can see every change against the video in real time.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         ])
     }

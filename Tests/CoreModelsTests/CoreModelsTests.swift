@@ -44,21 +44,23 @@ final class LoadStateTests: XCTestCase {
     }
 }
 
-final class CaptionSettingsTests: XCTestCase {
+final class SubtitleStyleCodableTests: XCTestCase {
     func testCodableRoundTrip() throws {
-        var settings = CaptionSettings.default
-        settings.followsSystemStyle = false
-        settings.fontScale = 1.5
-        settings.textColor = .yellow
-        settings.edgeStyle = .uniform
+        var style = SubtitleStyle.default
+        style.followsSystemStyle = false
+        style.fontScale = 1.5
+        style.textColor = .yellow
+        style.edge.style = .uniform
 
-        let data = try JSONEncoder().encode(settings)
-        let decoded = try JSONDecoder().decode(CaptionSettings.self, from: data)
-        XCTAssertEqual(decoded, settings)
+        let data = try JSONEncoder().encode(style)
+        let decoded = try JSONDecoder().decode(SubtitleStyle.self, from: data)
+        XCTAssertEqual(decoded, style)
     }
 
-    func testDefaultFollowsSystemStyle() {
-        XCTAssertTrue(CaptionSettings.default.followsSystemStyle)
+    func testDefaultUsesOwnRenderer() {
+        // The appearance model owns its look by default (Plozz's own renderer)
+        // rather than deferring to the system caption style.
+        XCTAssertFalse(SubtitleStyle.default.followsSystemStyle)
     }
 }
 

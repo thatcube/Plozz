@@ -9,7 +9,6 @@ import FeatureProfiles
 /// Bundled into a single value so each detail page can pull what it needs
 /// without `SettingsView`'s init exploding to 30+ parameters.
 struct SettingsContext {
-    let captions: CaptionSettingsModel
     let spoilers: SpoilerSettingsModel
     let playback: PlaybackSettingsModel
     let theme: ThemeSettingsModel

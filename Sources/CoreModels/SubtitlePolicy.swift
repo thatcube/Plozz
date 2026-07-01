@@ -111,16 +111,6 @@ public struct SubtitlePolicy: Codable, Equatable, Sendable {
         )
     }
 
-    /// Transitional overload bridging the retired `CaptionSettings`; delegates to
-    /// the `SubtitleBehavior` seed. Removed once every caller passes behaviour.
-    public static func inheriting(from caption: CaptionSettings) -> SubtitlePolicy {
-        inheriting(from: SubtitleBehavior(
-            subtitleMode: caption.subtitleMode,
-            preferredSubtitleLanguage: caption.preferredSubtitleLanguage,
-            autoDownloadSubtitles: caption.autoDownloadSubtitles
-        ))
-    }
-
     /// The live policy for a profile: the base mirrors `behavior`, and each stored
     /// override keeps its per-category `mode`/auto-download intent but always
     /// adopts the base's *current* preferred languages. The Settings UI only edits
@@ -142,22 +132,6 @@ public struct SubtitlePolicy: Codable, Equatable, Sendable {
             return refreshed
         }
         return policy
-    }
-
-    /// Transitional overload bridging the retired `CaptionSettings`; delegates to
-    /// the `SubtitleBehavior` resolver. Removed once every caller passes behaviour.
-    public static func resolved(
-        caption: CaptionSettings,
-        overrides: [SubtitleContentCategory: Rule]
-    ) -> SubtitlePolicy {
-        resolved(
-            behavior: SubtitleBehavior(
-                subtitleMode: caption.subtitleMode,
-                preferredSubtitleLanguage: caption.preferredSubtitleLanguage,
-                autoDownloadSubtitles: caption.autoDownloadSubtitles
-            ),
-            overrides: overrides
-        )
     }
 
     /// The user's example matrix as an opt-in seed (design §5.3): forced-only for

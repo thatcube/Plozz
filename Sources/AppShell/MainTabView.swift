@@ -68,7 +68,6 @@ struct RealtimePlaybackScrobbler: TraktScrobbling {
 /// checklist, and caption/spoiler/theme settings.
 struct MainTabView: View {
     let accounts: [ResolvedAccount]
-    let captionModel: CaptionSettingsModel
     /// Subtitle behaviour (mode / language / auto-download) and appearance
     /// (`SubtitleStyle`) split out of the retired `CaptionSettings`. Behaviour
     /// feeds the policy resolver; style seeds the player + live overlay.
@@ -205,7 +204,7 @@ struct MainTabView: View {
             }
 
             SettingsView(
-                captions: captionModel,
+                subtitleBehavior: subtitleBehaviorModel,
                 spoilers: spoilerModel,
                 playback: playbackModel,
                 subtitlePolicy: subtitlePolicyModel,

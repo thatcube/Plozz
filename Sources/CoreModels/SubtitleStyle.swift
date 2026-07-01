@@ -32,22 +32,17 @@ public enum SubtitleFontFamily: String, Codable, Sendable, Equatable, CaseIterab
 }
 
 
+/// This is the style model for Plozz's owned subtitle renderer and the persisted
+/// source of truth for subtitle appearance. It covers every knob the product
+/// brief calls for: size, position, offset, colour, overall opacity, an
+/// HDR-luminance control, a background box, an edge (shadow) treatment and an
+/// explicit border — each with adjustable colour, opacity and thickness where it
+/// applies — plus an optional secondary style for dual subtitles.
 ///
-/// This is the **forward** style model for Plozz's owned subtitle renderer. It
-/// is intentionally richer than the currently-persisted ``CaptionSettings`` and
-/// covers every knob the product brief calls for: size, position, offset,
-/// colour, overall opacity, an HDR-luminance control, a background box, an edge
-/// (shadow) treatment and an explicit border — each with adjustable colour,
-/// opacity and thickness where it applies — plus an optional secondary style for
-/// dual subtitles.
-///
-/// ## Relationship to `CaptionSettings` (deliberately non-destructive)
-/// `CaptionSettings` remains the persisted per-profile model **for now**. This
-/// type bridges from it via ``init(from:)`` so existing user settings carry over,
-/// and it ships its own tolerant `Codable` so it is *persist-ready* — but we do
-/// not migrate persistence until the renderer is validated on-device. That
-/// staging is intentional: prove the model + renderer first, then move the
-/// source of truth, so a wrong early guess can't strand saved settings.
+/// It ships a tolerant `Codable` and is persisted via `SubtitleStyleStore`. A
+/// profile's previously-saved look carries over from the retired `CaptionSettings`
+/// via ``init(from:)`` (the decode-only `LegacyCaptionSettings` shim) during the
+/// one-time migration.
 ///
 /// Lives in `CoreModels` (dependency-free) so the renderer, the settings UI and
 /// the future policy engine all share one definition.
@@ -196,8 +191,8 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
 
     // MARK: Behaviour
 
-    /// When true, defer entirely to the system/Settings caption style (parity
-    /// with `CaptionSettings.followsSystemStyle`).
+    /// When true, defer entirely to the system/Settings caption style (no
+    /// in-app style overrides are applied).
     public var followsSystemStyle: Bool
 
     public init(
@@ -270,25 +265,6 @@ public extension SubtitleStyle {
             ),
             edge: Edge(style: legacy.edgeStyle),
             followsSystemStyle: legacy.followsSystemStyle
-        )
-    }
-}
-
-// MARK: - Bridge from the persisted CaptionSettings (non-destructive)
-
-public extension SubtitleStyle {
-    /// Build a forward style from the currently-persisted ``CaptionSettings`` so
-    /// existing per-profile preferences are honoured before persistence migrates.
-    init(from caption: CaptionSettings) {
-        self.init(
-            fontScale: caption.fontScale,
-            textColor: caption.textColor,
-            background: Background(
-                isEnabled: caption.backgroundColor.alpha > 0.001,
-                color: caption.backgroundColor
-            ),
-            edge: Edge(style: caption.edgeStyle),
-            followsSystemStyle: caption.followsSystemStyle
         )
     }
 }

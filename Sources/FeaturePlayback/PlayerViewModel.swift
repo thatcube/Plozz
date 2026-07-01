@@ -347,10 +347,6 @@ public final class PlayerViewModel {
         mediaSourceID: String? = nil,
         behavior: SubtitleBehavior = .default,
         style: SubtitleStyle = .default,
-        // Transitional: legacy call sites still pass a `CaptionSettings`; when
-        // present it seeds both `behavior` and `style`. Removed in the final
-        // step once `CaptionSettings` is deleted.
-        captionSettings: CaptionSettings? = nil,
         subtitlePolicy: SubtitlePolicy? = nil,
         audioPolicy: AudioPolicy? = nil,
         playbackSettings: PlaybackSettings = .default,
@@ -373,9 +369,9 @@ public final class PlayerViewModel {
         self.provider = provider
         self.itemID = itemID
         self.mediaSourceID = mediaSourceID
-        self.behavior = captionSettings.map(SubtitleBehavior.init(from:)) ?? behavior
-        self.style = captionSettings.map(SubtitleStyle.init(from:)) ?? style
-        self.subtitlePolicy = subtitlePolicy ?? .inheriting(from: self.behavior)
+        self.behavior = behavior
+        self.style = style
+        self.subtitlePolicy = subtitlePolicy ?? .inheriting(from: behavior)
         self.audioPolicy = audioPolicy ?? .inheriting(from: playbackSettings)
         self.playbackSettings = playbackSettings
         self.spoilerSettings = spoilerSettings

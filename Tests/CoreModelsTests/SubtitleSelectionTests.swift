@@ -233,44 +233,67 @@ final class RemoteSubtitleBestMatchTests: XCTestCase {
     }
 }
 
-final class CaptionSettingsSubtitleTests: XCTestCase {
+final class SubtitleBehaviorTests: XCTestCase {
     func testRoundTripWithSubtitleFields() throws {
-        var settings = CaptionSettings.default
+        var settings = SubtitleBehavior.default
         settings.autoDownloadSubtitles = true
         settings.subtitleMode = .forcedOnly
         settings.preferredSubtitleLanguage = "fr"
 
         let data = try JSONEncoder().encode(settings)
-        let decoded = try JSONDecoder().decode(CaptionSettings.self, from: data)
+        let decoded = try JSONDecoder().decode(SubtitleBehavior.self, from: data)
         XCTAssertEqual(decoded, settings)
     }
 
     func testDefaultsAreSafe() {
-        XCTAssertFalse(CaptionSettings.default.autoDownloadSubtitles)
-        XCTAssertEqual(CaptionSettings.default.subtitleMode, .all)
-        XCTAssertNil(CaptionSettings.default.preferredSubtitleLanguage)
+        XCTAssertFalse(SubtitleBehavior.default.autoDownloadSubtitles)
+        XCTAssertEqual(SubtitleBehavior.default.subtitleMode, .all)
+        XCTAssertNil(SubtitleBehavior.default.preferredSubtitleLanguage)
     }
 
-    func testBackwardCompatibleDecodingOfOldSettings() throws {
-        // JSON persisted before the subtitle fields existed.
-        let legacy = """
+    func testLegacyCaptionSettingsMigratesIntoSplitModels() throws {
+        // A blob persisted by an older build under the legacy CaptionSettings
+        // shape, carrying both appearance and behaviour fields.
+        let legacyJSON = """
+        {"fontScale":1.5,"textColor":{"red":1,"green":1,"blue":1,"alpha":1},
+        "backgroundColor":{"red":0,"green":0,"blue":0,"alpha":0.5},
+        "edgeStyle":"uniform","followsSystemStyle":false,
+        "autoDownloadSubtitles":true,"subtitleMode":"forcedOnly",
+        "preferredSubtitleLanguage":"fr"}
+        """
+        let legacy = try JSONDecoder().decode(LegacyCaptionSettings.self, from: Data(legacyJSON.utf8))
+
+        // Behaviour half of the migration.
+        let behavior = SubtitleBehavior(from: legacy)
+        XCTAssertTrue(behavior.autoDownloadSubtitles)
+        XCTAssertEqual(behavior.subtitleMode, .forcedOnly)
+        XCTAssertEqual(behavior.preferredSubtitleLanguage, "fr")
+
+        // Appearance half of the migration.
+        let style = SubtitleStyle(from: legacy)
+        XCTAssertEqual(style.fontScale, 1.5)
+        XCTAssertEqual(style.edge.style, .uniform)
+        XCTAssertFalse(style.followsSystemStyle)
+    }
+
+    func testLegacyDecodeFallsBackForMissingBehaviourFields() throws {
+        // JSON persisted before the subtitle behaviour fields existed: only the
+        // old appearance keys are present, so behaviour must fall back to defaults.
+        let legacyJSON = """
         {"fontScale":1.5,"textColor":{"red":1,"green":1,"blue":1,"alpha":1},
         "backgroundColor":{"red":0,"green":0,"blue":0,"alpha":0.5},
         "edgeStyle":"uniform","followsSystemStyle":false}
         """
-        let decoded = try JSONDecoder().decode(CaptionSettings.self, from: Data(legacy.utf8))
+        let legacy = try JSONDecoder().decode(LegacyCaptionSettings.self, from: Data(legacyJSON.utf8))
+        let behavior = SubtitleBehavior(from: legacy)
 
-        XCTAssertEqual(decoded.fontScale, 1.5)
-        XCTAssertEqual(decoded.edgeStyle, .uniform)
-        XCTAssertFalse(decoded.followsSystemStyle)
-        // New fields fall back to their defaults.
-        XCTAssertFalse(decoded.autoDownloadSubtitles)
-        XCTAssertEqual(decoded.subtitleMode, .all)
-        XCTAssertNil(decoded.preferredSubtitleLanguage)
+        XCTAssertFalse(behavior.autoDownloadSubtitles)
+        XCTAssertEqual(behavior.subtitleMode, .all)
+        XCTAssertNil(behavior.preferredSubtitleLanguage)
     }
 
     func testResolvedPreferredLanguageUsesExplicitChoice() {
-        var settings = CaptionSettings.default
+        var settings = SubtitleBehavior.default
         settings.preferredSubtitleLanguage = "de"
         XCTAssertEqual(settings.resolvedPreferredLanguage, "de")
     }

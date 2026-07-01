@@ -531,7 +531,16 @@ public final class AudioPlaybackController {
         // dropping to silence (which is what tearing the player down did).
         player.replaceCurrentItem(with: item)
         observeEnd(of: item)
-        player.play()
+        // Re-assert the session and start with `playImmediately(atRate:)` rather
+        // than plain `play()`. A track swap can trigger a transient route change,
+        // and on a high-latency AirPlay route plain `play()` parks in AVPlayer's
+        // stall-avoidance wait state (`.waitingToPlayAtSpecifiedRate`) and never
+        // actually starts — so the next song is silent on the speaker. This
+        // mirrors `resume()`, which hit the same wait-state trap.
+        #if canImport(AVFoundation) && !os(macOS)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        #endif
+        player.playImmediately(atRate: 1.0)
         isPlaying = true
         currentTime = 0
         duration = track.duration ?? 0

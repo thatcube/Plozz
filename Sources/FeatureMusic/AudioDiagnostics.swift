@@ -94,11 +94,19 @@ public final class AudioDiagnostics {
     /// `AirPlay`) and name (e.g. the HomePod's name), so the log tells us exactly
     /// what we were connected to when a transition broke.
     public func currentRouteDescription() -> String {
-        let route = AVAudioSession.sharedInstance().currentRoute
-        if route.outputs.isEmpty { return "<no outputs>" }
-        return route.outputs
-            .map { "\($0.portType.rawValue):\"\($0.portName)\"" }
-            .joined(separator: " + ")
+        let session = AVAudioSession.sharedInstance()
+        let route = session.currentRoute
+        let outs = route.outputs.isEmpty
+            ? "<no outputs>"
+            : route.outputs
+                .map { "\($0.portType.rawValue):\"\($0.portName)\"" }
+                .joined(separator: " + ")
+        // Append the live system output format. On tvOS the HomePod is a
+        // system-level route (the app only ever sees HDMI), so a format
+        // renegotiation between tracks — a known trigger for the AirPlay link
+        // dropping — shows up here as a sampleRate/channel change even though the
+        // port stays "HDMI". This makes such a change visible in the log.
+        return "\(outs) @\(Int(session.sampleRate))Hz/\(session.outputNumberOfChannels)ch"
     }
     #endif
 }

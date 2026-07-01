@@ -206,6 +206,15 @@ struct NowPlayingView: View {
             bottomControls
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .allowsHitTesting(controlsVisible)
+                // Make the entire transport cluster non-focusable while hidden.
+                // Its rows only slide off via offset + opacity-0, and tvOS keeps
+                // offset / zero-opacity views as focus candidates — so without this
+                // a directional *click* on the hidden player moves focus straight
+                // into the (invisible) controls instead of firing the reveal
+                // catcher's .onMoveCommand. With the whole cluster disabled the
+                // catcher is the only focus target, so a down-click reveals the
+                // controls and lands on the pause button just like a swipe does.
+                .disabled(!controlsVisible)
                 // Bias the focus engine toward the pause button so it's the
                 // default landing spot when the controls appear, rather than the
                 // scrub surface that sits above it.

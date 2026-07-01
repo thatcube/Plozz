@@ -66,19 +66,12 @@ private enum MusicScrubGeometry {
 /// drawn in SwiftUI on top, reading `MusicScrubModel`.
 struct MusicScrubSurface: UIViewRepresentable {
     let model: MusicScrubModel
-    /// Gates focusability so the surface can't be focused while the transport
-    /// controls are hidden. `canBecomeFocused` is UIKit-side and doesn't observe
-    /// the SwiftUI opacity that hides the bar, so without this a clickpad
-    /// direction press would move focus straight onto the (invisible) scrubber
-    /// instead of revealing the controls with the pause button focused.
-    var isFocusable: Bool = true
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
     func makeUIView(context: Context) -> FocusableSurfaceView {
         let view = FocusableSurfaceView()
         view.backgroundColor = .clear
-        view.isFocusable = isFocusable
         view.onFocusChange = { focused in
             context.coordinator.model.isFocused = focused
         }
@@ -93,18 +86,11 @@ struct MusicScrubSurface: UIViewRepresentable {
 
     func updateUIView(_ uiView: FocusableSurfaceView, context: Context) {
         context.coordinator.model = model
-        if uiView.isFocusable != isFocusable {
-            uiView.isFocusable = isFocusable
-            // Drop focus off the surface the moment it's disabled so tvOS doesn't
-            // keep it highlighted while the controls slide away.
-            if !isFocusable { uiView.setNeedsFocusUpdate() }
-        }
     }
 
     final class FocusableSurfaceView: UIView {
         var onFocusChange: ((Bool) -> Void)?
-        var isFocusable: Bool = true
-        override var canBecomeFocused: Bool { isFocusable }
+        override var canBecomeFocused: Bool { true }
         override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
             super.didUpdateFocus(in: context, with: coordinator)
             onFocusChange?(context.nextFocusedView === self)
@@ -163,10 +149,13 @@ struct MusicScrubBar: View {
     /// progress (`knobX`) spring, which would otherwise fire on every playback
     /// tick mid-slide and give the fill/knob a different easing than the track.
     var suppressProgressAnimation: Bool = false
-    /// Forwarded to `MusicScrubSurface` so the scrub bar only becomes a focus
-    /// target while the transport controls are actually on screen. Without this,
-    /// a down-press on the hidden player would land focus on the invisible
-    /// scrubber instead of revealing the controls with the pause button focused.
+    /// Gates the focusable scrub surface. While `false` (the transport bar is
+    /// hidden, and briefly during its reveal) the `MusicScrubSurface` is removed
+    /// from the hierarchy entirely — not merely marked non-focusable — because on
+    /// tvOS an off-screen / zero-opacity view can still win a *directional-click*
+    /// focus move. With the surface absent, a down-click on the hidden player has
+    /// no focus neighbour, so `.onMoveCommand` fires and reveals the controls with
+    /// the pause button focused instead of the click jumping onto the scrubber.
     var isFocusable: Bool = true
 
     var body: some View {
@@ -200,7 +189,7 @@ struct MusicScrubBar: View {
             .animation(.easeOut(duration: 0.18), value: focused)
             .animation(.easeOut(duration: 0.12), value: model.isScrubbing)
             .animation((model.isScrubbing || suppressProgressAnimation) ? nil : .spring(response: 0.34, dampingFraction: 0.85), value: knobX)
-            .overlay { MusicScrubSurface(model: model, isFocusable: isFocusable) }
+            .overlay { if isFocusable { MusicScrubSurface(model: model) } }
         }
     }
 

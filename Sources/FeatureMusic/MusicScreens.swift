@@ -87,7 +87,7 @@ struct MusicLandingView: View {
             entryTiles(trailing: trailing)
         case .albums:
             if !content.albums.isEmpty {
-                MusicRow(title: "Albums", seeAll: { onSelectRoute(.grid(.album)) }, trailing: trailing) {
+                MusicRow(title: "Albums", trailing: trailing) {
                     ForEach(content.albums) { album in
                         AlbumCard(album: album) { onSelectRoute(.album(album)) }
                     }
@@ -95,7 +95,7 @@ struct MusicLandingView: View {
             }
         case .artists:
             if !content.artists.isEmpty {
-                MusicRow(title: "Artists", seeAll: { onSelectRoute(.grid(.artist)) }, trailing: trailing) {
+                MusicRow(title: "Artists", trailing: trailing) {
                     ForEach(content.artists) { artist in
                         ArtistCard(artist: artist) { onSelectRoute(.artist(artist)) }
                     }
@@ -103,7 +103,7 @@ struct MusicLandingView: View {
             }
         case .playlists:
             if !content.playlists.isEmpty {
-                MusicRow(title: "Playlists", seeAll: { onSelectRoute(.grid(.playlist)) }, trailing: trailing) {
+                MusicRow(title: "Playlists", trailing: trailing) {
                     ForEach(content.playlists) { playlist in
                         PlaylistCard(playlist: playlist) { onSelectRoute(.playlist(playlist)) }
                     }
@@ -183,10 +183,9 @@ private struct EntryTile: View {
     }
 }
 
-/// A horizontal rail with a title and an optional "See All".
+/// A horizontal rail with a title.
 private struct MusicRow<Content: View>: View {
     let title: String
-    var seeAll: (() -> Void)?
     /// Optional trailing accessory (used to hang the scrolling Now Playing card
     /// on the first section's header).
     var trailing: AnyView? = nil
@@ -199,19 +198,6 @@ private struct MusicRow<Content: View>: View {
             HStack(spacing: 24) {
                 Text(title).font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 Spacer()
-                if let seeAll {
-                    // Compact, display-scaled label: its type tracks the
-                    // (density-scaled) section header at ~0.72× so it stays a notch
-                    // smaller than the header and keeps the row short (more cards
-                    // fit). Focus REUSES the shared Settings list-row style so it
-                    // matches every other custom focused element and is theme-aware
-                    // (the native inverted card — white-on-black / black-on-white).
-                    Button(action: seeAll) {
-                        Text("See All")
-                            .font(.system(size: metrics.sectionHeaderFontSize * 0.72, weight: .semibold))
-                    }
-                    .buttonStyle(SettingsFocusButtonStyle())
-                }
                 if let trailing { trailing }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
@@ -234,8 +220,7 @@ private struct MusicRow<Content: View>: View {
             }
             // Match the shared rails: a tight `railTopPadding`-based gap above the
             // cards (not the wide `railVerticalPadding` used below the row), so the
-            // section header + "See All" hug the cards instead of floating far above
-            // them.
+            // section header hugs the cards instead of floating far above them.
             .padding(.top, metrics.railTopClearanceOffset)
             .padding(.bottom, metrics.railBottomClearanceOffset)
         }

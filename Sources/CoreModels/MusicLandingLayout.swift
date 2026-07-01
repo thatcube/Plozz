@@ -32,13 +32,13 @@ public struct MusicLandingLayout: Codable, Equatable, Sendable {
         self.items = items
     }
 
-    /// Shipped default order: Recently Played → Browse → Albums → Artists → Playlists.
+    /// Shipped default order: Browse → Recently Played → Playlists → Albums → Artists.
     public static let `default` = MusicLandingLayout(items: [
-        Item(section: .recentlyPlayed),
         Item(section: .browse),
+        Item(section: .recentlyPlayed),
+        Item(section: .playlists),
         Item(section: .albums),
-        Item(section: .artists),
-        Item(section: .playlists)
+        Item(section: .artists)
     ])
 
     /// The sections to render, in order, filtered to the visible ones. Any

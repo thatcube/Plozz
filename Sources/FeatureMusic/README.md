@@ -10,9 +10,11 @@ so audio keeps playing as the user navigates the rest of the app.
   `MusicAggregator`: artist / album / track screens that aggregate
   across the active accounts via `MediaProvider`.
 - **Audio engine** — `AudioPlaybackController`:
-  - owns an `AVQueuePlayer` + manually-managed queue so it can resolve
+  - owns a single `AVPlayer` + manually-managed queue so it can resolve
     each track's stream URL on demand and support shuffle / repeat /
-    next / previous;
+    next / previous; track changes swap the item in place
+    (`replaceCurrentItem`) so the audio session + output route stay alive
+    across songs (keeps AirPlay from dropping to silence on skip);
   - configures `AVAudioSession` `.playback` + `setActive(true)` so audio
     keeps playing across screens / screensaver;
   - publishes `MPNowPlayingInfoCenter` (title / artist / album / artwork

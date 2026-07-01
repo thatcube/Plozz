@@ -19,10 +19,17 @@ public typealias MusicTrack = CoreModels.MusicTrack
 /// The app-scoped audio playback engine — **independent** of the video
 /// `PlayerViewModel`, which stays full-screen and untouched.
 ///
-/// Owns an `AVQueuePlayer` and a manually-managed track queue so it can resolve
+/// Owns a single `AVPlayer` and a manually-managed track queue so it can resolve
 /// each track's stream URL on demand, support shuffle/repeat, and drive
 /// next/previous. It is created once and injected into the environment, so the
 /// mini-player and the Now Playing screen observe the *same* instance.
+///
+/// Track changes swap the item **in place** via `replaceCurrentItem(with:)`
+/// rather than tearing the player down. That keeps the same playback pipeline,
+/// active audio session and **output route** alive across songs — crucial for
+/// AirPlay, where emptying the player mid-song (the old `AVQueuePlayer`
+/// `removeAllItems()` path) dropped the route and the next track played to
+/// silence.
 ///
 /// tvOS background audio (the part the video flow never does):
 ///  * configures `AVAudioSession` `.playback` (with the `.longFormAudio`
@@ -183,7 +190,7 @@ public final class AudioPlaybackController {
 
     // MARK: Private
 
-    private let player = AVQueuePlayer()
+    private let player = AVPlayer()
     private var resolver: StreamURLResolver?
     private var lyricsResolver: LyricsResolver?
     private var lyricsRefresher: LyricsRefresher?
@@ -410,7 +417,7 @@ public final class AudioPlaybackController {
         // closes its now-playing session and records the play position.
         reportStopIfNeeded(position: currentTime)
         player.pause()
-        player.removeAllItems()
+        player.replaceCurrentItem(with: nil)
         isPlaying = false
         queue = []
         orderedQueue = []
@@ -518,8 +525,11 @@ public final class AudioPlaybackController {
         // the video player's own Play/Pause handling.
         enableRemoteCommands()
         let item = AVPlayerItem(url: url)
-        player.removeAllItems()
-        player.insert(item, after: nil)
+        // Swap the item in place rather than emptying the player. Keeping the
+        // same pipeline preserves the active audio session and output route, so
+        // advancing to the next song continues on an AirPlay speaker instead of
+        // dropping to silence (which is what tearing the player down did).
+        player.replaceCurrentItem(with: item)
         observeEnd(of: item)
         player.play()
         isPlaying = true

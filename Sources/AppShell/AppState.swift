@@ -82,7 +82,7 @@ public final class AppState {
     public let profilesModel: ProfilesModel
 
     /// The app-scoped audio playback engine. Created **once** and shared across
-    /// profile switches so there's only ever a single `AVQueuePlayer` — otherwise
+    /// profile switches so there's only ever a single `AVPlayer` — otherwise
     /// switching profiles (which rebuilds the tab subtree) would spin up a second
     /// controller and leave the previous profile's track audibly playing. Stopped
     /// on profile switch so a new profile starts silent.

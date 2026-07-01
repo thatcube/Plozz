@@ -811,7 +811,8 @@ struct PlayerControls: View {
             if let format = model.secondarySubtitleImagePrimaryFormat {
                 styleUnavailableForImageSubtitle(format: format)
             } else {
-                styleScreen(styleMainRows, dividerBefore: 6)
+                let main = styleMainRows
+                styleScreen(main.rows, dividerBefore: main.dividerBefore)
             }
         case .styleFont: styleFontScreen
         case .styleOutline: styleScreen(styleOutlineRows)
@@ -1062,21 +1063,31 @@ struct PlayerControls: View {
     /// submenu groups (outline/border, background box, dual subtitles) and Reset.
     /// The submenus own the quick control as their first row *and* echo its current
     /// value as their summary, so there is exactly one entry per concern here.
-    private var styleMainRows: [StyleRowSpec] {
+    private var styleMainRows: (rows: [StyleRowSpec], dividerBefore: Int) {
         let s = model.subtitleStyle
         let weights = s.fontFamily.availableWeights
-        return [
-            StyleRowSpec(slot: 0, title: "Font", kind: .submenu(summary: s.fontFamily.displayName, open: { openSubtitleScreen(.styleFont) })),
-            choiceRow(1, "Weight", options: weights, current: s.fontWeight.snapped(to: weights), label: { $0.displayName }) { v in updateStyle { $0.fontWeight = v } },
-            numberRow(2, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } },
-            numberRow(3, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: Self.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } },
-            colorRow(4, "Text Colour", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } },
-            numberRow(5, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } },
-            StyleRowSpec(slot: 6, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) })),
-            StyleRowSpec(slot: 7, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) })),
-            StyleRowSpec(slot: 8, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) })),
-            StyleRowSpec(slot: 9, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } })),
-        ]
+        var rows: [StyleRowSpec] = []
+        var slot = 0
+
+        rows.append(StyleRowSpec(slot: slot, title: "Font", kind: .submenu(summary: s.fontFamily.displayName, open: { openSubtitleScreen(.styleFont) }))); slot += 1
+        rows.append(choiceRow(slot, "Weight", options: weights, current: s.fontWeight.snapped(to: weights), label: { $0.displayName }) { v in updateStyle { $0.fontWeight = v } }); slot += 1
+        rows.append(numberRow(slot, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } }); slot += 1
+        rows.append(numberRow(slot, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: Self.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } }); slot += 1
+        rows.append(colorRow(slot, "Text Colour", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } }); slot += 1
+        rows.append(numberRow(slot, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } }); slot += 1
+        // Only affects HDR frames, so it appears exclusively while HDR is live —
+        // mirroring how the bitmap-primary gate hides controls that can't act.
+        if model.subtitlesRenderHDR {
+            rows.append(numberRow(slot, "HDR Brightness", options: Self.hdrBrightnessOptions, current: Int((s.hdrLuminanceScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.hdrLuminanceScale = Double(v) / 100 } }); slot += 1
+        }
+
+        // The submenu group + Reset sit under a divider, wherever the knobs above end.
+        let dividerBefore = slot
+        rows.append(StyleRowSpec(slot: slot, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) }))); slot += 1
+        rows.append(StyleRowSpec(slot: slot, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) }))); slot += 1
+        rows.append(StyleRowSpec(slot: slot, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) }))); slot += 1
+        rows.append(StyleRowSpec(slot: slot, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } }))); slot += 1
+        return (rows, dividerBefore)
     }
 
     /// The Font picker: one selectable row per family, each rendered **in its own
@@ -1154,8 +1165,8 @@ struct PlayerControls: View {
         return [
             StyleRowSpec(slot: 0, title: "Show Box", kind: .toggle(isOn: s.background.isEnabled, flip: { updateStyle { $0.background.isEnabled.toggle() } })),
             colorRow(1, "Colour", options: Self.boxColorOptions, current: s.background.color, label: Self.boxColorLabel) { c in updateStyle { $0.background.color = c } },
-            numberRow(2, "Box Opacity", options: Self.opacityOptions, current: Int((s.background.color.alpha * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.background.color.alpha = Double(v) / 100 } },
-            numberRow(3, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.cornerRadius = Double(v) } },
+            numberRow(2, "Box Opacity", options: Self.boxOpacityOptions, current: Int((s.background.color.alpha * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.background.color.alpha = Double(v) / 100 } },
+            numberRow(3, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: Self.cornerLabel) { v in updateStyle { $0.background.cornerRadius = Double(v) } },
             numberRow(4, "Horizontal Padding", options: Self.paddingOptions, current: Int(s.background.horizontalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.horizontalPadding = Double(v) } },
             numberRow(5, "Vertical Padding", options: Self.paddingOptions, current: Int(s.background.verticalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.verticalPadding = Double(v) } },
         ]
@@ -1285,8 +1296,18 @@ struct PlayerControls: View {
     private static let sizeOptions: [Int] = Array(stride(from: 60, through: 250, by: 5))
     private static let positionOptions: [Int] = Array(stride(from: 0, through: 90, by: 1))
     private static let opacityOptions: [Int] = Array(stride(from: 20, through: 100, by: 5))
+    /// The box's own opacity floors lower than text opacity (down to 5%) so a
+    /// near-invisible scrim is possible without dragging the text there too.
+    private static let boxOpacityOptions: [Int] = Array(stride(from: 5, through: 100, by: 5))
+    /// Subtitle HDR white-point scale, shown as a percentage. Mirrors the model's
+    /// `hdrLuminanceScale` (0.2–1.0); only surfaced while HDR is live.
+    private static let hdrBrightnessOptions: [Int] = Array(stride(from: 20, through: 100, by: 5))
     private static let thicknessOptions: [Int] = Array(stride(from: 0, through: 10, by: 1))
-    private static let cornerOptions: [Int] = Array(stride(from: 0, through: 24, by: 2))
+    /// Corner radius in points, then a large sentinel the box renderer clamps to a
+    /// perfect capsule (`UIBezierPath` caps the radius at half the shorter side),
+    /// so the top of the range always reads as "fully rounded" at any box size.
+    private static let cornerFull = 400
+    private static let cornerOptions: [Int] = Array(stride(from: 0, through: 40, by: 2)) + [cornerFull]
     private static let paddingOptions: [Int] = Array(stride(from: 0, through: 40, by: 2))
     private static let gapOptions: [Int] = Array(stride(from: 0, through: 24, by: 2))
     private static let secondarySizeOptions: [Int] = Array(stride(from: 50, through: 100, by: 5))
@@ -1316,6 +1337,12 @@ struct PlayerControls: View {
         case 90: return "Top"
         default: return "\(pct)%"
         }
+    }
+
+    /// Corner radius readout: the sentinel top step reads "Full" (a capsule/pill);
+    /// every other step is its point value.
+    private static func cornerLabel(_ pts: Int) -> String {
+        pts >= cornerFull ? "Full" : "\(pts)"
     }
 
     /// Matches the preset palette by RGB (ignoring alpha), so a swatch reads by name

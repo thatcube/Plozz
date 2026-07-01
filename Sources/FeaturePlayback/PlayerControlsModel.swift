@@ -143,6 +143,12 @@ public final class PlayerControlsModel {
     /// lock-step.
     public var subtitleStyle: SubtitleStyle = .default
 
+    /// Whether the subtitle overlay is currently rendering over an HDR frame
+    /// (the panel is being driven to an HDR/DV display mode). Only then does the
+    /// style's `hdrLuminanceScale` do anything, so the menu shows the "HDR
+    /// Brightness" row exclusively while this is true — no dead control on SDR.
+    public var subtitlesRenderHDR: Bool = false
+
     // MARK: Live tunables (mirrors of engine state)
     /// What the active engine supports — drives which rows the options menu
     /// renders so AVPlayer doesn't show fake delay sliders, etc.

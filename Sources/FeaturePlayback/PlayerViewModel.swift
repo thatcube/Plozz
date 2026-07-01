@@ -1028,6 +1028,9 @@ public final class PlayerViewModel {
         // The overlay clamps its white point on HDR frames; mirror the range the
         // panel is actually being driven to (native HDR content → HDR display).
         liveSubtitles.isHDR = displayMode != .sdr
+        // Mirror to the controls model so the style menu can show the HDR
+        // Brightness row only while it actually affects the picture.
+        controls.subtitlesRenderHDR = liveSubtitles.isHDR
         // Engine-independent: tracks the *content's* range so the exit veil can
         // cover a panel HDR/DV → SDR switch even when mpv (which stays `.sdr`
         // above) drove the panel into HDR on this TV.

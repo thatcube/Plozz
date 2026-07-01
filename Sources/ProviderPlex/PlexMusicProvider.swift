@@ -249,26 +249,37 @@ extension PlexProvider: MusicProvider {
 
     public func lyrics(for trackID: String) async throws -> Lyrics? {
         // A Plex track exposes lyrics as a `streamType == 4` stream on its media
-        // part; its `key` fetches the (usually `.lrc`) file. Any failure along the
-        // way is treated as "no lyrics" so the UI shows its empty state.
-        guard let detail = try? await client.metadata(ratingKey: trackID),
-              let streams = detail.Media?.first?.Part?.first?.Stream,
-              let lyricStream = streams.first(where: { $0.streamType == 4 }),
-              let key = lyricStream.key,
-              let text = try? await client.lyricsText(forStreamKey: key) else {
+        // part; its `key` fetches the (usually `.lrc`) file. We re-throw
+        // transport-level failures (offline / DNS / timeout / expired session) so
+        // the caller can retry later, and only return `nil` for a genuine
+        // "this track has no lyrics" outcome from a reachable server.
+        let detail: PlexMetadata
+        do {
+            detail = try await client.metadata(ratingKey: trackID)
+        } catch let error as AppError where error.isTransportFailure {
+            throw error
+        } catch {
             return nil
         }
-        // Plex serves lyrics either as an `.lrc` sidecar or as its own timed-JSON
-        // payload; pick the parser by sniffing the body so JSON is never rendered
-        // raw. A leading brace/bracket means JSON; anything else is LRC/plain.
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lyrics: Lyrics?
-        if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
-            lyrics = Lyrics(plexTimedJSON: text)
-        } else {
-            lyrics = Lyrics(lrc: text) ?? Lyrics(plainText: text)
+        guard let streams = detail.Media?.first?.Part?.first?.Stream,
+              let lyricStream = streams.first(where: { $0.streamType == 4 }),
+              let key = lyricStream.key else {
+            return nil
         }
-        guard let lyrics, !lyrics.isEmpty else { return nil }
+        let text: String?
+        do {
+            text = try await client.lyricsText(forStreamKey: key)
+        } catch let error as AppError where error.isTransportFailure {
+            throw error
+        } catch {
+            return nil
+        }
+        guard let text else { return nil }
+        // Plex serves lyrics as either its own timed-JSON payload or an `.lrc`/
+        // plain-text sidecar. `Lyrics(plexLyricsText:)` tries each parser in turn
+        // — it must NOT sniff a leading `[` as JSON, because every real `.lrc`
+        // file starts with `[` and that misrouting silently dropped LRC sidecars.
+        guard let lyrics = Lyrics(plexLyricsText: text), !lyrics.isEmpty else { return nil }
         return lyrics.taggingSource(.plex)
     }
 

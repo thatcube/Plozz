@@ -2,7 +2,6 @@
 import SwiftUI
 import CoreModels
 import CoreUI
-import Inject
 import FeatureProfiles
 import TraktService
 import SimklService
@@ -33,6 +32,8 @@ public struct SettingsView: View {
     private let captions: CaptionSettingsModel
     private let spoilers: SpoilerSettingsModel
     private let playback: PlaybackSettingsModel
+    private let subtitlePolicy: SubtitlePolicyModel
+    private let audioPolicy: AudioPolicyModel
     private let theme: ThemeSettingsModel
     private let nightShift: NightShiftSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
@@ -69,6 +70,8 @@ public struct SettingsView: View {
         captions: CaptionSettingsModel,
         spoilers: SpoilerSettingsModel,
         playback: PlaybackSettingsModel,
+        subtitlePolicy: SubtitlePolicyModel,
+        audioPolicy: AudioPolicyModel,
         theme: ThemeSettingsModel,
         nightShift: NightShiftSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
@@ -104,6 +107,8 @@ public struct SettingsView: View {
         self.captions = captions
         self.spoilers = spoilers
         self.playback = playback
+        self.subtitlePolicy = subtitlePolicy
+        self.audioPolicy = audioPolicy
         self.theme = theme
         self.nightShift = nightShift
         self.homeVisibility = homeVisibility
@@ -168,7 +173,6 @@ public struct SettingsView: View {
         )
     }
 
-    @ObserveInjection var inject
 
     public var body: some View {
         NavigationStack(path: $path) {
@@ -210,7 +214,6 @@ public struct SettingsView: View {
         } message: {
             Text("This removes every Plex and Jellyfin sign-in on this Apple TV. You'll need to sign in again.")
         }
-        .enableInjection()
     }
 
     // MARK: - Profile container (header + all settings this profile owns)
@@ -368,9 +371,7 @@ public struct SettingsView: View {
         case .nightShift:
             NightShiftDetailView(model: nightShift)
         case .playback:
-            PlaybackDetailView(playback: playback)
-        case .captions:
-            CaptionsDetailView(captions: captions)
+            PlaybackDetailView(playback: playback, captions: captions, subtitlePolicy: subtitlePolicy, audioPolicy: audioPolicy)
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:

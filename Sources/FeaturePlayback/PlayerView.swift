@@ -1,6 +1,5 @@
 #if canImport(SwiftUI)
 import SwiftUI
-import Inject
 import AVFoundation
 #if canImport(AVKit)
 import AVKit
@@ -37,7 +36,6 @@ public struct PlayerView: View {
         self.themePalette = themePalette
     }
 
-    @ObserveInjection var inject
 
     public var body: some View {
         ZStack {
@@ -56,6 +54,7 @@ public struct PlayerView: View {
                 CustomPlayerContainer(
                     engine: viewModel.videoEngine,
                     model: viewModel.controls,
+                    subtitleModel: viewModel.liveSubtitles,
                     actions: PlayerActions(
                         seek: { target in viewModel.requestSeek(to: target) },
                         togglePlayPause: { viewModel.togglePlayPause() },
@@ -65,6 +64,9 @@ public struct PlayerView: View {
                         setAudioDelay: { viewModel.setAudioDelay($0) },
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },
                         setDialogEnhance: { viewModel.setDialogEnhanceEnabled($0) },
+                        playNextEpisode: { if let next = viewModel.nextEpisode { viewModel.playEpisode(next) } },
+                        playPreviousEpisode: { if let prev = viewModel.previousEpisode { viewModel.playEpisode(prev) } },
+                        restart: { viewModel.requestSeek(to: 0) },
                         skipSegment: { viewModel.skipActiveSegment() },
                         autoSkipSegment: { viewModel.autoSkipActiveSegment() },
                         dismissSkip: { viewModel.dismissActiveSkipSegment() },
@@ -183,7 +185,6 @@ public struct PlayerView: View {
             diagnosticsSampler.stop()
             Task { await viewModel.stop() }
         }
-        .enableInjection()
     }
 
     /// Dismiss with an HDR-aware fade that keeps the screen fully black from the

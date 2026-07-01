@@ -77,9 +77,6 @@ let package = Package(
         // build time). Used by AetherEngine for DV P7→8.1 NAL surgery; also
         // satisfies libmpv's dovi symbol references.
         .package(url: "https://github.com/superuser404notfound/LibDovi", from: "1.0.2"),
-        // InjectionNext SwiftUI hot-reload runtime (DEBUG dev only). Lets feature
-        // package views observe injection and redraw live on-device.
-        .package(url: "https://github.com/krzysztofzablocki/Inject", from: "1.5.2"),
     ],
     targets: [
         // MARK: Core
@@ -217,19 +214,19 @@ let package = Package(
         // MARK: Features
         .target(
             name: "FeatureDiscovery",
-            dependencies: ["CoreModels", "CoreNetworking", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreNetworking"]
         ),
         .target(
             name: "FeatureAuth",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex"]
         ),
         .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers"]
         ),
         .target(
             name: "FeaturePlayback",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService", .product(name: "Inject", package: "Inject")],
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService", "MetadataKit"],
             linkerSettings: [
                 // Force-link AVKit on tvOS so its `UIWindow (AVAdditions)`
                 // category (which adds `avDisplayManager`, used to drive the
@@ -242,15 +239,15 @@ let package = Package(
         ),
         .target(
             name: "FeatureSearch",
-            dependencies: ["CoreModels", "CoreUI", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreUI"]
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService"]
         ),
         .target(
             name: "FeatureProfiles",
-            dependencies: ["CoreModels", "CoreUI", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreUI"]
         ),
 
         // MARK: Music (browse + audio playback engine)
@@ -261,7 +258,7 @@ let package = Package(
         // it stays decoupled from the video feature modules.
         .target(
             name: "FeatureMusic",
-            dependencies: ["CoreModels", "CoreUI", "MetadataKit", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreUI", "MetadataKit"]
         ),
 
         // MARK: Top Shelf (shared with the tvOS Top Shelf extension)
@@ -507,20 +504,3 @@ let package = Package(
         )
     ]
 )
-
-// InjectionNext hot-reload: every local Swift target must link `-interposable`
-// so saved function bodies can be swapped live on-device. Gated on PLOZZ_INJECT
-// so it only applies to dev injection builds — Release/TestFlight never gets it.
-if ProcessInfo.processInfo.environment["PLOZZ_INJECT"] != nil {
-    for target in package.targets where target.type == .regular {
-        var flags = target.linkerSettings ?? []
-        flags.append(.unsafeFlags(["-Xlinker", "-interposable"]))
-        target.linkerSettings = flags
-        // InjectionNext recompiles ONE saved file, which requires per-file
-        // (batch/incremental) compiles in the build log; whole-module has no
-        // -primary-file line for it to copy. Force batch mode on every target.
-        var sflags = target.swiftSettings ?? []
-        sflags.append(.unsafeFlags(["-enable-batch-mode", "-no-whole-module-optimization", "-v"]))
-        target.swiftSettings = sflags
-    }
-}

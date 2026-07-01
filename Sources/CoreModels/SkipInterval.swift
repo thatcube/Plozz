@@ -8,6 +8,7 @@ import Foundation
 /// YouTube, Swiftfin, Jellyfin Web) — covering quick-step (5 s), standard
 /// (10 s), moderate (15 / 30 s) and long-skip (60 s) use cases.
 public enum SkipInterval: Int, Codable, CaseIterable, Hashable, Sendable {
+    case one = 1
     case three = 3
     case five = 5
     case ten = 10
@@ -21,6 +22,7 @@ public enum SkipInterval: Int, Codable, CaseIterable, Hashable, Sendable {
     /// Human-readable label for the settings picker (e.g. "10 seconds").
     public var title: String {
         switch self {
+        case .one:     return "1 sec"
         case .three:   return "3 sec"
         case .five:    return "5 sec"
         case .ten:     return "10 sec"

@@ -17,120 +17,83 @@ struct AppearanceDetailView: View {
     }
 
     var body: some View {
+        SettingsSplitLayout(title: "Appearance", sections: sections)
+    }
+
+    private var sections: [SettingsSplitSection] {
         @Bindable var musicPlayer = musicPlayer
         @Bindable var density = density
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Appearance").font(.largeTitle.bold())
+        let transparencyBinding = Binding(
+            get: { transparencyPreference },
+            set: { transparencyPreferenceRaw = $0.rawValue }
+        )
 
-                VStack(alignment: .leading, spacing: 24) {
-                    // Theme
-                    LabeledSettingRow("Theme", labelWidth: 300) {
-                        SettingsOptionPicker(
-                            options: AppTheme.allCases,
-                            selection: $theme.theme,
-                            icon: { $0.symbolName },
-                            title: { $0.displayName }
-                        )
-                    }
-
-                    sectionDivider
-
-                    // Display Size
-                    LabeledSettingRow(
-                        "Display Size",
-                        subtitle: "Scales card size, columns and spacing.",
-                        labelWidth: 300
-                    ) {
-                        SettingsOptionPicker(
-                            options: UIDensity.allCases,
-                            selection: $density.density,
-                            icon: { $0.symbolName },
-                            title: { $0.displayName }
-                        )
-                    }
-
-                    sectionDivider
-
-                    // Transparency
-                    LabeledSettingRow("Transparency", subtitle: "Liquid glass", labelWidth: 300) {
-                        SettingsOptionPicker(
-                            options: TransparencyPreference.allCases,
-                            selection: Binding(
-                                get: { transparencyPreference },
-                                set: { transparencyPreferenceRaw = $0.rawValue }
-                            ),
-                            icon: { $0.symbolName },
-                            title: { $0.displayName }
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(28)
-                .background(
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
-                )
-
-                SettingsPanel(
-                    title: "Music Player"
+        return [
+            SettingsSplitSection(id: "display", header: "Display", rows: [
+                SettingsSplitRow(
+                    id: "theme",
+                    title: "Theme",
+                    description: "The overall light or dark appearance of the app.",
+                    valueSummary: theme.theme.displayName
                 ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        LabeledSettingRow("Style", labelWidth: 300) {
-                            SettingsOptionPicker(
-                                options: MusicPlayerAppearance.allCases,
-                                selection: $musicPlayer.appearance,
-                                icon: { $0.symbolName },
-                                title: { $0.displayName }
-                            )
-                        }
-
-                        Toggle("Show album name, audio quality & lyrics source", isOn: $musicPlayer.showTrackDetails)
-                    }
-                }
-            }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
-        }
-        .scrollClipDisabled()
-    }
-
-    /// Hairline rule between the joined Appearance sections so they read as one
-    /// grouped container rather than separate cards. The negative horizontal
-    /// padding cancels the container's 28 pt content inset *minus* the 1 pt
-    /// border stroke, so the rule meets the inner edge of the border exactly
-    /// without overlapping it (overlapping would stack the two translucent
-    /// fills into a darker dot at each end).
-    private var sectionDivider: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.1))
-            .frame(height: 1)
-            .padding(.horizontal, -27)
-    }
-}
-
-struct CaptionsDetailView: View {
-    @Bindable var captions: CaptionSettingsModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Captions").font(.largeTitle.bold())
-                SettingsPanel(
-                    title: "Caption style",
-                    footer: "These caption settings are also available from the player while you watch."
+                    SettingsOptionPicker(
+                        options: AppTheme.allCases,
+                        selection: $theme.theme,
+                        icon: { $0.symbolName },
+                        title: { $0.displayName }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "display-size",
+                    title: "Display Size",
+                    description: "Scales card size, columns and spacing across the app.",
+                    valueSummary: density.density.displayName
                 ) {
-                    CaptionSettingsCard(settings: $captions.settings)
+                    SettingsOptionPicker(
+                        options: UIDensity.allCases,
+                        selection: $density.density,
+                        icon: { $0.symbolName },
+                        title: { $0.displayName }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "transparency",
+                    title: "Transparency",
+                    description: "Liquid glass — translucent panels and cards. Turn off for solid backgrounds.",
+                    valueSummary: transparencyPreference.displayName
+                ) {
+                    SettingsOptionPicker(
+                        options: TransparencyPreference.allCases,
+                        selection: transparencyBinding,
+                        icon: { $0.symbolName },
+                        title: { $0.displayName }
+                    )
                 }
-            }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
-        }
-        .scrollClipDisabled()
+            ]),
+            SettingsSplitSection(id: "music", header: "Music Player", rows: [
+                SettingsSplitRow(
+                    id: "music-style",
+                    title: "Style",
+                    description: "How the now-playing music screen is presented.",
+                    valueSummary: musicPlayer.appearance.displayName
+                ) {
+                    SettingsOptionPicker(
+                        options: MusicPlayerAppearance.allCases,
+                        selection: $musicPlayer.appearance,
+                        icon: { $0.symbolName },
+                        title: { $0.displayName }
+                    )
+                },
+                SettingsSplitRow(
+                    id: "music-track-details",
+                    title: "Track details",
+                    description: "Show album name, audio quality & lyrics source on the now-playing screen.",
+                    valueSummary: musicPlayer.showTrackDetails ? "On" : "Off"
+                ) {
+                    Toggle("Show track details", isOn: $musicPlayer.showTrackDetails)
+                }
+            ])
+        ]
     }
 }
 
@@ -147,105 +110,353 @@ struct SpoilersDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Spoiler Protection").font(.largeTitle.bold())
-                SettingsPanel {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Toggle("Hide spoilers for unwatched episodes", isOn: $spoilers.settings.isEnabled)
+        SettingsSplitLayout(title: "Spoiler Protection", sections: sections)
+    }
 
-                        if spoilers.settings.isEnabled {
-                            LabeledSettingRow("Mode", labelWidth: 220) {
-                                SettingsOptionPicker(
-                                    options: SpoilerSettings.Mode.allCases,
-                                    selection: $spoilers.settings.mode,
-                                    title: { $0.displayName }
-                                )
-                            }
-
-                            Text(modeExplanation)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Divider()
-
-                        Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
-
-                        Text("Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+    private var sections: [SettingsSplitSection] {
+        var rows: [SettingsSplitRow] = [
+            SettingsSplitRow(
+                id: "hide-spoilers",
+                title: "Hide spoilers for unwatched episodes",
+                description: "Blur or replace episode thumbnails and keep titles and descriptions hidden until you finish an episode.",
+                valueSummary: spoilers.settings.isEnabled ? "On" : "Off"
+            ) {
+                Toggle("Hide spoilers", isOn: $spoilers.settings.isEnabled)
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+        ]
+
+        if spoilers.settings.isEnabled {
+            rows.append(
+                SettingsSplitRow(
+                    id: "spoiler-mode",
+                    title: "Mode",
+                    description: modeExplanation,
+                    valueSummary: spoilers.settings.mode.displayName,
+                    indented: true
+                ) {
+                    SettingsOptionPicker(
+                        options: SpoilerSettings.Mode.allCases,
+                        selection: $spoilers.settings.mode,
+                        title: { $0.displayName }
+                    )
+                }
+            )
         }
-        .scrollClipDisabled()
+
+        rows.append(
+            SettingsSplitRow(
+                id: "hide-ratings",
+                title: "Hide ratings until watched",
+                description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.",
+                valueSummary: spoilers.settings.hideRatingsUntilWatched ? "On" : "Off"
+            ) {
+                Toggle("Hide ratings", isOn: $spoilers.settings.hideRatingsUntilWatched)
+            }
+        )
+
+        return [SettingsSplitSection(id: "spoilers", header: "Spoiler Protection", rows: rows)]
     }
 }
 struct PlaybackDetailView: View {
     @Bindable var playback: PlaybackSettingsModel
+    /// The profile base subtitle mode/language lives in `CaptionSettings`.
+    @Bindable var captions: CaptionSettingsModel
+    /// Per-content-type overrides ("forced-only on movies, full subs on anime").
+    @Bindable var subtitlePolicy: SubtitlePolicyModel
+    /// Per-content-type audio-language overrides ("original audio for anime,
+    /// device language for everything else").
+    @Bindable var audioPolicy: AudioPolicyModel
+
+    /// The three classifiable content types the per-type rules apply to, in the
+    /// order shown in Settings (`.other` always follows the base, so it isn't
+    /// shown as its own row).
+    private static let policyCategories: [SubtitleContentCategory] = [.movie, .tvShow, .anime]
+
+    /// Whether the profile has opted into per-content-type rules (any override set).
+    private var perContentTypeEnabled: Bool { !subtitlePolicy.overrides.isEmpty }
+
+    /// The profile base rule, derived live from the caption settings.
+    private var baseRule: SubtitlePolicy.Rule {
+        SubtitlePolicy.inheriting(from: captions.settings).basePolicy
+    }
+
+    /// Toggles the whole per-content-type matrix: adopting the smart seed
+    /// (forced-only movies, full anime/TV) on, or clearing back to the single
+    /// base everywhere off.
+    private var perContentTypeBinding: Binding<Bool> {
+        Binding(
+            get: { perContentTypeEnabled },
+            set: { on in
+                subtitlePolicy.overrides = on
+                    ? SubtitlePolicy.smartDefaultOverrides(base: baseRule)
+                    : [:]
+            }
+        )
+    }
+
+    /// A picker binding for one category's subtitle mode, falling back to the
+    /// base mode when no override is stored yet.
+    private func modeBinding(for category: SubtitleContentCategory) -> Binding<CaptionSettings.SubtitleMode> {
+        Binding(
+            get: { subtitlePolicy.overrides[category]?.mode ?? baseRule.mode },
+            set: { newMode in
+                var rule = subtitlePolicy.overrides[category] ?? baseRule
+                rule.mode = newMode
+                subtitlePolicy.overrides[category] = rule
+            }
+        )
+    }
+
+    // MARK: Subtitle-language helpers
+
+    private var subtitleLanguageOptions: [String] {
+        [""] + CaptionSettingsCard.subtitleLanguages.map(\.code)
+    }
+
+    private var subtitleLanguageSelection: Binding<String> {
+        Binding(
+            get: { captions.settings.preferredSubtitleLanguage ?? "" },
+            set: { captions.settings.preferredSubtitleLanguage = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private func subtitleLanguageName(for code: String) -> String {
+        guard !code.isEmpty else { return "Device Default" }
+        return CaptionSettingsCard.subtitleLanguages.first(where: { $0.code == code })?.name ?? code
+    }
+
+    // MARK: Audio-language policy helpers
+
+    /// The selectable audio-language preferences for the dropdowns: Original /
+    /// Device, then the shared common-language list reused from the caption card.
+    private static let audioPreferenceOptions: [AudioLanguagePreference] =
+        [.original, .device] + CaptionSettingsCard.subtitleLanguages.map { .language($0.code) }
+
+    /// Human-readable label for an audio-language preference.
+    private static func audioPreferenceName(_ preference: AudioLanguagePreference) -> String {
+        switch preference {
+        case .original: return "Original"
+        case .device: return "Device"
+        case .language(let code):
+            return CaptionSettingsCard.subtitleLanguages.first(where: { $0.code == code })?.name ?? code
+        }
+    }
+
+    /// Whether the profile has opted into per-content-type audio rules.
+    private var audioPerContentTypeEnabled: Bool { !audioPolicy.overrides.isEmpty }
+
+    /// Toggles the whole per-content-type audio matrix: adopting the smart seed
+    /// (original audio for anime, device language for movies/TV) on, or clearing
+    /// back to the single base preference everywhere off.
+    private var audioPerContentTypeBinding: Binding<Bool> {
+        Binding(
+            get: { audioPerContentTypeEnabled },
+            set: { on in
+                audioPolicy.overrides = on
+                    ? AudioPolicy.smartDefaultOverrides()
+                    : [:]
+            }
+        )
+    }
+
+    /// A dropdown binding for one category's audio-language preference, falling
+    /// back to the base preference when no override is stored yet.
+    private func audioPreferenceBinding(for category: ContentCategory) -> Binding<AudioLanguagePreference> {
+        Binding(
+            get: { audioPolicy.overrides[category] ?? playback.settings.audioLanguagePreference },
+            set: { audioPolicy.overrides[category] = $0 }
+        )
+    }
+
+    /// A native pop-up menu for choosing an audio-language preference (the
+    /// common-language list is too long for the inline pill picker).
+    @ViewBuilder
+    private func audioLanguageMenu(_ selection: Binding<AudioLanguagePreference>) -> some View {
+        Menu {
+            Picker("Audio language", selection: selection) {
+                ForEach(Self.audioPreferenceOptions, id: \.self) { preference in
+                    Text(Self.audioPreferenceName(preference)).tag(preference)
+                }
+            }
+        } label: {
+            Label(Self.audioPreferenceName(selection.wrappedValue), systemImage: "globe")
+        }
+        .menuStyle(.button)
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Playback").font(.largeTitle.bold())
+        SettingsSplitLayout(title: "Playback", sections: sections)
+    }
 
-                SettingsPanel(
-                    title: "Captions",
-                    footer: "Adjust caption font, size and colours. These settings are also available from the player while you watch."
-                ) {
-                    NavigationLink(value: SettingsRoute.captions) {
-                        HStack(spacing: 16) {
-                            Image(systemName: "captions.bubble")
-                                .font(.title3)
-                                .frame(width: 44)
-                            Text("Caption style").font(.callout.weight(.medium))
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(SettingsFocusButtonStyle())
-                }
+    // MARK: - Split sections
 
-                SettingsPanel(
-                    title: "Skip Intros & Credits",
-                    footer: "When your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin."
+    private var sections: [SettingsSplitSection] {
+        [
+            subtitlesSection,
+            audioSection,
+            skipIntrosSection,
+            skipIntervalsSection,
+            scrubbingSection,
+            upNextSection
+        ]
+    }
+
+    private var subtitlesSection: SettingsSplitSection {
+        SettingsSplitSection(id: "subtitles", header: "Subtitles", rows: [
+            SettingsSplitRow(
+                id: "subtitle-default",
+                title: "Show subtitles",
+                description: "What Plozz does with subtitles when playback starts. You can still change them while watching.",
+                valueSummary: captions.settings.subtitleMode.displayName
+            ) {
+                DescribedSegmentedPicker(
+                    options: CaptionSettings.SubtitleMode.allCases,
+                    selection: $captions.settings.subtitleMode,
+                    title: { $0.displayName },
+                    detail: { $0.detail }
+                )
+            },
+            SettingsSplitRow(
+                id: "subtitle-per-type",
+                title: "Movie, TV, & Anime defaults",
+                description: "Use a separate subtitle default for each kind of content — for example forced-only on movies but full subtitles on anime.",
+                valueSummary: perContentTypeEnabled ? "On" : "Off"
+            ) {
+                SettingsRevealSection(
+                    isOn: perContentTypeBinding,
+                    masterLabel: "Use per-type defaults",
+                    revealedHeader: "Per Content Type"
                 ) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        LabeledSettingRow("Skip Intros", labelWidth: 220) {
-                            SettingsOptionPicker(
-                                options: SkipIntrosMode.allCases,
-                                selection: $playback.settings.skipIntros,
-                                title: { $0.title }
+                    ForEach(Self.policyCategories, id: \.self) { category in
+                        LabeledSettingRow(category.displayName) {
+                            SettingsSegmentedPicker(
+                                options: CaptionSettings.SubtitleMode.allCases,
+                                selection: modeBinding(for: category),
+                                title: { $0.displayName }
                             )
                         }
-
-                        Text(playback.settings.skipIntros.detail)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
                 }
-
-            SettingsPanel(
-                title: "Skip Intervals (left/right on remote)"
+            },
+            SettingsSplitRow(
+                id: "subtitle-language",
+                title: "Subtitle language",
+                description: "The language Plozz prefers when auto-selecting or downloading subtitles.",
+                valueSummary: subtitleLanguageName(for: subtitleLanguageSelection.wrappedValue)
             ) {
-                VStack(alignment: .leading, spacing: 18) {
-                    LabeledSettingRow("Skip Backward", labelWidth: 220) {
-                        SettingsOptionPicker(
+                Menu {
+                    Picker("Subtitle language", selection: subtitleLanguageSelection) {
+                        ForEach(subtitleLanguageOptions, id: \.self) { code in
+                            Text(subtitleLanguageName(for: code)).tag(code)
+                        }
+                    }
+                } label: {
+                    Label(subtitleLanguageName(for: subtitleLanguageSelection.wrappedValue), systemImage: "globe")
+                }
+                .menuStyle(.button)
+            },
+            SettingsSplitRow(
+                id: "subtitle-auto-download",
+                title: "Automatically download subtitles",
+                description: "When an item has no suitable subtitle in your preferred language, Plozz asks the Jellyfin server to fetch the best match so every client benefits.",
+                valueSummary: captions.settings.autoDownloadSubtitles ? "On" : "Off"
+            ) {
+                Toggle("Auto-download subtitles", isOn: $captions.settings.autoDownloadSubtitles)
+            },
+            SettingsSplitRow(
+                id: "subtitle-remember",
+                title: "Remember subtitles per series",
+                description: "When you change the subtitle track while watching a series, reuse that choice for the rest of the series.",
+                valueSummary: playback.settings.rememberSubtitleTrackPerSeries ? "On" : "Off"
+            ) {
+                Toggle("Remember per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
+            },
+            SettingsSplitRow(
+                id: "subtitle-style",
+                title: "Subtitle style",
+                description: "Adjust subtitle font, size and colours. These settings are also available from the player while you watch.",
+                valueSummary: captions.settings.followsSystemStyle ? "System" : "Custom"
+            ) {
+                SubtitleStyleEditor(settings: $captions.settings)
+            }
+        ])
+    }
+
+    private var audioSection: SettingsSplitSection {
+        SettingsSplitSection(id: "audio", header: "Audio Language", rows: [
+            SettingsSplitRow(
+                id: "audio-preferred",
+                title: "Preferred language",
+                description: "The audio language Plozz selects automatically when a title offers more than one.",
+                valueSummary: Self.audioPreferenceName(playback.settings.audioLanguagePreference)
+            ) {
+                audioLanguageMenu($playback.settings.audioLanguagePreference)
+            },
+            SettingsSplitRow(
+                id: "audio-per-type",
+                title: "Different audio default per type",
+                description: "Use a separate preferred audio language for each kind of content — for example original audio for anime but your device language elsewhere.",
+                valueSummary: audioPerContentTypeEnabled ? "On" : "Off"
+            ) {
+                SettingsRevealSection(
+                    isOn: audioPerContentTypeBinding,
+                    masterLabel: "Use per-type defaults",
+                    revealedHeader: "Per Content Type"
+                ) {
+                    ForEach(Self.policyCategories, id: \.self) { category in
+                        LabeledSettingRow(category.displayName) {
+                            audioLanguageMenu(audioPreferenceBinding(for: category))
+                        }
+                    }
+                }
+            },
+            SettingsSplitRow(
+                id: "audio-remember",
+                title: "Remember audio per series",
+                description: "When you change the audio track while watching a series, reuse that choice for the rest of the series.",
+                valueSummary: playback.settings.rememberAudioTrackPerSeries ? "On" : "Off"
+            ) {
+                Toggle("Remember per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
+            }
+        ])
+    }
+
+    private var skipIntrosSection: SettingsSplitSection {
+        SettingsSplitSection(id: "skip-intros", header: "Skip Intros & Credits", rows: [
+            SettingsSplitRow(
+                id: "skip-intros-mode",
+                title: "Skip Intros",
+                description: "Uses intro and credit markers from your server. Requires Plex Pass on Plex, or Media Segments / Intro Skipper on Jellyfin.",
+                valueSummary: playback.settings.skipIntros.title
+            ) {
+                DescribedSegmentedPicker(
+                    options: SkipIntrosMode.allCases,
+                    selection: $playback.settings.skipIntros,
+                    title: { $0.title },
+                    detail: { $0.detail }
+                )
+            }
+        ])
+    }
+
+    private var skipIntervalsSection: SettingsSplitSection {
+        SettingsSplitSection(id: "skip-intervals", header: "Skip Intervals", rows: [
+            SettingsSplitRow(
+                id: "skip-intervals",
+                title: "Skip Intervals",
+                description: "How far the remote's left and right buttons jump during playback.",
+                valueSummary: "\(playback.settings.skipBackwardInterval.title) / \(playback.settings.skipForwardInterval.title)"
+            ) {
+                VStack(alignment: .leading, spacing: 28) {
+                    LabeledSettingRow("Skip Backward") {
+                        SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipBackwardInterval,
                             title: { $0.title }
                         )
                     }
-
-                    LabeledSettingRow("Skip Forward", labelWidth: 220) {
-                        SettingsOptionPicker(
+                    LabeledSettingRow("Skip Forward") {
+                        SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipForwardInterval,
                             title: { $0.title }
@@ -253,29 +464,72 @@ struct PlaybackDetailView: View {
                     }
                 }
             }
+        ])
+    }
 
-            SettingsPanel(
-                title: "Scrubbing",
-                footer: playback.settings.seekWithoutPausing
+    private var scrubbingSection: SettingsSplitSection {
+        SettingsSplitSection(id: "scrubbing", header: "Scrubbing", rows: [
+            SettingsSplitRow(
+                id: "seek-without-pausing",
+                title: "Seek without pausing",
+                description: playback.settings.seekWithoutPausing
                     ? "Swipe to scrub while a title is playing and it resumes the moment you land — faster, but a stray swipe can move your position."
-                    : "You must pause before you can scrub — a swipe while playing won't seek or pause. Pause (Play/Pause, or center-press the scrubber), scrub, then press Play to resume. Prevents accidental seeks."
+                    : "You must pause before you can scrub — a swipe while playing won't seek or pause. Pause (Play/Pause, or center-press the scrubber), scrub, then press Play to resume. Prevents accidental seeks.",
+                valueSummary: playback.settings.seekWithoutPausing ? "On" : "Off"
             ) {
                 Toggle("Seek without pausing", isOn: $playback.settings.seekWithoutPausing)
             }
+        ])
+    }
 
-            SettingsPanel(
-                title: "Up Next",
-                footer: playback.settings.showUpNextCard
+    private var upNextSection: SettingsSplitSection {
+        SettingsSplitSection(id: "up-next", header: "Up Next", rows: [
+            SettingsSplitRow(
+                id: "show-up-next-card",
+                title: "Show Up Next card",
+                description: playback.settings.showUpNextCard
                     ? "During an episode's closing credits, show a card with the next episode so you can jump straight to it. Respects your Spoilers settings, and replaces the Skip Credits button when there's a next episode."
-                    : "Don't show the Up Next card. Episode credits behave like everything else — Skip Credits (if enabled) and the usual auto-advance at the very end."
+                    : "Don't show the Up Next card. Episode credits behave like everything else — Skip Credits (if enabled) and the usual auto-advance at the very end.",
+                valueSummary: playback.settings.showUpNextCard ? "On" : "Off"
             ) {
                 Toggle("Show Up Next card", isOn: $playback.settings.showUpNextCard)
             }
-            }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+        ])
+    }
+}
+
+/// A `SettingsSegmentedPicker` paired with a live description of what the
+/// *focused* option does. Moving focus across the segments updates the line
+/// beneath immediately — before you commit with Select — so each option's
+/// behavior is explained as you browse, not only after you pick. When focus
+/// isn't in the picker it falls back to describing the current selection.
+private struct DescribedSegmentedPicker<Option: Hashable>: View {
+    let options: [Option]
+    @Binding var selection: Option
+    let title: (Option) -> String
+    let detail: (Option) -> String
+
+    @State private var focusedOption: Option?
+
+    /// Focused option wins (live browsing); otherwise describe what's selected.
+    private var describedOption: Option { focusedOption ?? selection }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SettingsSegmentedPicker(
+                options: options,
+                selection: $selection,
+                title: title,
+                onFocusedOptionChange: { focusedOption = $0 }
+            )
+            Text(detail(describedOption))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentTransition(.opacity)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .scrollClipDisabled()
+        .animation(.easeInOut(duration: 0.18), value: describedOption)
     }
 }
 #endif

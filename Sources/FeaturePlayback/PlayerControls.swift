@@ -2,6 +2,7 @@
 import SwiftUI
 import UIKit
 import CoreUI
+import CoreModels
 
 /// Lightweight value-type bag of options callbacks. Mirrors the tunable subset
 /// of `PlayerActions` so the controls stay presentation-only.
@@ -14,6 +15,9 @@ struct PlayerOptionsActions {
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
+    var playNextEpisode: () -> Void = {}
+    var playPreviousEpisode: () -> Void = {}
+    var restart: () -> Void = {}
 }
 
 /// The complete custom-player transport: a title bar, the scrub bar (with
@@ -43,32 +47,48 @@ struct PlayerControls: View {
     let onExitToSurface: () -> Void
 
     enum Category: Hashable {
-        case audioSubtitles, speed, sync
+        case subtitles, audio, speed, sync, info
 
         var title: String {
             switch self {
-            case .audioSubtitles: return "Audio & Subtitles"
+            case .subtitles: return "Subtitles"
+            case .audio: return "Audio"
             case .speed: return "Speed"
             case .sync: return "A/V Sync"
+            case .info: return "Info"
             }
         }
 
         var icon: String {
             switch self {
-            case .audioSubtitles: return "captions.bubble"
+            case .subtitles: return "captions.bubble"
+            case .audio: return "waveform"
             case .speed: return "speedometer"
             case .sync: return "slider.horizontal.below.square.and.square.filled"
+            case .info: return "info.circle"
             }
         }
     }
 
     private enum FocusSlot: Hashable {
         case button(Category)
+        case infoNext       // Info panel: Next Episode
+        case infoPrev       // Info panel: Previous Episode
+        case infoRestart    // Info panel: Restart
         case diagnostics
         case row(Int)
+        case edit       // Subtitles header ✎ Edit (appearance) button
+        case download   // Trailing "Search for subtitles…" row
+        case subBack    // Back control inside a Subtitles sub-screen
     }
 
+    /// Sub-screens of the Subtitles panel. `tracks` is the default list; the
+    /// header ✎ Edit opens `style`, and the trailing row opens `download`. Menu
+    /// backs a sub-screen out to `tracks` rather than closing the whole panel.
+    private enum SubtitleScreen { case tracks, download, style }
+
     @State private var openPanel: Category?
+    @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
 
     var body: some View {
@@ -87,7 +107,14 @@ struct PlayerControls: View {
             focus = focused ? initialFocus : nil
         }
         .onChange(of: openPanel) { _, panel in
-            if let panel { focus = .row(selectedRowIndex(for: panel)) }
+            subtitleScreen = .tracks
+            guard let panel else { return }
+            if panel == .info {
+                focus = model.hasNextEpisode ? .infoNext
+                    : (model.hasPreviousEpisode ? .infoPrev : .infoRestart)
+            } else {
+                focus = .row(selectedRowIndex(for: panel))
+            }
         }
         .onExitCommand { handleExit() }
         .onPlayPauseCommand { actions.togglePlayPause() }
@@ -300,16 +327,15 @@ struct PlayerControls: View {
 
     private var buttonRow: some View {
         HStack(spacing: 20) {
-            ForEach(availableCategories, id: \.self) { category in
-                Button {
-                    toggle(category)
-                } label: {
-                    Label(category.title, systemImage: category.icon)
-                        .labelStyle(.iconOnly)
-                }
-                .playerGlassButton(prominent: openPanel == category)
-                .focused($focus, equals: .button(category))
+            // Utility cluster (far left): media Info placeholder + Diagnostics.
+            Button {
+                toggle(.info)
+            } label: {
+                Label("Info", systemImage: "info.circle")
+                    .labelStyle(.iconOnly)
             }
+            .playerGlassButton(prominent: openPanel == .info)
+            .focused($focus, equals: .button(.info))
 
             Button {
                 model.diagnosticsEnabled.toggle()
@@ -322,6 +348,20 @@ struct PlayerControls: View {
             }
             .playerGlassButton(prominent: model.diagnosticsEnabled)
             .focused($focus, equals: .diagnostics)
+
+            Spacer(minLength: 20)
+
+            // Track controls (far right), grouped: Speed · Audio · Subtitles.
+            ForEach(availableCategories, id: \.self) { category in
+                Button {
+                    toggle(category)
+                } label: {
+                    Label(category.title, systemImage: category.icon)
+                        .labelStyle(.iconOnly)
+                }
+                .playerGlassButton(prominent: openPanel == category)
+                .focused($focus, equals: .button(category))
+            }
         }
         .opacity(model.isScrubbing ? 0 : 1)
         .offset(y: model.isScrubbing ? 8 : 0)
@@ -341,72 +381,382 @@ struct PlayerControls: View {
 
     @ViewBuilder
     private func panelContainer(for category: Category) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(category.title)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 28)
-                .padding(.top, 22)
-                .padding(.bottom, 12)
-            Divider().background(.white.opacity(0.15))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    switch category {
-                    case .audioSubtitles: audioSubtitlesPane
-                    case .speed: speedPane
-                    case .sync: syncPane
+        if category == .info {
+            infoPanel
+                .colorScheme(.dark)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                panelHeader(for: category)
+                Divider().background(.white.opacity(0.15))
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        switch category {
+                        case .subtitles: subtitleBody
+                        case .audio: audioPane
+                        case .speed: speedPane
+                        case .sync: syncPane
+                        case .info: EmptyView()
+                        }
+                    }
+                    .padding(.vertical, 10)
+                }
+                .frame(maxHeight: 440)
+            }
+            .frame(width: 520, alignment: .leading)
+            .colorScheme(.dark)
+            .modifier(PanelGlassBackground())
+            // The track controls live on the right of the button row, so the panel
+            // opens against the trailing edge above them rather than on the left.
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    // MARK: Info panel
+
+    /// The "Series · S1E1 · 37 min" line under the title.
+    private var episodeMetaLine: String {
+        var parts: [String] = []
+        if !model.subtitle.isEmpty { parts.append(model.subtitle) }
+        if !model.infoRuntimeLabel.isEmpty { parts.append(model.infoRuntimeLabel) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// A wide now-playing card that slides into the controls area (video keeps
+    /// playing full-frame behind it): thumbnail · title · meta line · overview ·
+    /// badges, with Next/Previous Episode + Restart actions on the right.
+    private var infoPanel: some View {
+        // Concentric radii, matching the app's cards: the thumbnail's media radius
+        // nested inside the card's glass radius (outer = inner + content padding),
+        // so both corners share a centre.
+        let thumbRadius = PlozzTheme.Metrics.mediumMediaCornerRadius
+        let contentPad: CGFloat = 24
+        let cardRadius = thumbRadius + contentPad
+
+        return HStack(alignment: .top, spacing: 28) {
+            infoThumbnail(cornerRadius: thumbRadius)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.title.isEmpty ? "Now Playing" : model.title)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                if !episodeMetaLine.isEmpty {
+                    Text(episodeMetaLine)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
+                if !model.overview.isEmpty {
+                    Text(model.overview)
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.82))
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+                if !model.infoBadges.isEmpty {
+                    MediaBadgeRow(badges: model.infoBadges)
+                        .padding(.top, 4)
+                }
+            }
+            // Cap the text block to a comfortable reading measure so a full-width
+            // card doesn't stretch the overview into very long lines.
+            .frame(maxWidth: 760, alignment: .leading)
+
+            Spacer(minLength: 32)
+
+            VStack(spacing: 12) {
+                if model.hasNextEpisode {
+                    infoActionButton(title: "Next Episode", icon: "forward.end.fill", prominent: true, slot: .infoNext) {
+                        actions.playNextEpisode()
                     }
                 }
-                .padding(.vertical, 10)
+                if model.hasPreviousEpisode {
+                    infoActionButton(title: "Previous", icon: "backward.end.fill", prominent: false, slot: .infoPrev) {
+                        actions.playPreviousEpisode()
+                    }
+                }
+                infoActionButton(title: "Restart", icon: "arrow.counterclockwise", prominent: false, slot: .infoRestart) {
+                    actions.restart()
+                    openPanel = nil
+                    focus = .button(.info)
+                }
             }
-            .frame(maxHeight: 440)
+            .frame(width: 340)
         }
-        .frame(width: 760, alignment: .leading)
-        .background(.ultraThinMaterial)
-        .colorScheme(.dark)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(radius: 24)
+        .padding(contentPad)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(PanelGlassBackground(cornerRadius: cardRadius))
+    }
+
+    private func infoThumbnail(cornerRadius: CGFloat) -> some View {
+        Color.clear
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .frame(width: 360)
+            .overlay {
+                FallbackAsyncImage(urls: model.artworkURLs) {
+                    Rectangle().fill(Color.white.opacity(0.08))
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.system(size: 34, weight: .regular))
+                                .foregroundStyle(.white.opacity(0.28))
+                        )
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .plozzMediaEdge(cornerRadius: cornerRadius)
+    }
+
+    private func infoActionButton(
+        title: String,
+        icon: String,
+        prominent: Bool,
+        slot: FocusSlot,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+        }
+        .playerGlassButton(prominent: prominent)
+        .focused($focus, equals: slot)
+    }
+
+    /// Header of the floating panel: the screen title on the left, and — on the
+    /// Subtitles track list only — the ✎ Edit (appearance) button on the right.
+    @ViewBuilder
+    private func panelHeader(for category: Category) -> some View {
+        HStack(spacing: 12) {
+            Text(headerTitle(for: category))
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+            Spacer(minLength: 12)
+            if category == .subtitles && subtitleScreen == .tracks {
+                Button {
+                    openSubtitleScreen(.style)
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .playerGlassButton(prominent: false)
+                .focused($focus, equals: .edit)
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 22)
+        .padding(.bottom, 12)
+    }
+
+    private func headerTitle(for category: Category) -> String {
+        guard category == .subtitles else { return category.title }
+        switch subtitleScreen {
+        case .tracks: return "Subtitles"
+        case .download: return "Download Subtitles"
+        case .style: return "Subtitle Style"
+        }
+    }
+
+    /// The Subtitles panel is a small master flow: the track list (default), a
+    /// Download screen (from the trailing row) and a Style screen (from ✎ Edit).
+    @ViewBuilder
+    private var subtitleBody: some View {
+        switch subtitleScreen {
+        case .tracks: subtitlePane
+        case .download: subtitleDownloadStub
+        case .style: subtitleStyleStub
+        }
+    }
+
+    /// The Subtitles track list: one full-width column of selectable tracks
+    /// (incl. "Off"), then a trailing "Search for subtitles…" row. Full width so
+    /// a rich label ("Spanish (SDH, PGS)") never truncates.
+    @ViewBuilder
+    private var subtitlePane: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            let rows = subtitleRows
+            if rows.isEmpty {
+                emptyRow("No subtitles")
+            } else {
+                trackRowStack(rows)
+            }
+            Divider()
+                .background(.white.opacity(0.12))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            downloadEntryRow
+        }
+        .padding(.horizontal, 14)
+    }
+
+    /// "Looked through them all, found nothing → get more." Kept at the END of
+    /// the list so it surfaces exactly when it's needed (few / no tracks) and
+    /// stays out of the way when there are many.
+    private var downloadEntryRow: some View {
+        Button {
+            openSubtitleScreen(.download)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.circle").font(.body)
+                Text("Search for subtitles…").font(.body).lineLimit(1)
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .download)
+    }
+
+    // MARK: Subtitles sub-screens (Download / Style) — stubs for now
+
+    private var subtitleDownloadStub: some View {
+        subScreenStub(message: "Search the server's providers for a subtitle in your language and load it right here.")
+    }
+
+    private var subtitleStyleStub: some View {
+        subScreenStub(message: "Adjust size, position, colour, background and outline — previewed live over the video.")
+    }
+
+    private func subScreenStub(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.7))
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Coming soon")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.4))
+            Button {
+                openSubtitleScreen(.tracks)
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+            }
+            .playerGlassButton(prominent: false)
+            .focused($focus, equals: .subBack)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func openSubtitleScreen(_ screen: SubtitleScreen) {
+        subtitleScreen = screen
+        switch screen {
+        case .tracks: focus = .row(selectedRowIndex(for: .subtitles))
+        case .download, .style: focus = .subBack
+        }
+    }
+
+    /// The Audio menu: one full-width column of selectable tracks plus the
+    /// Dialog Enhance toggle when the engine supports it.
+    @ViewBuilder
+    private var audioPane: some View {
+        let rows = audioRows
+        if rows.isEmpty {
+            emptyRow("No alternate audio")
+        } else {
+            trackRowStack(rows).padding(.horizontal, 14)
+        }
     }
 
     @ViewBuilder
-    private var audioSubtitlesPane: some View {
-        let rows = audioSubtitleRows
-        if rows.isEmpty {
-            emptyRow("No alternate tracks")
-        } else {
+    private func trackRowStack(_ rows: [TrackRow]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(rows) { row in
-                if let header = row.header {
-                    sectionHeader(header)
-                }
                 if row.isToggle {
-                    toggleRow(
-                        title: row.title,
-                        subtitle: row.subtitle,
-                        isOn: row.isSelected,
-                        index: row.id,
-                        action: row.action
-                    )
+                    compactToggleRow(row)
                 } else {
-                    selectableRow(
-                        title: row.title,
-                        isSelected: row.isSelected,
-                        index: row.id,
-                        action: row.action
-                    )
+                    compactSelectableRow(row)
                 }
             }
         }
+    }
+
+    private func compactSelectableRow(_ row: TrackRow) -> some View {
+        Button(action: row.action) {
+            HStack(spacing: 10) {
+                Text(row.title)
+                    .font(.body)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if row.isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .playerMenuRowMark(isSelected: true, accent: palette.accent)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .row(row.id))
+    }
+
+    private func compactToggleRow(_ row: TrackRow) -> some View {
+        Button(action: row.action) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title).font(.body.weight(.medium)).lineLimit(1)
+                    if !row.subtitle.isEmpty {
+                        Text(row.subtitle)
+                            .font(.caption2)
+                            .playerMenuRowSecondary()
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 8)
+                Image(systemName: row.isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .playerMenuRowMark(isSelected: row.isSelected, accent: palette.accent)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .row(row.id))
     }
 
     @ViewBuilder
     private var speedPane: some View {
-        ForEach(Array(Self.speedPresets.enumerated()), id: \.offset) { index, speed in
-            selectableRow(
-                title: Self.speedLabel(speed),
-                isSelected: abs(model.playbackSpeed - speed) < 0.001,
-                index: index
-            ) {
-                actions.setPlaybackSpeed(speed)
+        VStack(alignment: .leading, spacing: 0) {
+            // Fine control: − {value}× + in 0.05 steps (0.25×–2×). Drives the same
+            // model.playbackSpeed as the presets below, so they stay in sync.
+            HStack {
+                Spacer(minLength: 0)
+                SettingsStepper(
+                    options: Array(0..<Self.speedGridCount),
+                    selection: Binding(
+                        get: { Self.nearestSpeedIndex(model.playbackSpeed) },
+                        set: { actions.setPlaybackSpeed(Self.speedGridValue($0)) }
+                    ),
+                    title: { Self.speedLabel(Self.speedGridValue($0)) }
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 14)
+
+            Divider()
+                .background(.white.opacity(0.12))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+
+            // Quick presets.
+            ForEach(Array(Self.speedPresets.enumerated()), id: \.offset) { index, speed in
+                selectableRow(
+                    title: Self.speedLabel(speed),
+                    isSelected: abs(model.playbackSpeed - speed) < 0.001,
+                    index: index
+                ) {
+                    actions.setPlaybackSpeed(speed)
+                }
             }
         }
     }
@@ -463,20 +813,21 @@ struct PlayerControls: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack {
-                Text(title).font(.title3)
-                Spacer()
+            HStack(spacing: 10) {
+                Text(title).font(.body).lineLimit(1)
+                Spacer(minLength: 8)
                 if isSelected {
                     Image(systemName: "checkmark")
-                        .font(.headline)
-                        .foregroundStyle(palette.accent)
+                        .font(.body.weight(.semibold))
+                        .playerMenuRowMark(isSelected: true, accent: palette.accent)
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
         .focused($focus, equals: .row(index))
     }
 
@@ -492,19 +843,20 @@ struct PlayerControls: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.title3.weight(.medium))
                     if !subtitle.isEmpty {
-                        Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+                        Text(subtitle).font(.footnote).playerMenuRowSecondary()
                     }
                 }
                 Spacer()
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(isOn ? palette.accent : .secondary)
+                    .playerMenuRowMark(isSelected: isOn, accent: palette.accent)
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
         .focused($focus, equals: .row(index))
     }
 
@@ -542,26 +894,32 @@ struct PlayerControls: View {
 
     // MARK: Model helpers
 
+    /// Track controls, left→right: Speed · Audio · **Subtitles** (Subtitles at the
+    /// far-right edge), rendered on the right of the button row opposite the
+    /// left-hand utility cluster (Info · Diagnostics).
+    ///
+    /// A/V Sync is intentionally omitted for now — the standalone button was
+    /// removed. `Category.sync` + `syncPane` are kept so it can be restored later.
     private var availableCategories: [Category] {
         var result: [Category] = []
-        if model.hasSelectableAudio
-            || model.hasSelectableSubtitles
-            || model.engineCapabilities.contains(.dialogEnhance) {
-            result.append(.audioSubtitles)
-        }
         if model.engineCapabilities.contains(.playbackSpeed) {
             result.append(.speed)
         }
-        if model.engineCapabilities.contains(.audioDelay)
-            || model.engineCapabilities.contains(.subtitleDelay) {
-            result.append(.sync)
+        if model.hasSelectableAudio
+            || model.engineCapabilities.contains(.dialogEnhance) {
+            result.append(.audio)
+        }
+        if model.hasSelectableSubtitles {
+            result.append(.subtitles)
         }
         return result
     }
 
-    /// Focus target when the bar first takes focus: the first category, or the
-    /// always-present Diagnostics button when no categories apply.
+    /// Focus target when the bar first takes focus: Subtitles (the most-used
+    /// control) when present, otherwise the first category, otherwise the
+    /// always-present Diagnostics button.
     private var initialFocus: FocusSlot {
+        if availableCategories.contains(.subtitles) { return .button(.subtitles) }
         if let first = availableCategories.first { return .button(first) }
         return .diagnostics
     }
@@ -576,14 +934,34 @@ struct PlayerControls: View {
         let action: () -> Void
     }
 
-    private var audioSubtitleRows: [TrackRow] {
+    /// Subtitle menu rows (one full-width column, including "Off"). Indexed from
+    /// 0 in their own focus-slot space — safe because only one panel is open at a
+    /// time, so audio and subtitle `.row` ids never coexist.
+    private var subtitleRows: [TrackRow] {
+        guard model.hasSelectableSubtitles else { return [] }
+        return model.subtitleOptions.enumerated().map { index, option in
+            TrackRow(
+                id: index,
+                header: nil,
+                title: option.title,
+                subtitle: "",
+                isSelected: option.isSelected,
+                isToggle: false,
+                action: { actions.selectSubtitle(option.id) }
+            )
+        }
+    }
+
+    /// Audio menu rows: selectable tracks followed by the Dialog Enhance toggle
+    /// when supported. Indexed from 0 in their own focus-slot space.
+    private var audioRows: [TrackRow] {
         var rows: [TrackRow] = []
         var index = 0
         if model.hasSelectableAudio {
-            for (offset, option) in model.audioOptions.enumerated() {
+            for option in model.audioOptions {
                 rows.append(TrackRow(
                     id: index,
-                    header: offset == 0 ? "Audio" : nil,
+                    header: nil,
                     title: option.title,
                     subtitle: "",
                     isSelected: option.isSelected,
@@ -596,7 +974,7 @@ struct PlayerControls: View {
         if model.engineCapabilities.contains(.dialogEnhance) {
             rows.append(TrackRow(
                 id: index,
-                header: model.hasSelectableAudio ? nil : "Audio",
+                header: nil,
                 title: "Dialog Enhance",
                 subtitle: "Boost speech clarity in loud mixes",
                 isSelected: model.dialogEnhanceEnabled,
@@ -605,36 +983,32 @@ struct PlayerControls: View {
             ))
             index += 1
         }
-        if model.hasSelectableSubtitles {
-            for (offset, option) in model.subtitleOptions.enumerated() {
-                rows.append(TrackRow(
-                    id: index,
-                    header: offset == 0 ? "Subtitles" : nil,
-                    title: option.title,
-                    subtitle: "",
-                    isSelected: option.isSelected,
-                    isToggle: false,
-                    action: { actions.selectSubtitle(option.id) }
-                ))
-                index += 1
-            }
-        }
         return rows
     }
 
     private func selectedRowIndex(for category: Category) -> Int {
         switch category {
-        case .audioSubtitles:
-            return audioSubtitleRows.first(where: { $0.isSelected })?.id
-                ?? audioSubtitleRows.first?.id ?? 0
+        case .subtitles:
+            // Open focused on the active subtitle (incl. "Off"), else the top row.
+            return subtitleRows.first(where: { $0.isSelected })?.id ?? 0
+        case .audio:
+            return audioRows.first(where: { $0.isSelected })?.id ?? 0
         case .speed:
             return Self.speedPresets.firstIndex(where: { abs(model.playbackSpeed - $0) < 0.001 }) ?? 0
         case .sync:
+            return 0
+        case .info:
             return 0
         }
     }
 
     private func handleExit() {
+        // Back out of a Subtitles sub-screen to the track list first; only then
+        // does Menu close the whole panel.
+        if openPanel == .subtitles && subtitleScreen != .tracks {
+            openSubtitleScreen(.tracks)
+            return
+        }
         if let category = openPanel {
             openPanel = nil
             focus = .button(category)
@@ -646,6 +1020,23 @@ struct PlayerControls: View {
     // MARK: Formatting
 
     static let speedPresets: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+
+    // Custom-speed grid for the − / + stepper: 0.25×…2.0× in 0.05 steps. Modelled
+    // as integer indices so the stepper matches exactly (no Double == fuzziness);
+    // the Double rate is derived on the way in (nearest index) and out (grid value).
+    static let speedStepMin = 0.25
+    static let speedStepMax = 2.0
+    static let speedStep = 0.05
+    static var speedGridCount: Int {
+        Int(((speedStepMax - speedStepMin) / speedStep).rounded()) + 1
+    }
+    static func speedGridValue(_ index: Int) -> Double {
+        ((speedStepMin + Double(index) * speedStep) * 100).rounded() / 100
+    }
+    static func nearestSpeedIndex(_ speed: Double) -> Int {
+        let raw = ((speed - speedStepMin) / speedStep).rounded()
+        return Int(min(max(raw, 0), Double(speedGridCount - 1)))
+    }
 
     static func speedLabel(_ speed: Double) -> String {
         if abs(speed - speed.rounded()) < 0.001 {
@@ -868,6 +1259,34 @@ private extension View {
             } else {
                 buttonStyle(.bordered)
             }
+        }
+    }
+}
+
+/// The floating panel's translucent backing. Native **Liquid Glass** on tvOS
+/// 26+, falling back to a cheap solid translucent fill below that (and honouring
+/// the perf intent on older devices).
+///
+/// Still **no `.shadow`** — a soft drop shadow was the original frame-drop
+/// culprit over Dolby Vision (a per-frame offscreen blur recomposited on the
+/// moving HDR signal). A 1px stroke gives edge separation instead. The glass is
+/// a *bounded* backdrop sample (the panel is only 760pt wide), so keep an eye on
+/// the diagnostics FPS over DV content and fall back to the solid fill if it
+/// ever stutters.
+private struct PanelGlassBackground: ViewModifier {
+    var cornerRadius: CGFloat = 24
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
+
+    func body(content: Content) -> some View {
+        if #available(tvOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: shape)
+                .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 1))
+        } else {
+            content
+                .background(Color.black.opacity(0.8))
+                .clipShape(shape)
+                .overlay(shape.stroke(.white.opacity(0.14), lineWidth: 1))
         }
     }
 }

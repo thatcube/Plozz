@@ -66,6 +66,44 @@ final class JellyfinProviderMappingTests: XCTestCase {
         )
     }
 
+    func testImageURLsIncludeCacheBustingTag() async throws {
+        // When the server advertises an image tag (a content hash that changes
+        // whenever the art changes), Plozz must include it in the image URL so a
+        // client-side cache busts when art is replaced server-side. Without the
+        // tag, the URL never changes and stale art keeps showing.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i1", json: """
+        {"Id":"i1","Name":"Hero","Type":"Movie",
+         "ImageTags":{"Primary":"primtag123","Logo":"logotag456"},
+         "BackdropImageTags":["backtag789"]}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "i1")
+        let poster = try XCTUnwrap(item.posterURL?.absoluteString)
+        let backdrop = try XCTUnwrap(item.backdropURL?.absoluteString)
+        let logo = try XCTUnwrap(item.logoURL?.absoluteString)
+
+        XCTAssertTrue(poster.contains("tag=primtag123"), "poster URL must carry its Primary image tag: \(poster)")
+        XCTAssertTrue(backdrop.contains("tag=backtag789"), "backdrop URL must carry its backdrop image tag: \(backdrop)")
+        XCTAssertTrue(logo.contains("tag=logotag456"), "logo URL must carry its Logo image tag: \(logo)")
+    }
+
+    func testImageURLOmitsTagWhenServerAdvertisesNone() async throws {
+        // No advertised tag -> no tag query item (and the gated art fields stay nil
+        // so the fallback chain runs instead of pointing at a guaranteed 404).
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/i2", json: """
+        {"Id":"i2","Name":"NoArt","Type":"Movie"}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let item = try await provider.item(id: "i2")
+        XCTAssertNil(item.posterURL)
+        XCTAssertNil(item.backdropURL)
+        XCTAssertNil(item.logoURL)
+    }
+
     func testContinueWatchingFoldsInNextUpEpisode() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """

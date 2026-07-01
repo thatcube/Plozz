@@ -71,6 +71,12 @@ public final class NativeVideoEngine: VideoEngine {
     public var onProgress: (@MainActor () -> Void)?
     public var onFailure: (@MainActor (AppError) -> Void)?
     public var onEnded: (@MainActor () -> Void)?
+    /// Native tracks are known synchronously and AVPlayer draws its own
+    /// subtitles (legible group) / Plozz draws sidecar cues via the VM, so the
+    /// native engine never fires either of these. Declared to satisfy the
+    /// protocol.
+    public var onTracksChanged: (@MainActor () -> Void)?
+    public var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 
     // MARK: Configuration
 
@@ -102,6 +108,12 @@ public final class NativeVideoEngine: VideoEngine {
     /// time-to-first-frame; cancelled on teardown so a stale selection never
     /// applies to a replaced player item.
     @ObservationIgnored private var defaultSubtitleSelectionTask: Task<Void, Never>?
+    /// Off-critical-path preferred-audio-language pick (per-series memory /
+    /// prefer-original-language). AVPlayer otherwise just plays the asset's default
+    /// audio track, so without this the audio half of those features no-ops on the
+    /// native engine. Cancelled on teardown so a stale selection never applies to a
+    /// replaced player item.
+    @ObservationIgnored private var preferredAudioSelectionTask: Task<Void, Never>?
     #if !os(macOS)
     @ObservationIgnored private var routeChangeObserver: NSObjectProtocol?
     @ObservationIgnored private var endOfPlaybackObserver: NSObjectProtocol?
@@ -193,15 +205,38 @@ public final class NativeVideoEngine: VideoEngine {
         isPaused = false
         player.playImmediately(atRate: Float(currentPlaybackRate))
 
-        // Best-effort: pick the default subtitle for the user's mode/language.
-        // Detached from the load() critical path because resolving the asset's
-        // `AVMediaSelectionGroup` involves additional I/O, and the first video
-        // frame must not wait on it. Cancelled in `teardownPlayer` so a stale
-        // selection never applies to a replaced player item.
+        // Plozz owns subtitle SELECTION and DRAWING through its SDR overlay (see
+        // PlayerViewModel.applyInitialSubtitleSelectionIfReady). The native engine
+        // must therefore NOT enable any AVPlayer legible option — otherwise
+        // AVPlayer would paint the asset's default/forced/autoselect subtitle into
+        // the (HDR) video signal in parallel with the overlay: a double-draw that
+        // also defeats HDR-safe rendering. Disable the legible group on load so
+        // the overlay stays the single source of truth. Detached from load()'s
+        // critical path because resolving the asset's `AVMediaSelectionGroup`
+        // involves extra I/O the first video frame must not wait on. Cancelled in
+        // `teardownPlayer` so it never applies to a replaced player item.
         defaultSubtitleSelectionTask?.cancel()
         defaultSubtitleSelectionTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.applyDefaultSubtitleSelection(for: item)
+            await self.disableLegibleSubtitleSelection(for: item)
+        }
+
+        // Apply the resolved audio-language preference (per-series memory /
+        // prefer-original-language) the same off-critical-path way. AVPlayer has no
+        // load-time language option, so we select the best-matching audible track
+        // once its `AVMediaSelectionGroup` resolves. Empty preference => leave the
+        // asset's default audio untouched (the no-feature common case). The viewer's
+        // later manual pick (`selectAudioTrack`) still overrides this freely.
+        preferredAudioSelectionTask?.cancel()
+        let preferredAudioLanguages = request.preferredAudioLanguages
+        if !preferredAudioLanguages.isEmpty {
+            preferredAudioSelectionTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.applyPreferredAudioSelection(
+                    for: item,
+                    preferredLanguages: preferredAudioLanguages
+                )
+            }
         }
     }
 
@@ -583,6 +618,8 @@ public final class NativeVideoEngine: VideoEngine {
         formatInspectTask = nil
         defaultSubtitleSelectionTask?.cancel()
         defaultSubtitleSelectionTask = nil
+        preferredAudioSelectionTask?.cancel()
+        preferredAudioSelectionTask = nil
         subtitleLoader = nil
         if let endOfPlaybackObserver {
             NotificationCenter.default.removeObserver(endOfPlaybackObserver)
@@ -677,36 +714,40 @@ public final class NativeVideoEngine: VideoEngine {
 
     // MARK: - Subtitle / audio track selection
 
-    /// Chooses the default legible (subtitle) option on the player item to honour
-    /// the user's subtitle mode + preferred language, using the asset's own
-    /// `AVMediaSelectionGroup`. Best-effort: any failure leaves AVPlayer's default
-    /// selection untouched and never affects playback.
-    private func applyDefaultSubtitleSelection(for item: AVPlayerItem) async {
+    /// Disables AVPlayer's legible (subtitle) selection on the player item so the
+    /// engine never draws a subtitle itself. Plozz routes the user's default and
+    /// manual subtitle choices through its own SDR overlay
+    /// (`PlayerViewModel.applyInitialSubtitleSelectionIfReady` /
+    /// `selectSubtitleOption`), which fetches/decodes the same track and renders
+    /// it HDR-safely on top of the video. Selecting `nil` here also overrides any
+    /// `default`/`autoselect`/forced characteristic the asset (or an injected HLS
+    /// rendition) would otherwise honour. Best-effort: failure simply leaves
+    /// AVPlayer's own selection untouched and never affects playback.
+    private func disableLegibleSubtitleSelection(for item: AVPlayerItem) async {
         guard let group = await legibleGroup(for: item.asset) else { return }
+        item.select(nil, in: group)
+    }
 
-        let options = group.options
-        let candidates: [SubtitleCandidate] = options.enumerated().map { index, option in
-            SubtitleCandidate(
-                id: index,
-                languageCode: option.extendedLanguageTag ?? option.locale?.identifier,
-                isForced: option.hasMediaCharacteristic(.containsOnlyForcedSubtitles),
-                isDefault: group.defaultOption == option
-            )
-        }
-
-        let decision = SubtitleSelector.decide(
-            candidates: candidates,
-            mode: captionSettings.subtitleMode,
-            preferredLanguage: captionSettings.resolvedPreferredLanguage
+    /// Selects the audible track best matching an ordered list of preferred
+    /// languages (per-series memory / prefer-original-language). Uses
+    /// `mediaSelectionOptions(from:filteredAndSortedAccordingToPreferredLanguages:)`
+    /// so language identifiers are canonicalised — a preference of `"jpn"` matches
+    /// an option tagged `"ja"`, and vice versa — and the result is ordered by the
+    /// preference list. Best-effort: no match (or no audible group) leaves the
+    /// asset's default audio untouched and never affects playback.
+    private func applyPreferredAudioSelection(
+        for item: AVPlayerItem,
+        preferredLanguages: [String]
+    ) async {
+        guard !preferredLanguages.isEmpty,
+              let group = try? await item.asset.loadMediaSelectionGroup(for: .audible)
+        else { return }
+        let ranked = AVMediaSelectionGroup.mediaSelectionOptions(
+            from: group.options,
+            filteredAndSortedAccordingToPreferredLanguages: preferredLanguages
         )
-
-        switch decision {
-        case .none:
-            item.select(nil, in: group)
-        case .select(let id):
-            guard options.indices.contains(id) else { return }
-            item.select(options[id], in: group)
-        }
+        guard let best = ranked.first else { return }
+        item.select(best, in: group)
     }
 
     private func legibleGroup(for asset: AVAsset) async -> AVMediaSelectionGroup? {

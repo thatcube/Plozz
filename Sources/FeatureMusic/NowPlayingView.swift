@@ -94,6 +94,16 @@ struct NowPlayingView: View {
     /// finish, then centers.
     @State private var latchedShowsLyricsPanel: Bool?
 
+    /// Pending "collapse the panel because lyrics are unavailable" timer. Held in
+    /// state so a follow-on `.loaded` result (e.g. the user skipping to the next
+    /// track) can cancel the collapse before the message even has time to fade.
+    @State private var pendingCollapse: Task<Void, Never>?
+
+    /// How long the "No lyrics found" message stays visible before the panel
+    /// collapses, so anyone reading the panel actually gets time to see it
+    /// rather than catching a flash mid-animation.
+    private static let noLyricsDwell: Duration = .milliseconds(1500)
+
     /// Whether to reserve the lyrics panel next to the player. Falls back to the
     /// live state only until the first track resolves (see `latchedShowsLyricsPanel`).
     private var showsLyricsPanel: Bool {
@@ -105,6 +115,8 @@ struct NowPlayingView: View {
     /// lookup — that hold is the "wait" before any artwork animation. Disabling
     /// lyrics always collapses the panel immediately.
     private func updateLyricsPanelLatch() {
+        pendingCollapse?.cancel()
+        pendingCollapse = nil
         guard lyricsEnabled else {
             latchedShowsLyricsPanel = false
             return
@@ -112,7 +124,29 @@ struct NowPlayingView: View {
         switch controller.lyricsState {
         case .loaded:
             latchedShowsLyricsPanel = true
-        case .unavailable, .idle:
+        case .unavailable:
+            // If the panel is currently open we hold it open for a beat so the
+            // "No lyrics found" message has time to be read before the panel
+            // slides shut. From a closed/undecided state we just collapse
+            // immediately — there's nothing for the user to read in that case.
+            if latchedShowsLyricsPanel == true {
+                pendingCollapse = Task { @MainActor in
+                    try? await Task.sleep(for: Self.noLyricsDwell)
+                    guard !Task.isCancelled else { return }
+                    if case .unavailable = controller.lyricsState, lyricsEnabled {
+                        latchedShowsLyricsPanel = false
+                    }
+                    pendingCollapse = nil
+                }
+            } else {
+                latchedShowsLyricsPanel = false
+            }
+        case .idle, .silent:
+            // `.silent` means we already know this track has no lyrics (cache
+            // hit) and a background re-check is quietly under way. Behave
+            // exactly like `.idle` — no panel, no message, no dwell — so the
+            // user never sees a "Searching for lyrics…" / "No lyrics found"
+            // flash for a song they've played before.
             latchedShowsLyricsPanel = false
         case .loading:
             break
@@ -201,7 +235,15 @@ struct NowPlayingView: View {
         // doesn't fly to center and snap back between two songs that both have
         // lyrics. See `latchedShowsLyricsPanel`.
         .onChange(of: controller.lyricsState) { _, _ in updateLyricsPanelLatch() }
-        .onChange(of: lyricsEnabled) { _, _ in updateLyricsPanelLatch() }
+        .onChange(of: lyricsEnabled) { wasEnabled, isEnabled in
+            updateLyricsPanelLatch()
+            // Turning lyrics back on must re-resolve the current track: the
+            // resolve that ran while they were off skipped LRCLIB, so its negative
+            // is stale and the panel would otherwise stay empty until the next skip.
+            if isEnabled && !wasEnabled {
+                controller.reloadCurrentTrackLyrics()
+            }
+        }
         // Back/Menu first dismisses the controls if they're showing; pressing it
         // again (with the controls already hidden) closes the player.
         .onExitCommand {
@@ -350,6 +392,24 @@ struct NowPlayingView: View {
         }
     }
 
+    /// A small animated equalizer shown immediately to the left of the playing
+    /// track's title — the one on-screen cue that audio is *actively* playing once
+    /// the transport controls auto-hide (artwork + title alone look identical
+    /// paused vs playing). Reuses the same `NowPlayingEqualizer` shown in track
+    /// lists and the mini player for visual consistency. Fades out when playback
+    /// is paused, so its presence *is* the "playing now" signal; respects Reduce
+    /// Motion by holding the bars still (still visible) rather than animating.
+    /// Hidden from accessibility — it's a decorative state cue, and "is playing"
+    /// is already exposed by the transport controls.
+    private var nowPlayingTitleIndicator: some View {
+        NowPlayingEqualizer(isAnimating: controller.isPlaying && !reduceMotion)
+            .frame(width: 26)
+            .opacity(controller.isPlaying ? 1 : 0)
+            .animation(.easeInOut(duration: 0.3), value: controller.isPlaying)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
     /// The title/artist (+ album & quality badge when "show track details" is on)
     /// stack rendered inside `metaColumn`'s reserved-height slot. The album row is
     /// always rendered (transparent when empty) and the quality badge reserves a
@@ -357,11 +417,21 @@ struct NowPlayingView: View {
     /// only its visibility changes.
     private var trackTextBlock: some View {
         VStack(spacing: 10) {
-            Text(controller.currentTrack?.title ?? "Not Playing")
-                .font(.system(size: 46, weight: .bold))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
+            // Title with the "now playing" equalizer to its left. The trailing
+            // clear spacer matches the indicator's width so the title stays
+            // centered whether playing (indicator visible) or paused (faded but
+            // still occupying its slot) — no horizontal shift on play/pause.
+            HStack(spacing: 14) {
+                nowPlayingTitleIndicator
+                Text(controller.currentTrack?.title ?? "Not Playing")
+                    .font(.system(size: 46, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
+                Color.clear
+                    .frame(width: 26)
+                    .accessibilityHidden(true)
+            }
             if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
                 Text(artist)
                     .font(.system(size: 26, weight: .medium))
@@ -572,18 +642,23 @@ struct NowPlayingView: View {
         .focused($focus, equals: .playPause)
     }
 
-    /// Toggles the lyrics panel. Highlighted when on; disabled (and dimmed) while
-    /// the current track has no lyrics, so it can't be turned on for nothing.
+    /// Toggles the lyrics panel. Highlighted when on; disabled (and dimmed) only
+    /// while lyrics are ON but the current track genuinely has none — turning it
+    /// "on" again would do nothing. While lyrics are OFF the toggle stays enabled
+    /// so the user can always turn them back on, even on a track that resolved to
+    /// "no lyrics" *while disabled* — that resolve deliberately skipped LRCLIB
+    /// (our main source) and didn't truly look, so re-enabling re-resolves it.
     private var lyricsToggleButton: some View {
         let hasLyrics = controller.lyricsState.hasLyrics
+        let blocked = lyricsEnabled && !hasLyrics
         return transportButton(
             icon: lyricsEnabled ? "quote.bubble.fill" : "quote.bubble",
             tint: (lyricsEnabled && hasLyrics) ? Color.accentColor : .primary
         ) {
             lyricsEnabled.toggle()
         }
-        .disabled(!hasLyrics)
-        .opacity(hasLyrics ? 1 : 0.4)
+        .disabled(blocked)
+        .opacity(blocked ? 0.4 : 1)
     }
 
     /// A secondary transport control. Its glass button style is **constant** —
@@ -682,6 +757,13 @@ struct NowPlayingLyricsView: View {
     let showTrackDetails: Bool
     /// Eases the lines in on first appearance instead of letting them pop.
     @State private var appeared = false
+    /// Whether the spinner + "Searching for lyrics…" label should be visible
+    /// for the current `.loading` window. Held off for `loadingChromeDelay` so
+    /// resolves that finish quickly (cache hits, fast server hits) never flash
+    /// the indicator on screen — the panel just stays blank for a beat and
+    /// then snaps to the lyrics.
+    @State private var showLoadingChrome = false
+    private static let loadingChromeDelay: Duration = .milliseconds(500)
 
     var body: some View {
         content
@@ -694,18 +776,52 @@ struct NowPlayingLyricsView: View {
                         .padding(.bottom, 4)
                 }
             }
+            // Reset the gate whenever we leave the loading state, and start the
+            // delay countdown each time we enter it. `.task(id:)` cancels its
+            // previous instance on identity change, which doubles as our timer
+            // cancellation when the state moves to `.loaded`/`.unavailable`
+            // before the delay elapses.
+            .task(id: isLoadingState) {
+                guard isLoadingState else {
+                    showLoadingChrome = false
+                    return
+                }
+                showLoadingChrome = false
+                try? await Task.sleep(for: Self.loadingChromeDelay)
+                guard !Task.isCancelled else { return }
+                showLoadingChrome = true
+            }
+    }
+
+    private var isLoadingState: Bool {
+        switch state {
+        case .idle, .loading: return true
+        case .loaded, .unavailable, .silent: return false
+        }
     }
 
     @ViewBuilder
     private var content: some View {
         switch state {
-        case .idle, .loading:
-            VStack {
+        case .idle, .loading, .silent:
+            // `.silent` is the "we already know there's nothing, stay quiet"
+            // state — render exactly like `.idle` so the panel collapses
+            // without ever flashing the spinner or the "No lyrics found"
+            // message. The panel won't even be visible in this state thanks
+            // to `updateLyricsPanelLatch`, but rendering as blank is the
+            // belt-and-braces.
+            VStack(spacing: 18) {
                 Spacer()
-                ProgressView()
+                if showLoadingChrome {
+                    ProgressView()
+                    Text("Searching for lyrics…")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.easeInOut(duration: 0.2), value: showLoadingChrome)
 
         case .unavailable:
             VStack {
@@ -856,7 +972,12 @@ struct LyricsSourceBadge: View {
         case .plex:
             Image("PlexLogo").renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
         case .lrclib:
-            Image(systemName: "quote.bubble").font(.caption)
+            // LRCLIB ships no brand asset we can bundle, so use a lyrics-flavoured
+            // SF Symbol sized to match the 16×16 server logos above so all three
+            // attributions line up cleanly.
+            Image(systemName: "quote.bubble.fill")
+                .font(.system(size: 13))
+                .frame(width: 16, height: 16)
         }
     }
 }

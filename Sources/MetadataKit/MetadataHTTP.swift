@@ -57,16 +57,65 @@ enum MetadataHTTP {
         return await perform(type, request: request, decoder: decoder)
     }
 
+    /// Like `get`, but also reports whether the answer is *authoritative* enough
+    /// to trust as a real negative. The `reachable` flag is `true` for a decoded
+    /// 2xx response **or** a definitive `404 Not Found`, and `false` when the
+    /// transport itself failed (offline, DNS, TLS, timeout) **or** the server
+    /// returned a transient/ambiguous error (429 rate-limit, any 5xx, 408/425,
+    /// or a 4xx like 400). The lyrics layer uses this to avoid burning a
+    /// permanent "no lyrics" into its cache when the device is disconnected or
+    /// LRCLIB merely throttled/hiccuped under the prefetch fan-out — see
+    /// `nonSuccessIsAuthoritative`.
+    static func getWithStatus<T: Decodable>(
+        _ type: T.Type,
+        url: URL,
+        accept: String = "application/json",
+        headers: [String: String] = [:],
+        decoder: JSONDecoder = JSONDecoder()
+    ) async -> (value: T?, reachable: Bool) {
+        var request = URLRequest(url: url)
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
+        return await performWithStatus(type, request: request, decoder: decoder)
+    }
+
     private static func perform<T: Decodable>(
         _ type: T.Type,
         request: URLRequest,
         decoder: JSONDecoder
     ) async -> T? {
-        guard let (data, response) = try? await session.data(for: request) else { return nil }
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            return nil
+        await performWithStatus(type, request: request, decoder: decoder).value
+    }
+
+    private static func performWithStatus<T: Decodable>(
+        _ type: T.Type,
+        request: URLRequest,
+        decoder: JSONDecoder
+    ) async -> (value: T?, reachable: Bool) {
+        guard let (data, response) = try? await session.data(for: request) else {
+            return (nil, false)
         }
-        return try? decoder.decode(T.self, from: data)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            return (nil, nonSuccessIsAuthoritative(http.statusCode))
+        }
+        return (try? decoder.decode(T.self, from: data), true)
+    }
+
+    /// Whether a non-2xx HTTP status is an *authoritative* answer the lyrics
+    /// layer may trust as a real negative (→ `reachable: true`), versus a
+    /// transient or ambiguous failure that must never be cached as "no lyrics"
+    /// (→ `reachable: false`).
+    ///
+    /// Only a definitive `404 Not Found` qualifies as authoritative: it means the
+    /// record genuinely isn't there. Everything else — `429` (rate-limited, which
+    /// the app's own prefetch fan-out provokes), any `5xx` (LRCLIB / Cloudflare
+    /// 500/502/503/520/522…), `408`/`425` (timeouts), and other `4xx` such as a
+    /// `400` from a malformed query (e.g. a track longer than LRCLIB's 3600s
+    /// `/get` cap) — is transient or a non-verdict, so the resolver re-tries on a
+    /// later play instead of poisoning the cache with a permanent miss.
+    static func nonSuccessIsAuthoritative(_ statusCode: Int) -> Bool {
+        statusCode == 404
     }
 }
 

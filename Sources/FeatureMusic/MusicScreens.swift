@@ -456,7 +456,8 @@ struct AlbumDetailView: View {
             tracks: viewModel.tracks,
             startIndex: start,
             resolveStreamURL: streamURLResolver(for: provider),
-            resolveLyrics: lyricsResolver(for: provider)
+            resolveLyrics: lyricsResolver(for: provider),
+            refreshLyrics: lyricsRefresher(for: provider)
         )
     }
 
@@ -465,7 +466,8 @@ struct AlbumDetailView: View {
         controller.playShuffled(
             tracks: viewModel.tracks,
             resolveStreamURL: streamURLResolver(for: provider),
-            resolveLyrics: lyricsResolver(for: provider)
+            resolveLyrics: lyricsResolver(for: provider),
+            refreshLyrics: lyricsRefresher(for: provider)
         )
     }
 }
@@ -525,7 +527,8 @@ struct PlaylistDetailView: View {
             tracks: viewModel.tracks,
             startIndex: start,
             resolveStreamURL: streamURLResolver(for: provider),
-            resolveLyrics: lyricsResolver(for: provider)
+            resolveLyrics: lyricsResolver(for: provider),
+            refreshLyrics: lyricsRefresher(for: provider)
         )
     }
 
@@ -534,7 +537,8 @@ struct PlaylistDetailView: View {
         controller.playShuffled(
             tracks: viewModel.tracks,
             resolveStreamURL: streamURLResolver(for: provider),
-            resolveLyrics: lyricsResolver(for: provider)
+            resolveLyrics: lyricsResolver(for: provider),
+            refreshLyrics: lyricsRefresher(for: provider)
         )
     }
 }

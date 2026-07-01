@@ -45,6 +45,14 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
     public var currentTime: TimeInterval { engine.currentTime }
     public var duration: TimeInterval { engine.duration }
+
+    /// Ground truth for the menu's "selected audio" indicator: the AVStream index
+    /// AetherEngine is actually decoding (its resolved `activeAudioTrackIndex`),
+    /// which can differ from the container `isDefault` flag because the engine
+    /// honors the viewer's audio-language preference at load. `TrackInfo.id`,
+    /// `selectAudioTrack(index:)`, and `activeAudioTrackIndex` all share the
+    /// FFmpeg AVStream-index space, so this maps directly onto `MediaTrack.id`.
+    public var currentAudioTrackID: Int? { engine.activeAudioTrackIndex }
     public var bufferedPosition: TimeInterval { engine.clock.bufferedPosition }
 
     /// Bridge AetherEngine's live telemetry into the diagnostics overlay so the
@@ -78,6 +86,13 @@ public final class PlozzigenVideoEngine: VideoEngine {
     public var onProgress: (@MainActor () -> Void)?
     public var onFailure: (@MainActor (AppError) -> Void)?
     public var onEnded: (@MainActor () -> Void)?
+    /// Fired after `syncTracks()` re-reads AetherEngine's async-published track
+    /// lists, so the VM can repopulate its (otherwise-empty-at-load) options menu.
+    public var onTracksChanged: (@MainActor () -> Void)?
+    /// Fired with AetherEngine's decoded subtitle cues (text + bitmap), mapped to
+    /// Plozz's cue model, so the owned overlay draws them. This is the decoded
+    /// read-ahead buffer — the host time-filters it against the playhead.
+    public var onSubtitleCues: (@MainActor ([CoreModels.SubtitleCue]) -> Void)?
 
     // MARK: - Private
 
@@ -133,10 +148,15 @@ public final class PlozzigenVideoEngine: VideoEngine {
         // gracefully. Either way it's an on-device bridge, never a server transcode.
         let channels = request.localRemuxSource?.sourceMetadata.audio?.channels
             ?? request.sourceMetadata?.audio?.channels ?? 0
-        let options = LoadOptions(
+        var options = LoadOptions(
             matchContentEnabled: true,
             audioBridgeMode: channels > 6 ? .lossless : .surroundCompat
         )
+        // Steer the INITIAL active audio/subtitle track via language preference
+        // (no reload). Computed upstream from per-series memory / prefer-original
+        // policy. Empty arrays express no preference (container default wins).
+        options.preferredAudioLanguages = request.preferredAudioLanguages
+        options.preferredSubtitleLanguages = request.preferredSubtitleLanguages
 
         do {
             try await engine.load(
@@ -283,6 +303,53 @@ public final class PlozzigenVideoEngine: VideoEngine {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.syncTracks() }
             .store(in: &cancellables)
+
+        // AetherEngine resolves its active audio track asynchronously at load
+        // (honoring the viewer's audio-language preference, which may override the
+        // container default) and again on every track switch. Re-emit so the host
+        // rebuilds its menu and highlights the track that's *actually* decoding —
+        // otherwise the indicator stays on the default-flag guess and lies about
+        // what's playing.
+        engine.$activeAudioTrackIndex
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.onTracksChanged?() }
+            .store(in: &cancellables)
+
+        // Bridge AetherEngine's decoded cues into Plozz's owned overlay.
+        // AetherEngine publishes its decoded *read-ahead* cue buffer (text +
+        // bitmap) — not just the on-screen line — so `LiveSubtitleModel` filters it
+        // by the playhead before drawing. Without this bridge, a selected
+        // Plozzigen subtitle decodes but nothing is ever rendered — the "no
+        // subtitles on Plozzigen" bug.
+        engine.$subtitleCues
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] cues in
+                guard let self else { return }
+                // Map AetherEngine cues → Plozz's cue model inline so the
+                // element type is inferred (the module and the engine class share
+                // the name `AetherEngine`, so naming `AetherEngine.SubtitleCue`
+                // explicitly is ambiguous here).
+                let mapped: [CoreModels.SubtitleCue] = cues.map { cue in
+                    let body: CoreModels.SubtitleCue.Body
+                    switch cue.body {
+                    case .text(let string):
+                        body = .text(CoreModels.SubtitleText(string))
+                    case .image(let image):
+                        body = .image(CoreModels.SubtitleImage(
+                            cgImage: image.cgImage,
+                            normalizedRect: image.position
+                        ))
+                    }
+                    return CoreModels.SubtitleCue(
+                        id: cue.id,
+                        start: cue.startTime,
+                        end: cue.endTime,
+                        body: body
+                    )
+                }
+                self.onSubtitleCues?(mapped)
+            }
+            .store(in: &cancellables)
     }
 
     private func startProgressTimer() {
@@ -303,7 +370,13 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 kind: .audio,
                 displayTitle: track.name,
                 language: track.language,
-                isDefault: track.isDefault
+                codec: track.codec,
+                isDefault: track.isDefault,
+                isForced: track.isForced,
+                channels: track.channels > 0 ? track.channels : nil,
+                isAtmos: track.isAtmos,
+                isHearingImpaired: track.isHearingImpaired,
+                isCommentary: track.isCommentary
             )
         }
         subtitleTracks = engine.subtitleTracks.map { track in
@@ -312,9 +385,23 @@ public final class PlozzigenVideoEngine: VideoEngine {
                 kind: .subtitle,
                 displayTitle: track.name,
                 language: track.language,
-                isDefault: track.isDefault
+                codec: track.codec,
+                isDefault: track.isDefault,
+                isForced: track.isForced,
+                isHearingImpaired: track.isHearingImpaired,
+                isCommentary: track.isCommentary
+                // NOTE: `isImageBasedSubtitle` is intentionally left at its
+                // default (false) here. The menu's "(PGS)" format hint is derived
+                // from `codec` instead, so labeling is accurate without changing
+                // default-subtitle routing (which keys off this flag). Flipping it
+                // to true belongs with the bitmap-through-overlay work, not here.
             )
         }
+        // Tracks arrive asynchronously (Combine) after `loadTrackOptions()` has
+        // already run once at playResolved, so tell the VM to rebuild the menu now
+        // that the lists are populated — otherwise the subtitle/audio menu is
+        // empty for the whole session.
+        onTracksChanged?()
     }
 }
 

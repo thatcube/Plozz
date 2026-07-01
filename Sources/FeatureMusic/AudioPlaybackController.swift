@@ -43,10 +43,54 @@ public final class AudioPlaybackController {
     /// provider.
     public typealias StreamURLResolver = @MainActor (MusicTrack) async -> ResolvedStream?
 
-    /// Resolves a track's lyrics (provider-backed), or `nil` when the backend has
-    /// none. Kept as a closure for the same reason as `StreamURLResolver`: the
-    /// engine stays decoupled from any concrete provider.
-    public typealias LyricsResolver = @MainActor (MusicTrack) async -> Lyrics?
+    /// Resolves a track's lyrics (provider-backed). The result reports both
+    /// the lyrics (or `nil` when none are available) and whether the UI should
+    /// *stay silent* about a `nil` — i.e. suppress the one-time "No lyrics
+    /// found" message. That happens when the negative came from a cache hit / an
+    /// instrumental heuristic, **or** when we couldn't reach a server at all
+    /// (offline). In every silent case the controller stays in `.silent` (no
+    /// spinner, no message) and kicks off a background re-check via
+    /// `LyricsRefresher`, so a song that later receives an LRCLIB upload — or
+    /// one we simply couldn't fetch while offline — surfaces silently on a
+    /// future play.
+    public typealias LyricsResolver = @MainActor (MusicTrack, LyricsResolveContext) async -> LyricsResolution
+
+    /// Why lyrics are being resolved, which tunes how hard the LRCLIB fallback
+    /// works. `visible` is the track the user is actually looking at (the Now
+    /// Playing panel) and earns the thorough title-only + duration-matched
+    /// fallback that rescues songs filed under a different artist name (a duo
+    /// alias, "Various Artists", composer-vs-performer). `prefetch` is
+    /// background queue-warming (next track + bulk sweep) where that extra
+    /// per-track fan-out isn't worth the shared LRCLIB rate-limiter contention,
+    /// so it sticks to the cheaper artist-qualified lookups — any track that
+    /// needs the fallback still gets it on-demand the instant it becomes visible.
+    public enum LyricsResolveContext: Sendable {
+        case visible
+        case prefetch
+    }
+
+    /// Background re-check for a track whose cached answer was negative.
+    /// Returns lyrics only when the *new* lookup found something the cache
+    /// didn't have. Implementations are expected to debounce so the same
+    /// instrumental isn't re-queried on every play.
+    public typealias LyricsRefresher = @MainActor (MusicTrack) async -> Lyrics?
+
+    /// Outcome of a `LyricsResolver` call.
+    public struct LyricsResolution: Sendable, Equatable {
+        public let lyrics: Lyrics?
+        /// When `lyrics` is `nil`, true means the UI should stay silent rather
+        /// than flash "No lyrics found": the negative came from a cache hit, an
+        /// instrumental heuristic, or an unreachable server (offline). All of
+        /// those drive the "stay silent + re-check in the background" behaviour.
+        /// Only a *definitive first-time* negative from a reachable server sets
+        /// this `false`, which is the lone path allowed to show the message.
+        public let staySilent: Bool
+
+        public init(lyrics: Lyrics?, staySilent: Bool = false) {
+            self.lyrics = lyrics
+            self.staySilent = staySilent
+        }
+    }
 
     /// Loading state of the current track's lyrics, observed by the Now Playing
     /// lyrics panel.
@@ -59,6 +103,12 @@ public final class AudioPlaybackController {
         case loaded(Lyrics)
         /// The fetch completed but the track has no lyrics.
         case unavailable
+        /// We've previously resolved this track to "no lyrics" and are trusting
+        /// that. UI stays exactly as if lyrics were disabled — no panel, no
+        /// spinner, no "No lyrics found" message — while a background refresh
+        /// silently re-checks. If the refresh finds new lyrics this transitions
+        /// to `.loaded`; otherwise it stays `.silent`.
+        case silent
 
         /// Whether usable lyrics are available (drives the toggle's enabled state).
         public var hasLyrics: Bool {
@@ -121,7 +171,37 @@ public final class AudioPlaybackController {
     private let player = AVQueuePlayer()
     private var resolver: StreamURLResolver?
     private var lyricsResolver: LyricsResolver?
+    private var lyricsRefresher: LyricsRefresher?
     private var lyricsLoadTask: Task<Void, Never>?
+    /// Background re-check for the current track when we resolved from a
+    /// remembered negative. Lets a song that was previously instrumental but
+    /// has since gained an LRCLIB upload surface silently mid-play, without
+    /// ever flashing "Searching for lyrics…" or "No lyrics found".
+    private var lyricsRefreshTask: Task<Void, Never>?
+    /// Fire-and-forget warmup for the *next* queued track's lyrics, so by the
+    /// time the user advances it's already a memo-cache hit. Cancelled and
+    /// replaced on every track change so a runaway skip-skip-skip session
+    /// only ever has one prefetch in flight.
+    private var lyricsPrefetchTask: Task<Void, Never>?
+    /// Slow background sweep that walks the *rest* of the queue after the
+    /// immediate next track, warming the lyrics cache one track at a time
+    /// with a small delay between each so we don't hammer LRCLIB or the
+    /// user's server. Cancelled and replaced on every track / queue change.
+    /// Cache hits cost ~0ms so a re-played album finishes its sweep almost
+    /// instantly; a fresh album incurs ~one polite request per track.
+    private var lyricsBulkPrefetchTask: Task<Void, Never>?
+    /// Pause between successive bulk-prefetch lookups. This spaces out *tracks*;
+    /// the actual per-request LRCLIB politeness is enforced separately by the
+    /// shared token-bucket rate limiter inside `LRCLIBLyricsProvider`, so a
+    /// track's internal fan-out can't burst past the global budget regardless of
+    /// this value. Tuned so a long playlist still finishes warming reasonably
+    /// soon without making the sweep feel like a network crawl.
+    private static let bulkPrefetchSpacing: Duration = .milliseconds(1500)
+    /// Upper bound on how many upcoming tracks the background sweep warms per
+    /// run. Caps the work scheduled for very long playlists/albums; tracks past
+    /// this point are warmed lazily as the user advances (each track change
+    /// re-runs the sweep from the new position).
+    private static let maxBulkPrefetch = 30
     /// The unshuffled queue, so toggling shuffle off restores original order.
     private var orderedQueue: [MusicTrack] = []
     private var playSessionID: String?
@@ -151,7 +231,8 @@ public final class AudioPlaybackController {
         startIndex: Int,
         playSessionID: String? = nil,
         resolveStreamURL: @escaping StreamURLResolver,
-        resolveLyrics: LyricsResolver? = nil
+        resolveLyrics: LyricsResolver? = nil,
+        refreshLyrics: LyricsRefresher? = nil
     ) {
         guard !tracks.isEmpty else { return }
         let clampedStart = min(max(startIndex, 0), tracks.count - 1)
@@ -163,6 +244,7 @@ public final class AudioPlaybackController {
         }
         self.resolver = resolveStreamURL
         self.lyricsResolver = resolveLyrics
+        self.lyricsRefresher = refreshLyrics
         self.playSessionID = playSessionID
         self.orderedQueue = tracks
         self.isShuffled = false
@@ -178,11 +260,13 @@ public final class AudioPlaybackController {
         tracks: [MusicTrack],
         playSessionID: String? = nil,
         resolveStreamURL: @escaping StreamURLResolver,
-        resolveLyrics: LyricsResolver? = nil
+        resolveLyrics: LyricsResolver? = nil,
+        refreshLyrics: LyricsRefresher? = nil
     ) {
         guard !tracks.isEmpty else { return }
         self.resolver = resolveStreamURL
         self.lyricsResolver = resolveLyrics
+        self.lyricsRefresher = refreshLyrics
         self.playSessionID = playSessionID
         self.orderedQueue = tracks
         self.isShuffled = true
@@ -278,6 +362,9 @@ public final class AudioPlaybackController {
         duration = 0
         currentQuality = nil
         lyricsLoadTask?.cancel()
+        lyricsRefreshTask?.cancel()
+        lyricsPrefetchTask?.cancel()
+        lyricsBulkPrefetchTask?.cancel()
         lyricsState = .idle
         // Relinquish the system Play/Pause button so the video player can
         // receive it again once music is no longer playing.
@@ -384,11 +471,32 @@ public final class AudioPlaybackController {
         #endif
     }
 
+    /// Re-resolves the current track's lyrics from scratch. Used when the user
+    /// turns the lyrics setting back ON from Now Playing: the resolve that ran
+    /// while lyrics were disabled deliberately skipped LRCLIB (our main source),
+    /// so the current `.silent`/`.unavailable` verdict is stale — a fresh lookup
+    /// now consults LRCLIB and can surface lyrics for the track on screen without
+    /// waiting for the user to skip to the next one. No-op when nothing's playing.
+    public func reloadCurrentTrackLyrics() {
+        guard let track = currentTrack else { return }
+        loadLyrics(for: track)
+    }
+
     /// Fetches lyrics for `track` off the critical path, publishing `lyricsState`
     /// as it resolves. Cancels any in-flight load so a fast next/previous never
     /// shows a stale track's lyrics. With no resolver wired, stays `.unavailable`.
+    ///
+    /// On a *remembered negative* (a cached or heuristically-determined "no
+    /// lyrics"), the visible state goes straight to `.silent` — no spinner,
+    /// no "No lyrics found" message — and we silently re-check in the
+    /// background so a song that has since gained an LRCLIB upload surfaces
+    /// without the user having to do anything. The refresher itself debounces,
+    /// so playing the same instrumental repeatedly isn't network traffic.
     private func loadLyrics(for track: MusicTrack) {
         lyricsLoadTask?.cancel()
+        lyricsRefreshTask?.cancel()
+        lyricsPrefetchTask?.cancel()
+        lyricsBulkPrefetchTask?.cancel()
         guard let lyricsResolver else {
             lyricsState = .unavailable
             return
@@ -396,16 +504,97 @@ public final class AudioPlaybackController {
         lyricsState = .loading
         let trackID = track.id
         lyricsLoadTask = Task { [weak self] in
-            let result = await lyricsResolver(track)
+            let resolution = await lyricsResolver(track, .visible)
             guard !Task.isCancelled, let self else { return }
             // Ignore a result that arrived after the user moved on.
             guard self.currentTrack?.id == trackID else { return }
+            let lyrics = resolution.lyrics
             // Only synced lyrics are usable on a TV (no manual scrolling), so an
             // unsynced result is treated as "no lyrics" — the player stays centered.
-            if let result, !result.isEmpty, result.isSynced {
-                self.lyricsState = .loaded(result)
+            let usable = (lyrics?.isEmpty == false && lyrics?.isSynced == true) ? lyrics : nil
+            if let usable {
+                self.lyricsState = .loaded(usable)
+            } else if resolution.staySilent {
+                // Stay silent (panel hidden, no message) and re-check quietly.
+                self.lyricsState = .silent
+                self.refreshLyricsInBackground(for: track)
             } else {
+                // First-time resolution that really came up empty — show the
+                // "No lyrics found" state once so the user sees a definitive
+                // answer. Future plays will be silent.
                 self.lyricsState = .unavailable
+            }
+            // Warm the cache for the next queued track so advancing is instant,
+            // then a slow background sweep walks the rest of the queue so a
+            // long album/playlist gets fully cached before the user reaches it.
+            self.prefetchNextTrackLyrics()
+            self.prefetchRestOfQueueLyrics()
+        }
+    }
+
+    /// Silent background re-check for a track whose visible state is `.silent`.
+    /// If the refresher returns synced lyrics, transitions to `.loaded`
+    /// (assuming the track is still current); otherwise leaves the state
+    /// alone — the user never sees a flash. Refresher is expected to debounce,
+    /// so this is safe to call on every play.
+    private func refreshLyricsInBackground(for track: MusicTrack) {
+        guard let lyricsRefresher else { return }
+        let trackID = track.id
+        lyricsRefreshTask = Task { [weak self] in
+            let refreshed = await lyricsRefresher(track)
+            guard !Task.isCancelled, let self else { return }
+            guard self.currentTrack?.id == trackID else { return }
+            guard let refreshed, !refreshed.isEmpty, refreshed.isSynced else { return }
+            // Only promote when we're still in `.silent`. If the user toggled
+            // lyrics off or another load supersceded us, leave that alone.
+            if case .silent = self.lyricsState {
+                self.lyricsState = .loaded(refreshed)
+            }
+        }
+    }
+
+    /// Kicks off a background lookup for the immediate next queued track so it
+    /// resolves from `LyricsMemoCache` instantly when the user advances. Skips
+    /// when nothing is up next (the prefetch task is left nil).
+    private func prefetchNextTrackLyrics() {
+        guard let lyricsResolver else { return }
+        let nextIndex = index + 1
+        guard queue.indices.contains(nextIndex) else { return }
+        let nextTrack = queue[nextIndex]
+        lyricsPrefetchTask = Task { @MainActor in
+            _ = await lyricsResolver(nextTrack, .prefetch)
+        }
+    }
+
+    /// Walks the rest of the queue past the immediate-next track and warms
+    /// the lyrics cache for each, one at a time with a small spacing between
+    /// requests. By the time the user reaches the middle of an album every
+    /// track ahead is already a cache hit, so the panel snaps in on advance
+    /// with no spinner.
+    ///
+    /// The resolver itself short-circuits on L1/L2/L3 cache hits, so a
+    /// re-played album costs essentially nothing — the loop blasts through
+    /// the queue in milliseconds. Only previously-unseen tracks actually
+    /// touch the network, and even those are paced to be a polite trickle
+    /// rather than a burst. The sweep is also capped to the next
+    /// `maxBulkPrefetch` tracks so a thousand-track playlist doesn't schedule
+    /// an unbounded crawl — anything past the cap is warmed lazily as the user
+    /// advances and this sweep re-runs from the new position.
+    private func prefetchRestOfQueueLyrics() {
+        guard let lyricsResolver else { return }
+        let startIndex = index + 2 // immediate-next is handled separately
+        guard startIndex < queue.count else { return }
+        let endIndex = min(startIndex + Self.maxBulkPrefetch, queue.count)
+        let upcoming = Array(queue[startIndex..<endIndex])
+        lyricsBulkPrefetchTask = Task { @MainActor [weak self] in
+            for track in upcoming {
+                guard !Task.isCancelled else { return }
+                _ = await lyricsResolver(track, .prefetch)
+                guard !Task.isCancelled else { return }
+                // Bail if the playback context changed under us (skip, stop,
+                // new album) — `loadLyrics` will have replaced this task.
+                guard let self, self.queue.contains(where: { $0.id == track.id }) else { return }
+                try? await Task.sleep(for: Self.bulkPrefetchSpacing)
             }
         }
     }

@@ -195,14 +195,20 @@ private struct MusicRow<Content: View>: View {
     @Environment(\.plozzMetrics) private var metrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             HStack(spacing: 24) {
                 Text(title).font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 Spacer()
                 if let seeAll {
+                    // A compact, text-only affordance rather than the platform's
+                    // large `.headline` button. Its type tracks the (density-scaled)
+                    // section header at ~0.72×, so it reads as a secondary action,
+                    // scales with the display, and keeps the header row short so
+                    // more cards fit. We supply our own focus treatment (brighten +
+                    // lift), so the default tvOS focus effect is disabled.
                     Button("See All", action: seeAll)
-                        .buttonStyle(.plain)
-                        .font(.headline)
+                        .buttonStyle(SeeAllButtonStyle(fontSize: metrics.sectionHeaderFontSize * 0.72))
+                        .focusEffectDisabled()
                 }
                 if let trailing { trailing }
             }
@@ -224,7 +230,43 @@ private struct MusicRow<Content: View>: View {
                 // the row's height is unchanged — only the clip grows.
                 .padding(.vertical, metrics.railShadowClearance)
             }
-            .padding(.vertical, metrics.railBottomClearanceOffset)
+            // Match the shared rails: a tight `railTopPadding`-based gap above the
+            // cards (not the wide `railVerticalPadding` used below the row), so the
+            // section header + "See All" hug the cards instead of floating far above
+            // them.
+            .padding(.top, metrics.railTopClearanceOffset)
+            .padding(.bottom, metrics.railBottomClearanceOffset)
+        }
+    }
+}
+
+/// A compact, text-only "See All" action for a `MusicRow` header. It deliberately
+/// avoids the platform's large `.headline` button so the header row stays short
+/// (more cards fit): its type tracks the density-scaled section header — passed in
+/// as `fontSize` — so it grows and shrinks with the display, sitting a notch
+/// smaller than the header at a matching (semibold) weight. Focus is shown with
+/// our own brighten-and-lift (the default tvOS focus effect is disabled at the
+/// call site), keeping it visually light rather than a full glass pill.
+private struct SeeAllButtonStyle: ButtonStyle {
+    let fontSize: CGFloat
+
+    func makeBody(configuration: Configuration) -> some View {
+        SeeAllBody(configuration: configuration, fontSize: fontSize)
+    }
+
+    private struct SeeAllBody: View {
+        let configuration: ButtonStyle.Configuration
+        let fontSize: CGFloat
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.themePalette) private var palette
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: fontSize, weight: .semibold))
+                .foregroundStyle(isFocused ? palette.primaryText : palette.secondaryText)
+                .scaleEffect(configuration.isPressed ? 0.96 : (isFocused ? 1.08 : 1.0))
+                .animation(.easeOut(duration: 0.16), value: isFocused)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }
     }
 }

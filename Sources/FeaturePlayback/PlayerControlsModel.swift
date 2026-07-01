@@ -93,6 +93,12 @@ public final class PlayerControlsModel {
     // MARK: Track menus
     public var audioOptions: [PlayerTrackOption] = []
     public var subtitleOptions: [PlayerTrackOption] = []
+    /// Eligible tracks for the **second** (dual) subtitle line, as an ordered
+    /// picker: "Off" first, then the text subtitle tracks that can drive Plozz's
+    /// overlay (a sidecar URL, non-image) excluding whatever is the primary. The
+    /// selected entry is flagged `isSelected`. Empty of real tracks means the
+    /// current media has nothing a second line could show.
+    public var secondarySubtitleOptions: [PlayerTrackOption] = []
 
     /// The current subtitle **appearance**, mirrored here so the in-player
     /// appearance editor (hosted in `PlayerControls`) can two-way bind it. The

@@ -87,6 +87,9 @@ public final class PlayerViewModel {
     /// Fetches + parses the selected sidecar into cues off the main actor; one at
     /// a time, cancelled when the selection changes or playback stops.
     @ObservationIgnored private var subtitleCueLoadTask: Task<Void, Never>?
+    /// The equivalent one-at-a-time fetch for the **secondary** (dual) subtitle
+    /// sidecar. Separate from the primary task so the two never cancel each other.
+    @ObservationIgnored private var secondaryCueLoadTask: Task<Void, Never>?
 
     private let provider: any MediaProvider
     private let itemID: String
@@ -189,6 +192,10 @@ public final class PlayerViewModel {
     /// `selectedSubtitleTrackID == nil` represents "Off".
     private var selectedAudioTrackID: Int?
     private var selectedSubtitleTrackID: Int?
+    /// The track feeding the overlay's **second** (dual) subtitle line, or `nil`
+    /// when off. Independent of the primary: it always renders through Plozz's
+    /// overlay (never the engine's own draw), so it must be a text sidecar track.
+    private var selectedSecondarySubtitleTrackID: Int?
 
     /// A just-requested audio track id whose engine switch is still in flight.
     /// AetherEngine reloads to change audio, so `currentAudioTrackID` lags the
@@ -1057,9 +1064,13 @@ public final class PlayerViewModel {
         engine.setSubtitleDelay(0)
         engine.setDialogEnhanceEnabled(false)
         // Drop any overlay cues from a previous stream/engine and reset the sync
-        // offset; a fresh selection re-seeds them.
+        // offset; a fresh selection re-seeds them. This is a full reset (new media
+        // or engine), so the dual-subtitle selection is dropped too.
         subtitleCueLoadTask?.cancel()
         subtitleCueLoadTask = nil
+        secondaryCueLoadTask?.cancel()
+        secondaryCueLoadTask = nil
+        selectedSecondarySubtitleTrackID = nil
         liveSubtitles.offset = 0
         liveSubtitles.clear()
 
@@ -1928,6 +1939,49 @@ public final class PlayerViewModel {
             })
             controls.subtitleOptions = options
         }
+
+        // Dual/second-line picker: text tracks with a sidecar the overlay can
+        // parse, excluding the primary. If the current secondary is no longer
+        // eligible (e.g. it just became the primary, or the media changed),
+        // reconcile by dropping it — clearing both its cues and its styling.
+        let secondaryEligible = subtitles.filter {
+            !$0.isImageBasedSubtitle && $0.deliveryURL != nil && $0.id != selectedSubtitleTrackID
+        }
+        if let sec = selectedSecondarySubtitleTrackID,
+           !secondaryEligible.contains(where: { $0.id == sec }) {
+            selectedSecondarySubtitleTrackID = nil
+            secondaryCueLoadTask?.cancel()
+            secondaryCueLoadTask = nil
+            liveSubtitles.loadSecondary(nil)
+            if style.secondary != nil {
+                var cleared = style
+                cleared.secondary = nil
+                applySubtitleStyle(cleared)
+            }
+        }
+        if secondaryEligible.isEmpty {
+            controls.secondarySubtitleOptions = []
+        } else {
+            var secOptions = [PlayerTrackOption(id: PlayerTrackOption.offID, title: "Off", isSelected: selectedSecondarySubtitleTrackID == nil)]
+            secOptions.append(contentsOf: secondaryEligible.sortedByPreferredLanguage(preferred).map { track in
+                PlayerTrackOption(
+                    id: track.id,
+                    title: TrackLabeling.subtitleLabel(
+                        displayTitle: track.displayTitle,
+                        language: track.language,
+                        codec: track.codec,
+                        isForced: track.isForced,
+                        isImageBased: track.isImageBasedSubtitle,
+                        isHearingImpaired: track.isHearingImpaired,
+                        isCommentary: track.isCommentary,
+                        detectedLanguage: detectedSubtitleLanguages[track.id],
+                        trackID: track.id
+                    ),
+                    isSelected: track.id == selectedSecondarySubtitleTrackID
+                )
+            })
+            controls.secondarySubtitleOptions = secOptions
+        }
     }
 
     /// Selects an audio track from the menu, routed through the engine.
@@ -2085,12 +2139,13 @@ public final class PlayerViewModel {
         loadTrackOptions()
     }
 
-    /// Cancels any in-flight cue fetch and clears the overlay (subtitles off, or
-    /// switching to an engine that draws its own).
+    /// Cancels any in-flight cue fetch and clears the **primary** overlay
+    /// (subtitles off, or switching to an engine that draws its own). Leaves the
+    /// secondary/dual line untouched — it's an independent overlay stream.
     private func clearOverlaySubtitle() {
         subtitleCueLoadTask?.cancel()
         subtitleCueLoadTask = nil
-        liveSubtitles.clear()
+        liveSubtitles.loadPrimary(nil)
     }
 
     /// Fetches the selected text sidecar, parses it to cues off the main actor,
@@ -2098,7 +2153,9 @@ public final class PlayerViewModel {
     /// Best-effort: a failure simply leaves no overlay cues rather than wedging.
     private func loadOverlaySubtitle(_ track: MediaTrack) {
         subtitleCueLoadTask?.cancel()
-        liveSubtitles.clear()
+        // Clear only the primary stream; a selected dual/secondary line survives a
+        // primary track change.
+        liveSubtitles.loadPrimary(nil)
         guard let url = track.deliveryURL else {
             // Embedded text without a sidecar URL: container extraction arrives
             // with the Plozzigen cue path; leave nothing showing until then.
@@ -2140,6 +2197,91 @@ public final class PlayerViewModel {
                 // Selection changed; the newer selection owns the overlay.
             } catch {
                 PlozzLog.playback.debug("Overlay subtitle fetch failed (non-fatal)")
+            }
+        }
+    }
+
+    // MARK: - Dual (secondary) subtitle
+
+    /// The tracks a second subtitle line can show: text subtitles with a sidecar
+    /// URL (so Plozz's overlay can parse + draw them), excluding whatever is the
+    /// current primary. Image subs and embedded-text-without-URL can't drive the
+    /// overlay's secondary stream, so they're filtered out.
+    private func eligibleSecondarySubtitleTracks() -> [MediaTrack] {
+        let providerSubs = request?.subtitleTracks ?? []
+        return engine.subtitleTracks
+            .map { track in track.enriched(withProvider: providerSubs.first { $0.id == track.id }) }
+            .filter { !$0.isImageBasedSubtitle && $0.deliveryURL != nil && $0.id != selectedSubtitleTrackID }
+    }
+
+    /// Selects the second (dual) subtitle track, or turns the second line off
+    /// (`PlayerTrackOption.offID`). The secondary always renders through Plozz's
+    /// overlay, so only text tracks with a sidecar URL are eligible. Picking a
+    /// track also enables the secondary *styling* (`style.secondary`) so the
+    /// overlay actually draws the line; turning it off clears both.
+    public func selectSecondarySubtitleOption(id: Int) {
+        if id == PlayerTrackOption.offID {
+            secondaryCueLoadTask?.cancel()
+            secondaryCueLoadTask = nil
+            selectedSecondarySubtitleTrackID = nil
+            liveSubtitles.loadSecondary(nil)
+            if style.secondary != nil {
+                var cleared = style
+                cleared.secondary = nil
+                applySubtitleStyle(cleared)
+            }
+            loadTrackOptions()
+            return
+        }
+        guard let track = eligibleSecondarySubtitleTracks().first(where: { $0.id == id }) else { return }
+        selectedSecondarySubtitleTrackID = id
+        // The overlay only draws the second line when `style.secondary` exists;
+        // seed a default (which inherits the primary look) if the viewer hasn't
+        // styled one yet.
+        if style.secondary == nil {
+            var enabled = style
+            enabled.secondary = SubtitleStyle.Secondary()
+            applySubtitleStyle(enabled)
+        }
+        loadSecondaryOverlaySubtitle(track)
+        loadTrackOptions()
+    }
+
+    /// Fetches + parses the secondary sidecar off the main actor and loads it into
+    /// the overlay's secondary stream, unless the secondary selection changed
+    /// mid-fetch. Mirrors ``loadOverlaySubtitle(_:)`` but never touches the
+    /// primary. Best-effort: a failure just leaves the second line empty.
+    private func loadSecondaryOverlaySubtitle(_ track: MediaTrack) {
+        secondaryCueLoadTask?.cancel()
+        liveSubtitles.loadSecondary(nil)
+        guard let url = track.deliveryURL else { return }
+        let id = track.id
+        let language = track.language
+        let title = track.displayTitle
+        let forced = track.isForced
+        secondaryCueLoadTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                try Task.checkCancellation()
+                guard let text = SubtitleCueParser.decodeText(data) else {
+                    PlozzLog.playback.error("Secondary subtitle sidecar decode failed (\(data.count) bytes)")
+                    return
+                }
+                let stream = SubtitleCueParser.parse(
+                    text, id: id, language: language, title: title,
+                    sourceTrackID: id, isForced: forced
+                )
+                try Task.checkCancellation()
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    if self.selectedSecondarySubtitleTrackID == id {
+                        self.liveSubtitles.loadSecondary(stream)
+                    }
+                }
+            } catch is CancellationError {
+                // Selection changed; the newer secondary owns the stream.
+            } catch {
+                PlozzLog.playback.debug("Secondary subtitle fetch failed (non-fatal)")
             }
         }
     }

@@ -16,6 +16,8 @@ struct PlayerActions {
     var togglePlayPause: () -> Void = {}
     var selectAudio: (Int) -> Void = { _ in }
     var selectSubtitle: (Int) -> Void = { _ in }
+    /// Pick the second (dual) subtitle track by option id, or `offID` for off.
+    var selectSecondarySubtitle: (Int) -> Void = { _ in }
     var setPlaybackSpeed: (Double) -> Void = { _ in }
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
@@ -371,6 +373,7 @@ final class PlayerInputViewController: UIViewController {
             togglePlayPause: { [weak self] in self?.actions.togglePlayPause() },
             selectAudio: { [weak self] in self?.actions.selectAudio($0) },
             selectSubtitle: { [weak self] in self?.actions.selectSubtitle($0) },
+            selectSecondarySubtitle: { [weak self] in self?.actions.selectSecondarySubtitle($0) },
             setPlaybackSpeed: { [weak self] in self?.actions.setPlaybackSpeed($0) },
             setAudioDelay: { [weak self] in self?.actions.setAudioDelay($0) },
             setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },

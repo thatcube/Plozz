@@ -11,6 +11,9 @@ struct PlayerOptionsActions {
     var togglePlayPause: () -> Void = {}
     var selectAudio: (Int) -> Void = { _ in }
     var selectSubtitle: (Int) -> Void = { _ in }
+    /// Pick the **second** (dual) subtitle track by option id, or `offID` to turn
+    /// the second line off. Loads its cues into the overlay's secondary stream.
+    var selectSecondarySubtitle: (Int) -> Void = { _ in }
     var setPlaybackSpeed: (Double) -> Void = { _ in }
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
@@ -976,7 +979,7 @@ struct PlayerControls: View {
             })),
             StyleRowSpec(slot: 7, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) })),
             StyleRowSpec(slot: 8, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) })),
-            StyleRowSpec(slot: 9, title: "Dual Subtitles", kind: .submenu(summary: s.secondary != nil ? "On" : "Off", open: { openSubtitleScreen(.styleDual) })),
+            StyleRowSpec(slot: 9, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) })),
             StyleRowSpec(slot: 10, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } })),
         ]
     }
@@ -1007,16 +1010,36 @@ struct PlayerControls: View {
         ]
     }
 
-    /// Dual subtitles: turn on a second line and (optionally) distinguish its look.
-    /// Enabling a second *track* is a separate feature — this styles the secondary.
+    /// True when a real (non-"Off") second subtitle track is currently selected,
+    /// so the main Style screen can label "Dual Subtitles" On/Off correctly.
+    private var hasSecondaryTrack: Bool {
+        guard let sel = model.secondarySubtitleOptions.first(where: { $0.isSelected }) else { return false }
+        return sel.id != PlayerTrackOption.offID
+    }
+
+    /// Dual subtitles: pick a second track to show a second line, then (optionally)
+    /// distinguish its look. The picker lists text tracks the overlay can draw
+    /// (excluding the primary); its styling rows appear only once a track is on.
     private var styleDualRows: [StyleRowSpec] {
         let s = model.subtitleStyle
+        let secOptions = model.secondarySubtitleOptions
+        let count = secOptions.count
+        let currentIdx = secOptions.firstIndex(where: { $0.isSelected }) ?? 0
+        let step: (Int) -> Void = { delta in
+            guard count > 0 else { return }
+            let next = secOptions[((currentIdx + delta) % count + count) % count]
+            actions.selectSecondarySubtitle(next.id)
+        }
         var rows: [StyleRowSpec] = [
-            StyleRowSpec(slot: 0, title: "Second Subtitle", kind: .toggle(isOn: s.secondary != nil, flip: {
-                updateStyle { $0.secondary = $0.secondary == nil ? SubtitleStyle.Secondary() : nil }
-            })),
+            StyleRowSpec(slot: 0, title: "Second Track", kind: .choice(
+                value: secOptions.isEmpty ? "None available" : secOptions[currentIdx].title,
+                prev: { step(-1) },
+                next: { step(1) }
+            )),
         ]
-        if let sec = s.secondary {
+        let selected = secOptions.first(where: { $0.isSelected })
+        let hasTrack = selected != nil && selected?.id != PlayerTrackOption.offID
+        if hasTrack, let sec = s.secondary {
             rows.append(choiceRow(1, "Placement", options: SubtitleStyle.Secondary.Placement.allCases, current: sec.placement, label: { $0 == .above ? "Above" : "Below" }) { v in updateStyle { $0.secondary?.placement = v } })
             rows.append(StyleRowSpec(slot: 2, title: "Distinct Style", kind: .toggle(isOn: sec.differentiate, flip: { updateStyle { $0.secondary?.differentiate.toggle() } })))
             rows.append(numberRow(3, "Size", options: Self.secondarySizeOptions, current: Int((sec.relativeScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.secondary?.relativeScale = Double(v) / 100 } })

@@ -60,6 +60,7 @@ public struct PlayerView: View {
                         togglePlayPause: { viewModel.togglePlayPause() },
                         selectAudio: { viewModel.selectAudioOption(id: $0) },
                         selectSubtitle: { viewModel.selectSubtitleOption(id: $0) },
+                        selectSecondarySubtitle: { viewModel.selectSecondarySubtitleOption(id: $0) },
                         setPlaybackSpeed: { viewModel.setPlaybackSpeed($0) },
                         setAudioDelay: { viewModel.setAudioDelay($0) },
                         setSubtitleDelay: { viewModel.setSubtitleDelay($0) },

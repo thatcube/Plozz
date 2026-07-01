@@ -196,7 +196,7 @@ struct PlaybackDetailView: View {
 
     /// A picker binding for one category's subtitle mode, falling back to the
     /// base mode when no override is stored yet.
-    private func modeBinding(for category: SubtitleContentCategory) -> Binding<CaptionSettings.SubtitleMode> {
+    private func modeBinding(for category: SubtitleContentCategory) -> Binding<SubtitleMode> {
         Binding(
             get: { subtitlePolicy.overrides[category]?.mode ?? baseRule.mode },
             set: { newMode in
@@ -522,22 +522,22 @@ private struct DescribedSegmentedPicker<Option: Hashable>: View {
 /// focused option instead of repeating it four times; it falls back to the base
 /// selection when focus is outside the pickers.
 private struct SubtitleModeControl: View {
-    @Binding var baseMode: CaptionSettings.SubtitleMode
+    @Binding var baseMode: SubtitleMode
     @Binding var perTypeEnabled: Bool
     let categories: [SubtitleContentCategory]
     let categoryName: (SubtitleContentCategory) -> String
-    let categoryMode: (SubtitleContentCategory) -> Binding<CaptionSettings.SubtitleMode>
+    let categoryMode: (SubtitleContentCategory) -> Binding<SubtitleMode>
 
     /// The option currently under focus, plus which picker owns that focus. The
     /// owner check makes the shared line order-independent: a blur reported by
     /// one picker never clears focus that a sibling took in the same update.
-    @State private var focusedMode: CaptionSettings.SubtitleMode?
+    @State private var focusedMode: SubtitleMode?
     @State private var focusOwner: Int?
 
-    private var describedMode: CaptionSettings.SubtitleMode { focusedMode ?? baseMode }
+    private var describedMode: SubtitleMode { focusedMode ?? baseMode }
 
     /// `id` 0 is the base picker; the per-type pickers are `1...`.
-    private func reportFocus(owner id: Int, mode: CaptionSettings.SubtitleMode?) {
+    private func reportFocus(owner id: Int, mode: SubtitleMode?) {
         if let mode {
             focusOwner = id
             focusedMode = mode
@@ -550,7 +550,7 @@ private struct SubtitleModeControl: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsSegmentedPicker(
-                options: CaptionSettings.SubtitleMode.allCases,
+                options: SubtitleMode.allCases,
                 selection: $baseMode,
                 title: { $0.displayName },
                 onFocusedOptionChange: { reportFocus(owner: 0, mode: $0) }
@@ -563,7 +563,7 @@ private struct SubtitleModeControl: View {
                 ForEach(Array(categories.enumerated()), id: \.element) { index, category in
                     LabeledSettingRow(categoryName(category)) {
                         SettingsSegmentedPicker(
-                            options: CaptionSettings.SubtitleMode.allCases,
+                            options: SubtitleMode.allCases,
                             selection: categoryMode(category),
                             title: { $0.displayName },
                             onFocusedOptionChange: { reportFocus(owner: index + 1, mode: $0) }

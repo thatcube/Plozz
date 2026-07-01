@@ -56,7 +56,7 @@ public struct CaptionSettingsCard: View {
 
             labeledRow("Show subtitles") {
                 OptionCardRow(
-                    options: CaptionSettings.SubtitleMode.allCases,
+                    options: SubtitleMode.allCases,
                     selection: $settings.subtitleMode
                 ) { mode in
                     optionLabel(mode.displayName)
@@ -107,7 +107,7 @@ public struct CaptionSettingsCard: View {
 
                 labeledRow("Edge style") {
                     OptionCardRow(
-                        options: CaptionSettings.EdgeStyle.allCases,
+                        options: SubtitleEdgeStyle.allCases,
                         selection: $settings.edgeStyle
                     ) { style in
                         optionLabel(style.displayName)
@@ -139,8 +139,8 @@ public struct CaptionSettingsCard: View {
         return Self.subtitleLanguages.first(where: { $0.code == code })?.name ?? code
     }
 
-    private var textColorOptions: [CaptionSettings.RGBAColor] {
-        CaptionSettings.RGBAColor.presets.map(\.color)
+    private var textColorOptions: [SubtitleColor] {
+        SubtitleColor.presets.map(\.color)
     }
 
     // MARK: Label helpers
@@ -151,8 +151,8 @@ public struct CaptionSettingsCard: View {
             .multilineTextAlignment(.center)
     }
 
-    private func colorLabel(_ color: CaptionSettings.RGBAColor) -> some View {
-        let name = CaptionSettings.RGBAColor.presets.first(where: { $0.color == color })?.name ?? "Custom"
+    private func colorLabel(_ color: SubtitleColor) -> some View {
+        let name = SubtitleColor.presets.first(where: { $0.color == color })?.name ?? "Custom"
         return VStack(spacing: 10) {
             Circle()
                 .fill(color.swiftUIColor)
@@ -215,7 +215,7 @@ struct CaptionPreview: View {
     }
 }
 
-public extension CaptionSettings.RGBAColor {
+public extension SubtitleColor {
     var swiftUIColor: Color {
         Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
     }

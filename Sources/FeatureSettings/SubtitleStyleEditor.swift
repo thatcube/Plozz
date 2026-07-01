@@ -41,7 +41,7 @@ struct SubtitleStyleEditor: View {
 
                     LabeledSettingRow("Edge style") {
                         SettingsStepper(
-                            options: CaptionSettings.EdgeStyle.allCases,
+                            options: SubtitleEdgeStyle.allCases,
                             selection: $settings.edgeStyle,
                             title: { $0.displayName }
                         )
@@ -64,12 +64,12 @@ struct SubtitleStyleEditor: View {
 
     // MARK: Option data
 
-    private var textColorOptions: [CaptionSettings.RGBAColor] {
-        CaptionSettings.RGBAColor.presets.map(\.color)
+    private var textColorOptions: [SubtitleColor] {
+        SubtitleColor.presets.map(\.color)
     }
 
-    private func colorName(for color: CaptionSettings.RGBAColor) -> String {
-        CaptionSettings.RGBAColor.presets.first(where: { $0.color == color })?.name ?? "Custom"
+    private func colorName(for color: SubtitleColor) -> String {
+        SubtitleColor.presets.first(where: { $0.color == color })?.name ?? "Custom"
     }
 
     // MARK: Building blocks
@@ -86,7 +86,7 @@ struct SubtitleStyleEditor: View {
         }
     }
 
-    private func colorLabel(_ color: CaptionSettings.RGBAColor) -> some View {
+    private func colorLabel(_ color: SubtitleColor) -> some View {
         VStack(spacing: 10) {
             Circle()
                 .fill(color.swiftUIColor)

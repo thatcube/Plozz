@@ -114,7 +114,7 @@ public enum SubtitleSelector {
     ///   enabled, fetches a real match later).
     public static func decide(
         candidates: [SubtitleCandidate],
-        mode: CaptionSettings.SubtitleMode,
+        mode: SubtitleMode,
         preferredLanguage: String?
     ) -> SubtitleDecision {
         guard !candidates.isEmpty else { return .none }
@@ -181,7 +181,7 @@ public extension Array where Element == MediaTrack {
     /// it can see image-based subs that AVFoundation hides), letting the router
     /// reason about which subtitle the user will actually get.
     func defaultSubtitleSelection(
-        mode: CaptionSettings.SubtitleMode,
+        mode: SubtitleMode,
         preferredLanguage: String?
     ) -> MediaTrack? {
         let subtitles = filter { $0.kind == .subtitle }
@@ -206,7 +206,7 @@ public extension Array where Element == MediaTrack {
     /// `deliveryURL == nil` — so an embedded text SRT (no sidecar URL, but
     /// Plozzigen-renderable) is never mistaken for a bitmap sub.
     func defaultSubtitleNeedsHybridEngine(
-        mode: CaptionSettings.SubtitleMode,
+        mode: SubtitleMode,
         preferredLanguage: String?
     ) -> Bool {
         guard let chosen = defaultSubtitleSelection(mode: mode, preferredLanguage: preferredLanguage),
@@ -267,7 +267,7 @@ public extension Array where Element == RemoteSubtitle {
     /// when the list is empty.
     func bestMatch(
         forLanguage language: String?,
-        mode: CaptionSettings.SubtitleMode = .all
+        mode: SubtitleMode = .all
     ) -> RemoteSubtitle? {
         guard !isEmpty else { return nil }
         let wantForced = (mode == .forcedOnly)

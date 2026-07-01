@@ -198,11 +198,11 @@ public struct SubtitleLabView: View {
     // MARK: Cyclers
 
     private func colorName(_ c: SubtitleStyle.Color) -> String {
-        CaptionSettings.RGBAColor.presets.first { $0.color == c }?.name ?? "Custom"
+        SubtitleColor.presets.first { $0.color == c }?.name ?? "Custom"
     }
 
     private func nextColor(after c: SubtitleStyle.Color) -> SubtitleStyle.Color {
-        let palette = CaptionSettings.RGBAColor.presets.map(\.color)
+        let palette = SubtitleColor.presets.map(\.color)
         guard let i = palette.firstIndex(of: c) else { return palette.first ?? .white }
         return palette[(i + 1) % palette.count]
     }

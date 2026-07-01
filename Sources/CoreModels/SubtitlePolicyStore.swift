@@ -16,9 +16,14 @@ public protocol SubtitlePolicyStoring: Sendable {
 }
 
 public extension SubtitlePolicyStoring {
-    /// The fully-resolved policy for a profile: base mirrors `caption`, overrides
+    /// The fully-resolved policy for a profile: base mirrors `behavior`, overrides
     /// come from this store. Resolving it for any category yields exactly today's
     /// behaviour when no overrides are set.
+    func resolvedPolicy(behavior: SubtitleBehavior) -> SubtitlePolicy {
+        SubtitlePolicy.resolved(behavior: behavior, overrides: overrides())
+    }
+
+    /// Transitional overload bridging the retired `CaptionSettings`.
     func resolvedPolicy(caption: CaptionSettings) -> SubtitlePolicy {
         SubtitlePolicy.resolved(caption: caption, overrides: overrides())
     }
@@ -101,8 +106,13 @@ public final class SubtitlePolicyModel {
         self.overrides = store.overrides()
     }
 
-    /// The fully-resolved policy for the current profile: base mirrors `caption`,
+    /// The fully-resolved policy for the current profile: base mirrors `behavior`,
     /// overrides come from this model. Fed into the player at load time.
+    public func resolvedPolicy(behavior: SubtitleBehavior) -> SubtitlePolicy {
+        SubtitlePolicy.resolved(behavior: behavior, overrides: overrides)
+    }
+
+    /// Transitional overload bridging the retired `CaptionSettings`.
     public func resolvedPolicy(caption: CaptionSettings) -> SubtitlePolicy {
         SubtitlePolicy.resolved(caption: caption, overrides: overrides)
     }

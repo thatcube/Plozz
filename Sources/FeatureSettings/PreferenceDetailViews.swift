@@ -253,6 +253,24 @@ struct PlaybackDetailView: View {
                     }
                 }
             }
+
+            SettingsPanel(
+                title: "Scrubbing",
+                footer: playback.settings.seekWithoutPausing
+                    ? "Swipe to scrub while a title is playing and it resumes the moment you land — faster, but a stray swipe can move your position."
+                    : "You must pause before you can scrub — a swipe while playing won't seek or pause. Pause (Play/Pause, or center-press the scrubber), scrub, then press Play to resume. Prevents accidental seeks."
+            ) {
+                Toggle("Seek without pausing", isOn: $playback.settings.seekWithoutPausing)
+            }
+
+            SettingsPanel(
+                title: "Up Next",
+                footer: playback.settings.showUpNextCard
+                    ? "During an episode's closing credits, show a card with the next episode so you can jump straight to it. Respects your Spoilers settings, and replaces the Skip Credits button when there's a next episode."
+                    : "Don't show the Up Next card. Episode credits behave like everything else — Skip Credits (if enabled) and the usual auto-advance at the very end."
+            ) {
+                Toggle("Show Up Next card", isOn: $playback.settings.showUpNextCard)
+            }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)

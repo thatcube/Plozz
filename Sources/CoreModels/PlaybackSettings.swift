@@ -25,16 +25,39 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     /// integration and keeps scrobbling either way.
     public var syncWatchAcrossServers: Bool
 
+    /// Whether a horizontal scrub gesture works **while playing** (the default),
+    /// or only after you pause. ON (default) keeps today's faster "seek without
+    /// pausing" feel — swipe to scrub mid-playback and it auto-resumes on
+    /// landing. OFF makes a swipe during playback a no-op for the timeline (it
+    /// neither seeks nor pauses): you must pause the video yourself first (remote
+    /// Play/Pause, or a center-press on the scrub timeline), then scrub while
+    /// paused; it stays paused on landing until you explicitly resume. This makes
+    /// accidental seeks impossible while playing.
+    public var seekWithoutPausing: Bool
+
+    /// Whether the "Up Next" card is offered during an episode's closing credits
+    /// when a next episode is queued. ON (default) shows a spoiler-safe card with
+    /// the next episode's thumbnail so you can advance with one press (and it
+    /// supersedes the Skip Credits button, since skipping to a black final frame
+    /// is pointless when intent is "play next"). OFF never shows the card; credits
+    /// fall back to the normal Skip Credits / natural-end auto-advance behaviour.
+    /// Only ever applies to episodes with a next episode — movies are unaffected.
+    public var showUpNextCard: Bool
+
     public init(
         skipIntros: SkipIntrosMode = .off,
         skipBackwardInterval: SkipInterval = .ten,
         skipForwardInterval: SkipInterval = .ten,
-        syncWatchAcrossServers: Bool = true
+        syncWatchAcrossServers: Bool = true,
+        seekWithoutPausing: Bool = true,
+        showUpNextCard: Bool = true
     ) {
         self.skipIntros = skipIntros
         self.skipBackwardInterval = skipBackwardInterval
         self.skipForwardInterval = skipForwardInterval
         self.syncWatchAcrossServers = syncWatchAcrossServers
+        self.seekWithoutPausing = seekWithoutPausing
+        self.showUpNextCard = showUpNextCard
     }
 
     public static let `default` = PlaybackSettings()
@@ -48,6 +71,8 @@ public extension PlaybackSettings {
         case skipBackwardInterval
         case skipForwardInterval
         case syncWatchAcrossServers
+        case seekWithoutPausing
+        case showUpNextCard
     }
 
     /// Decodes leniently so a payload written before a field existed (or in the
@@ -55,6 +80,10 @@ public extension PlaybackSettings {
     /// legacy `{"skipIntros": true/false}` boolean maps to `.on` / `.off`.
     /// `syncWatchAcrossServers` defaults to `true` when absent so installs that
     /// predate the toggle keep today's cross-server sync behaviour.
+    /// `seekWithoutPausing` likewise defaults to `true` so existing installs keep
+    /// today's scrub-while-playing behaviour.
+    /// `showUpNextCard` defaults to `true` so existing installs get the Up Next
+    /// card during episode credits.
     /// `skipBackwardInterval` / `skipForwardInterval` default to `.ten` when
     /// absent so existing installs keep the original 10-second skip behaviour.
     init(from decoder: Decoder) throws {
@@ -76,5 +105,11 @@ public extension PlaybackSettings {
         self.syncWatchAcrossServers =
             (try? container.decodeIfPresent(Bool.self, forKey: .syncWatchAcrossServers))
             .flatMap { $0 } ?? defaults.syncWatchAcrossServers
+        self.seekWithoutPausing =
+            (try? container.decodeIfPresent(Bool.self, forKey: .seekWithoutPausing))
+            .flatMap { $0 } ?? defaults.seekWithoutPausing
+        self.showUpNextCard =
+            (try? container.decodeIfPresent(Bool.self, forKey: .showUpNextCard))
+            .flatMap { $0 } ?? defaults.showUpNextCard
     }
 }

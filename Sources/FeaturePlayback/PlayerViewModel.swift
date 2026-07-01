@@ -2281,6 +2281,14 @@ public final class PlayerViewModel {
                     sourceTrackID: id, isForced: forced
                 )
                 try Task.checkCancellation()
+                #if DEBUG
+                let range = stream.cues.isEmpty
+                    ? "none"
+                    : "\(Int(stream.cues.first!.start))s–\(Int(stream.cues.last!.end))s"
+                PlozzLog.playback.debug(
+                    "Secondary track \(id): fetched \(data.count) bytes → \(stream.cues.count) cues (\(range))"
+                )
+                #endif
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     if self.selectedSecondarySubtitleTrackID == id {
@@ -2290,7 +2298,7 @@ public final class PlayerViewModel {
             } catch is CancellationError {
                 // Selection changed; the newer secondary owns the stream.
             } catch {
-                PlozzLog.playback.debug("Secondary subtitle fetch failed (non-fatal)")
+                PlozzLog.playback.debug("Secondary track \(id) sidecar fetch failed (non-fatal): \(error.localizedDescription)")
             }
         }
     }

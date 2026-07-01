@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://testflight.apple.com/join/EKfReNMu"><img src="https://img.shields.io/badge/Join%20the%20Public%20Beta%20on%20TestFlight-0D96F6?style=for-the-badge&logo=apple&logoColor=white" alt="Join the Plozz public beta on TestFlight" /></a>
+  <a href="https://testflight.apple.com/join/EKfReNMu"><img src="docs/assets/testflight-button.svg" alt="Join the TestFlight beta" width="232" /></a>
 </p>
 
 <p align="center">

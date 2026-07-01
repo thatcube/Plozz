@@ -1176,6 +1176,20 @@ public final class AudioPlaybackController {
             }
             diagnosticItemObservers.append(token)
         }
+        // Diagnostics: media-server reset/lost. If the HomePod drop is actually
+        // tvOS's mediaserverd tearing down (rather than a quiet route drop), THIS
+        // is the app-visible signal — and its recovery is well-documented
+        // (reconfigure the session + rebuild the player). We currently don't
+        // observe it, so a reset would look exactly like the silent break we see.
+        for name in [AVAudioSession.mediaServicesWereResetNotification,
+                     AVAudioSession.mediaServicesWereLostNotification] {
+            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.diag("mediaserver", "\(name.rawValue) route=\(self?.routeSummary() ?? "?") state=[\(self?.playerStateSummary() ?? "?")]")
+                }
+            }
+            diagnosticItemObservers.append(token)
+        }
         #endif
     }
 

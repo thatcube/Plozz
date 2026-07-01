@@ -789,7 +789,15 @@ struct PlayerControls: View {
         switch subtitleScreen {
         case .tracks: subtitlePane
         case .download: subtitleDownloadStub
-        case .style: styleScreen(styleMainRows, dividerBefore: 7)
+        case .style:
+            // A bitmap primary (PGS/DVD/…) is pre-rendered by the source, so NONE
+            // of the appearance controls apply. Replace the whole editor with a
+            // centered explanation rather than showing dead knobs.
+            if let format = model.secondarySubtitleImagePrimaryFormat {
+                styleUnavailableForImageSubtitle(format: format)
+            } else {
+                styleScreen(styleMainRows, dividerBefore: 5)
+            }
         case .styleOutline: styleScreen(styleOutlineRows)
         case .styleBackground: styleScreen(styleBackgroundRows)
         case .styleDual: styleScreen(styleDualRows)
@@ -870,10 +878,6 @@ struct PlayerControls: View {
             case toggle(isOn: Bool, flip: () -> Void)
             /// Opens a detail sub-screen: Select opens; shows a `›` chevron.
             case submenu(summary: String, open: () -> Void)
-            /// A submenu turned inert by context (e.g. dual subtitles while a
-            /// bitmap primary is active): shows a muted summary, no chevron, and
-            /// Select does nothing — the whole sub-screen is unreachable.
-            case disabled(summary: String)
             /// One-shot: Select runs it.
             case action(run: () -> Void)
         }
@@ -924,7 +928,6 @@ struct PlayerControls: View {
             case let .choice(_, _, next): next()
             case let .toggle(_, flip): flip()
             case let .submenu(_, open): open()
-            case .disabled: break
             case let .action(run): run()
             }
         } label: {
@@ -985,8 +988,6 @@ struct PlayerControls: View {
                 .playerMenuRowMark(isSelected: isOn, accent: palette.accent)
         case let .submenu(summary, _):
             Text(summary).font(.body).playerMenuRowSecondary()
-        case let .disabled(summary):
-            Text(summary).font(.body).lineLimit(1).playerMenuRowSecondary()
         case .action:
             EmptyView()
         }
@@ -1010,34 +1011,22 @@ struct PlayerControls: View {
 
     // MARK: Per-screen row builders
 
-    /// Main flat Style screen: the common knobs, a divider, then submenu groups
-    /// (advanced outline/border, background box, dual subtitles) and Reset.
+    /// Main flat Style screen: the common per-glyph knobs, a divider, then the
+    /// submenu groups (outline/border, background box, dual subtitles) and Reset.
+    /// The submenus own the quick control as their first row *and* echo its current
+    /// value as their summary, so there is exactly one entry per concern here.
     private var styleMainRows: [StyleRowSpec] {
         let s = model.subtitleStyle
-        // When the primary is a bitmap sub (PGS/DVD/…), dual mode is disallowed —
-        // a bitmap line can't be repositioned — so the whole Dual Subtitles
-        // sub-screen has nothing actionable. Surface that here and make the row
-        // inert so the viewer never even opens an empty sub-screen.
-        let dualRow: StyleRowSpec
-        if let format = model.secondarySubtitleImagePrimaryFormat {
-            dualRow = StyleRowSpec(slot: 9, title: "Dual Subtitles", kind: .disabled(summary: "Disabled for \(format)"))
-        } else {
-            dualRow = StyleRowSpec(slot: 9, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) }))
-        }
         return [
             choiceRow(0, "Font", options: SubtitleFontFamily.allCases, current: s.fontFamily, label: { $0.displayName }) { v in updateStyle { $0.fontFamily = v } },
             numberRow(1, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } },
             numberRow(2, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: Self.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } },
             colorRow(3, "Text Colour", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } },
-            choiceRow(4, "Outline", options: SubtitleEdgeStyle.allCases, current: s.edge.style, label: { $0.displayName }) { v in updateStyle { $0.edge.style = v } },
-            numberRow(5, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } },
-            StyleRowSpec(slot: 6, title: "Background Box", kind: .toggle(isOn: s.background.isEnabled, flip: {
-                updateStyle { st in st.background.isEnabled.toggle() }
-            })),
-            StyleRowSpec(slot: 7, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) })),
-            StyleRowSpec(slot: 8, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) })),
-            dualRow,
-            StyleRowSpec(slot: 10, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } })),
+            numberRow(4, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } },
+            StyleRowSpec(slot: 5, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) })),
+            StyleRowSpec(slot: 6, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) })),
+            StyleRowSpec(slot: 7, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) })),
+            StyleRowSpec(slot: 8, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } })),
         ]
     }
 
@@ -1248,12 +1237,40 @@ struct PlayerControls: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Shown in place of the whole style editor when the primary subtitle is a
+    /// bitmap (PGS/DVD/DVB/VobSub): those cues are pre-rendered images by the
+    /// source, so none of the font/colour/size/position controls apply. A calm
+    /// centered card explains why rather than presenting dead knobs.
+    private func styleUnavailableForImageSubtitle(format: String) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: "photo")
+                .font(.system(size: 44, weight: .regular))
+                .foregroundStyle(.white.opacity(0.5))
+            Text("\(format) subtitles can't be restyled")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+            Text("They're rendered as images by the source, so font, colour, size and position controls don't apply.")
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.65))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 44)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
     private func openSubtitleScreen(_ screen: SubtitleScreen) {
         subtitleScreen = screen
         switch screen {
         case .tracks: focus = .row(selectedRowIndex(for: .subtitles))
         case .download: focus = .subBack
-        case .style, .styleOutline, .styleBackground, .styleDual: focus = .row(0)
+        case .style:
+            // The style editor collapses to a non-focusable explanation when the
+            // primary is a bitmap sub, so land on the header Back instead of a row
+            // that isn't there.
+            focus = model.secondarySubtitleImagePrimaryFormat == nil ? .row(0) : .subBack
+        case .styleOutline, .styleBackground, .styleDual: focus = .row(0)
         }
     }
 

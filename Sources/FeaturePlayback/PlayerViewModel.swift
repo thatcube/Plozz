@@ -212,6 +212,15 @@ public final class PlayerViewModel {
     /// `onTracksChanged` or clobbering a manual menu pick made afterwards.
     private var initialSubtitleApplied = false
 
+    /// A provider subtitle track the viewer manually picked that turned out to be
+    /// image-based (PGS/DVB/DVD), triggering a native→Plozzigen swap so it can be
+    /// decoded and drawn on-device. The provider id-space doesn't line up with
+    /// Plozzigen's FFmpeg AVStream ids, so we can't select it until Plozzigen's
+    /// track list arrives; this holds the picked track so
+    /// `applyInitialSubtitleSelectionIfReady` can attribute-match it to the
+    /// equivalent engine track once demux completes, then clears itself.
+    private var pendingImageSubtitleMatch: MediaTrack?
+
     /// True once the viewer manually changed the **audio** track this playback
     /// session. Used by cross-server reconcile to decide whether the stored memory
     /// or this session's audio pick is the newer truth (resolved per dimension so
@@ -607,17 +616,15 @@ public final class PlayerViewModel {
 
     // MARK: - Engine selection / swapping
 
-    /// Instantiates the engine for `kind`, falling back to native if a hybrid
-    /// engine was requested but isn't wired in (defensive — the router never
-    /// asks for hybrid unless it's available).
+    /// Instantiates the engine for `kind`, falling back to native if the
+    /// Plozzigen engine was requested but isn't wired in (defensive — the router
+    /// never asks for on-device decode unless it's available).
     private func makeEngine(_ kind: PlaybackEngineKind) -> any VideoEngine {
         switch kind {
-        case .hybrid:
-            if let makeHybrid = engineFactory.makeHybrid {
-                return makeHybrid(style)
-            }
-            return engineFactory.makeNative(style)
-        case .plozzigen:
+        case .hybrid, .plozzigen:
+            // Plozzigen is the sole on-device decode engine. `.hybrid` is the
+            // router's abstract "needs on-device decode" signal; it resolves here
+            // to Plozzigen (the former mpv backing is retired).
             if let makePlozzigen = engineFactory.makePlozzigen, let engine = makePlozzigen() {
                 return engine
             }
@@ -658,23 +665,19 @@ public final class PlayerViewModel {
     }
 
     /// The engine to try when the current one fails: the opposite engine, but
-    /// only if it's actually available (no hybrid → nothing to swap to).
+    /// only if it's actually available (no Plozzigen → nothing to swap to).
     private var alternateEngineKind: PlaybackEngineKind? {
         switch currentEngineKind {
         case .native:
-            // AVPlayer failed (e.g. the runtime `hev1` black-screen catch). Prefer
+            // AVPlayer failed (e.g. the runtime `hev1` black-screen catch). Try
             // Plozzigen (AetherEngine): it fetches the source itself and remuxes
-            // on-device. mpv (the hybrid engine) shares a decode-only FFmpeg with
-            // NO network/TLS protocols, so it cannot open a remote HTTPS stream and
-            // would only drop straight to a server transcode — use it only when
-            // Plozzigen isn't wired in.
-            if engineFactory.plozzigenAvailable { return .plozzigen }
-            return engineFactory.hybridAvailable ? .hybrid : nil
-        case .hybrid:
-            // mpv failed — try Plozzigen before giving up to native/transcode.
-            return engineFactory.plozzigenAvailable ? .plozzigen : .native
-        case .plozzigen:
-            // Plozzigen failed — fall back to native (server transcode safety net).
+            // on-device. If it isn't wired in, there's nothing to swap to → fall
+            // through to the server-transcode safety net.
+            return engineFactory.plozzigenAvailable ? .plozzigen : nil
+        case .hybrid, .plozzigen:
+            // On-device decode failed — fall back to native (server-transcode
+            // safety net). (`.hybrid` is a legacy routing value; treated as
+            // Plozzigen, which is what it resolves to.)
             return .native
         }
     }
@@ -751,47 +754,39 @@ public final class PlayerViewModel {
                     source: request.sourceMetadata,
                     capabilities: capabilities,
                     isTranscoding: request.isTranscoding,
-                    hybridAvailable: engineFactory.hybridAvailable
+                    // Plozzigen is the on-device decode engine, so "hybrid
+                    // available" (needs-on-device-decode is routable) == Plozzigen
+                    // available. When it isn't wired in, the router stays native.
+                    hybridAvailable: engineFactory.plozzigenAvailable
                 )
-                // mpv (the hybrid engine) shares AetherEngine's decode-only FFmpeg
-                // build, which has NO network/TLS protocols compiled in. It
-                // therefore cannot open a remote HTTPS stream (every Plex/Jellyfin
-                // direct URL) — `loadfile` fails instantly and the player drops to
-                // a heavy server transcode. Plozzigen (AetherEngine) fetches the
-                // source itself and remuxes HEVC/`hev1`/etc. to AVPlayer on-device,
-                // so prefer it for any AVPlayer-incompatible source that would
-                // otherwise hit mpv.
+                // The router's `.hybrid` return is its abstract "needs on-device
+                // decode" signal; Plozzigen (AetherEngine) is that engine — it
+                // fetches the source itself and remuxes HEVC/`hev1`/etc. to
+                // AVPlayer on-device. Resolve `.hybrid` to it. (The former mpv
+                // backing is retired.)
                 if kind == .hybrid, engineFactory.plozzigenAvailable {
                     kind = .plozzigen
                 }
             }
 
-            // An adaptive source carries its audio as a *separate* track (e.g. a
-            // high-resolution YouTube DASH trailer). Only the hybrid (mpv) engine
-            // can mux two bare URLs, so force it there — AVPlayer would otherwise
-            // play the video-only stream silently.
-            if request.externalAudioURL != nil, engineFactory.hybridAvailable {
-                kind = .hybrid
-            }
-
             // If the subtitle that would be shown by default is image-based
-            // (PGS/VOBSUB), AVPlayer can't render it — route to the hybrid engine
-            // so it appears, but only when we're direct-playing and a hybrid
-            // engine is available. (A file with a text-subtitle equivalent stays
-            // native; see `defaultSubtitleNeedsHybridEngine`.) Plozzigen also
-            // can't render bitmap subtitles, so it overrides too. Use the
-            // per-content-type rule so this prediction matches the on-load default.
+            // (PGS/DVB/DVD/VOBSUB), AVPlayer can't render it — route to Plozzigen,
+            // which decodes bitmap subtitle packets into image cues that Plozz's
+            // overlay draws at their authored on-frame position (no server
+            // burn-in). Only when direct-playing and Plozzigen is wired in. (A file
+            // with a text-subtitle equivalent stays native; see
+            // `defaultSubtitleNeedsHybridEngine`.) If the source is already routed
+            // to Plozzigen this is a no-op. Use the per-content-type rule so this
+            // prediction matches the on-load default. On Plozzigen, its own
+            // load-time default-selection picks the matching engine track, so we
+            // don't seed a provider-id selection here (the id spaces differ).
             let subtitleRule = effectiveSubtitleRule(for: request.item)
-            if (kind == .native || kind == .plozzigen), !request.isTranscoding, engineFactory.hybridAvailable,
+            if kind == .native, !request.isTranscoding, engineFactory.plozzigenAvailable,
                request.subtitleTracks.defaultSubtitleNeedsHybridEngine(
                    mode: subtitleRule.mode,
                    preferredLanguage: subtitleRule.preferredLanguage) {
-                PlozzLog.playback.info("Default subtitle is image-based; routing to the hybrid engine so it can be rendered")
-                kind = .hybrid
-                // Reflect the auto-selected image subtitle in the track menu.
-                selectedSubtitleTrackID = request.subtitleTracks.defaultSubtitleSelection(
-                    mode: subtitleRule.mode,
-                    preferredLanguage: subtitleRule.preferredLanguage)?.id
+                PlozzLog.playback.info("Default subtitle is image-based; routing to Plozzigen so it can be rendered on-device")
+                kind = .plozzigen
             }
 
             try Task.checkCancellation()
@@ -2032,8 +2027,9 @@ public final class PlayerViewModel {
     ///   immediately from `playResolved`.
     /// - **Plozzigen** — the engine demuxes its track list asynchronously, so
     ///   this no-ops until the tracks arrive via `onTracksChanged`, then applies.
-    /// - **hybrid (mpv)** — draws its own subtitles (including bitmap defaults
-    ///   routed to it at resolve time), so it's left untouched.
+    ///   When a native→Plozzigen swap was triggered by a manual image-subtitle
+    ///   pick, the picked provider track is attribute-matched to the equivalent
+    ///   engine track here instead of applying the load-time default.
     private func applyInitialSubtitleSelectionIfReady(for request: PlaybackRequest) {
         guard !initialSubtitleApplied else { return }
         switch currentEngineKind {
@@ -2048,11 +2044,46 @@ public final class PlayerViewModel {
             let tracks = engine.subtitleTracks
             guard !tracks.isEmpty else { return }
             initialSubtitleApplied = true
+            // A native→Plozzigen swap for a manually-picked image subtitle carries
+            // the chosen provider track here; select its engine-side equivalent
+            // (matched by language/forced/SDH) instead of the load-time default.
+            if let picked = pendingImageSubtitleMatch {
+                pendingImageSubtitleMatch = nil
+                if let match = bestEngineSubtitleMatch(for: picked, in: tracks) {
+                    selectSubtitleOption(id: match.id, userInitiated: false)
+                    return
+                }
+                // No confident match — fall through to the default rule rather
+                // than selecting a wrong-language track.
+            }
             applyDefaultSubtitleThroughOverlay(from: tracks)
         default:
-            // hybrid (mpv) keeps drawing its own subtitles.
             initialSubtitleApplied = true
         }
+    }
+
+    /// Finds the engine subtitle track that best corresponds to a provider track
+    /// the viewer picked, across the two disjoint id-spaces (provider stream index
+    /// vs Plozzigen FFmpeg AVStream index). Requires a language match (when the
+    /// provider track has a language) so a mismatch never silently swaps in the
+    /// wrong subtitle; breaks ties on forced / hearing-impaired / image-based
+    /// agreement. Returns `nil` when nothing confidently matches.
+    private func bestEngineSubtitleMatch(for provider: MediaTrack, in engineTracks: [MediaTrack]) -> MediaTrack? {
+        let candidates: [MediaTrack]
+        if provider.language != nil {
+            candidates = engineTracks.filter { LanguageMatch.matches($0.language, provider.language) }
+        } else {
+            candidates = engineTracks
+        }
+        guard !candidates.isEmpty else { return nil }
+        func score(_ track: MediaTrack) -> Int {
+            var s = 0
+            if track.isForced == provider.isForced { s += 2 }
+            if track.isHearingImpaired == provider.isHearingImpaired { s += 1 }
+            if track.isImageBasedSubtitle == provider.isImageBasedSubtitle { s += 1 }
+            return s
+        }
+        return candidates.max { score($0) < score($1) }
     }
 
     /// Picks the default subtitle for the user's mode + preferred language from
@@ -2130,14 +2161,15 @@ public final class PlayerViewModel {
         guard let track = engine.subtitleTracks.first(where: { $0.id == id }) else { return }
         if userInitiated { recordSeriesSubtitleSelection(track.language.map(RememberedSubtitleSelection.language)) }
 
-        // Image-based subtitles (PGS/VOBSUB/DVDSUB) can't be rendered by AVPlayer
-        // or any on-device text renderer. If the user picks one while on the
-        // native engine, swap to the hybrid engine at the current position and
-        // apply the selection there so the subtitle actually shows. Key off
-        // `isImageBasedSubtitle` — NOT `deliveryURL == nil` — so an embedded text
-        // SRT (no sidecar URL, but renderable) stays on the native engine.
+        // Image-based subtitles (PGS/DVB/DVD/VOBSUB) can't be rendered by AVPlayer.
+        // If the user picks one while on the native engine, swap to Plozzigen
+        // (AetherEngine) at the current position: it decodes the bitmap subtitle
+        // packets into image cues that Plozz's overlay draws at their authored
+        // position — no server burn-in. Key off `isImageBasedSubtitle` — NOT
+        // `deliveryURL == nil` — so an embedded text SRT (no sidecar URL, but
+        // renderable) stays on the native engine.
         if track.isImageBasedSubtitle, currentEngineKind == .native,
-           let request, !request.isTranscoding, engineFactory.hybridAvailable {
+           let request, !request.isTranscoding, engineFactory.plozzigenAvailable {
             clearOverlaySubtitle()
             selectedSubtitleTrackID = id
             Task { await swapEngineForImageSubtitle(track) }
@@ -2446,15 +2478,17 @@ public final class PlayerViewModel {
         #endif
     }
 
-    /// Swaps from the native engine to the hybrid engine (preserving position) so
-    /// an image-based subtitle the user manually selected can be rendered, then
-    /// applies that selection on the new engine.
+    /// Swaps from the native engine to Plozzigen (preserving position) so an
+    /// image-based subtitle the user manually selected can be decoded and drawn
+    /// on-device. Plozzigen demuxes its tracks asynchronously with its own
+    /// id-space, so the actual selection is deferred: `pendingImageSubtitleMatch`
+    /// carries the picked provider track and `applyInitialSubtitleSelectionIfReady`
+    /// attribute-matches it once the engine's track list arrives.
     private func swapEngineForImageSubtitle(_ track: MediaTrack) async {
         guard let request else { return }
         let resume = max(engine.furthestObservedPosition, engine.currentTime)
-        await playResolved(request, engineKind: .hybrid, startPosition: resume > 1 ? resume : 0)
-        engine.selectSubtitleTrack(track)
-        selectedSubtitleTrackID = track.id
+        pendingImageSubtitleMatch = track
+        await playResolved(request, engineKind: .plozzigen, startPosition: resume > 1 ? resume : 0)
         loadTrackOptions()
     }
 

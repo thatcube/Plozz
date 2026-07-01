@@ -477,9 +477,12 @@ private func makePlayerViewModel(
                     )
                     return results.compactMap(\.youTubeTrailerVideoID)
                 },
-                // Only resolve the higher-resolution adaptive (separate audio)
-                // path when a hybrid engine is wired in to mux the two tracks.
-                allowsSeparateAudio: engineFactory.hybridAvailable
+                // Adaptive (separate audio) trailers need an on-device muxer to
+                // pair the video+audio streams; none exists now that the mpv
+                // hybrid engine is retired, so use the progressive **muxed** path
+                // (AVPlayer/Plozzigen play it directly). Trailers stay playable,
+                // capped to the muxed resolution YouTube serves.
+                allowsSeparateAudio: false
             ),
             itemID: videoID,
             behavior: behavior,

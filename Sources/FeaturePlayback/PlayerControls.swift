@@ -139,6 +139,12 @@ struct PlayerControls: View {
     /// margin exactly rather than relying on hand-tuned constants.
     @State private var transportHeight: CGFloat = 0
 
+    /// The Style panel's natural content height, remeasured whenever a sub-screen
+    /// swaps in or a row appears/disappears. Only the glass box's clip window
+    /// animates to this value; the rows themselves are always laid out at full
+    /// size and clipped, so they never fade or spill during the height morph.
+    @State private var styleBodyHeight: CGFloat = 0
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -513,64 +519,73 @@ struct PlayerControls: View {
             infoPanel
                 .colorScheme(.dark)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        } else if isStyleScreen(category) {
+            styleMorphPanel(for: category)
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 panelHeader(for: category)
                 Divider().background(.white.opacity(0.15))
-                // The swappable page content. `.animation(nil, value:)` opts this
-                // subtree OUT of the container-morph animation below, so when the
-                // page changes the rows *snap* to the new screen instantly while
-                // only the glass box smoothly resizes/repositions around them —
-                // "animate the container, not what's inside".
-                Group {
-                    if isStyleScreen(category) {
-                        // Editor: content-sized (no greedy ScrollView) so the panel
-                        // hugs its rows and pins to the top-right corner with an even
-                        // margin rather than stretching toward full height.
-                        //
-                        // `fixedSize(vertical:)` is essential here: unlike the other
-                        // panes (which sit in a ScrollView that proposes unbounded
-                        // height), this content is proposed the tall top-pinned column.
-                        // Focusable row buttons are height-flexible on tvOS, so without
-                        // this they'd absorb the excess and stretch — worst on small
-                        // sub-screens with few rows. Pinning to the ideal height keeps
-                        // every row the same compact height as the track/audio menus.
-                        VStack(alignment: .leading, spacing: 0) {
-                            subtitleBody
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        switch category {
+                        case .subtitles: subtitleBody
+                        case .audio: audioPane
+                        case .speed: speedPane
+                        case .sync: syncPane
+                        case .info: EmptyView()
                         }
-                        .padding(.vertical, 10)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                    } else {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 0) {
-                                switch category {
-                                case .subtitles: subtitleBody
-                                case .audio: audioPane
-                                case .speed: speedPane
-                                case .sync: syncPane
-                                case .info: EmptyView()
-                                }
-                            }
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                        }
-                        .frame(maxHeight: 440)
                     }
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .animation(nil, value: subtitleScreen)
+                .frame(maxHeight: 440)
             }
             .frame(width: 520, alignment: .leading)
             .colorScheme(.dark)
             .modifier(PanelGlassBackground())
-            // Morph the glass box between pages: only the container's frame
-            // (height, and top/bottom anchor via the layout) animates; the inner
-            // content opted out above so it swaps without a cross-fade.
-            .animation(.easeInOut(duration: 0.28), value: subtitleScreen)
             // The track controls live on the right of the button row, so the panel
             // opens against the trailing edge above them rather than on the left.
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
+    }
+
+    /// The in-player Subtitle Style editor panel. Uses a measured-height clip morph
+    /// so navigating between its sub-screens (or adding/removing a row within one)
+    /// animates ONLY the glass box's height while the rows stay put:
+    ///
+    /// - The content is laid out at its natural height (`fixedSize(vertical:)`) and
+    ///   its height is measured via `PanelBodyHeightKey` — the measurement ignores
+    ///   the outer clip frame, so it always reflects the true content height.
+    /// - The box is framed to `styleBodyHeight` (top-aligned) and `clipShape`d to the
+    ///   glass corner radius, so any content taller than the current window is
+    ///   clipped rather than spilling past the rounded border.
+    /// - Only `styleBodyHeight` is animated, so the rows never cross-fade — the clip
+    ///   window simply grows/shrinks and reveals them top-down.
+    @ViewBuilder
+    private func styleMorphPanel(for category: Category) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            panelHeader(for: category)
+            Divider().background(.white.opacity(0.15))
+            VStack(alignment: .leading, spacing: 0) {
+                subtitleBody
+            }
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(width: 520, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: PanelBodyHeightKey.self, value: proxy.size.height)
+            }
+        )
+        .frame(height: styleBodyHeight > 0 ? styleBodyHeight : nil, alignment: .top)
+        .colorScheme(.dark)
+        .modifier(PanelGlassBackground())
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .animation(.easeInOut(duration: 0.28), value: styleBodyHeight)
+        .onPreferenceChange(PanelBodyHeightKey.self) { styleBodyHeight = $0 }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private func isStyleScreen(_ category: Category) -> Bool {
@@ -1626,6 +1641,18 @@ private struct ControlsHeightKey: PreferenceKey {
 /// Reports the transport block's (scrubber + buttons) height so the Style panel
 /// can align its top margin to its side margin.
 private struct TransportHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Reports the Style panel's natural (unclipped) content height so the glass box
+/// can animate ONLY its clip window to that height. The rows are laid out at full
+/// size and clipped to the animating frame, so they never cross-fade or spill past
+/// the rounded border when a sub-screen adds/removes rows — "animate the container,
+/// not what's inside".
+private struct PanelBodyHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

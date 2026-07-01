@@ -1940,13 +1940,12 @@ public final class PlayerViewModel {
             controls.subtitleOptions = options
         }
 
-        // Dual/second-line picker: text tracks with a sidecar the overlay can
-        // parse, excluding the primary. If the current secondary is no longer
-        // eligible (e.g. it just became the primary, or the media changed),
-        // reconcile by dropping it — clearing both its cues and its styling.
-        let secondaryEligible = subtitles.filter {
-            !$0.isImageBasedSubtitle && $0.deliveryURL != nil && $0.id != selectedSubtitleTrackID
-        }
+        // Dual/second-line picker: any text track resolved to a sidecar the
+        // overlay can parse (embedded text falls back to the provider's VTT URL),
+        // excluding the primary. If the current secondary is no longer eligible
+        // (e.g. it just became the primary, or the media changed), reconcile by
+        // dropping it — clearing both its cues and its styling.
+        let secondaryEligible = eligibleSecondarySubtitleTracks()
         if let sec = selectedSecondarySubtitleTrackID,
            !secondaryEligible.contains(where: { $0.id == sec }) {
             selectedSecondarySubtitleTrackID = nil
@@ -2203,15 +2202,25 @@ public final class PlayerViewModel {
 
     // MARK: - Dual (secondary) subtitle
 
-    /// The tracks a second subtitle line can show: text subtitles with a sidecar
-    /// URL (so Plozz's overlay can parse + draw them), excluding whatever is the
-    /// current primary. Image subs and embedded-text-without-URL can't drive the
-    /// overlay's secondary stream, so they're filtered out.
+    /// The tracks a second subtitle line can show: any non-image (text) subtitle,
+    /// resolved to a sidecar URL the overlay can parse, excluding the current
+    /// primary. The advanced engine demuxes embedded text subs *without* a
+    /// `deliveryURL` (and `enriched` doesn't copy the provider's URL over), so we
+    /// fall back to the provider's VTT stream — Jellyfin serves any text sub as a
+    /// sidecar. Routing keys off `isImageBasedSubtitle`, never `deliveryURL == nil`,
+    /// so embedded text tracks are eligible (that was the "None available" bug).
     private func eligibleSecondarySubtitleTracks() -> [MediaTrack] {
         let providerSubs = request?.subtitleTracks ?? []
-        return engine.subtitleTracks
-            .map { track in track.enriched(withProvider: providerSubs.first { $0.id == track.id }) }
-            .filter { !$0.isImageBasedSubtitle && $0.deliveryURL != nil && $0.id != selectedSubtitleTrackID }
+        return engine.subtitleTracks.compactMap { track in
+            let provider = providerSubs.first { $0.id == track.id }
+            let merged = track.enriched(withProvider: provider)
+            guard !merged.isImageBasedSubtitle,
+                  merged.id != selectedSubtitleTrackID,
+                  let url = merged.deliveryURL ?? provider?.deliveryURL else { return nil }
+            var resolved = merged
+            resolved.deliveryURL = url
+            return resolved
+        }
     }
 
     /// Selects the second (dual) subtitle track, or turns the second line off

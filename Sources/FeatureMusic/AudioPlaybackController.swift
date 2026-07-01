@@ -49,6 +49,22 @@ public typealias MusicTrack = CoreModels.MusicTrack
 ///    elapsed, playback rate) for the system Now Playing card in Control Center;
 ///  * wires `MPRemoteCommandCenter` (play/pause/toggle/next/previous/seek) so the
 ///    Siri Remote transport controls drive the queue.
+/// Thread-safe one-shot bridge so an `AVPlayer.preroll` completion handler (which
+/// AVFoundation may invoke on an arbitrary queue) and a timeout task can race to
+/// resume the same continuation exactly once, without a double-resume crash.
+private final class PrerollContinuationBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+    init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+    func resume(_ value: Bool) {
+        lock.lock()
+        let cont = continuation
+        continuation = nil
+        lock.unlock()
+        cont?.resume(returning: value)
+    }
+}
+
 @MainActor
 @Observable
 public final class AudioPlaybackController {
@@ -523,10 +539,28 @@ public final class AudioPlaybackController {
         // paused scrub does not auto-resume.
         if isPlaying {
             #if canImport(AVFoundation) && !os(macOS)
-            try? AVAudioSession.sharedInstance().setActive(true)
+            // The seek drained the render buffer. On AirPlay the HomePod sink may
+            // have quietly parked, and a plain setActive(true) is a NO-OP on an
+            // already-active session (why the old nudge did nothing). Force a full
+            // deactivate→reactivate cycle so tvOS re-negotiates the HomePod stream
+            // from scratch. Pause first so the reactivation and preroll below can
+            // re-arm the pipeline before any output resumes.
+            player.pause()
+            let session = AVAudioSession.sharedInstance()
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            try? session.setActive(true)
             #endif
-            player.playImmediately(atRate: 1.0)
-            diag("seek", "seek nudge: setActive+playImmediately route=\(routeSummary()) postState=[\(playerStateSummary())]")
+            // Prime the pipeline before starting output: `playImmediately` only once
+            // preroll confirms the buffer is armed, otherwise a stall-avoidance
+            // `play()` — never force output against a still-refilling post-seek
+            // buffer, which itself can drop the HomePod.
+            let prerolled = await prerollCurrentItem(timeout: 1.5)
+            if prerolled {
+                player.playImmediately(atRate: 1.0)
+            } else {
+                player.play()
+            }
+            diag("seek", "seek recovery: deactivate→reactivate prerolled=\(prerolled) route=\(routeSummary()) postState=[\(playerStateSummary())]")
         }
         diag("seek", "seek done route=\(routeSummary()) postState=[\(playerStateSummary())]")
         currentTime = target
@@ -687,12 +721,13 @@ public final class AudioPlaybackController {
         // FAST PATH — the treadmill hand-off. This track was pre-enqueued behind
         // the outgoing one (see `prepareNextInQueue`) and has been prerolling in
         // the live pipeline, so it's already the player's *next* item and buffered.
-        // Advancing onto an already-ready queued item is the ONLY track change that
-        // reliably preserves the AirPlay 2 route (WWDC 2016 §503 / 2019 §501): no
-        // resolve, no cold insert, and crucially NO `playImmediately` — the item is
-        // ready, so a plain `play()` starts it without forcing past AVPlayer's
-        // stall-avoidance (forcing an empty AirPlay buffer is what dropped the route
-        // and produced the "seek bar advances but it's silent" symptom).
+        // Advancing onto an already-ready queued item is the track change most
+        // likely to preserve the AirPlay 2 route (WWDC 2016 §503 / 2019 §501): no
+        // resolve, no cold insert. But `advanceToNextItem()` still makes the
+        // HomePod re-negotiate its AirPlay stream for the new item, so we pause →
+        // advance → `preroll` (arm the pipeline, incl. the AirPlay output path) →
+        // `playImmediately` only once it's ready, rather than forcing output into a
+        // sink that's mid-renegotiation (the silent-skip drop).
         if let prepared = preparedNext, prepared.trackID == track.id,
            let item = prepared.item,
            player.items().count >= 2, player.items()[1] === item {
@@ -704,10 +739,26 @@ public final class AudioPlaybackController {
             enableRemoteCommands()
             currentQuality = prepared.quality
             preparedNext = nil
+            // PRIME-THEN-PLAY hand-off (the skip-drop fix). `advanceToNextItem()`
+            // on a progressive-download item makes the HomePod re-negotiate its
+            // AirPlay 2 stream (~200–800ms). Handing it a plain `play()` during
+            // that window feeds the still-renegotiating sink a "play now" it can't
+            // honour, so it silently drops — the app keeps reporting .playing while
+            // the HomePod goes quiet, with NO interruption/route/stall event.
+            // Instead: pause first (stops output so the pipeline can be re-armed
+            // while we still hold the route), advance, then `preroll` to prime ALL
+            // render pipelines (including the AirPlay output path) and only start
+            // output once it reports ready.
+            player.pause()
             player.advanceToNextItem()
             observeEnd(of: item)
-            player.play()
-            diag("start", "FAST-PATH post-advance/play route=\(routeSummary()) state=[\(playerStateSummary())]")
+            await prerollThenStart(generation: generation, path: "FAST-PATH")
+            guard generation == trackTransitionGeneration else {
+                diag("start", "FAST-PATH superseded after preroll gen=\(generation) current=\(trackTransitionGeneration)")
+                return
+            }
+            // Restore normal buffering now that this item is the one playing.
+            player.currentItem?.preferredForwardBufferDuration = 0
             await finishStart(track: track)
             return
         }
@@ -735,6 +786,9 @@ public final class AudioPlaybackController {
         enableRemoteCommands()
         let item = AVPlayerItem(url: resolved.url)
         if let current = player.currentItem {
+            // Fill a larger forward buffer before we advance, so audio keeps
+            // flowing to the HomePod through the AirPlay stream renegotiation.
+            item.preferredForwardBufferDuration = 30
             // Drop any stale pre-enqueued item so it doesn't linger in the queue
             // (this jump supersedes whatever "next" we'd guessed).
             clearPreparedNext(removeFromPlayer: true)
@@ -749,12 +803,17 @@ public final class AudioPlaybackController {
                 return
             }
             diag("start", "HARD-PATH buffered itemStatus=\(item.status.rawValue) likelyToKeepUp=\(item.isPlaybackLikelyToKeepUp) bufferFull=\(item.isPlaybackBufferFull) — advancing")
+            // Prime-then-play (see FAST-PATH): pause, advance, preroll the AirPlay
+            // pipeline, then start output only once it's armed.
+            player.pause()
             player.advanceToNextItem()
             observeEnd(of: item)
-            // Ready item → plain `play()`; don't force past stall-avoidance on a
-            // freshly-advanced AirPlay route.
-            player.play()
-            diag("start", "HARD-PATH post-advance/play route=\(routeSummary()) state=[\(playerStateSummary())]")
+            await prerollThenStart(generation: generation, path: "HARD-PATH")
+            guard generation == trackTransitionGeneration else {
+                diag("start", "HARD-PATH superseded after preroll gen=\(generation) current=\(trackTransitionGeneration)")
+                return
+            }
+            player.currentItem?.preferredForwardBufferDuration = 0
         } else {
             // Cold start — no current item and therefore no route to protect yet, so
             // `playImmediately` is safe and avoids parking in the wait state.
@@ -840,6 +899,10 @@ public final class AudioPlaybackController {
                   self.preparedNext?.trackID == trackID,
                   self.preparedNext?.item == nil else { return }
             let item = AVPlayerItem(url: resolved.url)
+            // Buffer further ahead than the default so the pre-enqueued track has a
+            // deep cushion of audio ready to keep flowing to the HomePod across the
+            // AirPlay stream renegotiation that `advanceToNextItem()` triggers.
+            item.preferredForwardBufferDuration = 30
             guard self.player.canInsert(item, after: self.player.currentItem) else {
                 self.clearPreparedNext()
                 return
@@ -873,6 +936,45 @@ public final class AudioPlaybackController {
                 return
             }
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
+    }
+
+    /// Primes every render pipeline for the just-advanced current item — crucially
+    /// the AirPlay 2 output path to the HomePod — with `preroll` BEFORE starting
+    /// output, then starts with `playImmediately` only once the pipeline reports
+    /// armed. This closes the window where a plain `play()` feeds a "play now"
+    /// signal to a HomePod that is still re-negotiating its AirPlay stream for the
+    /// new item and silently drops. Falls back to a stall-avoidance `play()` if the
+    /// preroll can't complete (item not ready, times out, or superseded) so a slow
+    /// server never hangs a skip. Generation-guarded by the caller.
+    private func prerollThenStart(generation: Int, path: String) async {
+        let prerolled = await prerollCurrentItem(timeout: 1.5)
+        guard generation == trackTransitionGeneration else { return }
+        if prerolled {
+            player.playImmediately(atRate: 1.0)
+        } else {
+            player.play()
+        }
+        diag("start", "\(path) post-advance prerolled=\(prerolled) route=\(routeSummary()) state=[\(playerStateSummary())]")
+    }
+
+    /// Awaits `AVPlayer.preroll(atRate:)` for the current item, returning whether it
+    /// completed (`true`) before `timeout`. Preroll can only prime a `.readyToPlay`
+    /// item, so a not-yet-ready item returns `false` immediately. The timeout
+    /// guarantees a preroll that never calls back (e.g. a stalled network item)
+    /// can't hang the caller.
+    @discardableResult
+    private func prerollCurrentItem(timeout: TimeInterval) async -> Bool {
+        guard player.currentItem?.status == .readyToPlay else { return false }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let box = PrerollContinuationBox(continuation)
+            player.preroll(atRate: 1.0) { finished in
+                box.resume(finished)
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(timeout))
+                box.resume(false)
+            }
         }
     }
 

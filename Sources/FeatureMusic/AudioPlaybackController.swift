@@ -316,6 +316,9 @@ public final class AudioPlaybackController {
         player.actionAtItemEnd = .none
         installTimeObserver()
         installRouteRecoveryObservers()
+        // Touch the diagnostics logger at launch so the log file exists (and is
+        // pullable) even before the first playback, and so each launch is marked.
+        diag("session", "AudioPlaybackController init — route=\(routeSummary())")
     }
 
     // MARK: Diagnostics

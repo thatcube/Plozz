@@ -53,10 +53,10 @@ public enum SubtitleFontFamily: String, Codable, Sendable, Equatable, CaseIterab
 /// the future policy engine all share one definition.
 public struct SubtitleStyle: Codable, Equatable, Sendable {
 
-    // Reuse the existing, already-persisted colour and edge primitives so there
-    // is exactly one colour type and one edge vocabulary across the app.
-    public typealias Color = CaptionSettings.RGBAColor
-    public typealias EdgeStyle = CaptionSettings.EdgeStyle
+    // Reuse the shared, neutral colour and edge primitives so there is exactly
+    // one colour type and one edge vocabulary across behaviour, style and policy.
+    public typealias Color = SubtitleColor
+    public typealias EdgeStyle = SubtitleEdgeStyle
 
     // MARK: Size & placement
 
@@ -239,6 +239,39 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
         edge: Edge(style: .dropShadow, color: Color(red: 0, green: 0, blue: 0, alpha: 0.75), thickness: 2.5),
         border: Border(isEnabled: true, color: .black, width: 2.5)
     )
+}
+
+// MARK: - Per-content-type resolution seam
+
+public extension SubtitleStyle {
+    /// The appearance to use for a given content category. Today appearance is a
+    /// single global base, so this returns `self` for every category — but it is
+    /// the resolution seam the renderer/policy call through, so adding a
+    /// `[SubtitleContentCategory: SubtitleStyle]` overrides map later (in
+    /// `SubtitleStyleStore`) is a drop-in with zero call-site churn.
+    func style(for category: SubtitleContentCategory) -> SubtitleStyle {
+        self
+    }
+}
+
+// MARK: - Migration from the retired CaptionSettings
+
+public extension SubtitleStyle {
+    /// Build appearance from a decoded legacy `CaptionSettings` blob so a
+    /// profile's previously-saved look (size / colour / background / edge / follow
+    /// system) carries over into the new persisted style store.
+    init(from legacy: LegacyCaptionSettings) {
+        self.init(
+            fontScale: legacy.fontScale,
+            textColor: legacy.textColor,
+            background: Background(
+                isEnabled: legacy.backgroundColor.alpha > 0.001,
+                color: legacy.backgroundColor
+            ),
+            edge: Edge(style: legacy.edgeStyle),
+            followsSystemStyle: legacy.followsSystemStyle
+        )
+    }
 }
 
 // MARK: - Bridge from the persisted CaptionSettings (non-destructive)

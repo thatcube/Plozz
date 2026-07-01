@@ -7,69 +7,15 @@ import Foundation
 /// AVFoundation; `FeaturePlayback` adds an extension that converts it into
 /// `AVTextStyleRule`s applied to the player.
 public struct CaptionSettings: Codable, Equatable, Sendable {
-    public enum EdgeStyle: String, Codable, CaseIterable, Sendable {
-        case none, dropShadow, raised, depressed, uniform
-
-        public var displayName: String {
-            switch self {
-            case .none: return "None"
-            case .dropShadow: return "Drop Shadow"
-            case .raised: return "Raised"
-            case .depressed: return "Depressed"
-            case .uniform: return "Outline"
-            }
-        }
-    }
-
-    /// Which subtitles to surface automatically when subtitles are desired.
-    public enum SubtitleMode: String, Codable, CaseIterable, Sendable {
-        /// Don't auto-enable any subtitle on load (the viewer can still pick one
-        /// manually, and a per-series remembered choice still applies).
-        case off
-        /// Show full subtitles in the preferred language whenever available.
-        case all
-        /// Only show "forced" subtitles (e.g. for foreign-language passages),
-        /// leaving regular dialogue unsubtitled.
-        case forcedOnly
-
-        public var displayName: String {
-            switch self {
-            case .off: return "Off"
-            case .all: return "On"
-            case .forcedOnly: return "Forced Only"
-            }
-        }
-
-        /// One-line explanation shown beneath each option in settings.
-        public var detail: String {
-            switch self {
-            case .off:
-                return "Don't turn subtitles on automatically."
-            case .all:
-                return "Show full subtitles in your preferred language."
-            case .forcedOnly:
-                return "Only show forced subtitles for foreign-language passages."
-            }
-        }
-    }
-
-    /// An RGBA colour stored in a `Codable`, platform-neutral way (`0...1`).
-    public struct RGBAColor: Codable, Equatable, Sendable, Hashable {
-        public var red, green, blue, alpha: Double
-        public init(red: Double, green: Double, blue: Double, alpha: Double = 1) {
-            self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
-        }
-        public static let white = RGBAColor(red: 1, green: 1, blue: 1)
-        public static let black = RGBAColor(red: 0, green: 0, blue: 0)
-        public static let yellow = RGBAColor(red: 1, green: 0.85, blue: 0)
-        public static let clear = RGBAColor(red: 0, green: 0, blue: 0, alpha: 0)
-
-        public static let presets: [(name: String, color: RGBAColor)] = [
-            ("White", .white),
-            ("Yellow", .yellow),
-            ("Black", .black)
-        ]
-    }
+    // Transitional typealiases: the primitives moved out to top-level
+    // (`SubtitleColor`/`SubtitleEdgeStyle`/`SubtitleMode`) so behavior and style
+    // can share them without `CaptionSettings`. These aliases keep existing
+    // `CaptionSettings.{RGBAColor,EdgeStyle,SubtitleMode}` references compiling
+    // during the migration; both they and this whole type are deleted once every
+    // call site is repointed.
+    public typealias EdgeStyle = SubtitleEdgeStyle
+    public typealias SubtitleMode = CoreModels.SubtitleMode
+    public typealias RGBAColor = SubtitleColor
 
     /// Multiplier applied to caption font size (1.0 == default).
     public var fontScale: Double

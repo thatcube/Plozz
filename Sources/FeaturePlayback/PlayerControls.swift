@@ -798,11 +798,16 @@ struct PlayerControls: View {
                         get: { Self.nearestSpeedIndex(model.playbackSpeed) },
                         set: { actions.setPlaybackSpeed(Self.speedGridValue($0)) }
                     ),
+                    compact: true,
                     title: { Self.speedLabel(Self.speedGridValue($0)) }
                 )
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 14)
+            // The enclosing ScrollView already adds 10pt above this pane, so give
+            // the stepper less top / more bottom padding to visually center it
+            // between the panel header and the presets divider (≈14pt each side).
+            .padding(.top, 4)
+            .padding(.bottom, 14)
 
             Divider()
                 .background(.white.opacity(0.12))

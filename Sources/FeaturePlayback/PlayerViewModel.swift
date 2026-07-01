@@ -1071,6 +1071,7 @@ public final class PlayerViewModel {
         secondaryCueLoadTask?.cancel()
         secondaryCueLoadTask = nil
         selectedSecondarySubtitleTrackID = nil
+        controls.secondarySubtitleStatus = .idle
         liveSubtitles.offset = 0
         liveSubtitles.clear()
 
@@ -1952,6 +1953,7 @@ public final class PlayerViewModel {
             secondaryCueLoadTask?.cancel()
             secondaryCueLoadTask = nil
             liveSubtitles.loadSecondary(nil)
+            controls.secondarySubtitleStatus = .idle
             if style.secondary != nil {
                 var cleared = style
                 cleared.secondary = nil
@@ -2234,6 +2236,7 @@ public final class PlayerViewModel {
             secondaryCueLoadTask = nil
             selectedSecondarySubtitleTrackID = nil
             liveSubtitles.loadSecondary(nil)
+            controls.secondarySubtitleStatus = .idle
             if style.secondary != nil {
                 var cleared = style
                 cleared.secondary = nil
@@ -2244,6 +2247,7 @@ public final class PlayerViewModel {
         }
         guard let track = eligibleSecondarySubtitleTracks().first(where: { $0.id == id }) else { return }
         selectedSecondarySubtitleTrackID = id
+        controls.secondarySubtitleStatus = .loading
         // The overlay only draws the second line when `style.secondary` exists;
         // seed a default (which inherits the primary look) if the viewer hasn't
         // styled one yet.
@@ -2259,11 +2263,17 @@ public final class PlayerViewModel {
     /// Fetches + parses the secondary sidecar off the main actor and loads it into
     /// the overlay's secondary stream, unless the secondary selection changed
     /// mid-fetch. Mirrors ``loadOverlaySubtitle(_:)`` but never touches the
-    /// primary. Best-effort: a failure just leaves the second line empty.
+    /// primary. Publishes a load status (`controls.secondarySubtitleStatus`) so the
+    /// picker row can show loading / cue count / unavailable. Best-effort: a
+    /// failure just leaves the second line empty.
     private func loadSecondaryOverlaySubtitle(_ track: MediaTrack) {
         secondaryCueLoadTask?.cancel()
         liveSubtitles.loadSecondary(nil)
-        guard let url = track.deliveryURL else { return }
+        guard let url = track.deliveryURL else {
+            controls.secondarySubtitleStatus = .unavailable
+            return
+        }
+        controls.secondarySubtitleStatus = .loading
         let id = track.id
         let language = track.language
         let title = track.displayTitle
@@ -2274,6 +2284,10 @@ public final class PlayerViewModel {
                 try Task.checkCancellation()
                 guard let text = SubtitleCueParser.decodeText(data) else {
                     PlozzLog.playback.error("Secondary subtitle sidecar decode failed (\(data.count) bytes)")
+                    await MainActor.run { [weak self] in
+                        guard let self, self.selectedSecondarySubtitleTrackID == id else { return }
+                        self.controls.secondarySubtitleStatus = .unavailable
+                    }
                     return
                 }
                 let stream = SubtitleCueParser.parse(
@@ -2290,15 +2304,18 @@ public final class PlayerViewModel {
                 )
                 #endif
                 await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    if self.selectedSecondarySubtitleTrackID == id {
-                        self.liveSubtitles.loadSecondary(stream)
-                    }
+                    guard let self, self.selectedSecondarySubtitleTrackID == id else { return }
+                    self.liveSubtitles.loadSecondary(stream)
+                    self.controls.secondarySubtitleStatus = .loaded(cueCount: stream.cues.count)
                 }
             } catch is CancellationError {
                 // Selection changed; the newer secondary owns the stream.
             } catch {
                 PlozzLog.playback.debug("Secondary track \(id) sidecar fetch failed (non-fatal): \(error.localizedDescription)")
+                await MainActor.run { [weak self] in
+                    guard let self, self.selectedSecondarySubtitleTrackID == id else { return }
+                    self.controls.secondarySubtitleStatus = .unavailable
+                }
             }
         }
     }

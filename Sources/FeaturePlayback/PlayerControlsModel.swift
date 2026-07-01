@@ -21,6 +21,19 @@ public struct PlayerTrackOption: Identifiable, Hashable, Sendable {
     }
 }
 
+/// Load state of a selected second (dual) subtitle track, surfaced on the
+/// "Second Track" row. Lets the viewer see why a picked track isn't drawing.
+public enum SecondarySubtitleStatus: Equatable, Sendable {
+    /// The second line is Off — nothing to report.
+    case idle
+    /// Fetching + parsing the track's sidecar.
+    case loading
+    /// Loaded with this many cues (0 means the file yielded no lines).
+    case loaded(cueCount: Int)
+    /// The sidecar couldn't be fetched or decoded.
+    case unavailable
+}
+
 /// Shared, observable state for the custom player's transport overlay.
 ///
 /// `PlayerViewModel` writes live playback facts (position, duration, buffered,
@@ -99,6 +112,11 @@ public final class PlayerControlsModel {
     /// selected entry is flagged `isSelected`. Empty of real tracks means the
     /// current media has nothing a second line could show.
     public var secondarySubtitleOptions: [PlayerTrackOption] = []
+    /// Load state of the currently-selected second subtitle track, surfaced on the
+    /// "Second Track" row so the viewer can see *why* a picked track isn't drawing
+    /// (fetching, no cues in the file, or the sidecar was unavailable) instead of
+    /// silently showing nothing. `.idle` when the second line is Off.
+    public var secondarySubtitleStatus: SecondarySubtitleStatus = .idle
 
     /// The current subtitle **appearance**, mirrored here so the in-player
     /// appearance editor (hosted in `PlayerControls`) can two-way bind it. The

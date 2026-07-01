@@ -1060,15 +1060,21 @@ struct PlayerControls: View {
             let next = secOptions[((currentIdx + delta) % count + count) % count]
             actions.selectSecondarySubtitle(next.id)
         }
+        let selected = secOptions.first(where: { $0.isSelected })
+        let hasTrack = selected != nil && selected?.id != PlayerTrackOption.offID
+        // Base value = the selected option's label; when a real track is selected,
+        // annotate it with the live load status so the viewer can see whether it's
+        // fetching, has no lines in this file, or the sidecar was unavailable —
+        // instead of a silent blank second line.
+        let baseValue = secOptions.isEmpty ? "None available" : secOptions[currentIdx].title
+        let trackValue = hasTrack ? baseValue + Self.secondaryStatusSuffix(model.secondarySubtitleStatus) : baseValue
         var rows: [StyleRowSpec] = [
             StyleRowSpec(slot: 0, title: "Second Track", kind: .choice(
-                value: secOptions.isEmpty ? "None available" : secOptions[currentIdx].title,
+                value: trackValue,
                 prev: { step(-1) },
                 next: { step(1) }
             )),
         ]
-        let selected = secOptions.first(where: { $0.isSelected })
-        let hasTrack = selected != nil && selected?.id != PlayerTrackOption.offID
         if hasTrack, let sec = s.secondary {
             rows.append(choiceRow(1, "Placement", options: SubtitleStyle.Secondary.Placement.allCases, current: sec.placement, label: { $0 == .above ? "Above" : "Below" }) { v in updateStyle { $0.secondary?.placement = v } })
             rows.append(StyleRowSpec(slot: 2, title: "Distinct Style", kind: .toggle(isOn: sec.differentiate, flip: { updateStyle { $0.secondary?.differentiate.toggle() } })))
@@ -1077,6 +1083,18 @@ struct PlayerControls: View {
             rows.append(numberRow(5, "Gap", options: Self.gapOptions, current: Int(sec.gap.rounded()), label: { "\($0)" }) { v in updateStyle { $0.secondary?.gap = Double(v) } })
         }
         return rows
+    }
+
+    /// A short suffix annotating the selected second track with its load state.
+    /// Empty while a track is loaded and actually has lines (the healthy case), so
+    /// the row stays clean; otherwise it flags loading / no-lines / unavailable.
+    private static func secondaryStatusSuffix(_ status: SecondarySubtitleStatus) -> String {
+        switch status {
+        case .idle: return ""
+        case .loading: return "  ·  loading…"
+        case .loaded(let n): return n > 0 ? "" : "  ·  no lines"
+        case .unavailable: return "  ·  unavailable"
+        }
     }
 
     // MARK: Row constructors

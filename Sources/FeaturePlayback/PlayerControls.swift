@@ -145,6 +145,20 @@ struct PlayerControls: View {
     /// size and clipped, so they never fade or spill during the height morph.
     @State private var styleBodyHeight: CGFloat = 0
 
+    /// Hold-to-accelerate state for the numeric style rows. `.onMoveCommand`
+    /// repeats while a direction is held on the remote, so we ramp the step size
+    /// as a same-direction streak builds on one focused row (fine taps stay 1×;
+    /// a sustained hold climbs 1→2→4→8 grid steps). Any pause beyond `holdWindow`,
+    /// a direction flip, or a row change restarts at the fine step.
+    private struct MoveAccel {
+        var slot: Int?
+        var sign: Int = 0
+        var lastMove: Date = .distantPast
+        var streak: Int = 0
+    }
+    @State private var moveAccel = MoveAccel()
+    private static let holdWindow: TimeInterval = 0.32
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -872,8 +886,9 @@ struct PlayerControls: View {
     /// restart at 0 on each screen with no collision.
     private struct StyleRowSpec: Identifiable {
         enum Kind {
-            /// Numeric range: Select increments (wrap); ←/→ step; shows −/+ on focus.
-            case number(value: String, prev: () -> Void, next: () -> Void)
+            /// Numeric range: ←/→ step (hold to accelerate), Select nudges up one.
+            /// `step` moves by a signed number of grid indices, clamped at the ends.
+            case number(value: String, step: (Int) -> Void)
             /// Small enum: Select cycles next (wrap); ←/→ cycle; no ± glyphs.
             case choice(value: String, prev: () -> Void, next: () -> Void)
             /// On/off: Select flips.
@@ -926,7 +941,7 @@ struct PlayerControls: View {
         let isFocused = focus == .row(row.slot)
         Button {
             switch row.kind {
-            case let .number(_, _, next): next()
+            case let .number(_, step): step(1)
             case let .choice(_, _, next): next()
             case let .toggle(_, flip): flip()
             case let .submenu(_, open): open()
@@ -980,7 +995,7 @@ struct PlayerControls: View {
     @ViewBuilder
     private func styleRowValue(_ row: StyleRowSpec) -> some View {
         switch row.kind {
-        case let .number(value, _, _):
+        case let .number(value, _):
             Text(value).font(.body).monospacedDigit().playerMenuRowSecondary()
         case let .choice(value, _, _):
             Text(value).font(.body).lineLimit(2).multilineTextAlignment(.trailing).playerMenuRowSecondary()
@@ -1002,12 +1017,42 @@ struct PlayerControls: View {
         guard case let .row(slot)? = focus,
               let row = rows.first(where: { $0.slot == slot }) else { return }
         switch (direction, row.kind) {
-        case let (.left, .number(_, prev, _)), let (.left, .choice(_, prev, _)):
+        case let (.left, .number(_, step)):
+            step(-acceleratedStep(slot: slot, sign: -1))
+        case let (.right, .number(_, step)):
+            step(acceleratedStep(slot: slot, sign: 1))
+        case let (.left, .choice(_, prev, _)):
             prev()
-        case let (.right, .number(_, _, next)), let (.right, .choice(_, _, next)):
+        case let (.right, .choice(_, _, next)):
             next()
         default:
             break
+        }
+    }
+
+    /// Advances the hold streak for this focused row + direction and returns the
+    /// grid magnitude to move. A pause longer than `holdWindow`, a direction flip,
+    /// or a different row restarts the streak so the next move is a fine 1 step.
+    private func acceleratedStep(slot: Int, sign: Int) -> Int {
+        let now = Date()
+        let held = moveAccel.slot == slot
+            && moveAccel.sign == sign
+            && now.timeIntervalSince(moveAccel.lastMove) < Self.holdWindow
+        let streak = held ? moveAccel.streak + 1 : 0
+        moveAccel = MoveAccel(slot: slot, sign: sign, lastMove: now, streak: streak)
+        return Self.accelMagnitude(streak)
+    }
+
+    /// Grid-index magnitude for the current hold streak: the first few repeats
+    /// stay fine (1 step) so deliberate taps land exactly, then a sustained hold
+    /// ramps up to cover large ranges quickly. On the 1% Position grid this reads
+    /// as 1→2→4→8 % per repeat.
+    private static func accelMagnitude(_ streak: Int) -> Int {
+        switch streak {
+        case ..<3: return 1
+        case ..<8: return 2
+        case ..<16: return 4
+        default: return 8
         }
     }
 
@@ -1186,14 +1231,18 @@ struct PlayerControls: View {
     // MARK: Row constructors
 
     /// Numeric stepper row over an Int grid; snaps a legacy off-grid value to the
-    /// nearest listed option so it still displays and steps cleanly. Wraps at ends.
+    /// nearest listed option so it still displays and steps cleanly. Steps by a
+    /// signed number of grid indices and clamps at both ends (no wrap), so a fast
+    /// hold-to-accelerate run parks at Bottom/Top instead of jumping across.
     private func numberRow(_ slot: Int, _ title: String, options: [Int], current: Int, label: @escaping (Int) -> String, apply: @escaping (Int) -> Void) -> StyleRowSpec {
         let n = options.count
         let idx = Self.nearestIndex(options, current)
         return StyleRowSpec(slot: slot, title: title, kind: .number(
             value: label(options[idx]),
-            prev: { apply(options[(idx - 1 + n) % n]) },
-            next: { apply(options[(idx + 1) % n]) }
+            step: { delta in
+                let target = min(max(idx + delta, 0), n - 1)
+                if target != idx { apply(options[target]) }
+            }
         ))
     }
 
@@ -1234,7 +1283,7 @@ struct PlayerControls: View {
 
     // Precise, numeric option grids — no "low / high" buckets.
     private static let sizeOptions: [Int] = Array(stride(from: 60, through: 250, by: 5))
-    private static let positionOptions: [Int] = Array(stride(from: 0, through: 90, by: 5))
+    private static let positionOptions: [Int] = Array(stride(from: 0, through: 90, by: 1))
     private static let opacityOptions: [Int] = Array(stride(from: 20, through: 100, by: 5))
     private static let thicknessOptions: [Int] = Array(stride(from: 0, through: 10, by: 1))
     private static let cornerOptions: [Int] = Array(stride(from: 0, through: 24, by: 2))

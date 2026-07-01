@@ -16,18 +16,18 @@ import CoreModels
 /// behaviour (always `NativeVideoEngine`).
 public struct EngineFactory {
     /// Builds the AVPlayer-backed engine. Always present.
-    public var makeNative: @MainActor (CaptionSettings) -> any VideoEngine
+    public var makeNative: @MainActor (SubtitleStyle) -> any VideoEngine
     /// Builds the VLCKit-backed hybrid engine, or `nil` when this build doesn't
     /// link an engine for AVPlayer-incompatible media (then routing stays native).
-    public var makeHybrid: (@MainActor (CaptionSettings) -> any VideoEngine)?
+    public var makeHybrid: (@MainActor (SubtitleStyle) -> any VideoEngine)?
     /// Builds the Plozzigen engine (FFmpeg demux → HLS-fMP4 → AVPlayer), or `nil`
     /// when the engine isn't linked. Used for DoVi/Atmos MKV sources that need
     /// native AVPlayer rendering with full seek and bounded memory.
     public var makePlozzigen: (@MainActor () -> (any VideoEngine)?)?
 
     public init(
-        makeNative: @escaping @MainActor (CaptionSettings) -> any VideoEngine = { NativeVideoEngine(captionSettings: $0) },
-        makeHybrid: (@MainActor (CaptionSettings) -> any VideoEngine)? = nil,
+        makeNative: @escaping @MainActor (SubtitleStyle) -> any VideoEngine = { NativeVideoEngine(style: $0) },
+        makeHybrid: (@MainActor (SubtitleStyle) -> any VideoEngine)? = nil,
         makePlozzigen: (@MainActor () -> (any VideoEngine)?)? = nil
     ) {
         self.makeNative = makeNative

@@ -87,9 +87,10 @@ public final class PlayerViewModel {
     /// The chosen `MediaVersion.id` (Jellyfin `MediaSourceId` / Plex `Media` id)
     /// to play when the title has multiple versions; `nil` plays the default.
     private let mediaSourceID: String?
-    private let captionSettings: CaptionSettings
+    private let behavior: SubtitleBehavior
+    private let style: SubtitleStyle
     /// The resolved per-content-type subtitle policy for this profile (design
-    /// §5.0/§5.3): base mirrors `captionSettings`, with optional per-category
+    /// §5.0/§5.3): base mirrors `behavior`, with optional per-category
     /// overrides ("forced-only on movies, full subs on anime"). Read-only here —
     /// the Settings UI owns edits — and resolved once per playback, so it's a
     /// value, not a live store. Defaults to inheriting the caption settings, so a
@@ -344,7 +345,12 @@ public final class PlayerViewModel {
         provider: any MediaProvider,
         itemID: String,
         mediaSourceID: String? = nil,
-        captionSettings: CaptionSettings = .default,
+        behavior: SubtitleBehavior = .default,
+        style: SubtitleStyle = .default,
+        // Transitional: legacy call sites still pass a `CaptionSettings`; when
+        // present it seeds both `behavior` and `style`. Removed in the final
+        // step once `CaptionSettings` is deleted.
+        captionSettings: CaptionSettings? = nil,
         subtitlePolicy: SubtitlePolicy? = nil,
         audioPolicy: AudioPolicy? = nil,
         playbackSettings: PlaybackSettings = .default,
@@ -367,8 +373,9 @@ public final class PlayerViewModel {
         self.provider = provider
         self.itemID = itemID
         self.mediaSourceID = mediaSourceID
-        self.captionSettings = captionSettings
-        self.subtitlePolicy = subtitlePolicy ?? .inheriting(from: captionSettings)
+        self.behavior = captionSettings.map(SubtitleBehavior.init(from:)) ?? behavior
+        self.style = captionSettings.map(SubtitleStyle.init(from:)) ?? style
+        self.subtitlePolicy = subtitlePolicy ?? .inheriting(from: self.behavior)
         self.audioPolicy = audioPolicy ?? .inheriting(from: playbackSettings)
         self.playbackSettings = playbackSettings
         self.spoilerSettings = spoilerSettings
@@ -386,7 +393,7 @@ public final class PlayerViewModel {
         self.onPlaybackStarted = onPlaybackStarted
         self.onPlaybackCheckpoint = onPlaybackCheckpoint
         self.checkpointInterval = checkpointInterval
-        self.engine = engineFactory.makeNative(captionSettings)
+        self.engine = engineFactory.makeNative(self.style)
         self.currentEngineKind = .native
         PlaybackInstrumentation.increment(.viewModel)
         // Seed last-used speed so a user who set 1.25× on the last show keeps it.
@@ -394,9 +401,9 @@ public final class PlayerViewModel {
         self.controls.skipBackwardInterval = playbackSettings.skipBackwardInterval
         self.controls.skipForwardInterval = playbackSettings.skipForwardInterval
         self.controls.seekWithoutPausing = playbackSettings.seekWithoutPausing
-        // Seed the overlay with the profile's persisted caption appearance so a
+        // Seed the overlay with the profile's persisted subtitle appearance so a
         // selected subtitle renders in the user's style from the first cue.
-        self.liveSubtitles.style = SubtitleStyle(from: captionSettings)
+        self.liveSubtitles.style = self.style
         configureEngineCallbacks()
 
         // Kick off bring-up now so playbackInfo + engine warm-up run *during* the
@@ -577,16 +584,16 @@ public final class PlayerViewModel {
         switch kind {
         case .hybrid:
             if let makeHybrid = engineFactory.makeHybrid {
-                return makeHybrid(captionSettings)
+                return makeHybrid(style)
             }
-            return engineFactory.makeNative(captionSettings)
+            return engineFactory.makeNative(style)
         case .plozzigen:
             if let makePlozzigen = engineFactory.makePlozzigen, let engine = makePlozzigen() {
                 return engine
             }
-            return engineFactory.makeNative(captionSettings)
+            return engineFactory.makeNative(style)
         case .native:
-            return engineFactory.makeNative(captionSettings)
+            return engineFactory.makeNative(style)
         }
     }
 
@@ -1845,7 +1852,7 @@ public final class PlayerViewModel {
         // Preferred languages, highest priority first: the viewer's explicit
         // choice (or device language) leads, the device language backs it up.
         let preferred: [String?] = [
-            captionSettings.resolvedPreferredLanguage,
+            behavior.resolvedPreferredLanguage,
             LanguageMatch.deviceLanguageCode
         ]
         controls.audioOptions = audio
@@ -1984,8 +1991,8 @@ public final class PlayerViewModel {
 
         let rule = request.map { effectiveSubtitleRule(for: $0.item) }
         let chosen = tracks.defaultSubtitleSelection(
-            mode: rule?.mode ?? captionSettings.subtitleMode,
-            preferredLanguage: rule?.preferredLanguage ?? captionSettings.resolvedPreferredLanguage
+            mode: rule?.mode ?? behavior.subtitleMode,
+            preferredLanguage: rule?.preferredLanguage ?? behavior.resolvedPreferredLanguage
         )
         guard let chosen, !chosen.isImageBasedSubtitle else {
             engine.selectSubtitleTrack(nil)
@@ -2175,7 +2182,7 @@ public final class PlayerViewModel {
         // No point fetching a subtitle the viewer won't see: "Off" suppresses the
         // background download just as it suppresses the on-load selection.
         guard rule.mode != .off, rule.autoDownloadIfMissing else { return }
-        let language = rule.preferredLanguage ?? captionSettings.resolvedPreferredLanguage
+        let language = rule.preferredLanguage ?? behavior.resolvedPreferredLanguage
         guard !request.subtitleTracks.hasSuitableSubtitle(forLanguage: language) else { return }
         guard let language, !language.isEmpty else { return }
 

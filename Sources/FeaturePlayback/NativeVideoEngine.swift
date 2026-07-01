@@ -80,9 +80,9 @@ public final class NativeVideoEngine: VideoEngine {
 
     // MARK: Configuration
 
-    /// Caption styling + default-subtitle preferences. The engine applies these
-    /// when building the player item and when choosing the default subtitle.
-    private let captionSettings: CaptionSettings
+    /// Subtitle appearance. The engine applies these style rules when building
+    /// the player item.
+    private let style: SubtitleStyle
 
     // MARK: Private playback state
 
@@ -135,8 +135,8 @@ public final class NativeVideoEngine: VideoEngine {
     @ObservationIgnored private weak var displayCriteriaWindow: UIWindow?
     #endif
 
-    public init(captionSettings: CaptionSettings = .default) {
-        self.captionSettings = captionSettings
+    public init(style: SubtitleStyle = .default) {
+        self.style = style
         PlaybackInstrumentation.increment(.nativeEngine)
     }
 
@@ -165,8 +165,8 @@ public final class NativeVideoEngine: VideoEngine {
 
         let asset = makeAsset(for: request)
         let item = AVPlayerItem(asset: asset)
-        // Apply in-app caption styling overrides if the user set any.
-        item.textStyleRules = captionSettings.textStyleRules()
+        // Apply in-app subtitle styling overrides if the user set any.
+        item.textStyleRules = style.textStyleRules()
         // Drive the tvOS display into the right dynamic range (true Dolby
         // Vision / HDR10 / HLG) for this source before playback begins.
         configureDynamicRange(for: request, item: item)

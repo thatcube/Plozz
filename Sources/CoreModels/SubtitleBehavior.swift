@@ -54,6 +54,17 @@ public extension SubtitleBehavior {
             autoDownloadSubtitles: legacy.autoDownloadSubtitles
         )
     }
+
+    /// Transitional bridge from the still-live `CaptionSettings` so call sites that
+    /// haven't migrated to the two-model split keep working. Removed once
+    /// `CaptionSettings` is deleted.
+    init(from caption: CaptionSettings) {
+        self.init(
+            subtitleMode: caption.subtitleMode,
+            preferredSubtitleLanguage: caption.preferredSubtitleLanguage,
+            autoDownloadSubtitles: caption.autoDownloadSubtitles
+        )
+    }
 }
 
 // MARK: - Tolerant decoding (forward-compatible)

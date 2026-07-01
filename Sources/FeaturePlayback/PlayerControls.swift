@@ -111,6 +111,11 @@ struct PlayerControls: View {
     /// climb toward the top edge while staying pinned to the bottom cluster.
     @State private var availableHeight: CGFloat = 0
 
+    /// Measured height of the transport block (scrubber + button row). Combined
+    /// with `availableHeight`, it lets the Style panel's top margin match its side
+    /// margin exactly rather than relying on hand-tuned constants.
+    @State private var transportHeight: CGFloat = 0
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -182,9 +187,19 @@ struct PlayerControls: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
-            scrubberRow
-            buttonRow
+            // Transport block (scrubber + buttons), measured so the Style panel can
+            // set its top margin to exactly match its side margin.
+            VStack(alignment: .leading, spacing: 18) {
+                scrubberRow
+                buttonRow
+            }
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: TransportHeightKey.self, value: proxy.size.height)
+                }
+            )
         }
+        .onPreferenceChange(TransportHeightKey.self) { transportHeight = $0 }
         .animation(.easeInOut(duration: 0.2), value: openPanel)
         .animation(.easeInOut(duration: 0.28), value: titleVisible)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
@@ -471,15 +486,16 @@ struct PlayerControls: View {
                         }
                     }
                     .padding(.vertical, 10)
-                    .frame(
-                        maxWidth: .infinity,
-                        minHeight: isStyleScreen(category) ? styleScreenContentHeight : nil,
-                        alignment: .topLeading
-                    )
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .frame(maxHeight: isStyleScreen(category) ? styleScreenContentHeight : 440)
+                .frame(maxHeight: isStyleScreen(category) ? .infinity : 440)
             }
             .frame(width: 520, alignment: .leading)
+            // The Style screen pins the whole panel to a measured height so it
+            // climbs toward the top edge (bottom stays anchored above the
+            // scrubber); the header/divider take their natural size and the
+            // scroll area fills the rest.
+            .frame(height: isStyleScreen(category) ? stylePanelHeight : nil, alignment: .top)
             .colorScheme(.dark)
             .modifier(PanelGlassBackground())
             // The track controls live on the right of the button row, so the panel
@@ -492,15 +508,15 @@ struct PlayerControls: View {
         category == .subtitles && subtitleScreen == .style
     }
 
-    /// Height the Subtitle Style scroll area is pinned to so the panel climbs
-    /// toward the top edge, leaving a top margin roughly matching the panel's
-    /// ~60pt side margin while its bottom stays anchored above the scrubber. The
-    /// reserve covers the bottom chrome (scrubber + button row + paddings), the
-    /// panel header, and that target top margin; it clamps so short screens still
-    /// render if the height hasn't been measured yet.
-    private var styleScreenContentHeight: CGFloat {
-        guard availableHeight > 0 else { return 440 }
-        return max(360, availableHeight - 360)
+    /// Height the Subtitle Style panel is pinned to so it climbs toward the top
+    /// edge with a top margin matching the panel's ~60pt side margin, while its
+    /// bottom stays anchored just above the scrubber. Derived from the measured
+    /// full height and the measured transport block (scrubber + buttons): the 126
+    /// covers the 18pt gap above the scrubber, the 48pt bottom padding, and the
+    /// 60pt target top margin. Clamps until both measurements arrive.
+    private var stylePanelHeight: CGFloat {
+        guard availableHeight > 0, transportHeight > 0 else { return 440 }
+        return max(360, availableHeight - transportHeight - 126)
     }
 
     // MARK: Info panel
@@ -633,10 +649,10 @@ struct PlayerControls: View {
                 Button {
                     openSubtitleScreen(.tracks)
                 } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.semibold))
+                    Image(systemName: "chevron.backward")
+                        .font(.body.weight(.semibold))
                 }
-                .playerGlassButton(prominent: false)
+                .buttonStyle(.plain)
                 .focused($focus, equals: .subBack)
             }
             Text(headerTitle(for: category))
@@ -1369,6 +1385,15 @@ struct PlayerControls: View {
 /// Reports the controls layer's full height up the tree so the Subtitle Style
 /// panel can size itself to climb toward the top edge.
 private struct ControlsHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Reports the transport block's (scrubber + buttons) height so the Style panel
+/// can align its top margin to its side margin.
+private struct TransportHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

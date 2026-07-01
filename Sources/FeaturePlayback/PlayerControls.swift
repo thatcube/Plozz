@@ -207,28 +207,42 @@ struct PlayerControls: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
-            // Transport block (scrubber + buttons), measured so the Style panel can
-            // set its top margin to exactly match its side margin.
-            VStack(alignment: .leading, spacing: 18) {
-                scrubberRow
-                buttonRow
-            }
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: TransportHeightKey.self, value: proxy.size.height)
+            // Transport block (scrubber + buttons). Hidden entirely while the
+            // full-height appearance editor is open so the live subtitles behind
+            // it are unobstructed; measured otherwise so other panels can size to
+            // match. Its removal/return animates with the panel's height change.
+            if !styleEditing {
+                VStack(alignment: .leading, spacing: 18) {
+                    scrubberRow
+                    buttonRow
                 }
-            )
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: TransportHeightKey.self, value: proxy.size.height)
+                    }
+                )
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
         .onPreferenceChange(TransportHeightKey.self) { transportHeight = $0 }
         .animation(.easeInOut(duration: 0.2), value: openPanel)
         .animation(.easeInOut(duration: 0.28), value: titleVisible)
+        .animation(.easeInOut(duration: 0.3), value: styleEditing)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
         .padding(.horizontal, 60)
-        .padding(.top, 90)
-        .padding(.bottom, 48)
+        // Even margins in editor mode (60 all round); otherwise the usual top-heavy
+        // transport layout. The top shrinks so the full-height panel clears overscan.
+        .padding(.top, styleEditing ? 60 : 90)
+        .padding(.bottom, styleEditing ? 60 : 48)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
+            // Drop the dim gradient while editing so the subtitles read clearly;
+            // interpolating the end colour animates the fade with the layout.
+            LinearGradient(
+                colors: [.clear, .black.opacity(styleEditing ? 0 : 0.7)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         )
     }
 
@@ -528,15 +542,22 @@ struct PlayerControls: View {
         category == .subtitles && subtitleScreen.isStyleFamily
     }
 
-    /// Height the Subtitle Style panel is pinned to so it climbs toward the top
-    /// edge with a top margin matching the panel's ~60pt side margin, while its
-    /// bottom stays anchored just above the scrubber. Derived from the measured
-    /// full height and the measured transport block (scrubber + buttons): the 126
-    /// covers the 18pt gap above the scrubber, the 48pt bottom padding, and the
-    /// 60pt target top margin. Clamps until both measurements arrive.
+    /// True while the ✎ Edit appearance editor (or one of its detail sub-screens)
+    /// is open. In this mode we hide the transport chrome and dim gradient and grow
+    /// the panel to full height, so the live subtitles behind it are unobstructed
+    /// and every tweak is easy to see.
+    private var styleEditing: Bool {
+        openPanel == .subtitles && subtitleScreen.isStyleFamily
+    }
+
+    /// Height the Subtitle Style panel is pinned to. The editor runs full-height
+    /// with even ~60pt margins top and bottom (matching its side margin): with the
+    /// transport hidden, the whole right column becomes the editor while the video
+    /// and live subtitles stay visible behind and beside it. Clamps until the
+    /// available height is measured.
     private var stylePanelHeight: CGFloat {
-        guard availableHeight > 0, transportHeight > 0 else { return 440 }
-        return max(360, availableHeight - transportHeight - 126)
+        guard availableHeight > 0 else { return 440 }
+        return max(360, availableHeight - 120)
     }
 
     // MARK: Info panel

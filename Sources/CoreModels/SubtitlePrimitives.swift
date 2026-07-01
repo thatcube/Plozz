@@ -50,7 +50,7 @@ public enum SubtitleEdgeStyle: String, Codable, CaseIterable, Sendable {
     public var displayName: String {
         switch self {
         case .none: return "None"
-        case .dropShadow: return "Drop Shadow"
+        case .dropShadow: return "Shadow"
         case .raised: return "Raised"
         case .depressed: return "Depressed"
         case .uniform: return "Outline"

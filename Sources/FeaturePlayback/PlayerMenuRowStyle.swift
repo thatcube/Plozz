@@ -30,15 +30,14 @@ private struct PlayerMenuRowBody: View {
             .environment(\.playerMenuRowIsFocused, isFocused)
             .foregroundStyle(isFocused ? AnyShapeStyle(Color.black) : AnyShapeStyle(.primary))
             .background(
-                // Inset the fitted card a few points within the full-width row
-                // so it carries an EQUAL gutter on both sides instead of
-                // full-bleeding to the column edge / center divider on one side
-                // while sitting off the panel edge on the other (which read as
-                // "uneven left/right spacing"). Text stays anchored by the row's
+                // Inset the fitted card a hair within the full-width row so it
+                // carries an EQUAL, minimal gutter on both sides — wide enough that
+                // the highlight reads as covering the row evenly rather than a
+                // narrow pill floating off-centre. Text stays anchored by the row's
                 // own padding, so titles still line up under the section header.
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(isFocused ? Color.white : Color.clear)
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, 2)
             )
             .opacity(configuration.isPressed ? 0.9 : 1)
             // Switch color + fill INSTANTLY on focus change. An animated fade

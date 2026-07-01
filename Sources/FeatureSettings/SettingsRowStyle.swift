@@ -194,11 +194,11 @@ private struct SettingsSwitchToggleBody: View {
             HStack(spacing: 20) {
                 configuration.label
                     .font(.headline.weight(.semibold))
-                    // Keep every detail-pane toggle label on a single line — it
-                    // shrinks slightly to fit rather than wrapping to a second
-                    // row (which looked ragged next to the switch).
+                    // Keep every detail-pane toggle label on a single line. The
+                    // labels are kept short enough to fit at full size (the pane
+                    // heading + description above carry the detail), so this only
+                    // guards against an accidental wrap — never shrinks the text.
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                 Spacer(minLength: 20)
                 SettingsSwitchIndicator(isOn: configuration.isOn)
             }

@@ -19,7 +19,7 @@ struct SubtitleStyleEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
-            Toggle("Use system subtitle style", isOn: $settings.followsSystemStyle)
+            Toggle("Use system style", isOn: $settings.followsSystemStyle)
 
             if !settings.followsSystemStyle {
                 VStack(alignment: .leading, spacing: 24) {

@@ -121,7 +121,7 @@ struct SpoilersDetailView: View {
                 description: "Blur or replace episode thumbnails and keep titles and descriptions hidden until you finish an episode.",
                 valueSummary: spoilers.settings.isEnabled ? "On" : "Off"
             ) {
-                Toggle("Hide spoilers for unwatched episodes", isOn: $spoilers.settings.isEnabled)
+                Toggle("Hide spoilers", isOn: $spoilers.settings.isEnabled)
             }
         ]
 
@@ -150,7 +150,7 @@ struct SpoilersDetailView: View {
                 description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.",
                 valueSummary: spoilers.settings.hideRatingsUntilWatched ? "On" : "Off"
             ) {
-                Toggle("Hide ratings until watched", isOn: $spoilers.settings.hideRatingsUntilWatched)
+                Toggle("Hide ratings", isOn: $spoilers.settings.hideRatingsUntilWatched)
             }
         )
 
@@ -321,7 +321,7 @@ struct PlaybackDetailView: View {
             ) {
                 SettingsRevealSection(
                     isOn: perContentTypeBinding,
-                    masterLabel: "Use a different default per type",
+                    masterLabel: "Use per-type defaults",
                     revealedHeader: "Per Content Type"
                 ) {
                     ForEach(Self.policyCategories, id: \.self) { category in
@@ -358,7 +358,7 @@ struct PlaybackDetailView: View {
                 description: "When an item has no suitable subtitle in your preferred language, Plozz asks the Jellyfin server to fetch the best match so every client benefits.",
                 valueSummary: captions.settings.autoDownloadSubtitles ? "On" : "Off"
             ) {
-                Toggle("Automatically download subtitles", isOn: $captions.settings.autoDownloadSubtitles)
+                Toggle("Auto-download subtitles", isOn: $captions.settings.autoDownloadSubtitles)
             },
             SettingsSplitRow(
                 id: "subtitle-remember",
@@ -366,7 +366,7 @@ struct PlaybackDetailView: View {
                 description: "When you change the subtitle track while watching a series, reuse that choice for the rest of the series.",
                 valueSummary: playback.settings.rememberSubtitleTrackPerSeries ? "On" : "Off"
             ) {
-                Toggle("Remember subtitle choice per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
+                Toggle("Remember per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
             },
             SettingsSplitRow(
                 id: "subtitle-style",
@@ -397,7 +397,7 @@ struct PlaybackDetailView: View {
             ) {
                 SettingsRevealSection(
                     isOn: audioPerContentTypeBinding,
-                    masterLabel: "Use a different default per type",
+                    masterLabel: "Use per-type defaults",
                     revealedHeader: "Per Content Type"
                 ) {
                     ForEach(Self.policyCategories, id: \.self) { category in
@@ -413,7 +413,7 @@ struct PlaybackDetailView: View {
                 description: "When you change the audio track while watching a series, reuse that choice for the rest of the series.",
                 valueSummary: playback.settings.rememberAudioTrackPerSeries ? "On" : "Off"
             ) {
-                Toggle("Remember audio choice per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
+                Toggle("Remember per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
             }
         ])
     }

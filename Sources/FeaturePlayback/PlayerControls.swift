@@ -1412,11 +1412,13 @@ private struct PanelHorizontalPlacement: ViewModifier {
 }
 
 /// Carries the Speed button's measured leading-edge X up to `PlayerControls` so
-/// the Speed panel can align its left edge to the button.
+/// the Speed panel can align its left edge to the button. Only the Speed button
+/// publishes a value; sibling buttons contribute the default (0), so the reduce
+/// keeps the largest (the real measurement) rather than letting a 0 clobber it.
 private struct SpeedButtonLeadingKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+        value = max(value, nextValue())
     }
 }
 #endif

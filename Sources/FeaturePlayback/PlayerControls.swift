@@ -86,9 +86,29 @@ struct PlayerControls: View {
     }
 
     /// Sub-screens of the Subtitles panel. `tracks` is the default list; the
-    /// header ✎ Edit opens `style`, and the trailing row opens `download`. Menu
-    /// backs a sub-screen out to `tracks` rather than closing the whole panel.
-    private enum SubtitleScreen { case tracks, download, style }
+    /// header ✎ Edit opens `style`, and the trailing row opens `download`. The
+    /// Style screen has its own detail sub-screens (`styleOutline` / `styleBackground`
+    /// / `styleDual`). Back steps to a screen's PARENT rather than closing the panel.
+    private enum SubtitleScreen {
+        case tracks, download, style, styleOutline, styleBackground, styleDual
+
+        /// The screen a Back / Menu press should return to.
+        var parent: SubtitleScreen {
+            switch self {
+            case .tracks, .download, .style: return .tracks
+            case .styleOutline, .styleBackground, .styleDual: return .style
+            }
+        }
+
+        /// Whether this is the Style editor or one of its detail sub-screens (they
+        /// share the taller upward-growing panel).
+        var isStyleFamily: Bool {
+            switch self {
+            case .style, .styleOutline, .styleBackground, .styleDual: return true
+            case .tracks, .download: return false
+            }
+        }
+    }
 
     @State private var openPanel: Category?
     @State private var subtitleScreen: SubtitleScreen = .tracks
@@ -505,7 +525,7 @@ struct PlayerControls: View {
     }
 
     private func isStyleScreen(_ category: Category) -> Bool {
-        category == .subtitles && subtitleScreen == .style
+        category == .subtitles && subtitleScreen.isStyleFamily
     }
 
     /// Height the Subtitle Style panel is pinned to so it climbs toward the top
@@ -647,7 +667,7 @@ struct PlayerControls: View {
             // rather than floating inside the scrollable content.
             if category == .subtitles && subtitleScreen != .tracks {
                 Button {
-                    openSubtitleScreen(.tracks)
+                    openSubtitleScreen(subtitleScreen.parent)
                 } label: {
                     Image(systemName: "chevron.backward")
                         .font(.body.weight(.semibold))
@@ -680,6 +700,9 @@ struct PlayerControls: View {
         case .tracks: return "Subtitles"
         case .download: return "Download Subtitles"
         case .style: return "Subtitle Style"
+        case .styleOutline: return "Outline & Border"
+        case .styleBackground: return "Background"
+        case .styleDual: return "Dual Subtitles"
         }
     }
 
@@ -690,7 +713,10 @@ struct PlayerControls: View {
         switch subtitleScreen {
         case .tracks: subtitlePane
         case .download: subtitleDownloadStub
-        case .style: subtitleStyleEditor
+        case .style: styleScreen(styleMainRows, dividerBefore: 7)
+        case .styleOutline: styleScreen(styleOutlineRows)
+        case .styleBackground: styleScreen(styleBackgroundRows)
+        case .styleDual: styleScreen(styleDualRows)
         }
     }
 
@@ -742,126 +768,79 @@ struct PlayerControls: View {
         subScreenStub(message: "Search the server's providers for a subtitle in your language and load it right here.")
     }
 
+    // MARK: Subtitle style editor (hybrid full-width rows)
+
+    /// One appearance control, rebuilt every render so its value string and its
+    /// mutation closures always read/write the freshest `SubtitleStyle`. `slot` is
+    /// the per-screen focus index (`.row(slot)`); screens never coexist so slots
+    /// restart at 0 on each screen with no collision.
+    private struct StyleRowSpec: Identifiable {
+        enum Kind {
+            /// Numeric range: Select increments (wrap); ←/→ step; shows −/+ on focus.
+            case number(value: String, prev: () -> Void, next: () -> Void)
+            /// Small enum: Select cycles next (wrap); ←/→ cycle; no ± glyphs.
+            case choice(value: String, prev: () -> Void, next: () -> Void)
+            /// On/off: Select flips.
+            case toggle(isOn: Bool, flip: () -> Void)
+            /// Opens a detail sub-screen: Select opens; shows a `›` chevron.
+            case submenu(summary: String, open: () -> Void)
+            /// One-shot: Select runs it.
+            case action(run: () -> Void)
+        }
+        let slot: Int
+        let title: String
+        let kind: Kind
+        var id: Int { slot }
+    }
+
     /// The live subtitle-appearance editor, hosted over the running video so every
-    /// tweak previews instantly on the real subtitles behind the panel. Rows use
-    /// the same steppers / focus language as the other in-player menus. Edits are
-    /// funnelled through `updateStyle`, which routes to `actions.setSubtitleStyle`
-    /// (live overlay + profile persistence). Back lives in the panel header.
+    /// tweak previews instantly on the real subtitles behind the panel. Each row is
+    /// a single full-width Button (one focus target spanning the width, so vertical
+    /// focus lands predictably), value right-aligned. Steppers reveal −/+ glyphs
+    /// only while focused (press ←/→ on the remote to adjust); the container's
+    /// `.onMoveCommand` — attached to the non-focusable VStack so children keep
+    /// native up/down nav — dispatches those left/right steps to the focused row.
+    /// Edits funnel through `updateStyle` → `actions.setSubtitleStyle` (live overlay
+    /// + profile persistence). Back lives in the panel header.
     @ViewBuilder
-    private var subtitleStyleEditor: some View {
-        let style = model.subtitleStyle
+    private func styleScreen(_ rows: [StyleRowSpec], dividerBefore: Int? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            styleStepperRow(
-                title: "Text Size",
-                options: Self.sizeOptions,
-                selection: Int((style.fontScale * 100).rounded()),
-                label: { "\($0)%" }
-            ) { pct in updateStyle { $0.fontScale = Double(pct) / 100 } }
-
-            styleStepperRow(
-                title: "Position",
-                options: Self.positionOptions,
-                selection: Int((style.verticalPosition * 100).rounded()),
-                label: Self.positionLabel
-            ) { pct in updateStyle { $0.verticalPosition = Double(pct) / 100 } }
-
-            styleStepperRow(
-                title: "Opacity",
-                options: Self.opacityOptions,
-                selection: Int((style.opacity * 100).rounded()),
-                label: { "\($0)%" }
-            ) { pct in updateStyle { $0.opacity = Double(pct) / 100 } }
-
-            styleStepperRow(
-                title: "Text Colour",
-                options: Self.textColorOptions,
-                selection: style.textColor,
-                label: Self.colorLabel
-            ) { color in updateStyle { $0.textColor = color } }
-
-            styleStepperRow(
-                title: "Outline",
-                options: SubtitleEdgeStyle.allCases,
-                selection: style.edge.style,
-                label: { $0.displayName }
-            ) { edge in updateStyle { $0.edge.style = edge } }
-
-            styleToggleRow(
-                title: "Background Box",
-                isOn: style.background.isEnabled,
-                slot: Self.styleBoxSlot
-            ) {
-                updateStyle { s in
-                    s.background.isEnabled.toggle()
-                    if s.background.isEnabled && !Self.boxColorOptions.contains(s.background.color) {
-                        s.background.color = Self.boxColorOptions[0]
-                    }
+            ForEach(rows) { row in
+                if let d = dividerBefore, row.slot == d {
+                    Divider()
+                        .background(.white.opacity(0.12))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
                 }
+                styleRow(row)
             }
-
-            if style.background.isEnabled {
-                styleStepperRow(
-                    title: "Box Colour",
-                    options: Self.boxColorOptions,
-                    selection: Self.boxColorOptions.contains(style.background.color) ? style.background.color : Self.boxColorOptions[0],
-                    label: Self.boxColorLabel
-                ) { color in updateStyle { $0.background.color = color } }
-            }
-
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
         .padding(.top, 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onMoveCommand { direction in handleStyleMove(direction, rows: rows) }
     }
 
-    // MARK: Subtitle style editor rows + option sets
-
-    /// One appearance row: a leading title and a trailing compact stepper, matching
-    /// the Speed menu's stepper language (circular focus thumb). The stepper snaps
-    /// the current value to the nearest listed option so a legacy value off-grid
-    /// still shows and steps cleanly.
-    private func styleStepperRow<V: Hashable>(
-        title: String,
-        options: [V],
-        selection current: V,
-        label: @escaping (V) -> String,
-        apply: @escaping (V) -> Void
-    ) -> some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.body)
-                .foregroundStyle(.white)
-            Spacer(minLength: 8)
-            SettingsStepper(
-                options: options,
-                selection: Binding(
-                    get: { options.contains(current) ? current : (options.first ?? current) },
-                    set: { apply($0) }
-                ),
-                compact: true,
-                title: label
-            )
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
-    }
-
-    /// A button-based on/off row (NOT a SwiftUI `Toggle`) so it flips on Select and
-    /// wears the same fitted-white-card focus as every other menu row.
-    private func styleToggleRow(
-        title: String,
-        isOn: Bool,
-        slot: Int,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Text(title).font(.body).lineLimit(1)
-                Spacer(minLength: 8)
-                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                    .font(.body)
-                    .playerMenuRowMark(isSelected: isOn, accent: palette.accent)
+    /// One rendered row: full-width Button + fitted-white-card focus, trailing HStack
+    /// with a fixed −slot, a right-aligned value column, and a +/`›` slot so every
+    /// row's value lines up whether or not it carries stepper glyphs.
+    @ViewBuilder
+    private func styleRow(_ row: StyleRowSpec) -> some View {
+        let isFocused = focus == .row(row.slot)
+        Button {
+            switch row.kind {
+            case let .number(_, _, next): next()
+            case let .choice(_, _, next): next()
+            case let .toggle(_, flip): flip()
+            case let .submenu(_, open): open()
+            case let .action(run): run()
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Text(row.title).font(.body).lineLimit(1)
+                Spacer(minLength: 12)
+                styleRowTrailing(row, isFocused: isFocused)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -869,7 +848,178 @@ struct PlayerControls: View {
         }
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
-        .focused($focus, equals: .row(slot))
+        .focused($focus, equals: .row(row.slot))
+    }
+
+    @ViewBuilder
+    private func styleRowTrailing(_ row: StyleRowSpec, isFocused: Bool) -> some View {
+        HStack(spacing: 8) {
+            // −slot: only steppers, only on focus.
+            ZStack {
+                if case .number = row.kind, isFocused {
+                    Image(systemName: "minus").font(.body.weight(.semibold))
+                }
+            }
+            .frame(width: 20)
+
+            styleRowValue(row).frame(minWidth: 92, alignment: .trailing)
+
+            // +/`›` slot: stepper + on focus, or a submenu chevron.
+            ZStack {
+                switch row.kind {
+                case .number:
+                    if isFocused { Image(systemName: "plus").font(.body.weight(.semibold)) }
+                case .submenu:
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .playerMenuRowSecondary()
+                default:
+                    EmptyView()
+                }
+            }
+            .frame(width: 20)
+        }
+    }
+
+    @ViewBuilder
+    private func styleRowValue(_ row: StyleRowSpec) -> some View {
+        switch row.kind {
+        case let .number(value, _, _):
+            Text(value).font(.body).monospacedDigit().playerMenuRowSecondary()
+        case let .choice(value, _, _):
+            Text(value).font(.body).playerMenuRowSecondary()
+        case let .toggle(isOn, _):
+            Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                .font(.body)
+                .playerMenuRowMark(isSelected: isOn, accent: palette.accent)
+        case let .submenu(summary, _):
+            Text(summary).font(.body).playerMenuRowSecondary()
+        case .action:
+            EmptyView()
+        }
+    }
+
+    /// Container-level ←/→ handler: looks up the focused slot's row and steps it.
+    /// Up/down are left to the native focus engine (single column → left/right
+    /// find no sibling, so focus stays put and this handler fires instead).
+    private func handleStyleMove(_ direction: MoveCommandDirection, rows: [StyleRowSpec]) {
+        guard case let .row(slot)? = focus,
+              let row = rows.first(where: { $0.slot == slot }) else { return }
+        switch (direction, row.kind) {
+        case let (.left, .number(_, prev, _)), let (.left, .choice(_, prev, _)):
+            prev()
+        case let (.right, .number(_, _, next)), let (.right, .choice(_, _, next)):
+            next()
+        default:
+            break
+        }
+    }
+
+    // MARK: Per-screen row builders
+
+    /// Main flat Style screen: the common knobs, a divider, then submenu groups
+    /// (advanced outline/border, background box, dual subtitles) and Reset.
+    private var styleMainRows: [StyleRowSpec] {
+        let s = model.subtitleStyle
+        return [
+            choiceRow(0, "Font", options: SubtitleFontFamily.allCases, current: s.fontFamily, label: { $0.displayName }) { v in updateStyle { $0.fontFamily = v } },
+            numberRow(1, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } },
+            numberRow(2, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: Self.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } },
+            colorRow(3, "Text Colour", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } },
+            choiceRow(4, "Outline", options: SubtitleEdgeStyle.allCases, current: s.edge.style, label: { $0.displayName }) { v in updateStyle { $0.edge.style = v } },
+            numberRow(5, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } },
+            StyleRowSpec(slot: 6, title: "Background Box", kind: .toggle(isOn: s.background.isEnabled, flip: {
+                updateStyle { st in st.background.isEnabled.toggle() }
+            })),
+            StyleRowSpec(slot: 7, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) })),
+            StyleRowSpec(slot: 8, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) })),
+            StyleRowSpec(slot: 9, title: "Dual Subtitles", kind: .submenu(summary: s.secondary != nil ? "On" : "Off", open: { openSubtitleScreen(.styleDual) })),
+            StyleRowSpec(slot: 10, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } })),
+        ]
+    }
+
+    /// Advanced outline (edge) + explicit glyph border.
+    private var styleOutlineRows: [StyleRowSpec] {
+        let s = model.subtitleStyle
+        return [
+            choiceRow(0, "Outline Style", options: SubtitleEdgeStyle.allCases, current: s.edge.style, label: { $0.displayName }) { v in updateStyle { $0.edge.style = v } },
+            colorRow(1, "Outline Colour", options: Self.textColorOptions, current: s.edge.color, label: Self.colorLabel) { c in updateStyle { $0.edge.color = c } },
+            numberRow(2, "Outline Thickness", options: Self.thicknessOptions, current: Int(s.edge.thickness.rounded()), label: { "\($0)" }) { v in updateStyle { $0.edge.thickness = Double(v) } },
+            StyleRowSpec(slot: 3, title: "Glyph Border", kind: .toggle(isOn: s.border.isEnabled, flip: { updateStyle { $0.border.isEnabled.toggle() } })),
+            colorRow(4, "Border Colour", options: Self.textColorOptions, current: s.border.color, label: Self.colorLabel) { c in updateStyle { $0.border.color = c } },
+            numberRow(5, "Border Width", options: Self.thicknessOptions, current: Int(s.border.width.rounded()), label: { "\($0)" }) { v in updateStyle { $0.border.width = Double(v) } },
+        ]
+    }
+
+    /// Background box: colour, its own opacity, corner radius and padding.
+    private var styleBackgroundRows: [StyleRowSpec] {
+        let s = model.subtitleStyle
+        return [
+            StyleRowSpec(slot: 0, title: "Show Box", kind: .toggle(isOn: s.background.isEnabled, flip: { updateStyle { $0.background.isEnabled.toggle() } })),
+            colorRow(1, "Colour", options: Self.boxColorOptions, current: s.background.color, label: Self.boxColorLabel) { c in updateStyle { $0.background.color = c } },
+            numberRow(2, "Box Opacity", options: Self.opacityOptions, current: Int((s.background.color.alpha * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.background.color.alpha = Double(v) / 100 } },
+            numberRow(3, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.cornerRadius = Double(v) } },
+            numberRow(4, "Horizontal Padding", options: Self.paddingOptions, current: Int(s.background.horizontalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.horizontalPadding = Double(v) } },
+            numberRow(5, "Vertical Padding", options: Self.paddingOptions, current: Int(s.background.verticalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.verticalPadding = Double(v) } },
+        ]
+    }
+
+    /// Dual subtitles: turn on a second line and (optionally) distinguish its look.
+    /// Enabling a second *track* is a separate feature — this styles the secondary.
+    private var styleDualRows: [StyleRowSpec] {
+        let s = model.subtitleStyle
+        var rows: [StyleRowSpec] = [
+            StyleRowSpec(slot: 0, title: "Second Subtitle", kind: .toggle(isOn: s.secondary != nil, flip: {
+                updateStyle { $0.secondary = $0.secondary == nil ? SubtitleStyle.Secondary() : nil }
+            })),
+        ]
+        if let sec = s.secondary {
+            rows.append(choiceRow(1, "Placement", options: SubtitleStyle.Secondary.Placement.allCases, current: sec.placement, label: { $0 == .above ? "Above" : "Below" }) { v in updateStyle { $0.secondary?.placement = v } })
+            rows.append(StyleRowSpec(slot: 2, title: "Distinct Style", kind: .toggle(isOn: sec.differentiate, flip: { updateStyle { $0.secondary?.differentiate.toggle() } })))
+            rows.append(numberRow(3, "Size", options: Self.secondarySizeOptions, current: Int((sec.relativeScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.secondary?.relativeScale = Double(v) / 100 } })
+            rows.append(colorRow(4, "Colour", options: Self.textColorOptions, current: sec.textColor, label: Self.colorLabel) { c in updateStyle { $0.secondary?.textColor = c } })
+            rows.append(numberRow(5, "Gap", options: Self.gapOptions, current: Int(sec.gap.rounded()), label: { "\($0)" }) { v in updateStyle { $0.secondary?.gap = Double(v) } })
+        }
+        return rows
+    }
+
+    // MARK: Row constructors
+
+    /// Numeric stepper row over an Int grid; snaps a legacy off-grid value to the
+    /// nearest listed option so it still displays and steps cleanly. Wraps at ends.
+    private func numberRow(_ slot: Int, _ title: String, options: [Int], current: Int, label: @escaping (Int) -> String, apply: @escaping (Int) -> Void) -> StyleRowSpec {
+        let n = options.count
+        let idx = Self.nearestIndex(options, current)
+        return StyleRowSpec(slot: slot, title: title, kind: .number(
+            value: label(options[idx]),
+            prev: { apply(options[(idx - 1 + n) % n]) },
+            next: { apply(options[(idx + 1) % n]) }
+        ))
+    }
+
+    /// Cycle row over any small `Equatable` set; wraps at both ends.
+    private func choiceRow<V: Equatable>(_ slot: Int, _ title: String, options: [V], current: V, label: @escaping (V) -> String, apply: @escaping (V) -> Void) -> StyleRowSpec {
+        let n = options.count
+        let idx = options.firstIndex(of: current) ?? 0
+        return StyleRowSpec(slot: slot, title: title, kind: .choice(
+            value: label(options[idx]),
+            prev: { apply(options[(idx - 1 + n) % n]) },
+            next: { apply(options[(idx + 1) % n]) }
+        ))
+    }
+
+    /// Cycle row over a colour palette, matched by RGB so it recognises the current
+    /// swatch regardless of its alpha, and preserves that alpha on change (so the
+    /// separate opacity knobs stay independent of the colour choice).
+    private func colorRow(_ slot: Int, _ title: String, options: [SubtitleColor], current: SubtitleColor, label: @escaping (SubtitleColor) -> String, apply: @escaping (SubtitleColor) -> Void) -> StyleRowSpec {
+        let n = options.count
+        let idx = options.firstIndex(where: { $0.red == current.red && $0.green == current.green && $0.blue == current.blue }) ?? 0
+        func withAlpha(_ c: SubtitleColor) -> SubtitleColor { SubtitleColor(red: c.red, green: c.green, blue: c.blue, alpha: current.alpha) }
+        return StyleRowSpec(slot: slot, title: title, kind: .choice(
+            value: label(current),
+            prev: { apply(withAlpha(options[(idx - 1 + n) % n])) },
+            next: { apply(withAlpha(options[(idx + 1) % n])) }
+        ))
     }
 
     /// Reads the mirror, applies the mutation, and routes the result through the
@@ -880,19 +1030,34 @@ struct PlayerControls: View {
         actions.setSubtitleStyle(next)
     }
 
-    // Precise, numeric option grids (percentages) — no "low / high" buckets.
+    // MARK: Option grids
+
+    // Precise, numeric option grids — no "low / high" buckets.
     private static let sizeOptions: [Int] = Array(stride(from: 60, through: 250, by: 5))
     private static let positionOptions: [Int] = Array(stride(from: 0, through: 90, by: 5))
     private static let opacityOptions: [Int] = Array(stride(from: 20, through: 100, by: 5))
+    private static let thicknessOptions: [Int] = Array(stride(from: 0, through: 10, by: 1))
+    private static let cornerOptions: [Int] = Array(stride(from: 0, through: 24, by: 2))
+    private static let paddingOptions: [Int] = Array(stride(from: 0, through: 40, by: 2))
+    private static let gapOptions: [Int] = Array(stride(from: 0, through: 24, by: 2))
+    private static let secondarySizeOptions: [Int] = Array(stride(from: 50, through: 100, by: 5))
     private static let textColorOptions: [SubtitleColor] = SubtitleColor.presets.map(\.color)
+    // RGB representatives (alpha handled by the Box Opacity knob).
     private static let boxColorOptions: [SubtitleColor] = [
-        SubtitleColor(red: 0, green: 0, blue: 0, alpha: 0.65),
-        SubtitleColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 0.7),
-        SubtitleColor(red: 1, green: 1, blue: 1, alpha: 0.75)
+        SubtitleColor(red: 0, green: 0, blue: 0, alpha: 1),
+        SubtitleColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1),
+        SubtitleColor(red: 1, green: 1, blue: 1, alpha: 1)
     ]
-    /// Focus slot for the Background Box toggle — parked high so it never collides
-    /// with the track-list `.row(index)` slots reused across panes.
-    private static let styleBoxSlot = 90
+
+    private static func nearestIndex(_ options: [Int], _ value: Int) -> Int {
+        guard !options.isEmpty else { return 0 }
+        var best = 0, bestDelta = Int.max
+        for (i, option) in options.enumerated() {
+            let delta = abs(option - value)
+            if delta < bestDelta { bestDelta = delta; best = i }
+        }
+        return best
+    }
 
     /// 0% = seated at the bottom safe edge; 90% = near the top. Anchors are named
     /// so the extremes read clearly, but every step in between is a plain percent.
@@ -904,17 +1069,17 @@ struct PlayerControls: View {
         }
     }
 
+    /// Matches the preset palette by RGB (ignoring alpha), so a swatch reads by name
+    /// even when its opacity has been dialled down elsewhere.
     private static func colorLabel(_ color: SubtitleColor) -> String {
-        SubtitleColor.presets.first(where: { $0.color == color })?.name ?? "Custom"
+        SubtitleColor.presets.first(where: { $0.color.red == color.red && $0.color.green == color.green && $0.color.blue == color.blue })?.name ?? "Custom"
     }
 
     private static func boxColorLabel(_ color: SubtitleColor) -> String {
-        switch boxColorOptions.firstIndex(of: color) {
-        case 0: return "Black"
-        case 1: return "Charcoal"
-        case 2: return "White"
-        default: return "Custom"
-        }
+        if color.red == 0, color.green == 0, color.blue == 0 { return "Black" }
+        if color.red == 1, color.green == 1, color.blue == 1 { return "White" }
+        if color.red == 0.15, color.green == 0.15, color.blue == 0.15 { return "Charcoal" }
+        return "Custom"
     }
 
     private func subScreenStub(message: String) -> some View {
@@ -936,7 +1101,8 @@ struct PlayerControls: View {
         subtitleScreen = screen
         switch screen {
         case .tracks: focus = .row(selectedRowIndex(for: .subtitles))
-        case .download, .style: focus = .subBack
+        case .download: focus = .subBack
+        case .style, .styleOutline, .styleBackground, .styleDual: focus = .row(0)
         }
     }
 
@@ -1300,7 +1466,7 @@ struct PlayerControls: View {
         // Back out of a Subtitles sub-screen to the track list first; only then
         // does Menu close the whole panel.
         if openPanel == .subtitles && subtitleScreen != .tracks {
-            openSubtitleScreen(.tracks)
+            openSubtitleScreen(subtitleScreen.parent)
             return
         }
         if openPanel != nil {

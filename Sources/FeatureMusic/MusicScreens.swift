@@ -853,7 +853,10 @@ struct NowPlayingEqualizer: View {
     private let barCount = 4
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.08, paused: !isAnimating)) { context in
+        // No `minimumInterval` so the timeline updates at the display's native
+        // refresh rate (60fps on Apple TV). A throttled interval here made the
+        // sine-driven bars visibly step/stutter.
+        TimelineView(.animation(paused: !isAnimating)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             HStack(alignment: .bottom, spacing: 3 * scale) {
                 ForEach(0..<barCount, id: \.self) { i in

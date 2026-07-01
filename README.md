@@ -163,7 +163,7 @@ by any of the services below.
   decode) by Vincent Herbst, LGPL-3.0 with an App Store exception.
   [superuser404notfound/AetherEngine](https://github.com/superuser404notfound/AetherEngine).
 - **libmpv / FFmpeg** — a decode-only, LGPL-3.0 build backs the optional
-  `EngineMPV` (see [`LGPL_COMPLIANCE.md`](LGPL_COMPLIANCE.md)).
+  `EngineMPV` (see [`NOTICE.md`](NOTICE.md)).
 - **The Movie Database (TMDB)** — some artwork and metadata is provided by the
   TMDB API. This product uses the TMDB API but is not endorsed or certified by
   TMDB. TMDB's marks and logos are trademarks of TMDB.

@@ -4,7 +4,7 @@
 #
 # EngineMPV's libmpv + FFmpeg xcframeworks (Frameworks/mpv/, ~78 MB, 8 frameworks)
 # are large, LGPL-clean local binaries that are gitignored and NEVER committed
-# (see .gitignore / LGPL_COMPLIANCE.md). So a freshly created worktree or any
+# (see .gitignore / NOTICE.md). So a freshly created worktree or any
 # branch that merged main can't build mpv until those binaries are present.
 #
 # This script populates Frameworks/mpv/ from a shared on-disk CACHE using an

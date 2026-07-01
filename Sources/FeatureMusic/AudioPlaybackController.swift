@@ -703,12 +703,17 @@ public final class AudioPlaybackController {
                 if Task.isCancelled { return }
             }
             guard let self, !Task.isCancelled else { return }
-            await self.startCurrent()
+            // A debounced start is a user-initiated skip/previous — aggressively
+            // re-establish the HomePod AirPlay stream on the hand-off (a brief gap
+            // is fine when the user pressed a button). A non-debounced start is a
+            // natural gapless end (or fresh play), which must stay seamless, so it
+            // keeps the plain treadmill hand-off with no session reactivation.
+            await self.startCurrent(reactivateRoute: debounced)
             if !Task.isCancelled { self.startPending = false }
         }
     }
 
-    private func startCurrent() async {
+    private func startCurrent(reactivateRoute: Bool = true) async {
         guard let track = currentTrack, let resolver else { return }
         // Supersede guard: a rapid skip or a new queue spawns another startCurrent
         // while this one is still resolving. Capture this transition's generation so
@@ -721,13 +726,11 @@ public final class AudioPlaybackController {
         // FAST PATH — the treadmill hand-off. This track was pre-enqueued behind
         // the outgoing one (see `prepareNextInQueue`) and has been prerolling in
         // the live pipeline, so it's already the player's *next* item and buffered.
-        // Advancing onto an already-ready queued item is the track change most
-        // likely to preserve the AirPlay 2 route (WWDC 2016 §503 / 2019 §501): no
-        // resolve, no cold insert. But `advanceToNextItem()` still makes the
-        // HomePod re-negotiate its AirPlay stream for the new item, so we pause →
-        // advance → `preroll` (arm the pipeline, incl. the AirPlay output path) →
-        // `playImmediately` only once it's ready, rather than forcing output into a
-        // sink that's mid-renegotiation (the silent-skip drop).
+        // Two sub-cases (see `reactivateRoute`): a NATURAL gapless end does a plain
+        // seamless advance+play (no gap), while a MANUAL skip does a full audio-
+        // session deactivate→reactivate cycle to force the HomePod to re-establish
+        // its AirPlay 2 stream (advanceToNextItem alone makes it re-negotiate, and a
+        // plain play() into that window silently drops the sink).
         if let prepared = preparedNext, prepared.trackID == track.id,
            let item = prepared.item,
            player.items().count >= 2, player.items()[1] === item {
@@ -739,23 +742,33 @@ public final class AudioPlaybackController {
             enableRemoteCommands()
             currentQuality = prepared.quality
             preparedNext = nil
-            // PRIME-THEN-PLAY hand-off (the skip-drop fix). `advanceToNextItem()`
-            // on a progressive-download item makes the HomePod re-negotiate its
-            // AirPlay 2 stream (~200–800ms). Handing it a plain `play()` during
-            // that window feeds the still-renegotiating sink a "play now" it can't
-            // honour, so it silently drops — the app keeps reporting .playing while
-            // the HomePod goes quiet, with NO interruption/route/stall event.
-            // Instead: pause first (stops output so the pipeline can be re-armed
-            // while we still hold the route), advance, then `preroll` to prime ALL
-            // render pipelines (including the AirPlay output path) and only start
-            // output once it reports ready.
-            player.pause()
-            player.advanceToNextItem()
-            observeEnd(of: item)
-            await prerollThenStart(generation: generation, path: "FAST-PATH")
-            guard generation == trackTransitionGeneration else {
-                diag("start", "FAST-PATH superseded after preroll gen=\(generation) current=\(trackTransitionGeneration)")
-                return
+            if reactivateRoute {
+                // MANUAL SKIP hand-off (the skip-drop fix). `advanceToNextItem()`
+                // on a progressive-download item makes the HomePod re-negotiate its
+                // AirPlay 2 stream; a plain `play()` into that still-renegotiating
+                // sink silently drops (player keeps reporting .playing, NO event).
+                // The proven cure — same as the seek path — is a full audio-session
+                // deactivate→reactivate cycle, which forces tvOS to re-establish the
+                // HomePod stream from scratch. Pause first so the reactivation lands
+                // while output is stopped, then preroll-gated restart.
+                player.pause()
+                player.advanceToNextItem()
+                observeEnd(of: item)
+                await reactivateAndStart(generation: generation, path: "FAST-PATH")
+                guard generation == trackTransitionGeneration else {
+                    diag("start", "FAST-PATH superseded after restart gen=\(generation) current=\(trackTransitionGeneration)")
+                    return
+                }
+            } else {
+                // NATURAL GAPLESS END — the treadmill's whole purpose. The next item
+                // is already prerolled behind this one, so a plain advance+play is a
+                // seamless hand-off that keeps the AirPlay route alive with NO gap.
+                // Deliberately no pause / no reactivation here (that would insert an
+                // audible gap between album tracks).
+                player.advanceToNextItem()
+                observeEnd(of: item)
+                player.play()
+                diag("start", "FAST-PATH natural gapless hand-off route=\(routeSummary()) state=[\(playerStateSummary())]")
             }
             // Restore normal buffering now that this item is the one playing.
             player.currentItem?.preferredForwardBufferDuration = 0
@@ -803,14 +816,14 @@ public final class AudioPlaybackController {
                 return
             }
             diag("start", "HARD-PATH buffered itemStatus=\(item.status.rawValue) likelyToKeepUp=\(item.isPlaybackLikelyToKeepUp) bufferFull=\(item.isPlaybackBufferFull) — advancing")
-            // Prime-then-play (see FAST-PATH): pause, advance, preroll the AirPlay
-            // pipeline, then start output only once it's armed.
+            // Manual jump / new queue — an inherent discontinuity, so use the same
+            // proven deactivate→reactivate cycle to keep the HomePod stream alive.
             player.pause()
             player.advanceToNextItem()
             observeEnd(of: item)
-            await prerollThenStart(generation: generation, path: "HARD-PATH")
+            await reactivateAndStart(generation: generation, path: "HARD-PATH")
             guard generation == trackTransitionGeneration else {
-                diag("start", "HARD-PATH superseded after preroll gen=\(generation) current=\(trackTransitionGeneration)")
+                diag("start", "HARD-PATH superseded after restart gen=\(generation) current=\(trackTransitionGeneration)")
                 return
             }
             player.currentItem?.preferredForwardBufferDuration = 0
@@ -939,15 +952,21 @@ public final class AudioPlaybackController {
         }
     }
 
-    /// Primes every render pipeline for the just-advanced current item — crucially
-    /// the AirPlay 2 output path to the HomePod — with `preroll` BEFORE starting
-    /// output, then starts with `playImmediately` only once the pipeline reports
-    /// armed. This closes the window where a plain `play()` feeds a "play now"
-    /// signal to a HomePod that is still re-negotiating its AirPlay stream for the
-    /// new item and silently drops. Falls back to a stall-avoidance `play()` if the
-    /// preroll can't complete (item not ready, times out, or superseded) so a slow
-    /// server never hangs a skip. Generation-guarded by the caller.
-    private func prerollThenStart(generation: Int, path: String) async {
+    /// Re-establishes the HomePod AirPlay stream for the just-advanced item, then
+    /// starts output. The winning move (proven on the seek path) is a full audio-
+    /// session deactivate→reactivate cycle: `setActive(true)` alone is a no-op on an
+    /// already-active session, but toggling it off then on forces tvOS to
+    /// re-negotiate the HomePod stream from scratch — which is what keeps a skip
+    /// from silently dropping. After reactivating we `preroll` the render pipelines
+    /// and start with `playImmediately` once armed, else fall back to a stall-
+    /// avoidance `play()`. The player is expected to be paused on entry so the
+    /// reactivation lands with output stopped. Generation-guarded by the caller.
+    private func reactivateAndStart(generation: Int, path: String) async {
+        #if canImport(AVFoundation) && !os(macOS)
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        try? session.setActive(true)
+        #endif
         let prerolled = await prerollCurrentItem(timeout: 1.5)
         guard generation == trackTransitionGeneration else { return }
         if prerolled {
@@ -955,7 +974,7 @@ public final class AudioPlaybackController {
         } else {
             player.play()
         }
-        diag("start", "\(path) post-advance prerolled=\(prerolled) route=\(routeSummary()) state=[\(playerStateSummary())]")
+        diag("start", "\(path) post-advance reactivated prerolled=\(prerolled) route=\(routeSummary()) state=[\(playerStateSummary())]")
     }
 
     /// Awaits `AVPlayer.preroll(atRate:)` for the current item, returning whether it

@@ -77,6 +77,7 @@ public final class NativeVideoEngine: VideoEngine {
     /// protocol.
     public var onTracksChanged: (@MainActor () -> Void)?
     public var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
+    public var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 
     // MARK: Configuration
 

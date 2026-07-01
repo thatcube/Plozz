@@ -473,6 +473,18 @@ public final class PlayerViewModel {
             }
             #endif
         }
+        // Same as above but for the engine's SECONDARY (dual) subtitle stream. This
+        // is the dual-subtitle path for embedded tracks that have no fetchable
+        // sidecar URL (e.g. Plex direct-play MKV): AetherEngine/Plozzigen decodes
+        // the second track itself and pushes its cues here. Inert unless
+        // `beginSecondaryLiveFeed()` has been called (guarded inside the model).
+        engine.onSecondarySubtitleCues = { [weak self] cues in
+            guard let self else { return }
+            self.liveSubtitles.updateSecondaryLiveCues(cues)
+            if self.selectedSecondarySubtitleTrackID != nil {
+                self.controls.secondarySubtitleStatus = .loaded(cueCount: cues.count)
+            }
+        }
     }
 
     /// Called when the active engine reports a clean playthrough to the end of the
@@ -1961,6 +1973,9 @@ public final class PlayerViewModel {
             selectedSecondarySubtitleTrackID = nil
             secondaryCueLoadTask?.cancel()
             secondaryCueLoadTask = nil
+            if engine.capabilities.contains(.dualSubtitleDecode) {
+                engine.selectSecondarySubtitleTrack(nil)
+            }
             liveSubtitles.loadSecondary(nil)
             controls.secondarySubtitleStatus = .idle
             if style.secondary != nil {
@@ -2260,6 +2275,25 @@ public final class PlayerViewModel {
     /// non-image text track Jellyfin exposes is therefore eligible; the current
     /// primary is dropped when its id matches.
     private func eligibleSecondarySubtitleTracks() -> [MediaTrack] {
+        // Engines that decode a second subtitle stream themselves (Plozzigen)
+        // source the dual picker from the ENGINE's own tracks (FFmpeg AVStream
+        // ids), so embedded tracks with no fetchable sidecar URL are selectable —
+        // the engine demuxes them. Include every subtitle track except the current
+        // primary (the viewer asked to be able to pick "all of them"); the exclude
+        // keys off the same engine id-space as `selectedSubtitleTrackID`.
+        if engine.capabilities.contains(.dualSubtitleDecode) {
+            let engineSubs = engine.subtitleTracks
+            let eligible = engineSubs.filter { $0.id != selectedSubtitleTrackID }
+            #if DEBUG
+            PlozzLog.playback.debug(
+                "Secondary eligible (engine-dual): \(eligible.count) of \(engineSubs.count) engine subs (primary id \(self.selectedSubtitleTrackID.map(String.init) ?? "off"))"
+            )
+            #endif
+            return eligible
+        }
+        // Sidecar path (native/mpv): the second line renders through Plozz's
+        // overlay from a parsed VTT, so only text tracks with a fetchable URL,
+        // excluding the primary, qualify.
         let providerSubs = request?.subtitleTracks ?? []
         let eligible = providerSubs.filter {
             !$0.isImageBasedSubtitle && $0.deliveryURL != nil && $0.id != selectedSubtitleTrackID
@@ -2278,10 +2312,17 @@ public final class PlayerViewModel {
     /// track also enables the secondary *styling* (`style.secondary`) so the
     /// overlay actually draws the line; turning it off clears both.
     public func selectSecondarySubtitleOption(id: Int) {
+        let engineDual = engine.capabilities.contains(.dualSubtitleDecode)
         if id == PlayerTrackOption.offID {
             secondaryCueLoadTask?.cancel()
             secondaryCueLoadTask = nil
             selectedSecondarySubtitleTrackID = nil
+            if engineDual {
+                // Tell the engine to stop decoding the second stream, then drop the
+                // live-fed cues. `loadSecondary(nil)` also flips the model out of
+                // secondary-live mode and empties the second line.
+                engine.selectSecondarySubtitleTrack(nil)
+            }
             liveSubtitles.loadSecondary(nil)
             controls.secondarySubtitleStatus = .idle
             if style.secondary != nil {
@@ -2303,7 +2344,19 @@ public final class PlayerViewModel {
             enabled.secondary = SubtitleStyle.Secondary()
             applySubtitleStyle(enabled)
         }
-        loadSecondaryOverlaySubtitle(track)
+        if engineDual {
+            // Engine decodes the embedded second track itself and publishes its
+            // cues via `onSecondarySubtitleCues` (wired in configureEngineCallbacks),
+            // which the model draws through secondary-live mode. This is what makes
+            // dual subtitles work for tracks with no fetchable sidecar URL (Plex
+            // direct-play MKV). Status flips to `.loaded` when the first cues land.
+            secondaryCueLoadTask?.cancel()
+            secondaryCueLoadTask = nil
+            liveSubtitles.beginSecondaryLiveFeed()
+            engine.selectSecondarySubtitleTrack(track)
+        } else {
+            loadSecondaryOverlaySubtitle(track)
+        }
         loadTrackOptions()
     }
 

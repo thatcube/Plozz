@@ -44,6 +44,12 @@ public struct PlayerEngineCapabilities: OptionSet, Sendable {
     public static let subtitleDelay = PlayerEngineCapabilities(rawValue: 1 << 2)
     /// Engine can boost dialog intelligibility via an audio filter.
     public static let dialogEnhance = PlayerEngineCapabilities(rawValue: 1 << 3)
+    /// Engine can decode a *second* subtitle stream concurrently and publish its
+    /// cues via `onSecondarySubtitleCues`, so the dual/second line can be drawn
+    /// from the container itself (AetherEngine/Plozzigen) — no fetchable sidecar
+    /// URL required. Engines without this fall back to the sidecar overlay, which
+    /// needs a provider-supplied `deliveryURL` on the secondary track.
+    public static let dualSubtitleDecode = PlayerEngineCapabilities(rawValue: 1 << 4)
 }
 
 /// Engine-agnostic abstraction over a single playback session.
@@ -202,6 +208,14 @@ public protocol VideoEngine: AnyObject {
     /// Selects a subtitle track (or `nil` to disable subtitles).
     func selectSubtitleTrack(_ track: MediaTrack?)
 
+    /// Selects a *secondary* subtitle track for the dual/second line (or `nil` to
+    /// clear it). Only meaningful on engines advertising
+    /// ``PlayerEngineCapabilities/dualSubtitleDecode`` — they decode the second
+    /// stream themselves and emit its cues via ``onSecondarySubtitleCues``. Other
+    /// engines no-op (default below); the owner drives their second line from a
+    /// parsed sidecar instead.
+    func selectSecondarySubtitleTrack(_ track: MediaTrack?)
+
     // MARK: Orchestration callbacks
 
     /// Fired on the report cadence (see the implementation's interval) so the
@@ -238,6 +252,14 @@ public protocol VideoEngine: AnyObject {
     /// or a parsed sidecar timeline — never fire it. Invoked on the main actor.
     var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)? { get set }
 
+    /// Fired with the engine's decoded *secondary* (dual-line) subtitle cues, for
+    /// engines that decode a second subtitle stream concurrently
+    /// (``PlayerEngineCapabilities/dualSubtitleDecode``). Same read-ahead-buffer
+    /// semantics as ``onSubtitleCues``; the owner time-filters it against the
+    /// playhead. Never fired on engines without dual decode. Invoked on the main
+    /// actor.
+    var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)? { get set }
+
     // MARK: View
 
     #if canImport(UIKit)
@@ -258,6 +280,12 @@ public protocol VideoEngine: AnyObject {
 public extension VideoEngine {
     /// Default: engines that don't track buffering report no buffer fill.
     var bufferedPosition: TimeInterval { 0 }
+
+    /// Default no-op: only engines advertising
+    /// ``PlayerEngineCapabilities/dualSubtitleDecode`` decode a second subtitle
+    /// stream. Others rely on the owner's parsed-sidecar second line, so there's
+    /// nothing to select here.
+    func selectSecondarySubtitleTrack(_ track: MediaTrack?) {}
 
     /// Default: the engine can't authoritatively name its active audio track, so
     /// the owner falls back to the container `isDefault` heuristic. Engines that

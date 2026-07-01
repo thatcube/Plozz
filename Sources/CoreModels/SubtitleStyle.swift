@@ -356,6 +356,25 @@ public extension SubtitleStyle {
             edge: Edge(style: legacy.edgeStyle),
             followsSystemStyle: legacy.followsSystemStyle
         )
+        foldUniformEdgeIntoBorder()
+    }
+}
+
+// MARK: - Edge normalisation
+
+extension SubtitleStyle {
+    /// Folds a legacy `.uniform` edge — the old "second outline" — into the single
+    /// explicit `border`, then drops the edge to shadow-only. Shadow and outline
+    /// are now two independent concerns in the model and menu, so any persisted
+    /// style, migrated `CaptionSettings`, or preset that expressed an outline via
+    /// the edge round-trips through the one Outline control, and no live style
+    /// carries a `.uniform` edge any more.
+    mutating func foldUniformEdgeIntoBorder() {
+        guard edge.style == .uniform else { return }
+        if !border.isEnabled {
+            border = Border(isEnabled: true, color: edge.color, width: edge.thickness)
+        }
+        edge.style = .none
     }
 }
 
@@ -381,7 +400,7 @@ public extension SubtitleStyle {
         )),
         Preset(id: "outline", name: "Outline", style: SubtitleStyle(
             background: Background(isEnabled: false),
-            edge: Edge(style: .uniform, thickness: 2),
+            edge: Edge(style: .none),
             border: Border(isEnabled: true, color: .black, width: 1.5)
         )),
         Preset(id: "classic-yellow", name: "Classic Yellow", style: SubtitleStyle(
@@ -421,5 +440,6 @@ extension SubtitleStyle {
             secondary: try c.decodeIfPresent(Secondary.self, forKey: .secondary),
             followsSystemStyle: try c.decodeIfPresent(Bool.self, forKey: .followsSystemStyle) ?? d.followsSystemStyle
         )
+        foldUniformEdgeIntoBorder()
     }
 }

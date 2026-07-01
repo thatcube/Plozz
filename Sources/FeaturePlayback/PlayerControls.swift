@@ -791,7 +791,7 @@ struct PlayerControls: View {
         case .download: return "Download Subtitles"
         case .style: return "Subtitle Style"
         case .styleFont: return "Font"
-        case .styleOutline: return "Outline & Border"
+        case .styleOutline: return "Shadow & Outline"
         case .styleBackground: return "Background"
         case .styleDual: return "Dual Subtitles"
         }
@@ -1084,7 +1084,7 @@ struct PlayerControls: View {
 
         // The submenu group + Reset sit under a divider, wherever the knobs above end.
         let dividerBefore = slot
-        rows.append(StyleRowSpec(slot: slot, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) }))); slot += 1
+        rows.append(StyleRowSpec(slot: slot, title: "Shadow & Outline", kind: .submenu(summary: Self.edgeSummary(s), open: { openSubtitleScreen(.styleOutline) }))); slot += 1
         rows.append(StyleRowSpec(slot: slot, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) }))); slot += 1
         rows.append(StyleRowSpec(slot: slot, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) }))); slot += 1
         rows.append(StyleRowSpec(slot: slot, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } }))); slot += 1
@@ -1147,20 +1147,25 @@ struct PlayerControls: View {
         return .system(size: size)
     }
 
-    /// Advanced outline (edge) + explicit glyph border.
+    /// Shadow (depth) + a single glyph Outline — two independent concerns that
+    /// compose freely (e.g. a drop shadow *and* an outline at once). Rows for each
+    /// group's colour/size reveal only when that group is active, so there are no
+    /// dead controls and never two competing "outline" concepts.
     private var styleOutlineRows: [StyleRowSpec] {
         let s = model.subtitleStyle
-        var rows: [StyleRowSpec] = [
-            choiceRow(0, "Outline Style", options: SubtitleEdgeStyle.allCases, current: s.edge.style, label: { $0.displayName }) { v in updateStyle { $0.edge.style = v } },
-            colorRow(1, "Outline Colour", options: Self.textColorOptions, current: s.edge.color, label: Self.colorLabel) { c in updateStyle { $0.edge.color = c } },
-            numberRow(2, "Outline Thickness", options: Self.thicknessOptions, current: Int(s.edge.thickness.rounded()), label: { "\($0)" }) { v in updateStyle { $0.edge.thickness = Double(v) } },
-            StyleRowSpec(slot: 3, title: "Glyph Border", kind: .toggle(isOn: s.border.isEnabled, flip: { updateStyle { $0.border.isEnabled.toggle() } })),
-        ]
-        // Border colour/width only draw anything once the border is on, so they
-        // reveal with the toggle (no dead rows) — same pattern as HDR/dual gating.
+        var rows: [StyleRowSpec] = []
+        var slot = 0
+
+        rows.append(choiceRow(slot, "Shadow", options: Self.shadowStyleOptions, current: s.edge.style, label: { $0.displayName }) { v in updateStyle { $0.edge.style = v } }); slot += 1
+        if s.edge.style != .none {
+            rows.append(colorRow(slot, "Shadow Colour", options: Self.textColorOptions, current: s.edge.color, label: Self.colorLabel) { c in updateStyle { $0.edge.color = c } }); slot += 1
+            rows.append(numberRow(slot, "Shadow Thickness", options: Self.thicknessOptions, current: Int(s.edge.thickness.rounded()), label: { "\($0)" }) { v in updateStyle { $0.edge.thickness = Double(v) } }); slot += 1
+        }
+
+        rows.append(StyleRowSpec(slot: slot, title: "Outline", kind: .toggle(isOn: s.border.isEnabled, flip: { updateStyle { $0.border.isEnabled.toggle() } }))); slot += 1
         if s.border.isEnabled {
-            rows.append(colorRow(4, "Border Colour", options: Self.textColorOptions, current: s.border.color, label: Self.colorLabel) { c in updateStyle { $0.border.color = c } })
-            rows.append(numberRow(5, "Border Width", options: Self.thicknessOptions, current: Int(s.border.width.rounded()), label: { "\($0)" }) { v in updateStyle { $0.border.width = Double(v) } })
+            rows.append(colorRow(slot, "Outline Colour", options: Self.textColorOptions, current: s.border.color, label: Self.colorLabel) { c in updateStyle { $0.border.color = c } }); slot += 1
+            rows.append(numberRow(slot, "Outline Width", options: Self.thicknessOptions, current: Int(s.border.width.rounded()), label: { "\($0)" }) { v in updateStyle { $0.border.width = Double(v) } }); slot += 1
         }
         return rows
     }
@@ -1312,6 +1317,9 @@ struct PlayerControls: View {
     /// `hdrLuminanceScale` (0.2–1.0); only surfaced while HDR is live.
     private static let hdrBrightnessOptions: [Int] = Array(stride(from: 20, through: 100, by: 5))
     private static let thicknessOptions: [Int] = Array(stride(from: 0, through: 10, by: 1))
+    /// Shadow (depth) styles only — the outline is now its own toggle, so the old
+    /// `.uniform` case is intentionally not offered here.
+    private static let shadowStyleOptions: [SubtitleEdgeStyle] = [.none, .dropShadow, .raised, .depressed]
     /// Corner radius in points, then a large sentinel the box renderer clamps to a
     /// perfect capsule (`UIBezierPath` caps the radius at half the shorter side),
     /// so the top of the range always reads as "fully rounded" at any box size.
@@ -1365,6 +1373,16 @@ struct PlayerControls: View {
     /// even when its opacity has been dialled down elsewhere.
     private static func colorLabel(_ color: SubtitleColor) -> String {
         SubtitleColor.presets.first(where: { $0.color.red == color.red && $0.color.green == color.green && $0.color.blue == color.blue })?.name ?? "Custom"
+    }
+
+    /// Compact summary for the "Shadow & Outline" submenu row: names whichever of
+    /// the two independent effects are active, e.g. "Shadow", "Outline",
+    /// "Shadow + Outline", or "Off" when neither is on.
+    private static func edgeSummary(_ s: SubtitleStyle) -> String {
+        var parts: [String] = []
+        if s.edge.style != .none { parts.append(s.edge.style.displayName) }
+        if s.border.isEnabled { parts.append("Outline") }
+        return parts.isEmpty ? "Off" : parts.joined(separator: " + ")
     }
 
     private static func boxColorLabel(_ color: SubtitleColor) -> String {

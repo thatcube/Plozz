@@ -118,9 +118,9 @@ struct MusicLandingView: View {
     /// buttons' left margin. No header — the labelled buttons are self-evident.
     private func entryTiles(trailing: AnyView?) -> some View {
         HStack(alignment: .center, spacing: metrics.cardSpacing) {
-            BrowseButton(title: "Artists") { onSelectRoute(.grid(.artist)) }
-            BrowseButton(title: "Albums") { onSelectRoute(.grid(.album)) }
             BrowseButton(title: "Playlists") { onSelectRoute(.grid(.playlist)) }
+            BrowseButton(title: "Albums") { onSelectRoute(.grid(.album)) }
+            BrowseButton(title: "Artists") { onSelectRoute(.grid(.artist)) }
             BrowseButton(title: "Genres") { onSelectRoute(.grid(.genre)) }
             Spacer(minLength: metrics.cardSpacing)
             if let trailing { trailing }
@@ -131,8 +131,9 @@ struct MusicLandingView: View {
 
 /// A text-only Browse category button. Its height matches the Now Playing card
 /// (`NowPlayingCard.nominalHeight`) so the buttons and the card line up on one
-/// row. Uses the shared glass-card focus — the same treatment as every other
-/// media card — rather than a bespoke focus style.
+/// row. Fully rounded (a capsule: corner radius = half its height). Uses the
+/// shared glass-card focus — the same treatment as every other media card —
+/// rather than a bespoke focus style.
 private struct BrowseButton: View {
     let title: String
     let action: () -> Void
@@ -145,14 +146,18 @@ private struct BrowseButton: View {
         PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
     }
 
+    /// Full-round: the pill's radius is half its height so the ends are perfect
+    /// semicircles at every density.
+    private var cornerRadius: CGFloat { NowPlayingCard.nominalHeight / 2 }
+
     var body: some View {
         Text(title)
             .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
             .foregroundStyle(titleColor)
             .padding(.horizontal, PlozzTheme.Spacing.xLarge)
             .frame(height: NowPlayingCard.nominalHeight)
-            .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
-            .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+            .plozzGlassCard(cornerRadius: cornerRadius, isFocused: isFocused)
+            .focusableCard(isFocused: $isFocused, cornerRadius: cornerRadius, action: action)
             .plozzCardRasterize(reduceTransparency: reduceTransparency)
             .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
             .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://testflight.apple.com/join/EKfReNMu"><img src="docs/assets/testflight-button.png" alt="Join the TestFlight beta" width="210" /></a>
+  <a href="https://testflight.apple.com/join/EKfReNMu"><img src="docs/assets/testflight-button.png" alt="Join the Plozz public beta on TestFlight" width="210" /></a>
 </p>
 
 <p align="center">
@@ -17,6 +17,10 @@
   <a href="https://www.apple.com/apple-tv-4k/"><img src="https://img.shields.io/badge/Platform-tvOS-black.svg?logo=apple" alt="Platform: tvOS" /></a>
   <a href="https://github.com/sponsors/thatcube"><img src="https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white" alt="Donate" /></a>
 </p>
+
+## Try the beta
+
+Plozz is in **public beta** on TestFlight. [**Join the beta →**](https://testflight.apple.com/join/EKfReNMu) to install it on your Apple TV (tvOS 17 or later) and stream from your own Jellyfin or Plex server.
 
 ## Features
 

@@ -53,6 +53,7 @@ enum SettingsRoute: Hashable {
     case integrations
     case attributions
     case help
+    case recentActivity
     case plexUser(accountID: String)
     case server(key: String)
 }

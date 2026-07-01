@@ -478,6 +478,8 @@ public struct SettingsView: View {
                 crashReporting: crashReporting,
                 crashReportingConfigured: crashReportingConfigured
             )
+        case .recentActivity:
+            RecentActivityDetailView()
         case let .plexUser(accountID):
             PlexLinkedUserDetailView(context: context, accountID: accountID)
         case let .server(key):

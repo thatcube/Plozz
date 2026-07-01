@@ -130,35 +130,38 @@ struct HelpDiagnosticsDetailView: View {
         }
     }
 
-    // MARK: - Recent activity (read-only, redacted)
+    // MARK: - Recent activity (read-only, redacted) — opens its own page
 
     private var recentActivityPanel: some View {
-        FocusableSettingsPanel(
-            title: "Recent Activity",
+        SettingsPanel(
             footer: "The most recent app log lines, kept only on this Apple TV and already stripped of tokens and secrets. Shown so a maintainer can ask what Plozz was doing when a bug happened."
         ) {
-            let entries = PlozzLog.recentEntries(limit: 40)
-            if entries.isEmpty {
-                Text("No activity recorded yet.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(entries.reversed()) { entry in
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Text(entry.category)
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 120, alignment: .leading)
-                            Text(entry.message)
-                                .font(.system(.caption, design: .monospaced))
-                                .lineLimit(2)
-                                .truncationMode(.middle)
-                        }
+            NavigationLink(value: SettingsRoute.recentActivity) {
+                SettingsRowLabel(icon: "list.bullet.rectangle", title: "Recent Activity") {
+                    Text("The latest app log lines from this Apple TV")
+                        .font(.subheadline)
+                        .settingsRowSecondary()
+                        .lineLimit(1)
+                } trailing: {
+                    HStack(spacing: 16) {
+                        Text(recentActivityCountLabel)
+                            .font(.subheadline)
+                            .settingsRowSecondary()
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .settingsRowSecondary()
                     }
                 }
             }
+            .buttonStyle(SettingsFocusButtonStyle())
         }
+    }
+
+    private var recentActivityCountLabel: String {
+        let count = PlozzLog.recentEntries(limit: 500).count
+        guard count > 0 else { return "None yet" }
+        return count == 1 ? "1 line" : "\(count) lines"
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {

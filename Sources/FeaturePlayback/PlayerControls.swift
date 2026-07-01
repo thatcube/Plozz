@@ -298,7 +298,7 @@ struct PlayerControls: View {
         let contentPad: CGFloat = 24
         let cardRadius = thumbRadius + contentPad
 
-        return HStack(alignment: .top, spacing: 26) {
+        return HStack(alignment: .top, spacing: 28) {
             infoThumbnail(cornerRadius: thumbRadius)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -325,7 +325,11 @@ struct PlayerControls: View {
                         .padding(.top, 4)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // Cap the text block to a comfortable reading measure so a full-width
+            // card doesn't stretch the overview into very long lines.
+            .frame(maxWidth: 760, alignment: .leading)
+
+            Spacer(minLength: 32)
 
             VStack(spacing: 12) {
                 if model.hasNextEpisode {
@@ -344,17 +348,17 @@ struct PlayerControls: View {
                     focus = .button(.info)
                 }
             }
-            .frame(width: 260)
+            .frame(width: 340)
         }
         .padding(contentPad)
-        .frame(maxWidth: 1180, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(PanelGlassBackground(cornerRadius: cardRadius))
     }
 
     private func infoThumbnail(cornerRadius: CGFloat) -> some View {
         Color.clear
             .aspectRatio(16.0 / 9.0, contentMode: .fit)
-            .frame(width: 300)
+            .frame(width: 360)
             .overlay {
                 FallbackAsyncImage(urls: model.artworkURLs) {
                     Rectangle().fill(Color.white.opacity(0.08))
@@ -379,6 +383,7 @@ struct PlayerControls: View {
         Button(action: action) {
             Label(title, systemImage: icon)
                 .font(.headline)
+                .lineLimit(1)
                 .frame(maxWidth: .infinity)
         }
         .playerGlassButton(prominent: prominent)

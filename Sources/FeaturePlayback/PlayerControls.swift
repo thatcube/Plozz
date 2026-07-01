@@ -176,6 +176,11 @@ struct PlayerControls: View {
             // clear our binding when focus leaves the bar.
             if !focused { focus = nil }
         }
+        .onChange(of: styleEditing) { _, editing in
+            // Reset the measured Style-panel height on close so the next open snaps
+            // to its natural size instead of morphing from a stale value.
+            if !editing { styleBodyHeight = 0 }
+        }
         .onChange(of: openPanel) { _, panel in
             subtitleScreen = .tracks
             guard let panel else {
@@ -583,8 +588,18 @@ struct PlayerControls: View {
         .colorScheme(.dark)
         .modifier(PanelGlassBackground())
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .animation(.easeInOut(duration: 0.28), value: styleBodyHeight)
-        .onPreferenceChange(PanelBodyHeightKey.self) { styleBodyHeight = $0 }
+        // Drive the height change explicitly: `.animation(_, value:)` does NOT
+        // reliably fire for preference-driven state (the value settles a frame
+        // after layout), so wrap the mutation in `withAnimation`. The very first
+        // measurement snaps in (no grow-from-zero); every later change morphs.
+        .onPreferenceChange(PanelBodyHeightKey.self) { newHeight in
+            guard newHeight > 0, newHeight != styleBodyHeight else { return }
+            if styleBodyHeight == 0 {
+                styleBodyHeight = newHeight
+            } else {
+                withAnimation(.easeInOut(duration: 0.28)) { styleBodyHeight = newHeight }
+            }
+        }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 

@@ -2202,25 +2202,25 @@ public final class PlayerViewModel {
 
     // MARK: - Dual (secondary) subtitle
 
-    /// The tracks a second subtitle line can show: any non-image (text) subtitle,
-    /// resolved to a sidecar URL the overlay can parse, excluding the current
-    /// primary. The advanced engine demuxes embedded text subs *without* a
-    /// `deliveryURL` (and `enriched` doesn't copy the provider's URL over), so we
-    /// fall back to the provider's VTT stream — Jellyfin serves any text sub as a
-    /// sidecar. Routing keys off `isImageBasedSubtitle`, never `deliveryURL == nil`,
-    /// so embedded text tracks are eligible (that was the "None available" bug).
+    /// The tracks a second subtitle line can show. Sourced from the PROVIDER's
+    /// subtitle probe (`request.subtitleTracks`), not the engine's demuxed tracks,
+    /// because the overlay fetches + parses the sidecar itself and only the provider
+    /// reliably carries a text sub's VTT `deliveryURL` — the advanced engine's
+    /// embedded-text tracks have none, and their ids may not even line up with the
+    /// provider's (which is why matching by id showed "None available"). Every
+    /// non-image text track Jellyfin exposes is therefore eligible; the current
+    /// primary is dropped when its id matches.
     private func eligibleSecondarySubtitleTracks() -> [MediaTrack] {
         let providerSubs = request?.subtitleTracks ?? []
-        return engine.subtitleTracks.compactMap { track in
-            let provider = providerSubs.first { $0.id == track.id }
-            let merged = track.enriched(withProvider: provider)
-            guard !merged.isImageBasedSubtitle,
-                  merged.id != selectedSubtitleTrackID,
-                  let url = merged.deliveryURL ?? provider?.deliveryURL else { return nil }
-            var resolved = merged
-            resolved.deliveryURL = url
-            return resolved
+        let eligible = providerSubs.filter {
+            !$0.isImageBasedSubtitle && $0.deliveryURL != nil && $0.id != selectedSubtitleTrackID
         }
+        #if DEBUG
+        PlozzLog.playback.debug(
+            "Secondary eligible: \(eligible.count) of \(providerSubs.count) provider subs (primary id \(self.selectedSubtitleTrackID.map(String.init) ?? "off"))"
+        )
+        #endif
+        return eligible
     }
 
     /// Selects the second (dual) subtitle track, or turns the second line off

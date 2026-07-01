@@ -306,6 +306,7 @@ public final class AudioPlaybackController {
     /// speaker doesn't stay silent until it's physically reconnected.
     private var routeChangeObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
+    private var diagnosticItemObservers: [NSObjectProtocol] = []
     /// Last `timeControlStatus` we logged, so the time observer only records
     /// *transitions* (playing→waiting→paused) rather than 4×/sec noise. A
     /// playing→waiting→paused slide with no user pause is the fingerprint of an
@@ -484,11 +485,13 @@ public final class AudioPlaybackController {
 
     public func seek(to seconds: TimeInterval) async {
         let target = max(0, seconds)
+        diag("seek", "seek→\(String(format: "%.1f", target))s route=\(routeSummary()) preState=[\(playerStateSummary())]")
         await player.seek(
             to: CMTime(seconds: target, preferredTimescale: 600),
             toleranceBefore: .zero,
             toleranceAfter: .zero
         )
+        diag("seek", "seek done route=\(routeSummary()) postState=[\(playerStateSummary())]")
         currentTime = target
         #if canImport(MediaPlayer)
         updateNowPlayingInfo()
@@ -1150,8 +1153,40 @@ public final class AudioPlaybackController {
         ) { [weak self] note in
             MainActor.assumeIsolated { self?.handleInterruption(note) }
         }
+        // Diagnostics: catch player-item stalls and errors. When the HomePod is the
+        // Apple TV's system audio output ("Use as TV Speakers"), tvOS forwards audio
+        // below the app layer, so a drop does NOT change the audio-session route
+        // (which stays HDMI) and posts NO interruption. In that setup a stall or a
+        // playback error-log entry may be the ONLY app-visible signal that the
+        // HomePod link broke, so log them all with the route + player state.
+        for name in [Notification.Name.AVPlayerItemPlaybackStalled,
+                     .AVPlayerItemFailedToPlayToEndTime,
+                     .AVPlayerItemNewErrorLogEntry] {
+            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                MainActor.assumeIsolated { self?.handlePlayerItemDiagnostic(name, note) }
+            }
+            diagnosticItemObservers.append(token)
+        }
         #endif
     }
+
+    #if canImport(AVFoundation) && !os(macOS)
+    /// Logs player-item stall / failure / error-log notifications — the only
+    /// app-visible signals when a home-theater HomePod link drops without any
+    /// audio-session route change or interruption.
+    private func handlePlayerItemDiagnostic(_ name: Notification.Name, _ note: Notification) {
+        var detail = ""
+        if name == .AVPlayerItemFailedToPlayToEndTime,
+           let err = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
+            detail = " error=\(err.localizedDescription)"
+        } else if name == .AVPlayerItemNewErrorLogEntry,
+                  let item = note.object as? AVPlayerItem,
+                  let entry = item.errorLog()?.events.last {
+            detail = " errorLog=[status=\(entry.errorStatusCode) domain=\(entry.errorDomain) \(entry.errorComment ?? "")]"
+        }
+        diag("itemevent", "\(name.rawValue)\(detail) route=\(routeSummary()) state=[\(playerStateSummary())]")
+    }
+    #endif
 
     #if canImport(AVFoundation) && !os(macOS)
     private func handleRouteChange(_ note: Notification) {

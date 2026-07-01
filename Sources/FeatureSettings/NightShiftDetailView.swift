@@ -12,7 +12,7 @@ struct NightShiftDetailView: View {
     @Bindable var model: NightShiftSettingsModel
 
     var body: some View {
-        SettingsSplitLayout(title: "Night Shift", sections: sections)
+        SettingsSplitLayout(sections: sections)
             .onChange(of: model.settings.isEnabled) { _, enabled in
                 if !enabled { model.isPreviewing = false }
             }
@@ -22,82 +22,23 @@ struct NightShiftDetailView: View {
     private var sections: [SettingsSplitSection] {
         @Bindable var model = model
 
-        var sections: [SettingsSplitSection] = [
-            SettingsSplitSection(id: "night-shift", header: nil, rows: [
-                SettingsSplitRow(
-                    id: "enable",
-                    title: "Enable Night Shift",
-                    description: model.scheduleSummary(),
-                    valueSummary: model.settings.isEnabled ? "On" : "Off"
-                ) {
-                    Toggle("Enable Night Shift", isOn: $model.settings.isEnabled)
-                }
-            ])
-        ]
-
-        guard model.settings.isEnabled else { return sections }
-
-        var scheduleRows: [SettingsSplitRow] = [
+        // One control governs on/off *and* schedule (Off · Auto · Manual ·
+        // Always On), so the first section is just that plus Fade.
+        var primaryRows: [SettingsSplitRow] = [
             SettingsSplitRow(
-                id: "schedule-mode",
-                title: "Schedule",
-                description: "When the warm tint switches on — at sunset for your location, on a manual clock, or always on.",
-                valueSummary: model.settings.scheduleMode.displayName
+                id: "night-shift",
+                title: "Night Shift",
+                description: "A warm, dimming tint that eases late-night watching.",
+                valueSummary: modeSummary
             ) {
-                SettingsOptionPicker(
-                    options: NightShiftScheduleMode.allCases,
-                    selection: $model.settings.scheduleMode,
-                    title: { $0.displayName }
-                )
+                NightShiftScheduleControl(model: model)
             }
         ]
 
-        switch model.settings.scheduleMode {
-        case .solar:
-            scheduleRows.append(
-                SettingsSplitRow(
-                    id: "location",
-                    title: "Location",
-                    description: "Used to calculate local sunset and sunrise times.",
-                    valueSummary: model.region.name,
-                    indented: true
-                ) { locationMenu }
-            )
-        case .manual:
-            scheduleRows.append(
-                SettingsSplitRow(
-                    id: "turns-on",
-                    title: "Turns on",
-                    description: "The time each evening the warm tint begins to fade in.",
-                    valueSummary: model.clockLabel(minutes: model.settings.manualOnMinutes),
-                    indented: true
-                ) {
-                    timeStepper(minutes: model.settings.manualOnMinutes) {
-                        model.settings.manualOnMinutes = $0
-                    }
-                }
-            )
-            scheduleRows.append(
-                SettingsSplitRow(
-                    id: "turns-off",
-                    title: "Turns off",
-                    description: "The time each morning the warm tint finishes fading out.",
-                    valueSummary: model.clockLabel(minutes: model.settings.manualOffMinutes),
-                    indented: true
-                ) {
-                    timeStepper(minutes: model.settings.manualOffMinutes) {
-                        model.settings.manualOffMinutes = $0
-                    }
-                }
-            )
-        case .alwaysOn:
-            break
-        }
-
-        // Fade only governs the schedule's on/off transition, so it is
-        // irrelevant when the tint is always on.
-        if model.settings.scheduleMode != .alwaysOn {
-            scheduleRows.append(
+        // Fade governs only the on/off transition, so it is irrelevant when the
+        // tint is off or always on.
+        if model.settings.isEnabled, model.settings.scheduleMode != .alwaysOn {
+            primaryRows.append(
                 SettingsSplitRow(
                     id: "fade",
                     title: "Fade",
@@ -116,7 +57,12 @@ struct NightShiftDetailView: View {
             )
         }
 
-        sections.append(SettingsSplitSection(id: "schedule", header: "Schedule", rows: scheduleRows))
+        var sections: [SettingsSplitSection] = [
+            SettingsSplitSection(id: "night-shift", header: nil, rows: primaryRows)
+        ]
+
+        // Off hides the rest — there's nothing to tune when the tint never paints.
+        guard model.settings.isEnabled else { return sections }
 
         sections.append(
             SettingsSplitSection(id: "look", header: "Look", rows: [
@@ -168,26 +114,14 @@ struct NightShiftDetailView: View {
         return sections
     }
 
-    // MARK: - Schedule
-
-    private var locationMenu: some View {
-        Menu {
-            Picker("Location", selection: $model.settings.regionID) {
-                ForEach(NightShiftRegion.sortedCatalog) { region in
-                    Text(region.name).tag(region.id)
-                }
-            }
-            .pickerStyle(.inline)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "mappin.and.ellipse")
-                Text(model.region.name)
-                Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold))
-            }
-            .font(.headline)
-            .padding(.horizontal, 4)
+    /// The current unified mode as a short label for the master list.
+    private var modeSummary: String {
+        guard model.settings.isEnabled else { return "Off" }
+        switch model.settings.scheduleMode {
+        case .solar: return "Auto"
+        case .manual: return "Manual"
+        case .alwaysOn: return "Always On"
         }
-        .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
     }
 
     // MARK: - Appearance
@@ -215,6 +149,130 @@ struct NightShiftDetailView: View {
         NightShiftSettingsModel.fadeOptions.min(by: {
             abs($0 - model.settings.fadeMinutes) < abs($1 - model.settings.fadeMinutes)
         }) ?? 90
+    }
+}
+
+// MARK: - Unified schedule control
+
+/// The single Night Shift control: one segmented toggle —
+/// Off · Auto · Manual · Always On — that folds the old separate "Enable" switch
+/// (now the **Off** segment) into the schedule choice. A live description
+/// follows focus (like Skip Intros / Subtitles), and the mode-specific extras —
+/// a location picker for Auto, the two wrap-around clock steppers for Manual —
+/// sit inline beneath it. Off and Always On need no extras. Extras track the
+/// *committed* selection, not focus, so browsing the segments never shuffles the
+/// layout.
+private struct NightShiftScheduleControl: View {
+    @Bindable var model: NightShiftSettingsModel
+
+    @State private var focusedMode: NightShiftMode?
+
+    /// Focused option wins (live browsing); otherwise describe what's selected.
+    private var describedMode: NightShiftMode { focusedMode ?? mode }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            SettingsSegmentedPicker(
+                options: NightShiftMode.allCases,
+                selection: modeBinding,
+                title: { $0.title },
+                onFocusedOptionChange: { focusedMode = $0 }
+            )
+
+            Text(describedMode.detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentTransition(.opacity)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            modeExtras
+        }
+        .animation(.easeInOut(duration: 0.18), value: describedMode)
+        .animation(.easeInOut(duration: 0.18), value: mode)
+    }
+
+    /// Controls specific to the committed mode: a location picker for Auto, the
+    /// two wrap-around clock steppers for Manual. Off and Always On show nothing.
+    @ViewBuilder
+    private var modeExtras: some View {
+        switch mode {
+        case .off, .alwaysOn:
+            EmptyView()
+        case .auto:
+            LabeledSettingRow("Location") { locationMenu }
+        case .manual:
+            VStack(alignment: .leading, spacing: 20) {
+                LabeledSettingRow("Turns on") {
+                    timeStepper(minutes: model.settings.manualOnMinutes) {
+                        model.settings.manualOnMinutes = $0
+                    }
+                }
+                LabeledSettingRow("Turns off") {
+                    timeStepper(minutes: model.settings.manualOffMinutes) {
+                        model.settings.manualOffMinutes = $0
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Mode binding
+
+    /// The current unified mode, derived from `isEnabled` + `scheduleMode`.
+    private var mode: NightShiftMode {
+        guard model.settings.isEnabled else { return .off }
+        switch model.settings.scheduleMode {
+        case .solar: return .auto
+        case .manual: return .manual
+        case .alwaysOn: return .alwaysOn
+        }
+    }
+
+    /// Writes the unified mode back onto the two persisted fields. Off flips the
+    /// master switch and leaves the last schedule mode intact, so re-enabling
+    /// returns to it; the others enable and select their schedule.
+    private var modeBinding: Binding<NightShiftMode> {
+        Binding(
+            get: { mode },
+            set: { newMode in
+                switch newMode {
+                case .off:
+                    model.settings.isEnabled = false
+                case .auto:
+                    model.settings.isEnabled = true
+                    model.settings.scheduleMode = .solar
+                case .manual:
+                    model.settings.isEnabled = true
+                    model.settings.scheduleMode = .manual
+                case .alwaysOn:
+                    model.settings.isEnabled = true
+                    model.settings.scheduleMode = .alwaysOn
+                }
+            }
+        )
+    }
+
+    // MARK: Extras
+
+    private var locationMenu: some View {
+        Menu {
+            Picker("Location", selection: $model.settings.regionID) {
+                ForEach(NightShiftRegion.sortedCatalog) { region in
+                    Text(region.name).tag(region.id)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "mappin.and.ellipse")
+                Text(model.region.name)
+                Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold))
+            }
+            .font(.headline)
+            .padding(.horizontal, 4)
+        }
+        .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
     }
 
     /// A ±15-minute clock stepper that wraps around midnight. The arrows never
@@ -247,6 +305,35 @@ struct NightShiftDetailView: View {
 
     private func wrappedMinutes(_ raw: Int) -> Int {
         ((raw % 1440) + 1440) % 1440
+    }
+}
+
+// MARK: - Unified mode
+
+/// The four states of the unified Night Shift control. **Off** replaces the old
+/// standalone enable switch; the other three mirror `NightShiftScheduleMode`.
+private enum NightShiftMode: String, CaseIterable, Hashable {
+    case off, auto, manual, alwaysOn
+
+    var title: String {
+        switch self {
+        case .off: return "Off"
+        case .auto: return "Auto"
+        case .manual: return "Manual"
+        case .alwaysOn: return "Always On"
+        }
+    }
+
+    /// One-line, plain-language behaviour shown live under the toggle. Auto and
+    /// Manual stay generic because the concrete schedule (location / times) sits
+    /// right below in the mode's own controls.
+    var detail: String {
+        switch self {
+        case .off: return "The picture is never dimmed or warmed."
+        case .auto: return "Warms automatically from sunset to sunrise for your location."
+        case .manual: return "Warms between two times you set each day."
+        case .alwaysOn: return "Always warm, at full strength, around the clock."
+        }
     }
 }
 

@@ -17,7 +17,7 @@ struct AppearanceDetailView: View {
     }
 
     var body: some View {
-        SettingsSplitLayout(title: "Appearance", sections: sections)
+        SettingsSplitLayout(sections: sections)
     }
 
     private var sections: [SettingsSplitSection] {
@@ -110,7 +110,7 @@ struct SpoilersDetailView: View {
     }
 
     var body: some View {
-        SettingsSplitLayout(title: "Spoiler Protection", sections: sections)
+        SettingsSplitLayout(sections: sections)
     }
 
     private var sections: [SettingsSplitSection] {
@@ -285,7 +285,7 @@ struct PlaybackDetailView: View {
     }
 
     var body: some View {
-        SettingsSplitLayout(title: "Playback", sections: sections)
+        SettingsSplitLayout(sections: sections)
     }
 
     // MARK: - Split sections
@@ -307,36 +307,17 @@ struct PlaybackDetailView: View {
                 id: "subtitle-default",
                 title: "Show subtitles",
                 description: "What Plozz does with subtitles when playback starts. You can still change them while watching.",
-                valueSummary: captions.settings.subtitleMode.displayName
+                valueSummary: perContentTypeEnabled
+                    ? "Per type"
+                    : captions.settings.subtitleMode.displayName
             ) {
-                DescribedSegmentedPicker(
-                    options: CaptionSettings.SubtitleMode.allCases,
-                    selection: $captions.settings.subtitleMode,
-                    title: { $0.displayName },
-                    detail: { $0.detail }
+                SubtitleModeControl(
+                    baseMode: $captions.settings.subtitleMode,
+                    perTypeEnabled: perContentTypeBinding,
+                    categories: Self.policyCategories,
+                    categoryName: { $0.displayName },
+                    categoryMode: { modeBinding(for: $0) }
                 )
-            },
-            SettingsSplitRow(
-                id: "subtitle-per-type",
-                title: "Movie, TV, & Anime defaults",
-                description: "Use a separate subtitle default for each kind of content — for example forced-only on movies but full subtitles on anime.",
-                valueSummary: perContentTypeEnabled ? "On" : "Off"
-            ) {
-                SettingsRevealSection(
-                    isOn: perContentTypeBinding,
-                    masterLabel: "Use per-type defaults",
-                    revealedHeader: "Per Content Type"
-                ) {
-                    ForEach(Self.policyCategories, id: \.self) { category in
-                        LabeledSettingRow(category.displayName) {
-                            SettingsSegmentedPicker(
-                                options: CaptionSettings.SubtitleMode.allCases,
-                                selection: modeBinding(for: category),
-                                title: { $0.displayName }
-                            )
-                        }
-                    }
-                }
             },
             SettingsSplitRow(
                 id: "subtitle-language",
@@ -530,6 +511,75 @@ private struct DescribedSegmentedPicker<Option: Hashable>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .animation(.easeInOut(duration: 0.18), value: describedOption)
+    }
+}
+
+/// The unified "Show subtitles" control: a base Off / On / Forced Only tri-toggle
+/// (the default for everything), an optional "different settings per type" reveal
+/// exposing Movies / TV Shows / Anime tri-toggles, and a *single* live
+/// description that follows focus across every tri-toggle. Off / On / Forced Only
+/// mean the same thing wherever they appear, so one shared line explains the
+/// focused option instead of repeating it four times; it falls back to the base
+/// selection when focus is outside the pickers.
+private struct SubtitleModeControl: View {
+    @Binding var baseMode: CaptionSettings.SubtitleMode
+    @Binding var perTypeEnabled: Bool
+    let categories: [SubtitleContentCategory]
+    let categoryName: (SubtitleContentCategory) -> String
+    let categoryMode: (SubtitleContentCategory) -> Binding<CaptionSettings.SubtitleMode>
+
+    /// The option currently under focus, plus which picker owns that focus. The
+    /// owner check makes the shared line order-independent: a blur reported by
+    /// one picker never clears focus that a sibling took in the same update.
+    @State private var focusedMode: CaptionSettings.SubtitleMode?
+    @State private var focusOwner: Int?
+
+    private var describedMode: CaptionSettings.SubtitleMode { focusedMode ?? baseMode }
+
+    /// `id` 0 is the base picker; the per-type pickers are `1...`.
+    private func reportFocus(owner id: Int, mode: CaptionSettings.SubtitleMode?) {
+        if let mode {
+            focusOwner = id
+            focusedMode = mode
+        } else if focusOwner == id {
+            focusOwner = nil
+            focusedMode = nil
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsSegmentedPicker(
+                options: CaptionSettings.SubtitleMode.allCases,
+                selection: $baseMode,
+                title: { $0.displayName },
+                onFocusedOptionChange: { reportFocus(owner: 0, mode: $0) }
+            )
+
+            SettingsRevealSection(
+                isOn: $perTypeEnabled,
+                masterLabel: "Different for Movies, TV & Anime"
+            ) {
+                ForEach(Array(categories.enumerated()), id: \.element) { index, category in
+                    LabeledSettingRow(categoryName(category)) {
+                        SettingsSegmentedPicker(
+                            options: CaptionSettings.SubtitleMode.allCases,
+                            selection: categoryMode(category),
+                            title: { $0.displayName },
+                            onFocusedOptionChange: { reportFocus(owner: index + 1, mode: $0) }
+                        )
+                    }
+                }
+            }
+
+            Text(describedMode.detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentTransition(.opacity)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .animation(.easeInOut(duration: 0.18), value: describedMode)
+        }
     }
 }
 #endif

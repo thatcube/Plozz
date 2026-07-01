@@ -16,7 +16,7 @@ struct IntegrationsDetailView: View {
     let serverCount: Int
 
     var body: some View {
-        SettingsSplitLayout(title: "Trackers", sections: sections)
+        SettingsSplitLayout(sections: sections)
             .task {
                 // Load all four statuses up front so the left list's value
                 // summaries are correct before any row is focused.
@@ -444,8 +444,6 @@ struct AttributionsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Attributions & Licensing").font(.largeTitle.bold())
-
                 Text("Plozz is free and open source under the GPL-3.0 license with an App Store exception. It is not affiliated with, endorsed, or certified by any of the projects or services listed below.")
                     .font(.callout)
                     .foregroundStyle(.secondary)

@@ -29,8 +29,6 @@ struct PlexLinkedUserDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                Text("Plex User").font(.largeTitle.bold())
-
                 if let account {
                     let admin = users.first(where: { $0.isAdmin })
                     let managed = users.filter { !$0.isAdmin }
@@ -66,7 +64,7 @@ struct PlexLinkedUserDetailView: View {
                 } else {
                     SettingsPanel(title: "No Plex Account") {
                         VStack(alignment: .leading, spacing: 16) {
-                            Text("Sign in to a Plex account in Server Accounts to pick a Plex Home user.")
+                            Text("Sign in to a Plex account under This Apple TV › Servers to pick a Plex Home user.")
                                 .foregroundStyle(.secondary)
                             // tvOS: at least one focusable element so Menu pops.
                             Button { /* no-op — anchors focus */ } label: {

@@ -162,6 +162,61 @@ extension View {
     func settingsRowGreenIndicator() -> some View { modifier(SettingsRowGreenIndicatorStyle()) }
 }
 
+// MARK: - Shared row body (one- or two-line)
+
+/// The shared body of a Settings list row: a leading icon, a primary `title`,
+/// an optional SECOND line beneath the title, and a trailing accessory.
+///
+/// Wrap it in a `NavigationLink` or `Button` and apply
+/// ``SettingsFocusButtonStyle`` to turn it into a live nav / toggle row — the
+/// two-column shape stays identical whether the second line is descriptive
+/// text, a strip of account avatars, or nothing at all, so every row reads as
+/// one control family. Leave `secondary` unset for a plain one-line row; pass a
+/// view (a subtitle, an avatar strip…) for the two-line variant. The `trailing`
+/// slot carries a value + chevron for navigation, or an On/Off word for an
+/// in-place toggle.
+///
+/// Row content adapts to focus automatically: pair inner text with
+/// `.settingsRowSecondary()` so it inverts against the focus card.
+struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
+    private let icon: String?
+    private let title: String
+    private let secondary: Secondary
+    private let trailing: Trailing
+
+    init(
+        icon: String?,
+        title: String,
+        @ViewBuilder secondary: () -> Secondary = { EmptyView() },
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+    ) {
+        self.icon = icon
+        self.title = title
+        self.secondary = secondary()
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .regular))
+                    .frame(width: 30, height: 30)
+                    .settingsRowIcon()
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.callout.weight(.medium))
+                secondary
+            }
+            Spacer(minLength: 12)
+            trailing
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .contentShape(Rectangle())
+    }
+}
+
 // MARK: - Switch-style Toggle for the detail pane
 
 /// A tvOS switch-style `ToggleStyle` for the Settings detail pane.

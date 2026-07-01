@@ -31,6 +31,14 @@ public final class PlozzigenVideoEngine: VideoEngine {
 
     public private(set) var status: VideoEngineStatus = .idle
     public private(set) var isPaused: Bool = true
+    /// Our *intended* transport state — the single source of truth for whether
+    /// the user wants to be playing. AetherEngine's "producer-restart" seek tears
+    /// down and rebuilds the pipeline, which re-emits a `.playing` state the
+    /// instant it restarts — even when we committed a seek *while paused* (a
+    /// pause-to-seek scrub). Mirroring that phantom `.playing` would flip us to
+    /// "playing" with a frozen picture. We gate the observer on this so a held
+    /// pause stays held until the user explicitly resumes.
+    private var intendsPause: Bool = true
     public private(set) var furthestObservedPosition: TimeInterval = 0
     public private(set) var audioTracks: [MediaTrack] = []
     public private(set) var subtitleTracks: [MediaTrack] = []
@@ -104,7 +112,20 @@ public final class PlozzigenVideoEngine: VideoEngine {
         engine.bind(view: surface)
         self.videoView = surface
         #endif
+        installEngineLogMirror()
         observeEngine()
+    }
+
+    /// Mirror AetherEngine's own diagnostics (`EngineLog`) to our `PLZSEEK` stdout
+    /// channel when seek tracing is on. This surfaces the engine's internal
+    /// decisions verbatim — most importantly the `seek(to:) ignored: no active
+    /// session (state=.ended)` line that proves a backward seek after end-of-media
+    /// is a no-op. Gated, so it's free (and unhooked) in normal runs.
+    private func installEngineLogMirror() {
+        guard PlaybackTrace.enabled else { return }
+        EngineLog.handler = { line in
+            PlaybackTrace.note("AE " + line)
+        }
     }
 
     // MARK: - VideoEngine Lifecycle
@@ -112,6 +133,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
     public func load(request: PlaybackRequest, startPosition: TimeInterval) async {
         status = .loading
         isPaused = false
+        intendsPause = false
         furthestObservedPosition = startPosition
 
         // Prefer the original range-readable URL (MKV bytes with embedded auth)
@@ -154,11 +176,13 @@ public final class PlozzigenVideoEngine: VideoEngine {
     }
 
     public func play() {
+        intendsPause = false
         engine.play()
         isPaused = false
     }
 
     public func pause() {
+        intendsPause = true
         engine.pause()
         isPaused = true
     }
@@ -168,7 +192,9 @@ public final class PlozzigenVideoEngine: VideoEngine {
     }
 
     public func seek(to seconds: TimeInterval, kind: VideoSeekKind) async {
+        PlaybackTrace.note("engine.seek BEGIN target=\(String(format: "%.2f", seconds)) kind=\(kind) state=\(engine.state) curr=\(String(format: "%.2f", currentTime)) dur=\(String(format: "%.2f", duration))")
         await engine.seek(to: seconds)
+        PlaybackTrace.note("engine.seek END   target=\(String(format: "%.2f", seconds)) state=\(engine.state) curr=\(String(format: "%.2f", currentTime))")
     }
 
     public func stop() {
@@ -176,6 +202,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
         progressTimer = nil
         engine.stop()
         status = .idle
+        intendsPause = true
         isPaused = true
     }
 
@@ -220,15 +247,27 @@ public final class PlozzigenVideoEngine: VideoEngine {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 guard let self else { return }
+                PlaybackTrace.note("engine.state -> \(state) intendsPause=\(self.intendsPause) curr=\(String(format: "%.2f", self.currentTime)) dur=\(String(format: "%.2f", self.duration))")
                 switch state {
                 case .idle:
                     break
                 case .loading:
                     self.status = .loading
                 case .playing:
-                    self.isPaused = false
-                    self.status = .ready
-                    self.startProgressTimer()
+                    // AetherEngine restarts its pipeline on a seek and re-emits
+                    // `.playing` even when we committed the seek while paused. If
+                    // the user intends to stay paused, treat that as a phantom:
+                    // re-assert the pause on the engine and keep our paused state
+                    // rather than surfacing a "playing" overlay over a held frame.
+                    if self.intendsPause {
+                        self.engine.pause()
+                        self.isPaused = true
+                        if self.status != .ready { self.status = .ready }
+                    } else {
+                        self.isPaused = false
+                        self.status = .ready
+                        self.startProgressTimer()
+                    }
                 case .paused:
                     self.isPaused = true
                     if self.status != .ready { self.status = .ready }

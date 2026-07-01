@@ -94,8 +94,6 @@ struct PlayerControls: View {
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                topBar
-                    .opacity(model.controlsVisible ? 1 : 0)
                 Spacer(minLength: 0)
                 bottomCluster
                     .opacity(model.controlsVisible ? 1 : 0)
@@ -125,32 +123,7 @@ struct PlayerControls: View {
         }
     }
 
-    // MARK: Title
-
-    private var topBar: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(model.title)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                if !model.subtitle.isEmpty {
-                    Text(model.subtitle)
-                        .font(.headline)
-                        .foregroundStyle(.white.opacity(0.7))
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 60)
-        .padding(.top, 50)
-        .padding(.bottom, 80)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom)
-        )
-    }
-
-    // MARK: Bottom cluster (scrubber + buttons)
+    // MARK: Bottom cluster (title + scrubber + buttons)
 
     private var bottomCluster: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -158,10 +131,12 @@ struct PlayerControls: View {
                 panelContainer(for: openPanel)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            titleBlock
             scrubberRow
             buttonRow
         }
         .animation(.easeInOut(duration: 0.2), value: openPanel)
+        .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
         .padding(.horizontal, 60)
         .padding(.top, 90)
         .padding(.bottom, 48)
@@ -171,23 +146,180 @@ struct PlayerControls: View {
         )
     }
 
+    // MARK: Title (episode line above the series title, bottom-left)
+
+    /// The episode line ("S1, E2 • Episode Title") sits *above* the prominent
+    /// series/movie title, Apple-TV style. The whole block lives at the bottom
+    /// just above the scrub bar and fades out fast while scrubbing so the scrub
+    /// surface stays uncluttered (the times stay).
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if !model.subtitle.isEmpty {
+                Text(model.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+            }
+            Text(model.title)
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(model.isScrubbing ? 0 : 1)
+        .offset(y: model.isScrubbing ? 8 : 0)
+        .allowsHitTesting(!model.isScrubbing)
+    }
+
     private var scrubberRow: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 8) {
             ScrubBar(
                 model: model,
                 palette: palette,
-                showThumbOverlay: openPanel == nil,
                 leadingInset: 60,
                 trailingInset: 60
             )
                 .frame(height: 44)
                 .frame(maxWidth: .infinity)
-            // Remaining time under the bar, aligned to the right.
-            Text("-" + Self.timeLabel(max(0, model.duration - model.displaySeconds)))
+            underBarTimes
+                .frame(height: 30)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// The time row *under* the bar. The current-position label tracks the scrub
+    /// head horizontally — all the way to the very end — with the status glyph
+    /// hanging off its right edge (free to slide into the trailing padding). The
+    /// remaining time stays pinned at the right but fades out + away once the
+    /// moving current time closes within ~16px of it, so the current time is never
+    /// blocked. Everything is absolutely positioned inside a fixed-height zone so
+    /// the bar never shifts when the glyph appears/clears.
+    private var underBarTimes: some View {
+        let fadeGap: CGFloat = 16
+        let curLabel = Self.timeLabel(model.displaySeconds)
+        let remLabel = "-" + Self.timeLabel(max(0, model.duration - model.displaySeconds))
+        // Deterministic, synchronous text widths. The SwiftUI `.background`/
+        // `PreferenceKey` measuring trick does NOT propagate through `.hidden()`
+        // here (verified on-device: the preference never fired, so the widths
+        // stayed 0 → no right-edge clamp and no fade). Measuring with UIKit using
+        // the matching monospaced-digit font is exact and needs no layout pass.
+        let curW = Self.measuredTimeWidth(curLabel)
+        let remW = Self.measuredTimeWidth(remLabel)
+        return GeometryReader { geo in
+            let width = geo.size.width
+            let midY = geo.size.height / 2
+            let knobX = width * CGFloat(model.progressFraction)
+            let halfCur = curW / 2
+            // The scrub track spans the full zone width [0, width] (the ScrubBar's
+            // insets only let the thumbnail overhang — the track itself is full
+            // width), so the head maps straight to knobX. Centre the label on the
+            // head, but clamp so its RIGHT edge stops exactly at the bar's right
+            // edge (x = width) and its LEFT edge never crosses the bar's left edge.
+            let centerX = min(max(knobX, halfCur), max(halfCur, width - halfCur))
+            let currentRightEdge = centerX + halfCur
+            // The remaining time is pinned to the bar's right edge; its left edge
+            // sits at width - remW.
+            let remainingLeftEdge = width - remW
+            // When the status glyph (pause/seek/skip) is showing it hangs ~40px
+            // past the current-time text's right edge, so NEAR THE VERY END it can
+            // land on top of the remaining time even though the time text hasn't
+            // reached it. Treat the glyph's right edge as the collision point
+            // whenever it's visible (it's faded out during an active scrub) so the
+            // remaining time still does the same fade — just earlier by the glyph's
+            // reach. Outside this edge case the glyph isn't near the end, so the
+            // time is never hidden early.
+            let glyphShown = !model.isScrubbing
+                && (model.skipHintVisible || (model.isPaused && model.intendsPause) || model.isSeeking)
+            let glyphReach: CGFloat = glyphShown ? 40 : 0
+            // Fade the remaining time once the current time's (or glyph's) right
+            // edge closes within the gap.
+            let remainingHidden = currentRightEdge + glyphReach + fadeGap >= remainingLeftEdge
+
+            // Current position — centred on the (clamped) scrub head, tracking it.
+            // The glyph hangs off the right edge as an overlay so it can't shift
+            // the time, and fades (no movement) while actively scrubbing, returning
+            // when the scrub ends, like the other transport elements.
+            Text(curLabel)
                 .monospacedDigit()
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.85))
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white)
+                .fixedSize()
+                .shadow(radius: 3)
+                .overlay(alignment: .trailing) {
+                    statusGlyph
+                        .frame(width: 30, height: 30)
+                        .offset(x: 40)
+                        .opacity(model.isScrubbing ? 0 : 1)
+                        // Fades with the rest of the transport (title + buttons):
+                        // vanish instantly when a scrub starts, then fade back in
+                        // together with them after a delay once it stops — so rapid
+                        // multi-scrubs don't flash anything back between swipes.
+                        .animation(
+                            Self.transportFadeAnimation(scrubbing: model.isScrubbing),
+                            value: model.isScrubbing
+                        )
+                }
+                .position(x: centerX, y: midY)
+
+            // Remaining time, pinned at the bar's right edge — fades out (in
+            // place, no drift) when the current time / glyph approaches.
+            Text(remLabel)
+                .monospacedDigit()
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.7))
+                .fixedSize()
+                .shadow(radius: 3)
+                .opacity(remainingHidden ? 0 : 1)
+                .animation(.easeOut(duration: 0.15), value: remainingHidden)
+                .frame(width: width, alignment: .trailing)
+                .position(x: width / 2, y: midY)
+        }
+        // No `.animation(value: isPaused/isSeeking)` here on purpose. The glyph's
+        // pause↔spinner swap must be INSTANT: the pause glyph is mounted (hidden)
+        // during a scrub, and animating the swap let it play a scale+opacity
+        // *removal* transition just as the parent overlay faded back in — you'd see
+        // a half-size pause icon try to appear and vanish on a seek-without-
+        // pausing. The parent's `isScrubbing` transport fade still handles the
+        // overall reveal; the content underneath swaps with no animation of its own.
+    }
+
+    /// Status glyph beside the current time under the bar. Priority, highest
+    /// first:
+    ///  1. a forward/back skip indicator during a skip burst,
+    ///  2. the loading spinner while a committed seek is resolving — this wins
+    ///     over the pause glyph UNCONDITIONALLY: while anything is loading the
+    ///     viewer must see ONLY the spinner, never a pause icon alongside it,
+    ///  3. a circular pause glyph while *intentionally* paused (a landed,
+    ///     finished-loading pause).
+    ///
+    /// The pause glyph requires `isPaused` AND `intendsPause` AND `!isScrubbing`.
+    /// `intendsPause` filters out the engine's transient post-seek pause (the
+    /// viewer never pressed pause). `!isScrubbing` is the decisive one: a scrub
+    /// pauses the stream for preview, so `isPaused`/`intendsPause` are BOTH true
+    /// mid-scrub — without this gate the pause glyph is the rendered content
+    /// during the scrub, and at commit its swap to the spinner gets animated by
+    /// the overlay's `isScrubbing` fade, cross-dissolving a half-faded pause icon
+    /// into the spinner (the seek-without-pausing flicker). Gating on
+    /// `!isScrubbing` keeps the content at none→spinner across the whole
+    /// scrub→commit window, so a manual pause is the ONLY thing that ever shows it.
+    @ViewBuilder private var statusGlyph: some View {
+        if model.skipHintVisible {
+            Image(systemName: model.skipHintForward
+                ? model.skipForwardInterval.forwardSymbol
+                : model.skipBackwardInterval.backwardSymbol)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
+                .transition(.scale(scale: 0.5).combined(with: .opacity))
+        } else if model.isSeeking {
+            ProgressView()
+                .tint(.white)
+                .controlSize(.small)
+        } else if model.isPaused && model.intendsPause && !model.isScrubbing {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 24))
+                .foregroundStyle(.white)
         }
     }
 
@@ -231,6 +363,9 @@ struct PlayerControls: View {
                 .focused($focus, equals: .button(category))
             }
         }
+        .opacity(model.isScrubbing ? 0 : 1)
+        .offset(y: model.isScrubbing ? 8 : 0)
+        .allowsHitTesting(!model.isScrubbing)
     }
 
     private func toggle(_ category: Category) {
@@ -926,6 +1061,31 @@ struct PlayerControls: View {
         }
         return String(format: "%d:%02d", m, s)
     }
+
+    /// Exact rendered width of an under-bar time label, measured synchronously
+    /// with UIKit using the matching monospaced-digit font. We measure here (not
+    /// via SwiftUI `PreferenceKey`s) because the `.background`/preference trick
+    /// does not propagate through `.hidden()` on tvOS — verified on-device, the
+    /// preference never fired so the labels never clamped or faded.
+    static func measuredTimeWidth(_ string: String) -> CGFloat {
+        let pointSize = UIFont.preferredFont(forTextStyle: .callout).pointSize
+        let font = UIFont.monospacedDigitSystemFont(ofSize: pointSize, weight: .semibold)
+        let bounds = (string as NSString).size(withAttributes: [.font: font])
+        return ceil(bounds.width)
+    }
+
+    /// Shared asymmetric fade for the transport chrome that hides while scrubbing
+    /// (title block, button row, and the under-bar status glyph): it vanishes
+    /// instantly when a scrub *starts* (quick ease) but waits before fading back
+    /// in once it *stops* (delayed ease), so all those elements return together
+    /// and rapid multi-scrubs never flash them back between swipes. Evaluated
+    /// against the NEW `isScrubbing` value, so the start→hide and stop→show
+    /// transitions each pick the matching curve.
+    static func transportFadeAnimation(scrubbing: Bool) -> Animation {
+        scrubbing
+            ? .easeOut(duration: 0.1)
+            : .easeOut(duration: 0.2).delay(0.45)
+    }
 }
 
 /// The scrub track: buffered + played fill, a knob, and a floating trickplay
@@ -933,20 +1093,11 @@ struct PlayerControls: View {
 private struct ScrubBar: View {
     let model: PlayerControlsModel
     let palette: ThemePalette
-    /// Whether to float the thumb overlay (current time + skip hint + remaining)
-    /// above the scrub head. Suppressed while a category panel is open so it
-    /// can't collide with the panel.
-    var showThumbOverlay: Bool = true
     /// Horizontal distance from the scrub track's leading/trailing edge out to the
     /// screen edge, so the trickplay thumbnail can extend past the track (but not
     /// off-screen).
     var leadingInset: CGFloat = 0
     var trailingInset: CGFloat = 0
-
-    /// Subtle "pressed-down" scale applied to the ±10s glyph on each skip press,
-    /// so rapid spamming reads as a held button rather than a flashing re-pop.
-    @State private var skipPressed = false
-    @State private var skipPressTask: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { geo in
@@ -987,18 +1138,11 @@ private struct ScrubBar: View {
                     thumbnailPreview(width: width, knobX: knobX)
                         .transition(.thumbnailDismiss)
                 }
-                if showThumbOverlay || model.isScrubbing {
-                    thumbOverlay(width: width, knobX: knobX)
-                }
             }
             .frame(maxHeight: .infinity, alignment: .center)
             .animation(.easeOut(duration: 0.12), value: model.isScrubbing)
             .animation(.easeOut(duration: 0.2), value: model.controlBarVisible)
             .animation(.easeOut(duration: 0.2), value: model.controlsVisible)
-            .onChange(of: model.skipHintToken) { _, _ in pulseSkipPress() }
-            .onChange(of: model.skipHintVisible) { _, visible in
-                if !visible { skipPressed = false }
-            }
         }
     }
 
@@ -1018,104 +1162,11 @@ private struct ScrubBar: View {
         }
     }
 
-    /// Dips the glyph on a press, then springs it back ~90 ms after the *last*
-    /// press — so while spamming it stays gently pressed and only releases once
-    /// the user stops.
-    private func pulseSkipPress() {
-        skipPressTask?.cancel()
-        withAnimation(.easeOut(duration: 0.06)) { skipPressed = true }
-        skipPressTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 90_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { skipPressed = false }
-        }
-    }
-
-    /// Vertical anchor (relative to the scrub track) for the time + glyph row.
-    /// Kept constant across scrubbing / non-scrubbing so the time never jumps;
-    /// the trickplay thumbnail floats above this line.
-    static let timeRowY: CGFloat = -28
-
-    /// Floated just above the scrub head (the focus indicator) and tracking it,
-    /// Apple-TV style. The current time is pinned dead-centre on the thumb and
-    /// never moves; the flanking glyphs hang off its left/right edges as overlays
-    /// so they can't shift it. A backward skip (and, if the seek is still
-    /// resolving, the loading spinner) sits to the left; a forward skip, the
-    /// spinner for a forward seek / plain scrub, and the circular pause glyph sit
-    /// to the right. Clamped so the time never runs off either edge.
-    @ViewBuilder
-    private func thumbOverlay(width: CGFloat, knobX: CGFloat) -> some View {
-        // Left edge of text aligns with left edge of the scrub track (x=0).
-        // ~30 approximates half the time label width at .callout size.
-        let leftMargin: CGFloat = 30
-        let rightMargin: CGFloat = 120
-        let cx = min(max(leftMargin, knobX), max(leftMargin, width - rightMargin))
-        Text(PlayerControls.timeLabel(model.displaySeconds))
-            .monospacedDigit()
-            .font(.callout.weight(.semibold))
-            .foregroundStyle(.white)
-            .fixedSize()
-            .shadow(radius: 3)
-            .overlay(alignment: .leading) {
-                leftSlot.frame(width: 44, height: 44).offset(x: -50)
-            }
-            .overlay(alignment: .trailing) {
-                rightSlot.frame(width: 44, height: 44).offset(x: 50)
-            }
-            .position(x: cx, y: Self.timeRowY)
-    }
-
-    /// Left of the current time: the backward-skip glyph after a backward skip,
-    /// replaced by the loading spinner if a backward seek is still resolving.
-    @ViewBuilder private var leftSlot: some View {
-        if model.skipHintVisible && !model.skipHintForward {
-            skipGlyph(forward: false)
-        } else if model.isSeeking && model.seekIndicatorOnLeft {
-            spinner
-        }
-    }
-
-    /// Right of the current time: the forward-skip glyph after a forward skip;
-    /// otherwise the spinner for a forward seek / plain scrub; otherwise the
-    /// circular pause glyph while paused. All share this one slot.
-    @ViewBuilder private var rightSlot: some View {
-        if model.skipHintVisible && model.skipHintForward {
-            skipGlyph(forward: true)
-        } else if model.isSeeking && !model.seekIndicatorOnLeft {
-            spinner
-        } else if model.isPaused {
-            Image(systemName: "pause.circle.fill")
-                .font(.system(size: 30))
-                .foregroundStyle(.white)
-                .shadow(radius: 3)
-        }
-    }
-
-    /// Compact skip glyph whose number matches the per-profile interval. It
-    /// persists for the whole skip burst (no per-press teardown), and a subtle
-    /// scale dip gives "pressed" feedback on each press.
-    private func skipGlyph(forward: Bool) -> some View {
-        let symbol = forward
-            ? model.skipForwardInterval.forwardSymbol
-            : model.skipBackwardInterval.backwardSymbol
-        return Image(systemName: symbol)
-            .font(.system(size: 28, weight: .semibold))
-            .foregroundStyle(.white)
-            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
-            .scaleEffect(skipPressed ? 0.9 : 1.0)
-            .transition(.scale(scale: 0.5).combined(with: .opacity))
-    }
-
-    private var spinner: some View {
-        ProgressView()
-            .tint(.white)
-            .controlSize(.small)
-    }
-
     @ViewBuilder
     private func thumbnailPreview(width: CGFloat, knobX: CGFloat) -> some View {
         if let image = model.previewImage {
-            let thumbWidth: CGFloat = 420
+            // ~15% larger than the previous 420pt thumbnail.
+            let thumbWidth: CGFloat = 483
             let aspect = previewAspect
             let thumbHeight = thumbWidth / aspect
             let corner: CGFloat = 18
@@ -1134,6 +1185,11 @@ private struct ScrubBar: View {
                 .frame(width: thumbWidth, height: thumbHeight)
                 .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
 
+            // Float the trickplay thumbnail above the scrub bar (bar is centred
+            // at y=0 in this GeometryReader). `thumbnailLift` is the gap from the
+            // bar centre to the *bottom* of the thumbnail — kept tight so the
+            // preview hugs the bar.
+            let thumbnailLift: CGFloat = 34
             Group {
                 if #available(tvOS 26.0, *) {
                     content
@@ -1147,7 +1203,7 @@ private struct ScrubBar: View {
                         )
                 }
             }
-            .position(x: clampedX, y: Self.timeRowY - 46 - thumbHeight / 2)
+            .position(x: clampedX, y: -(thumbnailLift + thumbHeight / 2))
         }
     }
 

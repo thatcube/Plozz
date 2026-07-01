@@ -82,6 +82,14 @@ public struct MediaSegment: Codable, Equatable, Sendable, Identifiable {
     /// skip button appears just before the segment and clears just before it ends.
     static let margin: TimeInterval = 0.25
 
+    /// How far into a segment a *seek* may land and still be treated as "entering"
+    /// it — the opening grace window. A committed seek that lands within this many
+    /// seconds of the segment's start still offers a (manual) Skip affordance; a
+    /// seek that lands deeper is taken as a deliberate jump *into* the segment and
+    /// the affordance is suppressed entirely (the seek is respected). Natural
+    /// playback always enters at offset ~0, so it is unaffected by this.
+    public static let seekGraceWindow: TimeInterval = 5
+
     /// The full length of the skip button's on-screen window, in seconds — the
     /// span over which the "time remaining" indicator depletes.
     public var window: TimeInterval { max(0, end - start) }

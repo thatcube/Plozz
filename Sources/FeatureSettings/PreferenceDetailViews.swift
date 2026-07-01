@@ -295,7 +295,9 @@ struct PlaybackDetailView: View {
             subtitlesSection,
             audioSection,
             skipIntrosSection,
-            skipIntervalsSection
+            skipIntervalsSection,
+            scrubbingSection,
+            upNextSection
         ]
     }
 
@@ -461,6 +463,36 @@ struct PlaybackDetailView: View {
                         )
                     }
                 }
+            }
+        ])
+    }
+
+    private var scrubbingSection: SettingsSplitSection {
+        SettingsSplitSection(id: "scrubbing", header: "Scrubbing", rows: [
+            SettingsSplitRow(
+                id: "seek-without-pausing",
+                title: "Seek without pausing",
+                description: playback.settings.seekWithoutPausing
+                    ? "Swipe to scrub while a title is playing and it resumes the moment you land — faster, but a stray swipe can move your position."
+                    : "You must pause before you can scrub — a swipe while playing won't seek or pause. Pause (Play/Pause, or center-press the scrubber), scrub, then press Play to resume. Prevents accidental seeks.",
+                valueSummary: playback.settings.seekWithoutPausing ? "On" : "Off"
+            ) {
+                Toggle("Seek without pausing", isOn: $playback.settings.seekWithoutPausing)
+            }
+        ])
+    }
+
+    private var upNextSection: SettingsSplitSection {
+        SettingsSplitSection(id: "up-next", header: "Up Next", rows: [
+            SettingsSplitRow(
+                id: "show-up-next-card",
+                title: "Show Up Next card",
+                description: playback.settings.showUpNextCard
+                    ? "During an episode's closing credits, show a card with the next episode so you can jump straight to it. Respects your Spoilers settings, and replaces the Skip Credits button when there's a next episode."
+                    : "Don't show the Up Next card. Episode credits behave like everything else — Skip Credits (if enabled) and the usual auto-advance at the very end.",
+                valueSummary: playback.settings.showUpNextCard ? "On" : "Off"
+            ) {
+                Toggle("Show Up Next card", isOn: $playback.settings.showUpNextCard)
             }
         ])
     }

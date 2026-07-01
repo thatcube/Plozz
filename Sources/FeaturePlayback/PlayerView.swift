@@ -70,6 +70,8 @@ public struct PlayerView: View {
                         skipSegment: { viewModel.skipActiveSegment() },
                         autoSkipSegment: { viewModel.autoSkipActiveSegment() },
                         dismissSkip: { viewModel.dismissActiveSkipSegment() },
+                        playUpNext: { viewModel.playNextEpisode() },
+                        dismissUpNext: { viewModel.dismissUpNextCard() },
                         dismiss: { dismissSmoothly() }
                     ),
                     scrubPreview: viewModel.scrubPreview,
@@ -82,12 +84,22 @@ public struct PlayerView: View {
                                 onExitToSurface: onExitToSurface
                             ))
                         },
-                        makeSkipButton: { model, onSkip, onDismiss in
+                        makeSkipButton: { model, onSkip, onDismiss, onPlayPause in
                             AnyView(SkipSegmentButton(
                                 model: model,
                                 palette: themePalette,
                                 onSkip: onSkip,
-                                onDismiss: onDismiss
+                                onDismiss: onDismiss,
+                                onPlayPause: onPlayPause
+                            ))
+                        },
+                        makeUpNextCard: { model, onPlayNext, onDismiss, onPlayPause in
+                            AnyView(UpNextCardView(
+                                model: model,
+                                palette: themePalette,
+                                onPlayNext: onPlayNext,
+                                onDismiss: onDismiss,
+                                onPlayPause: onPlayPause
                             ))
                         }
                     )

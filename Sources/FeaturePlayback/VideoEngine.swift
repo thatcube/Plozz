@@ -122,6 +122,15 @@ public protocol VideoEngine: AnyObject {
     /// No-op when the engine doesn't advertise `.dialogEnhance`.
     func setDialogEnhanceEnabled(_ enabled: Bool)
 
+    /// **Experimental.** While `enabled`, asks the connected display to run at a
+    /// high UI refresh (≈60 Hz) so *scrubbing* is smooth even when the content is
+    /// 24/25 fps — then restores the content-matched refresh (judder-free
+    /// playback) when disabled. Only meaningful on engines that drive
+    /// `AVDisplayManager` (the HDR/Dolby-Vision path); the dynamic range is
+    /// preserved so the switch is refresh-rate-only (seamless on QMS-capable
+    /// TVs, a brief HDMI re-sync otherwise). No-op by default.
+    func setScrubRefreshBoost(_ enabled: Bool)
+
     // MARK: Observable state
 
     /// A short, human-readable name for the concrete engine (e.g. `AVPlayer`,
@@ -280,5 +289,6 @@ public extension VideoEngine {
     func setAudioDelay(_ seconds: TimeInterval) {}
     func setSubtitleDelay(_ seconds: TimeInterval) {}
     func setDialogEnhanceEnabled(_ enabled: Bool) {}
+    func setScrubRefreshBoost(_ enabled: Bool) {}
 }
 #endif

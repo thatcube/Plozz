@@ -29,7 +29,6 @@ struct NightShiftDetailView: View {
                 id: "night-shift",
                 title: "Night Shift",
                 description: "A warm, dimming tint that eases late-night watching.",
-                valueSummary: modeSummary
             ) {
                 NightShiftScheduleControl(model: model)
             }
@@ -43,7 +42,6 @@ struct NightShiftDetailView: View {
                     id: "fade",
                     title: "Fade",
                     description: "How gradually the tint ramps on and off around the scheduled times.",
-                    valueSummary: NightShiftSettingsModel.fadeLabel(minutes: clampedFade)
                 ) {
                     SettingsOptionPicker(
                         options: NightShiftSettingsModel.fadeOptions,
@@ -70,7 +68,6 @@ struct NightShiftDetailView: View {
                     id: "darkness",
                     title: "Darkness",
                     description: "Dims the whole picture like sunglasses. Focus this row's options to preview at full night strength.",
-                    valueSummary: model.settings.dimness.displayName
                 ) {
                     SettingsOptionPicker(
                         options: NightShiftDimness.allCases,
@@ -83,7 +80,6 @@ struct NightShiftDetailView: View {
                     id: "warmth",
                     title: "Warmth",
                     description: "Tints the picture toward amber and red. Focus this row's options to preview at full night strength.",
-                    valueSummary: model.settings.warmth.displayName
                 ) {
                     SettingsOptionPicker(
                         options: NightShiftWarmth.allCases,
@@ -112,16 +108,6 @@ struct NightShiftDetailView: View {
         )
 
         return sections
-    }
-
-    /// The current unified mode as a short label for the master list.
-    private var modeSummary: String {
-        guard model.settings.isEnabled else { return "Off" }
-        switch model.settings.scheduleMode {
-        case .solar: return "Auto"
-        case .manual: return "Manual"
-        case .alwaysOn: return "Always On"
-        }
     }
 
     // MARK: - Appearance

@@ -300,16 +300,16 @@ public struct SettingsView: View {
                 signedInStrip
             }
             navRow("Appearance", icon: "paintpalette",
-                   value: theme.theme.displayName,
+                   value: nil,
                    route: .appearance)
             navRow("Night Shift", icon: "moon.stars",
-                   value: nightShift.settings.isEnabled ? "On" : "Off",
+                   value: nil,
                    route: .nightShift)
             navRow("Playback", icon: "play.rectangle",
-                   value: playback.settings.skipIntros == .off ? nil : "Skip: \(playback.settings.skipIntros.title)",
+                   value: nil,
                    route: .playback)
             navRow("Spoilers", icon: "eye.slash",
-                   value: spoilers.settings.isEnabled ? "On" : "Off",
+                   value: nil,
                    route: .spoilers)
             navRow("Trackers — Trakt, Simkl, AniList, MyAnimeList", icon: "link",
                    value: nil,

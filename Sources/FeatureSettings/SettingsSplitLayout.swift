@@ -3,9 +3,8 @@ import SwiftUI
 import CoreUI
 
 /// One row in a Settings master/detail split. The left list shows the row's
-/// `title` (plus an optional trailing `valueSummary`); focusing it live-updates
-/// the right detail pane, which renders the row's `description` and the row's
-/// existing `detail` control.
+/// `title`; focusing it live-updates the right detail pane, which renders the
+/// row's `description` and the row's existing `detail` control.
 ///
 /// `id` is stable so focus survives sub-rows inserting/removing (a per-type
 /// toggle revealing Movies/TV/Anime). Set `indented` for those revealed
@@ -14,7 +13,6 @@ struct SettingsSplitRow: Identifiable {
     let id: String
     let title: String
     let description: String?
-    let valueSummary: String?
     let indented: Bool
     let detail: () -> AnyView
 
@@ -22,14 +20,12 @@ struct SettingsSplitRow: Identifiable {
         id: String,
         title: String,
         description: String? = nil,
-        valueSummary: String? = nil,
         indented: Bool = false,
         @ViewBuilder detail: @escaping () -> Detail
     ) {
         self.id = id
         self.title = title
         self.description = description
-        self.valueSummary = valueSummary
         self.indented = indented
         self.detail = { AnyView(detail()) }
     }
@@ -254,12 +250,6 @@ private struct SettingsMasterRowLabel: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 12)
-            if let value = row.valueSummary {
-                Text(value)
-                    .font(.subheadline)
-                    .settingsRowSecondary()
-                    .lineLimit(1)
-            }
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(chevronColor)

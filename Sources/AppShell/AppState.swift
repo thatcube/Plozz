@@ -46,6 +46,11 @@ public final class AppState {
     /// state cleanly. When the caller injects models (tests), they're used
     /// as-is and not rebuilt.
     public private(set) var captionModel: CaptionSettingsModel
+    /// Subtitle behaviour + appearance split out of the retired `CaptionSettings`.
+    /// Behaviour (mode / language / auto-download) is the policy base input;
+    /// appearance (`SubtitleStyle`) is the persisted look. Rebuilt on profile switch.
+    public private(set) var subtitleBehaviorModel: SubtitleBehaviorModel
+    public private(set) var subtitleStyleModel: SubtitleStyleModel
     public private(set) var spoilerModel: SpoilerSettingsModel
     public private(set) var playbackModel: PlaybackSettingsModel
     /// Per-profile per-content-type subtitle policy overrides (forced-only on
@@ -615,6 +620,8 @@ public final class AppState {
         profilesModel: ProfilesModel? = nil,
         systemBridge: SystemProfileBridging? = nil,
         captionModel: CaptionSettingsModel? = nil,
+        subtitleBehaviorModel: SubtitleBehaviorModel? = nil,
+        subtitleStyleModel: SubtitleStyleModel? = nil,
         spoilerModel: SpoilerSettingsModel? = nil,
         playbackModel: PlaybackSettingsModel? = nil,
         themeModel: ThemeSettingsModel? = nil,
@@ -640,6 +647,7 @@ public final class AppState {
         // (test path) and don't rebuild them on profile switch. Otherwise build
         // them scoped to the active profile's namespace.
         let injected = captionModel != nil || spoilerModel != nil
+            || subtitleBehaviorModel != nil || subtitleStyleModel != nil
             || playbackModel != nil
             || themeModel != nil || diagnosticsModel != nil
             || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
@@ -655,6 +663,8 @@ public final class AppState {
         self.anilistService = anilistService ?? AniListServiceFactory.make(namespace: ns)
         self.malService = malService ?? MALServiceFactory.make(namespace: ns)
         self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
+        self.subtitleBehaviorModel = subtitleBehaviorModel ?? SubtitleBehaviorModel(store: SubtitleBehaviorStore(namespace: ns))
+        self.subtitleStyleModel = subtitleStyleModel ?? SubtitleStyleModel(store: SubtitleStyleStore(namespace: ns))
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         self.playbackModel = playbackModel ?? PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
         self.subtitlePolicyModel = SubtitlePolicyModel(store: SubtitlePolicyStore(namespace: ns))
@@ -1294,6 +1304,8 @@ public final class AppState {
         guard !usesInjectedModels else { return }
         let ns = profilesModel.activeNamespace
         captionModel = CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
+        subtitleBehaviorModel = SubtitleBehaviorModel(store: SubtitleBehaviorStore(namespace: ns))
+        subtitleStyleModel = SubtitleStyleModel(store: SubtitleStyleStore(namespace: ns))
         spoilerModel = SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         playbackModel = PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
         subtitlePolicyModel = SubtitlePolicyModel(store: SubtitlePolicyStore(namespace: ns))

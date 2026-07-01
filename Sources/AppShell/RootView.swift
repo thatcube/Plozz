@@ -84,6 +84,8 @@ public struct RootView: View {
                     MainTabView(
                         accounts: accounts,
                         captionModel: appState.captionModel,
+                        subtitleBehaviorModel: appState.subtitleBehaviorModel,
+                        subtitleStyleModel: appState.subtitleStyleModel,
                         spoilerModel: appState.spoilerModel,
                         playbackModel: appState.playbackModel,
                         subtitlePolicyModel: appState.subtitlePolicyModel,

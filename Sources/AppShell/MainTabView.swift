@@ -69,6 +69,11 @@ struct RealtimePlaybackScrobbler: TraktScrobbling {
 struct MainTabView: View {
     let accounts: [ResolvedAccount]
     let captionModel: CaptionSettingsModel
+    /// Subtitle behaviour (mode / language / auto-download) and appearance
+    /// (`SubtitleStyle`) split out of the retired `CaptionSettings`. Behaviour
+    /// feeds the policy resolver; style seeds the player + live overlay.
+    let subtitleBehaviorModel: SubtitleBehaviorModel
+    let subtitleStyleModel: SubtitleStyleModel
     let spoilerModel: SpoilerSettingsModel
     let playbackModel: PlaybackSettingsModel
     /// Per-profile per-content-type subtitle policy overrides, threaded into the
@@ -148,9 +153,10 @@ struct MainTabView: View {
                 accounts: accounts,
                 homeVisibility: homeVisibility,
                 homeLayoutStore: homeLayoutStore,
-                captionSettings: captionModel.settings,
+                behavior: subtitleBehaviorModel.settings,
+                style: subtitleStyleModel.style,
                 playbackSettings: playbackModel.settings,
-                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(caption: captionModel.settings),
+                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(behavior: subtitleBehaviorModel.settings),
                 audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
                 seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
@@ -167,9 +173,10 @@ struct MainTabView: View {
 
             SearchTab(
                 accounts: accounts,
-                captionSettings: captionModel.settings,
+                behavior: subtitleBehaviorModel.settings,
+                style: subtitleStyleModel.style,
                 playbackSettings: playbackModel.settings,
-                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(caption: captionModel.settings),
+                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(behavior: subtitleBehaviorModel.settings),
                 audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
                 seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
@@ -439,7 +446,8 @@ private func resolveLibraryBrowse(
 private func makePlayerViewModel(
     for request: PlayRequest,
     accounts: [ResolvedAccount],
-    captionSettings: CaptionSettings,
+    behavior: SubtitleBehavior,
+    style: SubtitleStyle,
     playbackSettings: PlaybackSettings,
     spoilerSettings: SpoilerSettings,
     subtitlePolicy: SubtitlePolicy,
@@ -472,7 +480,8 @@ private func makePlayerViewModel(
                 allowsSeparateAudio: engineFactory.hybridAvailable
             ),
             itemID: videoID,
-            captionSettings: captionSettings,
+            behavior: behavior,
+            style: style,
             subtitlePolicy: subtitlePolicy,
             audioPolicy: audioPolicy,
             playbackSettings: playbackSettings,
@@ -526,7 +535,8 @@ private func makePlayerViewModel(
         provider: episodeProvider,
         itemID: request.item.id,
         mediaSourceID: request.item.selectedVersionID,
-        captionSettings: captionSettings,
+        behavior: behavior,
+        style: style,
         subtitlePolicy: subtitlePolicy,
         audioPolicy: audioPolicy,
         playbackSettings: playbackSettings,
@@ -725,7 +735,8 @@ private struct HomeTab: View {
     let accounts: [ResolvedAccount]
     let homeVisibility: HomeLibraryVisibilityModel
     let homeLayoutStore: HomeLayoutStoring
-    let captionSettings: CaptionSettings
+    let behavior: SubtitleBehavior
+    let style: SubtitleStyle
     let playbackSettings: PlaybackSettings
     let subtitlePolicy: SubtitlePolicy
     let audioPolicy: AudioPolicy
@@ -839,7 +850,8 @@ private struct HomeTab: View {
             playRequest: $playRequest,
             resumePrompt: $resumePrompt,
             accounts: accounts,
-            captionSettings: captionSettings,
+            behavior: behavior,
+            style: style,
             playbackSettings: playbackSettings,
             spoilerSettings: spoilerSettings,
             subtitlePolicy: subtitlePolicy,
@@ -947,7 +959,8 @@ private extension View {
         playRequest: Binding<PlayRequest?>,
         resumePrompt: Binding<MediaItem?>,
         accounts: [ResolvedAccount],
-        captionSettings: CaptionSettings,
+        behavior: SubtitleBehavior,
+        style: SubtitleStyle,
         playbackSettings: PlaybackSettings,
         spoilerSettings: SpoilerSettings,
         subtitlePolicy: SubtitlePolicy,
@@ -966,7 +979,8 @@ private extension View {
                     makePlayerViewModel(
                         for: $0,
                         accounts: accounts,
-                        captionSettings: captionSettings,
+                        behavior: behavior,
+                        style: style,
                         playbackSettings: playbackSettings,
                         spoilerSettings: spoilerSettings,
                         subtitlePolicy: subtitlePolicy,
@@ -1059,7 +1073,8 @@ private extension View {
 /// across every active account; results route to their owning provider.
 private struct SearchTab: View {
     let accounts: [ResolvedAccount]
-    let captionSettings: CaptionSettings
+    let behavior: SubtitleBehavior
+    let style: SubtitleStyle
     let playbackSettings: PlaybackSettings
     let subtitlePolicy: SubtitlePolicy
     let audioPolicy: AudioPolicy
@@ -1163,7 +1178,8 @@ private struct SearchTab: View {
             playRequest: $playRequest,
             resumePrompt: $resumePrompt,
             accounts: accounts,
-            captionSettings: captionSettings,
+            behavior: behavior,
+            style: style,
             playbackSettings: playbackSettings,
             spoilerSettings: spoilerSettings,
             subtitlePolicy: subtitlePolicy,

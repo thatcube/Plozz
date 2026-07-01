@@ -35,7 +35,13 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
     let options: [Option]
     @Binding var selection: Option
     let title: (Option) -> String
+    /// Reports the option under focus as the user moves across the segments —
+    /// before any Select/commit — and `nil` when focus leaves the control. Lets a
+    /// caller mirror the focused option's own description live, decoupled from
+    /// `selection` (which only changes on Select).
+    var onFocusedOptionChange: ((Option?) -> Void)? = nil
 
+    @FocusState private var focusedOption: Option?
     @Environment(\.themePalette) private var palette
     @Environment(\.colorScheme) private var colorScheme
 
@@ -51,6 +57,7 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
                     )
                 }
                 .buttonStyle(SegmentButtonStyle(isSelected: option == selection))
+                .focused($focusedOption, equals: option)
                 .accessibilityValue(option == selection ? "Selected" : "")
             }
         }
@@ -66,6 +73,11 @@ struct SettingsSegmentedPicker<Option: Hashable>: View {
                 .strokeBorder(palette.cardBorder.opacity(0.8), lineWidth: 1)
         )
         .fixedSize()
+        // Surface focus movement so a caller can live-update a description of the
+        // focused option — decoupled from selection, which only changes on Select.
+        .onChange(of: focusedOption) { _, newValue in
+            onFocusedOptionChange?(newValue)
+        }
     }
 
     /// The contents of one segment: the label, plus a trailing checkmark shown

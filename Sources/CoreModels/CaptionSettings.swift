@@ -39,6 +39,18 @@ public struct CaptionSettings: Codable, Equatable, Sendable {
             case .forcedOnly: return "Forced Only"
             }
         }
+
+        /// One-line explanation shown beneath each option in settings.
+        public var detail: String {
+            switch self {
+            case .off:
+                return "Don't turn subtitles on automatically."
+            case .all:
+                return "Show full subtitles in your preferred language."
+            case .forcedOnly:
+                return "Only show forced subtitles for foreign-language passages."
+            }
+        }
     }
 
     /// An RGBA colour stored in a `Codable`, platform-neutral way (`0...1`).

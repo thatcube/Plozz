@@ -304,13 +304,14 @@ struct PlaybackDetailView: View {
             SettingsSplitRow(
                 id: "subtitle-default",
                 title: "Show subtitles",
-                description: "How subtitles behave by default for everything you play — full subtitles, only forced passages, or off.",
+                description: "What Plozz does with subtitles when playback starts. You can still change them while watching.",
                 valueSummary: captions.settings.subtitleMode.displayName
             ) {
-                SettingsSegmentedPicker(
+                DescribedSegmentedPicker(
                     options: CaptionSettings.SubtitleMode.allCases,
                     selection: $captions.settings.subtitleMode,
-                    title: { $0.displayName }
+                    title: { $0.displayName },
+                    detail: { $0.detail }
                 )
             },
             SettingsSplitRow(
@@ -423,14 +424,14 @@ struct PlaybackDetailView: View {
             SettingsSplitRow(
                 id: "skip-intros-mode",
                 title: "Skip Intros",
-                description: playback.settings.skipIntros.detail
-                    + "\n\nWhen your server has detected intro and credit markers, Plozz can show a Skip button — or skip for you automatically — during playback. Requires server-side markers — Plex Pass on Plex, or the Media Segments / Intro Skipper feature on Jellyfin.",
+                description: "Uses intro and credit markers from your server. Requires Plex Pass on Plex, or Media Segments / Intro Skipper on Jellyfin.",
                 valueSummary: playback.settings.skipIntros.title
             ) {
-                SettingsSegmentedPicker(
+                DescribedSegmentedPicker(
                     options: SkipIntrosMode.allCases,
                     selection: $playback.settings.skipIntros,
-                    title: { $0.title }
+                    title: { $0.title },
+                    detail: { $0.detail }
                 )
             }
         ])
@@ -462,6 +463,41 @@ struct PlaybackDetailView: View {
                 }
             }
         ])
+    }
+}
+
+/// A `SettingsSegmentedPicker` paired with a live description of what the
+/// *focused* option does. Moving focus across the segments updates the line
+/// beneath immediately — before you commit with Select — so each option's
+/// behavior is explained as you browse, not only after you pick. When focus
+/// isn't in the picker it falls back to describing the current selection.
+private struct DescribedSegmentedPicker<Option: Hashable>: View {
+    let options: [Option]
+    @Binding var selection: Option
+    let title: (Option) -> String
+    let detail: (Option) -> String
+
+    @State private var focusedOption: Option?
+
+    /// Focused option wins (live browsing); otherwise describe what's selected.
+    private var describedOption: Option { focusedOption ?? selection }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SettingsSegmentedPicker(
+                options: options,
+                selection: $selection,
+                title: title,
+                onFocusedOptionChange: { focusedOption = $0 }
+            )
+            Text(detail(describedOption))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentTransition(.opacity)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .animation(.easeInOut(duration: 0.18), value: describedOption)
     }
 }
 #endif

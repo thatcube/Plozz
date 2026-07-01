@@ -19,17 +19,18 @@ public typealias MusicTrack = CoreModels.MusicTrack
 /// The app-scoped audio playback engine — **independent** of the video
 /// `PlayerViewModel`, which stays full-screen and untouched.
 ///
-/// Owns a single `AVPlayer` and a manually-managed track queue so it can resolve
-/// each track's stream URL on demand, support shuffle/repeat, and drive
-/// next/previous. It is created once and injected into the environment, so the
-/// mini-player and the Now Playing screen observe the *same* instance.
+/// Owns a single long-lived `AVQueuePlayer` and a manually-managed track queue so
+/// it can resolve each track's stream URL on demand, support shuffle/repeat, and
+/// drive next/previous. It is created once and injected into the environment, so
+/// the mini-player and the Now Playing screen observe the *same* instance.
 ///
-/// Track changes swap the item **in place** via `replaceCurrentItem(with:)`
-/// rather than tearing the player down. That keeps the same playback pipeline,
-/// active audio session and **output route** alive across songs — crucial for
-/// AirPlay, where emptying the player mid-song (the old `AVQueuePlayer`
-/// `removeAllItems()` path) dropped the route and the next track played to
-/// silence.
+/// Track changes advance the queue (`advanceToNextItem()`) instead of emptying or
+/// replacing the player's item. Inserting the next item behind the still-playing
+/// one and advancing onto it keeps the player's pipeline continuously live, which
+/// PRESERVES the output route. That is essential for AirPlay 2: `removeAllItems()`
+/// or `replaceCurrentItem(with:)` tears the route to the speaker down, so the next
+/// track is silent (and the speaker stays dead until it's physically reconnected),
+/// while seeking within the same item — which never swaps the item — is unaffected.
 ///
 /// tvOS background audio (the part the video flow never does):
 ///  * configures `AVAudioSession` `.playback` (with the `.longFormAudio`
@@ -190,7 +191,7 @@ public final class AudioPlaybackController {
 
     // MARK: Private
 
-    private let player = AVPlayer()
+    private let player = AVQueuePlayer()
     private var resolver: StreamURLResolver?
     private var lyricsResolver: LyricsResolver?
     private var lyricsRefresher: LyricsRefresher?
@@ -417,7 +418,7 @@ public final class AudioPlaybackController {
         // closes its now-playing session and records the play position.
         reportStopIfNeeded(position: currentTime)
         player.pause()
-        player.replaceCurrentItem(with: nil)
+        player.removeAllItems()
         isPlaying = false
         queue = []
         orderedQueue = []
@@ -525,21 +526,24 @@ public final class AudioPlaybackController {
         // the video player's own Play/Pause handling.
         enableRemoteCommands()
         let item = AVPlayerItem(url: url)
-        // Swap the item in place rather than emptying the player. Keeping the
-        // same pipeline preserves the active audio session and output route, so
-        // advancing to the next song continues on an AirPlay speaker instead of
-        // dropping to silence (which is what tearing the player down did).
-        player.replaceCurrentItem(with: item)
+        // Change tracks by advancing the queue, never by emptying/replacing the
+        // sole item. Insert the new item behind the still-playing one and advance
+        // onto it: `advanceToNextItem()` transitions within the queue player's
+        // live pipeline, which PRESERVES the output route. On AirPlay 2,
+        // `replaceCurrentItem`/`removeAllItems` instead tears the route down and
+        // the speaker goes silent until it's physically reconnected. Keeping the
+        // player non-empty across the hand-off is what keeps the route alive.
+        if player.currentItem != nil {
+            player.insert(item, after: player.currentItem)
+            player.advanceToNextItem()
+        } else {
+            player.insert(item, after: nil)
+        }
         observeEnd(of: item)
-        // Re-assert the session and start with `playImmediately(atRate:)` rather
-        // than plain `play()`. A track swap can trigger a transient route change,
-        // and on a high-latency AirPlay route plain `play()` parks in AVPlayer's
+        // Start with `playImmediately(atRate:)` rather than plain `play()`: on a
+        // high-latency AirPlay route plain `play()` can park in AVPlayer's
         // stall-avoidance wait state (`.waitingToPlayAtSpecifiedRate`) and never
-        // actually starts — so the next song is silent on the speaker. This
-        // mirrors `resume()`, which hit the same wait-state trap.
-        #if canImport(AVFoundation) && !os(macOS)
-        try? AVAudioSession.sharedInstance().setActive(true)
-        #endif
+        // actually start. Mirrors `resume()`, which hit the same wait-state trap.
         player.playImmediately(atRate: 1.0)
         isPlaying = true
         currentTime = 0

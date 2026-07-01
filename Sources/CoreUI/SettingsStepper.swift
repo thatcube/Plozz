@@ -1,27 +1,32 @@
 #if canImport(SwiftUI)
 import SwiftUI
-import CoreUI
 
 /// A compact − / value / + stepper for dialing a value through an ordered set of
-/// presets (e.g. skip intervals).
+/// presets (e.g. skip intervals, playback speed).
 ///
 /// The − and + are *discrete focusable buttons*: you move focus between them with
 /// left/right and press **Select** to step. Deliberately not a value-on-left/right
 /// slider — that would hijack the left-press the split layout relies on to return
 /// focus to the master list. Here, a left-press from the − button just leaves the
 /// control like any other. The value clamps at the ends of the preset list.
-struct SettingsStepper<Value: Hashable>: View {
-    let options: [Value]
-    @Binding var selection: Value
-    let title: (Value) -> String
+public struct SettingsStepper<Value: Hashable>: View {
+    public let options: [Value]
+    @Binding public var selection: Value
+    public let title: (Value) -> String
 
     @Environment(\.themePalette) private var palette
+
+    public init(options: [Value], selection: Binding<Value>, title: @escaping (Value) -> String) {
+        self.options = options
+        self._selection = selection
+        self.title = title
+    }
 
     private var index: Int { options.firstIndex(of: selection) ?? 0 }
     private var canDecrement: Bool { index > 0 }
     private var canIncrement: Bool { index < options.count - 1 }
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 24) {
             stepButton(symbol: "minus", dimmed: !canDecrement) {
                 if canDecrement { selection = options[index - 1] }

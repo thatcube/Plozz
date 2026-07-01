@@ -457,13 +457,37 @@ struct PlayerControls: View {
 
     @ViewBuilder
     private var speedPane: some View {
-        ForEach(Array(Self.speedPresets.enumerated()), id: \.offset) { index, speed in
-            selectableRow(
-                title: Self.speedLabel(speed),
-                isSelected: abs(model.playbackSpeed - speed) < 0.001,
-                index: index
-            ) {
-                actions.setPlaybackSpeed(speed)
+        VStack(alignment: .leading, spacing: 0) {
+            // Fine control: − {value}× + in 0.05 steps (0.25×–2×). Drives the same
+            // model.playbackSpeed as the presets below, so they stay in sync.
+            HStack {
+                Spacer(minLength: 0)
+                SettingsStepper(
+                    options: Array(0..<Self.speedGridCount),
+                    selection: Binding(
+                        get: { Self.nearestSpeedIndex(model.playbackSpeed) },
+                        set: { actions.setPlaybackSpeed(Self.speedGridValue($0)) }
+                    ),
+                    title: { Self.speedLabel(Self.speedGridValue($0)) }
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 14)
+
+            Divider()
+                .background(.white.opacity(0.12))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+
+            // Quick presets.
+            ForEach(Array(Self.speedPresets.enumerated()), id: \.offset) { index, speed in
+                selectableRow(
+                    title: Self.speedLabel(speed),
+                    isSelected: abs(model.playbackSpeed - speed) < 0.001,
+                    index: index
+                ) {
+                    actions.setPlaybackSpeed(speed)
+                }
             }
         }
     }
@@ -725,6 +749,23 @@ struct PlayerControls: View {
     // MARK: Formatting
 
     static let speedPresets: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+
+    // Custom-speed grid for the − / + stepper: 0.25×…2.0× in 0.05 steps. Modelled
+    // as integer indices so the stepper matches exactly (no Double == fuzziness);
+    // the Double rate is derived on the way in (nearest index) and out (grid value).
+    static let speedStepMin = 0.25
+    static let speedStepMax = 2.0
+    static let speedStep = 0.05
+    static var speedGridCount: Int {
+        Int(((speedStepMax - speedStepMin) / speedStep).rounded()) + 1
+    }
+    static func speedGridValue(_ index: Int) -> Double {
+        ((speedStepMin + Double(index) * speedStep) * 100).rounded() / 100
+    }
+    static func nearestSpeedIndex(_ speed: Double) -> Int {
+        let raw = ((speed - speedStepMin) / speedStep).rounded()
+        return Int(min(max(raw, 0), Double(speedGridCount - 1)))
+    }
 
     static func speedLabel(_ speed: Double) -> String {
         if abs(speed - speed.rounded()) < 0.001 {

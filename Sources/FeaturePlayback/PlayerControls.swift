@@ -117,7 +117,11 @@ struct PlayerControls: View {
         .onChange(of: model.controlBarVisible) { _, focused in
             openPanel = nil
             titleVisible = true
-            focus = focused ? initialFocus : nil
+            // Don't force a specific button when the bar takes focus — imperatively
+            // setting @FocusState here fought the engine's own default pick and
+            // briefly lit two buttons at once. Let the engine choose on entry; only
+            // clear our binding when focus leaves the bar.
+            if !focused { focus = nil }
         }
         .onChange(of: openPanel) { _, panel in
             subtitleScreen = .tracks
@@ -160,6 +164,7 @@ struct PlayerControls: View {
                     .opacity(titleVisible ? 1 : 0)
                 if let openPanel {
                     panelContainer(for: openPanel)
+                        .focusSection()
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
@@ -398,6 +403,12 @@ struct PlayerControls: View {
         .opacity(model.isScrubbing ? 0 : 1)
         .offset(y: model.isScrubbing ? 8 : 0)
         .allowsHitTesting(!model.isScrubbing)
+        // Trap focus inside an open panel: while one is up, the transport buttons
+        // drop out of the focus engine so directional nav can't wander out of the
+        // menu. It closes only by selecting a row or pressing Menu (native-menu
+        // behaviour). The scrub surface is already non-focusable while the bar owns
+        // focus, so the open panel becomes the sole focusable region.
+        .disabled(openPanel != nil)
     }
 
     private func toggle(_ category: Category) {
@@ -413,14 +424,14 @@ struct PlayerControls: View {
     ///
     /// When a panel closes, its focused row is removed in the same state update
     /// and tvOS's focus engine auto-recovers to the leftmost control (the Info
-    /// button), which clobbers a synchronous `focus = …`. We set it immediately
-    /// *and* re-assert on the next runloop tick so the intended target wins the
-    /// race — this is what makes focus reliably return to wherever the panel was
-    /// opened, no matter how deep its sub-screens went.
+    /// button). Writing @FocusState synchronously here fights that recovery, and
+    /// writing it *twice* (sync + deferred) makes two buttons briefly render
+    /// focused. A SINGLE deferred write on the next runloop tick lands cleanly and
+    /// returns focus to wherever the panel was opened — no matter how deep its
+    /// sub-screens went.
     private func restoreFocus(_ slot: FocusSlot?) {
         guard let slot else { return }
-        focus = slot
-        Task { @MainActor in focus = slot }
+        DispatchQueue.main.async { focus = slot }
     }
 
     // MARK: Panels

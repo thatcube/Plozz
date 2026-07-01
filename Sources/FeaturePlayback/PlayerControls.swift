@@ -870,6 +870,10 @@ struct PlayerControls: View {
             case toggle(isOn: Bool, flip: () -> Void)
             /// Opens a detail sub-screen: Select opens; shows a `›` chevron.
             case submenu(summary: String, open: () -> Void)
+            /// A submenu turned inert by context (e.g. dual subtitles while a
+            /// bitmap primary is active): shows a muted summary, no chevron, and
+            /// Select does nothing — the whole sub-screen is unreachable.
+            case disabled(summary: String)
             /// One-shot: Select runs it.
             case action(run: () -> Void)
         }
@@ -920,6 +924,7 @@ struct PlayerControls: View {
             case let .choice(_, _, next): next()
             case let .toggle(_, flip): flip()
             case let .submenu(_, open): open()
+            case .disabled: break
             case let .action(run): run()
             }
         } label: {
@@ -980,6 +985,8 @@ struct PlayerControls: View {
                 .playerMenuRowMark(isSelected: isOn, accent: palette.accent)
         case let .submenu(summary, _):
             Text(summary).font(.body).playerMenuRowSecondary()
+        case let .disabled(summary):
+            Text(summary).font(.body).lineLimit(1).playerMenuRowSecondary()
         case .action:
             EmptyView()
         }
@@ -1007,6 +1014,16 @@ struct PlayerControls: View {
     /// (advanced outline/border, background box, dual subtitles) and Reset.
     private var styleMainRows: [StyleRowSpec] {
         let s = model.subtitleStyle
+        // When the primary is a bitmap sub (PGS/DVD/…), dual mode is disallowed —
+        // a bitmap line can't be repositioned — so the whole Dual Subtitles
+        // sub-screen has nothing actionable. Surface that here and make the row
+        // inert so the viewer never even opens an empty sub-screen.
+        let dualRow: StyleRowSpec
+        if let format = model.secondarySubtitleImagePrimaryFormat {
+            dualRow = StyleRowSpec(slot: 9, title: "Dual Subtitles", kind: .disabled(summary: "Disabled for \(format)"))
+        } else {
+            dualRow = StyleRowSpec(slot: 9, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) }))
+        }
         return [
             choiceRow(0, "Font", options: SubtitleFontFamily.allCases, current: s.fontFamily, label: { $0.displayName }) { v in updateStyle { $0.fontFamily = v } },
             numberRow(1, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } },
@@ -1019,7 +1036,7 @@ struct PlayerControls: View {
             })),
             StyleRowSpec(slot: 7, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) })),
             StyleRowSpec(slot: 8, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) })),
-            StyleRowSpec(slot: 9, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) })),
+            dualRow,
             StyleRowSpec(slot: 10, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } })),
         ]
     }

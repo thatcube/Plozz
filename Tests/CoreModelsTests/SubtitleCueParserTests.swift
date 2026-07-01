@@ -438,4 +438,26 @@ final class SubtitleCueParserTests: XCTestCase {
         XCTAssertEqual(cues.count, 1)
         XCTAssertEqual(cues[0].text, "café")
     }
+
+    func testDecodeMostlyUTF8WithStrayByteKeepsAccents() {
+        // A file that is valid UTF-8 apart from a stray bad byte must decode as
+        // UTF-8 (accents preserved), NOT fall through to CP1252 which would
+        // mojibake every multi-byte character (é -> Ã©). The bad byte becomes a
+        // single replacement character; everything else survives.
+        var bytes = [UInt8]("café déjà".utf8)   // several multi-byte sequences
+        bytes.append(0xFF)                       // one stray invalid byte
+        let decoded = SubtitleCueParser.decodeText(Data(bytes))
+        XCTAssertNotNil(decoded)
+        XCTAssertTrue(decoded!.contains("é"), "accents should survive lenient UTF-8")
+        XCTAssertTrue(decoded!.contains("à"))
+        XCTAssertFalse(decoded!.contains("Ã"), "must not mojibake via CP1252")
+    }
+
+    func testDecodeGenuineWindows1252StillUsesCodepage() {
+        // A real single-byte codepage file (no valid multi-byte UTF-8 runs) must
+        // still take the CP1252 path, not be misread as broken UTF-8.
+        // 0x93/0x94 = curly quotes, 0xE9 = é in Windows-1252.
+        let bytes: [UInt8] = [0x93, 0x63, 0x61, 0x66, 0xE9, 0x94]  // “café”
+        XCTAssertEqual(SubtitleCueParser.decodeText(Data(bytes)), "\u{201C}caf\u{00E9}\u{201D}")
+    }
 }

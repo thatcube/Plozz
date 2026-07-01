@@ -160,6 +160,16 @@ func playbackReporter(for provider: any MusicProvider) -> AudioPlaybackControlle
         PlozzLog.playback.debug("Music playback reporting disabled — provider is not a MediaProvider")
         return nil
     }
+    // Plex's /:/timeline keeps the now-playing dashboard and resume point fresh
+    // but never increments a track's play count / lastViewedAt — so timeline pings
+    // alone never surface a track in "Recently Played". Plex needs an explicit
+    // /:/scrobble once the track is played past ~80% of its length. Jellyfin, by
+    // contrast, marks a track played from its /Sessions/Playing/Stopped report, so
+    // scrobbling it again would double-count — hence this is Plex-only.
+    let plexScrobbler: WatchStateProviding? =
+        media.kind == .plex ? provider as? WatchStateProviding : nil
+    let scrobbleThreshold = 0.80
+
     return { track, event, positionSeconds in
         let progress = PlaybackProgress(
             itemID: track.id,
@@ -176,6 +186,21 @@ func playbackReporter(for provider: any MusicProvider) -> AudioPlaybackControlle
             MusicReportDiagnostics.emit(
                 "send THREW \(event.rawValue) id=\(track.id): \(error)"
             )
+        }
+        // A completed play (Plex only): scrobble so the track counts as played and
+        // appears in Recently Played. A natural end reports position == duration
+        // (100%); a near-complete skip still crosses the ~80% bar. Best-effort.
+        if event == .stop, let scrobbler = plexScrobbler,
+           let duration = track.duration, duration > 0,
+           positionSeconds >= duration * scrobbleThreshold {
+            do {
+                try await scrobbler.setPlayed(true, itemID: track.id)
+                MusicReportDiagnostics.emit(
+                    "scrobble OK id=\(track.id) pos=\(Int(positionSeconds))s/\(Int(duration))s"
+                )
+            } catch {
+                MusicReportDiagnostics.emit("scrobble THREW id=\(track.id): \(error)")
+            }
         }
     }
 }

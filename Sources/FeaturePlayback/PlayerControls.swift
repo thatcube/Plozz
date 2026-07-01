@@ -139,11 +139,16 @@ struct PlayerControls: View {
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                Spacer(minLength: 0)
+                if !styleEditing { Spacer(minLength: 0) }
                 bottomCluster
                     .opacity(model.controlsVisible ? 1 : 0)
+                // When the appearance editor is open the whole cluster flips to
+                // top-anchored so the panel pins to the top-right corner (top
+                // margin == side margin) instead of growing up from the transport.
+                if styleEditing { Spacer(minLength: 0) }
             }
             .animation(.easeInOut(duration: 0.25), value: model.controlsVisible)
+            .animation(.easeInOut(duration: 0.3), value: styleEditing)
         }
         .ignoresSafeArea()
         .background(
@@ -509,27 +514,33 @@ struct PlayerControls: View {
             VStack(alignment: .leading, spacing: 0) {
                 panelHeader(for: category)
                 Divider().background(.white.opacity(0.15))
-                ScrollView {
+                if isStyleScreen(category) {
+                    // Editor: content-sized (no greedy ScrollView) so the panel
+                    // hugs its rows and pins to the top-right corner with an even
+                    // margin rather than stretching toward full height.
                     VStack(alignment: .leading, spacing: 0) {
-                        switch category {
-                        case .subtitles: subtitleBody
-                        case .audio: audioPane
-                        case .speed: speedPane
-                        case .sync: syncPane
-                        case .info: EmptyView()
-                        }
+                        subtitleBody
                     }
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            switch category {
+                            case .subtitles: subtitleBody
+                            case .audio: audioPane
+                            case .speed: speedPane
+                            case .sync: syncPane
+                            case .info: EmptyView()
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    .frame(maxHeight: 440)
                 }
-                .frame(maxHeight: isStyleScreen(category) ? .infinity : 440)
             }
             .frame(width: 520, alignment: .leading)
-            // The Style screen pins the whole panel to a measured height so it
-            // climbs toward the top edge (bottom stays anchored above the
-            // scrubber); the header/divider take their natural size and the
-            // scroll area fills the rest.
-            .frame(height: isStyleScreen(category) ? stylePanelHeight : nil, alignment: .top)
             .colorScheme(.dark)
             .modifier(PanelGlassBackground())
             // The track controls live on the right of the button row, so the panel
@@ -543,21 +554,11 @@ struct PlayerControls: View {
     }
 
     /// True while the ✎ Edit appearance editor (or one of its detail sub-screens)
-    /// is open. In this mode we hide the transport chrome and dim gradient and grow
-    /// the panel to full height, so the live subtitles behind it are unobstructed
-    /// and every tweak is easy to see.
+    /// is open. In this mode we hide the transport chrome and dim gradient and pin
+    /// the content-sized panel to the top-right corner, so the live subtitles
+    /// behind and beside it are unobstructed and every tweak is easy to see.
     private var styleEditing: Bool {
         openPanel == .subtitles && subtitleScreen.isStyleFamily
-    }
-
-    /// Height the Subtitle Style panel is pinned to. The editor runs full-height
-    /// with even ~60pt margins top and bottom (matching its side margin): with the
-    /// transport hidden, the whole right column becomes the editor while the video
-    /// and live subtitles stay visible behind and beside it. Clamps until the
-    /// available height is measured.
-    private var stylePanelHeight: CGFloat {
-        guard availableHeight > 0 else { return 440 }
-        return max(360, availableHeight - 120)
     }
 
     // MARK: Info panel
@@ -697,7 +698,7 @@ struct PlayerControls: View {
                 .focused($focus, equals: .subBack)
             }
             Text(headerTitle(for: category))
-                .font(.title3.weight(.semibold))
+                .font(.headline.weight(.semibold))
                 .foregroundStyle(.white)
             Spacer(minLength: 12)
             if category == .subtitles && subtitleScreen == .tracks {
@@ -711,8 +712,8 @@ struct PlayerControls: View {
             }
         }
         .padding(.horizontal, 28)
-        .padding(.top, 22)
-        .padding(.bottom, 12)
+        .padding(.top, 16)
+        .padding(.bottom, 10)
     }
 
     private func headerTitle(for category: Category) -> String {
@@ -835,11 +836,10 @@ struct PlayerControls: View {
                 }
                 styleRow(row)
             }
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .top)
         .onMoveCommand { direction in handleStyleMove(direction, rows: rows) }
     }
 
@@ -858,7 +858,12 @@ struct PlayerControls: View {
             case let .action(run): run()
             }
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                // Leading slot mirrors the trailing +/chevron slot so the title and
+                // the right-aligned value carry EQUAL gutters inside the focus card
+                // (previously the value's reserved icon column made the right side
+                // look far while the title nearly touched the card's left edge).
+                Color.clear.frame(width: 20)
                 Text(row.title).font(.body).lineLimit(1)
                 Spacer(minLength: 12)
                 styleRowTrailing(row, isFocused: isFocused)
@@ -1772,7 +1777,7 @@ private extension View {
 /// the diagnostics FPS over DV content and fall back to the solid fill if it
 /// ever stutters.
 private struct PanelGlassBackground: ViewModifier {
-    var cornerRadius: CGFloat = 24
+    var cornerRadius: CGFloat = 32
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
 
     func body(content: Content) -> some View {

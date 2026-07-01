@@ -324,6 +324,10 @@ public final class AudioPlaybackController {
     /// player. Long enough to coalesce a burst of presses, short enough that a
     /// single deliberate skip still feels responsive.
     private static let skipDebounce: Duration = .milliseconds(350)
+    /// How long the player must stay stranded on a dead item before the watchdog
+    /// reloads it. Long enough that a brief transition/buffering blip is never
+    /// mistaken for a genuine freeze, short enough to recover on its own quickly.
+    private static let stuckRecoveryDelay: TimeInterval = 2.5
     /// Recovery observers: if a track transition makes the system tear down or
     /// reconfigure the (AirPlay) route, re-activate the session and resume so the
     /// speaker doesn't stay silent until it's physically reconnected.
@@ -335,6 +339,18 @@ public final class AudioPlaybackController {
     /// playing→waiting→paused slide with no user pause is the fingerprint of an
     /// AirPlay route drop.
     private var lastLoggedTimeControl: AVPlayer.TimeControlStatus?
+
+    /// When the player first entered a *stuck* state — `.waiting` with
+    /// `reasonForWaitingToPlay == .noItemToPlay`, or a `.failed` current item —
+    /// while we still intend to be playing. A rapid-skip burst (or any transient
+    /// network blip) can make an item load fail ("network connection was lost")
+    /// and strand the player here forever. The time-observer watchdog uses this to
+    /// tell a momentary blip from a genuine freeze and self-heal by reloading the
+    /// current track. Reset to nil the moment playback is healthy again.
+    private var stuckSince: Date?
+    /// The in-flight self-heal reload kicked off by the stuck watchdog, so we never
+    /// stack more than one recovery reload at a time.
+    private var stuckRecoveryTask: Task<Void, Never>?
 
     public init() {
         player.actionAtItemEnd = .none
@@ -797,30 +813,66 @@ public final class AudioPlaybackController {
         // instead of delivering it to the foreground view, which silently breaks
         // the video player's own Play/Pause handling.
         enableRemoteCommands()
-        let item = AVPlayerItem(url: resolved.url)
         if let current = player.currentItem {
-            // Fill a larger forward buffer before we advance, so audio keeps
-            // flowing to the HomePod through the AirPlay stream renegotiation.
-            item.preferredForwardBufferDuration = 30
-            // Drop any stale pre-enqueued item so it doesn't linger in the queue
-            // (this jump supersedes whatever "next" we'd guessed).
-            clearPreparedNext(removeFromPlayer: true)
-            player.insert(item, after: current)
-            diag("start", "HARD-PATH inserted, waiting to buffer route=\(routeSummary())")
-            await waitUntilReadyToPlay(item)
-            // A rapid skip / new queue may have superseded us while buffering. Drop
-            // the item we speculatively queued and let the newer transition win.
-            guard generation == trackTransitionGeneration else {
-                player.remove(item)
-                diag("start", "HARD-PATH superseded after buffering gen=\(generation) current=\(trackTransitionGeneration) — dropped item")
+            // Insert-and-buffer with a bounded retry. A rapid-skip burst (or any
+            // transient network blip) can make the freshly-inserted item fail to
+            // load — the on-device log caught `itemStatus=.failed
+            // itemError=The network connection was lost.` after ~16 skips in 2s.
+            // Advancing onto a `.failed` item strands the player at
+            // `WaitingWithNoItemToPlayReason` forever (seeks can't revive a dead
+            // item), so instead we drop the corpse, re-resolve a FRESH URL (the old
+            // stream/session may be gone) and try again a few times before giving
+            // up. This is what makes a hammered skip recover on its own.
+            var item = AVPlayerItem(url: resolved.url)
+            var readyItem: AVPlayerItem?
+            for attempt in 1...3 {
+                // Fill a larger forward buffer before we advance, so audio keeps
+                // flowing to the HomePod through the AirPlay stream renegotiation.
+                item.preferredForwardBufferDuration = 30
+                // Drop any stale pre-enqueued item so it doesn't linger in the queue
+                // (this jump supersedes whatever "next" we'd guessed).
+                clearPreparedNext(removeFromPlayer: true)
+                player.insert(item, after: player.currentItem)
+                diag("start", "HARD-PATH inserted (attempt \(attempt)), waiting to buffer route=\(routeSummary())")
+                await waitUntilReadyToPlay(item)
+                // A rapid skip / new queue may have superseded us while buffering.
+                // Drop the item we speculatively queued and let the newer transition win.
+                guard generation == trackTransitionGeneration else {
+                    player.remove(item)
+                    diag("start", "HARD-PATH superseded after buffering gen=\(generation) current=\(trackTransitionGeneration) — dropped item")
+                    return
+                }
+                if item.status == .failed {
+                    let err = item.error?.localizedDescription ?? "unknown"
+                    player.remove(item)
+                    diag("start", "HARD-PATH item FAILED attempt=\(attempt) error=\(err) — re-resolving")
+                    guard attempt < 3 else { break }
+                    // Brief backoff, then re-resolve a fresh URL and rebuild the item.
+                    try? await Task.sleep(for: .milliseconds(400))
+                    guard generation == trackTransitionGeneration else { return }
+                    guard let re = await resolver(track), generation == trackTransitionGeneration else {
+                        diag("start", "HARD-PATH re-resolve failed/superseded — giving up gen=\(generation) current=\(trackTransitionGeneration)")
+                        return
+                    }
+                    currentQuality = re.quality
+                    item = AVPlayerItem(url: re.url)
+                    continue
+                }
+                readyItem = item
+                break
+            }
+            guard let ready = readyItem else {
+                // All attempts failed. Leave the outgoing item playing rather than
+                // stranding the player on a corpse; the stuck watchdog will retry.
+                diag("start", "HARD-PATH exhausted retries — item never became ready, aborting")
                 return
             }
-            diag("start", "HARD-PATH buffered itemStatus=\(item.status.rawValue) likelyToKeepUp=\(item.isPlaybackLikelyToKeepUp) bufferFull=\(item.isPlaybackBufferFull) — advancing")
+            diag("start", "HARD-PATH buffered itemStatus=\(ready.status.rawValue) likelyToKeepUp=\(ready.isPlaybackLikelyToKeepUp) bufferFull=\(ready.isPlaybackBufferFull) — advancing")
             // Manual jump / new queue — an inherent discontinuity, so use the same
             // proven deactivate→reactivate cycle to keep the HomePod stream alive.
             player.pause()
             player.advanceToNextItem()
-            observeEnd(of: item)
+            observeEnd(of: ready)
             await reactivateAndStart(generation: generation, path: "HARD-PATH")
             guard generation == trackTransitionGeneration else {
                 diag("start", "HARD-PATH superseded after restart gen=\(generation) current=\(trackTransitionGeneration)")
@@ -830,6 +882,7 @@ public final class AudioPlaybackController {
         } else {
             // Cold start — no current item and therefore no route to protect yet, so
             // `playImmediately` is safe and avoids parking in the wait state.
+            let item = AVPlayerItem(url: resolved.url)
             player.insert(item, after: nil)
             observeEnd(of: item)
             player.playImmediately(atRate: 1.0)
@@ -1229,6 +1282,9 @@ public final class AudioPlaybackController {
                     self.lastLoggedTimeControl = tc
                     self.diag("player", "timeControl→[\(self.playerStateSummary())] route=\(self.routeSummary())")
                 }
+                // Self-heal watchdog: catch a player stranded on a dead item (a
+                // failed load / "network connection was lost") and reload it.
+                self.detectAndRecoverStuckPlayback()
                 // While a debounced skip is pending the outgoing track is still
                 // playing, but the UI already shows the target track — so don't
                 // let the old item's position drive the scrubber; keep it at 0.
@@ -1259,6 +1315,60 @@ public final class AudioPlaybackController {
     }
 
     // MARK: Audio session
+
+    /// Time-observer watchdog (runs 4×/sec) that detects a player stranded on a
+    /// dead item and self-heals by reloading the current track. The strand
+    /// fingerprint (seen on-device after a rapid-skip burst) is `.waiting` with
+    /// `reasonForWaitingToPlay == .noItemToPlay`, or a `.failed` current item, while
+    /// we still intend to be playing — a state seeks/reactivation can't fix because
+    /// the item itself has no data. We wait `stuckRecoveryDelay` before acting so a
+    /// momentary transition blip is never mistaken for a freeze, and gate on
+    /// `stuckRecoveryTask` so only one reload is ever in flight.
+    private func detectAndRecoverStuckPlayback() {
+        // Only meaningful when we intend to be playing and aren't mid-skip (the
+        // debounce window legitimately parks the outgoing item).
+        guard isPlaying, hasActivePlayback, !startPending, stuckRecoveryTask == nil else {
+            stuckSince = nil
+            return
+        }
+        let stuck: Bool
+        if player.timeControlStatus == .waitingToPlayAtSpecifiedRate,
+           player.reasonForWaitingToPlay == .some(.noItemToPlay) {
+            stuck = true
+        } else if player.currentItem?.status == .failed {
+            stuck = true
+        } else {
+            stuck = false
+        }
+        guard stuck else {
+            stuckSince = nil
+            return
+        }
+        let now = Date()
+        guard let since = stuckSince else {
+            stuckSince = now
+            return
+        }
+        guard now.timeIntervalSince(since) >= Self.stuckRecoveryDelay else { return }
+        diag("recover", "stuck \(String(format: "%.1f", now.timeIntervalSince(since)))s [\(playerStateSummary())] — reloading current track")
+        reloadCurrentTrackAfterStall()
+    }
+
+    /// Rebuilds the current track from a fresh network resolve after the watchdog
+    /// finds the player stranded on a dead item. Clears the (now stale) treadmill
+    /// so the reload takes the HARD-PATH — a fresh URL + the deactivate→reactivate
+    /// route restart — rather than re-handing the same corpse via the fast path.
+    private func reloadCurrentTrackAfterStall() {
+        stuckSince = nil
+        stuckRecoveryTask?.cancel()
+        stuckRecoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.clearPreparedNext(removeFromPlayer: true)
+            await self.startCurrent(reactivateRoute: true)
+            self.stuckRecoveryTask = nil
+        }
+    }
+
 
     private func configureSessionIfNeeded() {
         guard !sessionConfigured else { return }

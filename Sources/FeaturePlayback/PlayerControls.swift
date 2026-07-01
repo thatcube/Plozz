@@ -91,6 +91,15 @@ struct PlayerControls: View {
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
 
+    /// Named coordinate space spanning the whole bottom cluster (panel slot +
+    /// scrubber + button row) so the Speed button's leading edge can be measured
+    /// in the same frame the Speed panel is laid out in.
+    private static let bottomClusterSpace = "PlayerBottomCluster"
+
+    /// Measured leading-edge X of the Speed button, in `bottomClusterSpace`. The
+    /// Speed panel left-aligns to this so it opens directly under its own button.
+    @State private var speedButtonLeading: CGFloat = 0
+
     /// The transport control that was focused when the current panel was opened.
     /// Restored (deferred) whenever the panel fully closes so focus always lands
     /// back where the user started — no matter how deep the panel's sub-screens
@@ -171,6 +180,8 @@ struct PlayerControls: View {
             scrubberRow
             buttonRow
         }
+        .coordinateSpace(name: Self.bottomClusterSpace)
+        .onPreferenceChange(SpeedButtonLeadingKey.self) { speedButtonLeading = $0 }
         .animation(.easeInOut(duration: 0.2), value: openPanel)
         .animation(.easeInOut(duration: 0.28), value: titleVisible)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
@@ -398,6 +409,18 @@ struct PlayerControls: View {
                 }
                 .playerGlassButton(prominent: openPanel == category)
                 .focused($focus, equals: .button(category))
+                .background {
+                    // Publish the Speed button's leading edge so its panel can
+                    // open left-aligned to the button rather than the far edge.
+                    if category == .speed {
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: SpeedButtonLeadingKey.self,
+                                value: proxy.frame(in: .named(Self.bottomClusterSpace)).minX
+                            )
+                        }
+                    }
+                }
             }
         }
         .opacity(model.isScrubbing ? 0 : 1)
@@ -463,9 +486,11 @@ struct PlayerControls: View {
             .frame(width: panelWidth(for: category), alignment: .leading)
             .colorScheme(.dark)
             .modifier(PanelGlassBackground())
-            // The track controls live on the right of the button row, so the panel
-            // opens against the trailing edge above them rather than on the left.
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            // Speed opens left-aligned under its own button; the other panels pin
+            // to the trailing edge above the track-button cluster.
+            .modifier(PanelHorizontalPlacement(
+                leadingInset: category == .speed ? speedButtonLeading : nil
+            ))
         }
     }
 
@@ -982,7 +1007,7 @@ struct PlayerControls: View {
         if model.engineCapabilities.contains(.playbackSpeed) {
             result.append(.speed)
         }
-        if model.hasSelectableAudio
+        if !model.audioOptions.isEmpty
             || model.engineCapabilities.contains(.dialogEnhance) {
             result.append(.audio)
         }
@@ -1030,23 +1055,23 @@ struct PlayerControls: View {
     }
 
     /// Audio menu rows: selectable tracks followed by the Dialog Enhance toggle
-    /// when supported. Indexed from 0 in their own focus-slot space.
+    /// when supported. Indexed from 0 in their own focus-slot space. Every audio
+    /// track is listed even when there's only one, so the menu always reflects
+    /// what's playing.
     private var audioRows: [TrackRow] {
         var rows: [TrackRow] = []
         var index = 0
-        if model.hasSelectableAudio {
-            for option in model.audioOptions {
-                rows.append(TrackRow(
-                    id: index,
-                    header: nil,
-                    title: option.title,
-                    subtitle: "",
-                    isSelected: option.isSelected,
-                    isToggle: false,
-                    action: { actions.selectAudio(option.id) }
-                ))
-                index += 1
-            }
+        for option in model.audioOptions {
+            rows.append(TrackRow(
+                id: index,
+                header: nil,
+                title: option.title,
+                subtitle: "",
+                isSelected: option.isSelected,
+                isToggle: false,
+                action: { actions.selectAudio(option.id) }
+            ))
+            index += 1
         }
         if model.engineCapabilities.contains(.dialogEnhance) {
             rows.append(TrackRow(
@@ -1364,6 +1389,34 @@ private struct PanelGlassBackground: ViewModifier {
                 .clipShape(shape)
                 .overlay(shape.stroke(.white.opacity(0.14), lineWidth: 1))
         }
+    }
+}
+
+/// Horizontally positions an open control panel within the bottom cluster.
+/// `leadingInset` non-nil → left-align the panel at that inset (Speed, so it
+/// opens directly under its own button); nil → pin to the trailing edge above
+/// the track-button cluster (Subtitles/Audio/Sync).
+private struct PanelHorizontalPlacement: ViewModifier {
+    let leadingInset: CGFloat?
+
+    func body(content: Content) -> some View {
+        if let leadingInset {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, max(0, leadingInset))
+        } else {
+            content
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}
+
+/// Carries the Speed button's measured leading-edge X up to `PlayerControls` so
+/// the Speed panel can align its left edge to the button.
+private struct SpeedButtonLeadingKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 #endif

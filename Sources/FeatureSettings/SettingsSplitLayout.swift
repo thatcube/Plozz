@@ -65,7 +65,6 @@ struct SettingsSplitSection: Identifiable {
 /// flipping a toggle in the detail pane recomputes the list (revealing or
 /// hiding indented sub-rows) on the next render.
 struct SettingsSplitLayout: View {
-    let title: String
     let sections: [SettingsSplitSection]
 
     @State private var selectedRowID: String?
@@ -120,11 +119,6 @@ struct SettingsSplitLayout: View {
     private var masterList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                Text(title)
-                    .font(.largeTitle.bold())
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
-
                 ForEach(sections) { section in
                     if let header = section.header {
                         Text(header)

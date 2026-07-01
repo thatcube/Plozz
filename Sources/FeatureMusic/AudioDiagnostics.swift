@@ -10,10 +10,14 @@ import AVFoundation
 /// After reproducing the bug on the Apple TV the file is pulled to the Mac with:
 ///
 /// ```
-/// xcrun devicectl device copy from --device "Brando TV" \
+/// xcrun devicectl device copy from --device "Brando TV" --user mobile \
 ///   --domain-type appDataContainer --domain-identifier com.thatcube.Plozz \
-///   --source Documents/audio-diagnostics.log --destination ./audio-diagnostics.log
+///   --source Library/Caches/audio-diagnostics.log --destination ./audio-diagnostics.log
 /// ```
+///
+/// NOTE: the file lives in Caches (NOT Documents) because tvOS forbids writing to
+/// `.documentDirectory` — it fails at runtime (WWDC23 §10256). `--source` is
+/// relative to the app data container root.
 ///
 /// Events are cheap (a handful per skip), so a synchronous file append per event
 /// is negligible and keeps ordering exact even if the app is force-killed after a
@@ -42,7 +46,7 @@ public final class AudioDiagnostics {
         stamp.locale = Locale(identifier: "en_US_POSIX")
 
         let docs = try? FileManager.default.url(
-            for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+            for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )
         fileURL = docs?.appendingPathComponent("audio-diagnostics.log")
 

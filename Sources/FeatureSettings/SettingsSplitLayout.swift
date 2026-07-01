@@ -16,6 +16,13 @@ struct SettingsSplitRow: Identifiable {
     let description: String?
     let valueSummary: String?
     let indented: Bool
+    /// When true, *entering* this row's detail (pressing right / Select) grows
+    /// the pane into a full-bleed, full-height "immersive" editor — the left
+    /// index collapses to a slim strip and the detail drops its card chrome, so
+    /// a live preview + floating controls can mirror the in-player experience.
+    /// Merely navigating past the row in the list still shows the normal compact
+    /// preview; expansion is opt-in on enter and collapses on left/Menu.
+    let immersive: Bool
     let detail: () -> AnyView
 
     init<Detail: View>(
@@ -24,6 +31,7 @@ struct SettingsSplitRow: Identifiable {
         description: String? = nil,
         valueSummary: String? = nil,
         indented: Bool = false,
+        immersive: Bool = false,
         @ViewBuilder detail: @escaping () -> Detail
     ) {
         self.id = id
@@ -31,7 +39,21 @@ struct SettingsSplitRow: Identifiable {
         self.description = description
         self.valueSummary = valueSummary
         self.indented = indented
+        self.immersive = immersive
         self.detail = { AnyView(detail()) }
+    }
+}
+
+/// Injected into an immersive row's detail so the editor knows whether it is
+/// currently *expanded* (focus is inside it) or showing its compact preview.
+private struct SettingsDetailExpandedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var settingsDetailExpanded: Bool {
+        get { self[SettingsDetailExpandedKey.self] }
+        set { self[SettingsDetailExpandedKey.self] = newValue }
     }
 }
 
@@ -91,17 +113,26 @@ struct SettingsSplitLayout: View {
         allRows.first { $0.id == selectedRowID } ?? allRows.first
     }
 
+    /// True while the user has *entered* an immersive row's detail — drives the
+    /// index collapse + full-bleed pane transition.
+    private var isImmersive: Bool {
+        focusInDetail && (selectedRow?.immersive ?? false)
+    }
+
     var body: some View {
         GeometryReader { geo in
-            HStack(alignment: .top, spacing: 40) {
+            HStack(alignment: .top, spacing: isImmersive ? 0 : 40) {
                 masterList
-                    .frame(width: max(360, geo.size.width * 0.40), alignment: .leading)
+                    .frame(width: isImmersive ? 108 : max(360, geo.size.width * 0.40),
+                           alignment: .leading)
+                    .opacity(isImmersive ? 0.55 : 1)
 
                 detailPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            .padding(.vertical, 24)
+            .padding(.horizontal, isImmersive ? 0 : PlozzTheme.Metrics.screenPadding)
+            .padding(.vertical, isImmersive ? 0 : 24)
+            .animation(.easeInOut(duration: 0.30), value: isImmersive)
         }
         .onAppear {
             if selectedRowID == nil { selectedRowID = allRowIDs.first }
@@ -180,7 +211,39 @@ struct SettingsSplitLayout: View {
 
     // MARK: - Detail pane (right)
 
+    @ViewBuilder
     private var detailPane: some View {
+        if let row = selectedRow, row.immersive {
+            immersiveDetail(row)
+        } else {
+            standardDetail
+        }
+    }
+
+    /// An immersive row owns the whole pane: no title/description chrome, no
+    /// inner scroll padding. It renders full-bleed and reads
+    /// `settingsDetailExpanded` to switch between its compact preview and the
+    /// expanded editor. The card corner animates to 0 while expanded so it reads
+    /// as a full-height mini-player.
+    private func immersiveDetail(_ row: SettingsSplitRow) -> some View {
+        let corner: CGFloat = isImmersive ? 0 : PlozzTheme.Metrics.mediumCardCornerRadius
+        return row.detail()
+            .environment(\.settingsDetailExpanded, isImmersive)
+            .toggleStyle(SettingsSwitchToggleStyle())
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(isImmersive ? 0 : 0.08), lineWidth: 1)
+            )
+            .focusSection()
+    }
+
+    private var standardDetail: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 if let row = selectedRow {

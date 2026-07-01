@@ -372,9 +372,10 @@ struct PlaybackDetailView: View {
                 id: "subtitle-style",
                 title: "Subtitle style",
                 description: "Adjust subtitle font, size and colours. These settings are also available from the player while you watch.",
-                valueSummary: captions.settings.followsSystemStyle ? "System" : "Custom"
+                valueSummary: captions.settings.followsSystemStyle ? "System" : "Custom",
+                immersive: true
             ) {
-                SubtitleStyleEditor(settings: $captions.settings)
+                SubtitleStyleImmersiveEditor()
             }
         ])
     }

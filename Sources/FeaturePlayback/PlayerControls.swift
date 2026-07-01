@@ -1073,6 +1073,7 @@ struct PlayerControls: View {
         rows.append(choiceRow(slot, "Weight", options: weights, current: s.fontWeight.snapped(to: weights), label: { $0.displayName }) { v in updateStyle { $0.fontWeight = v } }); slot += 1
         rows.append(numberRow(slot, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } }); slot += 1
         rows.append(numberRow(slot, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: Self.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } }); slot += 1
+        rows.append(numberRow(slot, "Horizontal Offset", options: Self.hOffsetOptions, current: Int((s.horizontalOffset * 100).rounded()), label: Self.hOffsetLabel) { v in updateStyle { $0.horizontalOffset = Double(v) / 100 } }); slot += 1
         rows.append(colorRow(slot, "Text Colour", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } }); slot += 1
         rows.append(numberRow(slot, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } }); slot += 1
         // Only affects HDR frames, so it appears exclusively while HDR is live —
@@ -1149,14 +1150,19 @@ struct PlayerControls: View {
     /// Advanced outline (edge) + explicit glyph border.
     private var styleOutlineRows: [StyleRowSpec] {
         let s = model.subtitleStyle
-        return [
+        var rows: [StyleRowSpec] = [
             choiceRow(0, "Outline Style", options: SubtitleEdgeStyle.allCases, current: s.edge.style, label: { $0.displayName }) { v in updateStyle { $0.edge.style = v } },
             colorRow(1, "Outline Colour", options: Self.textColorOptions, current: s.edge.color, label: Self.colorLabel) { c in updateStyle { $0.edge.color = c } },
             numberRow(2, "Outline Thickness", options: Self.thicknessOptions, current: Int(s.edge.thickness.rounded()), label: { "\($0)" }) { v in updateStyle { $0.edge.thickness = Double(v) } },
             StyleRowSpec(slot: 3, title: "Glyph Border", kind: .toggle(isOn: s.border.isEnabled, flip: { updateStyle { $0.border.isEnabled.toggle() } })),
-            colorRow(4, "Border Colour", options: Self.textColorOptions, current: s.border.color, label: Self.colorLabel) { c in updateStyle { $0.border.color = c } },
-            numberRow(5, "Border Width", options: Self.thicknessOptions, current: Int(s.border.width.rounded()), label: { "\($0)" }) { v in updateStyle { $0.border.width = Double(v) } },
         ]
+        // Border colour/width only draw anything once the border is on, so they
+        // reveal with the toggle (no dead rows) — same pattern as HDR/dual gating.
+        if s.border.isEnabled {
+            rows.append(colorRow(4, "Border Colour", options: Self.textColorOptions, current: s.border.color, label: Self.colorLabel) { c in updateStyle { $0.border.color = c } })
+            rows.append(numberRow(5, "Border Width", options: Self.thicknessOptions, current: Int(s.border.width.rounded()), label: { "\($0)" }) { v in updateStyle { $0.border.width = Double(v) } })
+        }
+        return rows
     }
 
     /// Background box: colour, its own opacity, corner radius and padding.
@@ -1295,6 +1301,9 @@ struct PlayerControls: View {
     // Precise, numeric option grids — no "low / high" buckets.
     private static let sizeOptions: [Int] = Array(stride(from: 60, through: 250, by: 5))
     private static let positionOptions: [Int] = Array(stride(from: 0, through: 90, by: 1))
+    /// Horizontal nudge as a signed percentage of the max offset (±25% of width);
+    /// 0 = centred. Lets subtitles dodge burned-in signage / letterbox furniture.
+    private static let hOffsetOptions: [Int] = Array(stride(from: -100, through: 100, by: 5))
     private static let opacityOptions: [Int] = Array(stride(from: 20, through: 100, by: 5))
     /// The box's own opacity floors lower than text opacity (down to 5%) so a
     /// near-invisible scrim is possible without dragging the text there too.
@@ -1337,6 +1346,13 @@ struct PlayerControls: View {
         case 90: return "Top"
         default: return "\(pct)%"
         }
+    }
+
+    /// Horizontal offset readout: 0 reads "Centre"; a signed percentage otherwise,
+    /// worded by direction so the sign never has to be parsed.
+    private static func hOffsetLabel(_ pct: Int) -> String {
+        if pct == 0 { return "Centre" }
+        return pct > 0 ? "Right \(pct)%" : "Left \(-pct)%"
     }
 
     /// Corner radius readout: the sentinel top step reads "Full" (a capsule/pill);

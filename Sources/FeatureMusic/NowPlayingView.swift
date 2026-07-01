@@ -38,6 +38,15 @@ struct NowPlayingView: View {
     /// `showControls`); cancelled when the bar hides or the view goes away.
     @State private var focusTask: Task<Void, Never>?
 
+    /// Whether the scrub bar is allowed to take focus. It stays `false` while the
+    /// controls are hidden AND across the reveal itself, only flipping `true` a
+    /// beat after focus has settled on play/pause. This keeps the scrub surface
+    /// out of the focus relocation that fires when the reveal catcher is removed
+    /// on reveal — that relocation was what landed a down-press on the scrubber
+    /// instead of the pause button. Once settled it's focusable again so the user
+    /// can navigate up into the bar to scrub.
+    @State private var scrubFocusable = false
+
     /// True while the control bar is mid slide-in/out. During the slide the
     /// scrub bar suppresses its progress spring so the fill + knob ride the slide
     /// in lockstep with the glass track (rather than picking up a separate easing
@@ -344,18 +353,27 @@ struct NowPlayingView: View {
     /// play/pause so the bar always returns with it highlighted.
     private func showControls() {
         controlsVisible = true
+        // Keep the scrub bar non-focusable across the reveal so it can't win the
+        // focus relocation that fires when the (focused) reveal catcher is removed
+        // from the hierarchy — that relocation is what was landing a down-press on
+        // the scrubber. With the scrub surface out of the running, focus falls to
+        // the play/pause button (see .defaultFocus on bottomControls).
+        scrubFocusable = false
         focus = .playPause
-        // Re-assert on the next runloop. When the bar reveals, the transport row
-        // slides up from off-screen and the focusable scrub surface (a UIKit
-        // focusable above the buttons) can win the initial focus race, so a single
-        // synchronous set doesn't reliably land on play/pause. Setting it again
-        // once the buttons are on-screen makes the pause button the dependable
-        // default whether the bar was revealed by a press or a vertical swipe.
+        // Re-assert on the next runloop, then re-enable scrub focus a beat later.
+        // When the bar reveals, the transport row slides up from off-screen and a
+        // single synchronous set doesn't reliably land on play/pause. Setting it
+        // again once the buttons are on-screen makes the pause button the
+        // dependable default whether the bar was revealed by a press or a swipe;
+        // re-enabling the scrub bar afterwards keeps up-navigation to it working.
         focusTask?.cancel()
         focusTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 50_000_000)
             guard !Task.isCancelled, controlsVisible else { return }
             focus = .playPause
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, controlsVisible else { return }
+            scrubFocusable = true
         }
         scheduleHide()
     }
@@ -365,6 +383,7 @@ struct NowPlayingView: View {
     private func hideControls() {
         hideTask?.cancel()
         focusTask?.cancel()
+        scrubFocusable = false
         controlsVisible = false
         focus = .revealCatcher
     }
@@ -633,7 +652,7 @@ struct NowPlayingView: View {
     /// transport row below.
     private var scrubRow: some View {
         VStack(spacing: 10) {
-            MusicScrubBar(model: scrubModel, suppressProgressAnimation: controlsSliding, isFocusable: controlsVisible)
+            MusicScrubBar(model: scrubModel, suppressProgressAnimation: controlsSliding, isFocusable: scrubFocusable)
                 .frame(height: 44)
             HStack {
                 Text(MusicFormat.duration(scrubModel.displaySeconds))

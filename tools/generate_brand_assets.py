@@ -33,7 +33,7 @@ BRAND = os.path.join(REPO, "App/Resources/Assets.xcassets/App Icon & Top Shelf I
 # reintroduced (see the module docstring).
 BASE_GRAY = (28, 28, 30)     # off-black dark grey base (#1C1C1E)
 ACCENT_BLUE = (0, 164, 220)  # brand "light blue" (#00A4DC) — the radial glow hue
-GLOW_STRENGTH = 0.05         # peak blend toward ACCENT_BLUE at the centre (~5%)
+GLOW_STRENGTH = 0.09         # peak blend toward ACCENT_BLUE at the centre
 
 # Logo size as a fraction of the shorter side. Bumped ~15% larger than the
 # prior 0.688 so the TV mark reads bigger on the tvOS home row.

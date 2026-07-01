@@ -3,14 +3,17 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// Settings → Server Accounts → <Server> detail.
+/// Settings → This Apple TV → Servers → <Server> detail.
 ///
-/// All of the controls that used to live inline on the Servers list now
-/// belong here, behind a drill-in row:
-/// - "Use this server" toggle (per-profile fan-out across every household
-///   account on this server)
-/// - Signed-in accounts (Jellyfin = per-profile; Plex = one shared login)
-/// - Per-library "Show on Home" toggles
+/// This screen is **global / household scope** — it manages the server's
+/// sign-ins only:
+/// - Signed-in accounts (Jellyfin = per-profile creds; Plex = one shared login)
+/// - Sign out (removes the token for the whole household)
+///
+/// Anything *personal* — which Plex user a profile plays as, whether a profile
+/// uses this server, and which libraries show on a profile's Home — lives on
+/// `<Profile>` › Your Libraries instead, so a personal tweak never reads as
+/// household administration.
 struct ServerDetailView: View {
     let context: SettingsContext
     let serverKey: String
@@ -19,6 +22,9 @@ struct ServerDetailView: View {
     /// confirmation alert can show its name + recompute "is this the last
     /// account?" wording even if the underlying group changes.
     @State private var pendingSignOut: PendingSignOut?
+
+    /// Drives the "Remove Server" confirmation (multi-account servers only).
+    @State private var confirmRemoveServer = false
 
     private struct PendingSignOut: Identifiable {
         let id: String
@@ -32,9 +38,10 @@ struct ServerDetailView: View {
             VStack(alignment: .leading, spacing: 28) {
                 if let group = currentGroup {
                     header(group)
-                    useThisServerPanel(group)
                     accountsPanel(group)
-                    librariesPanel(group)
+                    if group.accounts.count > 1 {
+                        removeServerPanel(group)
+                    }
                 } else {
                     // Focusable so Menu/Back can pop back to the Servers list
                     // instead of falling through and quitting the app.
@@ -52,7 +59,6 @@ struct ServerDetailView: View {
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
-        .task { await context.reloadLibraries() }
         .alert(item: $pendingSignOut) { pending in
             Alert(
                 title: Text("Sign out \(pending.account.userName)?"),
@@ -96,42 +102,13 @@ struct ServerDetailView: View {
         }
     }
 
-    // MARK: - Use this server
-
-    @ViewBuilder
-    private func useThisServerPanel(_ group: ServerAccountGroup) -> some View {
-        if context.profilesEnabled {
-            SettingsPanel(
-                footer: "When on, this server's libraries appear on Home and playback is reported back to it as \(context.activeProfile.name)."
-            ) {
-                Toggle(isOn: useThisServerBinding(group)) {
-                    Text("Use this server").font(.headline)
-                }
-                .disabled(group.accounts.isEmpty)
-            }
-        }
-    }
-
-    private func useThisServerBinding(_ group: ServerAccountGroup) -> Binding<Bool> {
-        Binding(
-            get: {
-                group.accounts.contains { context.isAccountIncludedInActiveProfile($0.id) }
-            },
-            set: { included in
-                for account in group.accounts {
-                    context.onSetAccountIncluded(account.id, included)
-                }
-            }
-        )
-    }
-
     // MARK: - Accounts
 
     private func accountsPanel(_ group: ServerAccountGroup) -> some View {
         SettingsPanel(
             footer: group.providerKind == .plex
-                ? "Plex shares one sign-in across the household; each profile picks its own Plex user from the profile page."
-                : "Jellyfin signs in per profile. Each profile uses its own credentials and token."
+                ? "Plex shares one sign-in across the household. Each profile picks its own Plex user and libraries under Profile › Your Libraries."
+                : "Jellyfin signs in per profile, each with its own credentials. Choose what shows on your Home under Profile › Your Libraries."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Signed in as")
@@ -179,7 +156,8 @@ struct ServerDetailView: View {
                     isLastAccount: isLast
                 )
             } label: {
-                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                Label(isLast ? "Sign Out & Remove Server" : "Sign Out",
+                      systemImage: "rectangle.portrait.and.arrow.right")
                     .labelStyle(.titleAndIcon)
                     .font(.callout.weight(.semibold))
             }
@@ -188,70 +166,33 @@ struct ServerDetailView: View {
         .padding(.vertical, 2)
     }
 
-    // MARK: - Libraries
+    // MARK: - Remove server (household)
 
-    @ViewBuilder
-    private func librariesPanel(_ group: ServerAccountGroup) -> some View {
+    /// A single destructive action for multi-account servers: signs everyone
+    /// out at once and drops the server from the Apple TV. (For a single-account
+    /// server the per-account "Sign Out & Remove Server" already does this, so
+    /// this panel only appears when there's more than one sign-in.)
+    private func removeServerPanel(_ group: ServerAccountGroup) -> some View {
         SettingsPanel(
-            footer: "Toggle off to hide a library's rows on Home without signing the account out."
+            footer: "Signs out all \(group.accounts.count) accounts and removes \(group.serverName) from this Apple TV for everyone."
         ) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Libraries on Home")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                librarySection(for: group)
+            Button(role: .destructive) {
+                confirmRemoveServer = true
+            } label: {
+                Label("Remove Server", systemImage: "trash")
+                    .font(.callout.weight(.semibold))
             }
-        }
-    }
-
-    @ViewBuilder
-    private func librarySection(for group: ServerAccountGroup) -> some View {
-        switch context.discoveredLibraries {
-        case .idle, .loading:
-            HStack(spacing: 12) {
-                ProgressView()
-                Text("Discovering libraries…")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        case .empty:
-            Text("No libraries found on this server.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        case .failed:
-            HStack {
-                Text("Couldn't load libraries.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    Task { await context.reloadLibraries() }
-                } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
-                }
-            }
-        case let .loaded(all):
-            let libs = libraries(for: group, in: all)
-            if libs.isEmpty {
-                Text("No libraries found on this server.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(libs) { aggregated in
-                    Toggle(isOn: Binding(
-                        get: { context.homeVisibility.isVisible(aggregated.key) },
-                        set: { context.homeVisibility.setVisible($0, for: aggregated.key) }
-                    )) {
-                        Text(aggregated.library.title)
+            .alert("Remove \(group.serverName)?", isPresented: $confirmRemoveServer) {
+                Button("Remove Server", role: .destructive) {
+                    for account in group.accounts {
+                        context.onRemoveAccount(account)
                     }
                 }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This signs everyone out of \(group.serverName) on this Apple TV. Any profile will need to sign in again to use it.")
             }
         }
-    }
-
-    private func libraries(for group: ServerAccountGroup, in all: [AggregatedLibrary]) -> [AggregatedLibrary] {
-        let accountIDs = Set(group.accounts.map(\.id))
-        return all.filter { accountIDs.contains($0.accountID) }
     }
 }
 #endif

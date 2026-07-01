@@ -91,6 +91,27 @@ struct PlayerControls: View {
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
 
+    /// Named coordinate space spanning the whole bottom cluster (panel slot +
+    /// scrubber + button row) so the Speed button's leading edge can be measured
+    /// in the same frame the Speed panel is laid out in.
+    private static let bottomClusterSpace = "PlayerBottomCluster"
+
+    /// Measured leading-edge X of the Speed button, in `bottomClusterSpace`. The
+    /// Speed panel left-aligns to this so it opens directly under its own button.
+    @State private var speedButtonLeading: CGFloat = 0
+
+    /// The transport control that was focused when the current panel was opened.
+    /// Restored (deferred) whenever the panel fully closes so focus always lands
+    /// back where the user started — no matter how deep the panel's sub-screens
+    /// went. See `restoreFocus(_:)` for why the restore is deferred.
+    @State private var panelReturnFocus: FocusSlot?
+
+    /// Whether the now-playing title/description block is shown. Distinct from
+    /// `openPanel == nil` so the block can *lag* on the way back: opening a panel
+    /// hides it immediately, but closing one waits ~0.5s before it fades in again
+    /// (otherwise it snaps back the instant the panel starts collapsing).
+    @State private var titleVisible = true
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -104,11 +125,28 @@ struct PlayerControls: View {
         .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
         .onChange(of: model.controlBarVisible) { _, focused in
             openPanel = nil
-            focus = focused ? initialFocus : nil
+            titleVisible = true
+            // Don't force a specific button when the bar takes focus — imperatively
+            // setting @FocusState here fought the engine's own default pick and
+            // briefly lit two buttons at once. Let the engine choose on entry; only
+            // clear our binding when focus leaves the bar.
+            if !focused { focus = nil }
         }
         .onChange(of: openPanel) { _, panel in
             subtitleScreen = .tracks
-            guard let panel else { return }
+            guard let panel else {
+                // Panel fully closed. Return focus to whatever transport control
+                // opened it (skip while the whole bar is hiding — focus is
+                // intentionally cleared then). Then let the title/description
+                // fade back in after a short beat rather than snapping in.
+                if model.controlBarVisible { restoreFocus(panelReturnFocus) }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    if openPanel == nil { titleVisible = true }
+                }
+                return
+            }
+            titleVisible = false
             if panel == .info {
                 focus = model.hasNextEpisode ? .infoNext
                     : (model.hasPreviousEpisode ? .infoPrev : .infoRestart)
@@ -127,15 +165,25 @@ struct PlayerControls: View {
 
     private var bottomCluster: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let openPanel {
-                panelContainer(for: openPanel)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            // The context slot directly above the scrub bar: normally the now-playing
+            // title/description; when a panel opens it cross-fades to the panel (the
+            // title/description are repetitive with the Info card, so they fade out).
+            ZStack(alignment: .bottomLeading) {
+                titleBlock
+                    .opacity(titleVisible ? 1 : 0)
+                if let openPanel {
+                    panelContainer(for: openPanel)
+                        .focusSection()
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
             }
-            titleBlock
             scrubberRow
             buttonRow
         }
+        .coordinateSpace(name: Self.bottomClusterSpace)
+        .onPreferenceChange(SpeedButtonLeadingKey.self) { speedButtonLeading = $0 }
         .animation(.easeInOut(duration: 0.2), value: openPanel)
+        .animation(.easeInOut(duration: 0.28), value: titleVisible)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
         .padding(.horizontal, 60)
         .padding(.top, 90)
@@ -361,20 +409,52 @@ struct PlayerControls: View {
                 }
                 .playerGlassButton(prominent: openPanel == category)
                 .focused($focus, equals: .button(category))
+                .background {
+                    // Publish the Speed button's leading edge so its panel can
+                    // open left-aligned to the button rather than the far edge.
+                    if category == .speed {
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: SpeedButtonLeadingKey.self,
+                                value: proxy.frame(in: .named(Self.bottomClusterSpace)).minX
+                            )
+                        }
+                    }
+                }
             }
         }
         .opacity(model.isScrubbing ? 0 : 1)
         .offset(y: model.isScrubbing ? 8 : 0)
         .allowsHitTesting(!model.isScrubbing)
+        // Trap focus inside an open panel: while one is up, the transport buttons
+        // drop out of the focus engine so directional nav can't wander out of the
+        // menu. It closes only by selecting a row or pressing Menu (native-menu
+        // behaviour). The scrub surface is already non-focusable while the bar owns
+        // focus, so the open panel becomes the sole focusable region.
+        .disabled(openPanel != nil)
     }
 
     private func toggle(_ category: Category) {
         if openPanel == category {
-            openPanel = nil
-            focus = .button(category)
+            openPanel = nil   // focus restoration handled centrally in onChange(of: openPanel)
         } else {
+            panelReturnFocus = focus ?? .button(category)
             openPanel = category
         }
+    }
+
+    /// Move focus programmatically after the current view update settles.
+    ///
+    /// When a panel closes, its focused row is removed in the same state update
+    /// and tvOS's focus engine auto-recovers to the leftmost control (the Info
+    /// button). Writing @FocusState synchronously here fights that recovery, and
+    /// writing it *twice* (sync + deferred) makes two buttons briefly render
+    /// focused. A SINGLE deferred write on the next runloop tick lands cleanly and
+    /// returns focus to wherever the panel was opened — no matter how deep its
+    /// sub-screens went.
+    private func restoreFocus(_ slot: FocusSlot?) {
+        guard let slot else { return }
+        DispatchQueue.main.async { focus = slot }
     }
 
     // MARK: Panels
@@ -403,28 +483,44 @@ struct PlayerControls: View {
                 }
                 .frame(maxHeight: 440)
             }
-            .frame(width: 520, alignment: .leading)
+            .frame(width: panelWidth(for: category), alignment: .leading)
             .colorScheme(.dark)
             .modifier(PanelGlassBackground())
-            // The track controls live on the right of the button row, so the panel
-            // opens against the trailing edge above them rather than on the left.
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            // Speed opens left-aligned under its own button; the other panels pin
+            // to the trailing edge above the track-button cluster.
+            .modifier(PanelHorizontalPlacement(
+                leadingInset: category == .speed ? speedButtonLeading : nil
+            ))
+        }
+    }
+
+    /// Fixed width for an open control panel, per category. Most menus share a
+    /// roomy 520pt column; the Speed menu only holds short preset labels
+    /// ("1.25×") and a compact stepper, so it uses roughly half the width to
+    /// avoid a mostly-empty panel.
+    private func panelWidth(for category: Category) -> CGFloat {
+        switch category {
+        case .speed: return 260
+        default: return 520
         }
     }
 
     // MARK: Info panel
 
-    /// The "Series · S1E1 · 37 min" line under the title.
-    private var episodeMetaLine: String {
-        var parts: [String] = []
-        if !model.subtitle.isEmpty { parts.append(model.subtitle) }
-        if !model.infoRuntimeLabel.isEmpty { parts.append(model.infoRuntimeLabel) }
-        return parts.joined(separator: " · ")
+    /// The bottom metadata row content: "S2 · E7 · 42m" (season/episode + runtime),
+    /// shown inline with the technical badges — Apple-TV style.
+    private var infoMetaLine: String {
+        [model.infoEpisodeTag, model.infoRuntimeLabel]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 
-    /// A wide now-playing card that slides into the controls area (video keeps
-    /// playing full-frame behind it): thumbnail · title · meta line · overview ·
-    /// badges, with Next/Previous Episode + Restart actions on the right.
+    /// A wide now-playing card that fades in over the title/description slot (the
+    /// video keeps playing full-frame behind it). A fixed-height 16:9 thumbnail
+    /// drives the card height so the art fills top-to-bottom and the borders stay
+    /// equidistant on every edge whether or not the item has a description. The
+    /// headline is the episode (not the show) title; season/episode + runtime ride
+    /// inline with the badges on the bottom row.
     private var infoPanel: some View {
         // Concentric radii, matching the app's cards: the thumbnail's media radius
         // nested inside the card's glass radius (outer = inner + content padding),
@@ -432,41 +528,45 @@ struct PlayerControls: View {
         let thumbRadius = PlozzTheme.Metrics.mediumMediaCornerRadius
         let contentPad: CGFloat = 24
         let cardRadius = thumbRadius + contentPad
+        let thumbHeight: CGFloat = 210
 
         return HStack(alignment: .top, spacing: 28) {
-            infoThumbnail(cornerRadius: thumbRadius)
+            infoThumbnail(cornerRadius: thumbRadius, height: thumbHeight)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(model.title.isEmpty ? "Now Playing" : model.title)
-                    .font(.title2.weight(.bold))
+                Text(model.infoHeadline.isEmpty ? "Now Playing" : model.infoHeadline)
+                    .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
-                if !episodeMetaLine.isEmpty {
-                    Text(episodeMetaLine)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineLimit(1)
-                }
                 if !model.overview.isEmpty {
                     Text(model.overview)
-                        .font(.callout)
+                        .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(3)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
                 }
-                if !model.infoBadges.isEmpty {
-                    MediaBadgeRow(badges: model.infoBadges)
-                        .padding(.top, 4)
+                Spacer(minLength: 8)
+                // Bottom metadata row: season/episode + runtime, then the technical
+                // badges, all on one baseline pinned to the card's bottom edge.
+                HStack(alignment: .center, spacing: 12) {
+                    if !infoMetaLine.isEmpty {
+                        Text(infoMetaLine)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(1)
+                    }
+                    if !model.infoBadges.isEmpty {
+                        MediaBadgeRow(badges: model.infoBadges)
+                    }
                 }
             }
-            // Cap the text block to a comfortable reading measure so a full-width
-            // card doesn't stretch the overview into very long lines.
             .frame(maxWidth: 760, alignment: .leading)
+            .frame(height: thumbHeight, alignment: .topLeading)
 
             Spacer(minLength: 32)
 
-            VStack(spacing: 12) {
+            VStack(alignment: .trailing, spacing: 12) {
                 if model.hasNextEpisode {
                     infoActionButton(title: "Next Episode", icon: "forward.end.fill", prominent: true, slot: .infoNext) {
                         actions.playNextEpisode()
@@ -479,21 +579,19 @@ struct PlayerControls: View {
                 }
                 infoActionButton(title: "Restart", icon: "arrow.counterclockwise", prominent: false, slot: .infoRestart) {
                     actions.restart()
-                    openPanel = nil
-                    focus = .button(.info)
+                    openPanel = nil   // focus restored centrally in onChange(of: openPanel)
                 }
             }
-            .frame(width: 340)
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(contentPad)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(PanelGlassBackground(cornerRadius: cardRadius))
     }
 
-    private func infoThumbnail(cornerRadius: CGFloat) -> some View {
+    private func infoThumbnail(cornerRadius: CGFloat, height: CGFloat) -> some View {
         Color.clear
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
-            .frame(width: 360)
+            .frame(width: height * 16.0 / 9.0, height: height)
             .overlay {
                 FallbackAsyncImage(urls: model.artworkURLs) {
                     Rectangle().fill(Color.white.opacity(0.08))
@@ -517,9 +615,8 @@ struct PlayerControls: View {
     ) -> some View {
         Button(action: action) {
             Label(title, systemImage: icon)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
-                .frame(maxWidth: .infinity)
         }
         .playerGlassButton(prominent: prominent)
         .focused($focus, equals: slot)
@@ -737,11 +834,16 @@ struct PlayerControls: View {
                         get: { Self.nearestSpeedIndex(model.playbackSpeed) },
                         set: { actions.setPlaybackSpeed(Self.speedGridValue($0)) }
                     ),
+                    compact: true,
                     title: { Self.speedLabel(Self.speedGridValue($0)) }
                 )
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 14)
+            // The enclosing ScrollView already adds 10pt above this pane, so give
+            // the stepper less top / more bottom padding to visually center it
+            // between the panel header and the presets divider (≈14pt each side).
+            .padding(.top, 4)
+            .padding(.bottom, 14)
 
             Divider()
                 .background(.white.opacity(0.12))
@@ -905,7 +1007,7 @@ struct PlayerControls: View {
         if model.engineCapabilities.contains(.playbackSpeed) {
             result.append(.speed)
         }
-        if model.hasSelectableAudio
+        if !model.audioOptions.isEmpty
             || model.engineCapabilities.contains(.dialogEnhance) {
             result.append(.audio)
         }
@@ -953,23 +1055,23 @@ struct PlayerControls: View {
     }
 
     /// Audio menu rows: selectable tracks followed by the Dialog Enhance toggle
-    /// when supported. Indexed from 0 in their own focus-slot space.
+    /// when supported. Indexed from 0 in their own focus-slot space. Every audio
+    /// track is listed even when there's only one, so the menu always reflects
+    /// what's playing.
     private var audioRows: [TrackRow] {
         var rows: [TrackRow] = []
         var index = 0
-        if model.hasSelectableAudio {
-            for option in model.audioOptions {
-                rows.append(TrackRow(
-                    id: index,
-                    header: nil,
-                    title: option.title,
-                    subtitle: "",
-                    isSelected: option.isSelected,
-                    isToggle: false,
-                    action: { actions.selectAudio(option.id) }
-                ))
-                index += 1
-            }
+        for option in model.audioOptions {
+            rows.append(TrackRow(
+                id: index,
+                header: nil,
+                title: option.title,
+                subtitle: "",
+                isSelected: option.isSelected,
+                isToggle: false,
+                action: { actions.selectAudio(option.id) }
+            ))
+            index += 1
         }
         if model.engineCapabilities.contains(.dialogEnhance) {
             rows.append(TrackRow(
@@ -1009,9 +1111,8 @@ struct PlayerControls: View {
             openSubtitleScreen(.tracks)
             return
         }
-        if let category = openPanel {
-            openPanel = nil
-            focus = .button(category)
+        if openPanel != nil {
+            openPanel = nil   // onChange(of: openPanel) restores the transport focus
         } else {
             onExitToSurface()
         }
@@ -1019,7 +1120,7 @@ struct PlayerControls: View {
 
     // MARK: Formatting
 
-    static let speedPresets: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    static let speedPresets: [Double] = [1.0, 1.25, 1.5, 1.75, 2.0]
 
     // Custom-speed grid for the − / + stepper: 0.25×…2.0× in 0.05 steps. Modelled
     // as integer indices so the stepper matches exactly (no Double == fuzziness);
@@ -1288,6 +1389,41 @@ private struct PanelGlassBackground: ViewModifier {
                 .clipShape(shape)
                 .overlay(shape.stroke(.white.opacity(0.14), lineWidth: 1))
         }
+    }
+}
+
+/// Horizontally positions an open control panel within the bottom cluster.
+/// `leadingInset` non-nil → shift the panel right to sit under its own button
+/// (Speed); nil → pin to the trailing edge above the track-button cluster
+/// (Subtitles/Audio/Sync).
+private struct PanelHorizontalPlacement: ViewModifier {
+    let leadingInset: CGFloat?
+
+    func body(content: Content) -> some View {
+        if let leadingInset {
+            // Use `.offset` — NOT `.padding(.leading,)` — so aligning the Speed
+            // panel to its button has zero effect on the bottom cluster's layout.
+            // Leading padding applied after a fill frame grows the panel's own
+            // width by `leadingInset`, overflowing the row and dragging the whole
+            // control cluster sideways as the panel opens. Offset only moves the
+            // drawn panel; the measured cluster (and the button we align to) stay
+            // put, so there's no layout feedback loop.
+            content.offset(x: max(0, leadingInset))
+        } else {
+            content
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}
+
+/// Carries the Speed button's measured leading-edge X up to `PlayerControls` so
+/// the Speed panel can align its left edge to the button. Only the Speed button
+/// publishes a value; sibling buttons contribute the default (0), so the reduce
+/// keeps the largest (the real measurement) rather than letting a 0 clobber it.
+private struct SpeedButtonLeadingKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 #endif

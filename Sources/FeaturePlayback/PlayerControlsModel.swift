@@ -71,6 +71,9 @@ public final class PlayerControlsModel {
     public var hasTrickplay: Bool = false
 
     // MARK: Info panel
+    /// Episode title (or movie title) for the now-playing Info card headline —
+    /// distinct from `title`, which for episodes holds the *series* name.
+    public var infoHeadline: String = ""
     /// Long-form synopsis for the now-playing Info card.
     public var overview: String = ""
     /// Technical badges (resolution/codec/HDR/etc.) for the Info card.
@@ -79,6 +82,9 @@ public final class PlayerControlsModel {
     public var artworkURLs: [URL] = []
     /// Pre-formatted runtime label (e.g. "37 min") for the Info card meta line.
     public var infoRuntimeLabel: String = ""
+    /// Compact season/episode tag for the Info card metadata row (e.g. "S2 · E7").
+    /// Empty for movies.
+    public var infoEpisodeTag: String = ""
     /// Whether a following episode exists to jump to from the Info card.
     public var hasNextEpisode: Bool = false
     /// Whether a preceding episode exists to jump to from the Info card.

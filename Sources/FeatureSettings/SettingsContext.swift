@@ -45,6 +45,7 @@ struct SettingsContext {
 enum SettingsRoute: Hashable {
     case profile
     case servers
+    case myLibraries
     case appearance
     case nightShift
     case playback

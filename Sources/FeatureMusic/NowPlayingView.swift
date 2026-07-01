@@ -392,6 +392,14 @@ struct NowPlayingView: View {
         }
     }
 
+    /// Size of the Now Playing title equalizer. Scaled up from the shared
+    /// list/mini-player size (scale 1) so it reads at across-the-room distance,
+    /// and reused for the width-matched trailing spacer that keeps the block
+    /// centered.
+    private let nowPlayingIndicatorScale: CGFloat = 1.4
+    private var nowPlayingIndicatorWidth: CGFloat { 26 * nowPlayingIndicatorScale }
+    private var nowPlayingIndicatorHeight: CGFloat { 24 * nowPlayingIndicatorScale }
+
     /// A small animated equalizer shown immediately to the left of the playing
     /// track's title — the one on-screen cue that audio is *actively* playing once
     /// the transport controls auto-hide (artwork + title alone look identical
@@ -402,8 +410,9 @@ struct NowPlayingView: View {
     /// Hidden from accessibility — it's a decorative state cue, and "is playing"
     /// is already exposed by the transport controls.
     private var nowPlayingTitleIndicator: some View {
-        NowPlayingEqualizer(isAnimating: controller.isPlaying && !reduceMotion)
-            .frame(width: 26)
+        NowPlayingEqualizer(isAnimating: controller.isPlaying && !reduceMotion,
+                            scale: nowPlayingIndicatorScale)
+            .frame(width: nowPlayingIndicatorWidth)
             .opacity(controller.isPlaying ? 1 : 0)
             .animation(.easeInOut(duration: 0.3), value: controller.isPlaying)
             .allowsHitTesting(false)
@@ -417,19 +426,23 @@ struct NowPlayingView: View {
     /// only its visibility changes.
     private var trackTextBlock: some View {
         VStack(spacing: 10) {
-            // Title with the "now playing" equalizer to its left. The trailing
-            // clear spacer matches the indicator's width so the title stays
-            // centered whether playing (indicator visible) or paused (faded but
-            // still occupying its slot) — no horizontal shift on play/pause.
-            HStack(spacing: 14) {
+            // Title with the "now playing" equalizer to its left, baseline-aligned
+            // to the title's top line so it sits beside the first line (not floating
+            // to the vertical middle) when a long title wraps to two lines. Leading
+            // text alignment keeps the top line's left edge flush under the
+            // equalizer; the width-matched trailing clear spacer keeps the whole
+            // block centered and prevents any horizontal shift on play/pause
+            // (indicator visible when playing, faded but still occupying its slot
+            // when paused).
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
                 nowPlayingTitleIndicator
                 Text(controller.currentTrack?.title ?? "Not Playing")
                     .font(.system(size: 46, weight: .bold))
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(.leading)
                     .lineLimit(2)
                     .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
                 Color.clear
-                    .frame(width: 26)
+                    .frame(width: nowPlayingIndicatorWidth, height: nowPlayingIndicatorHeight)
                     .accessibilityHidden(true)
             }
             if let artist = controller.currentTrack?.artistName, !artist.isEmpty {

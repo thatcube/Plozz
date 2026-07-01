@@ -1755,6 +1755,8 @@ public final class PlayerViewModel {
         controls.title = lines.primary
         controls.subtitle = lines.secondary
         controls.overview = request.item.overview ?? ""
+        controls.infoHeadline = request.item.title
+        controls.infoEpisodeTag = Self.episodeTag(for: request.item)
         controls.infoBadges = request.item.technicalBadges
         controls.artworkURLs = [request.item.backdropURL, request.item.heroBackdropURL, request.item.fallbackArtworkURL, request.item.posterURL].compactMap { $0 }
         controls.infoRuntimeLabel = request.item.runtime?.runtimeBadgeText ?? ""
@@ -1792,6 +1794,18 @@ public final class PlayerViewModel {
             secondary = "\(prefix) • \(episodeTitle)"
         }
         return (series, secondary)
+    }
+
+    /// Compact season/episode tag for the Info card metadata row (e.g. "S2 · E7").
+    /// Empty for movies and anything without episode numbering.
+    private static func episodeTag(for item: MediaItem) -> String {
+        if let season = item.seasonNumber, let episode = item.episodeNumber {
+            return "S\(season) · E\(episode)"
+        }
+        if let episode = item.episodeNumber {
+            return "E\(episode)"
+        }
+        return ""
     }
 
     // MARK: - Track selection (custom player menu)

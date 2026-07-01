@@ -130,6 +130,7 @@ public struct PlayerView: View {
                 PlaybackDiagnosticsOverlay(diagnostics: diagnosticsSampler.latest)
                     .environment(\.themePalette, themePalette)
                     .allowsHitTesting(false)
+                    .ignoresSafeArea()
                     .transition(.opacity)
             }
         }

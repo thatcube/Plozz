@@ -29,6 +29,11 @@ public struct SettingsView: View {
     @State private var path: [SettingsRoute] = []
     @State private var confirmSignOutAll = false
 
+    /// Caps the root "Settings" page content and centers it, so the profile
+    /// card and About/Sign Out list don't stretch edge-to-edge on a wide TV.
+    /// Tune this single value to make the page wider/narrower.
+    private static let contentMaxWidth: CGFloat = 1200
+
     private let captions: CaptionSettingsModel
     private let spoilers: SpoilerSettingsModel
     private let playback: PlaybackSettingsModel
@@ -178,14 +183,16 @@ public struct SettingsView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 36) {
-                    Text("Settings")
-                        .font(.largeTitle.bold())
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // Device-shared settings come FIRST: servers + profile
+                    // management belong to the whole Apple TV, not to you.
+                    // Leading with the compact card makes the global scope
+                    // obvious and keeps it visible without scrolling past the
+                    // taller profile card.
+                    thisAppleTVSection
 
-                    // The profile-owned settings live INSIDE the profile's own
-                    // container, so the "this profile saves these settings"
-                    // relationship is visible at a glance. Switching profiles
-                    // swaps everything inside this container at once.
+                    // Then the active profile's own container: switching
+                    // profiles swaps everything inside it at once, and its
+                    // header makes clear these settings save on THIS profile.
                     profileContainer
 
                     // About + Attributions + Sign Out render INLINE at the
@@ -193,6 +200,8 @@ public struct SettingsView: View {
                     // Attributions & Licensing pushes one level deeper.
                     aboutAndSignOut
                 }
+                .frame(maxWidth: Self.contentMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
                 .padding(.vertical, 48)
             }
@@ -264,25 +273,28 @@ public struct SettingsView: View {
         }
     }
 
-    /// Rows nested inside the profile container. Order is deliberate:
-    /// identity-shaping rows first (Plex linked user, Server accounts), then
-    /// presentation (Appearance, Captions, Spoilers), then Trackers, then
-    /// profile management (edit/delete, ask-on-startup). Each row pushes its
-    /// own detail page via the root NavigationStack.
+    /// Rows nested inside the profile container — the settings this profile
+    /// actually *owns*: identity + presentation only. Order: personal per-server
+    /// settings first ("Your Libraries" — who you watch as + what shows on Home),
+    /// then presentation (Appearance, Night Shift, Playback, Spoilers), then
+    /// Trackers. Server sign-ins AND profile management (the roster) are
+    /// intentionally NOT here — they're device-shared (see
+    /// `thisAppleTVSection`). Each row pushes its own detail page via the root
+    /// NavigationStack.
     @ViewBuilder
     private var profileOwnedRows: some View {
         // Inter-row spacing replaces the previous dividers: it lets the
         // contained focus lift breathe without crossing into a neighbor row
         // or sitting on top of a divider line.
         VStack(spacing: 14) {
-            // One "Plex User" row per signed-in Plex account.
-            let plexAccts = plexAccountsForRows
-            ForEach(Array(plexAccts.enumerated()), id: \.element.id) { _, account in
-                plexLinkedUserRow(account: account, multiple: plexAccts.count > 1)
+            // Per-profile "Your Libraries": who you watch as + what shows on THIS
+            // profile's Home. The personal mirror of This Apple TV › Servers.
+            // Its second line glances the household's server sign-ins.
+            navRow("Your Libraries", icon: "rectangle.stack",
+                   value: myLibrariesSummary,
+                   route: .myLibraries) {
+                signedInStrip
             }
-            navRow("Server Accounts", icon: "person.2.crop.square.stack",
-                   value: serverAccountsSummary,
-                   route: .servers)
             navRow("Appearance", icon: "paintpalette",
                    value: theme.theme.displayName,
                    route: .appearance)
@@ -298,14 +310,71 @@ public struct SettingsView: View {
             navRow("Trackers — Trakt, Simkl, AniList, MyAnimeList", icon: "link",
                    value: nil,
                    route: .integrations)
-            if profilesEnabled {
-                navRow("Manage Profiles", icon: "person.crop.circle",
-                       value: profiles.count == 1 ? "1 profile" : "\(profiles.count) profiles",
-                       route: .profile)
-            } else {
-                enableProfilesRow
-            }
         }
+    }
+
+    /// The **This Apple TV** container: everything shared by everyone on the
+    /// device — server sign-ins (shared Keychain via `AccountStore`) and profile
+    /// management (the roster; the launch picker lives one level in, on the
+    /// Profiles screen). It leads the page so the global
+    /// scope is obvious and rhymes visually with the profile card below. Nothing
+    /// here belongs to a single profile; a profile only picks which of these
+    /// servers it watches (see Profile › Your Libraries).
+    @ViewBuilder
+    private var thisAppleTVSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Device "identity on top": an Apple-TV glyph + name + scope note,
+            // mirroring the profile card's avatar header.
+            HStack(spacing: 20) {
+                Image(systemName: "tv")
+                    .font(.system(size: 32, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 64, height: 64)
+                    .background(Circle().fill(Color.primary.opacity(0.06)))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("This Apple TV")
+                        .font(.system(size: 32, weight: .bold))
+                    Text("Servers and profiles, shared by everyone here.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(28)
+
+            Divider().padding(.horizontal, 28)
+
+            VStack(spacing: 14) {
+                // Shared server sign-ins (the household's full inventory). The
+                // list screen opens with a prominent Add Server button.
+                navRow("Servers", icon: "externaldrive.connected.to.line.below",
+                       value: householdServersSummary,
+                       route: .servers)
+
+                // Profile roster management is a device concern (who exists on
+                // this Apple TV), not a per-profile one — so it lives here.
+                // "Ask on startup" (the launch picker) lives inside Profiles.
+                if profilesEnabled {
+                    navRow("Profiles", icon: "person.2",
+                           value: "\(profiles.count)",
+                           route: .profile)
+                } else {
+                    enableProfilesRow
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+        )
     }
 
     /// About info + Attributions entry + Sign Out, rendered INLINE at the
@@ -366,6 +435,8 @@ public struct SettingsView: View {
             )
         case .servers:
             ServersAndLibrariesDetailView(context: context)
+        case .myLibraries:
+            MyLibrariesDetailView(context: context)
         case .appearance:
             AppearanceDetailView(theme: theme)
         case .nightShift:
@@ -399,16 +470,6 @@ public struct SettingsView: View {
                     .shadow(color: Color.accentColor.opacity(0.25), radius: 10, y: 4)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "person.crop.circle.badge.checkmark")
-                            .font(.footnote.weight(.bold))
-                            .foregroundStyle(Color.accentColor)
-                        Text("Active profile")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.accentColor)
-                            .textCase(.uppercase)
-                            .tracking(1.2)
-                    }
                     Text(activeProfile.name)
                         .font(.system(size: 44, weight: .bold))
                         .lineLimit(1)
@@ -416,8 +477,6 @@ public struct SettingsView: View {
                     Text("Settings below are saved on this profile.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-
-                    signedInToCluster
                 }
                 Spacer()
                 Button(action: onSwitchProfile) {
@@ -430,43 +489,37 @@ public struct SettingsView: View {
         .padding(28)
     }
 
-    /// Compact, read-only "Signed in to" glance under the active-profile
-    /// header. Purely informational — the Server Accounts row remains the
-    /// management/drill-in entry point, so this is a glance, not an action.
-    /// Capped to three entries with a trailing "+N more" so a busy household
-    /// stays one line.
+    /// Compact, read-only glance of the household's server sign-ins, rendered as
+    /// the SECOND line of the "Your Libraries" row. The row title labels it, so no
+    /// caption is needed here. Uses `.settingsRowSecondary()` so it inverts with
+    /// the row on focus. Capped to three entries with a trailing "+N more" so a
+    /// busy household stays on one line.
     @ViewBuilder
-    private var signedInToCluster: some View {
+    private var signedInStrip: some View {
         if !accounts.isEmpty {
-            HStack(alignment: .center, spacing: 10) {
-                Text("Signed in to")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                    .tracking(1.0)
+            HStack(alignment: .center, spacing: 8) {
                 let visible = Array(accounts.prefix(3))
                 let overflow = max(0, accounts.count - visible.count)
                 ForEach(Array(visible.enumerated()), id: \.element.id) { idx, account in
                     if idx > 0 {
                         Text("·")
                             .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.secondary)
+                            .settingsRowSecondary()
                     }
                     HStack(spacing: 6) {
-                        ProviderIcon(provider: account.server.provider, size: 26)
-                        AccountAvatar(name: account.userName, imageURL: account.avatarURL, size: 22)
+                        ProviderIcon(provider: account.server.provider, size: 24)
+                        AccountAvatar(name: account.userName, imageURL: account.avatarURL, size: 20)
                         Text(signedInLabel(for: account))
                             .font(.footnote.weight(.medium))
-                            .foregroundStyle(.primary)
+                            .settingsRowSecondary()
                             .lineLimit(1)
                     }
                 }
                 if overflow > 0 {
                     Text("· +\(overflow) more")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .settingsRowSecondary()
                 }
-                Spacer(minLength: 0)
             }
             .accessibilityElement(children: .combine)
         }
@@ -497,90 +550,6 @@ public struct SettingsView: View {
         .padding(28)
     }
 
-    // MARK: - Plex linked user row (one per signed-in Plex account)
-
-    /// All distinct signed-in Plex accounts. Each gets its own row so the
-    /// active profile's Home-user choice can differ per Plex sign-in.
-    private var plexAccountsForRows: [Account] {
-        accounts.filter { $0.server.provider == .plex }
-    }
-
-    private func plexLinkedUserRow(account: Account, multiple: Bool) -> some View {
-        // A nil binding MEANS "play as the account owner" (no Home-user switch,
-        // no PIN). Render it as the owner so "default" and "explicitly picked
-        // owner" look identical — they are the same thing semantically.
-        let binding = activeProfile.homeUserBinding(forPlexAccount: account.id)
-            ?? ownerBinding(for: account)
-        return NavigationLink(value: SettingsRoute.plexUser(accountID: account.id)) {
-            HStack(spacing: 16) {
-                plexAvatar(for: binding, size: 44)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(multiple ? "Plex User on \(account.server.name)" : "Plex User")
-                        .font(.callout.weight(.medium))
-                    Text(plexLinkedUserSubtitle(for: binding))
-                        .font(.subheadline)
-                        .settingsRowSecondary()
-                        .lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .settingsRowSecondary()
-            }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SettingsFocusButtonStyle())
-    }
-
-    /// Synthetic binding representing the Plex account owner — derived from
-    /// the signed-in Account (its userName + avatarURL), so we don't need to
-    /// fetch Home users just to display the default identity. Owner never
-    /// requires a PIN.
-    private func ownerBinding(for account: Account) -> PlexHomeUserBinding? {
-        let name = account.userName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return nil }
-        return PlexHomeUserBinding(
-            homeUserID: "",
-            name: name,
-            avatarURL: account.avatarURL?.absoluteString,
-            requiresPIN: false
-        )
-    }
-
-    /// Big circular Plex avatar — uses this binding's cached `avatarURL` so
-    /// the row shows the real Plex profile photo, not just text + an icon.
-    private func plexAvatar(for binding: PlexHomeUserBinding?, size: CGFloat) -> some View {
-        let url = binding?.avatarURL.flatMap(URL.init(string:))
-        return ZStack {
-            Circle()
-                .fill(ProviderIcon.tint(.plex).opacity(0.18))
-            if let url {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image.resizable().scaledToFill()
-                    default:
-                        ProviderIcon(provider: .plex, size: size * 0.55)
-                    }
-                }
-            } else {
-                ProviderIcon(provider: .plex, size: size * 0.55)
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .overlay(Circle().strokeBorder(ProviderIcon.tint(.plex).opacity(0.45), lineWidth: 1.5))
-    }
-
-    private func plexLinkedUserSubtitle(for binding: PlexHomeUserBinding?) -> String {
-        guard let binding, !binding.name.isEmpty else {
-            return "Select Plex user"
-        }
-        return binding.requiresPIN == true ? "\(binding.name) • PIN required" : binding.name
-    }
-
     // MARK: - Enable profiles row (single-profile household)
 
     private var enableProfilesRow: some View {
@@ -609,13 +578,27 @@ public struct SettingsView: View {
 
     // MARK: - Helpers
 
-    private var serverAccountsSummary: String {
+    /// Global summary for the This Apple TV › Servers row: how many distinct
+    /// servers the household is signed in to (device scope, not profile).
+    private var householdServersSummary: String {
         if accounts.isEmpty { return "Add a server" }
-        let included = accounts.filter { isAccountIncludedInActiveProfile($0.id) }.count
-        if profilesEnabled, included != accounts.count {
-            return "\(included) of \(accounts.count)"
+        // Row already says "Servers", so show a bare count (no repeated noun).
+        return "\(Set(accounts.map { $0.server.id }).count)"
+    }
+
+    /// Per-profile summary for the Your Libraries row: how many of the household's
+    /// servers this profile is actually watching (its active-account subset).
+    private var myLibrariesSummary: String? {
+        if accounts.isEmpty { return nil }
+        let allServers = Set(accounts.map { $0.server.id })
+        let watchedServers = Set(
+            accounts.filter { isAccountIncludedInActiveProfile($0.id) }.map { $0.server.id }
+        )
+        if watchedServers.isEmpty { return "Not watching any" }
+        if profilesEnabled, watchedServers.count != allServers.count {
+            return "\(watchedServers.count) of \(allServers.count)"
         }
-        return accounts.count == 1 ? "1 account" : "\(accounts.count) accounts"
+        return watchedServers.count == 1 ? "1 server" : "\(watchedServers.count) servers"
     }
 
     /// Number of distinct servers the active profile can watch from. Cross-server
@@ -645,24 +628,34 @@ public struct SettingsView: View {
         value: String?,
         route: SettingsRoute
     ) -> some View {
+        navRow(title, icon: icon, value: value, route: route) { EmptyView() }
+    }
+
+    /// Two-line variant: `secondary` renders a second line beneath the title
+    /// (a status strip, helper text…). Shares the exact row body + focus style
+    /// as the one-line rows via ``SettingsRowLabel``.
+    @ViewBuilder
+    private func navRow<Secondary: View>(
+        _ title: String,
+        icon: String,
+        value: String?,
+        route: SettingsRoute,
+        @ViewBuilder secondary: () -> Secondary
+    ) -> some View {
         NavigationLink(value: route) {
-            HStack(spacing: 16) {
-                rowIcon(icon)
-                Text(title).font(.callout.weight(.medium))
-                Spacer()
-                if let value {
-                    Text(value)
-                        .font(.subheadline)
+            SettingsRowLabel(icon: icon, title: title, secondary: secondary) {
+                HStack(spacing: 16) {
+                    if let value {
+                        Text(value)
+                            .font(.subheadline)
+                            .settingsRowSecondary()
+                            .lineLimit(1)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
                         .settingsRowSecondary()
-                        .lineLimit(1)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .settingsRowSecondary()
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
-            .contentShape(Rectangle())
         }
         .buttonStyle(SettingsFocusButtonStyle())
     }

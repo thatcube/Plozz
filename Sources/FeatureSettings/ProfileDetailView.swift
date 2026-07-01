@@ -32,12 +32,11 @@ struct ProfileDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                Text("Profile")
-                    .font(.largeTitle.bold())
-
                 activeProfilePanel
-                askOnStartupPanel
                 profilesListPanel
+                if context.profiles.count > 1 {
+                    startupPanel
+                }
                 if context.profiles.count == 1 {
                     disablePanel
                 }
@@ -105,22 +104,10 @@ struct ProfileDetailView: View {
         }
     }
 
-    private var askOnStartupPanel: some View {
-        SettingsPanel(
-            footer: "When on, Plozz shows the “Who's watching?” picker every time the app launches. When off, it boots straight into the last-used profile on this Apple TV user."
-        ) {
-            Toggle("Ask which profile on startup", isOn: Binding(
-                get: { context.askProfileOnStartup },
-                set: { context.onSetAskProfileOnStartup($0) }
-            ))
-            .disabled(context.profiles.count <= 1)
-        }
-    }
-
     private var profilesListPanel: some View {
         SettingsPanel(
             title: "Profiles",
-            footer: "Each profile keeps its own preferences, Home customization, and Trakt account. Server logins live in the household pool — share them between profiles in Server Accounts."
+            footer: "Each profile keeps its own preferences, Home customization, and Trakt account. Server logins live in the household pool — share them between profiles under This Apple TV › Servers."
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(context.profiles) { profile in
@@ -157,6 +144,36 @@ struct ProfileDetailView: View {
             .accessibilityLabel("Edit \(profile.name)")
         }
         .padding(.vertical, 2)
+    }
+
+    /// Launch picker toggle. Device-wide behaviour (it governs the whole Apple
+    /// TV's startup), but it lives here because it's about *which profile* opens
+    /// — only meaningful with 2+ profiles, so the caller gates it on that.
+    private var startupPanel: some View {
+        SettingsPanel(
+            title: "Startup",
+            footer: "Show the “Who's watching?” picker each time Plozz opens, so anyone can pick their profile. Off opens straight into the last-used profile."
+        ) {
+            Button {
+                context.onSetAskProfileOnStartup(!context.askProfileOnStartup)
+            } label: {
+                HStack(spacing: 16) {
+                    Image(systemName: "person.crop.circle.badge.questionmark")
+                        .font(.system(size: 22, weight: .regular))
+                        .frame(width: 30, height: 30)
+                        .settingsRowIcon()
+                    Text("Ask on startup").font(.headline)
+                    Spacer()
+                    Text(context.askProfileOnStartup ? "On" : "Off")
+                        .font(.subheadline)
+                        .settingsRowSecondary()
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(SettingsFocusButtonStyle())
+        }
     }
 
     private var disablePanel: some View {

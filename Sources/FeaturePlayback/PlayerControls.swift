@@ -68,9 +68,18 @@ struct PlayerControls: View {
         case button(Category)
         case diagnostics
         case row(Int)
+        case edit       // Subtitles header ✎ Edit (appearance) button
+        case download   // Trailing "Search for subtitles…" row
+        case subBack    // Back control inside a Subtitles sub-screen
     }
 
+    /// Sub-screens of the Subtitles panel. `tracks` is the default list; the
+    /// header ✎ Edit opens `style`, and the trailing row opens `download`. Menu
+    /// backs a sub-screen out to `tracks` rather than closing the whole panel.
+    private enum SubtitleScreen { case tracks, download, style }
+
     @State private var openPanel: Category?
+    @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
 
     var body: some View {
@@ -91,6 +100,7 @@ struct PlayerControls: View {
             focus = focused ? initialFocus : nil
         }
         .onChange(of: openPanel) { _, panel in
+            subtitleScreen = .tracks
             if let panel { focus = .row(selectedRowIndex(for: panel)) }
         }
         .onExitCommand { handleExit() }
@@ -209,17 +219,12 @@ struct PlayerControls: View {
     @ViewBuilder
     private func panelContainer(for category: Category) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(category.title)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 28)
-                .padding(.top, 22)
-                .padding(.bottom, 12)
+            panelHeader(for: category)
             Divider().background(.white.opacity(0.15))
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     switch category {
-                    case .subtitles: subtitlePane
+                    case .subtitles: subtitleBody
                     case .audio: audioPane
                     case .speed: speedPane
                     case .sync: syncPane
@@ -247,15 +252,129 @@ struct PlayerControls: View {
         )
     }
 
-    /// The Subtitles menu: one full-width column of selectable tracks (incl.
-    /// "Off"). Full width so a rich label ("Spanish (SDH, PGS)") never truncates.
+    /// Header of the floating panel: the screen title on the left, and — on the
+    /// Subtitles track list only — the ✎ Edit (appearance) button on the right.
+    @ViewBuilder
+    private func panelHeader(for category: Category) -> some View {
+        HStack(spacing: 12) {
+            Text(headerTitle(for: category))
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+            Spacer(minLength: 12)
+            if category == .subtitles && subtitleScreen == .tracks {
+                Button {
+                    openSubtitleScreen(.style)
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .playerGlassButton(prominent: false)
+                .focused($focus, equals: .edit)
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 22)
+        .padding(.bottom, 12)
+    }
+
+    private func headerTitle(for category: Category) -> String {
+        guard category == .subtitles else { return category.title }
+        switch subtitleScreen {
+        case .tracks: return "Subtitles"
+        case .download: return "Download Subtitles"
+        case .style: return "Subtitle Style"
+        }
+    }
+
+    /// The Subtitles panel is a small master flow: the track list (default), a
+    /// Download screen (from the trailing row) and a Style screen (from ✎ Edit).
+    @ViewBuilder
+    private var subtitleBody: some View {
+        switch subtitleScreen {
+        case .tracks: subtitlePane
+        case .download: subtitleDownloadStub
+        case .style: subtitleStyleStub
+        }
+    }
+
+    /// The Subtitles track list: one full-width column of selectable tracks
+    /// (incl. "Off"), then a trailing "Search for subtitles…" row. Full width so
+    /// a rich label ("Spanish (SDH, PGS)") never truncates.
     @ViewBuilder
     private var subtitlePane: some View {
-        let rows = subtitleRows
-        if rows.isEmpty {
-            emptyRow("No subtitles")
-        } else {
-            trackRowStack(rows).padding(.horizontal, 14)
+        VStack(alignment: .leading, spacing: 2) {
+            let rows = subtitleRows
+            if rows.isEmpty {
+                emptyRow("No subtitles")
+            } else {
+                trackRowStack(rows)
+            }
+            Divider()
+                .background(.white.opacity(0.12))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            downloadEntryRow
+        }
+        .padding(.horizontal, 14)
+    }
+
+    /// "Looked through them all, found nothing → get more." Kept at the END of
+    /// the list so it surfaces exactly when it's needed (few / no tracks) and
+    /// stays out of the way when there are many.
+    private var downloadEntryRow: some View {
+        Button {
+            openSubtitleScreen(.download)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.circle").font(.body)
+                Text("Search for subtitles…").font(.body).lineLimit(1)
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .download)
+    }
+
+    // MARK: Subtitles sub-screens (Download / Style) — stubs for now
+
+    private var subtitleDownloadStub: some View {
+        subScreenStub(message: "Search the server's providers for a subtitle in your language and load it right here.")
+    }
+
+    private var subtitleStyleStub: some View {
+        subScreenStub(message: "Adjust size, position, colour, background and outline — previewed live over the video.")
+    }
+
+    private func subScreenStub(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.7))
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Coming soon")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.4))
+            Button {
+                openSubtitleScreen(.tracks)
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+            }
+            .playerGlassButton(prominent: false)
+            .focused($focus, equals: .subBack)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func openSubtitleScreen(_ screen: SubtitleScreen) {
+        subtitleScreen = screen
+        switch screen {
+        case .tracks: focus = .row(selectedRowIndex(for: .subtitles))
+        case .download, .style: focus = .subBack
         }
     }
 
@@ -581,6 +700,12 @@ struct PlayerControls: View {
     }
 
     private func handleExit() {
+        // Back out of a Subtitles sub-screen to the track list first; only then
+        // does Menu close the whole panel.
+        if openPanel == .subtitles && subtitleScreen != .tracks {
+            openSubtitleScreen(.tracks)
+            return
+        }
         if let category = openPanel {
             openPanel = nil
             focus = .button(category)

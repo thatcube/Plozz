@@ -436,43 +436,14 @@ struct NowPlayingView: View {
             .accessibilityHidden(true)
     }
 
-    /// Computes how far to slide the title equalizer right so it hugs the first
-    /// word of a wrapped, center-aligned title.
-    ///
-    /// The title `Text` renders at `renderedWidth` (the width of its *widest*
-    /// line). Core Text lays the same string out at that width to find the first
-    /// line's width; a shorter first line is centered inside the frame, so the
-    /// leading gap is half the difference. Returns 0 for single-line titles or
-    /// when the first line is already the widest (no gap to close). Matches the
-    /// title's `.font(.system(size: 46, weight: .bold))` and word wrapping.
-    private static func titleIndicatorInset(for title: String, renderedWidth: CGFloat) -> CGFloat {
-        #if canImport(UIKit)
-        guard renderedWidth > 1, !title.isEmpty else { return 0 }
-        let font = UIFont.systemFont(ofSize: 46, weight: .bold)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byWordWrapping
-        paragraph.alignment = .center
-        let attributed = NSAttributedString(
-            string: title,
-            attributes: [.font: font, .paragraphStyle: paragraph]
-        )
-        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
-        // Pad the width slightly so the widest line, which fills `renderedWidth`
-        // exactly, isn't nudged onto an extra line by sub-point rounding.
-        let layoutWidth = renderedWidth + 1
-        let path = CGPath(
-            rect: CGRect(x: 0, y: 0, width: layoutWidth, height: .greatestFiniteMagnitude),
-            transform: nil
-        )
-        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
-        guard let lines = CTFrameGetLines(frame) as? [CTLine], lines.count > 1,
-              let firstLine = lines.first else { return 0 }
-        let firstLineWidth = CTLineGetTypographicBounds(firstLine, nil, nil, nil)
-        return max(0, (renderedWidth - CGFloat(firstLineWidth)) / 2)
-        #else
-        return 0
-        #endif
-    }
+    /// Slides the title equalizer right so it hugs the first word of a wrapped,
+    /// center-aligned title. `Text.Layout` (via `titleFirstLineInset`) reports the
+    /// first line's actual leading offset within the text — the widest line sits at
+    /// x0, so a shorter, centered first line is inset by half the width difference.
+    /// That inset is exactly how far the equalizer must move to reach the first
+    /// word. Reading SwiftUI's own layout means it matches whatever line-breaking
+    /// (balanced, not greedy) SwiftUI chose, so "Otherside / (2014 Remaster)" lands
+    /// correctly even though the first line isn't the widest.
 
     /// The title/artist (+ album & quality badge when "show track details" is on)
     /// stack rendered inside `metaColumn`'s reserved-height slot. The album row is
@@ -496,19 +467,14 @@ struct NowPlayingView: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
-                    // Measure the title's rendered width so the leading equalizer can
-                    // be nudged over to hug the first word even on wrapped titles.
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: TitleWidthKey.self, value: proxy.size.width)
-                        }
-                    )
+                    // Read the first line's actual leading offset from SwiftUI's own
+                    // text layout so the equalizer hugs the first word on wrap.
+                    .modifier(MeasureFirstLineInset { inset in
+                        if abs(inset - titleIndicatorInset) > 0.5 { titleIndicatorInset = inset }
+                    })
                 Color.clear
                     .frame(width: nowPlayingIndicatorWidth, height: nowPlayingIndicatorHeight)
                     .accessibilityHidden(true)
-            }
-            .onPreferenceChange(TitleWidthKey.self) { width in
-                titleIndicatorInset = Self.titleIndicatorInset(for: title, renderedWidth: width)
             }
             if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
                 Text(artist)
@@ -1092,10 +1058,37 @@ private struct BottomBarHeightKey: PreferenceKey {
 
 /// Reports the rendered width of the Now Playing title so the leading equalizer
 /// can be shifted to hug the first word of a wrapped, center-aligned title.
-private struct TitleWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+private struct MeasureFirstLineInset: ViewModifier {
+    /// Called with the first line's leading inset (0 when the first line is the
+    /// widest, i.e. no gap to close).
+    let onMeasure: (CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(tvOS 18.0, *) {
+            content.textRenderer(FirstLineInsetRenderer(onMeasure: onMeasure))
+        } else {
+            content
+        }
+    }
+}
+
+/// Draws the title normally while reading the first line's leading offset from the
+/// resolved `Text.Layout`. For a centered title the widest line sits at x0, so a
+/// shorter first line's `rect.minX` is exactly how far the equalizer must slide to
+/// reach the first word. Reported off the render pass to avoid mutating state mid
+/// update.
+@available(tvOS 18.0, *)
+private struct FirstLineInsetRenderer: TextRenderer {
+    let onMeasure: (CGFloat) -> Void
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        if let firstLine = layout.first {
+            let inset = firstLine.typographicBounds.rect.minX
+            DispatchQueue.main.async { onMeasure(max(0, inset)) }
+        }
+        for line in layout {
+            context.draw(line)
+        }
     }
 }
 #endif

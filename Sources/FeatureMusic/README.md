@@ -53,3 +53,13 @@ so audio keeps playing as the user navigates the rest of the app.
   / Now-Playing wiring.
 - `MusicArtworkFallback.swift` — how `MetadataKit` art is plugged in.
 - `MusicViewModels.swift` — screen state coordination.
+
+## AirPlay 2 / HomePod audio-drop recovery
+
+Seeks, skips, and network blips could silently drop audio on a HomePod over
+AirPlay 2. The root cause (progressive-download `AVPlayer` items forcing an
+AirPlay stream renegotiation) and every mechanism that fixed it — the
+deactivate→reactivate session cycle, gapless-vs-reactivate gating, the `.failed`
+retry, and the self-heal watchdog — are documented in
+[`docs/airplay-audio-recovery.md`](../../docs/airplay-audio-recovery.md). Read it
+before touching the transition/seek/recovery paths in `AudioPlaybackController`.

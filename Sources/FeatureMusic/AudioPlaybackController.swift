@@ -306,11 +306,59 @@ public final class AudioPlaybackController {
     /// speaker doesn't stay silent until it's physically reconnected.
     private var routeChangeObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
+    /// Last `timeControlStatus` we logged, so the time observer only records
+    /// *transitions* (playing→waiting→paused) rather than 4×/sec noise. A
+    /// playing→waiting→paused slide with no user pause is the fingerprint of an
+    /// AirPlay route drop.
+    private var lastLoggedTimeControl: AVPlayer.TimeControlStatus?
 
     public init() {
         player.actionAtItemEnd = .none
         installTimeObserver()
         installRouteRecoveryObservers()
+    }
+
+    // MARK: Diagnostics
+
+    /// Appends an audio event to the pullable diagnostics log (see
+    /// `AudioDiagnostics`). Cheap; called at every transition/route event so a
+    /// pulled log reconstructs exactly what happened around an AirPlay break.
+    private func diag(_ category: String, _ message: String) {
+        AudioDiagnostics.shared.log(category, message)
+    }
+
+    /// Current output route as a one-liner for the log (AirPlay port + name).
+    private func routeSummary() -> String {
+        #if canImport(AVFoundation) && !os(macOS)
+        return AudioDiagnostics.shared.currentRouteDescription()
+        #else
+        return "n/a"
+        #endif
+    }
+
+    /// The player's live playback state, for logging around a transition. Shows
+    /// whether it's playing / paused / waiting, and — when waiting — WHY, which is
+    /// the key tell for an AirPlay stall (`.toMinimizeStalls` = buffering,
+    /// `.evaluatingBufferingRate`, `.noItemToPlay`, etc.).
+    private func playerStateSummary() -> String {
+        let status: String
+        switch player.timeControlStatus {
+        case .paused: status = "paused"
+        case .waitingToPlayAtSpecifiedRate: status = "waiting"
+        case .playing: status = "playing"
+        @unknown default: status = "unknown"
+        }
+        var parts = ["timeControl=\(status)", "rate=\(player.rate)", "items=\(player.items().count)"]
+        if let reason = player.reasonForWaitingToPlay {
+            parts.append("waitReason=\(reason.rawValue)")
+        }
+        if let err = player.error {
+            parts.append("playerError=\(err.localizedDescription)")
+        }
+        if let itemErr = player.currentItem?.error {
+            parts.append("itemError=\(itemErr.localizedDescription)")
+        }
+        return parts.joined(separator: " ")
     }
 
     // MARK: Public API
@@ -564,6 +612,7 @@ public final class AudioPlaybackController {
     /// the generation here supersedes any start still resolving so it bails
     /// instead of transitioning to a track the user has already skipped past.
     private func scheduleStart(debounced: Bool) {
+        diag("skip", "scheduleStart debounced=\(debounced) index=\(index) track=\"\(currentTrack?.title ?? "nil")\" route=\(routeSummary())")
         startTask?.cancel()
         trackTransitionGeneration &+= 1
         if debounced {
@@ -604,6 +653,7 @@ public final class AudioPlaybackController {
         if let prepared = preparedNext, prepared.trackID == track.id,
            let item = prepared.item,
            player.items().count >= 2, player.items()[1] === item {
+            diag("start", "FAST-PATH gen=\(generation) track=\"\(track.title)\" route=\(routeSummary()) preState=[\(playerStateSummary())]")
             // Close the OUTGOING track's session (its skip point on a manual next,
             // or ≈duration on a natural end — where handleItemDidEnd already
             // reported it and this no-ops).
@@ -614,6 +664,7 @@ public final class AudioPlaybackController {
             player.advanceToNextItem()
             observeEnd(of: item)
             player.play()
+            diag("start", "FAST-PATH post-advance/play route=\(routeSummary()) state=[\(playerStateSummary())]")
             await finishStart(track: track)
             return
         }
@@ -625,8 +676,12 @@ public final class AudioPlaybackController {
         // enough for a smooth AirPlay hand-off, then advance. If the route can't be
         // preserved here the recovery observers pick it back up.
         currentQuality = nil
+        diag("start", "HARD-PATH gen=\(generation) track=\"\(track.title)\" route=\(routeSummary()) preState=[\(playerStateSummary())] — resolving URL")
         guard let resolved = await resolver(track),
-              generation == trackTransitionGeneration else { return }
+              generation == trackTransitionGeneration else {
+            diag("start", "HARD-PATH aborted (resolve failed or superseded) gen=\(generation) current=\(trackTransitionGeneration)")
+            return
+        }
         reportStopIfNeeded(position: currentTime)
         currentQuality = resolved.quality
         // Claim the system remote/Now Playing controls only once music is
@@ -641,24 +696,29 @@ public final class AudioPlaybackController {
             // (this jump supersedes whatever "next" we'd guessed).
             clearPreparedNext(removeFromPlayer: true)
             player.insert(item, after: current)
+            diag("start", "HARD-PATH inserted, waiting to buffer route=\(routeSummary())")
             await waitUntilReadyToPlay(item)
             // A rapid skip / new queue may have superseded us while buffering. Drop
             // the item we speculatively queued and let the newer transition win.
             guard generation == trackTransitionGeneration else {
                 player.remove(item)
+                diag("start", "HARD-PATH superseded after buffering gen=\(generation) current=\(trackTransitionGeneration) — dropped item")
                 return
             }
+            diag("start", "HARD-PATH buffered itemStatus=\(item.status.rawValue) likelyToKeepUp=\(item.isPlaybackLikelyToKeepUp) bufferFull=\(item.isPlaybackBufferFull) — advancing")
             player.advanceToNextItem()
             observeEnd(of: item)
             // Ready item → plain `play()`; don't force past stall-avoidance on a
             // freshly-advanced AirPlay route.
             player.play()
+            diag("start", "HARD-PATH post-advance/play route=\(routeSummary()) state=[\(playerStateSummary())]")
         } else {
             // Cold start — no current item and therefore no route to protect yet, so
             // `playImmediately` is safe and avoids parking in the wait state.
             player.insert(item, after: nil)
             observeEnd(of: item)
             player.playImmediately(atRate: 1.0)
+            diag("start", "COLD-START route=\(routeSummary()) state=[\(playerStateSummary())]")
         }
         await finishStart(track: track)
     }
@@ -996,6 +1056,15 @@ public final class AudioPlaybackController {
             // to satisfy strict concurrency.
             MainActor.assumeIsolated {
                 guard let self else { return }
+                // Log timeControlStatus TRANSITIONS (not the 4×/sec noise). A
+                // playing→waiting→paused slide with no user pause is the
+                // fingerprint of an AirPlay route drop, so capture it always —
+                // even during the debounced-skip pending window below.
+                let tc = self.player.timeControlStatus
+                if tc != self.lastLoggedTimeControl {
+                    self.lastLoggedTimeControl = tc
+                    self.diag("player", "timeControl→[\(self.playerStateSummary())] route=\(self.routeSummary())")
+                }
                 // While a debounced skip is pending the outgoing track is still
                 // playing, but the UI already shows the target track — so don't
                 // let the old item's position drive the scrubber; keep it at 0.
@@ -1083,24 +1152,40 @@ public final class AudioPlaybackController {
 
     #if canImport(AVFoundation) && !os(macOS)
     private func handleRouteChange(_ note: Notification) {
-        // IMPORTANT: We deliberately do NOTHING actionable here — reacting to
-        // route changes is what was intermittently BREAKING AirPlay 2 skips.
-        //
-        // `.routeConfigurationChange` is a benign, frequent notification that an
-        // AirPlay 2 device fires *during* a normal track transition as it
-        // reconfigures its long-form-audio pipeline for the next item. The old
-        // code responded by forcing `AVAudioSession.setActive(true)` (via
-        // attemptPlaybackRecovery). Re-activating the session in the middle of
-        // that reconfiguration races the system's own route management and tears
-        // the speaker down — the exact "skipping breaks playback, silent until
-        // physical reconnect" symptom, and intermittent because it depends on
-        // where our setActive lands in the negotiation.
-        //
-        // A genuine route loss instead arrives as an AVAudioSession INTERRUPTION
-        // (tvOS 17+), which `handleInterruption` recovers from at the documented-
-        // safe moment (`.ended` + `.shouldResume`). We also do not resume on
-        // `.oldDeviceUnavailable`: an intentional disconnect should stay paused,
-        // matching headphone-unplug behaviour. So there is nothing to do here.
+        // Log every route change with its reason + the route before/after. This is
+        // the single most important signal for the AirPlay skip bug: we want to see
+        // the exact notification sequence a skip produces on the HomePod.
+        let reasonRaw = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) ?? 999
+        let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw)
+        let reasonName: String
+        switch reason {
+        case .unknown: reasonName = "unknown"
+        case .newDeviceAvailable: reasonName = "newDeviceAvailable"
+        case .oldDeviceUnavailable: reasonName = "oldDeviceUnavailable"
+        case .categoryChange: reasonName = "categoryChange"
+        case .override: reasonName = "override"
+        case .wakeFromSleep: reasonName = "wakeFromSleep"
+        case .noSuitableRouteForCategory: reasonName = "noSuitableRouteForCategory"
+        case .routeConfigurationChange: reasonName = "routeConfigurationChange"
+        case .none: reasonName = "raw(\(reasonRaw))"
+        @unknown default: reasonName = "unknown(\(reasonRaw))"
+        }
+        var line = "reason=\(reasonName) now=\(routeSummary())"
+        if let prev = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription {
+            let prevOuts = prev.outputs.map { "\($0.portType.rawValue):\"\($0.portName)\"" }.joined(separator: " + ")
+            line += " prev=\(prevOuts.isEmpty ? "<none>" : prevOuts)"
+        }
+        line += " state=[\(playerStateSummary())]"
+        diag("route", line)
+        // IMPORTANT: We deliberately take NO recovery action here — reacting to
+        // route changes (forcing AVAudioSession.setActive(true) on
+        // `.routeConfigurationChange`) is what was intermittently BREAKING AirPlay
+        // 2 skips. `.routeConfigurationChange` is a benign notification an AirPlay
+        // 2 device fires *during* a normal track transition; re-activating the
+        // session mid-reconfiguration races the system's own route management and
+        // tears the speaker down. A genuine route loss instead arrives as an
+        // AVAudioSession INTERRUPTION (tvOS 17+), which `handleInterruption`
+        // recovers from at the documented-safe moment. So: log only, act never.
     }
 
     private func handleInterruption(_ note: Notification) {
@@ -1111,11 +1196,12 @@ public final class AudioPlaybackController {
         case .began:
             // System interrupted us (on tvOS 17+ this includes a route disconnect).
             // AVPlayer has already paused; nothing to do until it ends.
-            break
+            diag("interrupt", "BEGAN route=\(routeSummary()) isPlaying=\(isPlaying) state=[\(playerStateSummary())]")
         case .ended:
             let options = AVAudioSession.InterruptionOptions(
                 rawValue: info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             )
+            diag("interrupt", "ENDED shouldResume=\(options.contains(.shouldResume)) route=\(routeSummary()) isPlaying=\(isPlaying) state=[\(playerStateSummary())]")
             // Only resume when the system says it's safe AND we still intend to
             // play (a user pause leaves `isPlaying` false, so we stay put).
             if options.contains(.shouldResume) {
@@ -1129,7 +1215,11 @@ public final class AudioPlaybackController {
     /// Re-activates the audio session and resumes the player when we still intend
     /// to be playing but the render pipeline parked after a route disruption.
     private func attemptPlaybackRecovery() {
-        guard hasActivePlayback, isPlaying else { return }
+        guard hasActivePlayback, isPlaying else {
+            diag("recover", "skipped (hasActivePlayback=\(hasActivePlayback) isPlaying=\(isPlaying))")
+            return
+        }
+        diag("recover", "attempting: setActive(true) + play route=\(routeSummary()) state=[\(playerStateSummary())]")
         try? AVAudioSession.sharedInstance().setActive(true)
         if player.timeControlStatus != .playing {
             player.play()

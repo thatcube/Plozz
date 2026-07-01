@@ -180,17 +180,6 @@ struct PlayerControls: View {
 
     private var buttonRow: some View {
         HStack(spacing: 20) {
-            ForEach(availableCategories, id: \.self) { category in
-                Button {
-                    toggle(category)
-                } label: {
-                    Label(category.title, systemImage: category.icon)
-                        .labelStyle(.iconOnly)
-                }
-                .playerGlassButton(prominent: openPanel == category)
-                .focused($focus, equals: .button(category))
-            }
-
             Button {
                 model.diagnosticsEnabled.toggle()
             } label: {
@@ -202,6 +191,17 @@ struct PlayerControls: View {
             }
             .playerGlassButton(prominent: model.diagnosticsEnabled)
             .focused($focus, equals: .diagnostics)
+
+            ForEach(availableCategories, id: \.self) { category in
+                Button {
+                    toggle(category)
+                } label: {
+                    Label(category.title, systemImage: category.icon)
+                        .labelStyle(.iconOnly)
+                }
+                .playerGlassButton(prominent: openPanel == category)
+                .focused($focus, equals: .button(category))
+            }
         }
     }
 
@@ -235,21 +235,8 @@ struct PlayerControls: View {
             .frame(maxHeight: 440)
         }
         .frame(width: 760, alignment: .leading)
-        // Composite cheaply over Dolby Vision / HDR video. The frame-dropping
-        // culprit was the soft drop `.shadow` (a per-frame offscreen blur pass
-        // recomposited over the moving DV signal), so that stays gone. A simple
-        // translucent fill is fine — it's a single per-pixel blend per frame, far
-        // cheaper than a shadow blur — so we keep a little video showing through.
-        // (A `.ultraThinMaterial` here would be worst of all: a live backdrop blur
-        // of full-motion HDR every frame.) A 1px stroke gives edge separation for
-        // free, replacing the shadow.
-        .background(Color.black.opacity(0.8))
         .colorScheme(.dark)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
-        )
+        .modifier(PanelGlassBackground())
     }
 
     /// Header of the floating panel: the screen title on the left, and — on the
@@ -597,15 +584,11 @@ struct PlayerControls: View {
 
     // MARK: Model helpers
 
+    /// Left→right: Diagnostics (rendered separately, far left), then Speed · Sync ·
+    /// Audio · **Subtitles**. The two most-used track controls sit on the right,
+    /// with Subtitles at the far-right edge.
     private var availableCategories: [Category] {
         var result: [Category] = []
-        if model.hasSelectableSubtitles {
-            result.append(.subtitles)
-        }
-        if model.hasSelectableAudio
-            || model.engineCapabilities.contains(.dialogEnhance) {
-            result.append(.audio)
-        }
         if model.engineCapabilities.contains(.playbackSpeed) {
             result.append(.speed)
         }
@@ -613,12 +596,21 @@ struct PlayerControls: View {
             || model.engineCapabilities.contains(.subtitleDelay) {
             result.append(.sync)
         }
+        if model.hasSelectableAudio
+            || model.engineCapabilities.contains(.dialogEnhance) {
+            result.append(.audio)
+        }
+        if model.hasSelectableSubtitles {
+            result.append(.subtitles)
+        }
         return result
     }
 
-    /// Focus target when the bar first takes focus: the first category, or the
-    /// always-present Diagnostics button when no categories apply.
+    /// Focus target when the bar first takes focus: Subtitles (the most-used
+    /// control) when present, otherwise the first category, otherwise the
+    /// always-present Diagnostics button.
     private var initialFocus: FocusSlot {
+        if availableCategories.contains(.subtitles) { return .button(.subtitles) }
         if let first = availableCategories.first { return .button(first) }
         return .diagnostics
     }
@@ -1018,6 +1010,33 @@ private extension View {
             } else {
                 buttonStyle(.bordered)
             }
+        }
+    }
+}
+
+/// The floating panel's translucent backing. Native **Liquid Glass** on tvOS
+/// 26+, falling back to a cheap solid translucent fill below that (and honouring
+/// the perf intent on older devices).
+///
+/// Still **no `.shadow`** — a soft drop shadow was the original frame-drop
+/// culprit over Dolby Vision (a per-frame offscreen blur recomposited on the
+/// moving HDR signal). A 1px stroke gives edge separation instead. The glass is
+/// a *bounded* backdrop sample (the panel is only 760pt wide), so keep an eye on
+/// the diagnostics FPS over DV content and fall back to the solid fill if it
+/// ever stutters.
+private struct PanelGlassBackground: ViewModifier {
+    private let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+
+    func body(content: Content) -> some View {
+        if #available(tvOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: shape)
+                .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 1))
+        } else {
+            content
+                .background(Color.black.opacity(0.8))
+                .clipShape(shape)
+                .overlay(shape.stroke(.white.opacity(0.14), lineWidth: 1))
         }
     }
 }

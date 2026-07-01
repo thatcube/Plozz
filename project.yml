@@ -23,6 +23,12 @@ settings:
     # CFBundleShortVersionString must match the parent app's). Bump by hand for a
     # real release.
     MARKETING_VERSION: "0.1"
+    # Opt-in crash reporting endpoint (Sentry DSN). Empty by default so the app
+    # is a true no-op unless a real DSN is provided. tools/generate-project.sh
+    # bakes the value of the PLOZZ_SENTRY_DSN env var into the generated project
+    # when set (mirrors the CURRENT_PROJECT_VERSION bake). Kept OUT of git — the
+    # DSN is supplied via the untracked .env.fastlane / environment, never here.
+    PLOZZ_SENTRY_DSN: ""
 
 # Local Swift package providing all modular feature/code libraries.
 packages:
@@ -45,6 +51,10 @@ targets:
         # MARKETING_VERSION build setting so the app and Top Shelf extension match.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Opt-in crash-reporting DSN, read at runtime by CrashReporting. Resolves
+        # from the PLOZZ_SENTRY_DSN build setting (empty unless baked in), so
+        # builds without a DSN never send anything.
+        PlozzSentryDSN: "$(PLOZZ_SENTRY_DSN)"
         # Background audio keeps music playing while the user browses other
         # screens or the tvOS screensaver starts. Required for the music MVP's
         # background/Now-Playing behaviour (AVAudioSession .playback).

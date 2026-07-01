@@ -54,6 +54,8 @@
 	<string>Plozz uses your local network to discover Jellyfin servers automatically.</string>
 	<key>OMDBAPIKey</key>
 	<string>$(OMDB_API_KEY)</string>
+	<key>PlozzSentryDSN</key>
+	<string>$(PLOZZ_SENTRY_DSN)</string>
 	<key>SimklClientID</key>
 	<string>$(SIMKL_CLIENT_ID)</string>
 	<key>SimklClientSecret</key>

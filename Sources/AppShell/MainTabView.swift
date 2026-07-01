@@ -83,6 +83,12 @@ struct MainTabView: View {
     /// the player so a manual track switch sticks across that show's episodes.
     let seriesTrackStore: any SeriesTrackPreferenceStoring
     let diagnosticsModel: DiagnosticsSettingsModel
+    /// App-wide, opt-in crash-reporting consent (off by default). Threaded into
+    /// Settings ▸ Help & Diagnostics so the household can turn it on/off.
+    let crashReportingModel: CrashReportingSettingsModel
+    /// Whether this build has a crash-reporting endpoint baked in; drives whether
+    /// the opt-in toggle is enabled or shown disabled with a note.
+    let crashReportingConfigured: Bool
     let musicPlayerModel: MusicPlayerSettingsModel
     /// Per-profile UI density, injected into the environment below so the
     /// Settings ▸ Appearance picker can edit it.
@@ -209,6 +215,8 @@ struct MainTabView: View {
                 nightShift: nightShiftModel,
                 homeVisibility: homeVisibility,
                 diagnostics: diagnosticsModel,
+                crashReporting: crashReportingModel,
+                crashReportingConfigured: crashReportingConfigured,
                 trakt: trakt,
                 simkl: simkl,
                 anilist: anilist,

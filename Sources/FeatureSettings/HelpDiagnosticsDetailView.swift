@@ -20,6 +20,10 @@ struct HelpDiagnosticsDetailView: View {
     let repoURL: String
     let accounts: [Account]
     @Bindable var diagnostics: DiagnosticsSettingsModel
+    @Bindable var crashReporting: CrashReportingSettingsModel
+    /// Whether this build shipped with a crash-reporting endpoint. When `false`
+    /// the opt-in is shown disabled with a note (there's nowhere to send reports).
+    let crashReportingConfigured: Bool
 
     /// Email surfaced as a no-GitHub-account fallback for reporting problems.
     private static let feedbackEmail = "feedback@plozz.app"
@@ -45,6 +49,7 @@ struct HelpDiagnosticsDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 reportPanel
+                crashReportingPanel
                 diagnosticsPanel
                 recentActivityPanel
             }
@@ -54,7 +59,6 @@ struct HelpDiagnosticsDetailView: View {
             .padding(.vertical, 40)
         }
         .scrollClipDisabled()
-        .navigationTitle("Help & Diagnostics")
     }
 
     // MARK: - Report a Problem
@@ -62,19 +66,12 @@ struct HelpDiagnosticsDetailView: View {
     private var reportPanel: some View {
         SettingsPanel(
             title: "Report a Problem",
-            footer: "Scan the code with your phone to open a pre-filled bug report on GitHub — Apple TV has no keyboard, so you finish typing on your phone. No account? Email \(Self.feedbackEmail). For crashes or screenshots, use TestFlight’s built-in feedback. Your servers, logins and tokens are never included."
+            footer: "Scan the code, or go to the link on any device, to open a pre-filled bug report on GitHub. For crashes or screenshots, use TestFlight’s built-in feedback. Your servers, logins and tokens are never included."
         ) {
             HStack(alignment: .top, spacing: 36) {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Found a bug?")
-                        .font(.title3.weight(.semibold))
-                    Text("The report is pre-filled with your Plozz version and device so you don’t have to type it. Just describe what happened.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    infoRow("Open on your phone", report.newIssueShortURL)
-                    infoRow("Or email", Self.feedbackEmail)
+                VStack(alignment: .leading, spacing: 12) {
+                    infoRow("GitHub", report.newIssueShortURL)
+                    infoRow("Email", Self.feedbackEmail)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -83,12 +80,28 @@ struct HelpDiagnosticsDetailView: View {
                     // scannable at 10 feet (About's short repo link uses "H").
                     SettingsQRCode(string: report.newIssueURLString, correctionLevel: "M")
                         .frame(width: 200, height: 200)
-                    Text("Scan to file a\nGitHub issue")
+                    Text("Scan to report\na bug")
                         .font(.caption)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    // MARK: - Crash reporting (opt-in, off by default)
+
+    private var crashReportingPanel: some View {
+        SettingsPanel(
+            title: "Crash Reports",
+            footer: crashReportingConfigured
+                ? "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. Off by default; applies to this Apple TV."
+                : "This build has no crash-reporting endpoint configured, so nothing can be sent. Crash reporting is available in TestFlight and release builds."
+        ) {
+            Toggle("Share Crash Reports", isOn: $crashReporting.settings.isEnabled)
+                .toggleStyle(SettingsSwitchToggleStyle())
+                .disabled(!crashReportingConfigured)
+                .opacity(crashReportingConfigured ? 1 : 0.5)
         }
     }
 
@@ -99,15 +112,8 @@ struct HelpDiagnosticsDetailView: View {
             title: "Diagnostics",
             footer: "Overlays live playback stats (codec, bitrate, buffer, memory) on top of the video. A power-user aid for diagnosing playback issues — leave it off for normal watching. Saved on this profile."
         ) {
-            Toggle(isOn: $diagnostics.settings.isEnabled) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Playback Diagnostics Overlay")
-                        .font(.headline)
-                    Text(diagnostics.settings.isEnabled ? "On" : "Off")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Toggle("Playback Diagnostics Overlay", isOn: $diagnostics.settings.isEnabled)
+                .toggleStyle(SettingsSwitchToggleStyle())
         }
     }
 
@@ -146,7 +152,7 @@ struct HelpDiagnosticsDetailView: View {
         HStack(spacing: 16) {
             Text(label)
                 .foregroundStyle(.secondary)
-                .frame(width: 220, alignment: .leading)
+                .frame(width: 110, alignment: .leading)
             Text(value)
             Spacer(minLength: 0)
         }

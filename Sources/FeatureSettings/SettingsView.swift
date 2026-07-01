@@ -44,6 +44,8 @@ public struct SettingsView: View {
     private let nightShift: NightShiftSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
     private let diagnostics: DiagnosticsSettingsModel
+    private let crashReporting: CrashReportingSettingsModel
+    private let crashReportingConfigured: Bool
     private let trakt: TraktService
     private let simkl: SimklService
     private let anilist: AniListService
@@ -84,6 +86,8 @@ public struct SettingsView: View {
         nightShift: NightShiftSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
         diagnostics: DiagnosticsSettingsModel,
+        crashReporting: CrashReportingSettingsModel,
+        crashReportingConfigured: Bool,
         trakt: TraktService,
         simkl: SimklService,
         anilist: AniListService,
@@ -123,6 +127,8 @@ public struct SettingsView: View {
         self.nightShift = nightShift
         self.homeVisibility = homeVisibility
         self.diagnostics = diagnostics
+        self.crashReporting = crashReporting
+        self.crashReportingConfigured = crashReportingConfigured
         self.trakt = trakt
         self.simkl = simkl
         self.anilist = anilist
@@ -468,7 +474,9 @@ public struct SettingsView: View {
                 appBuild: appBuild,
                 repoURL: repoURL,
                 accounts: accounts,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                crashReporting: crashReporting,
+                crashReportingConfigured: crashReportingConfigured
             )
         case let .plexUser(accountID):
             PlexLinkedUserDetailView(context: context, accountID: accountID)

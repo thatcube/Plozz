@@ -34,6 +34,9 @@ struct NowPlayingView: View {
     @State private var controlsVisible = true
     /// Pending auto-hide; cancelled/rescheduled on every interaction.
     @State private var hideTask: Task<Void, Never>?
+    /// Pending focus re-assert that lands the pause button after a reveal (see
+    /// `showControls`); cancelled when the bar hides or the view goes away.
+    @State private var focusTask: Task<Void, Never>?
 
     /// True while the control bar is mid slide-in/out. During the slide the
     /// scrub bar suppresses its progress spring so the fill + knob ride the slide
@@ -194,6 +197,10 @@ struct NowPlayingView: View {
             bottomControls
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .allowsHitTesting(controlsVisible)
+                // Bias the focus engine toward the pause button so it's the
+                // default landing spot when the controls appear, rather than the
+                // scrub surface that sits above it.
+                .defaultFocus($focus, .playPause)
 
             // While the bar is hidden, a transparent full-screen catcher takes
             // focus so a Select/click brings the controls back. It uses a fully
@@ -233,6 +240,7 @@ struct NowPlayingView: View {
         .onDisappear {
             setIdleTimerDisabled(false)
             hideTask?.cancel()
+            focusTask?.cancel()
         }
         .onChange(of: scrubModel.isScrubbing) { _, _ in scheduleHide() }
         // Any focus movement among the controls (or onto the scrub bar, which
@@ -337,6 +345,18 @@ struct NowPlayingView: View {
     private func showControls() {
         controlsVisible = true
         focus = .playPause
+        // Re-assert on the next runloop. When the bar reveals, the transport row
+        // slides up from off-screen and the focusable scrub surface (a UIKit
+        // focusable above the buttons) can win the initial focus race, so a single
+        // synchronous set doesn't reliably land on play/pause. Setting it again
+        // once the buttons are on-screen makes the pause button the dependable
+        // default whether the bar was revealed by a press or a vertical swipe.
+        focusTask?.cancel()
+        focusTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard !Task.isCancelled, controlsVisible else { return }
+            focus = .playPause
+        }
         scheduleHide()
     }
 
@@ -344,6 +364,7 @@ struct NowPlayingView: View {
     /// moves focus to the reveal catcher, exactly as the auto-hide timer would.
     private func hideControls() {
         hideTask?.cancel()
+        focusTask?.cancel()
         controlsVisible = false
         focus = .revealCatcher
     }

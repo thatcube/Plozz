@@ -1197,21 +1197,39 @@ public final class AudioPlaybackController {
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
         switch type {
         case .began:
-            // System interrupted us (on tvOS 17+ this includes a route disconnect).
-            // AVPlayer has already paused; nothing to do until it ends.
-            diag("interrupt", "BEGAN route=\(routeSummary()) isPlaying=\(isPlaying) state=[\(playerStateSummary())]")
+            // System interrupted us. On tvOS 17+ a route disconnect (the HomePod
+            // dropping) arrives here as reason `.routeDisconnected` — the exact
+            // fingerprint of the AirPlay skip bug, so log the reason.
+            diag("interrupt", "BEGAN reason=\(interruptionReasonName(info)) route=\(routeSummary()) isPlaying=\(isPlaying) state=[\(playerStateSummary())]")
         case .ended:
             let options = AVAudioSession.InterruptionOptions(
                 rawValue: info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             )
-            diag("interrupt", "ENDED shouldResume=\(options.contains(.shouldResume)) route=\(routeSummary()) isPlaying=\(isPlaying) state=[\(playerStateSummary())]")
-            // Only resume when the system says it's safe AND we still intend to
-            // play (a user pause leaves `isPlaying` false, so we stay put).
-            if options.contains(.shouldResume) {
-                attemptPlaybackRecovery()
-            }
+            diag("interrupt", "ENDED reason=\(interruptionReasonName(info)) shouldResume=\(options.contains(.shouldResume)) route=\(routeSummary()) isPlaying=\(isPlaying) state=[\(playerStateSummary())]")
+            // tvOS 27 DEPRECATES `AVAudioSession.InterruptionOptions` (including
+            // `.shouldResume`) in favour of a separate resumption-recommendation
+            // notification, so the `.shouldResume` flag may be absent on tvOS 27
+            // even when we should resume — which is likely why recovery never
+            // fired and the HomePod stayed silent until a physical reconnect.
+            // This is a long-form music app that always intends to keep playing,
+            // so recover on ANY interruption end, guarded by our own `isPlaying`
+            // intent (a user pause left it false, so we stay put). `.ended` is the
+            // documented-safe moment to call `setActive(true)`.
+            attemptPlaybackRecovery()
         @unknown default:
             break
+        }
+    }
+
+    /// Human-readable name for an interruption's reason (tvOS 17+). A HomePod
+    /// route drop reports `.routeDisconnected`; anything else is a different
+    /// interruption (phone call analog, mic mute, etc.).
+    private func interruptionReasonName(_ info: [AnyHashable: Any]) -> String {
+        guard let raw = info[AVAudioSessionInterruptionReasonKey] as? UInt else { return "none" }
+        switch AVAudioSession.InterruptionReason(rawValue: raw) {
+        case .default: return "default"
+        case .routeDisconnected: return "routeDisconnected"
+        default: return "raw(\(raw))"
         }
     }
 

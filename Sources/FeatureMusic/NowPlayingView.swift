@@ -228,7 +228,16 @@ struct NowPlayingView: View {
                 Button { showControls() } label: { Color.clear }
                     .buttonStyle(InvisibleButtonStyle())
                     .focused($focus, equals: .revealCatcher)
-                    .onMoveCommand { _ in showControls() }
+                    // Reveal on any directional press, but honour the axis: a
+                    // horizontal press lands on the scrub bar (scrubbing IS
+                    // horizontal), while a vertical press lands on the play/pause
+                    // button. See showControls(preferScrubber:).
+                    .onMoveCommand { direction in
+                        switch direction {
+                        case .left, .right: showControls(preferScrubber: true)
+                        default: showControls(preferScrubber: false)
+                        }
+                    }
             }
         }
         // mainContent's bottom-padding re-center still rides one shared spring;
@@ -360,26 +369,28 @@ struct NowPlayingView: View {
 
     /// Reveals the control bar and (re)arms the auto-hide timer, focusing
     /// play/pause so the bar always returns with it highlighted.
-    private func showControls() {
+    private func showControls(preferScrubber: Bool = false) {
         controlsVisible = true
-        // Keep the scrub bar non-focusable across the reveal so it can't win the
-        // focus relocation that fires when the (focused) reveal catcher is removed
-        // from the hierarchy — that relocation is what was landing a down-press on
-        // the scrubber. With the scrub surface out of the running, focus falls to
-        // the play/pause button (see .defaultFocus on bottomControls).
-        scrubFocusable = false
-        focus = .playPause
-        // Re-assert on the next runloop, then re-enable scrub focus a beat later.
-        // When the bar reveals, the transport row slides up from off-screen and a
-        // single synchronous set doesn't reliably land on play/pause. Setting it
+        // Keep the scrub surface out of the hierarchy during a *vertical* reveal
+        // so it can't win the focus relocation that fires when the (focused)
+        // reveal catcher is removed — that relocation is what was landing a
+        // down-press on the scrubber. With the surface gone, focus falls to the
+        // play/pause button (see .defaultFocus on bottomControls). A *horizontal*
+        // reveal keeps the surface so the scrub bar itself can take focus, since
+        // scrubbing is a horizontal gesture.
+        scrubFocusable = preferScrubber
+        focus = preferScrubber ? nil : .playPause
+        // Re-assert on the next runloop, then make the scrub bar focusable a beat
+        // later regardless of direction so up-navigation to it always works. When
+        // the bar reveals, the transport row slides up from off-screen and a
+        // single synchronous set doesn't reliably land on play/pause; setting it
         // again once the buttons are on-screen makes the pause button the
-        // dependable default whether the bar was revealed by a press or a swipe;
-        // re-enabling the scrub bar afterwards keeps up-navigation to it working.
+        // dependable default for a vertical/select reveal.
         focusTask?.cancel()
         focusTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 50_000_000)
             guard !Task.isCancelled, controlsVisible else { return }
-            focus = .playPause
+            if !preferScrubber { focus = .playPause }
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled, controlsVisible else { return }
             scrubFocusable = true
@@ -391,6 +402,15 @@ struct NowPlayingView: View {
     /// moves focus to the reveal catcher, exactly as the auto-hide timer would.
     private func hideControls() {
         hideTask?.cancel()
+        collapseControls()
+    }
+
+    /// Collapses the controls and parks focus on the reveal catcher. Shared by
+    /// the explicit hide and the auto-hide timer so *both* paths reset
+    /// `scrubFocusable` — otherwise the scrub surface stays mounted and focusable
+    /// while hidden, giving a directional press a real neighbour to move to and
+    /// stealing the reveal (the catcher's .onMoveCommand never fires).
+    private func collapseControls() {
         focusTask?.cancel()
         scrubFocusable = false
         controlsVisible = false
@@ -409,8 +429,7 @@ struct NowPlayingView: View {
                 scheduleHide()
                 return
             }
-            controlsVisible = false
-            focus = .revealCatcher
+            collapseControls()
         }
     }
 

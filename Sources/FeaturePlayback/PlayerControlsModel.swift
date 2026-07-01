@@ -117,6 +117,15 @@ public final class PlayerControlsModel {
     /// (fetching, no cues in the file, or the sidecar was unavailable) instead of
     /// silently showing nothing. `.idle` when the second line is Off.
     public var secondarySubtitleStatus: SecondarySubtitleStatus = .idle
+    /// When non-`nil`, the dual (second) subtitle line is *disallowed* because the
+    /// PRIMARY subtitle is a bitmap format (PGS/DVD/DVB/VobSub) that draws at its
+    /// own uncontrollable authored position and so can't be positionally stacked
+    /// against a second line. Carries the primary's short format hint (e.g. "PGS",
+    /// "DVD", "Image") so the picker can explain the reason ("Unavailable with PGS
+    /// subtitles") instead of an ambiguous "None available". `nil` when dual is
+    /// available — including when it's empty for the ordinary reason that the media
+    /// simply has no other text track to show.
+    public var secondarySubtitleImagePrimaryFormat: String? = nil
 
     #if DEBUG
     /// DEBUG-only readout of how the *primary* selected subtitle is being routed:

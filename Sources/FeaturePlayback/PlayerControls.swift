@@ -1075,8 +1075,18 @@ struct PlayerControls: View {
         // Base value = the selected option's label; when a real track is selected,
         // annotate it with the live load status so the viewer can see whether it's
         // fetching, has no lines in this file, or the sidecar was unavailable —
-        // instead of a silent blank second line.
-        let baseValue = secOptions.isEmpty ? "None available" : secOptions[currentIdx].title
+        // instead of a silent blank second line. When the primary is a bitmap sub,
+        // dual mode is disallowed (a PGS/DVD line can't be positioned), so say so
+        // explicitly rather than the ambiguous "None available".
+        let baseValue: String
+        if let format = model.secondarySubtitleImagePrimaryFormat {
+            let readable = format == "Image" ? "image" : format
+            baseValue = "Unavailable with \(readable) subtitles"
+        } else if secOptions.isEmpty {
+            baseValue = "None available"
+        } else {
+            baseValue = secOptions[currentIdx].title
+        }
         let trackValue = hasTrack ? baseValue + Self.secondaryStatusSuffix(model.secondarySubtitleStatus) : baseValue
         var rows: [StyleRowSpec] = [
             StyleRowSpec(slot: 0, title: "Second Track", kind: .choice(

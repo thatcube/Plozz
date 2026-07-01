@@ -1963,6 +1963,19 @@ public final class PlayerViewModel {
         // (e.g. it just became the primary, or the media changed), reconcile by
         // dropping it — clearing both its cues and its styling.
         let secondaryEligible = eligibleSecondarySubtitleTracks()
+        // Distinguish an empty dual picker caused by a bitmap PRIMARY (dual is
+        // disallowed — a PGS/DVD line can't be positioned) from one that's empty
+        // because the media simply has no other text track, so the row can explain
+        // the former ("Unavailable with PGS subtitles") rather than "None available".
+        if let primaryID = selectedSubtitleTrackID,
+           let primary = engine.subtitleTracks.first(where: { $0.id == primaryID })
+            ?? providerSubs.first(where: { $0.id == primaryID }),
+           primary.isBitmapSubtitle {
+            controls.secondarySubtitleImagePrimaryFormat =
+                TrackLabeling.subtitleFormatHint(codec: primary.codec, isImageBased: true) ?? "Image"
+        } else {
+            controls.secondarySubtitleImagePrimaryFormat = nil
+        }
         if let sec = selectedSecondarySubtitleTrackID,
            !secondaryEligible.contains(where: { $0.id == sec }) {
             selectedSecondarySubtitleTrackID = nil

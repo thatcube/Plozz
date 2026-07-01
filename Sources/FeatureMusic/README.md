@@ -12,10 +12,14 @@ so audio keeps playing as the user navigates the rest of the app.
 - **Audio engine** — `AudioPlaybackController`:
   - owns a single long-lived `AVQueuePlayer` + manually-managed queue so it
     can resolve each track's stream URL on demand and support shuffle /
-    repeat / next / previous; track changes advance the queue
-    (`advanceToNextItem()`, inserting the next item behind the still-playing
-    one) rather than emptying/replacing the item, so the output route stays
-    alive across songs (keeps AirPlay 2 from dropping to silence on skip);
+    repeat / next / previous; the upcoming track is resolved and
+    *pre-enqueued* behind the current one (the "treadmill") so it prerolls
+    while the current song plays, and track changes advance the queue
+    (`advanceToNextItem()`) onto that already-buffered item rather than
+    emptying/replacing the item, so the output route stays alive across songs
+    (keeps AirPlay 2 from dropping to silence on skip); route-change /
+    interruption observers recover playback if the system parks it after a
+    jump the treadmill couldn't preroll;
   - configures `AVAudioSession` `.playback` + `setActive(true)` so audio
     keeps playing across screens / screensaver;
   - publishes `MPNowPlayingInfoCenter` (title / artist / album / artwork

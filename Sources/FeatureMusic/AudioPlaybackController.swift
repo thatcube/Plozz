@@ -25,12 +25,18 @@ public typealias MusicTrack = CoreModels.MusicTrack
 /// the mini-player and the Now Playing screen observe the *same* instance.
 ///
 /// Track changes advance the queue (`advanceToNextItem()`) instead of emptying or
-/// replacing the player's item. Inserting the next item behind the still-playing
-/// one and advancing onto it keeps the player's pipeline continuously live, which
-/// PRESERVES the output route. That is essential for AirPlay 2: `removeAllItems()`
-/// or `replaceCurrentItem(with:)` tears the route to the speaker down, so the next
-/// track is silent (and the speaker stays dead until it's physically reconnected),
-/// while seeking within the same item — which never swaps the item — is unaffected.
+/// replacing the player's item. The upcoming track is resolved and *pre-enqueued*
+/// behind the current one (the "treadmill", WWDC 2016 §503 / 2019 §501) so
+/// AVFoundation prerolls it while the current track still plays; a natural end or
+/// a Next then hands off onto that already-buffered item. Keeping the pipeline
+/// continuously live — never empty, never stalled on a cold fetch — is what
+/// PRESERVES the output route. That is essential for AirPlay 2: `removeAllItems()`,
+/// `replaceCurrentItem(with:)`, or advancing onto an unbuffered item tears the
+/// route to the speaker down, so the next track is silent (and the speaker stays
+/// dead until it's physically reconnected), while seeking within the same item —
+/// which never swaps the item — is unaffected. As a safety net for transitions
+/// that can't be pre-enqueued (arbitrary jumps), route-change and interruption
+/// observers re-activate the session and resume if the system parks playback.
 ///
 /// tvOS background audio (the part the video flow never does):
 ///  * configures `AVAudioSession` `.playback` (with the `.longFormAudio`
@@ -263,10 +269,31 @@ public final class AudioPlaybackController {
     private var currentArtwork: MPMediaItemArtwork?
     #endif
     private var artworkLoadTask: Task<Void, Never>?
+    /// The next track pre-enqueued *behind* the current one — the "treadmill"
+    /// (WWDC 2016 §503 / 2019 §501). Resolving the upcoming track's URL and
+    /// `insert`ing its item into the live queue ahead of time lets AVFoundation
+    /// preroll it while the current track still plays, so a natural end or a Next
+    /// hands off via `advanceToNextItem()` onto an already-buffered item. That is
+    /// the ONE transition that reliably keeps the AirPlay 2 route alive: the
+    /// pipeline never empties and never stalls on a cold fetch. `item` is `nil`
+    /// while the URL is still resolving (intent is recorded synchronously so
+    /// re-entrant prepares dedupe).
+    private struct PreparedNext {
+        let trackID: MusicTrack.ID
+        var item: AVPlayerItem?
+        var quality: PlaybackQuality?
+    }
+    private var preparedNext: PreparedNext?
+    /// Recovery observers: if a track transition makes the system tear down or
+    /// reconfigure the (AirPlay) route, re-activate the session and resume so the
+    /// speaker doesn't stay silent until it's physically reconnected.
+    private var routeChangeObserver: NSObjectProtocol?
+    private var interruptionObserver: NSObjectProtocol?
 
     public init() {
         player.actionAtItemEnd = .none
         installTimeObserver()
+        installRouteRecoveryObservers()
     }
 
     // MARK: Public API
@@ -410,6 +437,10 @@ public final class AudioPlaybackController {
         case .all: repeatMode = .one
         case .one: repeatMode = .off
         }
+        // Repeat mode changes what plays next (a wrap-around track, or the same
+        // track under repeat-one), so re-arm the treadmill for the new mode.
+        clearPreparedNext(removeFromPlayer: true)
+        prepareNextInQueue()
     }
 
     /// Stops playback and clears the queue — hides the mini-player.
@@ -419,6 +450,7 @@ public final class AudioPlaybackController {
         reportStopIfNeeded(position: currentTime)
         player.pause()
         player.removeAllItems()
+        preparedNext = nil
         isPlaying = false
         queue = []
         orderedQueue = []
@@ -455,6 +487,10 @@ public final class AudioPlaybackController {
             index = current.flatMap { queue.firstIndex(of: $0) } ?? 0
         }
         isShuffled = on
+        // The play order changed under the current track, so whatever we'd
+        // pre-enqueued as "next" is now wrong — drop it and re-arm the treadmill.
+        clearPreparedNext(removeFromPlayer: true)
+        prepareNextInQueue()
     }
 
     // MARK: Queue advancement
@@ -506,18 +542,44 @@ public final class AudioPlaybackController {
         // user has already skipped past (which would leak a start with no stop).
         trackTransitionGeneration &+= 1
         let generation = trackTransitionGeneration
-        currentQuality = nil
         loadLyrics(for: track)
+
+        // FAST PATH — the treadmill hand-off. This track was pre-enqueued behind
+        // the outgoing one (see `prepareNextInQueue`) and has been prerolling in
+        // the live pipeline, so it's already the player's *next* item and buffered.
+        // Advancing onto an already-ready queued item is the ONLY track change that
+        // reliably preserves the AirPlay 2 route (WWDC 2016 §503 / 2019 §501): no
+        // resolve, no cold insert, and crucially NO `playImmediately` — the item is
+        // ready, so a plain `play()` starts it without forcing past AVPlayer's
+        // stall-avoidance (forcing an empty AirPlay buffer is what dropped the route
+        // and produced the "seek bar advances but it's silent" symptom).
+        if let prepared = preparedNext, prepared.trackID == track.id,
+           let item = prepared.item,
+           player.items().count >= 2, player.items()[1] === item {
+            // Close the OUTGOING track's session (its skip point on a manual next,
+            // or ≈duration on a natural end — where handleItemDidEnd already
+            // reported it and this no-ops).
+            reportStopIfNeeded(position: currentTime)
+            enableRemoteCommands()
+            currentQuality = prepared.quality
+            preparedNext = nil
+            player.advanceToNextItem()
+            observeEnd(of: item)
+            player.play()
+            await finishStart(track: track)
+            return
+        }
+
+        // SLOW / HARD PATH — an arbitrary jump (new queue, tap-to-play, previous,
+        // repeat-one restart, shuffle/wrap) whose target wasn't pre-enqueued. We
+        // still keep the player instance and never empty it to `nil`: insert the
+        // fresh item behind the still-playing one, wait until it has buffered
+        // enough for a smooth AirPlay hand-off, then advance. If the route can't be
+        // preserved here the recovery observers pick it back up.
+        currentQuality = nil
         guard let resolved = await resolver(track),
               generation == trackTransitionGeneration else { return }
-        // Resolve succeeded and we're still the current transition — now close the
-        // OUTGOING track's session (its skip point on a manual next/previous, or
-        // ≈duration when a track ended naturally, in which case handleItemDidEnd
-        // already reported it and this no-ops) and swap in the new item. Doing the
-        // stop here, after a successful resolve, means a failed resolve leaves the
-        // previous track playing with its reporting intact.
         reportStopIfNeeded(position: currentTime)
-        let url = resolved.url
         currentQuality = resolved.quality
         // Claim the system remote/Now Playing controls only once music is
         // actually playing. Registering them eagerly (e.g. at app launch) makes
@@ -525,17 +587,11 @@ public final class AudioPlaybackController {
         // instead of delivering it to the foreground view, which silently breaks
         // the video player's own Play/Pause handling.
         enableRemoteCommands()
-        let item = AVPlayerItem(url: url)
-        // Change tracks by advancing the queue, never by emptying/replacing the
-        // sole item — and only advance once the NEW item has buffered enough to
-        // play. `advanceToNextItem()` transitions within the queue player's live
-        // pipeline (which preserves the AirPlay 2 output route), but advancing onto
-        // a still-cold item makes the pipeline STALL while it fetches, and that
-        // stall drops the route just like emptying the player does. So we insert
-        // the new item behind the still-playing one — keeping the current track
-        // (and the route) alive — wait for it to become ready, THEN hand off, so
-        // the pipeline never goes empty or stalls.
+        let item = AVPlayerItem(url: resolved.url)
         if let current = player.currentItem {
+            // Drop any stale pre-enqueued item so it doesn't linger in the queue
+            // (this jump supersedes whatever "next" we'd guessed).
+            clearPreparedNext(removeFromPlayer: true)
             player.insert(item, after: current)
             await waitUntilReadyToPlay(item)
             // A rapid skip / new queue may have superseded us while buffering. Drop
@@ -545,20 +601,34 @@ public final class AudioPlaybackController {
                 return
             }
             player.advanceToNextItem()
+            observeEnd(of: item)
+            // Ready item → plain `play()`; don't force past stall-avoidance on a
+            // freshly-advanced AirPlay route.
+            player.play()
         } else {
+            // Cold start — no current item and therefore no route to protect yet, so
+            // `playImmediately` is safe and avoids parking in the wait state.
             player.insert(item, after: nil)
+            observeEnd(of: item)
+            player.playImmediately(atRate: 1.0)
         }
-        observeEnd(of: item)
-        // Start with `playImmediately(atRate:)` rather than plain `play()`: on a
-        // high-latency AirPlay route plain `play()` can park in AVPlayer's
-        // stall-avoidance wait state (`.waitingToPlayAtSpecifiedRate`) and never
-        // actually start. Mirrors `resume()`, which hit the same wait-state trap.
-        player.playImmediately(atRate: 1.0)
+        await finishStart(track: track)
+    }
+
+    /// Shared tail run once `player.currentItem` is the intended `track` (via either
+    /// the treadmill hand-off or a hard advance): publishes UI/Now-Playing state,
+    /// opens the server-side now-playing session, and — importantly — pre-enqueues
+    /// the *following* track so the next advance can take the seamless fast path.
+    private func finishStart(track: MusicTrack) async {
         isPlaying = true
         currentTime = 0
         duration = track.duration ?? 0
         // The new track is now playing — open its server-side now-playing session.
         reportStart(track)
+        // Warm the treadmill: resolve + enqueue the upcoming track right away so it
+        // prerolls while this one plays. Done before the artwork/duration awaits so
+        // even a short track has its successor ready in time.
+        prepareNextInQueue()
         #if canImport(MediaPlayer)
         currentArtwork = nil
         // Try to have artwork ready BEFORE the first publish so tvOS's transient
@@ -581,16 +651,77 @@ public final class AudioPlaybackController {
         #endif
     }
 
-    /// Polls `item.status` until it is ready to play (or fails, or a short timeout
-    /// elapses). Used before `advanceToNextItem()` so the queue only ever hands off
-    /// onto an already-buffered item: advancing onto a cold item stalls the pipeline
-    /// while it fetches, and that stall drops the AirPlay 2 route. Waiting here keeps
-    /// the current track playing — and the route alive — until the next one is ready
-    /// to take over. Runs on the main actor; `Task.sleep` suspends without blocking.
-    private func waitUntilReadyToPlay(_ item: AVPlayerItem, timeout: TimeInterval = 4.0) async {
+    /// The track a natural end or a Next would advance to — the one worth
+    /// pre-enqueuing. `nil` when there's nothing to preroll (end of a non-repeating
+    /// queue, or repeat-one where the same item simply replays).
+    private func sequentialNextTrack() -> MusicTrack? {
+        guard hasActivePlayback else { return nil }
+        if repeatMode == .one { return nil }
+        let next = index + 1
+        if queue.indices.contains(next) { return queue[next] }
+        // Past the end: repeat-all loops back to the top (but a single-track queue
+        // has no distinct "next" to enqueue).
+        if repeatMode == .all, queue.count > 1 { return queue.first }
+        return nil
+    }
+
+    /// Resolves and inserts the upcoming track behind the current item so it
+    /// prerolls in the live pipeline (the treadmill). Idempotent per target track;
+    /// the async resolve bails if a newer transition superseded it, preventing a
+    /// double-insert during rapid skipping.
+    private func prepareNextInQueue() {
+        guard let resolver, let nextTrack = sequentialNextTrack() else {
+            clearPreparedNext(removeFromPlayer: true)
+            return
+        }
+        // Already prepared (or preparing) for this exact track — leave it be.
+        if preparedNext?.trackID == nextTrack.id { return }
+        clearPreparedNext(removeFromPlayer: true)
+        let generation = trackTransitionGeneration
+        let trackID = nextTrack.id
+        // Record intent synchronously so a re-entrant prepare dedupes even before
+        // the URL resolves; the item is filled in once resolved + inserted.
+        preparedNext = PreparedNext(trackID: trackID, item: nil, quality: nil)
+        Task { [weak self] in
+            guard let self else { return }
+            guard let resolved = await resolver(nextTrack),
+                  self.trackTransitionGeneration == generation,
+                  self.preparedNext?.trackID == trackID,
+                  self.preparedNext?.item == nil else { return }
+            let item = AVPlayerItem(url: resolved.url)
+            guard self.player.canInsert(item, after: self.player.currentItem) else {
+                self.clearPreparedNext()
+                return
+            }
+            self.player.insert(item, after: self.player.currentItem)
+            self.preparedNext = PreparedNext(trackID: trackID, item: item, quality: resolved.quality)
+        }
+    }
+
+    /// Forgets the pre-enqueued track, optionally removing its (still-queued) item
+    /// from the player so a hard jump doesn't leave a stale item behind the new one.
+    private func clearPreparedNext(removeFromPlayer: Bool = false) {
+        if removeFromPlayer, let item = preparedNext?.item,
+           player.items().contains(where: { $0 === item }) {
+            player.remove(item)
+        }
+        preparedNext = nil
+    }
+
+    /// Waits until `item` has both loaded (`.readyToPlay`) *and* buffered enough to
+    /// keep up before a hard `advanceToNextItem()`. Gating on `.readyToPlay` alone
+    /// is only local readiness; AirPlay has far higher startup latency, so advancing
+    /// with a locally-ready-but-AirPlay-empty buffer stalls the speaker and drops
+    /// the route. Runs on the main actor; `Task.sleep` suspends without blocking.
+    private func waitUntilReadyToPlay(_ item: AVPlayerItem, timeout: TimeInterval = 8.0) async {
         let deadline = Date().addingTimeInterval(timeout)
-        while item.status != .readyToPlay, item.status != .failed, Date() < deadline {
-            try? await Task.sleep(nanoseconds: 40_000_000) // 40ms
+        while Date() < deadline {
+            if item.status == .failed { return }
+            if item.status == .readyToPlay,
+               item.isPlaybackLikelyToKeepUp || item.isPlaybackBufferFull {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
         }
     }
 
@@ -866,6 +997,85 @@ public final class AudioPlaybackController {
         }
         #endif
     }
+
+    /// Registers the AirPlay recovery safety net. A track transition can make the
+    /// system momentarily tear down or reconfigure the route to an AirPlay 2
+    /// speaker; when that happens `AVPlayer` auto-pauses and does NOT auto-resume,
+    /// leaving the speaker silent until it's physically reconnected. These
+    /// observers detect the disruption and, when we still intend to be playing,
+    /// re-activate the session and resume so playback recovers on its own. The
+    /// treadmill (pre-enqueuing) is the primary fix that prevents the teardown;
+    /// this is defence-in-depth for the cases it can't preroll (arbitrary jumps).
+    private func installRouteRecoveryObservers() {
+        #if canImport(AVFoundation) && !os(macOS)
+        let center = NotificationCenter.default
+        let session = AVAudioSession.sharedInstance()
+        // `routeChangeNotification` is posted on a secondary thread; delivering the
+        // block on `.main` lets us safely touch main-actor state.
+        routeChangeObserver = center.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated { self?.handleRouteChange(note) }
+        }
+        interruptionObserver = center.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated { self?.handleInterruption(note) }
+        }
+        #endif
+    }
+
+    #if canImport(AVFoundation) && !os(macOS)
+    private func handleRouteChange(_ note: Notification) {
+        guard let info = note.userInfo,
+              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+        // An AirPlay 2 group can reconfigure its route as part of an item
+        // transition; if the player parked while that happened, nudge it. We
+        // deliberately do NOT resume on `.oldDeviceUnavailable` (an intentional
+        // disconnect should stay paused, matching headphone-unplug behaviour).
+        if reason == .routeConfigurationChange {
+            attemptPlaybackRecovery()
+        }
+    }
+
+    private func handleInterruption(_ note: Notification) {
+        guard let info = note.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        switch type {
+        case .began:
+            // System interrupted us (on tvOS 17+ this includes a route disconnect).
+            // AVPlayer has already paused; nothing to do until it ends.
+            break
+        case .ended:
+            let options = AVAudioSession.InterruptionOptions(
+                rawValue: info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            )
+            // Only resume when the system says it's safe AND we still intend to
+            // play (a user pause leaves `isPlaying` false, so we stay put).
+            if options.contains(.shouldResume) {
+                attemptPlaybackRecovery()
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    /// Re-activates the audio session and resumes the player when we still intend
+    /// to be playing but the render pipeline parked after a route disruption.
+    private func attemptPlaybackRecovery() {
+        guard hasActivePlayback, isPlaying else { return }
+        try? AVAudioSession.sharedInstance().setActive(true)
+        if player.timeControlStatus != .playing {
+            player.play()
+        }
+    }
+    #endif
 
 
     // MARK: Now Playing + remote commands

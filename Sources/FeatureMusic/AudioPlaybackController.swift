@@ -351,6 +351,11 @@ public final class AudioPlaybackController {
     /// The in-flight self-heal reload kicked off by the stuck watchdog, so we never
     /// stack more than one recovery reload at a time.
     private var stuckRecoveryTask: Task<Void, Never>?
+    /// A delayed retry scheduled when a HARD-PATH jump exhausts all its load
+    /// attempts (persistent network failure). Kept separate from
+    /// `stuckRecoveryTask` so the two recovery mechanisms never clobber each
+    /// other's handle; both are gated by the watchdog and cancelled by `stop()`.
+    private var stalledRetryTask: Task<Void, Never>?
 
     public init() {
         player.actionAtItemEnd = .none
@@ -606,7 +611,17 @@ public final class AudioPlaybackController {
         // Report the current track's stop before we tear down so the server
         // closes its now-playing session and records the play position.
         reportStopIfNeeded(position: currentTime)
+        // Supersede any start still resolving so it bails instead of resurrecting
+        // playback after the queue is emptied, and tear down the self-heal recovery
+        // tasks (which otherwise resume an `await`, pass the unchanged generation
+        // guard, and cold-start into an empty queue with a spurious `.start`).
+        trackTransitionGeneration &+= 1
         startTask?.cancel()
+        stuckRecoveryTask?.cancel()
+        stuckRecoveryTask = nil
+        stalledRetryTask?.cancel()
+        stalledRetryTask = nil
+        stuckSince = nil
         startPending = false
         player.pause()
         player.removeAllItems()
@@ -805,7 +820,6 @@ public final class AudioPlaybackController {
             diag("start", "HARD-PATH aborted (resolve failed or superseded) gen=\(generation) current=\(trackTransitionGeneration)")
             return
         }
-        reportStopIfNeeded(position: currentTime)
         currentQuality = resolved.quality
         // Claim the system remote/Now Playing controls only once music is
         // actually playing. Registering them eagerly (e.g. at app launch) makes
@@ -862,12 +876,23 @@ public final class AudioPlaybackController {
                 break
             }
             guard let ready = readyItem else {
-                // All attempts failed. Leave the outgoing item playing rather than
-                // stranding the player on a corpse; the stuck watchdog will retry.
-                diag("start", "HARD-PATH exhausted retries — item never became ready, aborting")
+                // Every attempt failed (persistent network failure — resolve may
+                // keep succeeding while the media stream can't). We deliberately did
+                // NOT report the outgoing track's stop or advance, so whatever was
+                // playing keeps playing (and stays scrobble-eligible). Rather than
+                // silently stranding on the wrong/finished track with no recovery,
+                // schedule a delayed retry of this same target so playback self-heals
+                // once the network returns.
+                diag("start", "HARD-PATH exhausted retries — item never became ready; scheduling delayed retry gen=\(generation)")
+                scheduleStalledRetry(forGeneration: generation)
                 return
             }
             diag("start", "HARD-PATH buffered itemStatus=\(ready.status.rawValue) likelyToKeepUp=\(ready.isPlaybackLikelyToKeepUp) bufferFull=\(ready.isPlaybackBufferFull) — advancing")
+            // Close the OUTGOING track's session only now that we actually have a
+            // ready replacement to advance onto (deferred from before the retry loop
+            // so an aborted jump leaves the still-playing track's now-playing session
+            // — and its end-of-track scrobble — intact).
+            reportStopIfNeeded(position: currentTime)
             // Manual jump / new queue — an inherent discontinuity, so use the same
             // proven deactivate→reactivate cycle to keep the HomePod stream alive.
             player.pause()
@@ -882,6 +907,7 @@ public final class AudioPlaybackController {
         } else {
             // Cold start — no current item and therefore no route to protect yet, so
             // `playImmediately` is safe and avoids parking in the wait state.
+            reportStopIfNeeded(position: currentTime)
             let item = AVPlayerItem(url: resolved.url)
             player.insert(item, after: nil)
             observeEnd(of: item)
@@ -1326,8 +1352,10 @@ public final class AudioPlaybackController {
     /// `stuckRecoveryTask` so only one reload is ever in flight.
     private func detectAndRecoverStuckPlayback() {
         // Only meaningful when we intend to be playing and aren't mid-skip (the
-        // debounce window legitimately parks the outgoing item).
-        guard isPlaying, hasActivePlayback, !startPending, stuckRecoveryTask == nil else {
+        // debounce window legitimately parks the outgoing item). Also stand down
+        // while either recovery mechanism is already in flight so we don't stack.
+        guard isPlaying, hasActivePlayback, !startPending,
+              stuckRecoveryTask == nil, stalledRetryTask == nil else {
             stuckSince = nil
             return
         }
@@ -1366,6 +1394,29 @@ public final class AudioPlaybackController {
             self.clearPreparedNext(removeFromPlayer: true)
             await self.startCurrent(reactivateRoute: true)
             self.stuckRecoveryTask = nil
+        }
+    }
+
+    /// Schedules a delayed retry after a HARD-PATH jump exhausts all its load
+    /// attempts. This is the persistent-network-failure path: resolve may keep
+    /// succeeding while the media stream can't be established, so a bounded retry
+    /// loop can't win in the moment. Instead we back off and re-attempt the SAME
+    /// target track once the network has had a chance to recover — bailing if a
+    /// newer transition superseded us or playback was stopped in the meantime.
+    /// Chains naturally (each failed retry schedules the next) into a polite
+    /// ~`stuckRecoveryDelay`-spaced loop until the track finally loads.
+    private func scheduleStalledRetry(forGeneration generation: Int) {
+        stalledRetryTask?.cancel()
+        stalledRetryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.stuckRecoveryDelay))
+            guard let self, !Task.isCancelled else { return }
+            self.stalledRetryTask = nil
+            // Superseded by a newer skip/stop while we waited — let it win.
+            guard generation == self.trackTransitionGeneration,
+                  self.isPlaying, self.hasActivePlayback else { return }
+            self.diag("recover", "stalled-retry firing for gen=\(generation) — reloading current track")
+            self.clearPreparedNext(removeFromPlayer: true)
+            await self.startCurrent(reactivateRoute: true)
         }
     }
 

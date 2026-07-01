@@ -45,6 +45,25 @@ public enum ContentClassifier {
         }
     }
 
+    /// The subtitle-policy content category for `item` (design §5.0). Bridges the
+    /// routing-oriented ``ContentType`` onto the persistence-friendly
+    /// ``SubtitleContentCategory`` the per-content-type subtitle policy is keyed
+    /// on, so the player can resolve "forced-only on movies, full subs on anime"
+    /// without the playback layer re-running classification logic. `music` and
+    /// `unknown` map to ``SubtitleContentCategory/other`` (the profile base).
+    public static func subtitleCategory(for item: MediaItem) -> SubtitleContentCategory {
+        classify(item).subtitleCategory
+    }
+
+    /// The per-content-type **audio** policy category for `item` — the same
+    /// content taxonomy the subtitle policy uses (anime vs movie vs TV), surfaced
+    /// under an audio-named accessor so the audio path reads cleanly. Lets the
+    /// player resolve "original audio for anime, device language for everything
+    /// else" without re-running classification logic.
+    public static func audioCategory(for item: MediaItem) -> ContentCategory {
+        classify(item).subtitleCategory
+    }
+
     /// `true` when the provider-id key names an anime database (AniList / AniDB /
     /// MyAnimeList / Shoko / Kitsu), tolerant of the casing/punctuation each
     /// backend uses. Lets callers copy just a series' anime ids onto its episodes.
@@ -72,6 +91,33 @@ public enum ContentClassifier {
         }
         let labels = (item.genres + item.tags).map { $0.lowercased() }
         return labels.contains { label in animeLabels.contains { label.contains($0) } }
+    }
+
+    /// Best-effort ORIGINAL audio language (ISO-639, lowercased) for the
+    /// "prefer original language" audio policy. Providers expose no explicit
+    /// original-language field today, so this is heuristic: anime is
+    /// overwhelmingly Japanese-original, so `.anime` → `"ja"`. Everything else
+    /// returns `nil`, letting the caller defer to the container's default track
+    /// (the best available proxy for "original"). Seam: fill from real
+    /// provider/TMDB `original_language` metadata here for live-action foreign
+    /// films later.
+    public static func originalAudioLanguage(for item: MediaItem) -> String? {
+        classify(item) == .anime ? "ja" : nil
+    }
+}
+
+public extension ContentType {
+    /// Maps a routing `ContentType` onto the CoreModels-local subtitle-policy
+    /// axis, so the per-content-type subtitle policy can key off the same
+    /// classification without CoreModels depending on MetadataKit. Music and
+    /// unclassified content fall to `.other`, which always uses the profile base.
+    var subtitleCategory: SubtitleContentCategory {
+        switch self {
+        case .anime: return .anime
+        case .movie: return .movie
+        case .tvShow: return .tvShow
+        case .music, .unknown: return .other
+        }
     }
 }
 

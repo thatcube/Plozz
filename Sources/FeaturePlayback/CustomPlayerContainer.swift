@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import UIKit
 import SwiftUI
+import QuartzCore
 import CoreModels
 import CoreNetworking
 
@@ -19,12 +20,23 @@ struct PlayerActions {
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
+    /// Advance to the next episode (Info card → Next Episode).
+    var playNextEpisode: () -> Void = {}
+    /// Return to the previous episode (Info card → Previous).
+    var playPreviousEpisode: () -> Void = {}
+    /// Restart the current item from the beginning (Info card → Restart).
+    var restart: () -> Void = {}
     /// Seek past the active intro/credits segment (Skip button Select).
     var skipSegment: () -> Void = {}
     /// Auto-seek past the active segment (no button) when Auto-skip is enabled.
     var autoSkipSegment: () -> Void = {}
     /// Dismiss the skip button without seeking (Menu / swipe away).
     var dismissSkip: () -> Void = {}
+    /// Advance to the next episode (Up Next card Play / auto-advance). Routed
+    /// through an in-place VM swap so the full-screen cover never flashes.
+    var playUpNext: () -> Void = {}
+    /// Dismiss the Up Next card without advancing (Menu / swipe away).
+    var dismissUpNext: () -> Void = {}
     var dismiss: () -> Void = {}
 }
 
@@ -38,6 +50,7 @@ struct PlayerActions {
 struct CustomPlayerContainer: UIViewControllerRepresentable {
     let engine: any VideoEngine
     let model: PlayerControlsModel
+    let subtitleModel: LiveSubtitleModel
     let actions: PlayerActions
     let scrubPreview: ScrubPreviewSource?
     let themePalette: ThemePaletteBox
@@ -46,6 +59,7 @@ struct CustomPlayerContainer: UIViewControllerRepresentable {
         let controller = PlayerInputViewController(engine: engine, model: model, actions: actions)
         controller.configureScrubPreview(scrubPreview)
         controller.attachVideoSurface()
+        controller.attachSubtitleOverlay(subtitleModel)
         controller.attachControls(themePalette: themePalette)
         return controller
     }
@@ -89,9 +103,19 @@ struct VideoSurfaceContainer: UIViewRepresentable {
 struct ThemePaletteBox {
     let makeControls: (PlayerControlsModel, PlayerOptionsActions, @escaping () -> Void) -> AnyView
     /// Builds the focusable Skip Intro/Credits button. `onSkip` seeks past the
-    /// active segment; `onDismiss` hides it without seeking. Both also return
-    /// focus to the scrub surface (the controller owns that transition).
-    let makeSkipButton: (PlayerControlsModel, @escaping () -> Void, @escaping () -> Void) -> AnyView
+    /// active segment; `onDismiss` hides it without seeking; `onPlayPause` toggles
+    /// playback while the button holds focus (so Play/Pause still works there, and
+    /// the countdown ring freezes in place because it tracks playback position).
+    /// `onSkip`/`onDismiss` also return focus to the scrub surface (the controller
+    /// owns that transition).
+    let makeSkipButton: (PlayerControlsModel, @escaping () -> Void, @escaping () -> Void, @escaping () -> Void) -> AnyView
+    /// Builds the focusable Up Next card shown during the closing credits when a
+    /// next episode is queued. `onPlayNext` advances to it (in-place VM swap);
+    /// `onDismiss` hides the card without advancing; `onPlayPause` toggles playback
+    /// while the card holds focus (the auto-advance ring freezes in place because
+    /// it tracks playback position). `onPlayNext`/`onDismiss` return focus to the
+    /// scrub surface (the controller owns that transition).
+    let makeUpNextCard: (PlayerControlsModel, @escaping () -> Void, @escaping () -> Void, @escaping () -> Void) -> AnyView
 }
 
 /// The focusable root view that receives Siri Remote presses and indirect-touch
@@ -137,6 +161,26 @@ final class PlayerInputViewController: UIViewController {
     private var scrubSmoothedSpeed: Double = 0
     private var resumeAfterScrub = false
 
+    /// Pending debounced commit for a *flick*-ended scrub. A fast flick lift
+    /// keeps the scrub session alive instead of seeking immediately, so a quick
+    /// follow-up swipe can cancel this and continue the same session — turning a
+    /// multi-swipe traversal into one fluid scrub that seeks (and resumes) only
+    /// once, instead of fighting a seek + rebuffer + play/pause on every swipe.
+    private var scrubCommitTask: Task<Void, Never>?
+    /// Lift speed (points/sec) above which a scrub is treated as a mid-traversal
+    /// flick (defer the commit to bridge to the next swipe) rather than a
+    /// deliberate landing (commit + resume playback immediately).
+    private let scrubFlickCommitThreshold: Double = 1000
+    /// How long after a flick lift to wait for a follow-up swipe before
+    /// committing. Long enough to bridge the gap between rapid swipes, short
+    /// enough that a final flick still lands without a noticeable delay.
+    private let scrubFlickBridgeWindow: TimeInterval = 0.3
+
+    /// Env-gated (`SCRUB_DIAG=1`) per-scrub smoothness probe — measures display
+    /// hitches, pan-sample cadence, per-sample handler cost, and thumbnail cache
+    /// hit/miss, emitting one `PLZSCRUB` line per scrub for off-device capture.
+    private let scrubDiag = ScrubDiagnostics()
+
     /// Suppresses the tvOS screensaver / Apple TV sleep while video is actively
     /// playing, and releases it the instant playback pauses, ends, or this host
     /// goes away. Driven every refresh tick off `engine.preventsDisplaySleep`, so
@@ -146,7 +190,7 @@ final class PlayerInputViewController: UIViewController {
     /// Whether the Siri Remote currently drives the scrub surface or the bottom
     /// control bar. In `.controlBar` the surface gesture recognizers are disabled
     /// so the SwiftUI focus engine owns navigation.
-    private enum FocusContext { case surface, controlBar, skipButton }
+    private enum FocusContext { case surface, controlBar, skipButton, upNext }
     private var focusContext: FocusContext = .surface
 
     /// The always-attached, focusable bottom control bar. It only takes focus
@@ -158,6 +202,15 @@ final class PlayerInputViewController: UIViewController {
     /// when no segment is active. Tracked so presentation only flips on change.
     private var skipButtonHost: UIHostingController<AnyView>?
     private var presentingSkipButton = false
+    /// The always-attached Up Next card overlay (closing-credits next-episode
+    /// affordance). Interactive/focused only while `focusContext == .upNext`;
+    /// collapses to nothing when no next episode / not in credits. Shares the
+    /// lower-right slot with the Skip button — they never present together.
+    private var upNextHost: UIHostingController<AnyView>?
+    private var presentingUpNext = false
+    /// In `.autoDelay`, the playback position (seconds) at which the presented Up
+    /// Next card auto-advances to the next episode. `nil` outside an active delay.
+    private var upNextAdvanceAtSeconds: TimeInterval?
     /// In `.autoDelay`, the playback position (seconds) at which the presented
     /// Skip button auto-skips. Tied to playback position (not wall-clock) so the
     /// countdown pauses with the video. `nil` outside an active delay.
@@ -165,6 +218,15 @@ final class PlayerInputViewController: UIViewController {
 
     /// Surface gesture recognizers we toggle off while the control bar owns focus.
     private var surfaceRecognizers: [UIGestureRecognizer] = []
+
+    /// Hosts the owned subtitle overlay above the video surface and below the
+    /// transport controls. Present for the player's lifetime; renders nothing
+    /// until the view model loads a cue stream into `subtitleModel`.
+    private var subtitleOverlayHost: UIHostingController<LiveSubtitleOverlay>?
+    private var subtitleModel: LiveSubtitleModel?
+    /// Drives the subtitle timeline off the engine clock every frame. The model
+    /// only republishes on cue-boundary crossings, so this stays cheap.
+    private var subtitleClock: CADisplayLink?
 
     private var playerInputView: PlayerInputView? { view as? PlayerInputView }
 
@@ -196,12 +258,17 @@ final class PlayerInputViewController: UIViewController {
         setNeedsFocusUpdate()
         updateFocusIfNeeded()
         startRefreshLoop()
+        startSubtitleClock()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         refreshTask?.cancel()
         refreshTask = nil
+        cancelScrubCommit()
+        if ScrubDiagnostics.forceScrubRefresh { engine.setScrubRefreshBoost(false) }
+        subtitleClock?.invalidate()
+        subtitleClock = nil
         // Leaving playback: let the screensaver / Apple TV sleep resume.
         idleSleepGuard.allowSleep()
     }
@@ -230,6 +297,21 @@ final class PlayerInputViewController: UIViewController {
             thumbnailLoader = PlexBIFThumbnailLoader(url: url)
             PlozzLog.playback.debug("Configured Plex BIF scrub preview url=\(PlozzLog.redact(url: url))")
         }
+        prefetchThumbnailsSoon()
+    }
+
+    /// Warms the trickplay source (e.g. downloads the Plex BIF blob) a beat after
+    /// it's configured, so the first scrub already has previews instead of feeling
+    /// like it's fighting an empty timeline while the data loads. Delayed slightly
+    /// so initial video buffering gets first claim on bandwidth.
+    private func prefetchThumbnailsSoon() {
+        let loader = thumbnailLoader
+        guard loader != nil else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let self, self.thumbnailLoader === loader else { return }
+            loader?.prefetch()
+        }
     }
 
     /// Hosts the engine's bare video surface as the backmost, non-interactive
@@ -240,6 +322,38 @@ final class PlayerInputViewController: UIViewController {
         surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         surface.isUserInteractionEnabled = false
         view.insertSubview(surface, at: 0)
+    }
+
+    /// Mounts the owned subtitle overlay directly above the video surface (and
+    /// below the transport controls, which are attached afterwards). The overlay
+    /// is non-interactive so Siri Remote pans still reach the scrub surface. A
+    /// display-link then drives the cue timeline off the engine clock.
+    func attachSubtitleOverlay(_ model: LiveSubtitleModel) {
+        subtitleModel = model
+        let host = UIHostingController(rootView: LiveSubtitleOverlay(model: model))
+        host.view.backgroundColor = .clear
+        host.view.isUserInteractionEnabled = false
+        host.view.frame = view.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addChild(host)
+        // Index 1: above the video surface (index 0), below the controls/skip
+        // hosts that `attachControls` adds on top afterwards.
+        view.insertSubview(host.view, at: 1)
+        host.didMove(toParent: self)
+        subtitleOverlayHost = host
+    }
+
+    /// Starts the per-frame subtitle clock. Cheap when no cues are loaded (the
+    /// model no-ops) and when a line is held (no boundary crossing → no publish).
+    private func startSubtitleClock() {
+        subtitleClock?.invalidate()
+        let link = CADisplayLink(target: self, selector: #selector(tickSubtitleClock))
+        link.add(to: .main, forMode: .common)
+        subtitleClock = link
+    }
+
+    @objc private func tickSubtitleClock() {
+        subtitleModel?.tick(engine.currentTime)
     }
 
     /// Hosts the combined transport + focusable control bar. It stays attached
@@ -257,7 +371,10 @@ final class PlayerInputViewController: UIViewController {
             setPlaybackSpeed: { [weak self] in self?.actions.setPlaybackSpeed($0) },
             setAudioDelay: { [weak self] in self?.actions.setAudioDelay($0) },
             setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
-            setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) }
+            setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) },
+            playNextEpisode: { [weak self] in self?.actions.playNextEpisode() },
+            playPreviousEpisode: { [weak self] in self?.actions.playPreviousEpisode() },
+            restart: { [weak self] in self?.actions.restart() }
         )
         let host = UIHostingController(rootView: themePalette.makeControls(model, actions, exitToSurface))
         host.view.backgroundColor = .clear
@@ -276,7 +393,8 @@ final class PlayerInputViewController: UIViewController {
             rootView: themePalette.makeSkipButton(
                 model,
                 { [weak self] in self?.performSkip() },
-                { [weak self] in self?.dismissSkipButton() }
+                { [weak self] in self?.dismissSkipButton() },
+                { [weak self] in self?.togglePlayPauseFromOverlay() }
             )
         )
         skipHost.view.backgroundColor = .clear
@@ -287,6 +405,26 @@ final class PlayerInputViewController: UIViewController {
         view.addSubview(skipHost.view)
         skipHost.didMove(toParent: self)
         skipButtonHost = skipHost
+
+        // Up Next card on top of the control bar, sharing the lower-right slot
+        // with the Skip button. Off until the closing-credits window opens with a
+        // next episode queued and the viewer is on the scrub surface.
+        let upNextCardHost = UIHostingController(
+            rootView: themePalette.makeUpNextCard(
+                model,
+                { [weak self] in self?.playUpNext() },
+                { [weak self] in self?.dismissUpNextCard() },
+                { [weak self] in self?.togglePlayPauseFromOverlay() }
+            )
+        )
+        upNextCardHost.view.backgroundColor = .clear
+        upNextCardHost.view.isUserInteractionEnabled = false
+        addChild(upNextCardHost)
+        upNextCardHost.view.frame = view.bounds
+        upNextCardHost.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(upNextCardHost.view)
+        upNextCardHost.didMove(toParent: self)
+        upNextHost = upNextCardHost
     }
 
     // MARK: Engine state refresh
@@ -299,7 +437,14 @@ final class PlayerInputViewController: UIViewController {
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 self?.refreshFromEngine()
-                try? await Task.sleep(nanoseconds: 300_000_000)
+                // Poll fast while a committed seek is settling so the bar
+                // releases its optimistic pin and resumes mirroring engine time
+                // the instant the seek lands — that's what makes a seek feel like
+                // it "sticks" immediately. Relax to a cheaper cadence during
+                // steady playback, where a tighter loop buys nothing.
+                let settling = (self?.model.pendingSeekTarget != nil)
+                let interval: UInt64 = settling ? 60_000_000 : 250_000_000
+                try? await Task.sleep(nanoseconds: interval)
             }
         }
     }
@@ -320,8 +465,13 @@ final class PlayerInputViewController: UIViewController {
             // entire fix for the "press right → snap back" feel: a poll arriving
             // between the optimistic update and the engine catching up would
             // otherwise overwrite `currentSeconds` with the stale pre-seek time.
-            // Once the engine's position is within tolerance, release.
-            if abs(engineTime - pending) < 0.75 {
+            // Once the engine's position is within tolerance, release. The
+            // window must exceed the engine's `.exact` seek tolerance (1s): a
+            // seek can legally land up to 1s *ahead* of the target by snapping to
+            // the next keyframe, and a tighter window than that would leave the
+            // bar pinned forever in that case. A real seek jump is many seconds,
+            // so this stays comfortably clear of a false early release.
+            if abs(engineTime - pending) < 1.25 {
                 model.pendingSeekTarget = nil
                 model.currentSeconds = engineTime
             }
@@ -330,7 +480,15 @@ final class PlayerInputViewController: UIViewController {
             model.currentSeconds = engineTime
         }
         model.bufferedSeconds = engine.bufferedPosition
-        model.isPaused = engine.isPaused
+        // While the view model is actively re-asserting playback after a seek,
+        // the engine can briefly report paused (rate-0 settle on a buffering
+        // edge). Don't mirror that transient into the model, or the pause icon
+        // flashes on by itself and the resume loop fights its own state. The
+        // resume loop clears `isResumeConfirming` the instant the clock advances
+        // (or it gives up), at which point we resume reflecting reality.
+        if !model.isResumeConfirming {
+            model.isPaused = engine.isPaused
+        }
         evaluateSkipPresentation()
     }
 
@@ -348,13 +506,60 @@ final class PlayerInputViewController: UIViewController {
     /// the control bar or a scrub; returns focus to the surface once the segment
     /// passes or is dismissed.
     private func evaluateSkipPresentation() {
+        // Clear a stale seek-landing once the live position leaves its segment, so
+        // a later NATURAL re-entry into the same segment isn't still treated as a
+        // seek (which would otherwise keep suppressing it / forcing manual-only).
+        if let landing = model.seekLanding,
+           model.skippableSegments.activeSkippable(at: model.currentSeconds)?.id != landing.segmentID {
+            model.seekLanding = nil
+        }
+
+        // Up Next takes priority over Skip Credits in the shared lower-right slot:
+        // when a next episode is queued during the closing credits, the card
+        // supersedes the (pointless) Skip Credits button. Resolve it first; when
+        // it owns the slot, ensure the Skip button is torn down and stop here.
+        if model.upNextActive {
+            if presentingSkipButton { exitSkipButton() }
+            presentUpNextIfNeeded()
+            return
+        }
+        // Up Next isn't active — make sure its card is dismissed before the Skip
+        // button (or nothing) takes the slot.
+        if presentingUpNext { exitUpNext() }
+
+        // Credits owned by Up Next (next episode queued) never fall back to a Skip
+        // Credits button — once the card is dismissed (or while auto-instant
+        // advances) the slot stays empty, so the two affordances never both show.
+        if model.creditsOwnedByUpNext {
+            if presentingSkipButton { exitSkipButton() }
+            return
+        }
+
         guard model.activeSkipSegment != nil else {
             if presentingSkipButton { exitSkipButton() }
             return
         }
 
+        // A seek that landed in the segment's opening grace window offers a manual
+        // button only — never auto-skip, never a countdown, never a focus-steal —
+        // so a deliberate seek is never hijacked. (A *deep* seek already cleared
+        // `activeSkipSegment` above, so this branch is the grace-window case.)
+        // Skip OFF suppresses it: markers are now fetched when the Up Next card is
+        // enabled (skip can be off), so a grace seek must not resurrect a Skip
+        // button the viewer turned off — fall through to the `.off` tear-down.
+        if model.activeSkipWasSeekEntered, model.skipMode != .off {
+            guard !presentingSkipButton, focusContext == .surface, !model.isScrubbing else { return }
+            enterSkipButton(stealFocus: false)
+            return
+        }
+
         switch model.skipMode {
-        case .off, .on:
+        case .off:
+            // Markers may be loaded only for the Up Next card (skip is off), so
+            // never offer a Skip button here.
+            if presentingSkipButton { exitSkipButton() }
+
+        case .on:
             guard !presentingSkipButton, focusContext == .surface, !model.isScrubbing else { return }
             enterSkipButton()
 
@@ -379,8 +584,15 @@ final class PlayerInputViewController: UIViewController {
         }
     }
 
-    private func enterSkipButton() {
+    private func enterSkipButton(stealFocus: Bool = true) {
         presentingSkipButton = true
+        guard stealFocus else {
+            // Passive present (a grace-window seek landed here): the button is
+            // visible but the scrub surface keeps focus and stays fully
+            // interactive, so the seek is never hijacked. An Up press grabs the
+            // button (see `handleUp`) for viewers who do want to skip.
+            return
+        }
         focusContext = .skipButton
         // Clear the transport so the skip button floats on its own — it must stay
         // visible even when the scrub bar / controls are hidden, not ride on top
@@ -419,6 +631,14 @@ final class PlayerInputViewController: UIViewController {
         flashControls()
     }
 
+    /// Play/Pause pressed while the Skip button or Up Next card holds focus.
+    /// Toggle playback in place — do NOT leave the focus context or reveal the
+    /// transport bar — so the affordance stays put. The countdown ring freezes on
+    /// its own because it's driven by playback position, which stops while paused.
+    private func togglePlayPauseFromOverlay() {
+        actions.togglePlayPause()
+    }
+
     /// `.autoDelay` deadline reached: seek past the segment (no notice — the
     /// button was already visible) and return to the surface.
     private func autoSkipFromDelay() {
@@ -432,6 +652,101 @@ final class PlayerInputViewController: UIViewController {
         exitSkipButton()
     }
 
+    // MARK: Up Next card presentation
+
+    /// Presents, auto-advances, or holds the Up Next card during the closing
+    /// credits, mirroring the Skip affordance's per-mode behaviour but advancing
+    /// to the *next episode* (an in-place VM swap — never a seek-to-end, so the
+    /// next episode never flashes the series page):
+    ///  * `.on` / `.off` — present the focusable card (manual Play Next).
+    ///  * `.autoDelay` — present the card, then advance once playback reaches the
+    ///    deadline (the card's ring counts the wait down; swipe-up cancels).
+    ///  * `.autoInstant` — advance immediately, no card (binge).
+    /// A grace-window seek into credits presents the card passively (no auto, no
+    /// focus-steal); a deep seek suppressed `upNextActive` entirely upstream.
+    private func presentUpNextIfNeeded() {
+        if model.activeSkipWasSeekEntered {
+            guard !presentingUpNext, focusContext == .surface, !model.isScrubbing else { return }
+            enterUpNext(stealFocus: false)
+            return
+        }
+
+        switch model.skipMode {
+        case .off, .on:
+            guard !presentingUpNext, focusContext == .surface, !model.isScrubbing else { return }
+            enterUpNext()
+
+        case .autoInstant:
+            guard !model.isScrubbing else { return }
+            advanceToUpNext()
+
+        case .autoDelay:
+            if presentingUpNext {
+                if let deadline = upNextAdvanceAtSeconds, model.currentSeconds >= deadline, !model.isScrubbing {
+                    advanceToUpNext()
+                }
+                return
+            }
+            guard focusContext == .surface, !model.isScrubbing else { return }
+            upNextAdvanceAtSeconds = model.currentSeconds + SkipIntrosMode.autoSkipDelay
+            model.upNextAdvanceAtSeconds = upNextAdvanceAtSeconds
+            enterUpNext()
+        }
+    }
+
+    private func enterUpNext(stealFocus: Bool = true) {
+        presentingUpNext = true
+        guard stealFocus else {
+            // Passive present (a grace-window seek landed in credits): the card is
+            // visible but the scrub surface keeps focus, so the seek is never
+            // hijacked. An Up press grabs the card (see `handleUp`).
+            return
+        }
+        focusContext = .upNext
+        hideControls()
+        setSurfaceRecognizers(enabled: false)
+        upNextHost?.view.isUserInteractionEnabled = true
+        playerInputView?.allowsFocus = false
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+    }
+
+    /// Returns focus to the scrub surface after the Up Next card is used,
+    /// dismissed, or its credits window passes.
+    private func exitUpNext() {
+        presentingUpNext = false
+        upNextAdvanceAtSeconds = nil
+        model.upNextAdvanceAtSeconds = nil
+        upNextHost?.view.isUserInteractionEnabled = false
+        if focusContext == .upNext {
+            focusContext = .surface
+            playerInputView?.allowsFocus = true
+            setSurfaceRecognizers(enabled: true)
+            setNeedsFocusUpdate()
+            updateFocusIfNeeded()
+        }
+    }
+
+    /// Up Next card Select / auto-delay deadline: advance to the next episode.
+    /// Marks the card consumed so a per-tick auto mode (instant/delay) fires this
+    /// exactly once and never re-summons anything for the same credits window.
+    private func advanceToUpNext() {
+        model.dismissedUpNext = true
+        actions.playUpNext()
+        exitUpNext()
+    }
+
+    /// Up Next card Menu / swipe-up: hide without advancing, return to surface.
+    private func dismissUpNextCard() {
+        actions.dismissUpNext()
+        exitUpNext()
+    }
+
+    /// Up Next card Select via the surface passive-present path (Up grab).
+    private func playUpNext() {
+        advanceToUpNext()
+    }
+
     // MARK: Focus
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
@@ -441,6 +756,9 @@ final class PlayerInputViewController: UIViewController {
         // pans/presses reach our gesture recognizers.
         if focusContext == .skipButton, let skipButtonHost {
             return [skipButtonHost.view]
+        }
+        if focusContext == .upNext, let upNextHost {
+            return [upNextHost.view]
         }
         if focusContext == .controlBar, let controlBarHost {
             return [controlBarHost.view]
@@ -494,14 +812,16 @@ final class PlayerInputViewController: UIViewController {
 
     private var scrubTuning: ScrubGeometry.Tuning {
         // Base seconds-per-point scales with runtime so the *fraction* of the
-        // content a swipe covers stays roughly consistent. The reference is a 2h
-        // film (scale 1.0 → ~0.18 s/pt, the silky fine-scrub feel). The floor is
-        // low (0.3) so short TV episodes scale right down — otherwise the same
-        // s/pt crosses a much bigger fraction of a 25-min episode and feels way
-        // too fast. A fast flick accelerates up to maxAccelMultiplier via a
-        // smoothstep curve (see ScrubGeometry); the ceiling is modest so flicks
-        // stay controllable.
-        let durationScale = min(max(model.duration / 7200, 0.3), 1.6)
+        // content a swipe covers stays consistent across lengths — a fast flick
+        // crosses the same percentage of a 5-min clip as a 2h film. The reference
+        // is a 2h film (scale 1.0 → ~0.18 s/pt). The floor is kept very low (0.05,
+        // ≈ a 6-min runtime) purely to stop sub-minute clips from scrubbing
+        // imperceptibly; above that it's pure fraction-consistency. Lowering the
+        // base on short content also makes fine drags there *finer*, never
+        // coarser, so the precise slow-finger feel is preserved everywhere. A fast
+        // flick accelerates up to maxAccelMultiplier via a smoothstep curve (see
+        // ScrubGeometry); the ceiling is modest so flicks stay controllable.
+        let durationScale = min(max(model.duration / 7200, 0.05), 1.6)
         return ScrubGeometry.Tuning(
             baseSecondsPerPoint: 0.18 * durationScale,
             accelOnsetSpeed: 500,
@@ -529,7 +849,31 @@ final class PlayerInputViewController: UIViewController {
                 guard max(absX, absY) >= panAxisDeadZone else { return }
                 if absX >= absY {
                     panAxis = .horizontal
-                    beginScrub()
+                    if model.isScrubbing {
+                        // Continuing a multi-swipe traversal: a previous flick
+                        // left the scrub session alive with a commit pending.
+                        // Cancel that pending commit and keep scrubbing from here,
+                        // carrying the smoothed speed so momentum builds across
+                        // swipes instead of resetting to a crawl on each one.
+                        cancelScrubCommit()
+                    } else if !model.seekWithoutPausing, !model.isPaused {
+                        // "Pause to seek" mode (per-profile, opt-in): while
+                        // playing, a horizontal swipe does NOTHING to the
+                        // timeline — it neither seeks NOR pauses. You must pause
+                        // the video yourself first (remote Play/Pause anywhere,
+                        // or a center-press on the scrub timeline) before you can
+                        // scrub, so a stray swipe can't move your position or
+                        // even pause playback. Scrubbing only ever engages while
+                        // paused and stays paused on landing until you explicitly
+                        // resume. We just flash the transport for feedback, then
+                        // suppress the rest of this gesture.
+                        panAxis = .verticalIgnored
+                        flashControls()
+                        return
+                    } else {
+                        beginScrub()
+                        scrubSmoothedSpeed = 0
+                    }
                     // Seed the incremental anchor at *this* translation so the
                     // axis-decision dead-zone travel is excluded (the first
                     // scrub sample moves by zero, not the cumulative pan
@@ -539,7 +883,6 @@ final class PlayerInputViewController: UIViewController {
                     // reset-to-tiny translation next event — stepping the bar
                     // backward by the gap.
                     scrubLastTranslationX = translation.x
-                    scrubSmoothedSpeed = 0
                 } else {
                     panAxis = .verticalIgnored
                     // A deliberate downward swipe reveals the controls and drops
@@ -557,6 +900,7 @@ final class PlayerInputViewController: UIViewController {
             // up with pan speed: slow drags stay precise, fast flicks fling far.
             // The raw recognizer velocity is jittery, so smooth it (EMA) before
             // it drives the gain — otherwise fast flicks feel jumpy.
+            let sampleStart = ScrubDiagnostics.enabled ? CACurrentMediaTime() : 0
             let dx = Double(translation.x - scrubLastTranslationX)
             scrubLastTranslationX = translation.x
             let rawSpeed = abs(Double(gesture.velocity(in: view).x))
@@ -567,14 +911,27 @@ final class PlayerInputViewController: UIViewController {
                 speedPointsPerSecond: scrubSmoothedSpeed,
                 tuning: scrubTuning,
                 duration: model.duration)
-            updatePreviewThumbnail()
+            let cacheHit = updatePreviewThumbnail()
+            if ScrubDiagnostics.enabled {
+                scrubDiag.recordSample(
+                    handlerMs: (CACurrentMediaTime() - sampleStart) * 1000,
+                    cacheHit: cacheHit)
+            }
         case .ended, .cancelled, .failed:
             // Auto-commit a horizontal scrub on lift, like Apple's own
-            // AVPlayerViewController: the user expects the bar's final position
-            // to take effect without a separate Select press. A vertical-only
-            // gesture never started a scrub, so nothing to commit.
+            // AVPlayerViewController. But distinguish *intent*: a deliberate slow
+            // landing commits now so playback resumes the instant you settle (the
+            // play-on-landing feel), while a fast flick is mid-traversal — keep
+            // the scrub session alive and bridge to the next swipe so we don't
+            // seek + rebuffer + resume between every swipe (the "fighting it"
+            // churn, which also steals bandwidth from the trickplay download).
             if panAxis == .horizontal, model.isScrubbing {
-                commitScrub()
+                let liftSpeed = abs(Double(gesture.velocity(in: view).x))
+                if gesture.state == .ended, liftSpeed >= scrubFlickCommitThreshold {
+                    scheduleScrubCommit()
+                } else {
+                    commitScrub()
+                }
             }
             panAxis = .undecided
         default:
@@ -590,11 +947,16 @@ final class PlayerInputViewController: UIViewController {
         model.controlsVisible = true
         // Pause the underlying stream while previewing; we resume on commit.
         if !model.isPaused { actions.togglePlayPause() }
+        ScrubDiagnostics.note("boost-call engine=\(type(of: engine)) force=\(ScrubDiagnostics.forceScrubRefresh)")
+        if ScrubDiagnostics.forceScrubRefresh { engine.setScrubRefreshBoost(true) }
+        scrubDiag.begin()
         updatePreviewThumbnail()
     }
 
     private func commitScrub() {
         guard model.isScrubbing else { return }
+        // Any pending flick bridge is now resolved by this commit.
+        cancelScrubCommit()
         let target = model.scrubSeconds
         // Commit the optimistic target BEFORE leaving scrub mode. While
         // scrubbing, `displaySeconds` reads `scrubSeconds` (== target); once
@@ -603,32 +965,67 @@ final class PlayerInputViewController: UIViewController {
         // scrubSeconds(target) → currentSeconds(target) with no one-frame dip
         // back to the stale pre-scrub position.
         actions.seek(target)
+        // Resolve playback intent BEFORE clearing `isScrubbing`. Clearing
+        // `isScrubbing` un-hides the status glyph; if the resume ran *after* that
+        // there'd be a frame where the overlay is visible while the begin-scrub
+        // preview-pause is still in effect (isPaused && intendsPause), mounting the
+        // pause glyph for one beat — it would animate in (scale+opacity) then
+        // vanish as the resume + seek spinner took over (the flicker). Resuming
+        // first means the pause branch never mounts: a seek-without-pausing shows
+        // only the loading spinner.
+        if resumeAfterScrub { actions.togglePlayPause() }
         model.isScrubbing = false
         model.previewImage = nil
         model.seekIndicatorOnLeft = false
-        if resumeAfterScrub { actions.togglePlayPause() }
+        if ScrubDiagnostics.forceScrubRefresh { engine.setScrubRefreshBoost(false) }
+        scrubDiag.end("commit")
         scheduleAutoHide()
+    }
+
+    /// Defers a flick-ended scrub's commit by `scrubFlickBridgeWindow`. If a
+    /// follow-up swipe arrives first it cancels this (continuing the session);
+    /// otherwise the timer fires and the scrub commits — seeking + resuming once
+    /// the traversal has actually settled.
+    private func scheduleScrubCommit() {
+        scrubCommitTask?.cancel()
+        let window = scrubFlickBridgeWindow
+        scrubCommitTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(window * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.scrubCommitTask = nil
+            self.commitScrub()
+        }
+    }
+
+    private func cancelScrubCommit() {
+        scrubCommitTask?.cancel()
+        scrubCommitTask = nil
     }
 
     private func cancelScrub() {
         guard model.isScrubbing else { return }
+        // Resolve playback intent before un-hiding the overlay (same ordering
+        // rationale as commitScrub) so the pause glyph never flickers in.
+        if resumeAfterScrub { actions.togglePlayPause() }
         model.isScrubbing = false
         model.previewImage = nil
-        if resumeAfterScrub { actions.togglePlayPause() }
+        if ScrubDiagnostics.forceScrubRefresh { engine.setScrubRefreshBoost(false) }
+        scrubDiag.end("cancel")
         scheduleAutoHide()
     }
 
-    private func updatePreviewThumbnail() {
+    @discardableResult
+    private func updatePreviewThumbnail() -> Bool {
         guard let loader = thumbnailLoader else {
             model.previewImage = nil
-            return
+            return true
         }
         let requestedSeconds = model.scrubSeconds
         // Instant swap when the tile is already cached (the common case while
         // dragging within one tile) keeps scrubbing fluid; otherwise fetch async.
         if let cached = loader.cachedThumbnail(forSeconds: requestedSeconds) {
             model.previewImage = cached
-            return
+            return true
         }
         thumbnailTask?.cancel()
         thumbnailTask = Task { [weak self] in
@@ -650,6 +1047,7 @@ final class PlayerInputViewController: UIViewController {
             guard !Task.isCancelled, self.model.isScrubbing else { return }
             self.model.previewImage = image
         }
+        return false
     }
 
     // MARK: Button handlers
@@ -697,9 +1095,20 @@ final class PlayerInputViewController: UIViewController {
     }
 
     /// An Up press from the scrub surface reveals the transport without moving
-    /// focus off the surface, matching the swipe-up reveal.
+    /// focus off the surface, matching the swipe-up reveal. If a Skip button is
+    /// currently showing passively (a grace-window seek landed in a segment), Up
+    /// grabs it instead so the viewer can act on the affordance they chose not to
+    /// have steal focus.
     @objc private func handleUp() {
         guard focusContext == .surface, !model.isScrubbing else { return }
+        if presentingSkipButton, model.activeSkipSegment != nil {
+            enterSkipButton(stealFocus: true)
+            return
+        }
+        if presentingUpNext, model.upNextActive {
+            enterUpNext(stealFocus: true)
+            return
+        }
         flashControls()
     }
 

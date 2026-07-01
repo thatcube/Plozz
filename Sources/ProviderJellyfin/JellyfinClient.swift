@@ -700,7 +700,13 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(LyricDto.self, from: endpoint, baseURL: baseURL)
     }
 
-    func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? {
+    /// Builds an item image URL. When the server-advertised image `tag` (a
+    /// content hash that changes whenever the art changes) is supplied, it is
+    /// appended as a query item so the URL is unique per image revision. This is
+    /// what busts client-side image caches when art is replaced server-side —
+    /// without it, replaced art keeps showing the stale cached copy because the
+    /// tag-less URL never changes.
+    func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?, tag: String? = nil) -> URL? {
         let typeSegment: String
         switch kind {
         case .primary: typeSegment = "Primary"
@@ -711,9 +717,14 @@ public struct JellyfinClient: Sendable {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
         let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
         components.path = basePath + "/Items/\(itemID)/Images/\(typeSegment)"
+        var query: [URLQueryItem] = []
         if let maxWidth {
-            components.queryItems = [URLQueryItem(name: "maxWidth", value: String(maxWidth))]
+            query.append(URLQueryItem(name: "maxWidth", value: String(maxWidth)))
         }
+        if let tag, !tag.isEmpty {
+            query.append(URLQueryItem(name: "tag", value: tag))
+        }
+        components.queryItems = query.isEmpty ? nil : query
         return components.url
     }
 

@@ -48,6 +48,15 @@ public final class AppState {
     public private(set) var captionModel: CaptionSettingsModel
     public private(set) var spoilerModel: SpoilerSettingsModel
     public private(set) var playbackModel: PlaybackSettingsModel
+    /// Per-profile per-content-type subtitle policy overrides (forced-only on
+    /// movies, full subs on anime, …). The profile base mode/language lives in
+    /// `captionModel`; this only owns the overrides. Rebuilt on profile switch.
+    public private(set) var subtitlePolicyModel: SubtitlePolicyModel
+    /// Per-profile per-content-type audio-language overrides ("original audio for
+    /// anime, device language for everything else"). The profile base preference
+    /// lives in `playbackModel`; this only owns the overrides. Rebuilt on profile
+    /// switch, mirroring `subtitlePolicyModel`.
+    public private(set) var audioPolicyModel: AudioPolicyModel
     public private(set) var themeModel: ThemeSettingsModel
     public private(set) var diagnosticsModel: DiagnosticsSettingsModel
     /// The full-screen music player's per-profile look + "show extra info"
@@ -648,6 +657,8 @@ public final class AppState {
         self.captionModel = captionModel ?? CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         self.spoilerModel = spoilerModel ?? SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         self.playbackModel = playbackModel ?? PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
+        self.subtitlePolicyModel = SubtitlePolicyModel(store: SubtitlePolicyStore(namespace: ns))
+        self.audioPolicyModel = AudioPolicyModel(store: AudioPolicyStore(namespace: ns))
         self.themeModel = themeModel ?? ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         self.diagnosticsModel = diagnosticsModel ?? DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         self.musicPlayerModel = musicPlayerModel ?? MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
@@ -1285,6 +1296,8 @@ public final class AppState {
         captionModel = CaptionSettingsModel(store: CaptionSettingsStore(namespace: ns))
         spoilerModel = SpoilerSettingsModel(store: SpoilerSettingsStore(namespace: ns))
         playbackModel = PlaybackSettingsModel(store: PlaybackSettingsStore(namespace: ns))
+        subtitlePolicyModel = SubtitlePolicyModel(store: SubtitlePolicyStore(namespace: ns))
+        audioPolicyModel = AudioPolicyModel(store: AudioPolicyStore(namespace: ns))
         themeModel = ThemeSettingsModel(store: ThemeSettingsStore(namespace: ns))
         diagnosticsModel = DiagnosticsSettingsModel(store: DiagnosticsSettingsStore(namespace: ns))
         musicPlayerModel = MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))

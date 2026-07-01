@@ -54,7 +54,21 @@ let package = Package(
         // AetherEngine — production media player engine for Apple platforms.
         // FFmpeg demuxes, VideoToolbox decodes, AVPlayer handles Dolby Atmos.
         // Powers the native HLS-fMP4 remux path for MKV → DoVi + Atmos + seek.
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", from: "4.6.3"),
+        // 4.8.0: unified `playbackPhase` status source-of-truth (#85), keyframe-
+        // gated VOD segment cutting so a seek landing on a segment boundary
+        // decodes cleanly (#92), software-path seek holds last frame (#90). See
+        // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
+        //
+        // TEMP fork override → thatcube/AetherEngine @ fix/vod-audio-eac3-wedge
+        // (4.8.0 + the backward-seek muxer wedge fix; upstream PR #94). Under
+        // +delay_moov the fMP4 muxer writes moov lazily on the first flush; for
+        // AC-3/E-AC-3/TrueHD the audio sample entry (dac3/dec3/dmlp) can only be
+        // built from a PARSED audio packet, so a fresh restart muxer whose first
+        // moov flush fired video-only errored "Cannot write moov atom before EAC3
+        // packets parsed" → wedged muxer + forever-loading on a mid-file backward
+        // seek. The fix primes moov with a parsed audio packet, codec-scoped so AAC
+        // keeps the exact stock path. Revert to a released upstream tag once #94 merges.
+        .package(url: "https://github.com/thatcube/AetherEngine", branch: "fix/vod-audio-eac3-wedge"),
         // AetherEngine's FFmpeg build (n8.1.2, minimal LGPL decode-only). Shared
         // by AetherEngine and EngineMPV — replaces the locally-staged
         // Frameworks/mpv/Libav*.xcframework set (same n8.1 ABI).
@@ -63,9 +77,6 @@ let package = Package(
         // build time). Used by AetherEngine for DV P7→8.1 NAL surgery; also
         // satisfies libmpv's dovi symbol references.
         .package(url: "https://github.com/superuser404notfound/LibDovi", from: "1.0.2"),
-        // InjectionNext SwiftUI hot-reload runtime (DEBUG dev only). Lets feature
-        // package views observe injection and redraw live on-device.
-        .package(url: "https://github.com/krzysztofzablocki/Inject", from: "1.5.2"),
     ],
     targets: [
         // MARK: Core
@@ -203,19 +214,19 @@ let package = Package(
         // MARK: Features
         .target(
             name: "FeatureDiscovery",
-            dependencies: ["CoreModels", "CoreNetworking", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreNetworking"]
         ),
         .target(
             name: "FeatureAuth",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "ProviderJellyfin", "ProviderPlex"]
         ),
         .target(
             name: "FeatureHome",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "MetadataKit", "TopShelfKit", "RatingsService", "ProviderTrailers"]
         ),
         .target(
             name: "FeaturePlayback",
-            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService", .product(name: "Inject", package: "Inject")],
+            dependencies: ["CoreModels", "CoreNetworking", "CoreUI", "TraktService", "MetadataKit"],
             linkerSettings: [
                 // Force-link AVKit on tvOS so its `UIWindow (AVAdditions)`
                 // category (which adds `avDisplayManager`, used to drive the
@@ -228,15 +239,15 @@ let package = Package(
         ),
         .target(
             name: "FeatureSearch",
-            dependencies: ["CoreModels", "CoreUI", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreUI"]
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService"]
         ),
         .target(
             name: "FeatureProfiles",
-            dependencies: ["CoreModels", "CoreUI", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreUI"]
         ),
 
         // MARK: Music (browse + audio playback engine)
@@ -247,7 +258,7 @@ let package = Package(
         // it stays decoupled from the video feature modules.
         .target(
             name: "FeatureMusic",
-            dependencies: ["CoreModels", "CoreUI", "MetadataKit", .product(name: "Inject", package: "Inject")]
+            dependencies: ["CoreModels", "CoreUI", "MetadataKit"]
         ),
 
         // MARK: Top Shelf (shared with the tvOS Top Shelf extension)
@@ -493,20 +504,3 @@ let package = Package(
         )
     ]
 )
-
-// InjectionNext hot-reload: every local Swift target must link `-interposable`
-// so saved function bodies can be swapped live on-device. Gated on PLOZZ_INJECT
-// so it only applies to dev injection builds — Release/TestFlight never gets it.
-if ProcessInfo.processInfo.environment["PLOZZ_INJECT"] != nil {
-    for target in package.targets where target.type == .regular {
-        var flags = target.linkerSettings ?? []
-        flags.append(.unsafeFlags(["-Xlinker", "-interposable"]))
-        target.linkerSettings = flags
-        // InjectionNext recompiles ONE saved file, which requires per-file
-        // (batch/incremental) compiles in the build log; whole-module has no
-        // -primary-file line for it to copy. Force batch mode on every target.
-        var sflags = target.swiftSettings ?? []
-        sflags.append(.unsafeFlags(["-enable-batch-mode", "-no-whole-module-optimization", "-v"]))
-        target.swiftSettings = sflags
-    }
-}

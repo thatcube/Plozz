@@ -95,6 +95,11 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     public var onProgress: (@MainActor () -> Void)?
     public var onFailure: (@MainActor (AppError) -> Void)?
     public var onEnded: (@MainActor () -> Void)?
+    /// mpv discovers its tracks synchronously after load and renders its own
+    /// subtitle overlay, so it fires neither of these. Declared to satisfy the
+    /// protocol.
+    public var onTracksChanged: (@MainActor () -> Void)?
+    public var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 
     // MARK: Configuration
 
@@ -130,6 +135,13 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
     /// A pending HDR display-mode switch awaiting a live `UIWindow`. Applied as
     /// soon as the output view is in a window; `nil` for SDR content.
     private var pendingDisplayCriteria: AVDisplayCriteria?
+    /// The HDR/DoVi format description backing `pendingDisplayCriteria`, retained
+    /// so the scrub-refresh boost can rebuild an *identical* criteria at a higher
+    /// refresh rate (refresh-only switch, dynamic range unchanged).
+    private var boostFormatDescription: CMVideoFormatDescription?
+    /// Whether a scrub-refresh boost (≈60 Hz) is currently overriding the
+    /// content-matched criteria, so we restore the right value when it ends.
+    private var scrubRefreshBoostActive = false
     /// Whether the pending/applied criteria carries the `'dvh1'` Dolby Vision
     /// codec tag (i.e. we're asking tvOS for a true DoVi HDMI signal). Cleared
     /// on the HDR10 fallback path.
@@ -246,14 +258,17 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         let frameRate = Float(request.sourceMetadata?.video?.frameRate ?? 0)
         if let desc = MPVHDR.formatDescription(for: hdrMode, video: request.sourceMetadata?.video) {
             pendingDisplayCriteria = AVDisplayCriteria(refreshRate: frameRate, formatDescription: desc)
+            boostFormatDescription = desc
             requestedDolbyVisionSwitch = (hdrMode == .dolbyVision)
         } else if hdrMode == .dolbyVision,
                   let fallback = MPVHDR.hdr10FallbackFormatDescription(video: request.sourceMetadata?.video) {
             log.error("HDR: dvh1 Dolby Vision criteria unavailable; falling back to HDR10 (hvc1+PQ) display switch")
             pendingDisplayCriteria = AVDisplayCriteria(refreshRate: frameRate, formatDescription: fallback)
+            boostFormatDescription = fallback
             requestedDolbyVisionSwitch = false
         } else {
             pendingDisplayCriteria = nil
+            boostFormatDescription = nil
             requestedDolbyVisionSwitch = false
         }
 
@@ -378,6 +393,39 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         log.info("HDR: requested display-mode switch (dolbyVision=\(self.requestedDolbyVisionSwitch, privacy: .public) matchingEnabled=\(manager.isDisplayCriteriaMatchingEnabled, privacy: .public))")
     }
 
+    /// **Experimental scrub-refresh boost.** While `enabled`, re-applies our HDR
+    /// criteria with the refresh rate forced to 60 Hz so the *UI* (scrub bar +
+    /// remote sampling) runs smooth even though the content is 24/25 fps; the HDR
+    /// format description is unchanged, so this is a refresh-rate-only switch
+    /// (seamless on a QMS-capable TV, a brief HDMI re-sync otherwise). Disabling
+    /// restores the content-matched criteria for judder-free playback. Only acts
+    /// when we already drove a switch for this stream (HDR/DoVi); SDR/no-criteria
+    /// streams are a no-op here.
+    public func setScrubRefreshBoost(_ enabled: Bool) {
+        if ProcessInfo.processInfo.environment["SCRUB_DIAG"] == "1" {
+            let hasMgr = appliedDisplayManager != nil
+                || (outputView?.window.map { Self.windowHasDisplayManager($0) } ?? false)
+            let msg = "mpv-boost enabled=\(enabled) didApplyCriteria=\(didApplyDisplayCriteria) "
+                + "hasDesc=\(boostFormatDescription != nil) hasMgr=\(hasMgr) active=\(scrubRefreshBoostActive)\n"
+            try? FileHandle.standardOutput.write(contentsOf: Data(("PLZSCRUB " + msg).utf8))
+        }
+        guard enabled != scrubRefreshBoostActive else { return }
+        guard didApplyDisplayCriteria,
+              let desc = boostFormatDescription,
+              let manager = appliedDisplayManager
+                ?? (outputView?.window.flatMap { Self.windowHasDisplayManager($0) ? $0.avDisplayManager : nil })
+        else { return }
+        if enabled {
+            manager.preferredDisplayCriteria = AVDisplayCriteria(refreshRate: 60, formatDescription: desc)
+            scrubRefreshBoostActive = true
+            log.info("HDR: scrub-refresh boost ON (forcing 60Hz, range unchanged)")
+        } else {
+            manager.preferredDisplayCriteria = pendingDisplayCriteria
+            scrubRefreshBoostActive = false
+            log.info("HDR: scrub-refresh boost OFF (restored content refresh)")
+        }
+    }
+
     /// Clears our `preferredDisplayCriteria` (passing `nil` returns the display to
     /// a mode suitable for mixed/UI content). Only touches the manager if we
     /// actually applied a switch. Clears via the *captured* manager so it still
@@ -404,6 +452,7 @@ public final class MPVVideoEngine: NSObject, VideoEngine {
         manager.preferredDisplayCriteria = nil
         appliedDisplayManager = nil
         didApplyDisplayCriteria = false
+        scrubRefreshBoostActive = false
     }
 
     /// Safety net: the `avDisplayManager` accessor comes from AVKit's

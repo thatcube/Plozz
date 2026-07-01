@@ -70,4 +70,62 @@ final class PlaybackSyncSettingsTests: XCTestCase {
         XCTAssertFalse(PlaybackSettingsStore.currentSyncAcrossServers(defaults: defaults, namespace: ns),
                        "Static reader must observe the freshly persisted OFF value")
     }
+
+    // MARK: Audio-language preference (migration from the legacy boolean)
+
+    func testDefaultAudioPreferenceIsOriginal() {
+        XCTAssertEqual(PlaybackSettings.default.audioLanguagePreference, .original,
+                       "Default preserves today's prefer-original behaviour")
+    }
+
+    func testLegacyPreferOriginalTrueMigratesToOriginal() throws {
+        let (defaults, _) = makeDefaults()
+        let key = SettingsKey.scoped("com.plozz.playbackSettings", namespace: nil)
+        let legacy = try JSONSerialization.data(withJSONObject: ["preferOriginalLanguageAudio": true])
+        defaults.set(legacy, forKey: key)
+
+        let loaded = PlaybackSettingsStore(defaults: defaults).load()
+        XCTAssertEqual(loaded.audioLanguagePreference, .original,
+                       "Legacy prefer-original=true maps to .original")
+    }
+
+    func testLegacyPreferOriginalFalseMigratesToDevice() throws {
+        let (defaults, _) = makeDefaults()
+        let key = SettingsKey.scoped("com.plozz.playbackSettings", namespace: nil)
+        let legacy = try JSONSerialization.data(withJSONObject: ["preferOriginalLanguageAudio": false])
+        defaults.set(legacy, forKey: key)
+
+        let loaded = PlaybackSettingsStore(defaults: defaults).load()
+        XCTAssertEqual(loaded.audioLanguagePreference, .device,
+                       "Legacy prefer-original=false maps to .device")
+    }
+
+    func testAudioPreferenceRoundTripsAndPrefersNewKeyOverLegacy() throws {
+        let (defaults, _) = makeDefaults()
+        let store = PlaybackSettingsStore(defaults: defaults)
+        var settings = store.load()
+        settings.audioLanguagePreference = .language("en")
+        store.save(settings)
+        XCTAssertEqual(store.load().audioLanguagePreference, .language("en"))
+
+        // A payload carrying BOTH the new key and the stale legacy bool: the new
+        // key must win so a re-save never resurrects an old choice.
+        let key = SettingsKey.scoped("com.plozz.playbackSettings", namespace: nil)
+        let both = try JSONSerialization.data(withJSONObject: [
+            "audioLanguagePreference": "lang:ko",
+            "preferOriginalLanguageAudio": true
+        ])
+        defaults.set(both, forKey: key)
+        XCTAssertEqual(store.load().audioLanguagePreference, .language("ko"),
+                       "The new preference key takes precedence over the legacy bool")
+    }
+
+    func testMissingAudioFieldDefaultsToOriginal() throws {
+        let (defaults, _) = makeDefaults()
+        let key = SettingsKey.scoped("com.plozz.playbackSettings", namespace: nil)
+        let legacy = try JSONSerialization.data(withJSONObject: ["skipIntros": "on"])
+        defaults.set(legacy, forKey: key)
+        XCTAssertEqual(PlaybackSettingsStore(defaults: defaults).load().audioLanguagePreference, .original,
+                       "Missing audio field defaults to .original")
+    }
 }

@@ -514,44 +514,56 @@ struct PlayerControls: View {
             VStack(alignment: .leading, spacing: 0) {
                 panelHeader(for: category)
                 Divider().background(.white.opacity(0.15))
-                if isStyleScreen(category) {
-                    // Editor: content-sized (no greedy ScrollView) so the panel
-                    // hugs its rows and pins to the top-right corner with an even
-                    // margin rather than stretching toward full height.
-                    //
-                    // `fixedSize(vertical:)` is essential here: unlike the other
-                    // panes (which sit in a ScrollView that proposes unbounded
-                    // height), this content is proposed the tall top-pinned column.
-                    // Focusable row buttons are height-flexible on tvOS, so without
-                    // this they'd absorb the excess and stretch — worst on small
-                    // sub-screens with few rows. Pinning to the ideal height keeps
-                    // every row the same compact height as the track/audio menus.
-                    VStack(alignment: .leading, spacing: 0) {
-                        subtitleBody
-                    }
-                    .padding(.vertical, 10)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                } else {
-                    ScrollView {
+                // The swappable page content. `.animation(nil, value:)` opts this
+                // subtree OUT of the container-morph animation below, so when the
+                // page changes the rows *snap* to the new screen instantly while
+                // only the glass box smoothly resizes/repositions around them —
+                // "animate the container, not what's inside".
+                Group {
+                    if isStyleScreen(category) {
+                        // Editor: content-sized (no greedy ScrollView) so the panel
+                        // hugs its rows and pins to the top-right corner with an even
+                        // margin rather than stretching toward full height.
+                        //
+                        // `fixedSize(vertical:)` is essential here: unlike the other
+                        // panes (which sit in a ScrollView that proposes unbounded
+                        // height), this content is proposed the tall top-pinned column.
+                        // Focusable row buttons are height-flexible on tvOS, so without
+                        // this they'd absorb the excess and stretch — worst on small
+                        // sub-screens with few rows. Pinning to the ideal height keeps
+                        // every row the same compact height as the track/audio menus.
                         VStack(alignment: .leading, spacing: 0) {
-                            switch category {
-                            case .subtitles: subtitleBody
-                            case .audio: audioPane
-                            case .speed: speedPane
-                            case .sync: syncPane
-                            case .info: EmptyView()
-                            }
+                            subtitleBody
                         }
                         .padding(.vertical, 10)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                switch category {
+                                case .subtitles: subtitleBody
+                                case .audio: audioPane
+                                case .speed: speedPane
+                                case .sync: syncPane
+                                case .info: EmptyView()
+                                }
+                            }
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                        .frame(maxHeight: 440)
                     }
-                    .frame(maxHeight: 440)
                 }
+                .animation(nil, value: subtitleScreen)
             }
             .frame(width: 520, alignment: .leading)
             .colorScheme(.dark)
             .modifier(PanelGlassBackground())
+            // Morph the glass box between pages: only the container's frame
+            // (height, and top/bottom anchor via the layout) animates; the inner
+            // content opted out above so it swaps without a cross-fade.
+            .animation(.easeInOut(duration: 0.28), value: subtitleScreen)
             // The track controls live on the right of the button row, so the panel
             // opens against the trailing edge above them rather than on the left.
             .frame(maxWidth: .infinity, alignment: .trailing)

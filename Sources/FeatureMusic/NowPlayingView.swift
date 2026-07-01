@@ -396,7 +396,7 @@ struct NowPlayingView: View {
     /// list/mini-player size (scale 1) so it reads at across-the-room distance,
     /// and reused for the width-matched trailing spacer that keeps the block
     /// centered.
-    private let nowPlayingIndicatorScale: CGFloat = 1.4
+    private let nowPlayingIndicatorScale: CGFloat = 1.57
     private var nowPlayingIndicatorWidth: CGFloat { 26 * nowPlayingIndicatorScale }
     private var nowPlayingIndicatorHeight: CGFloat { 24 * nowPlayingIndicatorScale }
 
@@ -413,9 +413,9 @@ struct NowPlayingView: View {
         NowPlayingEqualizer(isAnimating: controller.isPlaying && !reduceMotion,
                             scale: nowPlayingIndicatorScale)
             .frame(width: nowPlayingIndicatorWidth)
-            // Nudge the equalizer up a touch so it reads as vertically centered
-            // against the large title cap height rather than sitting low.
-            .offset(y: -2)
+            // Sits a touch below the title baseline so the taller bars read as
+            // centered against the large title cap height.
+            .offset(y: 2)
             .opacity(controller.isPlaying ? 1 : 0)
             .animation(.easeInOut(duration: 0.3), value: controller.isPlaying)
             .allowsHitTesting(false)

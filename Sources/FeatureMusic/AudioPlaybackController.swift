@@ -284,6 +284,23 @@ public final class AudioPlaybackController {
         var quality: PlaybackQuality?
     }
     private var preparedNext: PreparedNext?
+    /// Coalesces rapid user-initiated skips into a single player transition. Each
+    /// Next/Previous press only moves `index` and (re)schedules this task; the
+    /// actual `startCurrent()` runs once the presses settle. Spamming skip would
+    /// otherwise fire an `advanceToNextItem()` per press, and on AirPlay 2 each
+    /// transition interrupts the previous one's route negotiation mid-flight,
+    /// tearing the speaker connection down. Debouncing keeps the CURRENT track
+    /// playing (route alive) until the user lands, then transitions just once.
+    private var startTask: Task<Void, Never>?
+    /// True while a debounced skip is pending — the UI shows the target track but
+    /// the player is still on the outgoing one, so the time observer freezes the
+    /// scrubber at 0 instead of showing the old track's position under the new
+    /// title. Cleared once the pending `startCurrent()` completes.
+    private var startPending = false
+    /// How long to wait for skips to settle before actually retargeting the
+    /// player. Long enough to coalesce a burst of presses, short enough that a
+    /// single deliberate skip still feels responsive.
+    private static let skipDebounce: Duration = .milliseconds(350)
     /// Recovery observers: if a track transition makes the system tear down or
     /// reconfigure the (AirPlay) route, re-activate the session and resume so the
     /// speaker doesn't stay silent until it's physically reconnected.
@@ -333,7 +350,7 @@ public final class AudioPlaybackController {
         self.index = clampedStart
         configureSessionIfNeeded()
         playbackStartToken &+= 1
-        Task { await startCurrent() }
+        scheduleStart(debounced: false)
     }
 
     /// Plays the whole list shuffled, starting on a random track.
@@ -361,7 +378,7 @@ public final class AudioPlaybackController {
         self.index = 0
         configureSessionIfNeeded()
         playbackStartToken &+= 1
-        Task { await startCurrent() }
+        scheduleStart(debounced: false)
     }
 
     public func togglePlayPause() {
@@ -411,7 +428,7 @@ public final class AudioPlaybackController {
     public func play(at queueIndex: Int) {
         guard queue.indices.contains(queueIndex) else { return }
         index = queueIndex
-        Task { await startCurrent() }
+        scheduleStart(debounced: false)
     }
 
     public func seek(to seconds: TimeInterval) async {
@@ -448,6 +465,8 @@ public final class AudioPlaybackController {
         // Report the current track's stop before we tear down so the server
         // closes its now-playing session and records the play position.
         reportStopIfNeeded(position: currentTime)
+        startTask?.cancel()
+        startPending = false
         player.pause()
         player.removeAllItems()
         preparedNext = nil
@@ -500,24 +519,24 @@ public final class AudioPlaybackController {
         let next = index + offset
         if next < 0 {
             index = 0
-            Task { await startCurrent() }
+            scheduleStart(debounced: userInitiated)
             return
         }
         if next >= queue.count {
             // Past the end: wrap on repeat-all, otherwise stop at the last track.
             if repeatMode == .all {
                 index = 0
-                Task { await startCurrent() }
+                scheduleStart(debounced: userInitiated)
             } else if userInitiated {
                 index = queue.count - 1
-                Task { await startCurrent() }
+                scheduleStart(debounced: userInitiated)
             } else {
                 pause()
             }
             return
         }
         index = next
-        Task { await startCurrent() }
+        scheduleStart(debounced: userInitiated)
     }
 
     /// Called when the current item finishes on its own.
@@ -528,9 +547,38 @@ public final class AudioPlaybackController {
         // then no-ops because reportedTrack is already cleared.
         reportStopIfNeeded(position: duration > 0 ? duration : currentTime)
         if repeatMode == .one {
-            Task { await startCurrent() }
+            scheduleStart(debounced: false)
         } else {
             advance(by: 1, userInitiated: false)
+        }
+    }
+
+    /// (Re)schedules a start of the current index. User-initiated skips are
+    /// debounced so a burst of Next/Previous presses collapses into ONE player
+    /// transition once the user lands — critical for AirPlay 2, where firing a
+    /// transition per press interrupts each item's route negotiation mid-flight
+    /// and drops the speaker. During the debounce the outgoing track keeps
+    /// playing (route stays alive) and the scrubber freezes at 0 under the new
+    /// title. Natural ends and explicit taps pass `debounced: false` — they're
+    /// never rapid and want the immediate, seamless treadmill hand-off. Bumping
+    /// the generation here supersedes any start still resolving so it bails
+    /// instead of transitioning to a track the user has already skipped past.
+    private func scheduleStart(debounced: Bool) {
+        startTask?.cancel()
+        trackTransitionGeneration &+= 1
+        if debounced {
+            startPending = true
+            currentTime = 0
+            duration = currentTrack?.duration ?? 0
+        }
+        startTask = Task { [weak self] in
+            if debounced {
+                try? await Task.sleep(for: Self.skipDebounce)
+                if Task.isCancelled { return }
+            }
+            guard let self, !Task.isCancelled else { return }
+            await self.startCurrent()
+            if !Task.isCancelled { self.startPending = false }
         }
     }
 
@@ -948,6 +996,10 @@ public final class AudioPlaybackController {
             // to satisfy strict concurrency.
             MainActor.assumeIsolated {
                 guard let self else { return }
+                // While a debounced skip is pending the outgoing track is still
+                // playing, but the UI already shows the target track — so don't
+                // let the old item's position drive the scrubber; keep it at 0.
+                guard !self.startPending else { return }
                 let seconds = time.seconds
                 if seconds.isFinite { self.currentTime = seconds }
                 if self.duration == 0, let d = self.player.currentItem?.duration.seconds, d.isFinite, d > 0 {

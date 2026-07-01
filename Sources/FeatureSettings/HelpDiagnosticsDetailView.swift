@@ -64,9 +64,9 @@ struct HelpDiagnosticsDetailView: View {
     // MARK: - Report a Problem
 
     private var reportPanel: some View {
-        SettingsPanel(
+        FocusableSettingsPanel(
             title: "Report a Problem",
-            footer: "Scan the code, or go to the link on any device, to open a pre-filled bug report on GitHub. For crashes or screenshots, use TestFlight’s built-in feedback. Your servers, logins and tokens are never included."
+            footer: "Scan the code, or go to the link on any device, to open a pre-filled bug report on GitHub. Your servers, logins and tokens are never included."
         ) {
             HStack(alignment: .top, spacing: 36) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -91,17 +91,30 @@ struct HelpDiagnosticsDetailView: View {
 
     // MARK: - Crash reporting (opt-in, off by default)
 
+    @ViewBuilder
     private var crashReportingPanel: some View {
-        SettingsPanel(
-            title: "Crash Reports",
-            footer: crashReportingConfigured
-                ? "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. Off by default; applies to this Apple TV."
-                : "This build has no crash-reporting endpoint configured, so nothing can be sent. Crash reporting is available in TestFlight and release builds."
-        ) {
-            Toggle("Share Crash Reports", isOn: $crashReporting.settings.isEnabled)
-                .toggleStyle(SettingsSwitchToggleStyle())
-                .disabled(!crashReportingConfigured)
-                .opacity(crashReportingConfigured ? 1 : 0.5)
+        if crashReportingConfigured {
+            SettingsPanel(
+                title: "Crash Reports",
+                footer: "When on, Plozz sends an anonymous report if it crashes or freezes, so bugs can be fixed faster. Reports include only the crash itself plus your app version, tvOS version and device model — never your servers, logins, tokens, or what you were watching. Off by default; applies to this Apple TV."
+            ) {
+                Toggle("Share Crash Reports", isOn: $crashReporting.settings.isEnabled)
+                    .toggleStyle(SettingsSwitchToggleStyle())
+            }
+        } else {
+            // No DSN baked in ⇒ the toggle can't do anything, so it's disabled
+            // (and thus unfocusable). Make the whole panel focusable instead so
+            // it stays reachable/readable and doesn't create a focus dead-zone.
+            FocusableSettingsPanel(
+                title: "Crash Reports",
+                footer: "This build has no crash-reporting endpoint configured, so nothing can be sent. Crash reporting is available in TestFlight and release builds."
+            ) {
+                Toggle("Share Crash Reports", isOn: .constant(false))
+                    .toggleStyle(SettingsSwitchToggleStyle())
+                    .disabled(true)
+                    .opacity(0.5)
+                    .allowsHitTesting(false)
+            }
         }
     }
 
@@ -120,7 +133,7 @@ struct HelpDiagnosticsDetailView: View {
     // MARK: - Recent activity (read-only, redacted)
 
     private var recentActivityPanel: some View {
-        SettingsPanel(
+        FocusableSettingsPanel(
             title: "Recent Activity",
             footer: "The most recent app log lines, kept only on this Apple TV and already stripped of tokens and secrets. Shown so a maintainer can ask what Plozz was doing when a bug happened."
         ) {
@@ -152,7 +165,9 @@ struct HelpDiagnosticsDetailView: View {
         HStack(spacing: 16) {
             Text(label)
                 .foregroundStyle(.secondary)
-                .frame(width: 110, alignment: .leading)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(width: 150, alignment: .leading)
             Text(value)
             Spacer(minLength: 0)
         }

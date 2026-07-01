@@ -100,6 +100,47 @@ struct SettingsPanel<Content: View>: View {
     }
 }
 
+/// A `SettingsPanel` that can itself take focus, for panels whose content is
+/// **read-only** (or whose only control is disabled) and would otherwise be
+/// unreachable on tvOS — a non-focusable view never receives focus, so the
+/// parent `ScrollView` can't scroll it into view and the user gets stuck.
+///
+/// Rather than the About panel's stark inverted-card contrast flip, focus here
+/// is shown the way round artwork (avatars, cast portraits, profile tiles) shows
+/// it: a soft, **theme-tinted outline** blooming around the whole element (plus a
+/// gentle lift), so contrast never inverts and the panel's resting look is
+/// identical to every other `SettingsPanel`.
+struct FocusableSettingsPanel<Content: View>: View {
+    let title: String?
+    var footer: String?
+    @ViewBuilder let content: Content
+
+    @FocusState private var isFocused: Bool
+    @Environment(\.themePalette) private var palette
+
+    init(title: String? = nil, footer: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.footer = footer
+        self.content = content()
+    }
+
+    var body: some View {
+        SettingsPanel(title: title, footer: footer) { content }
+            .overlay {
+                RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius, style: .continuous)
+                    .strokeBorder(palette.accent, lineWidth: 4)
+                    .opacity(isFocused ? 1 : 0)
+            }
+            .shadow(color: .black.opacity(isFocused ? 0.28 : 0), radius: isFocused ? 14 : 0, y: isFocused ? 6 : 0)
+            .scaleEffect(isFocused ? 1.01 : 1)
+            .focusable()
+            .focused($isFocused)
+            .focusEffectDisabled()
+            .animation(.easeOut(duration: 0.16), value: isFocused)
+            .accessibilityElement(children: .combine)
+    }
+}
+
 /// Shared provider chip + icon used across Settings detail pages.
 struct ProviderBadge: View {
     let provider: ProviderKind

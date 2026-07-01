@@ -187,6 +187,13 @@ private struct SettingsSwitchToggleBody: View {
     let configuration: ToggleStyleConfiguration
     @Environment(\.isEnabled) private var isEnabled
 
+    // Horizontal breathing room inside the focus pill. The same amount is pulled
+    // back off the leading edge below, so the *label* lines up flush-left with
+    // the pane heading, description and the rows above/below it — while the pill
+    // (drawn by the button style, which bleeds outward on focus) still keeps a
+    // symmetric cushion around the content.
+    private let hInset: CGFloat = 12
+
     var body: some View {
         Button {
             configuration.isOn.toggle()
@@ -203,11 +210,15 @@ private struct SettingsSwitchToggleBody: View {
                 SettingsSwitchIndicator(isOn: configuration.isOn)
             }
             .padding(.vertical, 14)
-            .padding(.horizontal, 18)
+            .padding(.horizontal, hInset)
             .opacity(isEnabled ? 1 : 0.45)
             .contentShape(Rectangle())
         }
         .buttonStyle(SettingsFocusButtonStyle())
+        // Cancel the leading inset so the label sits flush with the flush-left
+        // content around it; the focus pill simply extends that much further to
+        // the left, staying centered on the content.
+        .padding(.leading, -hInset)
     }
 }
 

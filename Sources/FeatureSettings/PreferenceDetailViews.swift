@@ -315,7 +315,7 @@ struct PlaybackDetailView: View {
             },
             SettingsSplitRow(
                 id: "subtitle-per-type",
-                title: "Different subtitle default per type",
+                title: "Movie, TV, & Anime defaults",
                 description: "Use a separate subtitle default for each kind of content — for example forced-only on movies but full subtitles on anime.",
                 valueSummary: perContentTypeEnabled ? "On" : "Off"
             ) {

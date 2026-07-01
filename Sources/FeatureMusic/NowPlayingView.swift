@@ -47,6 +47,18 @@ struct NowPlayingView: View {
     /// the rest of the bar.
     @State private var bottomBarHeight: CGFloat = 0
 
+    /// Horizontal shift applied to the title's now-playing equalizer so it always
+    /// hugs the first word of the *top* title line. The title is center-aligned,
+    /// so when a title wraps and the second line is wider than the first, the
+    /// shorter first line is centered inside the (wider) text frame — leaving a
+    /// gap between the frame's leading edge (where the equalizer sits) and the
+    /// first word. We measure the rendered title width and, via Core Text, the
+    /// first line's width, then slide the equalizer right by half their
+    /// difference so it lands just left of the first word. `.offset` doesn't
+    /// affect layout, so the title stays perfectly centered. Zero for
+    /// single-line titles (and titles whose first line is the widest).
+    @State private var titleIndicatorInset: CGFloat = 0
+
     /// Focus targets on the player. Play/pause is the anchor the bar always
     /// comes back focused on; the reveal catcher holds focus while the bar is
     /// hidden so tvOS focus never lands on an invisible control. Every visible
@@ -414,12 +426,52 @@ struct NowPlayingView: View {
                             scale: nowPlayingIndicatorScale)
             .frame(width: nowPlayingIndicatorWidth)
             // Sits a touch below the title baseline so the taller bars read as
-            // centered against the large title cap height.
-            .offset(y: 1)
+            // centered against the large title cap height. The x shift keeps the
+            // equalizer beside the first word even when a centered title wraps to
+            // a wider second line (see `titleIndicatorInset`).
+            .offset(x: titleIndicatorInset, y: 1)
             .opacity(controller.isPlaying ? 1 : 0)
             .animation(.easeInOut(duration: 0.3), value: controller.isPlaying)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+    }
+
+    /// Computes how far to slide the title equalizer right so it hugs the first
+    /// word of a wrapped, center-aligned title.
+    ///
+    /// The title `Text` renders at `renderedWidth` (the width of its *widest*
+    /// line). Core Text lays the same string out at that width to find the first
+    /// line's width; a shorter first line is centered inside the frame, so the
+    /// leading gap is half the difference. Returns 0 for single-line titles or
+    /// when the first line is already the widest (no gap to close). Matches the
+    /// title's `.font(.system(size: 46, weight: .bold))` and word wrapping.
+    private static func titleIndicatorInset(for title: String, renderedWidth: CGFloat) -> CGFloat {
+        #if canImport(UIKit)
+        guard renderedWidth > 1, !title.isEmpty else { return 0 }
+        let font = UIFont.systemFont(ofSize: 46, weight: .bold)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        paragraph.alignment = .center
+        let attributed = NSAttributedString(
+            string: title,
+            attributes: [.font: font, .paragraphStyle: paragraph]
+        )
+        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
+        // Pad the width slightly so the widest line, which fills `renderedWidth`
+        // exactly, isn't nudged onto an extra line by sub-point rounding.
+        let layoutWidth = renderedWidth + 1
+        let path = CGPath(
+            rect: CGRect(x: 0, y: 0, width: layoutWidth, height: .greatestFiniteMagnitude),
+            transform: nil
+        )
+        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
+        guard let lines = CTFrameGetLines(frame) as? [CTLine], lines.count > 1,
+              let firstLine = lines.first else { return 0 }
+        let firstLineWidth = CTLineGetTypographicBounds(firstLine, nil, nil, nil)
+        return max(0, (renderedWidth - CGFloat(firstLineWidth)) / 2)
+        #else
+        return 0
+        #endif
     }
 
     /// The title/artist (+ album & quality badge when "show track details" is on)
@@ -428,7 +480,8 @@ struct NowPlayingView: View {
     /// constant height, so a track that lacks either doesn't change the layout —
     /// only its visibility changes.
     private var trackTextBlock: some View {
-        VStack(spacing: 10) {
+        let title = controller.currentTrack?.title ?? "Not Playing"
+        return VStack(spacing: 10) {
             // Title with the "now playing" equalizer to its left, baseline-aligned
             // to the title's top line so it sits beside the first line (not floating
             // to the vertical middle) when a long title wraps to two lines. The
@@ -438,14 +491,24 @@ struct NowPlayingView: View {
             // but still occupying its slot when paused).
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 nowPlayingTitleIndicator
-                Text(controller.currentTrack?.title ?? "Not Playing")
+                Text(title)
                     .font(.system(size: 46, weight: .bold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .shadow(color: .black.opacity(isLightPlayer ? 0 : 0.4), radius: 8, y: 2)
+                    // Measure the title's rendered width so the leading equalizer can
+                    // be nudged over to hug the first word even on wrapped titles.
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: TitleWidthKey.self, value: proxy.size.width)
+                        }
+                    )
                 Color.clear
                     .frame(width: nowPlayingIndicatorWidth, height: nowPlayingIndicatorHeight)
                     .accessibilityHidden(true)
+            }
+            .onPreferenceChange(TitleWidthKey.self) { width in
+                titleIndicatorInset = Self.titleIndicatorInset(for: title, renderedWidth: width)
             }
             if let artist = controller.currentTrack?.artistName, !artist.isEmpty {
                 Text(artist)
@@ -1021,6 +1084,15 @@ private extension View {
 /// Reports the natural height of the bottom control bar so the player can slide
 /// it fully off the bottom edge as a single layer.
 private struct BottomBarHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Reports the rendered width of the Now Playing title so the leading equalizer
+/// can be shifted to hug the first word of a wrapped, center-aligned title.
+private struct TitleWidthKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

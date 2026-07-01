@@ -127,11 +127,17 @@ struct PlayerControls: View {
 
     private var bottomCluster: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let openPanel {
-                panelContainer(for: openPanel)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            // The context slot directly above the scrub bar: normally the now-playing
+            // title/description; when a panel opens it cross-fades to the panel (the
+            // title/description are repetitive with the Info card, so they fade out).
+            ZStack(alignment: .bottomLeading) {
+                titleBlock
+                    .opacity(openPanel == nil ? 1 : 0)
+                if let openPanel {
+                    panelContainer(for: openPanel)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
             }
-            titleBlock
             scrubberRow
             buttonRow
         }
@@ -414,17 +420,20 @@ struct PlayerControls: View {
 
     // MARK: Info panel
 
-    /// The "Series · S1E1 · 37 min" line under the title.
-    private var episodeMetaLine: String {
-        var parts: [String] = []
-        if !model.subtitle.isEmpty { parts.append(model.subtitle) }
-        if !model.infoRuntimeLabel.isEmpty { parts.append(model.infoRuntimeLabel) }
-        return parts.joined(separator: " · ")
+    /// The bottom metadata row content: "S2 · E7 · 42m" (season/episode + runtime),
+    /// shown inline with the technical badges — Apple-TV style.
+    private var infoMetaLine: String {
+        [model.infoEpisodeTag, model.infoRuntimeLabel]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 
-    /// A wide now-playing card that slides into the controls area (video keeps
-    /// playing full-frame behind it): thumbnail · title · meta line · overview ·
-    /// badges, with Next/Previous Episode + Restart actions on the right.
+    /// A wide now-playing card that fades in over the title/description slot (the
+    /// video keeps playing full-frame behind it). A fixed-height 16:9 thumbnail
+    /// drives the card height so the art fills top-to-bottom and the borders stay
+    /// equidistant on every edge whether or not the item has a description. The
+    /// headline is the episode (not the show) title; season/episode + runtime ride
+    /// inline with the badges on the bottom row.
     private var infoPanel: some View {
         // Concentric radii, matching the app's cards: the thumbnail's media radius
         // nested inside the card's glass radius (outer = inner + content padding),
@@ -432,37 +441,41 @@ struct PlayerControls: View {
         let thumbRadius = PlozzTheme.Metrics.mediumMediaCornerRadius
         let contentPad: CGFloat = 24
         let cardRadius = thumbRadius + contentPad
+        let thumbHeight: CGFloat = 210
 
         return HStack(alignment: .top, spacing: 28) {
-            infoThumbnail(cornerRadius: thumbRadius)
+            infoThumbnail(cornerRadius: thumbRadius, height: thumbHeight)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(model.title.isEmpty ? "Now Playing" : model.title)
+                Text(model.infoHeadline.isEmpty ? "Now Playing" : model.infoHeadline)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
-                if !episodeMetaLine.isEmpty {
-                    Text(episodeMetaLine)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineLimit(1)
-                }
                 if !model.overview.isEmpty {
                     Text(model.overview)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(3)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
                 }
-                if !model.infoBadges.isEmpty {
-                    MediaBadgeRow(badges: model.infoBadges)
-                        .padding(.top, 4)
+                Spacer(minLength: 8)
+                // Bottom metadata row: season/episode + runtime, then the technical
+                // badges, all on one baseline pinned to the card's bottom edge.
+                HStack(alignment: .center, spacing: 12) {
+                    if !infoMetaLine.isEmpty {
+                        Text(infoMetaLine)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(1)
+                    }
+                    if !model.infoBadges.isEmpty {
+                        MediaBadgeRow(badges: model.infoBadges)
+                    }
                 }
             }
-            // Cap the text block to a comfortable reading measure so a full-width
-            // card doesn't stretch the overview into very long lines.
             .frame(maxWidth: 760, alignment: .leading)
+            .frame(height: thumbHeight, alignment: .topLeading)
 
             Spacer(minLength: 32)
 
@@ -490,10 +503,9 @@ struct PlayerControls: View {
         .modifier(PanelGlassBackground(cornerRadius: cardRadius))
     }
 
-    private func infoThumbnail(cornerRadius: CGFloat) -> some View {
+    private func infoThumbnail(cornerRadius: CGFloat, height: CGFloat) -> some View {
         Color.clear
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
-            .frame(width: 360)
+            .frame(width: height * 16.0 / 9.0, height: height)
             .overlay {
                 FallbackAsyncImage(urls: model.artworkURLs) {
                     Rectangle().fill(Color.white.opacity(0.08))

@@ -668,8 +668,8 @@ public final class AudioPlaybackController {
     /// controller busy.
     private func fireReport(_ event: PlaybackEvent, for track: MusicTrack, position: TimeInterval) {
         guard let reporter else { return }
-        PlozzLog.playback.debug(
-            "Music report \(event.rawValue) pos=\(Int(position))s id=\(track.id) '\(track.title)'"
+        MusicReportDiagnostics.emit(
+            "dispatch \(event.rawValue) pos=\(Int(position))s id=\(track.id) '\(track.title)'"
         )
         Task { await reporter(track, event, position) }
     }

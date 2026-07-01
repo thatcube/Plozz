@@ -169,8 +169,13 @@ func playbackReporter(for provider: any MusicProvider) -> AudioPlaybackControlle
         )
         do {
             try await media.reportPlayback(progress, event: event)
+            MusicReportDiagnostics.emit(
+                "sent OK \(event.rawValue) pos=\(Int(positionSeconds))s id=\(track.id)"
+            )
         } catch {
-            PlozzLog.playback.debug("Music playback report failed (non-fatal): \(event.rawValue)")
+            MusicReportDiagnostics.emit(
+                "send THREW \(event.rawValue) id=\(track.id): \(error)"
+            )
         }
     }
 }

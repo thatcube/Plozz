@@ -527,14 +527,23 @@ public final class AudioPlaybackController {
         enableRemoteCommands()
         let item = AVPlayerItem(url: url)
         // Change tracks by advancing the queue, never by emptying/replacing the
-        // sole item. Insert the new item behind the still-playing one and advance
-        // onto it: `advanceToNextItem()` transitions within the queue player's
-        // live pipeline, which PRESERVES the output route. On AirPlay 2,
-        // `replaceCurrentItem`/`removeAllItems` instead tears the route down and
-        // the speaker goes silent until it's physically reconnected. Keeping the
-        // player non-empty across the hand-off is what keeps the route alive.
-        if player.currentItem != nil {
-            player.insert(item, after: player.currentItem)
+        // sole item — and only advance once the NEW item has buffered enough to
+        // play. `advanceToNextItem()` transitions within the queue player's live
+        // pipeline (which preserves the AirPlay 2 output route), but advancing onto
+        // a still-cold item makes the pipeline STALL while it fetches, and that
+        // stall drops the route just like emptying the player does. So we insert
+        // the new item behind the still-playing one — keeping the current track
+        // (and the route) alive — wait for it to become ready, THEN hand off, so
+        // the pipeline never goes empty or stalls.
+        if let current = player.currentItem {
+            player.insert(item, after: current)
+            await waitUntilReadyToPlay(item)
+            // A rapid skip / new queue may have superseded us while buffering. Drop
+            // the item we speculatively queued and let the newer transition win.
+            guard generation == trackTransitionGeneration else {
+                player.remove(item)
+                return
+            }
             player.advanceToNextItem()
         } else {
             player.insert(item, after: nil)
@@ -570,6 +579,19 @@ public final class AudioPlaybackController {
         #if canImport(MediaPlayer)
         updateNowPlayingInfo()
         #endif
+    }
+
+    /// Polls `item.status` until it is ready to play (or fails, or a short timeout
+    /// elapses). Used before `advanceToNextItem()` so the queue only ever hands off
+    /// onto an already-buffered item: advancing onto a cold item stalls the pipeline
+    /// while it fetches, and that stall drops the AirPlay 2 route. Waiting here keeps
+    /// the current track playing — and the route alive — until the next one is ready
+    /// to take over. Runs on the main actor; `Task.sleep` suspends without blocking.
+    private func waitUntilReadyToPlay(_ item: AVPlayerItem, timeout: TimeInterval = 4.0) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while item.status != .readyToPlay, item.status != .failed, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 40_000_000) // 40ms
+        }
     }
 
     /// Re-resolves the current track's lyrics from scratch. Used when the user

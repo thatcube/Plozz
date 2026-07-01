@@ -33,9 +33,12 @@ public typealias MusicTrack = CoreModels.MusicTrack
 /// PRESERVES the output route. That is essential for AirPlay 2: `removeAllItems()`,
 /// `replaceCurrentItem(with:)`, or advancing onto an unbuffered item tears the
 /// route to the speaker down, so the next track is silent (and the speaker stays
-/// dead until it's physically reconnected), while seeking within the same item —
-/// which never swaps the item — is unaffected. As a safety net for transitions
-/// that can't be pre-enqueued (arbitrary jumps), route-change and interruption
+/// dead until it's physically reconnected). Seeking within the same item never
+/// swaps the item, but a seek still flushes the render buffer, which can ALSO
+/// drop the (system-level, app-invisible) HomePod route — so `seek(to:)`
+/// re-asserts playback with `playImmediately(atRate:)` right after the seek
+/// completes to re-negotiate the output. As a safety net for transitions that
+/// can't be pre-enqueued (arbitrary jumps), route-change and interruption
 /// observers re-activate the session and resume if the system parks playback.
 ///
 /// tvOS background audio (the part the video flow never does):
@@ -500,6 +503,27 @@ public final class AudioPlaybackController {
             toleranceBefore: tolerance,
             toleranceAfter: tolerance
         )
+        // POST-SEEK NUDGE — the actual fix for the HomePod-goes-silent-on-seek bug.
+        // The seek's buffer flush can silently drop tvOS's system-level HomePod
+        // AirPlay 2 forwarding (a route the app never sees — it always reports
+        // HDMI), with NO interruption / routeChange / stall fired; the player keeps
+        // reporting .playing while the HomePod is quiet. The treadmill preserves
+        // the route across TRACK changes by handing off to a pre-buffered item, but
+        // a seek within the current item has no such re-assertion — so we add it
+        // here. `play()` is a no-op when the rate is already 1.0 (which it is), so
+        // it does NOT re-negotiate the output; `playImmediately(atRate:)` sends an
+        // explicit "start now" that forces AVFoundation to re-negotiate ALL output
+        // sinks, including the HomePod pipe. This is the same re-assertion `resume()`
+        // uses. Safe here because `seek` only completes once the buffer holds data
+        // (never forces an empty AirPlay buffer). Guarded by `isPlaying` so a
+        // paused scrub does not auto-resume.
+        if isPlaying {
+            #if canImport(AVFoundation) && !os(macOS)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            #endif
+            player.playImmediately(atRate: 1.0)
+            diag("seek", "seek nudge: setActive+playImmediately route=\(routeSummary()) postState=[\(playerStateSummary())]")
+        }
         diag("seek", "seek done route=\(routeSummary()) postState=[\(playerStateSummary())]")
         currentTime = target
         #if canImport(MediaPlayer)
@@ -1185,7 +1209,16 @@ public final class AudioPlaybackController {
                      AVAudioSession.mediaServicesWereLostNotification] {
             let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.diag("mediaserver", "\(name.rawValue) route=\(self?.routeSummary() ?? "?") state=[\(self?.playerStateSummary() ?? "?")]")
+                    guard let self else { return }
+                    self.diag("mediaserver", "\(name.rawValue) route=\(self.routeSummary()) state=[\(self.playerStateSummary())]")
+                    // If mediaserverd actually reset, our session claim is gone —
+                    // force a re-configure on the next activation and re-assert
+                    // playback so the HomePod (and any output) comes back.
+                    if name == AVAudioSession.mediaServicesWereResetNotification {
+                        self.sessionConfigured = false
+                        self.configureSessionIfNeeded()
+                        self.attemptPlaybackRecovery()
+                    }
                 }
             }
             diagnosticItemObservers.append(token)

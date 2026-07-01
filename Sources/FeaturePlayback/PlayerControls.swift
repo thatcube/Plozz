@@ -106,6 +106,11 @@ struct PlayerControls: View {
     /// (otherwise it snaps back the instant the panel starts collapsing).
     @State private var titleVisible = true
 
+    /// Full height available to the controls layer (captured via a background
+    /// GeometryReader). Drives how tall the Subtitle Style panel grows so it can
+    /// climb toward the top edge while staying pinned to the bottom cluster.
+    @State private var availableHeight: CGFloat = 0
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -116,6 +121,12 @@ struct PlayerControls: View {
             .animation(.easeInOut(duration: 0.25), value: model.controlsVisible)
         }
         .ignoresSafeArea()
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: ControlsHeightKey.self, value: proxy.size.height)
+            }
+        )
+        .onPreferenceChange(ControlsHeightKey.self) { availableHeight = $0 }
         .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
         .onChange(of: model.controlBarVisible) { _, focused in
             openPanel = nil
@@ -460,8 +471,13 @@ struct PlayerControls: View {
                         }
                     }
                     .padding(.vertical, 10)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: isStyleScreen(category) ? styleScreenContentHeight : nil,
+                        alignment: .topLeading
+                    )
                 }
-                .frame(maxHeight: 440)
+                .frame(maxHeight: isStyleScreen(category) ? styleScreenContentHeight : 440)
             }
             .frame(width: 520, alignment: .leading)
             .colorScheme(.dark)
@@ -470,6 +486,21 @@ struct PlayerControls: View {
             // opens against the trailing edge above them rather than on the left.
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
+    }
+
+    private func isStyleScreen(_ category: Category) -> Bool {
+        category == .subtitles && subtitleScreen == .style
+    }
+
+    /// Height the Subtitle Style scroll area is pinned to so the panel climbs
+    /// toward the top edge, leaving a top margin roughly matching the panel's
+    /// ~60pt side margin while its bottom stays anchored above the scrubber. The
+    /// reserve covers the bottom chrome (scrubber + button row + paddings), the
+    /// panel header, and that target top margin; it clamps so short screens still
+    /// render if the height hasn't been measured yet.
+    private var styleScreenContentHeight: CGFloat {
+        guard availableHeight > 0 else { return 440 }
+        return max(360, availableHeight - 360)
     }
 
     // MARK: Info panel
@@ -589,11 +620,25 @@ struct PlayerControls: View {
         .focused($focus, equals: slot)
     }
 
-    /// Header of the floating panel: the screen title on the left, and — on the
-    /// Subtitles track list only — the ✎ Edit (appearance) button on the right.
+    /// Header of the floating panel: the screen title, plus — on the Subtitles
+    /// track list — a trailing ✎ Edit (appearance) button, and — on a Subtitles
+    /// sub-screen — a leading Back chevron.
     @ViewBuilder
     private func panelHeader(for category: Category) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
+            // On a Subtitles sub-screen (Style / Download), the Back control lives
+            // in the header — leading the title — so it mirrors the other menus
+            // rather than floating inside the scrollable content.
+            if category == .subtitles && subtitleScreen != .tracks {
+                Button {
+                    openSubtitleScreen(.tracks)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.title3.weight(.semibold))
+                }
+                .playerGlassButton(prominent: false)
+                .focused($focus, equals: .subBack)
+            }
             Text(headerTitle(for: category))
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
@@ -682,28 +727,178 @@ struct PlayerControls: View {
     }
 
     /// The live subtitle-appearance editor, hosted over the running video so every
-    /// tweak previews instantly on the real subtitles behind the panel. Edits are
-    /// routed through `actions.setSubtitleStyle`, which the view model applies to
-    /// the live overlay and persists to the profile's appearance store. A Back
-    /// button (top, focus-seated on open) returns to the track list.
+    /// tweak previews instantly on the real subtitles behind the panel. Rows use
+    /// the same steppers / focus language as the other in-player menus. Edits are
+    /// funnelled through `updateStyle`, which routes to `actions.setSubtitleStyle`
+    /// (live overlay + profile persistence). Back lives in the panel header.
+    @ViewBuilder
     private var subtitleStyleEditor: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Button {
-                openSubtitleScreen(.tracks)
-            } label: {
-                Label("Back", systemImage: "chevron.left")
-            }
-            .playerGlassButton(prominent: false)
-            .focused($focus, equals: .subBack)
+        let style = model.subtitleStyle
+        VStack(alignment: .leading, spacing: 2) {
+            styleStepperRow(
+                title: "Text Size",
+                options: Self.sizeOptions,
+                selection: Int((style.fontScale * 100).rounded()),
+                label: { "\($0)%" }
+            ) { pct in updateStyle { $0.fontScale = Double(pct) / 100 } }
 
-            SubtitleAppearanceEditor(style: Binding(
-                get: { model.subtitleStyle },
-                set: { actions.setSubtitleStyle($0) }
-            ))
+            styleStepperRow(
+                title: "Position",
+                options: Self.positionOptions,
+                selection: Int((style.verticalPosition * 100).rounded()),
+                label: Self.positionLabel
+            ) { pct in updateStyle { $0.verticalPosition = Double(pct) / 100 } }
+
+            styleStepperRow(
+                title: "Opacity",
+                options: Self.opacityOptions,
+                selection: Int((style.opacity * 100).rounded()),
+                label: { "\($0)%" }
+            ) { pct in updateStyle { $0.opacity = Double(pct) / 100 } }
+
+            styleStepperRow(
+                title: "Text Colour",
+                options: Self.textColorOptions,
+                selection: style.textColor,
+                label: Self.colorLabel
+            ) { color in updateStyle { $0.textColor = color } }
+
+            styleStepperRow(
+                title: "Outline",
+                options: SubtitleEdgeStyle.allCases,
+                selection: style.edge.style,
+                label: { $0.displayName }
+            ) { edge in updateStyle { $0.edge.style = edge } }
+
+            styleToggleRow(
+                title: "Background Box",
+                isOn: style.background.isEnabled,
+                slot: Self.styleBoxSlot
+            ) {
+                updateStyle { s in
+                    s.background.isEnabled.toggle()
+                    if s.background.isEnabled && !Self.boxColorOptions.contains(s.background.color) {
+                        s.background.color = Self.boxColorOptions[0]
+                    }
+                }
+            }
+
+            if style.background.isEnabled {
+                styleStepperRow(
+                    title: "Box Colour",
+                    options: Self.boxColorOptions,
+                    selection: Self.boxColorOptions.contains(style.background.color) ? style.background.color : Self.boxColorOptions[0],
+                    label: Self.boxColorLabel
+                ) { color in updateStyle { $0.background.color = color } }
+            }
+
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    // MARK: Subtitle style editor rows + option sets
+
+    /// One appearance row: a leading title and a trailing compact stepper, matching
+    /// the Speed menu's stepper language (circular focus thumb). The stepper snaps
+    /// the current value to the nearest listed option so a legacy value off-grid
+    /// still shows and steps cleanly.
+    private func styleStepperRow<V: Hashable>(
+        title: String,
+        options: [V],
+        selection current: V,
+        label: @escaping (V) -> String,
+        apply: @escaping (V) -> Void
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(.white)
+            Spacer(minLength: 8)
+            SettingsStepper(
+                options: options,
+                selection: Binding(
+                    get: { options.contains(current) ? current : (options.first ?? current) },
+                    set: { apply($0) }
+                ),
+                compact: true,
+                title: label
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+    }
+
+    /// A button-based on/off row (NOT a SwiftUI `Toggle`) so it flips on Select and
+    /// wears the same fitted-white-card focus as every other menu row.
+    private func styleToggleRow(
+        title: String,
+        isOn: Bool,
+        slot: Int,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Text(title).font(.body).lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .playerMenuRowMark(isSelected: isOn, accent: palette.accent)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .row(slot))
+    }
+
+    /// Reads the mirror, applies the mutation, and routes the result through the
+    /// live-apply + persist funnel. Single write path for every appearance control.
+    private func updateStyle(_ mutate: (inout SubtitleStyle) -> Void) {
+        var next = model.subtitleStyle
+        mutate(&next)
+        actions.setSubtitleStyle(next)
+    }
+
+    // Precise, numeric option grids (percentages) — no "low / high" buckets.
+    private static let sizeOptions: [Int] = Array(stride(from: 60, through: 250, by: 5))
+    private static let positionOptions: [Int] = Array(stride(from: 0, through: 90, by: 5))
+    private static let opacityOptions: [Int] = Array(stride(from: 20, through: 100, by: 5))
+    private static let textColorOptions: [SubtitleColor] = SubtitleColor.presets.map(\.color)
+    private static let boxColorOptions: [SubtitleColor] = [
+        SubtitleColor(red: 0, green: 0, blue: 0, alpha: 0.65),
+        SubtitleColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 0.7),
+        SubtitleColor(red: 1, green: 1, blue: 1, alpha: 0.75)
+    ]
+    /// Focus slot for the Background Box toggle — parked high so it never collides
+    /// with the track-list `.row(index)` slots reused across panes.
+    private static let styleBoxSlot = 90
+
+    /// 0% = seated at the bottom safe edge; 90% = near the top. Anchors are named
+    /// so the extremes read clearly, but every step in between is a plain percent.
+    private static func positionLabel(_ pct: Int) -> String {
+        switch pct {
+        case 0: return "Bottom"
+        case 90: return "Top"
+        default: return "\(pct)%"
+        }
+    }
+
+    private static func colorLabel(_ color: SubtitleColor) -> String {
+        SubtitleColor.presets.first(where: { $0.color == color })?.name ?? "Custom"
+    }
+
+    private static func boxColorLabel(_ color: SubtitleColor) -> String {
+        switch boxColorOptions.firstIndex(of: color) {
+        case 0: return "Black"
+        case 1: return "Charcoal"
+        case 2: return "White"
+        default: return "Custom"
+        }
     }
 
     private func subScreenStub(message: String) -> some View {
@@ -715,13 +910,6 @@ struct PlayerControls: View {
             Text("Coming soon")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.4))
-            Button {
-                openSubtitleScreen(.tracks)
-            } label: {
-                Label("Back", systemImage: "chevron.left")
-            }
-            .playerGlassButton(prominent: false)
-            .focused($focus, equals: .subBack)
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 14)
@@ -1175,6 +1363,15 @@ struct PlayerControls: View {
         scrubbing
             ? .easeOut(duration: 0.1)
             : .easeOut(duration: 0.2).delay(0.45)
+    }
+}
+
+/// Reports the controls layer's full height up the tree so the Subtitle Style
+/// panel can size itself to climb toward the top edge.
+private struct ControlsHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

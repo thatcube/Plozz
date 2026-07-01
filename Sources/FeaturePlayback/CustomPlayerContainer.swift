@@ -19,6 +19,12 @@ struct PlayerActions {
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
+    /// Advance to the next episode (Info card → Next Episode).
+    var playNextEpisode: () -> Void = {}
+    /// Return to the previous episode (Info card → Previous).
+    var playPreviousEpisode: () -> Void = {}
+    /// Restart the current item from the beginning (Info card → Restart).
+    var restart: () -> Void = {}
     /// Seek past the active intro/credits segment (Skip button Select).
     var skipSegment: () -> Void = {}
     /// Auto-seek past the active segment (no button) when Auto-skip is enabled.
@@ -303,7 +309,10 @@ final class PlayerInputViewController: UIViewController {
             setPlaybackSpeed: { [weak self] in self?.actions.setPlaybackSpeed($0) },
             setAudioDelay: { [weak self] in self?.actions.setAudioDelay($0) },
             setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
-            setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) }
+            setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) },
+            playNextEpisode: { [weak self] in self?.actions.playNextEpisode() },
+            playPreviousEpisode: { [weak self] in self?.actions.playPreviousEpisode() },
+            restart: { [weak self] in self?.actions.restart() }
         )
         let host = UIHostingController(rootView: themePalette.makeControls(model, actions, exitToSurface))
         host.view.backgroundColor = .clear

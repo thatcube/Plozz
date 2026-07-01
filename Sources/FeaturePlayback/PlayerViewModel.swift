@@ -441,6 +441,8 @@ public final class PlayerViewModel {
         let (prev, next) = await neighborResolver()
         previousEpisode = prev
         nextEpisode = next
+        controls.hasPreviousEpisode = prev != nil
+        controls.hasNextEpisode = next != nil
     }
 
     /// Fetches the playing episode's series-level ids and folds them into the
@@ -1425,6 +1427,10 @@ public final class PlayerViewModel {
     private func configureControls(for request: PlaybackRequest) {
         controls.title = request.item.title
         controls.subtitle = Self.subtitleText(for: request.item)
+        controls.overview = request.item.overview ?? ""
+        controls.infoBadges = request.item.technicalBadges
+        controls.artworkURLs = [request.item.backdropURL, request.item.heroBackdropURL, request.item.fallbackArtworkURL, request.item.posterURL].compactMap { $0 }
+        controls.infoRuntimeLabel = request.item.runtime?.runtimeBadgeText ?? ""
         controls.hasTrickplay = request.scrubPreview?.isUsable ?? false
         controls.duration = request.item.runtime ?? 0
         controls.currentSeconds = 0

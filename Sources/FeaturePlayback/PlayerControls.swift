@@ -2,6 +2,7 @@
 import SwiftUI
 import UIKit
 import CoreUI
+import CoreModels
 
 /// Lightweight value-type bag of options callbacks. Mirrors the tunable subset
 /// of `PlayerActions` so the controls stay presentation-only.
@@ -14,6 +15,9 @@ struct PlayerOptionsActions {
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
+    var playNextEpisode: () -> Void = {}
+    var playPreviousEpisode: () -> Void = {}
+    var restart: () -> Void = {}
 }
 
 /// The complete custom-player transport: a title bar, the scrub bar (with
@@ -43,7 +47,7 @@ struct PlayerControls: View {
     let onExitToSurface: () -> Void
 
     enum Category: Hashable {
-        case subtitles, audio, speed, sync
+        case subtitles, audio, speed, sync, info
 
         var title: String {
             switch self {
@@ -51,6 +55,7 @@ struct PlayerControls: View {
             case .audio: return "Audio"
             case .speed: return "Speed"
             case .sync: return "A/V Sync"
+            case .info: return "Info"
             }
         }
 
@@ -60,13 +65,16 @@ struct PlayerControls: View {
             case .audio: return "waveform"
             case .speed: return "speedometer"
             case .sync: return "slider.horizontal.below.square.and.square.filled"
+            case .info: return "info.circle"
             }
         }
     }
 
     private enum FocusSlot: Hashable {
         case button(Category)
-        case info       // Far-left media Info placeholder
+        case infoNext       // Info panel: Next Episode
+        case infoPrev       // Info panel: Previous Episode
+        case infoRestart    // Info panel: Restart
         case diagnostics
         case row(Int)
         case edit       // Subtitles header ✎ Edit (appearance) button
@@ -102,7 +110,13 @@ struct PlayerControls: View {
         }
         .onChange(of: openPanel) { _, panel in
             subtitleScreen = .tracks
-            if let panel { focus = .row(selectedRowIndex(for: panel)) }
+            guard let panel else { return }
+            if panel == .info {
+                focus = model.hasNextEpisode ? .infoNext
+                    : (model.hasPreviousEpisode ? .infoPrev : .infoRestart)
+            } else {
+                focus = .row(selectedRowIndex(for: panel))
+            }
         }
         .onExitCommand { handleExit() }
         .onPlayPauseCommand { actions.togglePlayPause() }
@@ -183,13 +197,13 @@ struct PlayerControls: View {
         HStack(spacing: 20) {
             // Utility cluster (far left): media Info placeholder + Diagnostics.
             Button {
-                // Placeholder — media info panel is TBD.
+                toggle(.info)
             } label: {
                 Label("Info", systemImage: "info.circle")
                     .labelStyle(.iconOnly)
             }
-            .playerGlassButton(prominent: false)
-            .focused($focus, equals: .info)
+            .playerGlassButton(prominent: openPanel == .info)
+            .focused($focus, equals: .button(.info))
 
             Button {
                 model.diagnosticsEnabled.toggle()
@@ -232,28 +246,143 @@ struct PlayerControls: View {
 
     @ViewBuilder
     private func panelContainer(for category: Category) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            panelHeader(for: category)
-            Divider().background(.white.opacity(0.15))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    switch category {
-                    case .subtitles: subtitleBody
-                    case .audio: audioPane
-                    case .speed: speedPane
-                    case .sync: syncPane
+        if category == .info {
+            infoPanel
+                .colorScheme(.dark)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                panelHeader(for: category)
+                Divider().background(.white.opacity(0.15))
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        switch category {
+                        case .subtitles: subtitleBody
+                        case .audio: audioPane
+                        case .speed: speedPane
+                        case .sync: syncPane
+                        case .info: EmptyView()
+                        }
+                    }
+                    .padding(.vertical, 10)
+                }
+                .frame(maxHeight: 440)
+            }
+            .frame(width: 520, alignment: .leading)
+            .colorScheme(.dark)
+            .modifier(PanelGlassBackground())
+            // The track controls live on the right of the button row, so the panel
+            // opens against the trailing edge above them rather than on the left.
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    // MARK: Info panel
+
+    /// The "Series · S1E1 · 37 min" line under the title.
+    private var episodeMetaLine: String {
+        var parts: [String] = []
+        if !model.subtitle.isEmpty { parts.append(model.subtitle) }
+        if !model.infoRuntimeLabel.isEmpty { parts.append(model.infoRuntimeLabel) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// A wide now-playing card that slides into the controls area (video keeps
+    /// playing full-frame behind it): thumbnail · title · meta line · overview ·
+    /// badges, with Next/Previous Episode + Restart actions on the right.
+    private var infoPanel: some View {
+        // Concentric radii, matching the app's cards: the thumbnail's media radius
+        // nested inside the card's glass radius (outer = inner + content padding),
+        // so both corners share a centre.
+        let thumbRadius = PlozzTheme.Metrics.mediumMediaCornerRadius
+        let contentPad: CGFloat = 24
+        let cardRadius = thumbRadius + contentPad
+
+        return HStack(alignment: .top, spacing: 26) {
+            infoThumbnail(cornerRadius: thumbRadius)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.title.isEmpty ? "Now Playing" : model.title)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                if !episodeMetaLine.isEmpty {
+                    Text(episodeMetaLine)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
+                if !model.overview.isEmpty {
+                    Text(model.overview)
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.82))
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+                if !model.infoBadges.isEmpty {
+                    MediaBadgeRow(badges: model.infoBadges)
+                        .padding(.top, 4)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(spacing: 12) {
+                if model.hasNextEpisode {
+                    infoActionButton(title: "Next Episode", icon: "forward.end.fill", prominent: true, slot: .infoNext) {
+                        actions.playNextEpisode()
                     }
                 }
-                .padding(.vertical, 10)
+                if model.hasPreviousEpisode {
+                    infoActionButton(title: "Previous", icon: "backward.end.fill", prominent: false, slot: .infoPrev) {
+                        actions.playPreviousEpisode()
+                    }
+                }
+                infoActionButton(title: "Restart", icon: "arrow.counterclockwise", prominent: false, slot: .infoRestart) {
+                    actions.restart()
+                    openPanel = nil
+                    focus = .button(.info)
+                }
             }
-            .frame(maxHeight: 440)
+            .frame(width: 260)
         }
-        .frame(width: 520, alignment: .leading)
-        .colorScheme(.dark)
-        .modifier(PanelGlassBackground())
-        // The track controls live on the right of the button row, so the panel
-        // opens against the trailing edge above them rather than on the left.
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(contentPad)
+        .frame(maxWidth: 1180, alignment: .leading)
+        .modifier(PanelGlassBackground(cornerRadius: cardRadius))
+    }
+
+    private func infoThumbnail(cornerRadius: CGFloat) -> some View {
+        Color.clear
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .frame(width: 300)
+            .overlay {
+                FallbackAsyncImage(urls: model.artworkURLs) {
+                    Rectangle().fill(Color.white.opacity(0.08))
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.system(size: 34, weight: .regular))
+                                .foregroundStyle(.white.opacity(0.28))
+                        )
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .plozzMediaEdge(cornerRadius: cornerRadius)
+    }
+
+    private func infoActionButton(
+        title: String,
+        icon: String,
+        prominent: Bool,
+        slot: FocusSlot,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+        }
+        .playerGlassButton(prominent: prominent)
+        .focused($focus, equals: slot)
     }
 
     /// Header of the floating panel: the screen title on the left, and — on the
@@ -728,6 +857,8 @@ struct PlayerControls: View {
             return Self.speedPresets.firstIndex(where: { abs(model.playbackSpeed - $0) < 0.001 }) ?? 0
         case .sync:
             return 0
+        case .info:
+            return 0
         }
     }
 
@@ -1082,7 +1213,8 @@ private extension View {
 /// the diagnostics FPS over DV content and fall back to the solid fill if it
 /// ever stutters.
 private struct PanelGlassBackground: ViewModifier {
-    private let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+    var cornerRadius: CGFloat = 24
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
 
     func body(content: Content) -> some View {
         if #available(tvOS 26.0, *) {

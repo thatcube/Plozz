@@ -53,6 +53,20 @@ public final class PlayerControlsModel {
     public var subtitle: String = ""
     public var hasTrickplay: Bool = false
 
+    // MARK: Info panel
+    /// Long-form synopsis for the now-playing Info card.
+    public var overview: String = ""
+    /// Technical badges (resolution/codec/HDR/etc.) for the Info card.
+    public var infoBadges: [MediaBadge] = []
+    /// Ordered artwork candidates (image → backdrop → poster) for the Info thumbnail.
+    public var artworkURLs: [URL] = []
+    /// Pre-formatted runtime label (e.g. "37 min") for the Info card meta line.
+    public var infoRuntimeLabel: String = ""
+    /// Whether a following episode exists to jump to from the Info card.
+    public var hasNextEpisode: Bool = false
+    /// Whether a preceding episode exists to jump to from the Info card.
+    public var hasPreviousEpisode: Bool = false
+
     // MARK: Track menus
     public var audioOptions: [PlayerTrackOption] = []
     public var subtitleOptions: [PlayerTrackOption] = []

@@ -22,6 +22,9 @@ Package.resolved
 # macOS
 .DS_Store
 
+# Local tooling cache (machine-specific; leaks local paths/session ids)
+.impeccable/
+
 # Generated
 *.generated.swift
 

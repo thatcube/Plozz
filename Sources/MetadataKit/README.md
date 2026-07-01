@@ -5,7 +5,7 @@ art that the user's own server already supplies. The keyless backbone is
 what lets Plozz ship a great anime + episode-thumbnail + music experience
 **without bringing your own API key**.
 
-See `METADATA_ARCHITECTURE.md` at the repo root for the full design and
+See `docs/METADATA_ARCHITECTURE.md` for the full design and
 the rationale for "keyless per-IP scales infinitely, shared-key doesn't".
 
 ## Responsibility
@@ -51,4 +51,4 @@ the rationale for "keyless per-IP scales infinitely, shared-key doesn't".
 - `MetadataProviderConfig.swift` — how the optional TMDb tier is wired.
 - `ContentClassification.swift` — the anime / movie / tvShow / music
   decision.
-- `METADATA_ARCHITECTURE.md` (repo root) — the full architectural story.
+- `docs/METADATA_ARCHITECTURE.md` — the full architectural story.

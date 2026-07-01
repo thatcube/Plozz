@@ -221,7 +221,42 @@ extension JellyfinProvider: MusicProvider {
         )
     }
 
-    // MARK: Library-scoped browse
+    public func recentlyPlayedPlaylists(limit: Int) async throws -> [MusicPlaylist] {
+        try await recentlyPlayedPlaylists(limit: limit, parentIDs: nil)
+    }
+
+    public func recentlyPlayedPlaylists(limit: Int, libraryIDs: [String]?) async throws -> [MusicPlaylist] {
+        try await recentlyPlayedPlaylists(limit: limit, parentIDs: libraryIDs)
+    }
+
+    private func recentlyPlayedPlaylists(limit: Int, parentIDs: [String]?) async throws -> [MusicPlaylist] {
+        guard limit > 0 else { return [] }
+
+        // Playlists are account-global in Jellyfin (not under a music view), so
+        // the library scope doesn't apply — one recursive query returns them all.
+        // `filters: ["IsPlayed"]` keeps only playlists the backend has stamped
+        // with a `DatePlayed`; some Jellyfin versions don't stamp playlists when
+        // their member tracks play, in which case this returns empty (handled
+        // upstream — the rail simply omits playlists).
+        let response = try? await client.musicItems(
+            userID: session.userID,
+            parentID: nil,
+            includeItemTypes: ["Playlist"],
+            recursive: true,
+            startIndex: 0,
+            limit: limit,
+            sortBy: "DatePlayed",
+            sortOrder: "Descending",
+            filters: ["IsPlayed"]
+        )
+        return Array(
+            (response?.Items ?? [])
+                .map(mapPlaylist(_:))
+                .filter { $0.lastPlayedAt != nil }
+                .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .prefix(limit)
+        )
+    }
 
     public func musicItems(in containerID: String, kind: MusicItemKind, page: PageRequest, libraryIDs: [String]?) async throws -> MusicPage {
         // Scope only applies to the whole-library (empty container) query; a
@@ -486,7 +521,8 @@ extension JellyfinProvider: MusicProvider {
             title: dto.Name ?? "Playlist",
             artworkURL: client.imageURL(itemID: dto.Id, kind: .primary, maxWidth: 500),
             trackCount: dto.ChildCount,
-            totalDuration: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks)
+            totalDuration: JellyfinTicks.seconds(fromTicks: dto.RunTimeTicks),
+            lastPlayedAt: JellyfinProvider.parseDate(dto.UserData?.LastPlayedDate)
         )
     }
 }

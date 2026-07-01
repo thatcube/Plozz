@@ -66,6 +66,7 @@ struct PlayerControls: View {
 
     private enum FocusSlot: Hashable {
         case button(Category)
+        case info       // Far-left media Info placeholder
         case diagnostics
         case row(Int)
         case edit       // Subtitles header ✎ Edit (appearance) button
@@ -180,6 +181,16 @@ struct PlayerControls: View {
 
     private var buttonRow: some View {
         HStack(spacing: 20) {
+            // Utility cluster (far left): media Info placeholder + Diagnostics.
+            Button {
+                // Placeholder — media info panel is TBD.
+            } label: {
+                Label("Info", systemImage: "info.circle")
+                    .labelStyle(.iconOnly)
+            }
+            .playerGlassButton(prominent: false)
+            .focused($focus, equals: .info)
+
             Button {
                 model.diagnosticsEnabled.toggle()
             } label: {
@@ -192,6 +203,9 @@ struct PlayerControls: View {
             .playerGlassButton(prominent: model.diagnosticsEnabled)
             .focused($focus, equals: .diagnostics)
 
+            Spacer(minLength: 20)
+
+            // Track controls (far right), grouped: Speed · Audio · Subtitles.
             ForEach(availableCategories, id: \.self) { category in
                 Button {
                     toggle(category)
@@ -584,17 +598,16 @@ struct PlayerControls: View {
 
     // MARK: Model helpers
 
-    /// Left→right: Diagnostics (rendered separately, far left), then Speed · Sync ·
-    /// Audio · **Subtitles**. The two most-used track controls sit on the right,
-    /// with Subtitles at the far-right edge.
+    /// Track controls, left→right: Speed · Audio · **Subtitles** (Subtitles at the
+    /// far-right edge), rendered on the right of the button row opposite the
+    /// left-hand utility cluster (Info · Diagnostics).
+    ///
+    /// A/V Sync is intentionally omitted for now — the standalone button was
+    /// removed. `Category.sync` + `syncPane` are kept so it can be restored later.
     private var availableCategories: [Category] {
         var result: [Category] = []
         if model.engineCapabilities.contains(.playbackSpeed) {
             result.append(.speed)
-        }
-        if model.engineCapabilities.contains(.audioDelay)
-            || model.engineCapabilities.contains(.subtitleDelay) {
-            result.append(.sync)
         }
         if model.hasSelectableAudio
             || model.engineCapabilities.contains(.dialogEnhance) {

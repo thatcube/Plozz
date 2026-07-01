@@ -63,18 +63,30 @@ targets:
           - "AtkinsonHyperlegible-Bold.ttf"
           - "AtkinsonHyperlegible-BoldItalic.ttf"
           # Additional subtitle faces, all open-license and bundled like Atkinson.
-          # Lexend (OFL) — tuned for reading speed/comprehension; ships upright
-          # Regular/Bold only, so the renderer degrades italics to upright.
+          # Lexend (OFL) — tuned for reading speed/comprehension; upright weights
+          # Regular/Medium/SemiBold/Bold (instanced from the variable font), no
+          # italics, so the renderer degrades italics to upright.
           # License: App/Resources/Fonts/OFL-Lexend.txt.
           - "Lexend-Regular.ttf"
+          - "Lexend-Medium.ttf"
+          - "Lexend-SemiBold.ttf"
           - "Lexend-Bold.ttf"
           # Roboto (OFL) — the neutral, familiar sans used by Android/YouTube
-          # captions; full Regular/Bold/Italic/BoldItalic set.
+          # captions; upright Regular/Medium/SemiBold/Bold plus Italic/BoldItalic.
           # License: App/Resources/Fonts/OFL-Roboto.txt.
           - "Roboto-Regular.ttf"
+          - "Roboto-Medium.ttf"
+          - "Roboto-SemiBold.ttf"
           - "Roboto-Italic.ttf"
           - "Roboto-Bold.ttf"
           - "Roboto-BoldItalic.ttf"
+          # Fredoka (OFL) — a rounded, chunky, playful display sans; upright
+          # Regular/Medium/SemiBold/Bold (instanced from the variable font), no
+          # italics. License: App/Resources/Fonts/OFL-Fredoka.txt.
+          - "Fredoka-Regular.ttf"
+          - "Fredoka-Medium.ttf"
+          - "Fredoka-SemiBold.ttf"
+          - "Fredoka-Bold.ttf"
           # OpenDyslexic (OFL) — weighted-bottom letterforms that aid readers with
           # dyslexia; full Regular/Bold/Italic/BoldItalic set (OTF).
           # License: App/Resources/Fonts/OFL-OpenDyslexic.txt.

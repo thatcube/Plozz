@@ -70,11 +70,19 @@
 		<string>AtkinsonHyperlegible-Bold.ttf</string>
 		<string>AtkinsonHyperlegible-BoldItalic.ttf</string>
 		<string>Lexend-Regular.ttf</string>
+		<string>Lexend-Medium.ttf</string>
+		<string>Lexend-SemiBold.ttf</string>
 		<string>Lexend-Bold.ttf</string>
 		<string>Roboto-Regular.ttf</string>
+		<string>Roboto-Medium.ttf</string>
+		<string>Roboto-SemiBold.ttf</string>
 		<string>Roboto-Italic.ttf</string>
 		<string>Roboto-Bold.ttf</string>
 		<string>Roboto-BoldItalic.ttf</string>
+		<string>Fredoka-Regular.ttf</string>
+		<string>Fredoka-Medium.ttf</string>
+		<string>Fredoka-SemiBold.ttf</string>
+		<string>Fredoka-Bold.ttf</string>
 		<string>OpenDyslexic-Regular.otf</string>
 		<string>OpenDyslexic-Italic.otf</string>
 		<string>OpenDyslexic-Bold.otf</string>

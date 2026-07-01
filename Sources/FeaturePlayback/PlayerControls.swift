@@ -93,13 +93,13 @@ struct PlayerControls: View {
     /// Style screen has its own detail sub-screens (`styleOutline` / `styleBackground`
     /// / `styleDual`). Back steps to a screen's PARENT rather than closing the panel.
     private enum SubtitleScreen {
-        case tracks, download, style, styleOutline, styleBackground, styleDual
+        case tracks, download, style, styleFont, styleOutline, styleBackground, styleDual
 
         /// The screen a Back / Menu press should return to.
         var parent: SubtitleScreen {
             switch self {
             case .tracks, .download, .style: return .tracks
-            case .styleOutline, .styleBackground, .styleDual: return .style
+            case .styleFont, .styleOutline, .styleBackground, .styleDual: return .style
             }
         }
 
@@ -107,7 +107,7 @@ struct PlayerControls: View {
         /// share the taller upward-growing panel).
         var isStyleFamily: Bool {
             switch self {
-            case .style, .styleOutline, .styleBackground, .styleDual: return true
+            case .style, .styleFont, .styleOutline, .styleBackground, .styleDual: return true
             case .tracks, .download: return false
             }
         }
@@ -776,6 +776,7 @@ struct PlayerControls: View {
         case .tracks: return "Subtitles"
         case .download: return "Download Subtitles"
         case .style: return "Subtitle Style"
+        case .styleFont: return "Font"
         case .styleOutline: return "Outline & Border"
         case .styleBackground: return "Background"
         case .styleDual: return "Dual Subtitles"
@@ -796,8 +797,9 @@ struct PlayerControls: View {
             if let format = model.secondarySubtitleImagePrimaryFormat {
                 styleUnavailableForImageSubtitle(format: format)
             } else {
-                styleScreen(styleMainRows, dividerBefore: 5)
+                styleScreen(styleMainRows, dividerBefore: 6)
             }
+        case .styleFont: styleFontScreen
         case .styleOutline: styleScreen(styleOutlineRows)
         case .styleBackground: styleScreen(styleBackgroundRows)
         case .styleDual: styleScreen(styleDualRows)
@@ -1017,17 +1019,72 @@ struct PlayerControls: View {
     /// value as their summary, so there is exactly one entry per concern here.
     private var styleMainRows: [StyleRowSpec] {
         let s = model.subtitleStyle
+        let weights = s.fontFamily.availableWeights
         return [
-            choiceRow(0, "Font", options: SubtitleFontFamily.allCases, current: s.fontFamily, label: { $0.displayName }) { v in updateStyle { $0.fontFamily = v } },
-            numberRow(1, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } },
-            numberRow(2, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: Self.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } },
-            colorRow(3, "Text Colour", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } },
-            numberRow(4, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } },
-            StyleRowSpec(slot: 5, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) })),
-            StyleRowSpec(slot: 6, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) })),
-            StyleRowSpec(slot: 7, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) })),
-            StyleRowSpec(slot: 8, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } })),
+            StyleRowSpec(slot: 0, title: "Font", kind: .submenu(summary: s.fontFamily.displayName, open: { openSubtitleScreen(.styleFont) })),
+            choiceRow(1, "Weight", options: weights, current: s.fontWeight.snapped(to: weights), label: { $0.displayName }) { v in updateStyle { $0.fontWeight = v } },
+            numberRow(2, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } },
+            numberRow(3, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: Self.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } },
+            colorRow(4, "Text Colour", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } },
+            numberRow(5, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } },
+            StyleRowSpec(slot: 6, title: "Outline & Border", kind: .submenu(summary: s.edge.style.displayName, open: { openSubtitleScreen(.styleOutline) })),
+            StyleRowSpec(slot: 7, title: "Background", kind: .submenu(summary: s.background.isEnabled ? "On" : "Off", open: { openSubtitleScreen(.styleBackground) })),
+            StyleRowSpec(slot: 8, title: "Dual Subtitles", kind: .submenu(summary: hasSecondaryTrack ? "On" : "Off", open: { openSubtitleScreen(.styleDual) })),
+            StyleRowSpec(slot: 9, title: "Reset to Default", kind: .action(run: { updateStyle { $0 = .default } })),
         ]
+    }
+
+    /// The Font picker: one selectable row per family, each rendered **in its own
+    /// typeface** (a touch larger than the value rows) so the list previews itself.
+    /// Selecting a font applies it and returns to the Style screen; the chosen
+    /// weight persists and is re-snapped to the new family's available weights by
+    /// the renderer and the Weight row.
+    @ViewBuilder
+    private var styleFontScreen: some View {
+        let current = model.subtitleStyle.fontFamily
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(SubtitleFontFamily.allCases.enumerated()), id: \.offset) { idx, family in
+                fontChoiceRow(family, index: idx, isSelected: family == current)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private func fontChoiceRow(_ family: SubtitleFontFamily, index: Int, isSelected: Bool) -> some View {
+        Button {
+            updateStyle { $0.fontFamily = family }
+            openSubtitleScreen(.style)
+        } label: {
+            HStack(spacing: 10) {
+                Text(family.displayName)
+                    .font(Self.fontPreviewFont(for: family))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                Spacer(minLength: 8)
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.body)
+                    .playerMenuRowMark(isSelected: isSelected, accent: palette.accent)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlayerMenuRowButtonStyle())
+        .focusEffectDisabled()
+        .focused($focus, equals: .row(index))
+    }
+
+    /// A SwiftUI `Font` that renders a family's name in that family's own Regular
+    /// face — bundled faces via their PostScript name, SF via the system font, and
+    /// SF Rounded via the rounded system design.
+    private static func fontPreviewFont(for family: SubtitleFontFamily) -> Font {
+        let size: CGFloat = 34
+        if family.usesRoundedDesign { return .system(size: size, design: .rounded) }
+        if let stem = family.postScriptStem { return .custom("\(stem)-Regular", size: size) }
+        return .system(size: size)
     }
 
     /// Advanced outline (edge) + explicit glyph border.
@@ -1270,6 +1327,9 @@ struct PlayerControls: View {
             // primary is a bitmap sub, so land on the header Back instead of a row
             // that isn't there.
             focus = model.secondarySubtitleImagePrimaryFormat == nil ? .row(0) : .subBack
+        case .styleFont:
+            // Land on the currently-selected font so the checkmark is in view.
+            focus = .row(SubtitleFontFamily.allCases.firstIndex(of: model.subtitleStyle.fontFamily) ?? 0)
         case .styleOutline, .styleBackground, .styleDual: focus = .row(0)
         }
     }

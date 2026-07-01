@@ -12,32 +12,106 @@ import Foundation
 public enum SubtitleFontFamily: String, Codable, Sendable, Equatable, CaseIterable {
     case atkinson
     case system
-    case lexend
+    case sfRounded
     case roboto
+    case lexend
+    case fredoka
     case openDyslexic
 
     public var displayName: String {
         switch self {
         case .atkinson: return "Atkinson Hyperlegible"
         case .system: return "System (SF)"
-        case .lexend: return "Lexend"
+        case .sfRounded: return "SF Rounded"
         case .roboto: return "Roboto"
+        case .lexend: return "Lexend"
+        case .fredoka: return "Fredoka"
         case .openDyslexic: return "OpenDyslexic"
         }
     }
 
     /// The PostScript family stem of the bundled face, or `nil` to use the system
-    /// font. The renderer appends the weight/slant suffix (`-Regular`/`-Bold`/
-    /// `-Italic`/`-BoldItalic`), degrading to a lighter/upright face when a family
-    /// doesn't bundle every combination (e.g. Lexend ships no italics).
+    /// font. The renderer appends the weight/slant suffix (`-Regular`/`-Medium`/
+    /// `-SemiBold`/`-Bold`/`-Italic`/`-BoldItalic`), degrading to a lighter/upright
+    /// face when a family doesn't bundle every combination (e.g. Lexend ships no
+    /// italics). `system` and `sfRounded` render via the system font (no bundle).
     public var postScriptStem: String? {
         switch self {
         case .atkinson: return "AtkinsonHyperlegible"
-        case .system: return nil
-        case .lexend: return "Lexend"
+        case .system, .sfRounded: return nil
         case .roboto: return "Roboto"
+        case .lexend: return "Lexend"
+        case .fredoka: return "Fredoka"
         case .openDyslexic: return "OpenDyslexic"
         }
+    }
+
+    /// True when the family is drawn with the tvOS system font rather than a
+    /// bundled face (SF and SF Rounded).
+    public var usesSystemFont: Bool { postScriptStem == nil }
+
+    /// True when the system font should adopt the rounded design (SF Rounded).
+    public var usesRoundedDesign: Bool { self == .sfRounded }
+
+    /// The weights this family actually offers. A global weight choice snaps to
+    /// the nearest of these, so the picker only ever shows real faces: the system
+    /// families expose the full range; the static bundled faces (Atkinson,
+    /// OpenDyslexic) only Regular/Bold; the variable-derived faces (Lexend,
+    /// Roboto, Fredoka) ship Regular/Medium/SemiBold/Bold.
+    public var availableWeights: [SubtitleFontWeight] {
+        switch self {
+        case .atkinson, .openDyslexic:
+            return [.regular, .bold]
+        case .system, .sfRounded, .roboto, .lexend, .fredoka:
+            return [.regular, .medium, .semibold, .bold]
+        }
+    }
+}
+
+
+/// A subtitle typeface weight. The user picks a global weight; each family snaps
+/// it to the nearest weight it actually bundles (``SubtitleFontFamily/availableWeights``).
+public enum SubtitleFontWeight: String, Codable, Sendable, Equatable, CaseIterable {
+    case regular
+    case medium
+    case semibold
+    case bold
+
+    public var displayName: String {
+        switch self {
+        case .regular: return "Regular"
+        case .medium: return "Medium"
+        case .semibold: return "Semibold"
+        case .bold: return "Bold"
+        }
+    }
+
+    /// CSS-style numeric weight, used to snap to the nearest available face.
+    public var value: Int {
+        switch self {
+        case .regular: return 400
+        case .medium: return 500
+        case .semibold: return 600
+        case .bold: return 700
+        }
+    }
+
+    /// The PostScript suffix token for a bundled face name (`<stem>-<token>`).
+    public var faceToken: String {
+        switch self {
+        case .regular: return "Regular"
+        case .medium: return "Medium"
+        case .semibold: return "SemiBold"
+        case .bold: return "Bold"
+        }
+    }
+
+    /// The nearest weight in `available` (by numeric distance), so a global choice
+    /// always resolves to a face the family really ships.
+    public func snapped(to available: [SubtitleFontWeight]) -> SubtitleFontWeight {
+        guard !available.isEmpty else { return self }
+        if available.contains(self) { return self }
+        return available.min(by: { abs($0.value - value) < abs($1.value - value) }) ?? self
     }
 }
 
@@ -67,6 +141,10 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
 
     /// The subtitle typeface. Defaults to bundled Atkinson Hyperlegible.
     public var fontFamily: SubtitleFontFamily
+    /// The global typeface weight. The active family snaps this to the nearest
+    /// weight it actually bundles, so the value persists across family switches
+    /// even when a family (e.g. Atkinson) offers fewer weights.
+    public var fontWeight: SubtitleFontWeight
     /// Multiplier on the base caption size (1.0 == default).
     public var fontScale: Double
     /// Vertical seat of the subtitle block, `0` = bottom safe edge … `1` = top.
@@ -207,6 +285,7 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
 
     public init(
         fontFamily: SubtitleFontFamily = .atkinson,
+        fontWeight: SubtitleFontWeight = .regular,
         fontScale: Double = 1.0,
         verticalPosition: Double = 0.06,
         horizontalOffset: Double = 0,
@@ -220,6 +299,7 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
         followsSystemStyle: Bool = false
     ) {
         self.fontFamily = fontFamily
+        self.fontWeight = fontWeight
         self.fontScale = fontScale
         self.verticalPosition = verticalPosition
         self.horizontalOffset = horizontalOffset
@@ -316,7 +396,7 @@ public extension SubtitleStyle {
 
 extension SubtitleStyle {
     private enum CodingKeys: String, CodingKey {
-        case fontFamily, fontScale, verticalPosition, horizontalOffset
+        case fontFamily, fontWeight, fontScale, verticalPosition, horizontalOffset
         case textColor, opacity, hdrLuminanceScale
         case background, edge, border, secondary, followsSystemStyle
     }
@@ -328,6 +408,7 @@ extension SubtitleStyle {
         let d = SubtitleStyle.default
         self.init(
             fontFamily: try c.decodeIfPresent(SubtitleFontFamily.self, forKey: .fontFamily) ?? d.fontFamily,
+            fontWeight: try c.decodeIfPresent(SubtitleFontWeight.self, forKey: .fontWeight) ?? d.fontWeight,
             fontScale: try c.decodeIfPresent(Double.self, forKey: .fontScale) ?? d.fontScale,
             verticalPosition: try c.decodeIfPresent(Double.self, forKey: .verticalPosition) ?? d.verticalPosition,
             horizontalOffset: try c.decodeIfPresent(Double.self, forKey: .horizontalOffset) ?? d.horizontalOffset,

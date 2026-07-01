@@ -327,6 +327,7 @@ private struct StyledCueText: View {
         CoreTextSubtitleLine(
             text: text.string,
             family: style.fontFamily,
+            weight: style.fontWeight,
             fontSize: fontSize,
             isBold: text.isBold,
             isItalic: text.isItalic,

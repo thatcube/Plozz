@@ -42,6 +42,7 @@ struct SubtitleBackgroundSpec: Equatable {
 struct CoreTextSubtitleLine: UIViewRepresentable {
     let text: String
     let family: SubtitleFontFamily
+    let weight: SubtitleFontWeight
     let fontSize: CGFloat
     let isBold: Bool
     let isItalic: Bool
@@ -57,7 +58,7 @@ struct CoreTextSubtitleLine: UIViewRepresentable {
 
     func updateUIView(_ view: SubtitleLineView, context: Context) {
         view.configure(SubtitleLineView.Config(
-            text: text, family: family, fontSize: fontSize,
+            text: text, family: family, weight: weight, fontSize: fontSize,
             isBold: isBold, isItalic: isItalic,
             fill: fill, outline: outline, outlineWidth: outlineWidth,
             shadow: shadow, background: background, alignment: alignment))
@@ -78,6 +79,7 @@ final class SubtitleLineView: UIView {
     struct Config: Equatable {
         var text: String
         var family: SubtitleFontFamily
+        var weight: SubtitleFontWeight
         var fontSize: CGFloat
         var isBold: Bool
         var isItalic: Bool
@@ -370,18 +372,45 @@ final class SubtitleLineView: UIView {
 
     /// The bundled-face PostScript name for the requested weight/slant, or `nil`
     /// to use the system font. Picks the closest face a family actually bundles:
-    /// families without italics (e.g. Lexend) fall back to the upright weight
-    /// rather than letting Core Text substitute an unrelated system font.
+    /// italic is preserved first (families ship italics only at Regular/Bold, and
+    /// italic is per-cue emphasis), then the weight degrades toward Regular rather
+    /// than letting Core Text substitute an unrelated system font.
     private func postScriptName(_ c: Config) -> String? {
         guard let stem = c.family.postScriptStem else { return nil }
-        let candidates: [String]
-        switch (c.isBold, c.isItalic) {
-        case (true, true):   candidates = ["\(stem)-BoldItalic", "\(stem)-Bold", "\(stem)-Italic", "\(stem)-Regular"]
-        case (true, false):  candidates = ["\(stem)-Bold", "\(stem)-Regular"]
-        case (false, true):  candidates = ["\(stem)-Italic", "\(stem)-Regular"]
-        case (false, false): candidates = ["\(stem)-Regular"]
+        let weight = effectiveWeight(c)
+        let available = c.family.availableWeights
+        var candidates: [String] = []
+        // Keep the slant first when the cue is italic (only Regular/Bold italics
+        // are bundled), so emphasis survives even if the exact weight can't.
+        if c.isItalic {
+            if weight == .bold { candidates.append("\(stem)-BoldItalic") }
+            candidates.append("\(stem)-Italic")
         }
-        return candidates.first { UIFont(name: $0, size: 12) != nil } ?? candidates.last
+        // Upright faces from the effective weight down to Regular.
+        let downChain = available.filter { $0.value <= weight.value }.sorted { $0.value > $1.value }
+        for w in downChain { candidates.append("\(stem)-\(w.faceToken)") }
+        if !downChain.contains(.regular) { candidates.append("\(stem)-Regular") }
+        return candidates.first { UIFont(name: $0, size: 12) != nil } ?? "\(stem)-Regular"
+    }
+
+    /// The weight to actually render for this cue: the global weight snapped to
+    /// what the family bundles, bumped to the family's heaviest face when the cue
+    /// itself is bold (per-cue markup), never lighter than the chosen base.
+    private func effectiveWeight(_ c: Config) -> SubtitleFontWeight {
+        let available = c.family.availableWeights
+        let base = c.weight.snapped(to: available)
+        guard c.isBold else { return base }
+        let heaviest = available.last ?? .bold
+        return heaviest.value >= base.value ? heaviest : base
+    }
+
+    private func uiFontWeight(_ w: SubtitleFontWeight) -> UIFont.Weight {
+        switch w {
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        }
     }
 
     /// tvOS system fonts that cover CJK + emoji, appended as a Core Text cascade
@@ -410,12 +439,17 @@ final class SubtitleLineView: UIView {
             }
             #endif
         } else {
-            var ui = UIFont.systemFont(ofSize: size, weight: c.isBold ? .heavy : .semibold)
-            if c.isItalic,
-               let d = ui.fontDescriptor.withSymbolicTraits([ui.fontDescriptor.symbolicTraits, .traitItalic]) {
-                ui = UIFont(descriptor: d, size: size)
+            let ui = UIFont.systemFont(ofSize: size, weight: uiFontWeight(effectiveWeight(c)))
+            var descriptor = ui.fontDescriptor
+            // SF Rounded: adopt the rounded design while preserving the weight.
+            if c.family.usesRoundedDesign, let d = descriptor.withDesign(.rounded) {
+                descriptor = d
             }
-            baseDescriptor = ui.fontDescriptor as CTFontDescriptor
+            if c.isItalic,
+               let d = descriptor.withSymbolicTraits([descriptor.symbolicTraits, .traitItalic]) {
+                descriptor = d
+            }
+            baseDescriptor = UIFont(descriptor: descriptor, size: size).fontDescriptor as CTFontDescriptor
         }
         let cascade = Self.cjkFallbackNames.map {
             CTFontDescriptorCreateWithNameAndSize($0 as CFString, size)

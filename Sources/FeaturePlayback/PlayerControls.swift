@@ -91,6 +91,15 @@ struct PlayerControls: View {
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
 
+    /// Named coordinate space spanning the whole bottom cluster (panel slot +
+    /// scrubber + button row) so the Speed button's leading edge can be measured
+    /// in the same frame the Speed panel is laid out in.
+    private static let bottomClusterSpace = "PlayerBottomCluster"
+
+    /// Measured leading-edge X of the Speed button, in `bottomClusterSpace`. The
+    /// Speed panel left-aligns to this so it opens directly under its own button.
+    @State private var speedButtonLeading: CGFloat = 0
+
     /// The transport control that was focused when the current panel was opened.
     /// Restored (deferred) whenever the panel fully closes so focus always lands
     /// back where the user started — no matter how deep the panel's sub-screens
@@ -171,6 +180,8 @@ struct PlayerControls: View {
             scrubberRow
             buttonRow
         }
+        .coordinateSpace(name: Self.bottomClusterSpace)
+        .onPreferenceChange(SpeedButtonLeadingKey.self) { speedButtonLeading = $0 }
         .animation(.easeInOut(duration: 0.2), value: openPanel)
         .animation(.easeInOut(duration: 0.28), value: titleVisible)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
@@ -398,6 +409,18 @@ struct PlayerControls: View {
                 }
                 .playerGlassButton(prominent: openPanel == category)
                 .focused($focus, equals: .button(category))
+                .background {
+                    // Publish the Speed button's leading edge so its panel can
+                    // open left-aligned to the button rather than the far edge.
+                    if category == .speed {
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: SpeedButtonLeadingKey.self,
+                                value: proxy.frame(in: .named(Self.bottomClusterSpace)).minX
+                            )
+                        }
+                    }
+                }
             }
         }
         .opacity(model.isScrubbing ? 0 : 1)
@@ -460,12 +483,25 @@ struct PlayerControls: View {
                 }
                 .frame(maxHeight: 440)
             }
-            .frame(width: 520, alignment: .leading)
+            .frame(width: panelWidth(for: category), alignment: .leading)
             .colorScheme(.dark)
             .modifier(PanelGlassBackground())
-            // The track controls live on the right of the button row, so the panel
-            // opens against the trailing edge above them rather than on the left.
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            // Speed opens left-aligned under its own button; the other panels pin
+            // to the trailing edge above the track-button cluster.
+            .modifier(PanelHorizontalPlacement(
+                leadingInset: category == .speed ? speedButtonLeading : nil
+            ))
+        }
+    }
+
+    /// Fixed width for an open control panel, per category. Most menus share a
+    /// roomy 520pt column; the Speed menu only holds short preset labels
+    /// ("1.25×") and a compact stepper, so it uses roughly half the width to
+    /// avoid a mostly-empty panel.
+    private func panelWidth(for category: Category) -> CGFloat {
+        switch category {
+        case .speed: return 260
+        default: return 520
         }
     }
 
@@ -971,7 +1007,7 @@ struct PlayerControls: View {
         if model.engineCapabilities.contains(.playbackSpeed) {
             result.append(.speed)
         }
-        if model.hasSelectableAudio
+        if !model.audioOptions.isEmpty
             || model.engineCapabilities.contains(.dialogEnhance) {
             result.append(.audio)
         }
@@ -1019,23 +1055,23 @@ struct PlayerControls: View {
     }
 
     /// Audio menu rows: selectable tracks followed by the Dialog Enhance toggle
-    /// when supported. Indexed from 0 in their own focus-slot space.
+    /// when supported. Indexed from 0 in their own focus-slot space. Every audio
+    /// track is listed even when there's only one, so the menu always reflects
+    /// what's playing.
     private var audioRows: [TrackRow] {
         var rows: [TrackRow] = []
         var index = 0
-        if model.hasSelectableAudio {
-            for option in model.audioOptions {
-                rows.append(TrackRow(
-                    id: index,
-                    header: nil,
-                    title: option.title,
-                    subtitle: "",
-                    isSelected: option.isSelected,
-                    isToggle: false,
-                    action: { actions.selectAudio(option.id) }
-                ))
-                index += 1
-            }
+        for option in model.audioOptions {
+            rows.append(TrackRow(
+                id: index,
+                header: nil,
+                title: option.title,
+                subtitle: "",
+                isSelected: option.isSelected,
+                isToggle: false,
+                action: { actions.selectAudio(option.id) }
+            ))
+            index += 1
         }
         if model.engineCapabilities.contains(.dialogEnhance) {
             rows.append(TrackRow(
@@ -1084,7 +1120,7 @@ struct PlayerControls: View {
 
     // MARK: Formatting
 
-    static let speedPresets: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    static let speedPresets: [Double] = [1.0, 1.25, 1.5, 1.75, 2.0]
 
     // Custom-speed grid for the − / + stepper: 0.25×…2.0× in 0.05 steps. Modelled
     // as integer indices so the stepper matches exactly (no Double == fuzziness);
@@ -1353,6 +1389,41 @@ private struct PanelGlassBackground: ViewModifier {
                 .clipShape(shape)
                 .overlay(shape.stroke(.white.opacity(0.14), lineWidth: 1))
         }
+    }
+}
+
+/// Horizontally positions an open control panel within the bottom cluster.
+/// `leadingInset` non-nil → shift the panel right to sit under its own button
+/// (Speed); nil → pin to the trailing edge above the track-button cluster
+/// (Subtitles/Audio/Sync).
+private struct PanelHorizontalPlacement: ViewModifier {
+    let leadingInset: CGFloat?
+
+    func body(content: Content) -> some View {
+        if let leadingInset {
+            // Use `.offset` — NOT `.padding(.leading,)` — so aligning the Speed
+            // panel to its button has zero effect on the bottom cluster's layout.
+            // Leading padding applied after a fill frame grows the panel's own
+            // width by `leadingInset`, overflowing the row and dragging the whole
+            // control cluster sideways as the panel opens. Offset only moves the
+            // drawn panel; the measured cluster (and the button we align to) stay
+            // put, so there's no layout feedback loop.
+            content.offset(x: max(0, leadingInset))
+        } else {
+            content
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}
+
+/// Carries the Speed button's measured leading-edge X up to `PlayerControls` so
+/// the Speed panel can align its left edge to the button. Only the Speed button
+/// publishes a value; sibling buttons contribute the default (0), so the reduce
+/// keeps the largest (the real measurement) rather than letting a 0 clobber it.
+private struct SpeedButtonLeadingKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 #endif

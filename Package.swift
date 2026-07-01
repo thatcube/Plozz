@@ -60,16 +60,17 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // TEMP fork override → thatcube/AetherEngine @ fix/vod-audio-eac3-wedge
-        // (4.8.0 + the backward-seek muxer wedge fix; upstream PR #94). Under
-        // +delay_moov the fMP4 muxer writes moov lazily on the first flush; for
-        // AC-3/E-AC-3/TrueHD the audio sample entry (dac3/dec3/dmlp) can only be
-        // built from a PARSED audio packet, so a fresh restart muxer whose first
-        // moov flush fired video-only errored "Cannot write moov atom before EAC3
-        // packets parsed" → wedged muxer + forever-loading on a mid-file backward
-        // seek. The fix primes moov with a parsed audio packet, codec-scoped so AAC
-        // keeps the exact stock path. Revert to a released upstream tag once #94 merges.
-        .package(url: "https://github.com/thatcube/AetherEngine", branch: "fix/vod-audio-eac3-wedge"),
+        // Pinned to the upstream merge commit for the backward-seek muxer wedge
+        // fix (PR #94, merged into superuser404notfound/AetherEngine main as
+        // 8e4ed87 — 4.8.0 plus the fix). Under +delay_moov the fMP4 muxer writes
+        // moov lazily on the first flush; for AC-3/E-AC-3/TrueHD the audio sample
+        // entry (dac3/dec3/dmlp) can only be built from a PARSED audio packet, so a
+        // fresh restart muxer whose first moov flush fired video-only errored
+        // "Cannot write moov atom before EAC3 packets parsed" → wedged muxer +
+        // forever-loading on a mid-file backward seek. The fix primes moov with a
+        // parsed audio packet, codec-scoped so AAC keeps the exact stock path. Bump
+        // to the released upstream tag (`from:`) once one past 4.8.0 is cut.
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "8e4ed87c6a46a1e05164a1a556f942989eb8a7d0"),
         // AetherEngine's FFmpeg build (n8.1.2, minimal LGPL decode-only). Shared
         // by AetherEngine and EngineMPV — replaces the locally-staged
         // Frameworks/mpv/Libav*.xcframework set (same n8.1 ABI).

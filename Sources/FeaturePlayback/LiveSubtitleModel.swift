@@ -143,12 +143,15 @@ public final class LiveSubtitleModel {
     public func tick(_ time: Double) {
         lastTickTime = time
         if isLiveFeed {
+            // Live feed drives the PRIMARY only (the engine decodes it). Fall
+            // through so the secondary sidecar timeline below still advances.
             recomputeLiveActive(at: time)
-            return
-        }
-        if let p = primaryTimeline, p.update(to: time) {
+        } else if let p = primaryTimeline, p.update(to: time) {
             primary = p.active
         }
+        // The secondary/dual line is always a sidecar timeline, independent of
+        // the primary's source, so seat it every tick — including while the
+        // primary is a live feed (mpv/Plozzigen), or the second line never shows.
         if let s = secondaryTimeline, s.update(to: time) { secondary = s.active }
     }
 }

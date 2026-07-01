@@ -171,17 +171,40 @@ public struct SubtitleOverlayView: View {
 
     /// The shared default-position stack: primary dialogue plus the optional
     /// secondary (dual-subtitle) block, ordered per ``SubtitleStyle/Secondary``.
+    ///
+    /// When dual subtitles are on, each line gets a **fixed lane** (a reserved
+    /// one-line minimum height) so neither block collapses to zero while its cue
+    /// momentarily has no text. Without that, the empty block vanishes and the
+    /// other line slides into the freed space — the "second track hopping up and
+    /// down as the bottom line comes and goes" that dual subtitles suffer because
+    /// the two tracks' cues rarely start/end together.
     @ViewBuilder
     private func dialogueStack(_ dialogue: [SubtitleCue]) -> some View {
-        VStack(spacing: style.secondary?.gap ?? 6) {
-            if style.secondary?.placement == .above {
-                secondaryBlock()
+        if let sec = style.secondary {
+            let above = sec.placement == .above
+            let secScale = sec.differentiate ? sec.relativeScale : 1.0
+            let primaryLane = reservedLineHeight(scale: 1.0)
+            let secondaryLane = reservedLineHeight(scale: secScale)
+            VStack(spacing: sec.gap) {
+                if above {
+                    secondaryBlock().frame(minHeight: secondaryLane, alignment: .bottom)
+                }
+                primaryBlock(dialogue).frame(minHeight: primaryLane, alignment: .bottom)
+                if !above {
+                    secondaryBlock().frame(minHeight: secondaryLane, alignment: .top)
+                }
             }
+        } else {
             primaryBlock(dialogue)
-            if secondary.isEmpty == false, style.secondary?.placement != .above {
-                secondaryBlock()
-            }
         }
+    }
+
+    /// Height to reserve for one subtitle line at the given scale, so a dual-sub
+    /// lane holds its place while its cue is momentarily empty. Tracks the font
+    /// size (a constant multiple of the glyph height) rather than a fixed point
+    /// value, so it stays right as the user scales subtitles.
+    private func reservedLineHeight(scale: Double) -> CGFloat {
+        Self.baseFontSize * CGFloat(style.fontScale) * CGFloat(scale) * 1.25
     }
 
     @ViewBuilder

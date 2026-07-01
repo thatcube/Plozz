@@ -387,6 +387,10 @@ struct AlbumDetailView: View {
     @State var viewModel: AlbumDetailViewModel
     let controller: AudioPlaybackController
 
+    /// Lands initial focus on the Play button rather than the top of the track
+    /// list. Set once tracks load (Play is disabled until then).
+    @FocusState private var playFocused: Bool
+
     var body: some View {
         MusicDetailLayout(
             tracks: viewModel.tracks,
@@ -398,7 +402,15 @@ struct AlbumDetailView: View {
         ) {
             infoColumn
         }
-        .task { await viewModel.load() }
+        .defaultFocus($playFocused, true)
+        .task {
+            await viewModel.load()
+            // Play is disabled until tracks exist, so a declarative default alone
+            // can't land on it at appear. Set focus explicitly once loaded, after
+            // a short runloop hop so the focus engine sees the now-enabled button.
+            try? await Task.sleep(for: .milliseconds(50))
+            if !viewModel.tracks.isEmpty { playFocused = true }
+        }
     }
 
     private let columnWidth: CGFloat = 480
@@ -425,7 +437,8 @@ struct AlbumDetailView: View {
                 isEmpty: viewModel.tracks.isEmpty,
                 onPlay: { play(from: nil) },
                 onShuffle: { shuffle() },
-                fillWidth: true
+                fillWidth: true,
+                playFocus: $playFocused
             )
             .frame(width: columnWidth)
             .padding(.top, 8)
@@ -470,6 +483,10 @@ struct PlaylistDetailView: View {
     @State var viewModel: PlaylistDetailViewModel
     let controller: AudioPlaybackController
 
+    /// Lands initial focus on the Play button rather than the top of the track
+    /// list. Set once tracks load (Play is disabled until then).
+    @FocusState private var playFocused: Bool
+
     var body: some View {
         MusicDetailLayout(
             tracks: viewModel.tracks,
@@ -483,7 +500,15 @@ struct PlaylistDetailView: View {
         ) {
             infoColumn
         }
-        .task { await viewModel.load() }
+        .defaultFocus($playFocused, true)
+        .task {
+            await viewModel.load()
+            // Play is disabled until tracks exist, so a declarative default alone
+            // can't land on it at appear. Set focus explicitly once loaded, after
+            // a short runloop hop so the focus engine sees the now-enabled button.
+            try? await Task.sleep(for: .milliseconds(50))
+            if !viewModel.tracks.isEmpty { playFocused = true }
+        }
     }
 
     private let columnWidth: CGFloat = 480
@@ -498,7 +523,8 @@ struct PlaylistDetailView: View {
                 isEmpty: viewModel.tracks.isEmpty,
                 onPlay: { play(from: nil) },
                 onShuffle: { shuffle() },
-                fillWidth: true
+                fillWidth: true,
+                playFocus: $playFocused
             )
             .frame(width: columnWidth)
             .padding(.top, 8)
@@ -546,17 +572,14 @@ struct PlayShuffleButtons: View {
     /// When true the row spans its container with Play stretching to fill the
     /// leftover width and Shuffle keeping its natural size.
     var fillWidth: Bool = false
+    /// When provided, the Play button binds this focus state so the enclosing
+    /// detail view can land initial focus on Play (via `.defaultFocus` plus an
+    /// explicit set once tracks load) instead of the top of the track list.
+    var playFocus: FocusState<Bool>.Binding? = nil
 
     var body: some View {
         HStack(spacing: 20) {
-            Button(action: onPlay) {
-                Label("Play", systemImage: "play.fill")
-                    .padding(.horizontal, 12)
-                    .frame(maxWidth: fillWidth ? .infinity : nil)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isEmpty)
-
+            playButton
             Button(action: onShuffle) {
                 Label("Shuffle", systemImage: "shuffle").padding(.horizontal, 12)
             }
@@ -564,6 +587,23 @@ struct PlayShuffleButtons: View {
             .disabled(isEmpty)
         }
         .frame(maxWidth: fillWidth ? .infinity : nil, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var playButton: some View {
+        let button = Button(action: onPlay) {
+            Label("Play", systemImage: "play.fill")
+                .padding(.horizontal, 12)
+                .frame(maxWidth: fillWidth ? .infinity : nil)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(isEmpty)
+
+        if let playFocus {
+            button.focused(playFocus, equals: true)
+        } else {
+            button
+        }
     }
 }
 

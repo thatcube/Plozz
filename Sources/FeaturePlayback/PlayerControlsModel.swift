@@ -118,6 +118,15 @@ public final class PlayerControlsModel {
     /// silently showing nothing. `.idle` when the second line is Off.
     public var secondarySubtitleStatus: SecondarySubtitleStatus = .idle
 
+    #if DEBUG
+    /// DEBUG-only readout of how the *primary* selected subtitle is being routed:
+    /// active engine · path (overlay-sidecar / avplayer-draw / live-feed) · live
+    /// cue count. Surfaced at the bottom of the Subtitles list so we can see — on
+    /// a device whose logs are unreadable in this environment — exactly why a
+    /// Plex embedded track lists but never draws. Empty when nothing is selected.
+    public var primarySubtitleDiagnostic: String = ""
+    #endif
+
     /// The current subtitle **appearance**, mirrored here so the in-player
     /// appearance editor (hosted in `PlayerControls`) can two-way bind it. The
     /// view model seeds this from the profile's persisted style and updates it

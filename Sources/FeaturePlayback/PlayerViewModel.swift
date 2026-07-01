@@ -465,7 +465,13 @@ public final class PlayerViewModel {
         // native. Guarded by live-feed mode inside the model, so it's inert unless
         // a Plozzigen subtitle is actually selected.
         engine.onSubtitleCues = { [weak self] cues in
-            self?.liveSubtitles.updateLiveCues(cues)
+            guard let self else { return }
+            self.liveSubtitles.updateLiveCues(cues)
+            #if DEBUG
+            if self.selectedSubtitleTrackID != nil {
+                self.setPrimarySubtitleDiagnostic(route: "live-feed", cues: cues.count)
+            }
+            #endif
         }
     }
 
@@ -1072,6 +1078,9 @@ public final class PlayerViewModel {
         secondaryCueLoadTask = nil
         selectedSecondarySubtitleTrackID = nil
         controls.secondarySubtitleStatus = .idle
+        #if DEBUG
+        controls.primarySubtitleDiagnostic = ""
+        #endif
         liveSubtitles.offset = 0
         liveSubtitles.clear()
 
@@ -2079,6 +2088,17 @@ public final class PlayerViewModel {
     /// Selects a subtitle track, or turns subtitles off (`PlayerTrackOption.offID`).
     /// `userInitiated` is `true` for a real menu pick (which is remembered for the
     /// series) and `false` for the programmatic load-time default.
+    #if DEBUG
+    /// Composes the DEBUG primary-subtitle route readout shown at the bottom of
+    /// the Subtitles list: active engine, the routing path taken, and (when known)
+    /// the cue count. Lets us classify a non-drawing Plex track without device logs.
+    private func setPrimarySubtitleDiagnostic(route: String, cues: Int? = nil) {
+        var text = "eng \(currentEngineKind) · \(route)"
+        if let cues { text += " · \(cues) cues" }
+        controls.primarySubtitleDiagnostic = text
+    }
+    #endif
+
     public func selectSubtitleOption(id: Int, userInitiated: Bool = true) {
         if userInitiated { viewerChangedSubtitleThisSession = true }
         if id == PlayerTrackOption.offID {
@@ -2086,6 +2106,9 @@ public final class PlayerViewModel {
             engine.selectSubtitleTrack(nil)
             clearOverlaySubtitle()
             selectedSubtitleTrackID = nil
+            #if DEBUG
+            controls.primarySubtitleDiagnostic = ""
+            #endif
             loadTrackOptions()
             return
         }
@@ -2117,10 +2140,16 @@ public final class PlayerViewModel {
             selectedSubtitleTrackID = id
             if track.deliveryURL != nil {
                 engine.selectSubtitleTrack(nil)
+                #if DEBUG
+                setPrimarySubtitleDiagnostic(route: "overlay")
+                #endif
                 loadOverlaySubtitle(track)
             } else {
                 clearOverlaySubtitle()
                 engine.selectSubtitleTrack(track)
+                #if DEBUG
+                setPrimarySubtitleDiagnostic(route: "avplayer-draw")
+                #endif
             }
             loadTrackOptions()
             return
@@ -2137,6 +2166,9 @@ public final class PlayerViewModel {
         liveSubtitles.beginLiveFeed()
         engine.selectSubtitleTrack(track)
         selectedSubtitleTrackID = id
+        #if DEBUG
+        setPrimarySubtitleDiagnostic(route: "live-feed")
+        #endif
         loadTrackOptions()
     }
 
@@ -2176,6 +2208,12 @@ public final class PlayerViewModel {
                 try Task.checkCancellation()
                 guard let text = SubtitleCueParser.decodeText(data) else {
                     PlozzLog.playback.error("Subtitle sidecar decode failed (\(data.count) bytes); unknown text encoding")
+                    await MainActor.run { [weak self] in
+                        guard let self, self.selectedSubtitleTrackID == id else { return }
+                        #if DEBUG
+                        self.setPrimarySubtitleDiagnostic(route: "overlay · decode-fail")
+                        #endif
+                    }
                     return
                 }
                 let stream = SubtitleCueParser.parse(
@@ -2190,6 +2228,9 @@ public final class PlayerViewModel {
                     if let detected, storedNew { self.detectedSubtitleLanguages[id] = detected }
                     if self.selectedSubtitleTrackID == id {
                         self.liveSubtitles.loadPrimary(stream)
+                        #if DEBUG
+                        self.setPrimarySubtitleDiagnostic(route: "overlay", cues: stream.cues.count)
+                        #endif
                     }
                     // A fresh guess changes a track's menu label, so rebuild.
                     if storedNew { self.loadTrackOptions() }
@@ -2198,6 +2239,12 @@ public final class PlayerViewModel {
                 // Selection changed; the newer selection owns the overlay.
             } catch {
                 PlozzLog.playback.debug("Overlay subtitle fetch failed (non-fatal)")
+                await MainActor.run { [weak self] in
+                    guard let self, self.selectedSubtitleTrackID == id else { return }
+                    #if DEBUG
+                    self.setPrimarySubtitleDiagnostic(route: "overlay · fetch-fail")
+                    #endif
+                }
             }
         }
     }

@@ -813,6 +813,16 @@ struct PlayerControls: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
             downloadEntryRow
+            #if DEBUG
+            if !model.primarySubtitleDiagnostic.isEmpty {
+                Text(model.primarySubtitleDiagnostic)
+                    .font(.caption2)
+                    .foregroundStyle(.yellow.opacity(0.85))
+                    .lineLimit(1)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 2)
+            }
+            #endif
         }
         .padding(.horizontal, 14)
     }

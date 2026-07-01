@@ -190,18 +190,16 @@ struct PlayerControls: View {
             // clear our binding when focus leaves the bar.
             if !focused { focus = nil }
         }
-        .onChange(of: styleEditing) { _, editing in
-            // Reset the measured Style-panel height on close so the next open snaps
-            // to its natural size instead of morphing from a stale value.
-            if !editing { styleBodyHeight = 0 }
-        }
         .onChange(of: openPanel) { _, panel in
             subtitleScreen = .tracks
             guard let panel else {
-                // Panel fully closed. Return focus to whatever transport control
-                // opened it (skip while the whole bar is hiding — focus is
-                // intentionally cleared then). Then let the title/description
-                // fade back in after a short beat rather than snapping in.
+                // Panel fully closed. Reset the measured height so the next open
+                // renders at its own natural size instead of morphing from a stale
+                // (possibly different-category) value. Return focus to whatever
+                // transport control opened it (skip while the whole bar is hiding —
+                // focus is intentionally cleared then). Then let the title fade back
+                // in after a short beat rather than snapping in.
+                styleBodyHeight = 0
                 if model.controlBarVisible { restoreFocus(panelReturnFocus) }
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(500))
@@ -237,7 +235,9 @@ struct PlayerControls: View {
                 if let openPanel {
                     panelContainer(for: openPanel)
                         .focusSection()
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        // Grow + fade from the bottom so the panel reads as opening
+                        // up out of the transport rather than just appearing.
+                        .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
                 }
             }
             // Transport block (scrubber + buttons). Hidden entirely while the
@@ -538,87 +538,84 @@ struct PlayerControls: View {
             infoPanel
                 .colorScheme(.dark)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        } else if isStyleScreen(category) {
-            styleMorphPanel(for: category)
         } else {
-            VStack(alignment: .leading, spacing: 0) {
-                panelHeader(for: category)
-                Divider().background(.white.opacity(0.15))
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        switch category {
-                        case .subtitles: subtitleBody
-                        case .audio: audioPane
-                        case .speed: speedPane
-                        case .sync: syncPane
-                        case .info: EmptyView()
-                        }
-                    }
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .frame(maxHeight: 440)
-            }
-            .frame(width: 520, alignment: .leading)
-            .colorScheme(.dark)
-            .modifier(PanelGlassBackground())
-            // The track controls live on the right of the button row, so the panel
-            // opens against the trailing edge above them rather than on the left.
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            morphingPanel(for: category)
         }
     }
 
-    /// The in-player Subtitle Style editor panel. Uses a measured-height clip morph
-    /// so navigating between its sub-screens (or adding/removing a row within one)
-    /// animates ONLY the glass box's height while the rows stay put:
+    /// The tallest the scrolling body may grow before it clamps + scrolls. Comfortably
+    /// fits the deepest style sub-screen (the Font list) and a healthy track list; a
+    /// longer list scrolls inside the clamp rather than overflowing the screen.
+    private static let panelBodyMaxHeight: CGFloat = 520
+
+    /// The floating options panel (Subtitles / Audio / Speed / Sync) with a
+    /// measured-height morph so navigating between screens — the track list, the
+    /// Style editor, and its detail sub-screens — animates ONLY the glass box's
+    /// height while the rows stay put (no cross-fade or spill):
     ///
-    /// - The content is laid out at its natural height (`fixedSize(vertical:)`) and
-    ///   its height is measured via `PanelBodyHeightKey` — the measurement ignores
-    ///   the outer clip frame, so it always reflects the true content height.
-    /// - The box is framed to `styleBodyHeight` (top-aligned) and `clipShape`d to the
-    ///   glass corner radius, so any content taller than the current window is
-    ///   clipped rather than spilling past the rounded border.
-    /// - Only `styleBodyHeight` is animated, so the rows never cross-fade — the clip
-    ///   window simply grows/shrinks and reveals them top-down.
+    /// - The body content is laid out at its natural height inside a `ScrollView`
+    ///   and measured via `PanelBodyHeightKey` (the measurement reflects the true
+    ///   content height, independent of the clamped frame).
+    /// - The scroll body is framed to `min(measured, panelBodyMaxHeight)` and the
+    ///   whole panel is `clipShape`d to the glass corner radius, so content taller
+    ///   than the clamp scrolls rather than spilling past the rounded border.
+    /// - Until the first measurement lands the body sizes itself (`maxHeight`) so a
+    ///   fresh open always renders at the right height; every later change morphs.
     @ViewBuilder
-    private func styleMorphPanel(for category: Category) -> some View {
+    private func morphingPanel(for category: Category) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             panelHeader(for: category)
             Divider().background(.white.opacity(0.15))
-            VStack(alignment: .leading, spacing: 0) {
-                subtitleBody
-            }
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            morphingBody(for: category)
         }
         .frame(width: 520, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: PanelBodyHeightKey.self, value: proxy.size.height)
-            }
-        )
-        .frame(height: styleBodyHeight > 0 ? styleBodyHeight : nil, alignment: .top)
         .colorScheme(.dark)
         .modifier(PanelGlassBackground())
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         // Drive the height change explicitly: `.animation(_, value:)` does NOT
         // reliably fire for preference-driven state (the value settles a frame
-        // after layout), so wrap the mutation in `withAnimation`. The very first
-        // measurement snaps in (no grow-from-zero); every later change morphs.
+        // after layout), so wrap the mutation in `withAnimation`.
         .onPreferenceChange(PanelBodyHeightKey.self) { newHeight in
             guard newHeight > 0, newHeight != styleBodyHeight else { return }
-            if styleBodyHeight == 0 {
-                styleBodyHeight = newHeight
-            } else {
-                withAnimation(.easeInOut(duration: 0.28)) { styleBodyHeight = newHeight }
-            }
+            withAnimation(.easeInOut(duration: 0.28)) { styleBodyHeight = newHeight }
         }
+        // The track controls live on the right of the button row, so the panel
+        // opens against the trailing edge above them rather than on the left.
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
-    private func isStyleScreen(_ category: Category) -> Bool {
-        category == .subtitles && subtitleScreen.isStyleFamily
+    @ViewBuilder
+    private func morphingBody(for category: Category) -> some View {
+        let scroll = ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                panelBodyContent(for: category)
+            }
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: PanelBodyHeightKey.self, value: proxy.size.height)
+                }
+            )
+        }
+        if styleBodyHeight > 0 {
+            scroll.frame(height: min(styleBodyHeight, Self.panelBodyMaxHeight), alignment: .top)
+        } else {
+            // Pre-measurement: let the body size to its content (capped) so the very
+            // first frame is correct; the measured value takes over immediately after.
+            scroll.frame(maxHeight: Self.panelBodyMaxHeight)
+        }
+    }
+
+    @ViewBuilder
+    private func panelBodyContent(for category: Category) -> some View {
+        switch category {
+        case .subtitles: subtitleBody
+        case .audio: audioPane
+        case .speed: speedPane
+        case .sync: syncPane
+        case .info: EmptyView()
+        }
     }
 
     /// True while the ✎ Edit appearance editor (or one of its detail sub-screens)
@@ -760,10 +757,13 @@ struct PlayerControls: View {
                     openSubtitleScreen(subtitleScreen.parent)
                 } label: {
                     Image(systemName: "chevron.backward")
-                        .font(.body.weight(.semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PanelHeaderButtonStyle())
+                .focusEffectDisabled()
                 .focused($focus, equals: .subBack)
+                // Pull the chip past the header gutter so it hugs the panel's
+                // leading edge, concentric with the rounded corner.
+                .padding(.leading, -10)
             }
             Text(headerTitle(for: category))
                 .font(.headline.weight(.semibold))
@@ -775,13 +775,16 @@ struct PlayerControls: View {
                 } label: {
                     Label("Edit", systemImage: "pencil")
                 }
-                .playerGlassButton(prominent: false)
+                .buttonStyle(PanelHeaderButtonStyle())
+                .focusEffectDisabled()
                 .focused($focus, equals: .edit)
+                // Mirror the back chip: hug the trailing edge, ignoring the gutter.
+                .padding(.trailing, -10)
             }
         }
         .padding(.horizontal, 28)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.top, 18)
+        .padding(.bottom, 18)
     }
 
     private func headerTitle(for category: Category) -> String {
@@ -1388,14 +1391,19 @@ struct PlayerControls: View {
         SubtitleColor.presets.first(where: { $0.color.red == color.red && $0.color.green == color.green && $0.color.blue == color.blue })?.name ?? "Custom"
     }
 
-    /// Compact summary for the "Shadow & Outline" submenu row: names whichever of
-    /// the two independent effects are active, e.g. "Shadow", "Outline",
-    /// "Shadow + Outline", or "Off" when neither is on.
+    /// Compact summary for the "Shadow & Outline" submenu row. The row title
+    /// already says "Shadow & Outline", so echoing "Shadow + Outline" as the value
+    /// reads as repetitive — collapse to "On" when both effects are active, name
+    /// the single active one otherwise, and "Off" when neither is on.
     private static func edgeSummary(_ s: SubtitleStyle) -> String {
-        var parts: [String] = []
-        if s.edge.style != .none { parts.append(s.edge.style.displayName) }
-        if s.border.isEnabled { parts.append("Outline") }
-        return parts.isEmpty ? "Off" : parts.joined(separator: " + ")
+        let shadow = s.edge.style != .none
+        let outline = s.border.isEnabled
+        switch (shadow, outline) {
+        case (true, true): return "On"
+        case (true, false): return "Shadow"
+        case (false, true): return "Outline"
+        case (false, false): return "Off"
+        }
     }
 
     private static func boxColorLabel(_ color: SubtitleColor) -> String {

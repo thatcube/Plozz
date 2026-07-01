@@ -413,8 +413,10 @@ final class SubtitleLineView: UIView {
         }
     }
 
-    /// tvOS system fonts that cover CJK + emoji, appended as a Core Text cascade
-    /// list so the Latin face falls back per-glyph for mixed-script lines.
+    /// Preferred CJK + emoji faces placed at the FRONT of the cascade list so
+    /// mixed-script lines fall back to subtitle-weight cuts. The OS default
+    /// cascade is appended after these (see `makeCTFont`) to cover every other
+    /// script, so this list only needs to express CJK/emoji *preferences*.
     private static let cjkFallbackNames = [
         "HiraginoSans-W6", "HiraginoSans-W5", "HiraginoSans-W3",
         "AppleSDGothicNeo-SemiBold", "AppleSDGothicNeo-Medium", "AppleSDGothicNeo-Regular",
@@ -451,9 +453,19 @@ final class SubtitleLineView: UIView {
             }
             baseDescriptor = UIFont(descriptor: descriptor, size: size).fontDescriptor as CTFontDescriptor
         }
-        let cascade = Self.cjkFallbackNames.map {
+        // Curated CJK/emoji faces first so mixed-script Latin lines fall back to
+        // subtitle-weight Hiragino/PingFang rather than the default thin cut.
+        let curated = Self.cjkFallbackNames.map {
             CTFontDescriptorCreateWithNameAndSize($0 as CFString, size)
         }
+        // Then the OS's own full default cascade so EVERY remaining script
+        // (Arabic, Hebrew, Thai, Devanagari and other Indic, …) still resolves
+        // to a real system face instead of tofu when the chosen Latin font — or
+        // even SF — lacks the glyph. Universal coverage, any language, any font.
+        let baseFont = CTFontCreateWithFontDescriptor(baseDescriptor, size, nil)
+        let systemDefault =
+            (CTFontCopyDefaultCascadeListForLanguages(baseFont, nil) as? [CTFontDescriptor]) ?? []
+        let cascade = curated + systemDefault
         let withCascade = CTFontDescriptorCreateCopyWithAttributes(
             baseDescriptor,
             [kCTFontCascadeListAttribute: cascade] as CFDictionary)

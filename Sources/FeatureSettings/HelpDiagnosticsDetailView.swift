@@ -64,26 +64,30 @@ struct HelpDiagnosticsDetailView: View {
     // MARK: - Report a Problem
 
     private var reportPanel: some View {
-        FocusableSettingsPanel(
-            title: "Report a Problem",
-            footer: "Scan the code, or go to the link on any device, to open a pre-filled bug report on GitHub. Your servers, logins and tokens are never included."
-        ) {
-            HStack(alignment: .top, spacing: 36) {
-                VStack(alignment: .leading, spacing: 12) {
-                    infoRow("GitHub", report.newIssueShortURL)
-                    infoRow("Email", Self.feedbackEmail)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+        FocusableSettingsPanel(title: "Report a Problem") {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Scan the code or go to the link to submit a GitHub issue.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(spacing: 12) {
-                    // "M" correction keeps the longer pre-filled issue URL
-                    // scannable at 10 feet (About's short repo link uses "H").
-                    SettingsQRCode(string: report.newIssueURLString, correctionLevel: "M")
-                        .frame(width: 200, height: 200)
-                    Text("Scan to report\na bug")
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 36) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        infoRow("GitHub", report.newIssueShortURL)
+                        infoRow("Email", Self.feedbackEmail)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(spacing: 12) {
+                        // "M" correction keeps the longer pre-filled issue URL
+                        // scannable at 10 feet (About's short repo link uses "H").
+                        SettingsQRCode(string: report.newIssueURLString, correctionLevel: "M")
+                            .frame(width: 200, height: 200)
+                        Text("Scan to report\na bug")
+                            .font(.caption)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }

@@ -633,7 +633,7 @@ struct NowPlayingView: View {
     /// transport row below.
     private var scrubRow: some View {
         VStack(spacing: 10) {
-            MusicScrubBar(model: scrubModel, suppressProgressAnimation: controlsSliding)
+            MusicScrubBar(model: scrubModel, suppressProgressAnimation: controlsSliding, isFocusable: controlsVisible)
                 .frame(height: 44)
             HStack {
                 Text(MusicFormat.duration(scrubModel.displaySeconds))

@@ -91,6 +91,18 @@ struct PlayerControls: View {
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
 
+    /// The transport control that was focused when the current panel was opened.
+    /// Restored (deferred) whenever the panel fully closes so focus always lands
+    /// back where the user started — no matter how deep the panel's sub-screens
+    /// went. See `restoreFocus(_:)` for why the restore is deferred.
+    @State private var panelReturnFocus: FocusSlot?
+
+    /// Whether the now-playing title/description block is shown. Distinct from
+    /// `openPanel == nil` so the block can *lag* on the way back: opening a panel
+    /// hides it immediately, but closing one waits ~0.5s before it fades in again
+    /// (otherwise it snaps back the instant the panel starts collapsing).
+    @State private var titleVisible = true
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -104,11 +116,24 @@ struct PlayerControls: View {
         .animation(.spring(response: 0.22, dampingFraction: 0.72), value: model.skipHintVisible)
         .onChange(of: model.controlBarVisible) { _, focused in
             openPanel = nil
+            titleVisible = true
             focus = focused ? initialFocus : nil
         }
         .onChange(of: openPanel) { _, panel in
             subtitleScreen = .tracks
-            guard let panel else { return }
+            guard let panel else {
+                // Panel fully closed. Return focus to whatever transport control
+                // opened it (skip while the whole bar is hiding — focus is
+                // intentionally cleared then). Then let the title/description
+                // fade back in after a short beat rather than snapping in.
+                if model.controlBarVisible { restoreFocus(panelReturnFocus) }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    if openPanel == nil { titleVisible = true }
+                }
+                return
+            }
+            titleVisible = false
             if panel == .info {
                 focus = model.hasNextEpisode ? .infoNext
                     : (model.hasPreviousEpisode ? .infoPrev : .infoRestart)
@@ -132,7 +157,7 @@ struct PlayerControls: View {
             // title/description are repetitive with the Info card, so they fade out).
             ZStack(alignment: .bottomLeading) {
                 titleBlock
-                    .opacity(openPanel == nil ? 1 : 0)
+                    .opacity(titleVisible ? 1 : 0)
                 if let openPanel {
                     panelContainer(for: openPanel)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -142,6 +167,7 @@ struct PlayerControls: View {
             buttonRow
         }
         .animation(.easeInOut(duration: 0.2), value: openPanel)
+        .animation(.easeInOut(duration: 0.28), value: titleVisible)
         .animation(Self.transportFadeAnimation(scrubbing: model.isScrubbing), value: model.isScrubbing)
         .padding(.horizontal, 60)
         .padding(.top, 90)
@@ -376,11 +402,25 @@ struct PlayerControls: View {
 
     private func toggle(_ category: Category) {
         if openPanel == category {
-            openPanel = nil
-            focus = .button(category)
+            openPanel = nil   // focus restoration handled centrally in onChange(of: openPanel)
         } else {
+            panelReturnFocus = focus ?? .button(category)
             openPanel = category
         }
+    }
+
+    /// Move focus programmatically after the current view update settles.
+    ///
+    /// When a panel closes, its focused row is removed in the same state update
+    /// and tvOS's focus engine auto-recovers to the leftmost control (the Info
+    /// button), which clobbers a synchronous `focus = …`. We set it immediately
+    /// *and* re-assert on the next runloop tick so the intended target wins the
+    /// race — this is what makes focus reliably return to wherever the panel was
+    /// opened, no matter how deep its sub-screens went.
+    private func restoreFocus(_ slot: FocusSlot?) {
+        guard let slot else { return }
+        focus = slot
+        Task { @MainActor in focus = slot }
     }
 
     // MARK: Panels
@@ -492,8 +532,7 @@ struct PlayerControls: View {
                 }
                 infoActionButton(title: "Restart", icon: "arrow.counterclockwise", prominent: false, slot: .infoRestart) {
                     actions.restart()
-                    openPanel = nil
-                    focus = .button(.info)
+                    openPanel = nil   // focus restored centrally in onChange(of: openPanel)
                 }
             }
             .fixedSize(horizontal: true, vertical: false)
@@ -1020,9 +1059,8 @@ struct PlayerControls: View {
             openSubtitleScreen(.tracks)
             return
         }
-        if let category = openPanel {
-            openPanel = nil
-            focus = .button(category)
+        if openPanel != nil {
+            openPanel = nil   // onChange(of: openPanel) restores the transport focus
         } else {
             onExitToSurface()
         }

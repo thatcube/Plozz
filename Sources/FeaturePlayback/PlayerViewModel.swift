@@ -2080,7 +2080,7 @@ public final class PlayerViewModel {
             var s = 0
             if track.isForced == provider.isForced { s += 2 }
             if track.isHearingImpaired == provider.isHearingImpaired { s += 1 }
-            if track.isImageBasedSubtitle == provider.isImageBasedSubtitle { s += 1 }
+            if track.isBitmapSubtitle == provider.isBitmapSubtitle { s += 1 }
             return s
         }
         return candidates.max { score($0) < score($1) }
@@ -2306,16 +2306,38 @@ public final class PlayerViewModel {
     /// provider's (which is why matching by id showed "None available"). Every
     /// non-image text track Jellyfin exposes is therefore eligible; the current
     /// primary is dropped when its id matches.
+    ///
+    /// Bitmap (PGS/DVD/DVB/VOBSUB) tracks are **never** eligible as a second line:
+    /// the dual layout stacks two *repositionable text* lines (the secondary has an
+    /// Above/Below placement), but a bitmap cue is drawn at its own authored
+    /// on-frame position that we can't move — a PGS "second line" would collide
+    /// with the primary instead of stacking. And when the **primary** itself is a
+    /// bitmap subtitle, dual mode is disabled entirely (no eligible seconds), since
+    /// the overlay can't know where the primary bitmap will land to place a line
+    /// clear of it.
     private func eligibleSecondarySubtitleTracks() -> [MediaTrack] {
+        // Dual mode needs a positionable primary to stack a second line against; a
+        // bitmap primary (PGS/DVD/DVB) has an uncontrollable authored position, so
+        // offer no seconds at all — the picker reads "None available".
+        if let primaryID = selectedSubtitleTrackID,
+           let primary = engine.subtitleTracks.first(where: { $0.id == primaryID })
+            ?? request?.subtitleTracks.first(where: { $0.id == primaryID }),
+           primary.isBitmapSubtitle {
+            #if DEBUG
+            PlozzLog.playback.debug("Secondary disabled: primary subtitle is bitmap (\(primary.codec ?? "?"))")
+            #endif
+            return []
+        }
         // Engines that decode a second subtitle stream themselves (Plozzigen)
         // source the dual picker from the ENGINE's own tracks (FFmpeg AVStream
         // ids), so embedded tracks with no fetchable sidecar URL are selectable —
         // the engine demuxes them. Include every subtitle track except the current
-        // primary (the viewer asked to be able to pick "all of them"); the exclude
-        // keys off the same engine id-space as `selectedSubtitleTrackID`.
+        // primary (the viewer asked to be able to pick "all of them") and any
+        // bitmap track (can't be positioned as a second line); the exclude keys off
+        // the same engine id-space as `selectedSubtitleTrackID`.
         if engine.capabilities.contains(.dualSubtitleDecode) {
             let engineSubs = engine.subtitleTracks
-            let eligible = engineSubs.filter { $0.id != selectedSubtitleTrackID }
+            let eligible = engineSubs.filter { $0.id != selectedSubtitleTrackID && !$0.isBitmapSubtitle }
             #if DEBUG
             PlozzLog.playback.debug(
                 "Secondary eligible (engine-dual): \(eligible.count) of \(engineSubs.count) engine subs (primary id \(self.selectedSubtitleTrackID.map(String.init) ?? "off"))"
@@ -2323,12 +2345,13 @@ public final class PlayerViewModel {
             #endif
             return eligible
         }
-        // Sidecar path (native/mpv): the second line renders through Plozz's
-        // overlay from a parsed VTT, so only text tracks with a fetchable URL,
-        // excluding the primary, qualify.
+        // Sidecar path (native): the second line renders through Plozz's overlay
+        // from a parsed VTT, so only text tracks with a fetchable URL, excluding the
+        // primary, qualify. (`isBitmapSubtitle` is redundant with the text-URL
+        // requirement here but kept for symmetry / defence in depth.)
         let providerSubs = request?.subtitleTracks ?? []
         let eligible = providerSubs.filter {
-            !$0.isImageBasedSubtitle && $0.deliveryURL != nil && $0.id != selectedSubtitleTrackID
+            !$0.isBitmapSubtitle && $0.deliveryURL != nil && $0.id != selectedSubtitleTrackID
         }
         #if DEBUG
         PlozzLog.playback.debug(

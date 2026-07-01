@@ -11,21 +11,33 @@ import OSLog
 /// Backed by `OSLog` where available (Apple platforms) and a no-op elsewhere,
 /// so non-Apple hosts (CI tooling, Linux) can still compile the logic modules.
 public struct PlozzLogger: Sendable {
+    private let category: String
+
     #if canImport(OSLog)
     private let logger: Logger
 
     init(category: String) {
+        self.category = category
         self.logger = Logger(subsystem: PlozzLog.subsystem, category: category)
     }
 
-    public func debug(_ message: String) { logger.debug("\(message, privacy: .public)") }
-    public func info(_ message: String) { logger.info("\(message, privacy: .public)") }
-    public func error(_ message: String) { logger.error("\(message, privacy: .public)") }
+    public func debug(_ message: String) {
+        logger.debug("\(message, privacy: .public)")
+        PlozzLog.record(.debug, category: category, message: message)
+    }
+    public func info(_ message: String) {
+        logger.info("\(message, privacy: .public)")
+        PlozzLog.record(.info, category: category, message: message)
+    }
+    public func error(_ message: String) {
+        logger.error("\(message, privacy: .public)")
+        PlozzLog.record(.error, category: category, message: message)
+    }
     #else
-    init(category: String) {}
-    public func debug(_ message: String) {}
-    public func info(_ message: String) {}
-    public func error(_ message: String) {}
+    init(category: String) { self.category = category }
+    public func debug(_ message: String) { PlozzLog.record(.debug, category: category, message: message) }
+    public func info(_ message: String) { PlozzLog.record(.info, category: category, message: message) }
+    public func error(_ message: String) { PlozzLog.record(.error, category: category, message: message) }
     #endif
 }
 
@@ -84,5 +96,75 @@ public enum PlozzLog {
                 : item
         }
         return components.string ?? url.path
+    }
+
+    // MARK: - Recent-log ring buffer
+
+    /// Severity of a captured log line.
+    public enum Level: String, Sendable {
+        case debug, info, error
+    }
+
+    /// One captured log line. Holds exactly what was passed to `os_log` — which
+    /// is already secret-safe because every call site redacts via
+    /// `redact(headers:)` / `redact(url:)`. Nothing extra is stored, so the
+    /// buffer inherits the same "never logs tokens" guarantee.
+    public struct LogEntry: Sendable, Identifiable {
+        public let id: UUID
+        public let date: Date
+        public let level: Level
+        public let category: String
+        public let message: String
+    }
+
+    /// Fixed-capacity, lock-guarded ring of the most recent log lines. Lets the
+    /// app attach a short window of recent activity to a user bug report without
+    /// a backend. `OSLogStore` can't read this back reliably on tvOS (current
+    /// process only), so we keep our own copy. Capped so memory stays bounded.
+    private final class RingBuffer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entries: [LogEntry] = []
+        private let capacity: Int
+
+        init(capacity: Int) {
+            self.capacity = capacity
+            entries.reserveCapacity(capacity)
+        }
+
+        func append(_ entry: LogEntry) {
+            lock.lock(); defer { lock.unlock() }
+            entries.append(entry)
+            if entries.count > capacity {
+                entries.removeFirst(entries.count - capacity)
+            }
+        }
+
+        func snapshot() -> [LogEntry] {
+            lock.lock(); defer { lock.unlock() }
+            return entries
+        }
+    }
+
+    private static let ring = RingBuffer(capacity: 500)
+
+    static func record(_ level: Level, category: String, message: String) {
+        ring.append(LogEntry(id: UUID(), date: Date(), level: level, category: category, message: message))
+    }
+
+    /// The most recent captured log entries, oldest→newest, capped to `limit`.
+    public static func recentEntries(limit: Int = 200) -> [LogEntry] {
+        let all = ring.snapshot()
+        guard limit < all.count else { return all }
+        return Array(all.suffix(limit))
+    }
+
+    /// The recent log window rendered as plain text (one line per entry),
+    /// suitable for pasting into a bug report. Already redacted at source.
+    public static func recentLogText(limit: Int = 100) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return recentEntries(limit: limit)
+            .map { "\(formatter.string(from: $0.date)) [\($0.level.rawValue)] \($0.category): \($0.message)" }
+            .joined(separator: "\n")
     }
 }

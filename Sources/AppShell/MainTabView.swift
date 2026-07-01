@@ -208,6 +208,7 @@ struct MainTabView: View {
                 theme: themeModel,
                 nightShift: nightShiftModel,
                 homeVisibility: homeVisibility,
+                diagnostics: diagnosticsModel,
                 trakt: trakt,
                 simkl: simkl,
                 anilist: anilist,

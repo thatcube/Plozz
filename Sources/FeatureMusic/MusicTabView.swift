@@ -170,7 +170,7 @@ func playbackReporter(for provider: any MusicProvider) -> AudioPlaybackControlle
         media.kind == .plex ? provider as? WatchStateProviding : nil
     let scrobbleThreshold = 0.80
 
-    return { track, event, positionSeconds in
+    return { track, event, positionSeconds, durationSeconds in
         let progress = PlaybackProgress(
             itemID: track.id,
             playSessionID: nil,
@@ -189,14 +189,16 @@ func playbackReporter(for provider: any MusicProvider) -> AudioPlaybackControlle
         }
         // A completed play (Plex only): scrobble so the track counts as played and
         // appears in Recently Played. A natural end reports position == duration
-        // (100%); a near-complete skip still crosses the ~80% bar. Best-effort.
+        // (100%); a near-complete skip still crosses the ~80% bar. `durationSeconds`
+        // is the engine-resolved length, so a track whose metadata omitted a
+        // duration still scrobbles. Best-effort.
         if event == .stop, let scrobbler = plexScrobbler,
-           let duration = track.duration, duration > 0,
-           positionSeconds >= duration * scrobbleThreshold {
+           durationSeconds > 0,
+           positionSeconds >= durationSeconds * scrobbleThreshold {
             do {
                 try await scrobbler.setPlayed(true, itemID: track.id)
                 MusicReportDiagnostics.emit(
-                    "scrobble OK id=\(track.id) pos=\(Int(positionSeconds))s/\(Int(duration))s"
+                    "scrobble OK id=\(track.id) pos=\(Int(positionSeconds))s/\(Int(durationSeconds))s"
                 )
             } catch {
                 MusicReportDiagnostics.emit("scrobble THREW id=\(track.id): \(error)")

@@ -190,16 +190,18 @@ struct PlayerControls: View {
             // clear our binding when focus leaves the bar.
             if !focused { focus = nil }
         }
+        .onChange(of: styleEditing) { _, editing in
+            // Reset the measured Style-panel height on close so the next open snaps
+            // to its natural size instead of morphing from a stale value.
+            if !editing { styleBodyHeight = 0 }
+        }
         .onChange(of: openPanel) { _, panel in
             subtitleScreen = .tracks
             guard let panel else {
-                // Panel fully closed. Reset the measured height so the next open
-                // renders at its own natural size instead of morphing from a stale
-                // (possibly different-category) value. Return focus to whatever
-                // transport control opened it (skip while the whole bar is hiding —
-                // focus is intentionally cleared then). Then let the title fade back
-                // in after a short beat rather than snapping in.
-                styleBodyHeight = 0
+                // Panel fully closed. Return focus to whatever transport control
+                // opened it (skip while the whole bar is hiding — focus is
+                // intentionally cleared then). Then let the title fade back in after
+                // a short beat rather than snapping in.
                 if model.controlBarVisible { restoreFocus(panelReturnFocus) }
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(500))
@@ -538,73 +540,90 @@ struct PlayerControls: View {
             infoPanel
                 .colorScheme(.dark)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        } else if category == .subtitles && subtitleScreen.isStyleFamily {
+            styleMorphPanel(for: category)
         } else {
-            morphingPanel(for: category)
+            plainPanel(for: category)
         }
     }
 
-    /// The tallest the scrolling body may grow before it clamps + scrolls. Comfortably
-    /// fits the deepest style sub-screen (the Font list) and a healthy track list; a
-    /// longer list scrolls inside the clamp rather than overflowing the screen.
-    private static let panelBodyMaxHeight: CGFloat = 520
+    /// The tallest the track/audio list may grow before it clamps + scrolls, so a
+    /// long list never overflows the screen. The Style editor is exempt (it grows
+    /// to full natural height — see `styleMorphPanel`).
+    private static let panelBodyMaxHeight: CGFloat = 440
 
-    /// The floating options panel (Subtitles / Audio / Speed / Sync) with a
-    /// measured-height morph so navigating between screens — the track list, the
-    /// Style editor, and its detail sub-screens — animates ONLY the glass box's
-    /// height while the rows stay put (no cross-fade or spill):
-    ///
-    /// - The body content is laid out at its natural height inside a `ScrollView`
-    ///   and measured via `PanelBodyHeightKey` (the measurement reflects the true
-    ///   content height, independent of the clamped frame).
-    /// - The scroll body is framed to `min(measured, panelBodyMaxHeight)` and the
-    ///   whole panel is `clipShape`d to the glass corner radius, so content taller
-    ///   than the clamp scrolls rather than spilling past the rounded border.
-    /// - Until the first measurement lands the body sizes itself (`maxHeight`) so a
-    ///   fresh open always renders at the right height; every later change morphs.
+    /// The plain options panel (track list / Audio / Speed / Sync). Content-driven
+    /// height, clamped + scrollable so a long track list stays on-screen.
     @ViewBuilder
-    private func morphingPanel(for category: Category) -> some View {
+    private func plainPanel(for category: Category) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             panelHeader(for: category)
             Divider().background(.white.opacity(0.15))
-            morphingBody(for: category)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    panelBodyContent(for: category)
+                }
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .frame(maxHeight: Self.panelBodyMaxHeight)
         }
         .frame(width: 520, alignment: .leading)
         .colorScheme(.dark)
         .modifier(PanelGlassBackground())
-        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        // Drive the height change explicitly: `.animation(_, value:)` does NOT
-        // reliably fire for preference-driven state (the value settles a frame
-        // after layout), so wrap the mutation in `withAnimation`.
-        .onPreferenceChange(PanelBodyHeightKey.self) { newHeight in
-            guard newHeight > 0, newHeight != styleBodyHeight else { return }
-            withAnimation(.easeInOut(duration: 0.28)) { styleBodyHeight = newHeight }
-        }
         // The track controls live on the right of the button row, so the panel
         // opens against the trailing edge above them rather than on the left.
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
+    /// The in-player Subtitle Style editor panel. Uses a measured-height clip morph
+    /// so navigating between its sub-screens (or adding/removing a row within one)
+    /// animates ONLY the glass box's height while the rows stay put:
+    ///
+    /// - The content is laid out at its natural height (`fixedSize(vertical:)`) and
+    ///   its height is measured via `PanelBodyHeightKey` — the measurement ignores
+    ///   the outer clip frame, so it always reflects the true content height.
+    /// - The box is framed to `styleBodyHeight` (top-aligned) and `clipShape`d to the
+    ///   glass corner radius. The editor is pinned to the top corner with generous
+    ///   vertical room, so it grows to its full natural height (no scroll clamp) —
+    ///   clamping it would cut off the lower rows.
+    /// - Only `styleBodyHeight` is animated, so the rows never cross-fade — the clip
+    ///   window simply grows/shrinks and reveals them top-down.
     @ViewBuilder
-    private func morphingBody(for category: Category) -> some View {
-        let scroll = ScrollView {
+    private func styleMorphPanel(for category: Category) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            panelHeader(for: category)
+            Divider().background(.white.opacity(0.15))
             VStack(alignment: .leading, spacing: 0) {
-                panelBodyContent(for: category)
+                subtitleBody
             }
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: PanelBodyHeightKey.self, value: proxy.size.height)
-                }
-            )
         }
-        if styleBodyHeight > 0 {
-            scroll.frame(height: min(styleBodyHeight, Self.panelBodyMaxHeight), alignment: .top)
-        } else {
-            // Pre-measurement: let the body size to its content (capped) so the very
-            // first frame is correct; the measured value takes over immediately after.
-            scroll.frame(maxHeight: Self.panelBodyMaxHeight)
+        .frame(width: 520, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: PanelBodyHeightKey.self, value: proxy.size.height)
+            }
+        )
+        .frame(height: styleBodyHeight > 0 ? styleBodyHeight : nil, alignment: .top)
+        .colorScheme(.dark)
+        .modifier(PanelGlassBackground())
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        // Drive the height change explicitly: `.animation(_, value:)` does NOT
+        // reliably fire for preference-driven state (the value settles a frame
+        // after layout), so wrap the mutation in `withAnimation`. The very first
+        // measurement snaps in (no grow-from-zero); every later change morphs.
+        .onPreferenceChange(PanelBodyHeightKey.self) { newHeight in
+            guard newHeight > 0, newHeight != styleBodyHeight else { return }
+            if styleBodyHeight == 0 {
+                styleBodyHeight = newHeight
+            } else {
+                withAnimation(.easeInOut(duration: 0.28)) { styleBodyHeight = newHeight }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     @ViewBuilder

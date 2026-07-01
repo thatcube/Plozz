@@ -248,9 +248,12 @@ struct PlayerControls: View {
             }
             .frame(maxHeight: 440)
         }
-        .frame(width: 760, alignment: .leading)
+        .frame(width: 520, alignment: .leading)
         .colorScheme(.dark)
         .modifier(PanelGlassBackground())
+        // The track controls live on the right of the button row, so the panel
+        // opens against the trailing edge above them rather than on the left.
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     /// Header of the floating panel: the screen title on the left, and — on the

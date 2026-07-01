@@ -486,10 +486,19 @@ public final class AudioPlaybackController {
     public func seek(to seconds: TimeInterval) async {
         let target = max(0, seconds)
         diag("seek", "seek→\(String(format: "%.1f", target))s route=\(routeSummary()) preState=[\(playerStateSummary())]")
+        // A sample-accurate seek (`.zero` tolerance) forces AVPlayer to flush and
+        // re-render its audio output buffer. On HDMI that's imperceptible, but when
+        // tvOS is forwarding the system audio to a HomePod — a system-level route
+        // the app never sees (it always reports HDMI) — that output-buffer
+        // discontinuity can drop the AirPlay link, and because the app gets no
+        // event for the drop it can't recover. Allowing a small tolerance lets the
+        // seek be satisfied from already-buffered audio, minimizing the
+        // discontinuity; half a second is imperceptible when scrubbing music.
+        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
         await player.seek(
             to: CMTime(seconds: target, preferredTimescale: 600),
-            toleranceBefore: .zero,
-            toleranceAfter: .zero
+            toleranceBefore: tolerance,
+            toleranceAfter: tolerance
         )
         diag("seek", "seek done route=\(routeSummary()) postState=[\(playerStateSummary())]")
         currentTime = target

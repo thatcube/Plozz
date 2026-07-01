@@ -369,15 +369,19 @@ final class SubtitleLineView: UIView {
     // MARK: - Font
 
     /// The bundled-face PostScript name for the requested weight/slant, or `nil`
-    /// to use the system font.
+    /// to use the system font. Picks the closest face a family actually bundles:
+    /// families without italics (e.g. Lexend) fall back to the upright weight
+    /// rather than letting Core Text substitute an unrelated system font.
     private func postScriptName(_ c: Config) -> String? {
         guard let stem = c.family.postScriptStem else { return nil }
+        let candidates: [String]
         switch (c.isBold, c.isItalic) {
-        case (true, true):  return "\(stem)-BoldItalic"
-        case (true, false): return "\(stem)-Bold"
-        case (false, true): return "\(stem)-Italic"
-        case (false, false): return "\(stem)-Regular"
+        case (true, true):   candidates = ["\(stem)-BoldItalic", "\(stem)-Bold", "\(stem)-Italic", "\(stem)-Regular"]
+        case (true, false):  candidates = ["\(stem)-Bold", "\(stem)-Regular"]
+        case (false, true):  candidates = ["\(stem)-Italic", "\(stem)-Regular"]
+        case (false, false): candidates = ["\(stem)-Regular"]
         }
+        return candidates.first { UIFont(name: $0, size: 12) != nil } ?? candidates.last
     }
 
     /// tvOS system fonts that cover CJK + emoji, appended as a Core Text cascade

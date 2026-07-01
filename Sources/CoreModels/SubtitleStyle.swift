@@ -12,21 +12,31 @@ import Foundation
 public enum SubtitleFontFamily: String, Codable, Sendable, Equatable, CaseIterable {
     case atkinson
     case system
+    case lexend
+    case roboto
+    case openDyslexic
 
     public var displayName: String {
         switch self {
         case .atkinson: return "Atkinson Hyperlegible"
         case .system: return "System (SF)"
+        case .lexend: return "Lexend"
+        case .roboto: return "Roboto"
+        case .openDyslexic: return "OpenDyslexic"
         }
     }
 
     /// The PostScript family stem of the bundled face, or `nil` to use the system
     /// font. The renderer appends the weight/slant suffix (`-Regular`/`-Bold`/
-    /// `-Italic`/`-BoldItalic`).
+    /// `-Italic`/`-BoldItalic`), degrading to a lighter/upright face when a family
+    /// doesn't bundle every combination (e.g. Lexend ships no italics).
     public var postScriptStem: String? {
         switch self {
         case .atkinson: return "AtkinsonHyperlegible"
         case .system: return nil
+        case .lexend: return "Lexend"
+        case .roboto: return "Roboto"
+        case .openDyslexic: return "OpenDyslexic"
         }
     }
 }

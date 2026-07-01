@@ -303,18 +303,18 @@ struct PlayerControls: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(model.title.isEmpty ? "Now Playing" : model.title)
-                    .font(.title2.weight(.bold))
+                    .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
                 if !episodeMetaLine.isEmpty {
                     Text(episodeMetaLine)
-                        .font(.subheadline.weight(.medium))
+                        .font(.footnote.weight(.medium))
                         .foregroundStyle(.white.opacity(0.6))
                         .lineLimit(1)
                 }
                 if !model.overview.isEmpty {
                     Text(model.overview)
-                        .font(.callout)
+                        .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
@@ -331,7 +331,7 @@ struct PlayerControls: View {
 
             Spacer(minLength: 32)
 
-            VStack(spacing: 12) {
+            VStack(alignment: .trailing, spacing: 12) {
                 if model.hasNextEpisode {
                     infoActionButton(title: "Next Episode", icon: "forward.end.fill", prominent: true, slot: .infoNext) {
                         actions.playNextEpisode()
@@ -348,7 +348,7 @@ struct PlayerControls: View {
                     focus = .button(.info)
                 }
             }
-            .frame(width: 340)
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(contentPad)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -382,9 +382,8 @@ struct PlayerControls: View {
     ) -> some View {
         Button(action: action) {
             Label(title, systemImage: icon)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
-                .frame(maxWidth: .infinity)
         }
         .playerGlassButton(prominent: prominent)
         .focused($focus, equals: slot)

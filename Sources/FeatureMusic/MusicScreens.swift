@@ -457,7 +457,8 @@ struct AlbumDetailView: View {
             startIndex: start,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 
@@ -467,7 +468,8 @@ struct AlbumDetailView: View {
             tracks: viewModel.tracks,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 }
@@ -528,7 +530,8 @@ struct PlaylistDetailView: View {
             startIndex: start,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 
@@ -538,7 +541,8 @@ struct PlaylistDetailView: View {
             tracks: viewModel.tracks,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 }

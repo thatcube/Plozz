@@ -3,6 +3,7 @@ import SwiftUI
 import CoreModels
 import CoreUI
 import MetadataKit
+import CoreNetworking
 
 /// Navigation routes inside the Music tab's stack.
 enum MusicRoute: Hashable {
@@ -81,7 +82,8 @@ public struct MusicTabView: View {
             startIndex: 0,
             resolveStreamURL: streamURLResolver(for: provider),
             resolveLyrics: lyricsResolver(for: provider),
-            refreshLyrics: lyricsRefresher(for: provider)
+            refreshLyrics: lyricsRefresher(for: provider),
+            reportPlayback: playbackReporter(for: provider)
         )
     }
 
@@ -130,6 +132,46 @@ func streamURLResolver(for provider: any MusicProvider) -> AudioPlaybackControll
             return nil
         }
         return AudioPlaybackController.ResolvedStream(url: info.streamURL, quality: info.quality)
+    }
+}
+
+/// Builds a playback reporter bound to a music provider, mirroring
+/// `streamURLResolver`, so the audio engine can report play lifecycle events
+/// (start / periodic progress / pause / unpause / stop) to the server that owns
+/// the track. This is what stamps the user's server-side play history — which in
+/// turn feeds the "Recently Played" rail. (Plozz's video player already reports;
+/// the music engine historically never did, so listening in Plozz was invisible
+/// to both Jellyfin and Plex.)
+///
+/// The music providers are the *same* concrete types as the video providers —
+/// `JellyfinProvider` and `PlexProvider` conform to both `MusicProvider` and
+/// `MediaProvider` — so we reach the existing `reportPlayback(_:event:)` by
+/// casting. Returns `nil` for a provider that isn't a `MediaProvider` (reporting
+/// simply stays off for that session).
+///
+/// Reporting is best-effort: a failure is logged and swallowed so it can never
+/// surface as a playback error (matching the video player's tolerance).
+@MainActor
+func playbackReporter(for provider: any MusicProvider) -> AudioPlaybackController.PlaybackReporter? {
+    guard let media = provider as? MediaProvider else {
+        // Every real provider (Jellyfin/Plex) is also a MediaProvider, so this
+        // should never happen — log it if it ever does, so a silent absence of
+        // "Music report …" lines has an explanation.
+        PlozzLog.playback.debug("Music playback reporting disabled — provider is not a MediaProvider")
+        return nil
+    }
+    return { track, event, positionSeconds in
+        let progress = PlaybackProgress(
+            itemID: track.id,
+            playSessionID: nil,
+            positionSeconds: positionSeconds,
+            isPaused: event == .pause
+        )
+        do {
+            try await media.reportPlayback(progress, event: event)
+        } catch {
+            PlozzLog.playback.debug("Music playback report failed (non-fatal): \(event.rawValue)")
+        }
     }
 }
 

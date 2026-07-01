@@ -1084,7 +1084,7 @@ struct PlayerControls: View {
 
     // MARK: Formatting
 
-    static let speedPresets: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    static let speedPresets: [Double] = [1.0, 1.25, 1.5, 1.75, 2.0]
 
     // Custom-speed grid for the − / + stepper: 0.25×…2.0× in 0.05 steps. Modelled
     // as integer indices so the stepper matches exactly (no Double == fuzziness);

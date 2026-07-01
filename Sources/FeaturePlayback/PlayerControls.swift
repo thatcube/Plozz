@@ -973,7 +973,7 @@ struct PlayerControls: View {
         case let .number(value, _, _):
             Text(value).font(.body).monospacedDigit().playerMenuRowSecondary()
         case let .choice(value, _, _):
-            Text(value).font(.body).playerMenuRowSecondary()
+            Text(value).font(.body).lineLimit(2).multilineTextAlignment(.trailing).playerMenuRowSecondary()
         case let .toggle(isOn, _):
             Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                 .font(.body)
@@ -1080,8 +1080,7 @@ struct PlayerControls: View {
         // explicitly rather than the ambiguous "None available".
         let baseValue: String
         if let format = model.secondarySubtitleImagePrimaryFormat {
-            let readable = format == "Image" ? "image" : format
-            baseValue = "Unavailable with \(readable) subtitles"
+            baseValue = "Disabled for \(format)"
         } else if secOptions.isEmpty {
             baseValue = "None available"
         } else {

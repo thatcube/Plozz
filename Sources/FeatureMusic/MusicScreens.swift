@@ -112,41 +112,29 @@ struct MusicLandingView: View {
         }
     }
 
+    /// The Browse row: text-only category buttons on the leading edge with the
+    /// scrolling Now Playing card pinned to the trailing screen edge. Both insets
+    /// are the standard `screenPadding`, so the card's right margin matches the
+    /// buttons' left margin. No header — the labelled buttons are self-evident.
     private func entryTiles(trailing: AnyView?) -> some View {
-        VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
-            HStack {
-                Text("Browse")
-                    .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
-                Spacer()
-                if let trailing { trailing }
-            }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            ScrollView(.horizontal, showsIndicators: false) {
-                // Lazy so only on-screen tiles build their Liquid Glass surface —
-                // eager rails kept every card's glass effect live, which made
-                // focus navigation recompute every tile's SDF and lag the UI.
-                LazyHStack(spacing: metrics.cardSpacing) {
-                    EntryTile(title: "Artists", icon: "music.mic") { onSelectRoute(.grid(.artist)) }
-                    EntryTile(title: "Albums", icon: "opticaldisc") { onSelectRoute(.grid(.album)) }
-                    EntryTile(title: "Playlists", icon: "music.note.list") { onSelectRoute(.grid(.playlist)) }
-                    EntryTile(title: "Genres", icon: "guitars") { onSelectRoute(.grid(.genre)) }
-                }
-                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
-                // engine holds the first/last tile at its inset, and reserve room
-                // *inside* the clip for the focused tile's lift + shadow. The
-                // negative outer padding restores the original inset, so the row's
-                // height is unchanged — only the clip grows.
-                .padding(.vertical, metrics.railShadowClearance)
-            }
-            .padding(.vertical, metrics.railClearanceOffset(for: PlozzTheme.Spacing.small))
+        HStack(alignment: .center, spacing: metrics.cardSpacing) {
+            BrowseButton(title: "Artists") { onSelectRoute(.grid(.artist)) }
+            BrowseButton(title: "Albums") { onSelectRoute(.grid(.album)) }
+            BrowseButton(title: "Playlists") { onSelectRoute(.grid(.playlist)) }
+            BrowseButton(title: "Genres") { onSelectRoute(.grid(.genre)) }
+            Spacer(minLength: metrics.cardSpacing)
+            if let trailing { trailing }
         }
+        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
     }
 }
 
-private struct EntryTile: View {
+/// A text-only Browse category button. Its height matches the Now Playing card
+/// (`NowPlayingCard.nominalHeight`) so the buttons and the card line up on one
+/// row. Uses the shared glass-card focus — the same treatment as every other
+/// media card — rather than a bespoke focus style.
+private struct BrowseButton: View {
     let title: String
-    let icon: String
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -157,29 +145,19 @@ private struct EntryTile: View {
         PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
     }
 
-    /// Scale the tile size with the density setting so it grows/shrinks alongside
-    /// media cards when appearance is changed.
-    private var tileWidth: CGFloat { (260 * metrics.scale).rounded() }
-    private var tileHeight: CGFloat { (150 * metrics.scale).rounded() }
-    private var iconSize: CGFloat { (40 * metrics.scale).rounded() }
-
     var body: some View {
-        VStack(spacing: (12 * metrics.scale).rounded()) {
-            Image(systemName: icon)
-                .font(.system(size: iconSize))
-                .foregroundStyle(isFocused ? titleColor : Color.accentColor)
-            Text(title)
-                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                .foregroundStyle(titleColor)
-        }
-        .frame(width: tileWidth, height: tileHeight)
-        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
-        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
-        .plozzCardRasterize(reduceTransparency: reduceTransparency)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
-        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        Text(title)
+            .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+            .foregroundStyle(titleColor)
+            .padding(.horizontal, PlozzTheme.Spacing.xLarge)
+            .frame(height: NowPlayingCard.nominalHeight)
+            .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+            .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+            .plozzCardRasterize(reduceTransparency: reduceTransparency)
+            .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
+            .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
+            .zIndex(isFocused ? 2 : 0)
+            .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 

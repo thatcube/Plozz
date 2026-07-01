@@ -45,6 +45,11 @@ struct NowPlayingCard: View {
     var controller: AudioPlaybackController
     @Environment(\.openNowPlaying) private var openNowPlaying
 
+    /// The card's fixed rendered height: the 64pt artwork plus its 16pt top and
+    /// bottom padding (see `NowPlayingCardContent`). Exposed so sibling controls
+    /// — the Browse category buttons — can match the card's height exactly.
+    static let nominalHeight: CGFloat = 64 + 16 * 2
+
     /// Maximum width for the title/subtitle column. Wider than the old pill so
     /// the average song title + "Artist · Album" line fits without truncation.
     var textWidth: CGFloat = 320

@@ -518,10 +518,19 @@ struct PlayerControls: View {
                     // Editor: content-sized (no greedy ScrollView) so the panel
                     // hugs its rows and pins to the top-right corner with an even
                     // margin rather than stretching toward full height.
+                    //
+                    // `fixedSize(vertical:)` is essential here: unlike the other
+                    // panes (which sit in a ScrollView that proposes unbounded
+                    // height), this content is proposed the tall top-pinned column.
+                    // Focusable row buttons are height-flexible on tvOS, so without
+                    // this they'd absorb the excess and stretch — worst on small
+                    // sub-screens with few rows. Pinning to the ideal height keeps
+                    // every row the same compact height as the track/audio menus.
                     VStack(alignment: .leading, spacing: 0) {
                         subtitleBody
                     }
                     .padding(.vertical, 10)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 } else {
                     ScrollView {
@@ -843,9 +852,10 @@ struct PlayerControls: View {
         .onMoveCommand { direction in handleStyleMove(direction, rows: rows) }
     }
 
-    /// One rendered row: full-width Button + fitted-white-card focus, trailing HStack
-    /// with a fixed −slot, a right-aligned value column, and a +/`›` slot so every
-    /// row's value lines up whether or not it carries stepper glyphs.
+    /// One rendered row, laid out to match the track/audio rows exactly: a full-width
+    /// Button with the title hard-left and the value/glyph hard-right, so titles and
+    /// values carry equal edge gutters. Steppers reveal −/+ flanking the value on
+    /// focus; submenus show a trailing chevron.
     @ViewBuilder
     private func styleRow(_ row: StyleRowSpec) -> some View {
         let isFocused = focus == .row(row.slot)
@@ -858,14 +868,13 @@ struct PlayerControls: View {
             case let .action(run): run()
             }
         } label: {
-            HStack(spacing: 8) {
-                // Leading slot mirrors the trailing +/chevron slot so the title and
-                // the right-aligned value carry EQUAL gutters inside the focus card
-                // (previously the value's reserved icon column made the right side
-                // look far while the title nearly touched the card's left edge).
-                Color.clear.frame(width: 20)
+            // Mirror the track/audio rows exactly: title hard-left, a Spacer, and
+            // the value/glyph hard-right against the same trailing padding the
+            // checkmark uses. Title and trailing element therefore carry equal edge
+            // gutters (no extra leading slot pushing the title in).
+            HStack(spacing: 10) {
                 Text(row.title).font(.body).lineLimit(1)
-                Spacer(minLength: 12)
+                Spacer(minLength: 8)
                 styleRowTrailing(row, isFocused: isFocused)
             }
             .padding(.horizontal, 16)
@@ -880,30 +889,26 @@ struct PlayerControls: View {
     @ViewBuilder
     private func styleRowTrailing(_ row: StyleRowSpec, isFocused: Bool) -> some View {
         HStack(spacing: 8) {
-            // −slot: only steppers, only on focus.
-            ZStack {
-                if case .number = row.kind, isFocused {
-                    Image(systemName: "minus").font(.body.weight(.semibold))
-                }
+            // − appears on focus for steppers, immediately left of the value.
+            if case .number = row.kind, isFocused {
+                Image(systemName: "minus").font(.body.weight(.semibold))
             }
-            .frame(width: 20)
 
-            styleRowValue(row).frame(minWidth: 92, alignment: .trailing)
+            styleRowValue(row)
 
-            // +/`›` slot: stepper + on focus, or a submenu chevron.
-            ZStack {
-                switch row.kind {
-                case .number:
-                    if isFocused { Image(systemName: "plus").font(.body.weight(.semibold)) }
-                case .submenu:
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .playerMenuRowSecondary()
-                default:
-                    EmptyView()
-                }
+            // + on focus for steppers, or a persistent chevron for submenus — both
+            // sit at the trailing edge, exactly where the track rows put their
+            // checkmark, so the value column hugs the right like every other menu.
+            switch row.kind {
+            case .number:
+                if isFocused { Image(systemName: "plus").font(.body.weight(.semibold)) }
+            case .submenu:
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .playerMenuRowSecondary()
+            default:
+                EmptyView()
             }
-            .frame(width: 20)
         }
     }
 

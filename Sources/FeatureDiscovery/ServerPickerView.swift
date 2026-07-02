@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import CoreModels
+import CoreUI
 
 /// tvOS server picker: discovered servers, last-used reconnect, and manual entry.
 ///
@@ -74,6 +75,10 @@ public struct ServerPickerView: View {
                     }
                 }
             }
+            // Match the Settings page width: cap the form at the shared content
+            // max width and center it, instead of the wider default tvOS Form.
+            .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth)
+            .frame(maxWidth: .infinity, alignment: .center)
             .navigationTitle("Choose your server")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {

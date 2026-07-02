@@ -416,6 +416,17 @@ public final class AppState {
     /// Per-library scan caps so building the index can never become an unbounded
     /// full-library walk that stalls launch on a huge catalogue.
     private let identityChunkSize = 200
+    /// Per-library ceiling on how many items a single warm pass indexes. Sized
+    /// far above any realistic personal library so it's effectively "all of it".
+    ///
+    /// KNOWN EDGE (r6-10k-cap-complete, documented/deferred): if a library really
+    /// does exceed this, the account is still marked rebuilt for the wave, so a
+    /// twin living past the 10k boundary in one server's ordering may not get
+    /// indexed and could miss its cross-server merge until a future full re-warm
+    /// happens to reach it. Closing this fully would need cursor persistence
+    /// (resume the scan past the cap across warms). Left as-is: 10k per library is
+    /// enormous for a home media server, so the miss window is negligible in
+    /// practice and not worth the added state.
     private let identityMaxItemsPerLibrary = 10_000
 
     /// Caps how many accounts are indexed concurrently during a warm. Without a
@@ -459,12 +470,13 @@ public final class AppState {
             // origin-only while the live scan below refreshes things. Pruned to the
             // active accounts inside `restore` (B3) so a removed server / switched
             // profile is never resurrected.
+            var publishedInRestore = false
             if let self, await self.consumePendingRestore() {
                 let persisted = store.load()
                 if !persisted.isEmpty, await index.restore(from: persisted, retaining: activeIDs) {
                     let snapshot = await index.snapshot()
-                    await MainActor.run {
-                        guard self.publishWarmedSnapshot(snapshot, generation: warmGeneration) else { return }
+                    publishedInRestore = await MainActor.run { () -> Bool in
+                        guard self.publishWarmedSnapshot(snapshot, generation: warmGeneration) else { return false }
                         // Tell already-loaded surfaces (Home) that cross-server
                         // membership is now known so they re-fold the fuller source
                         // set into their in-place cards. Without this, a boot whose
@@ -474,11 +486,25 @@ public final class AppState {
                         // locality selection then had no local twin to route to.
                         NotificationCenter.default.post(name: .identityIndexDidUpdate, object: nil)
                         self.drainWatchOutbox()
+                        return true
                     }
                     FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "restore"))
                 }
             }
             await index.retainAccounts(activeIDs)
+            // r6-retain-publish: if the restore path didn't publish this wave,
+            // publish the just-pruned snapshot now so a removed server's sources stop
+            // appearing immediately — even when NO account needs a (re)scan (the
+            // remaining accounts are warm & fresh, so `accountsToWarm` is empty and
+            // the warm loop below would otherwise never publish the pruned set).
+            if !publishedInRestore, let self {
+                let snapshot = await index.snapshot()
+                await MainActor.run {
+                    guard self.publishWarmedSnapshot(snapshot, generation: warmGeneration) else { return }
+                    NotificationCenter.default.post(name: .identityIndexDidUpdate, object: nil)
+                    self.drainWatchOutbox()
+                }
+            }
             let stale = await index.staleAccounts(olderThan: ttl)
 
             // Select the accounts that actually need a (re)scan: warm & fresh ones
@@ -532,13 +558,6 @@ public final class AppState {
                         // when the outbox is empty.
                         self.drainWatchOutbox()
                     }
-                    // B1: persist the freshly-warmed membership so the next cold
-                    // boot can seed it at t=0. Only warm accounts are exported, so
-                    // a half-scan is never frozen as authoritative. The store is
-                    // NSLock-guarded with atomic writes, so the concurrent saves
-                    // from sibling warm tasks are safe and monotonic.
-                    let persisted = await index.export()
-                    try? store.save(persisted)
                     // Make warm progress visible: each publish shows how many
                     // identities and cross-server unions the index now holds.
                     // crossServer staying 0 as accounts warm is the H1 signal
@@ -560,6 +579,17 @@ public final class AppState {
                         next += 1
                         group.addTask { await warmOne(account) }
                     }
+                }
+                // B1: persist the freshly-warmed membership so the next cold boot can
+                // seed it at t=0. Done ONCE after the whole wave rather than after
+                // each account: `export()` serializes the entire warm index every
+                // time, so a per-account save is O(accounts²) redundant full-JSON
+                // writes for a many-server library. Only warm accounts are exported,
+                // so a half-scan is never frozen as authoritative; skipped on cancel
+                // (a superseding wave will persist its own result).
+                if !Task.isCancelled {
+                    let persisted = await index.export()
+                    try? store.save(persisted)
                 }
             }
         }

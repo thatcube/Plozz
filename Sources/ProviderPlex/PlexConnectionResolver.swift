@@ -87,6 +87,19 @@ public final class PlexConnectionResolver: @unchecked Sendable {
         return cached ?? reachableSeed ?? candidates[0]
     }
 
+    /// True when the resolver has a connection whose locality can be trusted: a
+    /// probe-confirmed `cached` URL or a persisted last-known-good `reachableSeed`
+    /// (an address that demonstrably worked). When BOTH are nil, `current` falls
+    /// back to the most-preferred but **unproven** candidate — and because a Plex
+    /// server advertises its own LAN address even to remote clients, that guess can
+    /// be a local-looking URL that isn't actually reachable. Best-source selection
+    /// must treat locality as `.unknown` until this is true, or a dead LAN-shaped
+    /// guess would wrongly win as `.local`.
+    public var hasConfirmedReachableConnection: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cached != nil || reachableSeed != nil
+    }
+
     /// The base URL to use for the next request. Probes for a reachable
     /// connection on first use (and after a reported failure), caching the
     /// result; concurrent callers share a single in-flight resolution.

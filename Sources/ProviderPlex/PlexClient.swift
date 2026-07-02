@@ -41,6 +41,11 @@ public struct PlexClient: Sendable {
     /// used by URL builders after a request has settled it.
     public var baseURL: URL { resolver.current }
 
+    /// Whether the resolver has a confirmed-reachable (or persisted last-known-good)
+    /// connection, so `baseURL`'s locality can be trusted for best-source selection.
+    /// See ``PlexConnectionResolver/hasConfirmedReachableConnection``.
+    public var hasConfirmedReachableConnection: Bool { resolver.hasConfirmedReachableConnection }
+
     /// Fixed-URL initializer: the client always talks to `baseURL` (no probing).
     /// Used for manually-entered hosts and unit tests.
     public init(
@@ -165,6 +170,26 @@ public struct PlexClient: Sendable {
             path: "/library/onDeck",
             query: containerQuery(start: 0, size: limit)
         ).MediaContainer.Metadata ?? []
+    }
+
+    /// Shows across every section ordered by most-recently-viewed first — the Plex
+    /// mirror of ``JellyfinClient/recentlyWatchedSeries(userID:limit:)``. A
+    /// just-finished series' *next* episode arrives on `onDeck` with no
+    /// `lastViewedAt` of its own (it's unwatched), so Continue Watching can't rank
+    /// the show by real recency; this lets the provider stamp that episode with its
+    /// series' `lastViewedAt`, keyed by the series `ratingKey` (an episode's
+    /// `grandparentRatingKey`). `type=2` selects shows; never-viewed shows sort last
+    /// (Plex omits `lastViewedAt`). Best-effort — a failure yields an empty map and
+    /// Continue Watching falls back to unstamped ordering.
+    func recentlyViewedShows(limit: Int) async throws -> [PlexMetadata] {
+        let query = [
+            URLQueryItem(name: "type", value: "2"),
+            URLQueryItem(name: "X-Plex-Container-Start", value: "0"),
+            URLQueryItem(name: "X-Plex-Container-Size", value: String(max(0, limit))),
+            URLQueryItem(name: "sort", value: "lastViewedAt:desc")
+        ]
+        let endpoint = Endpoint(path: "/library/all", queryItems: query, headers: headers)
+        return try await decode(PlexMediaContainerResponse.self, endpoint).MediaContainer.Metadata ?? []
     }
 
     /// `GET /library/recentlyAdded` — newest items across libraries.

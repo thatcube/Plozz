@@ -389,6 +389,15 @@ private func crossServerSourceResolver(
         // Start from the eager index's known sources for this title — the shared
         // source of truth — so the picker is at least as complete as the watch
         // fan-out even before (or without) an on-demand probe.
+        //
+        // KNOWN COST (r6-playtime-fanout, documented/deferred): even when the index
+        // already knows this title's sources, we still probe EVERY account below
+        // for live versions/watch-state and same-server duplicates. That's a
+        // fan-out of N searches per open. It's bounded (each search is deadline-
+        // capped at 4s via `searchWithDeadline`) and only runs on detail-open, not
+        // per-card, so it isn't hot. Using the index as the primary answer and
+        // probing only the *selected* source is folded into the upcoming
+        // preferred-server/bandwidth feature rather than changed here.
         var sources: [MediaSourceRef] = identitySources(primary)
         var seen = Set(sources.map(\.id))
         // Probe EVERY signed-in account, including the primary's own. The

@@ -79,7 +79,16 @@ public struct PlexProvider: MediaProvider {
     /// is the best-known **reachable** connection the resolver probed, which is
     /// the truthful basis for best-source selection.
     public var connectionLocality: SourceLocality {
-        SourceLocalityClassifier.classify(url: client.baseURL)
+        // Only classify a connection we've actually confirmed reachable. When the
+        // resolver has neither a probed (`cached`) nor a persisted last-known-good
+        // (`reachableSeed`) connection, `client.baseURL` is an UNPROVEN most-
+        // preferred candidate — and since a Plex server advertises its own LAN
+        // address even to remote clients, that guess can be a local-looking URL
+        // that's actually dead. Reporting `.local` for it would wrongly win
+        // best-source selection over a genuinely reachable remote twin. Report
+        // `.unknown` until reachability is confirmed. (r6-plex-unreachable-local)
+        guard client.hasConfirmedReachableConnection else { return .unknown }
+        return SourceLocalityClassifier.classify(url: client.baseURL)
     }
 
     public func libraries() async throws -> [MediaLibrary] {
@@ -95,7 +104,45 @@ public struct PlexProvider: MediaProvider {
     }
 
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
-        try await client.onDeck(limit: limit).map(map(metadata:))
+        // Fetch the recently-viewed-shows map concurrently with onDeck so stamping
+        // adds no latency to the common path.
+        async let onDeckTask = client.onDeck(limit: limit)
+        async let seriesDatesTask = seriesLastPlayedDatesBestEffort(limit: limit)
+        let onDeck = try await onDeckTask
+        let seriesDates = await seriesDatesTask
+        return onDeck.map(map(metadata:)).map { stampingSeriesRecency($0, using: seriesDates) }
+    }
+
+    /// Best-effort map of `series ratingKey → last-viewed date`, used to stamp
+    /// onDeck *next* episodes (unwatched, so no `lastViewedAt` of their own) with
+    /// their series' true recency. Mirrors
+    /// ``JellyfinProvider``'s Jellyfin-side stamping. Run concurrently with the
+    /// onDeck fetch; a failure yields an empty map and Continue Watching falls back
+    /// to unstamped ordering.
+    private func seriesLastPlayedDatesBestEffort(limit: Int) async -> [String: Date] {
+        guard let shows = try? await client.recentlyViewedShows(limit: limit) else { return [:] }
+        var result: [String: Date] = [:]
+        for show in shows {
+            guard let ratingKey = show.ratingKey, let seconds = show.lastViewedAt else { continue }
+            result[ratingKey] = Date(timeIntervalSince1970: TimeInterval(seconds))
+        }
+        return result
+    }
+
+    /// Stamps a Continue Watching item that carries no play timestamp of its own —
+    /// a next-episode suggestion whose `lastViewedAt` is nil — with its series'
+    /// last-viewed date (keyed by the episode's `grandparentRatingKey`, carried as
+    /// `seriesID`), so a just-finished show sorts by real recency in a merged
+    /// Continue Watching row instead of sinking to the bottom or inheriting a
+    /// foreign timestamp. In-progress items (already timestamped) and non-episode
+    /// items are returned unchanged.
+    private func stampingSeriesRecency(_ item: MediaItem, using seriesDates: [String: Date]) -> MediaItem {
+        guard item.lastPlayedAt == nil,
+              let seriesID = item.seriesID,
+              let date = seriesDates[seriesID] else { return item }
+        var copy = item
+        copy.lastPlayedAt = date
+        return copy
     }
 
     public func latest(limit: Int) async throws -> [MediaItem] {

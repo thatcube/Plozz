@@ -15,6 +15,17 @@ import Foundation
 /// middle so an unclassifiable host (a manually-entered domain that might be a
 /// LAN box via split-horizon DNS) never loses to a *known-remote* server nor
 /// beats a *known-local* one.
+///
+/// ACCEPTED CONSEQUENCE (r6-tailscale-vs-unknown): because Tailscale/CGNAT hosts
+/// are *positively* classified `.remote` (rank 0) while a bare public DDNS
+/// hostname we can't place is `.unknown` (rank 1), a title available on both a
+/// Tailscale peer and an unclassifiable public domain will prefer the public
+/// domain. This is intentional: a Tailscale tunnel is genuinely a relayed remote
+/// path, whereas the unclassifiable domain *might* resolve to a same-LAN box via
+/// split-horizon DNS — so ranking the maybe-local host above the definitely-
+/// tunnelled one is the safer default. If a user wants to force the tunnelled
+/// peer, that is what the (upcoming) per-profile preferred-server override is for,
+/// not a change to this conservative tiering.
 public enum SourceLocality: Int, Codable, Sendable, Hashable, Comparable {
     /// Reached over the internet / a relay / a Tailscale tunnel (CGNAT or
     /// MagicDNS) — treat as high-latency, low-bandwidth.

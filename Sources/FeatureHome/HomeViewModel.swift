@@ -242,11 +242,14 @@ public final class HomeViewModel {
         var updated = watchlist.map { apply(mutation, to: $0) }
         guard let favorite = mutation.favorite else { return updated }
         if favorite {
-            let present = Set(updated.map(\.id))
-            let candidates = (content.continueWatching + content.latest)
-                .filter { mutation.targets($0) && !present.contains($0.id) }
-            var seen = present
-            for candidate in candidates where seen.insert(candidate.id).inserted {
+            // De-dup by (account, id), not bare id: a raw item id collides across
+            // servers (two Plex servers can share a ratingKey), which would wrongly
+            // suppress a genuine favorite that lives on a different server.
+            // (r6-watchlist-bareid)
+            func scopedKey(_ item: MediaItem) -> String { "\(item.sourceAccountID ?? ""):\(item.id)" }
+            var seen = Set(updated.map(scopedKey))
+            for candidate in (content.continueWatching + content.latest)
+            where mutation.targets(candidate) && seen.insert(scopedKey(candidate)).inserted {
                 var copy = candidate
                 copy.isFavorite = true
                 updated.insert(copy, at: 0)

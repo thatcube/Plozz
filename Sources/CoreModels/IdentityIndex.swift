@@ -211,16 +211,28 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
 public actor IdentityIndex {
     /// account → identity → (sourceID → source).
     private var byAccount: [String: [MediaIdentity: [String: IndexedSource]]] = [:]
+    /// Shadow buckets for accounts with an in-flight rebuild. A rebuild ingests
+    /// into its shadow bucket (never the live one), then ``finishRebuild(for:)``
+    /// atomically swaps it into `byAccount`. This keeps the account's *existing*
+    /// sources serving fan-out for the entire rebuild window (so a watch never
+    /// misses a union just because a re-scan is mid-flight), and means a rebuild
+    /// that never conclusively finishes — an inconclusive scan — leaves the live
+    /// bucket and the persisted membership untouched rather than clobbering them.
+    private var pendingRebuild: [String: [MediaIdentity: [String: IndexedSource]]] = [:]
+    /// Accounts with an in-flight rebuild — routes ``ingest`` to the shadow bucket.
+    private var rebuilding: Set<String> = []
     /// Accounts whose initial catalogue scan has completed at least once.
     private var warmAccounts: Set<String> = []
     /// When each account's catalogue was last (re)built, for staleness checks.
     private var builtAtByAccount: [String: Date] = [:]
     /// Memoized fold of `byAccount` into one identity → sources snapshot. Cleared
-    /// by every content mutation (`ingest` / `beginRebuild` / `removeAccount` /
+    /// by every content mutation that changes the **live** index (`ingest` into a
+    /// non-rebuilding account, `finishRebuild`'s shadow swap, `removeAccount`,
     /// `restore`) so a stale merge is never served, and repopulated lazily on the
-    /// next ``snapshot()``. Lets repeated reads with no intervening mutation — the
-    /// post-warm steady state, diagnostics, and the skip-warm restore path — reuse
-    /// the built value instead of re-deriving the full map each time.
+    /// next ``snapshot()``. A rebuild in flight does NOT clear it — the live view is
+    /// unchanged until the atomic swap. Lets repeated reads with no intervening live
+    /// mutation — the post-warm steady state, diagnostics, and the skip-warm restore
+    /// path — reuse the built value instead of re-deriving the full map each time.
     private var cachedSnapshot: IdentityIndexSnapshot?
     private let now: @Sendable () -> Date
 
@@ -255,7 +267,10 @@ public actor IdentityIndex {
         serverInfo: SourceServerInfo? = nil
     ) {
         guard !items.isEmpty else { return }
-        var bucket = byAccount[accountID] ?? [:]
+        // While an account is rebuilding, ingest into its shadow bucket so the live
+        // sources keep serving fan-out untouched until the swap at finishRebuild.
+        let intoShadow = rebuilding.contains(accountID)
+        var bucket = (intoShadow ? pendingRebuild[accountID] : byAccount[accountID]) ?? [:]
         for item in items {
             guard item.kind == .movie || item.kind == .series else { continue }
             let identities = MediaItemIdentity.identities(for: item)
@@ -273,20 +288,36 @@ public actor IdentityIndex {
                 bucket[identity, default: [:]][source.id] = source
             }
         }
-        byAccount[accountID] = bucket
-        cachedSnapshot = nil
+        if intoShadow {
+            // The live snapshot is unchanged during a rebuild — don't invalidate it.
+            pendingRebuild[accountID] = bucket
+        } else {
+            byAccount[accountID] = bucket
+            cachedSnapshot = nil
+        }
     }
 
-    /// Clears `accountID`'s bucket so a full re-scan replaces it cleanly. Marks the
-    /// account not-warm until ``finishRebuild(for:)`` is called.
+    /// Opens a shadow bucket for `accountID`'s re-scan. The account's **existing**
+    /// live sources keep serving fan-out (and stay warm, and stay exportable as
+    /// last-known-good) throughout the rebuild; ``ingest`` routes the new page into
+    /// the shadow, and ``finishRebuild(for:)`` atomically swaps it in. A rebuild
+    /// that never finishes therefore leaves the live index untouched — no stale-out
+    /// window, no persisted-membership clobber.
     public func beginRebuild(for accountID: String) {
-        byAccount[accountID] = [:]
-        warmAccounts.remove(accountID)
-        cachedSnapshot = nil
+        pendingRebuild[accountID] = [:]
+        rebuilding.insert(accountID)
     }
 
-    /// Marks `accountID`'s scan complete and records its freshness timestamp.
+    /// Marks `accountID`'s scan complete: atomically swaps the shadow bucket into
+    /// the live index (if a rebuild was in flight) and records its freshness
+    /// timestamp.
     public func finishRebuild(for accountID: String) {
+        if rebuilding.contains(accountID) {
+            byAccount[accountID] = pendingRebuild[accountID] ?? [:]
+            pendingRebuild[accountID] = nil
+            rebuilding.remove(accountID)
+            cachedSnapshot = nil
+        }
         warmAccounts.insert(accountID)
         builtAtByAccount[accountID] = now()
     }
@@ -295,15 +326,20 @@ public actor IdentityIndex {
     /// appearing in the snapshot immediately.
     public func removeAccount(_ accountID: String) {
         byAccount[accountID] = nil
+        pendingRebuild[accountID] = nil
+        rebuilding.remove(accountID)
         warmAccounts.remove(accountID)
         builtAtByAccount[accountID] = nil
         cachedSnapshot = nil
     }
 
     /// Prunes any indexed account not in `accountIDs` (e.g. after a profile switch
-    /// narrows the active set), keeping the snapshot honest.
+    /// narrows the active set), keeping the snapshot honest. Also prunes accounts
+    /// that exist only as an in-flight rebuild (a brand-new account whose first scan
+    /// hasn't finished), so a removed server mid-scan leaves no shadow behind.
     public func retainAccounts(_ accountIDs: Set<String>) {
-        for accountID in byAccount.keys where !accountIDs.contains(accountID) {
+        let known = Set(byAccount.keys).union(pendingRebuild.keys)
+        for accountID in known where !accountIDs.contains(accountID) {
             removeAccount(accountID)
         }
     }

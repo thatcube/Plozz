@@ -220,6 +220,43 @@ final class JellyfinProviderMappingTests: XCTestCase {
                        "A NextUp failure must silently degrade to resume-only, never break Continue Watching")
     }
 
+    /// r6-jf-precap regression: Resume alone fills `limit`, and a just-finished
+    /// show surfaces only in NextUp (its next episode, untimestamped). The old code
+    /// capped `(resume + nextUp)` to `limit` BEFORE stamping series recency, so that
+    /// NextUp episode was dropped even though — once stamped — it's the single most
+    /// recently watched thing. The provider must stamp first, order by effective
+    /// recency, then cap, so the stamped NextUp survives and the oldest Resume item
+    /// is the one dropped.
+    func testContinueWatchingStampedNextUpSurvivesCapOverOlderResume() async throws {
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[
+          {"Id":"resumeNew","Name":"Resume Newer","Type":"Movie",
+           "UserData":{"PlaybackPositionTicks":18000000000,"Played":false,"LastPlayedDate":"2026-01-02T00:00:00Z"}},
+          {"Id":"resumeOld","Name":"Resume Older","Type":"Movie",
+           "UserData":{"PlaybackPositionTicks":18000000000,"Played":false,"LastPlayedDate":"2026-01-01T00:00:00Z"}}
+        ],"TotalRecordCount":2}
+        """)
+        stub.stub(pathSuffix: "/Shows/NextUp", json: """
+        {"Items":[{"Id":"next1","Name":"Episode 6","Type":"Episode","SeriesId":"series-x",
+        "IndexNumber":6,"UserData":{"Played":false}}],"TotalRecordCount":1}
+        """)
+        // Series was watched most recently of all — newer than either Resume item.
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[{"Id":"series-x","Name":"My Show","Type":"Series",
+        "UserData":{"Played":false,"LastPlayedDate":"2026-06-15T10:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 2)
+        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(items.first?.id, "next1",
+                       "The stamped just-finished show is the most recent and must sort first")
+        XCTAssertTrue(items.contains { $0.id == "resumeNew" })
+        XCTAssertFalse(items.contains { $0.id == "resumeOld" },
+                       "The oldest item is the one dropped by the cap, not the just-watched NextUp")
+    }
+
     func testLatestIncludesProviderIDsForHomeDedup() async throws {
         let stub = StubHTTPClient()
         stub.stub(pathSuffix: "/Users/u1/Items/Latest", json: """

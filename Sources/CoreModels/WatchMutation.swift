@@ -260,31 +260,45 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     // MARK: - Canonical id
 
     /// Derives a stable cross-server canonical id from a provider id map, preferring
-    /// the most authoritative namespace. Falls back to a normalized title (+year)
-    /// and finally to a supplied per-item id so a title with no external ids still
-    /// enqueues safely (it just won't coalesce across servers — which it couldn't
-    /// have merged across anyway).
+    /// the most authoritative namespace. After Trakt (the watch-sync authority, which
+    /// is not a merge namespace) this mirrors ``MediaItemIdentity/strongExternalNamespaces``
+    /// **exactly** — same order, same alias resolution, same canonical tokens — and
+    /// falls back to the same ``MediaItemIdentity/normalizedTitle(_:)`` (+year) the
+    /// merger uses, so the outbox's notion of "same title across servers" matches the
+    /// identity index. If they diverged, a mutation could fail to coalesce or fan out
+    /// across servers the merger treats as one title (r6-canonical-weak). A final
+    /// per-item fallback keeps a title with no external ids enqueuing safely (it just
+    /// won't coalesce across servers — which it couldn't have merged across anyway).
     public static func canonicalMediaID(
         providerIDs: [String: String],
         title: String? = nil,
         year: Int? = nil,
         fallback: String
     ) -> String {
-        let normalized: [String: String] = Dictionary(
-            providerIDs.compactMap { key, value in
-                let v = value.trimmingCharacters(in: .whitespaces)
-                return v.isEmpty ? nil : (key.lowercased(), v)
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        for namespace in ["trakt", "imdb", "tmdb", "tvdb"] {
-            if let value = normalized[namespace] {
-                return "\(namespace):\(value)"
+        // Trakt is the watch-sync authority and is NOT one of the merge identity's
+        // external namespaces, so it stays the highest-priority canonical key.
+        for (key, value) in providerIDs where key.lowercased() == "trakt" {
+            let v = value.trimmingCharacters(in: .whitespaces)
+            if !v.isEmpty { return "trakt:\(v.lowercased())" }
+        }
+        // Then mirror the merge identity's strong external namespaces via the same
+        // alias-insensitive resolution (`providerID(_:)`), so `TheTvdb`, `TMDb ID`,
+        // `myanimelist`, an AniList/MAL/AniDB/TVmaze-only anime series, etc. all
+        // produce the same canonical id the merger keys on.
+        for entry in MediaItemIdentity.strongExternalNamespaces {
+            if let value = providerIDs.providerID(entry.namespace)?.trimmingCharacters(in: .whitespaces),
+               !value.isEmpty {
+                return "\(entry.canonical):\(value.lowercased())"
             }
         }
-        if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty {
-            let slug = title.lowercased().trimmingCharacters(in: .whitespaces)
-            return year.map { "title:\(slug):\($0)" } ?? "title:\(slug)"
+        // Title fallback uses the SAME normalization as the merge identity
+        // (accent-fold + punctuation-strip + whitespace-collapse) so "Spider-Man"
+        // and "spider man" canonicalise identically here too.
+        if let title {
+            let slug = MediaItemIdentity.normalizedTitle(title)
+            if !slug.isEmpty {
+                return year.map { "title:\(slug):\($0)" } ?? "title:\(slug)"
+            }
         }
         return "local:\(fallback)"
     }

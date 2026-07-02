@@ -213,6 +213,83 @@ final class IdentityIndexTests: XCTestCase {
         XCTAssertTrue(snapshot.isEmpty, "retainAccounts prunes every non-retained account")
     }
 
+    // MARK: Atomic rebuild (shadow bucket)
+
+    func testRebuildKeepsExistingSourcesLiveUntilFinish() async {
+        let index = IdentityIndex()
+        await index.ingest([movie("old", account: "jf", tmdb: "42")], accountID: "jf")
+        await index.finishRebuild(for: "jf")
+
+        // A re-scan begins: the account's existing source must keep serving fan-out.
+        await index.beginRebuild(for: "jf")
+        var refs = await index.snapshot().sourceRefs(for: movie("probe", account: "jf", tmdb: "42"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:old"],
+                       "A rebuild in flight must keep serving the account's existing sources")
+
+        // The new page ingests into the shadow bucket — still not visible live.
+        await index.ingest([movie("new", account: "jf", tmdb: "42")], accountID: "jf")
+        refs = await index.snapshot().sourceRefs(for: movie("probe", account: "jf", tmdb: "42"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:old"],
+                       "Ingest during a rebuild must not mutate the live index before the swap")
+
+        // finishRebuild atomically swaps the shadow into the live index.
+        await index.finishRebuild(for: "jf")
+        refs = await index.snapshot().sourceRefs(for: movie("probe", account: "jf", tmdb: "42"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:new"],
+                       "finishRebuild swaps the shadow bucket into the live index")
+    }
+
+    func testInconclusiveRebuildDoesNotClobberExportedMembership() async {
+        // r6-rewarm-nonatomic: a re-scan that never conclusively finishes (an
+        // inconclusive page) must leave the last-known-good membership intact — both
+        // live AND exported — so a mid-rebuild persist can't wipe the account from disk.
+        let index = IdentityIndex()
+        await index.ingest([movie("good", account: "jf", tmdb: "42")], accountID: "jf")
+        await index.finishRebuild(for: "jf")
+
+        await index.beginRebuild(for: "jf")
+        await index.ingest([movie("partial", account: "jf", tmdb: "42")], accountID: "jf") // never finished
+
+        let exported = await index.export()
+        XCTAssertEqual(exported.entriesByAccount["jf"]?.map(\.source.itemID), ["good"],
+                       "An inconclusive rebuild must export last-known-good, never the partial shadow")
+        let refs = await index.snapshot().sourceRefs(for: movie("probe", account: "jf", tmdb: "42"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:good"],
+                       "The live index keeps last-known-good sources during an unfinished rebuild")
+    }
+
+    func testRebuildDoesNotUndercountIndexedAccountsMidWave() async {
+        // r6-warm-progressive-stall: while account "b" re-scans, the snapshot's
+        // indexed-account set must not lose "b", or the monotonic publish guard
+        // (accountCount >= published) would reject every publish for the rest of the
+        // warm wave and pin a stale snapshot.
+        let index = IdentityIndex()
+        await index.ingest([movie("a1", account: "a", tmdb: "1")], accountID: "a")
+        await index.finishRebuild(for: "a")
+        await index.ingest([movie("b1", account: "b", tmdb: "2")], accountID: "b")
+        await index.finishRebuild(for: "b")
+        var indexed = await index.snapshot().indexedAccountIDs
+        XCTAssertEqual(indexed, ["a", "b"])
+
+        await index.beginRebuild(for: "b")
+        indexed = await index.snapshot().indexedAccountIDs
+        XCTAssertEqual(indexed, ["a", "b"],
+                       "A rebuild must not drop an account from the indexed set mid-scan")
+    }
+
+    func testRetainAccountsPrunesInFlightRebuildOnlyAccount() async {
+        // A brand-new account whose first scan is still in flight (shadow only, no
+        // live bucket) must still be pruned by retainAccounts when it's removed.
+        let index = IdentityIndex()
+        await index.beginRebuild(for: "c")
+        await index.ingest([movie("c1", account: "c", tmdb: "9")], accountID: "c")
+        await index.retainAccounts(["a"]) // "c" not retained
+
+        await index.finishRebuild(for: "c") // must not resurrect the pruned shadow
+        let refs = await index.snapshot().sourceRefs(for: movie("probe", account: "c", tmdb: "9"))
+        XCTAssertTrue(refs.isEmpty, "A removed account's in-flight rebuild must not survive retain")
+    }
+
     func testStaleAccountsRespectTTL() async {
         var clock = Date(timeIntervalSince1970: 1_000)
         let index = IdentityIndex(now: { clock })

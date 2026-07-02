@@ -65,7 +65,32 @@ public struct JellyfinProvider: MediaProvider {
 
         var seen = Set<String>()
         let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
-        return merged.prefix(limit).map(map(item:)).map { stampingSeriesRecency($0, using: seriesDates) }
+        // Stamp NextUp recency BEFORE capping: a just-finished show's next episode
+        // must be able to survive the `limit` cut on its stamped recency rather than
+        // being dropped merely because in-progress Resume items filled the limit
+        // first (r6-jf-precap).
+        let stamped = merged.map(map(item:)).map { stampingSeriesRecency($0, using: seriesDates) }
+        return Array(orderedByEffectiveRecency(stamped).prefix(limit))
+    }
+
+    /// Orders Continue Watching items by **effective recency** before any cap is
+    /// applied: timestamped items (in-progress Resume, plus NextUp suggestions the
+    /// provider stamped with their series' recency) first, most-recent first;
+    /// untimestamped items after, in arrival order (Resume before NextUp). The sort
+    /// is stable — equal timestamps and the untimestamped tail keep their original
+    /// order — so capping to `limit` keeps the genuinely most-recent items instead
+    /// of dropping a just-finished show's next episode just because Resume happened
+    /// to fill the limit first.
+    private func orderedByEffectiveRecency(_ items: [MediaItem]) -> [MediaItem] {
+        items.enumerated().sorted { lhs, rhs in
+            switch (lhs.element.lastPlayedAt, rhs.element.lastPlayedAt) {
+            case let (l?, r?):
+                return l == r ? lhs.offset < rhs.offset : l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
     }
 
     /// Wraps `/Shows/NextUp` so a failure never propagates into Continue
@@ -138,7 +163,11 @@ public struct JellyfinProvider: MediaProvider {
                         let resume = (await resumeTask) ?? []
                         var seen = Set<String>()
                         let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
-                        return (index, Array(merged.prefix(limit)))
+                        // No inner per-library cap: capping here (before series-recency
+                        // stamping and the final effective-recency ordering) could drop a
+                        // just-finished show's next episode within a library whose Resume
+                        // list is long. The single recency-aware cap below handles it.
+                        return (index, merged)
                     }
                 }
             }
@@ -157,7 +186,9 @@ public struct JellyfinProvider: MediaProvider {
                 result.append(stampingSeriesRecency(map(item: dto).taggingLibrary(libraryID), using: seriesDates))
             }
         }
-        return Array(result.prefix(limit))
+        // Order by effective recency, then cap once — same rationale as the unscoped
+        // path: a just-finished show's stamped next episode must survive the cut.
+        return Array(orderedByEffectiveRecency(result).prefix(limit))
     }
 
     /// Library-scoped Recently Added — see ``continueWatching(limit:inLibraries:)``

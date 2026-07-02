@@ -413,6 +413,23 @@ public extension Array where Element == ResolvedAccount {
 /// The scope is the raw ``MediaItemKind`` (not a coarse bucket) so every kind —
 /// including the untyped `.unknown`/`.folder`/`.collection` — only ever merges
 /// with its own kind, never bridging two kinds that happen to reuse an id.
+/// A merge key scoped to one ``MediaItemKind`` (see the union loop above): an
+/// identity only unifies items of the *same* kind, so a movie and a series that
+/// reuse an external integer id never collapse.
+///
+/// KNOWN LIMITATION (deliberately not addressed here — r6-episode-false-merge):
+/// this scopes by kind but NOT by episode position. If two DIFFERENT episodes of
+/// one series are ever merged together (e.g. an aggregated row containing raw
+/// episode items), and their metadata carries *series-level* external ids
+/// (anilist/tvdb on the episode instead of episode-level ids), they would share a
+/// `.episode` KindScopedIdentity and collapse into one card. In practice this
+/// doesn't fire: episodes are never indexed (see ``IdentityIndex.ingest``) and
+/// both providers stamp episode-LEVEL external ids, so Ep1/Ep2 get distinct
+/// identities. Adding season+episode number to the key for `.episode` would make
+/// the guard airtight, but the conservative stance ("a missed merge is far better
+/// than a wrong merge") plus the no-episode-indexing rule makes it unnecessary
+/// today. Revisit only if a provider is found emitting series-level ids on
+/// episode items.
 struct KindScopedIdentity: Hashable {
     let identity: MediaIdentity
     let kind: MediaItemKind

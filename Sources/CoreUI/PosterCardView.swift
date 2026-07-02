@@ -205,8 +205,8 @@ public struct PosterCardView: View {
             .overlay(alignment: .bottom) {
                 progressBar(
                     height: metrics.progressBarHeight,
-                    hInset: borderlessProgressHInset,
-                    bottomInset: borderlessProgressBottomInset
+                    hInset: borderlessProgressInset,
+                    bottomInset: borderlessProgressInset
                 )
             }
             .clipShape(RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous))
@@ -253,20 +253,15 @@ public struct PosterCardView: View {
         }
     }
 
-    /// Horizontal inset for the borderless progress bar. Pulls the bar in by the
-    /// full corner radius so its rounded ends clear the card's corner curves and it
-    /// reads as a shorter, centred scrubber rather than a corner-hugging one.
-    /// Scales with density via the (cardInset-derived) corner radius.
-    private var borderlessProgressHInset: CGFloat {
-        borderlessCornerRadius
-    }
-
-    /// Bottom inset for the borderless progress bar. Sits it lower than a strictly
-    /// concentric bar (which would reserve `cornerRadius − height/2` and ride high)
-    /// while keeping a floored margin off the edge. Because the bar is pulled well
-    /// in horizontally, it no longer needs to match the side inset to look even.
-    private var borderlessProgressBottomInset: CGFloat {
-        max(borderlessCornerRadius - metrics.progressBarHeight, 12)
+    /// Even inset that keeps the borderless progress bar concentric with the card's
+    /// rounded corner — the same inner/outer relationship the framed card's glass
+    /// ring uses: an inner shape shares a corner's centre only when its inset equals
+    /// `outerRadius − innerRadius`. The bar is a capsule (corner radius =
+    /// `height / 2`), so this inset makes the gap even along the bottom edge *and*
+    /// around both corners. It scales with density through the corner radius and the
+    /// (scaled) bar height, and is floored so it never crowds the edge.
+    private var borderlessProgressInset: CGFloat {
+        max(borderlessCornerRadius - metrics.progressBarHeight / 2, 12)
     }
 
     /// Inset that keeps the watched badge concentric with the borderless card's

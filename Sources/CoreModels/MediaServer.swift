@@ -36,3 +36,16 @@ public struct MediaServer: Codable, Hashable, Identifiable, Sendable {
         self.connectionURLs = connectionURLs
     }
 }
+
+public extension MediaServer {
+    /// A stable de-duplication key for a server: the backend id when present,
+    /// else `host:port`. Lets callers group/de-dupe the same box reached two
+    /// ways (discovery, manual entry, an existing account) without duplicating
+    /// the matching rules.
+    var identityKey: String {
+        if !id.isEmpty { return "id:\(id)" }
+        let host = baseURL.host ?? baseURL.absoluteString
+        let port = baseURL.port.map { ":\($0)" } ?? ""
+        return "url:\(host)\(port)"
+    }
+}

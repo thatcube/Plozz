@@ -28,6 +28,11 @@ import TopShelfKit
 public final class AppState {
     public private(set) var state: SessionState = .launching
 
+    /// Provider chosen for the add-account flow currently in progress, so that
+    /// cancelling Quick Connect returns to *that* provider's server picker
+    /// rather than the provider chooser. `nil` starts the flow at the chooser.
+    public private(set) var pendingOnboardingProvider: ProviderKind?
+
     /// All signed-in accounts, in stable order.
     public private(set) var accounts: [Account] = []
     /// The subset of `accounts` currently included in the active set. Sourced
@@ -1101,7 +1106,29 @@ public final class AppState {
         }
     }
 
+    /// Servers this device already has accounts on, grouped for the picker's
+    /// one-tap "add another user" targets. Order follows the accounts list
+    /// (first-added first); users are listed per server in that same order.
+    public var signedInServers: [SignedInServer] {
+        var order: [String] = []
+        var byKey: [String: (server: MediaServer, users: [String])] = [:]
+        for account in accounts {
+            let key = account.server.identityKey
+            if byKey[key] == nil {
+                order.append(key)
+                byKey[key] = (account.server, [])
+            }
+            byKey[key]?.users.append(account.userName)
+        }
+        return order.compactMap { key in
+            byKey[key].map { SignedInServer(server: $0.server, userNames: $0.users) }
+        }
+    }
+
     public func selectServer(_ server: MediaServer) {
+        // Remember which provider's flow we're in so a later cancel returns to
+        // this picker instead of the chooser.
+        pendingOnboardingProvider = server.provider
         apply(.serverSelected(server))
     }
 
@@ -1116,6 +1143,8 @@ public final class AppState {
         }
         reloadAccounts()
         apply(.accountAuthenticated)
+        // Flow finished — next add-account starts at the chooser.
+        pendingOnboardingProvider = nil
     }
 
     /// Completes a Plex sign-in started from the provider chooser.
@@ -1132,11 +1161,24 @@ public final class AppState {
 
     /// Begins adding another account from inside the signed-in app.
     public func addAccount() {
+        // A fresh add-account flow always starts at the provider chooser.
+        pendingOnboardingProvider = nil
         apply(.addAccountRequested)
     }
 
     public func cancelAuthentication() {
+        // Stepping back from Quick Connect keeps the provider so we land on that
+        // provider's server list; any other cancel backs out to the chooser.
+        let wasAuthenticating: Bool
+        if case .onboarding(.authenticating, _) = state {
+            wasAuthenticating = true
+        } else {
+            wasAuthenticating = false
+        }
         apply(.cancelOnboarding)
+        if !wasAuthenticating {
+            pendingOnboardingProvider = nil
+        }
     }
 
     /// Removes one account; drops to onboarding if it was the last.

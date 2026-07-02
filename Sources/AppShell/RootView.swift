@@ -92,6 +92,8 @@ public struct RootView: View {
                 AddAccountView(
                     deviceID: appState.deviceID,
                     canReturnToApp: canReturnToApp,
+                    initialProvider: appState.pendingOnboardingProvider,
+                    signedInServers: appState.signedInServers,
                     onJellyfinServerSelected: { server in appState.selectServer(server) },
                     onPlexAuthenticated: { session in appState.didAuthenticatePlex(session) },
                     onCancel: { appState.cancelAuthentication() }

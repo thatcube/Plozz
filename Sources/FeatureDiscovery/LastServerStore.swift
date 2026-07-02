@@ -36,10 +36,7 @@ enum ServerIdentity {
 
     /// A stable dictionary key for a server (id when present, else host:port).
     static func key(for server: MediaServer) -> String {
-        if !server.id.isEmpty { return "id:\(server.id)" }
-        let host = server.baseURL.host ?? server.baseURL.absoluteString
-        let port = server.baseURL.port.map { ":\($0)" } ?? ""
-        return "url:\(host)\(port)"
+        server.identityKey
     }
 }
 

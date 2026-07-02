@@ -29,6 +29,11 @@ public final class ServerPickerViewModel {
 
     public private(set) var phase: Phase = .idle
     public private(set) var discoveredServers: [MediaServer] = []
+    /// Servers this device already has accounts on, offered as one-tap
+    /// "add another user" targets. Populated by the host (from the account
+    /// list); empty during plain discovery so nothing changes for tests/first
+    /// run.
+    public private(set) var signedInServers: [SignedInServer] = []
     /// Whether this Apple TV is currently connected to a Tailscale network.
     /// Drives the conditional Tailscale guidance in the picker.
     public private(set) var isOnTailscale: Bool = false
@@ -72,8 +77,23 @@ public final class ServerPickerViewModel {
 
     /// Recently-used servers, most-recent first, offered as one-tap reconnects.
     /// Includes manually-entered and Tailscale servers that LAN discovery can't
-    /// re-find on its own.
-    public var recentServers: [MediaServer] { store.recentServers }
+    /// re-find on its own. Servers already surfaced in the signed-in group are
+    /// filtered out so each server appears once.
+    public var recentServers: [MediaServer] {
+        let signedIn = signedInKeys
+        return store.recentServers.filter { !signedIn.contains(ServerIdentity.key(for: $0)) }
+    }
+
+    /// Updates the set of servers this device already has accounts on. Kept
+    /// separate from discovery so the host can feed it from the account list.
+    public func setSignedInServers(_ servers: [SignedInServer]) {
+        signedInServers = servers
+    }
+
+    /// Identity keys of the signed-in servers, for de-duplication.
+    private var signedInKeys: Set<String> {
+        Set(signedInServers.map { ServerIdentity.key(for: $0.server) })
+    }
 
     /// The single most-recently-used server, if any.
     public var lastServer: MediaServer? { store.lastServer }
@@ -168,6 +188,9 @@ public final class ServerPickerViewModel {
         // Hearing from a server on the LAN is definitive: mark it present and
         // reachable so its row (recent or discovered) reads "On your network".
         lanKeys.insert(key)
+        // A server we already have an account on is shown in the signed-in
+        // group — don't also list it under discovered.
+        if signedInKeys.contains(key) { return }
         // A server already in the recents list is shown there — don't also list
         // it under discovered.
         if store.recentServers.contains(where: { ServerIdentity.isSame($0, server) }) { return }

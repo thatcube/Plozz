@@ -101,9 +101,16 @@ public struct SessionStateMachine: Sendable {
         case let (.onboarding(.authenticating, canReturn), .authenticationFailed(error)):
             return .failed(error, canReturnToApp: canReturn)
 
-        // Cancelling onboarding: return to the app if it has accounts, else stay
-        // on the picker.
-        case let (.onboarding(_, canReturn), .cancelOnboarding):
+        // Cancelling the Quick Connect / password step steps BACK to the
+        // picker (preserving the return-to-app context), so the user lands on
+        // the server list they came from — not the Home screen.
+        case let (.onboarding(.authenticating, canReturn), .cancelOnboarding):
+            return .onboarding(.selectingServer, canReturnToApp: canReturn)
+
+        // Cancelling from the picker itself backs all the way out: return to the
+        // app if it has accounts, else stay on the picker (first-run has nowhere
+        // to go).
+        case let (.onboarding(.selectingServer, canReturn), .cancelOnboarding):
             return canReturn ? .ready : .onboarding(.selectingServer, canReturnToApp: false)
 
         // Failure recovery.

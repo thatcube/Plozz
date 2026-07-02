@@ -20,10 +20,13 @@ public struct ServerPickerView: View {
     @MainActor
     public init(
         viewModel: ServerPickerViewModel? = nil,
+        signedInServers: [SignedInServer] = [],
         onBack: (() -> Void)? = nil,
         onSelect: @escaping (MediaServer) -> Void
     ) {
-        _viewModel = State(initialValue: viewModel ?? ServerPickerViewModel())
+        let vm = viewModel ?? ServerPickerViewModel()
+        vm.setSignedInServers(signedInServers)
+        _viewModel = State(initialValue: vm)
         self.onBack = onBack
         self.onSelect = onSelect
     }
@@ -38,22 +41,29 @@ public struct ServerPickerView: View {
                 // including manual/Tailscale entries) first, then anything new
                 // found on the network — no more confusing split sections.
                 PickerPanel(title: "Servers", titleAccessory: { scanIndicator }) {
+                    let signedIn = viewModel.signedInServers
                     let recents = viewModel.recentServers
                     let discovered = viewModel.discoveredServers
-                    if recents.isEmpty && discovered.isEmpty {
+                    if signedIn.isEmpty && recents.isEmpty && discovered.isEmpty {
                         emptyServersPlaceholder
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 8)
                             .padding(.horizontal, 12)
                     } else {
                         VStack(spacing: 0) {
-                            ForEach(Array(recents.enumerated()), id: \.element) { idx, server in
+                            // Servers you already have accounts on come first —
+                            // tap to add another user to them.
+                            ForEach(Array(signedIn.enumerated()), id: \.element.server) { idx, entry in
                                 if idx > 0 { Divider() }
-                                serverRow(server, isRecent: true)
+                                serverRow(entry.server, role: .signedIn(entry.userNames))
+                            }
+                            ForEach(Array(recents.enumerated()), id: \.element) { idx, server in
+                                if idx > 0 || !signedIn.isEmpty { Divider() }
+                                serverRow(server, role: .recent)
                             }
                             ForEach(Array(discovered.enumerated()), id: \.element) { idx, server in
-                                if idx > 0 || !recents.isEmpty { Divider() }
-                                serverRow(server, isRecent: false)
+                                if idx > 0 || !signedIn.isEmpty || !recents.isEmpty { Divider() }
+                                serverRow(server, role: .discovered)
                             }
                         }
                     }
@@ -161,7 +171,7 @@ public struct ServerPickerView: View {
         }
     }
 
-    private func serverRow(_ server: MediaServer, isRecent: Bool) -> some View {
+    private func serverRow(_ server: MediaServer, role: RowRole) -> some View {
         Button {
             viewModel.select(server)
             onSelect(server)
@@ -177,7 +187,7 @@ public struct ServerPickerView: View {
                     }
                 }
                 Spacer(minLength: 12)
-                statusBadge(for: server, isRecent: isRecent)
+                trailingBadge(for: server, role: role)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 12)
@@ -187,9 +197,42 @@ public struct ServerPickerView: View {
         .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
     }
 
-    /// Trailing status for a server row. Discovered servers are always on the
-    /// network; recents show their live probe result, or a plain "Recently
-    /// used" tag until a probe resolves.
+    /// Distinguishes the three kinds of rows in the "Servers" card so each gets
+    /// the right trailing badge: an account you're already signed into, a
+    /// recent reconnect target, or a freshly discovered LAN server.
+    private enum RowRole {
+        case signedIn([String])
+        case recent
+        case discovered
+    }
+
+    /// Trailing status/annotation for a server row.
+    @ViewBuilder
+    private func trailingBadge(for server: MediaServer, role: RowRole) -> some View {
+        switch role {
+        case let .signedIn(userNames):
+            statusText(signedInSummary(userNames), systemImage: "checkmark.circle.fill")
+        case .recent:
+            statusBadge(for: server, isRecent: true)
+        case .discovered:
+            statusBadge(for: server, isRecent: false)
+        }
+    }
+
+    /// Human-readable summary of who's signed in on a server, shown as its
+    /// badge. Tapping the row starts sign-in for *another* user.
+    private func signedInSummary(_ userNames: [String]) -> String {
+        switch userNames.count {
+        case 0: return "Signed in"
+        case 1: return "Signed in · \(userNames[0])"
+        case 2: return "Signed in · \(userNames[0]) & \(userNames[1])"
+        default: return "Signed in · \(userNames.count) users"
+        }
+    }
+
+    /// Trailing status for a discovered/recent server row. Discovered servers
+    /// are always on the network; recents show their live probe result, or a
+    /// plain "Recently used" tag until a probe resolves.
     @ViewBuilder
     private func statusBadge(for server: MediaServer, isRecent: Bool) -> some View {
         switch viewModel.status(for: server) {

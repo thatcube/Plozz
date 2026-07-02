@@ -12,18 +12,43 @@ import FeatureDiscovery
 struct AddAccountView: View {
     let deviceID: String
     let canReturnToApp: Bool
+    let signedInServers: [SignedInServer]
     let onJellyfinServerSelected: (MediaServer) -> Void
     let onPlexAuthenticated: (UserSession) -> Void
     let onCancel: () -> Void
 
     @State private var choice: ProviderKind?
 
+    init(
+        deviceID: String,
+        canReturnToApp: Bool,
+        initialProvider: ProviderKind? = nil,
+        signedInServers: [SignedInServer] = [],
+        onJellyfinServerSelected: @escaping (MediaServer) -> Void,
+        onPlexAuthenticated: @escaping (UserSession) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.deviceID = deviceID
+        self.canReturnToApp = canReturnToApp
+        self.signedInServers = signedInServers
+        self.onJellyfinServerSelected = onJellyfinServerSelected
+        self.onPlexAuthenticated = onPlexAuthenticated
+        self.onCancel = onCancel
+        // Seed the flow's starting screen. Cancelling Quick Connect returns here
+        // with the provider preserved so we land on its server list, not the
+        // chooser. Plex has no intermediate list, so it falls back to the chooser.
+        _choice = State(initialValue: initialProvider == .jellyfin ? initialProvider : nil)
+    }
+
     var body: some View {
         switch choice {
         case .none:
             chooser
         case .jellyfin:
-            ServerPickerView(onBack: { choice = nil }) { onJellyfinServerSelected($0) }
+            ServerPickerView(
+                signedInServers: signedInServers.filter { $0.server.provider == .jellyfin },
+                onBack: { choice = nil }
+            ) { onJellyfinServerSelected($0) }
         case .plex:
             PlexLinkView(
                 viewModel: PlexAuthViewModel(

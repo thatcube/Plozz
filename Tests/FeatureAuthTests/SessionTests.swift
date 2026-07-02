@@ -51,6 +51,15 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .onboarding(.selectingServer, canReturnToApp: false))
     }
 
+    func testCancelQuickConnectWhenAddingReturnsToPickerNotApp() {
+        // Cancelling the Quick Connect step while adding another account steps
+        // back to the picker (preserving return-to-app), rather than jumping to
+        // the Home screen.
+        var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: true))
+        m.apply(.cancelOnboarding)
+        XCTAssertEqual(m.state, .onboarding(.selectingServer, canReturnToApp: true))
+    }
+
     func testAuthenticationFailureGoesToFailedPreservingContext() {
         var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: true))
         m.apply(.authenticationFailed(.quickConnectExpired))

@@ -238,4 +238,30 @@ final class ServerPickerViewModelTests: XCTestCase {
 
         XCTAssertEqual(vm.discoveredServers.count, 1)
     }
+
+    @MainActor
+    func testSignedInServersAreExcludedFromDiscoveredAndRecents() async {
+        // A server we already have an account on should surface only in the
+        // signed-in group — never duplicated under recents or discovered.
+        let known = server("srv1", "http://10.0.0.5:8096", "Den")
+        let store = StubLastServerStore(lastServer: known)
+        let discovery = StubDiscovery(servers: [
+            server("srv1", "http://10.0.0.5:8096", "Den"),
+            server("srv2", "http://10.0.0.6:8096", "Attic"),
+        ])
+        let vm = ServerPickerViewModel(
+            discovery: discovery,
+            validator: ServerValidator(http: StubHTTPClient()),
+            store: store
+        )
+        vm.setSignedInServers([SignedInServer(server: known, userNames: ["Alice", "Bob"])])
+
+        vm.startScan(timeout: 1)
+        await waitUntil { vm.phase == .idle }
+
+        XCTAssertEqual(vm.discoveredServers.map(\.id), ["srv2"], "Signed-in server must not be listed under discovered")
+        XCTAssertTrue(vm.recentServers.isEmpty, "Signed-in server must be filtered out of recents")
+        XCTAssertEqual(vm.signedInServers.map(\.server.id), ["srv1"])
+        XCTAssertEqual(vm.signedInServers.first?.userNames, ["Alice", "Bob"])
+    }
 }

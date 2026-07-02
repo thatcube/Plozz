@@ -213,12 +213,11 @@ public final class HomeViewModel {
             }
             // Float the just-played card(s) to the front while preserving the
             // relative order of every other card. We deliberately do NOT re-run the
-            // recency sort here: that sort's carry-forward anchor is computed per
-            // *feed* (pre-interleave, see `HomeAggregator.effectiveRecency`) and the
-            // loaded row no longer carries those feeds, so re-sorting it would drop
-            // every untimestamped "Next Up" card to the bottom and reshuffle the row
-            // out from under the user. A stable partition ("just watched" → top,
-            // everyone else in place) is the correct, focus-preserving reorder.
+            // recency sort here: the loaded row no longer carries the per-server
+            // feeds, and re-sorting a row whose just-played cards we've optimistically
+            // stamped to `now` would reshuffle it out from under the user. A stable
+            // partition ("just watched" → top, everyone else in place) is the correct,
+            // focus-preserving reorder.
             let played = stamped.filter { mutation.targets($0) }
             let rest = stamped.filter { !mutation.targets($0) }
             content.continueWatching = played + rest

@@ -111,7 +111,30 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
                 reverse[source.id, default: []].append(identity)
             }
         }
-        self.bySource = reverse
+        // Dictionary iteration order is nondeterministic across launches (Swift
+        // seeds its hashing per process), so the identity lists appended above
+        // arrive in an arbitrary order. Sort each list by a stable key so a
+        // recovered-identity lookup — and therefore the unioned source order the
+        // cross-server selector tie-breaks on — is identical across rebuilds.
+        // Without this the "best source" for a title could flip between launches
+        // (the reported "it's almost random which server I end up on" symptom).
+        self.bySource = reverse.mapValues { identities in
+            identities.sorted { Self.stableSortKey($0) < Self.stableSortKey($1) }
+        }
+    }
+
+    /// A deterministic, launch-stable ordering key for a ``MediaIdentity`` (the enum
+    /// is `Hashable` but not `Comparable`). The leading digit groups by case so the
+    /// order is total and cannot collide across cases.
+    private static func stableSortKey(_ identity: MediaIdentity) -> String {
+        switch identity {
+        case let .external(source, value):
+            return "0:\(source):\(value)"
+        case let .title(normalizedTitle, year, kind):
+            return "1:\(normalizedTitle):\(year.map(String.init) ?? "?"):\(kind.rawValue)"
+        case let .sameItemID(id):
+            return "2:\(id)"
+        }
     }
 
     public var isEmpty: Bool { byIdentity.isEmpty }
@@ -337,6 +360,17 @@ public actor IdentityIndex {
     /// narrows the active set), keeping the snapshot honest. Also prunes accounts
     /// that exist only as an in-flight rebuild (a brand-new account whose first scan
     /// hasn't finished), so a removed server mid-scan leaves no shadow behind.
+    ///
+    /// Resurrection invariant (why a superseded warm wave can't undo this prune):
+    /// the actor serializes all of `ingest`/`beginRebuild`/`retainAccounts`, and the
+    /// caller (`AppState.warmIdentityIndex`) always calls `identityWarmTask.cancel()`
+    /// **before** it awaits the next wave's `retainAccounts`. So by the time this
+    /// runs, every already-issued `ingest` from the prior wave has either completed
+    /// (queued on the actor ahead of us) or been abandoned by the `Task.isCancelled`
+    /// checks guarding each `ingest`/`beginRebuild`. A pruned account therefore has
+    /// no later write racing behind this call to resurrect its bucket — a new wave
+    /// only re-adds an account by re-selecting it into `accountsToWarm`, which
+    /// happens after this prune, not concurrently with it.
     public func retainAccounts(_ accountIDs: Set<String>) {
         let known = Set(byAccount.keys).union(pendingRebuild.keys)
         for accountID in known where !accountIDs.contains(accountID) {

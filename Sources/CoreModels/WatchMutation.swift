@@ -239,8 +239,15 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     /// Title-level key used to COALESCE queued mutations (latest wins, targets
     /// unioned) and to key the stale-write clock. Excludes the account/day so any
     /// server's write for the same title/episode collapses to one queue entry.
+    ///
+    /// Scoped by media **kind**: TMDb/TVDb reuse one integer id space across movies
+    /// and series (movie 550 ≠ tv 550), so an unscoped key would collapse a movie's
+    /// and a series' write into one entry and cross-apply watched state — the same
+    /// kind scoping the merger applies (``KindScopedIdentity``). A legacy mutation
+    /// with no persisted `kind` uses a stable `?` token so it keeps coalescing with
+    /// its own kind rather than silently splitting mid-flight.
     public var coalesceKey: String {
-        "\(canonicalMediaID)|s\(seasonNumber.map(String.init) ?? "-")|e\(episodeNumber.map(String.init) ?? "-")"
+        "\(kind?.rawValue ?? "?")|\(canonicalMediaID)|s\(seasonNumber.map(String.init) ?? "-")|e\(episodeNumber.map(String.init) ?? "-")"
     }
 
     /// Durable Trakt idempotency key (`profile | canonicalMediaId | episode |

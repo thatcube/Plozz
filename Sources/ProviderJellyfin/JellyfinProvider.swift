@@ -31,6 +31,18 @@ public struct JellyfinProvider: MediaProvider {
 
     // MARK: Browsing
 
+    /// Locality of this Jellyfin connection. Unlike Plex, Jellyfin uses a single
+    /// fixed `baseURL` (no connection resolver), so locality derives from that
+    /// host — but only once we've **confirmed the server is reachable**. A saved
+    /// server whose LAN address (`192.168.x`, `.local`, …) no longer answers must
+    /// not report `.local`, or best-source selection would route a merged title to
+    /// the dead local copy over a genuinely reachable remote twin. Until the first
+    /// successful request latches reachability, report `.unknown`. (r7-jf-locality)
+    public var connectionLocality: SourceLocality {
+        guard client.hasConfirmedReachableConnection else { return .unknown }
+        return SourceLocalityClassifier.classify(url: session.server.baseURL)
+    }
+
     public func libraries() async throws -> [MediaLibrary] {
         try await client.userViews(userID: session.userID).map { dto in
             MediaLibrary(

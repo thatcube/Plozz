@@ -72,6 +72,30 @@ final class IdentityIndexTests: XCTestCase {
         XCTAssertEqual(Set(snapshot.targets(for: fromJF).map(\.id)), ["jf:j1", "plex:p1"])
     }
 
+    func testRecoveredIdentityOrderIsStableAcrossRebuilds() {
+        // A payload-id-less item recovers its identities via the reverse (bySource)
+        // map. Those must resolve in a deterministic order so the unioned source
+        // list — and thus the server the cross-server selector ultimately picks —
+        // never varies between launches (the "almost random which server I end up
+        // on" symptom). idA ("imdb:tt9") must sort before idB ("tmdb:500").
+        let idA = MediaIdentity.external(source: "imdb", value: "tt9")
+        let idB = MediaIdentity.external(source: "tmdb", value: "500")
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            idA: [indexed("acct-1", "m1"), indexed("acct-2", "m2")],
+            idB: [indexed("acct-1", "m1"), indexed("acct-3", "m3")]
+        ])
+        // The acct-1 physical item, but its loaded payload carries NO strong
+        // external id, so resolution depends entirely on the recovered identities.
+        var probe = MediaItem(id: "m1", title: "Nonesuch", kind: .movie)
+        probe.sourceAccountID = "acct-1"
+
+        XCTAssertEqual(
+            snapshot.sources(for: probe).map(\.id),
+            ["acct-1:m1", "acct-2:m2", "acct-3:m3"],
+            "Recovered-identity union must be in a stable (imdb-before-tmdb) order, not dictionary-iteration order"
+        )
+    }
+
     func testSnapshotDeduplicatesByAccountItem() {
         let identity = MediaIdentity.external(source: "tmdb", value: "42")
         let snapshot = IdentityIndexSnapshot(byIdentity: [

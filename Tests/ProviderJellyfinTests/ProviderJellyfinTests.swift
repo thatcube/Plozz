@@ -1170,3 +1170,44 @@ final class JellyfinResumeWriteTests: XCTestCase {
                         "LastPlayedDate should be a valid ISO 8601 timestamp")
     }
 }
+
+final class JellyfinConnectionLocalityTests: XCTestCase {
+    private func makeSession(host: String) -> UserSession {
+        UserSession(
+            server: MediaServer(id: "s", name: "Home", baseURL: URL(string: host)!, provider: .jellyfin),
+            userID: "u1", userName: "Alice", deviceID: "d1", accessToken: "TOKEN"
+        )
+    }
+
+    func testLocalityIsUnknownUntilAReachableRequestConfirms() async throws {
+        // A LAN-shaped Jellyfin URL must NOT report `.local` before we've proven
+        // the server actually answers — otherwise a dead local server would beat a
+        // reachable remote twin in best-source selection. (r7-jf-locality)
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"i1","Name":"Movie","Type":"Movie"}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(host: "http://192.168.1.50:8096"), http: stub)
+
+        XCTAssertEqual(provider.connectionLocality, .unknown,
+                       "Before any successful request, a LAN-shaped host is an unproven candidate")
+
+        _ = try await provider.continueWatching(limit: 10)
+
+        XCTAssertEqual(provider.connectionLocality, .local,
+                       "After a reachable request confirms the connection, the LAN host classifies local")
+    }
+
+    func testLocalityStaysUnknownWhenServerIsUnreachable() async throws {
+        // A saved LAN server that no longer answers keeps reporting `.unknown`, so
+        // best-source selection prefers a reachable remote copy over the dead LAN one.
+        let stub = StubHTTPClient()
+        stub.error = .serverUnreachable
+        let provider = JellyfinProvider(session: makeSession(host: "http://192.168.1.50:8096"), http: stub)
+
+        _ = try? await provider.continueWatching(limit: 10)
+
+        XCTAssertEqual(provider.connectionLocality, .unknown,
+                       "An unreachable LAN server must not claim local locality")
+    }
+}

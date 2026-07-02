@@ -259,15 +259,16 @@ public struct HomeAggregator: Sendable {
     /// Interleaves and de-duplicates one Home row, then caps the rendered count so
     /// Home remains responsive with many accounts.
     ///
-    /// When `sortByRecency` is set (the Continue Watching row) the merged result
-    /// is stable-sorted by an effective recency (see ``sortedByRecency(_:effectiveByRef:)``)
-    /// so the row reflects what the user actually watched last instead of a
-    /// round-robin interleave that shuffles between launches. The recency that
-    /// anchors untimestamped "Next Up" cards is computed **per feed, before the
-    /// interleave** (``effectiveRecency(forFeeds:)``) so a suggestion travels with
-    /// its *own* server's recency and can never inherit a foreign server's
-    /// timestamp. Cards with no effective recency keep their interleave order
-    /// *after* the timestamped ones.
+    /// When `sortByRecency` is set (the Continue Watching row) the merged result is
+    /// stable-sorted by ``sortedByRecency(_:)`` so the row reflects what the user
+    /// actually watched last instead of a round-robin interleave that shuffles
+    /// between launches. Recency comes straight from each card's `lastPlayedAt`,
+    /// which the cross-server merge already folds to the newest timestamp across a
+    /// title's servers (``MediaItemMerger`` — most-recent-wins). Untimestamped "Next
+    /// Up" cards — which each provider stamps with their series' recency up front,
+    /// and which only remain untimestamped when that lookup genuinely fails — keep
+    /// their interleave order *after* the timestamped ones (they never inherit a
+    /// neighbouring show's timestamp).
     private static func mergedRow(
         from groups: [[MediaItem]],
         limit: Int,
@@ -282,73 +283,38 @@ public struct HomeAggregator: Sendable {
             identitySources: identitySources
         )
         if sortByRecency {
-            merged = sortedByRecency(merged, effectiveByRef: effectiveRecency(forFeeds: groups))
+            merged = sortedByRecency(merged)
         }
         guard merged.count > limit else { return merged }
         return Array(merged.prefix(limit))
     }
 
-    /// Stable descending sort of a merged Continue Watching row by an **effective
-    /// recency** supplied per source ref.
+    /// Stable descending sort of a merged Continue Watching row by `lastPlayedAt`.
     ///
-    /// Continue Watching feeds arrive newest-first, and each "Next Up" suggestion
-    /// sits right below the in-progress episode whose series spawned it — but those
-    /// suggestions carry no play timestamp of their own (`lastPlayedAt == nil`). The
-    /// recency that anchors them is computed **per feed, before the cross-server
-    /// interleave** (see ``effectiveRecency(forFeeds:)``) and passed in here as
-    /// `effectiveByRef`, keyed by ``MediaSourceRef/id`` ("account:item").
+    /// Each card's recency is its own `lastPlayedAt`, which for a cross-server card
+    /// the merger already sets to the newest timestamp across every server backing
+    /// it (``MediaItemMerger`` — most-recent-wins), and which each provider stamps
+    /// onto "Next Up" suggestions from their series' recency before the feed ever
+    /// reaches here. Cards we still can't timestamp (a suggestion whose series
+    /// recency lookup failed) sort *after* the timestamped ones in their incoming
+    /// order — they are never handed a neighbouring show's timestamp.
     ///
-    /// Doing the carry-forward per feed — instead of over the *interleaved*
-    /// sequence — is the fix for the reported bug: an earlier version walked the
-    /// already-interleaved row, so a nil card inherited whatever **foreign** server's
-    /// card happened to interleave above it. That let the next episode of a show you
-    /// last touched weeks ago steal a *different* server's fresh timestamp and jump
-    /// the queue (and, because the interleave is account-order dependent, the result
-    /// shifted between launches) — exactly the "Continue Watching is different from
-    /// what I watched last / keeps shifting around" symptom.
+    /// The sort is stable (equal `lastPlayedAt` breaks by the original offset) and
+    /// idempotent, so re-sorting an already-ordered row leaves it unchanged.
     ///
-    /// Each merged card's effective recency is the max over (its own `lastPlayedAt`
-    /// and the `effectiveByRef` entry of every source it merged) so a card backed by
-    /// several servers ranks by its most recent activity *anywhere*. Cards with no
-    /// effective recency keep their incoming order after the timestamped ones.
-    ///
-    /// The sort is stable (equal effective recency breaks by the original offset)
-    /// **and idempotent**. When `effectiveByRef` is empty it degrades to a plain
-    /// stable "timestamped first by `lastPlayedAt`, everything else in place" sort
-    /// with **no** carry-forward — for callers that operate on an already-ordered
-    /// row and must never re-derive order from a (now absent) interleave.
-    static func sortedByRecency(
-        _ items: [MediaItem],
-        effectiveByRef: [String: Date] = [:]
-    ) -> [MediaItem] {
-        let keyed = items.enumerated().map { offset, element -> (offset: Int, element: MediaItem, effective: Date?) in
-            var effective = element.lastPlayedAt
-            if !effectiveByRef.isEmpty {
-                // The card's OWN (account, item) key. A single-source card that the
-                // merger didn't touch (no cross-server twin, and episodes are never
-                // indexed) carries an EMPTY `sources` array, so the loop below would
-                // skip it — yet that is exactly the untimestamped "Next Up" episode
-                // the per-feed carry-forward exists to anchor. Look up its own key
-                // directly so its carried recency is applied. For a merged card this
-                // is redundant with its self-ref in `sources` (max() is idempotent).
-                if let account = element.sourceAccountID {
-                    let ownKey = "\(account):\(element.id)"
-                    if let candidate = effectiveByRef[ownKey], effective == nil || candidate > effective! {
-                        effective = candidate
-                    }
-                }
-                for ref in element.sources {
-                    guard let candidate = effectiveByRef[ref.id] else { continue }
-                    if effective == nil || candidate > effective! { effective = candidate }
-                }
-            }
-            return (offset, element, effective)
-        }
-        return keyed.sorted { lhs, rhs in
-            switch (lhs.effective, rhs.effective) {
+    /// > Note: an earlier version manufactured recency for untimestamped cards by
+    /// > carrying the previous card's timestamp forward through each feed. Because a
+    /// > feed is ordered "timestamped first, untimestamped tail" (not
+    /// > in-progress/next-up pairs), that let an unrelated show's next episode
+    /// > inherit the feed's oldest real timestamp and jump ahead of another server's
+    /// > genuine progress — the reported "Continue Watching keeps shifting / isn't
+    /// > what I watched last" symptom. Provider-side series stamping now handles the
+    /// > legitimate case correctly, so the positional carry-forward was removed.
+    static func sortedByRecency(_ items: [MediaItem]) -> [MediaItem] {
+        items.enumerated().sorted { lhs, rhs in
+            switch (lhs.element.lastPlayedAt, rhs.element.lastPlayedAt) {
             case let (l?, r?):
-                if l != r { return l > r }
-                return lhs.offset < rhs.offset
+                return l == r ? lhs.offset < rhs.offset : l > r
             case (.some, nil):
                 return true
             case (nil, .some):
@@ -357,39 +323,6 @@ public struct HomeAggregator: Sendable {
                 return lhs.offset < rhs.offset
             }
         }.map(\.element)
-    }
-
-    /// Per-feed effective recency for Continue Watching, keyed by
-    /// ``MediaSourceRef/id`` ("account:item").
-    ///
-    /// Each server's Continue Watching feed arrives newest-first with its "Next Up"
-    /// suggestions (`lastPlayedAt == nil`) sitting just below the in-progress
-    /// episode that spawned them. Walking **each feed independently** top-to-bottom
-    /// and carrying the last seen timestamp forward gives every untimestamped card
-    /// the recency of its own series — and, critically, never lets a card inherit a
-    /// *different* server's timestamp (which the old post-interleave carry-forward
-    /// did). Leading untimestamped cards (nothing timestamped above them in their
-    /// own feed) get no entry and sort after the timestamped cards.
-    ///
-    /// Keyed by (account, item) so the map survives the cross-server merge: a merged
-    /// card looks up each of its `sources` and takes the max, so progress on any one
-    /// server floats the unified card.
-    static func effectiveRecency(forFeeds feeds: [[MediaItem]]) -> [String: Date] {
-        var result: [String: Date] = [:]
-        for feed in feeds {
-            var carry: Date?
-            for item in feed {
-                guard let account = item.sourceAccountID else { continue }
-                let key = "\(account):\(item.id)"
-                if let timestamp = item.lastPlayedAt {
-                    carry = timestamp
-                    result[key] = timestamp
-                } else if let carry {
-                    result[key] = carry
-                }
-            }
-        }
-        return result
     }
 
     // MARK: - Merge

@@ -67,9 +67,17 @@ enum WatchMutationFactory {
     }
 
     private static func canonicalID(for item: MediaItem) -> String {
-        WatchMutation.canonicalMediaID(
+        // For episodes the title fallback (used only when no strong external id is
+        // present) must key on the SERIES title, not the episode title: generic
+        // episode titles like "Pilot" / "Episode 1" collide across unrelated shows,
+        // which would coalesce two different series' S1E1 into one outbox entry and
+        // cross-apply watched state. The season/episode numbers on the coalesce key
+        // then disambiguate within the series. Fall back to the episode title only
+        // when the parent series title is unavailable.
+        let canonicalTitle = (item.kind == .episode ? item.parentTitle : nil) ?? item.title
+        return WatchMutation.canonicalMediaID(
             providerIDs: item.providerIDs,
-            title: item.title,
+            title: canonicalTitle,
             year: item.productionYear,
             fallback: item.id
         )

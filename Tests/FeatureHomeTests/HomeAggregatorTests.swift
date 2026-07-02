@@ -160,17 +160,17 @@ final class HomeAggregatorTests: XCTestCase {
     func testContinueWatchingNextUpKeepsItsOwnServersRecencyAcrossMerge() async {
         // Regression for the reported "Continue Watching shifts / isn't what I
         // watched last" bug. Server A's activity is OLD: an in-progress episode
-        // (T1) followed by its untimestamped Next Up suggestion. Server B has a
-        // FRESH in-progress card (T2 > T1). The two feeds round-robin interleave to
-        // [A-inprogress, B-inprogress, A-nextup], so the Next Up card lands directly
-        // below server B's fresh card.
+        // (T1) followed by its "Next Up" suggestion whose series-recency stamp
+        // failed, so it arrives untimestamped. Server B has a FRESH in-progress
+        // card (T2 > T1). The two feeds round-robin interleave to
+        // [A-inprogress, B-inprogress, A-nextup].
         //
-        // The old post-interleave carry-forward walked that interleaved row and let
+        // An earlier positional carry-forward walked that interleaved row and let
         // A-nextup inherit B's fresh T2, floating a stale show's next episode to the
-        // #2 slot. The per-feed carry-forward must instead anchor A-nextup to its
-        // OWN feed's T1, so the correct order is B's fresh card first, then server
-        // A's old in-progress card, then its Next Up — never the Next Up jumping the
-        // queue on a foreign server's timestamp.
+        // #2 slot. With that carry removed, an untimestamped card gets NO recency and
+        // sorts to the tail — it can never steal a foreign server's timestamp. The
+        // correct order is therefore B's fresh card, then server A's old in-progress
+        // card, then its still-unknown Next Up.
         let old = Date(timeIntervalSince1970: 1_000)
         let fresh = Date(timeIntervalSince1970: 9_000)
         let aInProgress = MediaItem(id: "a-ip", title: "A In Progress", kind: .episode,
@@ -190,28 +190,60 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(
             content.continueWatching.map(\.id),
             ["b-ip", "a-ip", "a-next"],
-            "Server B's fresh card leads; server A's Next Up stays anchored to its own old feed instead of stealing B's recency"
+            "Server B's fresh card leads; server A's untimestamped Next Up sinks to the tail instead of stealing B's recency"
         )
     }
 
-    func testContinueWatchingSingleSourceNextUpRanksAboveStalerForeignCard() async {
-        // Regression for the own-key carry-forward gap. Server A's feed is an
-        // in-progress episode (RECENT) followed by its untimestamped Next Up
-        // suggestion for a DIFFERENT episode of the same show — a single-source
-        // card the merger returns unchanged, so it carries an EMPTY `sources` array.
-        // Server B has an in-progress card that is OLDER than A's activity.
+    func testContinueWatchingUntimestampedNextUpDoesNotStealNeighborRecency() async {
+        // The definitive regression for the removed positional carry-forward. A real
+        // provider feed is ordered "timestamped first, untimestamped tail" — NOT
+        // in-progress/next-up pairs — so an untimestamped card sits below an UNRELATED
+        // show's timestamped card in the same feed.
         //
-        // The per-feed carry-forward records A-nextup's recency under its OWN
-        // (account,item) key, but `sortedByRecency` only walked each card's
-        // `sources` — which is empty here — so A-nextup got no effective recency and
-        // sank BELOW server B's staler card. Looking up the card's own key restores
-        // the intended order: A's recent activity (in-progress AND its Next Up) leads
-        // server B's older card.
+        // Server A feed: showX in-progress (T=100), then showY's Next Up whose series
+        // stamp failed (untimestamped). Server B: showZ in-progress (T=50) — genuine,
+        // older progress on a real show.
+        //
+        // The old carry-forward gave showY-next server A's T=100, floating a show the
+        // user never watched ABOVE showZ (real, if older, progress). Without carry,
+        // showY-next has no recency and sorts last, so showZ correctly outranks it.
+        let x = Date(timeIntervalSince1970: 100)
+        let z = Date(timeIntervalSince1970: 50)
+        let xInProgress = MediaItem(id: "x-ip", title: "Show X", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: x)
+        let yNextUp = MediaItem(id: "y-next", title: "Show Y", kind: .episode)
+        let zInProgress = MediaItem(id: "z-ip", title: "Show Z", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: z)
+        let a = AggregatorStub(continueWatching: [xInProgress, yNextUp])
+        let b = AggregatorStub(continueWatching: [zInProgress])
+        let accounts = [
+            resolved("acct-a", user: "A", server: "S-A", kind: .jellyfin, provider: a),
+            resolved("acct-b", user: "B", server: "S-B", kind: .plex, provider: b)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(
+            content.continueWatching.map(\.id),
+            ["x-ip", "z-ip", "y-next"],
+            "An untimestamped Next Up must not inherit an unrelated show's timestamp; real (even older) progress outranks it"
+        )
+    }
+
+    func testContinueWatchingStampedNextUpRanksByItsSeriesRecency() async {
+        // Models the real provider pipeline: each provider stamps a "Next Up"
+        // suggestion with its SERIES' recency before the feed reaches the aggregator
+        // (JellyfinProvider/PlexProvider stampingSeriesRecency). A properly-stamped
+        // Next Up therefore ranks by real recency — here A's active show and its next
+        // episode both lead server B's older card — via the correct mechanism
+        // (provider stamping) rather than the removed positional carry-forward.
         let recent = Date(timeIntervalSince1970: 5_000)
+        let seriesStamp = Date(timeIntervalSince1970: 4_900)
         let older = Date(timeIntervalSince1970: 3_000)
         let aInProgress = MediaItem(id: "a-ip", title: "A In Progress", kind: .episode,
                                     resumePosition: 60, lastPlayedAt: recent)
-        let aNextUp = MediaItem(id: "a-next", title: "A Next Up", kind: .episode)
+        let aNextUp = MediaItem(id: "a-next", title: "A Next Up", kind: .episode,
+                                lastPlayedAt: seriesStamp)
         let bInProgress = MediaItem(id: "b-ip", title: "B In Progress", kind: .episode,
                                     resumePosition: 60, lastPlayedAt: older)
         let a = AggregatorStub(continueWatching: [aInProgress, aNextUp])
@@ -226,9 +258,10 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(
             content.continueWatching.map(\.id),
             ["a-ip", "a-next", "b-ip"],
-            "A single-source Next Up card must rank by its own carried recency, above a staler foreign server's card"
+            "A provider-stamped Next Up ranks by its series recency, above a staler foreign server's card"
         )
     }
+
 
     func testContentCapsMergedRowsToRequestedLimits() async {
         let a = AggregatorStub(

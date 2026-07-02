@@ -138,13 +138,22 @@ public enum SourceLocalityClassifier {
     /// Extracts the leading IPv4 address from either a bare-IP host
     /// (`192.168.68.71`) or a `plex.direct` host
     /// (`192-168-68-71.<hash>.plex.direct`). `nil` when the host isn't IPv4-shaped.
+    ///
+    /// The hyphenated-first-label decoding is applied **only** to `.plex.direct`
+    /// hosts, because that embedding is unique to Plex. Applying it to any host
+    /// would misclassify an unrelated name whose first label merely looks like a
+    /// hyphenated IP — e.g. a Tailscale MagicDNS host `192-168-1-5.tailnet.ts.net`
+    /// (the tunnel, must stay `.remote`) or an arbitrary `192-168-1-5.example.com`
+    /// (unplaceable, must stay `.unknown`) — as a LAN address.
     static func leadingIPv4(_ host: String) -> [Int]? {
+        // Bare dotted IPv4 host (`192.168.68.71`).
+        let dotted = host.split(separator: ".").map(String.init)
+        if dotted.count == 4, let octets = octetsIfValid(dotted) { return octets }
+        // Plex embeds the server's real IP as a hyphenated first label.
+        guard host.hasSuffix(".plex.direct") else { return nil }
         let firstLabel = host.split(separator: ".").first.map(String.init) ?? host
-        for separator in [".", "-"] as [Character] {
-            let source = separator == "." ? host : firstLabel
-            let parts = source.split(separator: separator).map(String.init)
-            if parts.count == 4, let octets = octetsIfValid(parts) { return octets }
-        }
+        let hyphenated = firstLabel.split(separator: "-").map(String.init)
+        if hyphenated.count == 4, let octets = octetsIfValid(hyphenated) { return octets }
         return nil
     }
 

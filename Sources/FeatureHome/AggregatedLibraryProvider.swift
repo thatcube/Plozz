@@ -82,6 +82,15 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             // to re-implement the same-server two-account dedup and cross-server
             // identity union statefully — trading a proven, correct merge for a
             // subtle one to shave time off a path that is never hot. Kept simple.
+            //
+            // The `identitySources` closure (an identity-index snapshot lookup) is
+            // re-invoked for every already-merged item on each page, so a deep
+            // scroll is O(pages × merged) lookups. That is accepted for the same
+            // reason: each lookup is a dictionary hit on an immutable snapshot, the
+            // merged set only reaches the thousands after minutes of continuous
+            // scrolling, and caching per-item results would have to be invalidated
+            // whenever the live index warms a new cross-server twin (the very reason
+            // the closure is re-consulted). Not worth the staleness risk. (r7-agg-fanout)
             merged = MediaItemMerger.merge(
                 merged + items,
                 serverInfo: { [serverInfo] id in serverInfo[id] },

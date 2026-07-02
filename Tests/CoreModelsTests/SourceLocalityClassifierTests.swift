@@ -38,6 +38,21 @@ final class SourceLocalityClassifierTests: XCTestCase {
         XCTAssertEqual(SourceLocalityClassifier.classify(host: "100-64-0-1.abcdef.plex.direct"), .remote)
     }
 
+    /// The hyphenated-IP decoding is unique to `plex.direct`. A non-Plex host whose
+    /// first label merely *looks* like a hyphenated IP must NOT be decoded as a LAN
+    /// address — the reported "sister's Tailscale server treated as local" hazard.
+    func testHyphenatedFirstLabelDecodedOnlyForPlexDirect() {
+        // Tailscale MagicDNS host with a hyphenated-IP-shaped first label: the
+        // tunnel, must stay remote (the `.ts.net` rule wins, not a fake LAN IP).
+        XCTAssertEqual(SourceLocalityClassifier.classify(host: "192-168-1-5.tailnet.ts.net"), .remote)
+        // Arbitrary host with the same shape: unplaceable, must stay unknown.
+        XCTAssertEqual(SourceLocalityClassifier.classify(host: "192-168-1-5.example.com"), .unknown)
+        // A public-IP-shaped first label on a non-Plex host is likewise not decoded.
+        XCTAssertEqual(SourceLocalityClassifier.classify(host: "8-8-8-8.example.com"), .unknown)
+        // Bare dotted IPv4 is still decoded (no plex.direct suffix needed).
+        XCTAssertEqual(SourceLocalityClassifier.classify(host: "192.168.1.5"), .local)
+    }
+
     // MARK: - Hostnames
 
     func testMDNSLocalSuffixIsLocal() {

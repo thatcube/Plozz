@@ -19,6 +19,9 @@ public struct JellyfinClient: Sendable {
     /// enrichment traffic on the shared default pool.
     private let interactiveHTTP: HTTPClient
     private let capabilityProfile: JellyfinCapabilityProfile
+    /// One-way latch flipped the first time any request through this connection
+    /// succeeds. See ``hasConfirmedReachableConnection``.
+    private let reachability: ReachabilityLatch
 
     public init(
         baseURL: URL,
@@ -28,22 +31,72 @@ public struct JellyfinClient: Sendable {
         interactiveHTTP: HTTPClient? = nil,
         capabilityProfile: JellyfinCapabilityProfile = .detected()
     ) {
+        let latch = ReachabilityLatch()
+        // Wrap the transport(s) so the FIRST successful request against this
+        // server latches reachability. `connectionLocality` reads that latch to
+        // avoid reporting a saved-but-now-unreachable LAN server as `.local`
+        // (which would wrongly win best-source selection over a reachable remote
+        // twin). Mirrors Plex's resolver-confirmed reachability. (r7-jf-locality)
+        let observedHTTP = ReachabilityObservingHTTPClient(wrapped: http, latch: latch)
         self.baseURL = baseURL
         self.deviceProfile = deviceProfile
         self.token = token
-        self.http = http
-        // Falls back to `http` when no dedicated foreground client is supplied, so
-        // a test (or any caller) that injects a single stub for `http` routes the
-        // `item()` fetch through it too instead of silently hitting a live session.
-        // The production foreground-pool isolation is opted into explicitly by the
-        // provider (see AppState), which passes a real `plozzInteractive` client.
-        self.interactiveHTTP = interactiveHTTP ?? http
+        self.reachability = latch
+        self.http = observedHTTP
+        // Falls back to the observed `http` when no dedicated foreground client is
+        // supplied, so a test (or any caller) that injects a single stub for
+        // `http` routes the `item()` fetch through it too instead of silently
+        // hitting a live session. The production foreground-pool isolation is
+        // opted into explicitly by the provider (see AppState), which passes a
+        // real `plozzInteractive` client.
+        self.interactiveHTTP = interactiveHTTP.map {
+            ReachabilityObservingHTTPClient(wrapped: $0, latch: latch)
+        } ?? observedHTTP
         self.capabilityProfile = capabilityProfile
     }
 
+    /// Rebuilds a client that preserves the caller's already-wrapped transports
+    /// and reachability latch, so a token refresh doesn't discard a connection
+    /// we've already confirmed reachable.
+    private init(
+        preserving reachability: ReachabilityLatch,
+        baseURL: URL,
+        deviceProfile: JellyfinDeviceProfile,
+        token: String?,
+        http: HTTPClient,
+        interactiveHTTP: HTTPClient,
+        capabilityProfile: JellyfinCapabilityProfile
+    ) {
+        self.baseURL = baseURL
+        self.deviceProfile = deviceProfile
+        self.token = token
+        self.reachability = reachability
+        self.http = http
+        self.interactiveHTTP = interactiveHTTP
+        self.capabilityProfile = capabilityProfile
+    }
+
+    /// Whether this connection has answered at least one request successfully.
+    /// Until it has, `session.server.baseURL` is an UNPROVEN candidate that may
+    /// be a local-looking host that's actually dead — so
+    /// ``JellyfinProvider/connectionLocality`` reports `.unknown` rather than a
+    /// misleading `.local`. Mirrors
+    /// ``PlexConnectionResolver/hasConfirmedReachableConnection``.
+    public var hasConfirmedReachableConnection: Bool { reachability.isConfirmed }
+
     /// Returns a copy of this client carrying an auth token.
     public func authenticated(token: String) -> JellyfinClient {
-        JellyfinClient(baseURL: baseURL, deviceProfile: deviceProfile, token: token, http: http, interactiveHTTP: interactiveHTTP, capabilityProfile: capabilityProfile)
+        // Reuse the already-wrapped transports and shared latch so the refreshed
+        // client keeps any reachability we've already confirmed.
+        JellyfinClient(
+            preserving: reachability,
+            baseURL: baseURL,
+            deviceProfile: deviceProfile,
+            token: token,
+            http: http,
+            interactiveHTTP: interactiveHTTP,
+            capabilityProfile: capabilityProfile
+        )
     }
 
     // MARK: Header
@@ -809,4 +862,41 @@ private struct PlaybackProgressBody: Encodable {
 private struct UpdateUserItemDataBody: Encodable {
     let PlaybackPositionTicks: Int64
     var LastPlayedDate: String?
+}
+
+// MARK: - Reachability latching
+
+/// A thread-safe, one-way latch that flips to confirmed the first time a request
+/// through the connection succeeds. Jellyfin, unlike Plex, has no connection
+/// resolver, so this is where a Jellyfin connection records that it has actually
+/// answered — letting ``JellyfinProvider/connectionLocality`` withhold a `.local`
+/// verdict for a saved-but-now-unreachable LAN server until it is proven live.
+final class ReachabilityLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var confirmed = false
+
+    var isConfirmed: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return confirmed
+    }
+
+    func confirm() {
+        lock.lock(); defer { lock.unlock() }
+        confirmed = true
+    }
+}
+
+/// Decorates an `HTTPClient`, confirming a ``ReachabilityLatch`` the first time a
+/// request completes without throwing. A non-2xx status or transport failure
+/// throws inside the wrapped `send`, so only a genuinely reachable server (one
+/// that returned a success response) latches — matching Plex's probe semantics.
+struct ReachabilityObservingHTTPClient: HTTPClient {
+    let wrapped: HTTPClient
+    let latch: ReachabilityLatch
+
+    func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
+        let result = try await wrapped.send(endpoint, baseURL: baseURL)
+        latch.confirm()
+        return result
+    }
 }

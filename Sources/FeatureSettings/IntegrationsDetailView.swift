@@ -112,10 +112,7 @@ struct IntegrationsDetailView: View {
                         onDisconnect: { Task { await mal.disconnect() } }
                     )
                 }
-            }
-        ])
-
-        let music = SettingsSplitSection(id: "music", header: "Music", rows: [
+            },
             SettingsSplitRow(
                 id: "lastfm",
                 title: "Last.fm",
@@ -152,7 +149,7 @@ struct IntegrationsDetailView: View {
             }
         ])
 
-        return [trackers, music, watchStatus]
+        return [trackers, watchStatus]
     }
 
     /// The status + action controls shown in a tracker's detail pane for every

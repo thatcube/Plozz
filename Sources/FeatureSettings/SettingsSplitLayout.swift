@@ -88,9 +88,9 @@ struct SettingsSplitLayout: View {
 
     var body: some View {
         GeometryReader { geo in
-            HStack(alignment: .top, spacing: 40) {
+            HStack(alignment: .top, spacing: 120) {
                 masterList
-                    .frame(width: max(360, geo.size.width * 0.40), alignment: .leading)
+                    .frame(width: max(320, geo.size.width * 0.40 - 80), alignment: .leading)
 
                 detailPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

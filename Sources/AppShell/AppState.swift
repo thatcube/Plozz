@@ -76,6 +76,11 @@ public final class AppState {
     /// Large). Scaled into `PlozzMetrics` and injected into the environment at the
     /// app root, and rebuilt on profile switch like the other per-profile models.
     public private(set) var uiDensityModel: UIDensitySettingsModel
+    /// The active profile's media card style (framed glass cards vs borderless
+    /// artwork-only "posters"). Injected into the environment at the app root like
+    /// `uiDensityModel`, and rebuilt on profile switch like the other per-profile
+    /// models.
+    public private(set) var cardStyleModel: CardStyleSettingsModel
     /// The active profile's Night Shift (warm/dim screen tint) settings + live
     /// schedule. Scoped per profile (rebuilt on profile switch) like the theme;
     /// its overlay is installed at the app root in `RootView`.
@@ -829,6 +834,7 @@ public final class AppState {
         musicPlayerModel: MusicPlayerSettingsModel? = nil,
         homeLibraryVisibilityModel: HomeLibraryVisibilityModel? = nil,
         uiDensityModel: UIDensitySettingsModel? = nil,
+        cardStyleModel: CardStyleSettingsModel? = nil,
         nightShiftModel: NightShiftSettingsModel? = nil,
         ratingsProvider: (any ExternalRatingsProviding)? = nil,
         traktService: TraktService? = nil,
@@ -853,6 +859,7 @@ public final class AppState {
             || themeModel != nil || diagnosticsModel != nil
             || homeLibraryVisibilityModel != nil || musicPlayerModel != nil
             || uiDensityModel != nil
+            || cardStyleModel != nil
             || nightShiftModel != nil
         self.usesInjectedModels = injected
         let ns = (profilesModel ?? self.profilesModel).activeNamespace
@@ -879,6 +886,8 @@ public final class AppState {
             ?? HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
         self.uiDensityModel = uiDensityModel
             ?? UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
+        self.cardStyleModel = cardStyleModel
+            ?? CardStyleSettingsModel(store: CardStyleSettingsStore(namespace: ns))
         self.nightShiftModel = nightShiftModel
             ?? NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
 
@@ -1530,6 +1539,7 @@ public final class AppState {
         musicPlayerModel = MusicPlayerSettingsModel(store: MusicPlayerSettingsStore(namespace: ns))
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
         uiDensityModel = UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
+        cardStyleModel = CardStyleSettingsModel(store: CardStyleSettingsStore(namespace: ns))
         nightShiftModel = NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
     }
 

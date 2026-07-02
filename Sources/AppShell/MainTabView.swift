@@ -97,6 +97,10 @@ struct MainTabView: View {
     /// Per-profile UI density, injected into the environment below so the
     /// Settings ▸ Appearance picker can edit it.
     let uiDensityModel: UIDensitySettingsModel
+    /// Per-profile media card style, edited in Settings ▸ Appearance ▸ Display.
+    /// Injected into the environment for the Settings editor; card rendering reads
+    /// `\.plozzCardStyle` (installed at the app root in RootView).
+    let cardStyleModel: CardStyleSettingsModel
     /// Per-profile Night Shift settings, edited in Settings ▸ Night Shift. Its
     /// overlay is installed at the app root (RootView); here it's only threaded
     /// into Settings for editing.
@@ -264,6 +268,7 @@ struct MainTabView: View {
         }
         .environment(musicPlayerModel)
         .environment(uiDensityModel)
+        .environment(cardStyleModel)
         .task(id: accounts.map(\.account.id)) {
             onWarmIdentityIndex()
         }

@@ -12,7 +12,7 @@ first-class backends; co-equal with `ProviderPlex`.
   at the seam (no DTO ever leaks above this module).
 - `JellyfinDeviceProfile` + `JellyfinCapabilityProfile` — the
   direct-play / transcode capability matrix sent on `/PlaybackInfo`,
-  parameterised by whether the on-device hybrid engine (libmpv) is linked
+  parameterised by whether the on-device decode engine (Plozzigen) is linked
   so the server allows MKV / DTS / TrueHD / etc. to direct play when we can
   decode them locally.
 - `JellyfinMusicProvider` — music-library queries (artists, albums, tracks)

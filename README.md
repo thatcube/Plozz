@@ -70,7 +70,6 @@ app target generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 | [`MetadataKit`](Sources/MetadataKit/README.md) | Keyless-first artwork & metadata enrichment (AniList, Kitsu, TVmaze, Deezer, MusicBrainz/CAA, Wikidata/Wikipedia) routed by content type with a persistent on-disk cache. Optional maintainer-hosted TMDb tier. |
 | [`RatingsService`](Sources/RatingsService/README.md) | External ratings enrichment (OMDb optional key, keyless AniList) with on-disk cache. |
 | [`TraktService`](Sources/TraktService/README.md) | Optional Trakt OAuth, scrobbling, and watched/sync helpers. |
-| [`EngineMPV`](Sources/EngineMPV/README.md) | libmpv-backed `VideoEngine` conformer for codecs/containers AVPlayer can't decode (linked at the composition root). |
 | [`TopShelfKit`](Sources/TopShelfKit/README.md) | Domain-to-snapshot mapping for the Top Shelf extension; writes to the shared App Group container. |
 | [`FeatureDiscovery`](Sources/FeatureDiscovery/README.md) | LAN (UDP) discovery, server validation, server-picker UI, last-server persistence. |
 | [`FeatureAuth`](Sources/FeatureAuth/README.md) | Quick Connect, Plex Link, password sign-in, the explicit **session state machine**, Keychain-backed account/session stores. |
@@ -97,7 +96,6 @@ conformer — adding another backend means one new conformer, no feature rewrite
 ### Generate the project and run
 
 ```bash
-tools/setup-mpv.sh   # stage the gitignored libmpv/FFmpeg xcframeworks (instant)
 xcodegen generate
 open Plozz.xcodeproj
 # Select the "Plozz" scheme and an Apple TV simulator, then Run.
@@ -110,9 +108,9 @@ swift test
 ```
 
 The logic modules are platform-portable, so `swift test` runs on any Swift
-toolchain — no simulator. UI and the libmpv-backed `EngineMPV` compile out behind
-`#if canImport(...)` guards and are covered by the tvOS simulator/app build
-instead. CI runs `swift test` on Linux and an `xcodebuild` tvOS build on macOS.
+toolchain — no simulator. UI modules compile out behind `#if canImport(...)`
+guards and are covered by the tvOS simulator/app build instead. CI runs
+`swift test` on Linux and an `xcodebuild` tvOS build on macOS.
 
 ### Performance debugging
 
@@ -162,8 +160,7 @@ by any of the services below.
 - **AetherEngine** — on-device playback engine (FFmpeg demux → VideoToolbox
   decode) by Vincent Herbst, LGPL-3.0 with an App Store exception.
   [superuser404notfound/AetherEngine](https://github.com/superuser404notfound/AetherEngine).
-- **libmpv / FFmpeg** — a decode-only, LGPL-3.0 build backs the optional
-  `EngineMPV` (see [`NOTICE.md`](NOTICE.md)).
+  Its bundled FFmpeg is a decode-only, LGPL-3.0 build (see [`NOTICE.md`](NOTICE.md)).
 - **The Movie Database (TMDB)** — some artwork and metadata is provided by the
   TMDB API. This product uses the TMDB API but is not endorsed or certified by
   TMDB. TMDB's marks and logos are trademarks of TMDB.

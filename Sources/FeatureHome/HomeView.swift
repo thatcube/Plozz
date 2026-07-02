@@ -181,6 +181,10 @@ private struct LibraryCardView: View {
     @Environment(\.themePalette) private var palette
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.plozzMetrics) private var metrics
+    /// Per-profile card presentation, so a Home "Libraries" tile switches between
+    /// the framed glass card and the borderless "Posters" look with every other
+    /// card on Home.
+    @Environment(\.plozzCardStyle) private var cardStyle
 
     /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
     /// "lift" surface — shared with every other card via `PlozzCardCaption` so the
@@ -193,6 +197,15 @@ private struct LibraryCardView: View {
     }
 
     var body: some View {
+        switch cardStyle {
+        case .framed:
+            framedCard
+        case .borderless:
+            borderlessCard
+        }
+    }
+
+    private var framedCard: some View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
@@ -223,6 +236,41 @@ private struct LibraryCardView: View {
         .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 
+    /// The borderless ("Posters") Libraries tile: the library artwork with no glass
+    /// surface, rounded at the outer radius, wearing the shared `plozzFocusHalo`
+    /// focus ring and dropping its caption on focus — exactly like the borderless
+    /// Continue Watching / Latest landscape cards, so a Libraries tile stays flush
+    /// with them in either card style.
+    private var borderlessCard: some View {
+        let width = metrics.landscapeCardSlotWidth - metrics.borderlessCardSideMargin * 2
+        return VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush) {
+            Color.clear
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .frame(width: width)
+                .overlay { artwork }
+                .clipShape(RoundedRectangle(cornerRadius: metrics.landscapeCardCornerRadius, style: .continuous))
+                .plozzMediaEdge(cornerRadius: metrics.landscapeCardCornerRadius)
+                .plozzFocusHalo(
+                    cornerRadius: metrics.landscapeCardCornerRadius,
+                    focusScale: PlozzTheme.Metrics.mediumFocusedCardScale,
+                    isFocused: isFocused
+                )
+
+            BorderlessCardCaption(
+                title: aggregated.library.title,
+                subtitle: subtitle.isEmpty ? nil : subtitle,
+                horizontalInset: metrics.landscapeCaptionInset
+            )
+            .frame(width: width)
+            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+        }
+        .padding(.horizontal, metrics.borderlessCardSideMargin)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+        .compositingGroup()
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
+    }
+
     @ViewBuilder
     private var artwork: some View {
         if let url = aggregated.library.imageURL {
@@ -236,23 +284,23 @@ private struct LibraryCardView: View {
         }
     }
 
-    /// Themed empty-state for an imageless library: a soft accent→surface gradient
-    /// behind a large, low-contrast per-kind glyph. Tracks the active theme so it
-    /// never reads as a dead gray box on any palette. Icon flips to dark ink on
-    /// focus when reduced-transparency is on.
+    /// Themed empty-state for an imageless library. A subtle vertical gradient
+    /// between the page's `backgroundBase` (top) and the opaque `cardOpaqueSurface`
+    /// (bottom): close in value so the fill reads a touch brighter than the page
+    /// yet never as a heavy gradient, and — because both stops come straight from
+    /// the palette — it tracks light / dark and collapses to pure black in OLED
+    /// (both stops are black there). Opaque, so the focus glass halo behind the
+    /// card can't bleed through, and focus-independent so nothing jumps on focus.
     private var placeholder: some View {
         ZStack {
             LinearGradient(
-                colors: [
-                    palette.accent.opacity(palette.isLight ? 0.22 : 0.32),
-                    palette.cardSurface.opacity(0.45)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                colors: [palette.backgroundBase, palette.cardOpaqueSurface],
+                startPoint: .top,
+                endPoint: .bottom
             )
             Image(systemName: librarySymbol)
                 .font(.system(size: 64, weight: .semibold))
-                .foregroundStyle(subtitleColor.opacity(0.5))
+                .foregroundStyle(palette.secondaryText.opacity(0.4))
         }
     }
 

@@ -66,15 +66,18 @@ public struct CircularFocusHalo<Avatar: View>: View {
     }
 }
 
-/// A self-contained, focusable circular tile: a `CircularFocusHalo` over a round
-/// avatar with an optional caption beneath it. Owns its focus the same way the
-/// rectangular cards do — `.focusable` + `.onTapGesture` with the system focus
-/// effect disabled — so the only focus visual is our circular glass halo (a
+/// A self-contained, focusable circular tile: a round avatar wearing the shared
+/// `plozzFocusHalo` (the same theme-aware glass focus ring the borderless
+/// "Posters" cards use) with an optional caption beneath it. Owns its focus the
+/// same way the rectangular cards do — `.focusable` + `.onTapGesture` with the
+/// system focus effect disabled — so the only focus visual is our glass halo (a
 /// `Button` would paint tvOS's white focus platter behind it).
 ///
 /// The caption builder receives the live focus state so labels can emphasise on
-/// focus. The caption sits *below* the halo (never inside it), so it stays on the
-/// page rather than on the glass.
+/// focus, and — like every other focused tile in the app — the caption **drops**
+/// by `focusCaptionPush` on focus (via a transform, so the footprint never
+/// changes and neighbours don't move). The focused slot is always reserved, so
+/// gaining focus never nudges neighbouring tiles.
 public struct CircularFocusTile<Avatar: View, Caption: View>: View {
     private let diameter: CGFloat
     private let focusPadding: CGFloat
@@ -85,6 +88,7 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
     private let action: () -> Void
 
     @FocusState private var isFocused: Bool
+    @Environment(\.plozzMetrics) private var metrics
 
     public init(
         diameter: CGFloat,
@@ -104,16 +108,27 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
         self.caption = caption
     }
 
+    /// The reserved slot: the avatar plus the halo's clearance on every side, so
+    /// the tile's footprint (and thus the grid/row spacing) is identical focused or
+    /// not.
+    private var slot: CGFloat { diameter + focusPadding * 2 }
+
     public var body: some View {
-        VStack(spacing: captionSpacing) {
-            CircularFocusHalo(
-                isFocused: isFocused,
-                diameter: diameter,
-                focusPadding: focusPadding,
-                focusScale: focusScale,
-                avatar: avatar
-            )
+        // Always reserve the focused gap; the caption rides up when unfocused via a
+        // transform (see `.offset`), so the drop never changes the tile's footprint.
+        let push = metrics.focusCaptionPush
+        VStack(spacing: captionSpacing + push) {
+            avatar()
+                .frame(width: diameter, height: diameter)
+                .clipShape(Circle())
+                .plozzFocusHalo(
+                    cornerRadius: diameter / 2,
+                    focusScale: focusScale,
+                    isFocused: isFocused
+                )
+                .frame(width: slot, height: slot)
             caption(isFocused)
+                .offset(y: isFocused ? 0 : -push)
         }
         .focusable(true)
         .focused($isFocused)
@@ -121,6 +136,7 @@ public struct CircularFocusTile<Avatar: View, Caption: View>: View {
         .onTapGesture(perform: action)
         .accessibilityAddTraits(.isButton)
         .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 #endif

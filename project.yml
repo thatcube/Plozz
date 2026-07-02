@@ -224,29 +224,6 @@ targets:
         # instantiates ContentProvider.
         LD_ENTRY_POINT: _NSExtensionMain
 
-  # COMPILE/LINK gate target. This tvOS framework links the EngineMPV package
-  # product on its own so CI / the build gate can prove it compiles + links
-  # against the tvOS SDK with its libmpv + FFmpeg xcframeworks, independent of
-  # the full app. (EngineMPV is also linked into the Plozz app itself as the sole
-  # on-device decode engine; VLCKit was removed — see tag archive/vlckit-engine.)
-  # Build via the EngineMPVProbe scheme.
-  EngineMPVProbe:
-    type: framework
-    platform: tvOS
-    deploymentTarget: "17.0"
-    sources:
-      - path: App/EngineMPVProbe
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.thatcube.Plozz.EngineMPVProbe
-        PRODUCT_NAME: EngineMPVProbe
-        GENERATE_INFOPLIST_FILE: YES
-        # Probe-only; never shipped, so skip code signing entirely.
-        CODE_SIGNING_ALLOWED: NO
-    dependencies:
-      - package: Plozz
-        product: EngineMPV
-
 schemes:
   Plozz:
     build:
@@ -270,13 +247,5 @@ schemes:
       # per-module *Tests schemes that Xcode publishes for the local package
       # (e.g. CoreModelsTests, ProviderJellyfinTests). `tools/run-tests.sh`
       # wraps `xcodebuild test ... -destination 'platform=tvOS Simulator,...'`
-      # for the full set. `swift test` is unusable on macOS because the mpv
-      # xcframeworks are tvOS-only.
-
-  # Compile-only gate for the otherwise-unlinked EngineMPV module.
-  EngineMPVProbe:
-    build:
-      targets:
-        EngineMPVProbe: all
-    run:
-      config: Debug
+      # for the full set. `swift test` is unusable on macOS because
+      # AetherEngine's FFmpeg xcframeworks are tvOS-only.

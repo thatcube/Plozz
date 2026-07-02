@@ -15,7 +15,7 @@
 #   # Hunt the leak (persistent allocations growing across playbacks):
 #   tools/trace-device.sh --template Allocations --time-limit 5m
 #
-#   # GPU/render cost of the mpv gpu-next HDR/DoVi path:
+#   # GPU/render cost of the Plozzigen (VideoToolbox) HDR/DoVi path:
 #   tools/trace-device.sh --template "Metal System Trace"
 #
 #   # Explicit device + leaks pass:

@@ -50,7 +50,6 @@ module_to_suite() {
     CoreNetworking)    echo CoreNetworkingTests;;
     CoreUI)            echo CoreUITests;;
     MetadataKit)       echo MetadataKitTests;;
-    EngineMPV)         echo EngineMPVTests;;
     FeatureDiscovery)  echo FeatureDiscoveryTests;;
     ProviderJellyfin)  echo ProviderJellyfinTests;;
     ProviderPlex)      echo ProviderPlexTests;;

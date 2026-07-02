@@ -527,8 +527,10 @@ public struct PosterCardView: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         // Track: matches the main player's scrubber — Liquid Glass on
-                        // tvOS 26+, with a translucent-white fallback on older systems.
-                        if #available(tvOS 26.0, *) {
+                        // tvOS 26+, with a translucent-white fallback on older systems
+                        // *and* whenever Reduce Transparency is on (OS or in-app), so
+                        // the scrubber turns solid alongside every other glass surface.
+                        if #available(tvOS 26.0, *), !reduceTransparency {
                             Capsule(style: .continuous)
                                 .fill(.clear)
                                 .glassEffect(.regular, in: Capsule(style: .continuous))
@@ -539,9 +541,9 @@ public struct PosterCardView: View {
 
                         // Fill: Plozz's brand blue rendered as Liquid Glass on
                         // tvOS 26+ (a tinted glass capsule), with a solid brand-blue
-                        // fallback on older systems.
+                        // fallback on older systems and under Reduce Transparency.
                         Group {
-                            if #available(tvOS 26.0, *) {
+                            if #available(tvOS 26.0, *), !reduceTransparency {
                                 Capsule(style: .continuous)
                                     .fill(.clear)
                                     .glassEffect(.regular.tint(ThemePalette.brandBlue), in: Capsule(style: .continuous))

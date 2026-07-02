@@ -4,7 +4,7 @@ import UIKit
 import Observation
 import CoreModels
 
-/// Installs Night Shift's tint so it floats above *everything* — including the
+/// Installs Circadian Mode's tint so it floats above *everything* — including the
 /// player and other `fullScreenCover`s — without ever stealing focus, and tints
 /// by **multiplying** the app rather than painting a wash on top.
 ///
@@ -20,30 +20,15 @@ import CoreModels
 /// passthrough tint view directly into the app's main window and push it to the
 /// front with a very high `zPosition`, which keeps it above the modally-presented
 /// covers (player, etc.) that are sibling subviews of that same window.
-
-// MARK: - Tint view
-
-/// The SwiftUI content hosted in the overlay: one opaque rectangle filled with
-/// the model's current multiply colour. The host view's layer multiplies it
-/// against the app (see the installer), so this colour acts as a per-channel
-/// scale — white by day (×1, invisible), redder as night deepens.
-private struct NightShiftTintView: View {
-    var model: NightShiftSettingsModel
-
-    private var multiplyColor: Color {
-        let s = model.channelScalars
-        return Color(.sRGB, red: s.red, green: s.green, blue: s.blue, opacity: 1)
-    }
-
-    var body: some View {
-        Rectangle()
-            .fill(multiplyColor)
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            .animation(.easeInOut(duration: 0.6), value: model.currentDimOpacity)
-            .animation(.easeInOut(duration: 0.6), value: model.currentWarmOpacity)
-    }
-}
+///
+/// The tint is a plain `UIView` whose `CALayer.backgroundColor` we set directly,
+/// *not* a hosted SwiftUI view. A `UIHostingController` attached straight to the
+/// window (outside the view-controller graph, as this must be to float above
+/// covers) never gets its SwiftUI update loop driven, so it renders once at
+/// launch and then ignores later `@Observable` changes — the tint would only
+/// refresh on the next launch. Painting the layer colour ourselves, driven by an
+/// explicit observation loop, repaints reliably the instant warmth/darkness/
+/// schedule change.
 
 // MARK: - Installer
 
@@ -71,24 +56,28 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
     @MainActor
     final class Coordinator {
         private let model: NightShiftSettingsModel
-        private var hostingController: UIHostingController<NightShiftTintView>?
+        private var tintView: UIView?
         private var attempts = 0
-        /// Whether the explicit observation loop has been armed. The tint host is
-        /// attached straight to the `UIWindow`, *outside* the view-controller
-        /// graph (so it can float above `fullScreenCover`s), and in that
-        /// configuration SwiftUI stops re-running the hosted view's `body` on
-        /// `@Observable` changes after the first render. So we drive re-renders
-        /// ourselves with `withObservationTracking`, or a live warmth/dimness/
-        /// schedule change would only take effect on the next app launch.
+        /// The tint lives straight on the `UIWindow`, so SwiftUI's implicit
+        /// `@Observable` tracking never re-runs against it. We drive repaints
+        /// ourselves with `withObservationTracking`; without this loop a live
+        /// warmth/darkness/schedule change would only take effect next launch.
         private var isObserving = false
+
+        private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
         init(model: NightShiftSettingsModel) {
             self.model = model
         }
 
         func installIfNeeded() {
-            // Already attached to a window — nothing to do.
-            if let view = hostingController?.view, view.superview != nil { return }
+            // Already attached to a window — just make sure it shows the current
+            // colour (e.g. after the model instance was swapped on a profile
+            // switch) and keep it frontmost.
+            if let view = tintView, view.superview != nil {
+                paintTint(animated: false)
+                return
+            }
 
             guard let window = Self.mainWindow() else {
                 // The window can lag the first few layout passes — retry briefly.
@@ -100,12 +89,8 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
                 return
             }
 
-            let host = hostingController
-                ?? UIHostingController(rootView: NightShiftTintView(model: model))
-            hostingController = host
-
-            guard let view = host.view else { return }
-            view.backgroundColor = .clear
+            let view = tintView ?? UIView(frame: window.bounds)
+            tintView = view
             view.isUserInteractionEnabled = false
             view.frame = window.bounds
             view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -117,12 +102,13 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
             view.layer.zPosition = .greatestFiniteMagnitude
 
             window.addSubview(view)
+            paintTint(animated: false)
             startObservingModel()
         }
 
-        /// Re-renders the window-attached tint whenever the model's live tint
+        /// Repaints the tint whenever any value the multiply colour derives from
         /// changes. `withObservationTracking` is one-shot, so the change handler
-        /// re-reads the current colour into a fresh `rootView` and re-arms itself.
+        /// repaints and then re-arms itself for the next change.
         private func startObservingModel() {
             guard !isObserving else { return }
             isObserving = true
@@ -131,21 +117,58 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
 
         private func observeTintOnce() {
             withObservationTracking {
-                // Touch every stored property the tint colour derives from so a
-                // change to any of them (settings, the minute tick, the preview
-                // sweep) invalidates this tracking.
+                // Read the stored inputs directly (so `\.settings`, the preview
+                // sweep and the calibration flag all register) plus the derived
+                // colour (so the minute `tick` registers via its getter).
+                _ = model.settings
+                _ = model.isPreviewing
+                _ = model.previewDate
                 _ = model.channelScalars
-                _ = model.currentDimOpacity
-                _ = model.currentWarmOpacity
             } onChange: { [weak self] in
                 // `onChange` fires just before the value settles, so hop to the
                 // next main-actor turn to read the new value, repaint, and re-arm.
                 Task { @MainActor in
-                    guard let self, let host = self.hostingController else { return }
-                    host.rootView = NightShiftTintView(model: self.model)
+                    guard let self else { return }
+                    self.paintTint(animated: true)
                     self.observeTintOnce()
                 }
             }
+        }
+
+        /// Sets the tint layer's colour to the model's current per-channel
+        /// multiply (white by day → invisible, redder as night deepens),
+        /// optionally easing from wherever it is now.
+        private func paintTint(animated: Bool) {
+            guard let view = tintView else { return }
+            let scalars = model.channelScalars
+            let target = CGColor(
+                colorSpace: Self.colorSpace,
+                components: [
+                    CGFloat(scalars.red),
+                    CGFloat(scalars.green),
+                    CGFloat(scalars.blue),
+                    1,
+                ]
+            ) ?? UIColor(
+                red: CGFloat(scalars.red),
+                green: CGFloat(scalars.green),
+                blue: CGFloat(scalars.blue),
+                alpha: 1
+            ).cgColor
+
+            if animated {
+                let animation = CABasicAnimation(keyPath: "backgroundColor")
+                // Chase from the on-screen colour so rapid updates (the day
+                // preview sweep) glide instead of snapping.
+                animation.fromValue = view.layer.presentation()?.backgroundColor
+                    ?? view.layer.backgroundColor
+                    ?? target
+                animation.toValue = target
+                animation.duration = 0.6
+                animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                view.layer.add(animation, forKey: "tint")
+            }
+            view.layer.backgroundColor = target
         }
 
         private static func mainWindow() -> UIWindow? {
@@ -158,7 +181,7 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
 }
 
 extension View {
-    /// Attaches the global Night Shift tint to the app's main window.
+    /// Attaches the global Circadian Mode tint to the app's main window.
     public func installNightShiftOverlay(_ model: NightShiftSettingsModel) -> some View {
         background(NightShiftOverlayInstaller(model: model))
     }

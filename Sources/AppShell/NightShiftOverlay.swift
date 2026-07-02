@@ -1,6 +1,7 @@
 #if canImport(SwiftUI) && canImport(UIKit)
 import SwiftUI
 import UIKit
+import Observation
 import CoreModels
 
 /// Installs Night Shift's tint so it floats above *everything* — including the
@@ -72,6 +73,14 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
         private let model: NightShiftSettingsModel
         private var hostingController: UIHostingController<NightShiftTintView>?
         private var attempts = 0
+        /// Whether the explicit observation loop has been armed. The tint host is
+        /// attached straight to the `UIWindow`, *outside* the view-controller
+        /// graph (so it can float above `fullScreenCover`s), and in that
+        /// configuration SwiftUI stops re-running the hosted view's `body` on
+        /// `@Observable` changes after the first render. So we drive re-renders
+        /// ourselves with `withObservationTracking`, or a live warmth/dimness/
+        /// schedule change would only take effect on the next app launch.
+        private var isObserving = false
 
         init(model: NightShiftSettingsModel) {
             self.model = model
@@ -108,6 +117,35 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
             view.layer.zPosition = .greatestFiniteMagnitude
 
             window.addSubview(view)
+            startObservingModel()
+        }
+
+        /// Re-renders the window-attached tint whenever the model's live tint
+        /// changes. `withObservationTracking` is one-shot, so the change handler
+        /// re-reads the current colour into a fresh `rootView` and re-arms itself.
+        private func startObservingModel() {
+            guard !isObserving else { return }
+            isObserving = true
+            observeTintOnce()
+        }
+
+        private func observeTintOnce() {
+            withObservationTracking {
+                // Touch every stored property the tint colour derives from so a
+                // change to any of them (settings, the minute tick, the preview
+                // sweep) invalidates this tracking.
+                _ = model.channelScalars
+                _ = model.currentDimOpacity
+                _ = model.currentWarmOpacity
+            } onChange: { [weak self] in
+                // `onChange` fires just before the value settles, so hop to the
+                // next main-actor turn to read the new value, repaint, and re-arm.
+                Task { @MainActor in
+                    guard let self, let host = self.hostingController else { return }
+                    host.rootView = NightShiftTintView(model: self.model)
+                    self.observeTintOnce()
+                }
+            }
         }
 
         private static func mainWindow() -> UIWindow? {

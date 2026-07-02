@@ -116,7 +116,6 @@ struct PlayerControls: View {
     @State private var openPanel: Category?
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
-    @Namespace private var panelFocusScope
 
     /// The transport control that was focused when the current panel was opened.
     /// Restored (deferred) whenever the panel fully closes so focus always lands
@@ -238,14 +237,20 @@ struct PlayerControls: View {
             // same-panel change is a morph (animate); a miss leaves it unmeasured so the
             // first measurement snaps.
             measuredPanel = styleBodyHeight > 0 ? panel : nil
-            // Opening a panel simultaneously INSERTS new focusable content and DISABLES
-            // the transport buttons that currently hold focus. A synchronous
-            // `@FocusState` write here races that relocation: tvOS often performs its
-            // own default-focus pass after this closure, once the panel's views
-            // actually exist, and overwrites the binding with the section's top row.
-            // Declare the preferred default INSIDE the panel's focus scope instead and
-            // let the focus engine choose it when the panel becomes focusable.
-            focus = nil
+            // Land initial focus on the active/selected row. This MUST be deferred to
+            // the next runloop tick: opening a panel simultaneously inserts the panel's
+            // rows and disables the transport button that currently holds focus, which
+            // forces tvOS to run its own default-focus pass. That pass runs after this
+            // closure (once the rows exist) and picks the section's first row. A
+            // synchronous write here raced it (sometimes we won → active row, sometimes
+            // the engine won → top/Style), and the declarative `prefersDefaultFocus`
+            // approach loses to the enclosing ScrollView, which always defaults to its
+            // first item (see ProfilePickerView: tvOS declarative default focus is
+            // unreliable inside scroll containers). A single deferred write runs AFTER
+            // the engine's pass, so it reliably lands — the same mechanism `restoreFocus`
+            // already uses on close. Any one-frame highlight of the engine's pick happens
+            // while the panel is still at ~0 opacity (mid fade-in), so it's imperceptible.
+            restoreFocus(preferredPanelFocus)
         }
         .onExitCommand { handleExit() }
         .onPlayPauseCommand { actions.togglePlayPause() }
@@ -266,7 +271,6 @@ struct PlayerControls: View {
                     .opacity(titleVisible ? 1 : 0)
                 if let openPanel {
                     panelContainer(for: openPanel)
-                        .focusScope(panelFocusScope)
                         .focusSection()
                         // Grow + fade from the corner nearest the button that opened
                         // it (panels open trailing, above the transport buttons; Info
@@ -573,18 +577,25 @@ struct PlayerControls: View {
 
     /// Move focus programmatically after the current view update settles.
     ///
-    /// When a panel closes, its focused row is removed in the same state update
-    /// and tvOS's focus engine auto-recovers to the leftmost control (the Info
-    /// button). Writing @FocusState synchronously here fights that recovery, and
-    /// writing it *twice* (sync + deferred) makes two buttons briefly render
-    /// focused. A SINGLE deferred write on the next runloop tick lands cleanly and
-    /// returns focus to wherever the panel was opened — no matter how deep its
-    /// sub-screens went.
+    /// Both opening and closing a panel provoke tvOS's focus engine to run its own
+    /// default/auto-recovery pass in the same update: on close the focused row is
+    /// removed and the engine recovers to the leftmost transport control; on open the
+    /// panel's rows appear while the opening button is disabled, forcing the engine to
+    /// pick a default (the section's first row). Writing @FocusState synchronously
+    /// races that pass (and writing it *twice* — sync + deferred — briefly renders two
+    /// controls focused). A SINGLE deferred write on the next runloop tick runs after
+    /// the engine settles, so it lands cleanly: on open it reaches the active row, on
+    /// close it returns focus to whichever control opened the panel — no matter how
+    /// deep its sub-screens went.
     private func restoreFocus(_ slot: FocusSlot?) {
         guard let slot else { return }
         DispatchQueue.main.async { focus = slot }
     }
 
+    /// The focus target a freshly-opened panel should land on: the active/selected
+    /// row for the track lists, the first available delay row for Sync, the primary
+    /// action for Info, and the right control for each Subtitles sub-screen. Deferred
+    /// onto `focus` in `onChange(of: openPanel)` via `restoreFocus`.
     private var preferredPanelFocus: FocusSlot? {
         guard let panel = openPanel else { return nil }
         switch panel {
@@ -894,7 +905,6 @@ struct PlayerControls: View {
         }
         .playerGlassButton(prominent: prominent)
         .focused($focus, equals: slot)
-        .prefersDefaultFocus(preferredPanelFocus == slot, in: panelFocusScope)
     }
 
     /// Header of the floating panel: the screen title, plus — on the Subtitles
@@ -915,7 +925,6 @@ struct PlayerControls: View {
                 .buttonStyle(PanelHeaderButtonStyle())
                 .focusEffectDisabled()
                 .focused($focus, equals: .subBack)
-                .prefersDefaultFocus(preferredPanelFocus == .subBack, in: panelFocusScope)
                 // Pull the chip past the header gutter so it hugs the panel's
                 // leading edge, concentric with the rounded corner.
                 .padding(.leading, -10)
@@ -933,7 +942,6 @@ struct PlayerControls: View {
                 .buttonStyle(PanelHeaderButtonStyle())
                 .focusEffectDisabled()
                 .focused($focus, equals: .edit)
-                .prefersDefaultFocus(preferredPanelFocus == .edit, in: panelFocusScope)
                 // Mirror the back chip: hug the trailing edge, ignoring the gutter.
                 .padding(.trailing, -10)
             }
@@ -1030,7 +1038,6 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .download)
-        .prefersDefaultFocus(preferredPanelFocus == .download, in: panelFocusScope)
     }
 
     // MARK: Subtitles sub-screens (Download stub / live Style editor)
@@ -1125,7 +1132,6 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(row.slot))
-        .prefersDefaultFocus(preferredPanelFocus == .row(row.slot), in: panelFocusScope)
     }
 
     @ViewBuilder
@@ -1293,7 +1299,6 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(index))
-        .prefersDefaultFocus(preferredPanelFocus == .row(index), in: panelFocusScope)
     }
 
     /// A SwiftUI `Font` that renders a family's name in that family's own Regular
@@ -1672,7 +1677,6 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(row.id))
-        .prefersDefaultFocus(preferredPanelFocus == .row(row.id), in: panelFocusScope)
     }
 
     private func compactToggleRow(_ row: TrackRow) -> some View {
@@ -1699,7 +1703,6 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(row.id))
-        .prefersDefaultFocus(preferredPanelFocus == .row(row.id), in: panelFocusScope)
     }
 
     @ViewBuilder
@@ -1812,7 +1815,6 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(index))
-        .prefersDefaultFocus(preferredPanelFocus == .row(index), in: panelFocusScope)
     }
 
     private func toggleRow(
@@ -1842,7 +1844,6 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(index))
-        .prefersDefaultFocus(preferredPanelFocus == .row(index), in: panelFocusScope)
     }
 
     private func delayRow(
@@ -1875,7 +1876,6 @@ struct PlayerControls: View {
             Text(title).font(.callout.weight(.medium))
         }
         .focused($focus, equals: .row(slot))
-        .prefersDefaultFocus(preferredPanelFocus == .row(slot), in: panelFocusScope)
     }
 
     // MARK: Model helpers

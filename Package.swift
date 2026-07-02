@@ -257,7 +257,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", "LastFmService"]
+            dependencies: ["CoreModels", "CoreUI", "CoreNetworking", "CrashReporting", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", "LastFmService"]
         ),
         .target(
             name: "FeatureProfiles",

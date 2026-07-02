@@ -2,6 +2,7 @@
 import SwiftUI
 import CoreNetworking
 import CoreUI
+import CrashReporting
 
 /// Full-page, scrollable view of the recent-activity log.
 ///
@@ -16,12 +17,23 @@ import CoreUI
 /// redacted at the source (tokens/secrets stripped), so nothing sensitive is
 /// shown here.
 struct RecentActivityDetailView: View {
+    /// Whether the on-demand "Send to Developer" upload is possible right now —
+    /// i.e. the build shipped with a crash-reporting endpoint AND the user has
+    /// opted in (Help & Diagnostics ▸ Share Crash Reports). When false the button
+    /// is replaced by a short note explaining how to enable it, because there is
+    /// nowhere to send the log.
+    var canSendDiagnostics: Bool = false
+
     private let entries = PlozzLog.recentEntries(limit: 500)
+
+    private enum SendState { case idle, sent, failed }
+    @State private var sendState: SendState = .idle
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
+                sendSection
 
                 if entries.isEmpty {
                     Text("No activity recorded yet.")
@@ -53,6 +65,53 @@ struct RecentActivityDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    /// The whole point of this page for real debugging: hand the *full* log off
+    /// to the developer's crash-reporting service in one click, so it can be read
+    /// on a computer instead of squinting at (or trying to QR-scan) a TV.
+    @ViewBuilder
+    private var sendSection: some View {
+        if canSendDiagnostics {
+            VStack(alignment: .leading, spacing: 10) {
+                Button {
+                    let ok = CrashDiagnostics.send(
+                        logText: PlozzLog.recentLogText(limit: 500),
+                        note: "User diagnostics report"
+                    )
+                    sendState = ok ? .sent : .failed
+                } label: {
+                    Label(
+                        sendState == .sent ? "Sent to Developer" : "Send to Developer",
+                        systemImage: sendState == .sent ? "checkmark.circle.fill" : "paperplane.fill"
+                    )
+                    .font(.headline)
+                }
+                .buttonStyle(PlozzOpaquePillButtonStyle())
+                .disabled(sendState == .sent)
+
+                Text(sendStatusText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            Text("To send this log to the developer, turn on Share Crash Reports in Help & Diagnostics. It's sent anonymously — no logins, tokens, servers, or titles.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var sendStatusText: String {
+        switch sendState {
+        case .idle:
+            return "Uploads the full log above to the developer so it can be read on a computer. Anonymous — no logins, tokens, servers, or titles are included."
+        case .sent:
+            return "Thanks! Your recent activity was sent to the developer."
+        case .failed:
+            return "Couldn't send — crash reporting isn't active. Turn on Share Crash Reports in Help & Diagnostics and try again."
+        }
+    }
 }
 
 /// One log line, rendered as a focusable console row so the page scrolls on
@@ -80,8 +139,8 @@ private struct RecentActivityRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 10) {
                 Text(Self.timeFormatter.string(from: entry.date))
                     .foregroundStyle(.secondary)
                 Text(entry.level.rawValue.uppercased())
@@ -89,16 +148,16 @@ private struct RecentActivityRow: View {
                 Text(entry.category)
                     .foregroundStyle(.secondary)
             }
-            .font(.system(.caption2, design: .monospaced))
+            .font(.system(size: 14, design: .monospaced))
 
             Text(entry.message)
-                .font(.system(.footnote, design: .monospaced))
+                .font(.system(size: 17, design: .monospaced))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)

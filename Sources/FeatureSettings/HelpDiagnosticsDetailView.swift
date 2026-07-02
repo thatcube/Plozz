@@ -79,9 +79,12 @@ struct HelpDiagnosticsDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     VStack(spacing: 12) {
-                        // "M" correction keeps the longer pre-filled issue URL
-                        // scannable at 10 feet (About's short repo link uses "H").
-                        SettingsQRCode(string: report.newIssueURLString, correctionLevel: "M")
+                        // "L" correction: the pre-filled issue URL now carries a
+                        // short recent-activity tail as well, so we trade error
+                        // correction for capacity to keep the QR scannable at 10
+                        // feet. It's shown on a clean screen (no print damage to
+                        // recover from), so low correction is fine here.
+                        SettingsQRCode(string: report.newIssueURLString, correctionLevel: "L")
                             .frame(width: 200, height: 200)
                         Text("Scan to report\na bug")
                             .font(.caption)
@@ -220,10 +223,23 @@ struct DiagnosticsReport {
         """
     }
 
+    /// A tiny tail of the most recent redacted log lines, folded into the issue
+    /// so a maintainer sees roughly what Plozz was doing right before the report
+    /// — without the tester sending anything separately. Deliberately capped hard
+    /// (a few hundred chars): the whole issue body is encoded into the scannable
+    /// QR code, so a long tail would make the QR too dense to scan across a room.
+    /// For the *full* log, testers use "Send to Developer" on Recent Activity.
+    var recentLogTail: String {
+        let raw = PlozzLog.recentLogText(limit: 8)
+        guard !raw.isEmpty else { return "" }
+        // Keep only the last ~400 chars so the QR stays comfortably scannable.
+        return raw.count > 400 ? "…" + String(raw.suffix(400)) : raw
+    }
+
     private var issueTitle: String { "[Bug] " }
 
     private var issueBody: String {
-        """
+        var body = """
         **What happened?**
 
 
@@ -237,6 +253,21 @@ struct DiagnosticsReport {
         _Environment (auto-filled by Plozz — please keep):_
         \(environmentBlock)
         """
+
+        let tail = recentLogTail
+        if !tail.isEmpty {
+            body += """
+
+
+            <details><summary>Recent activity (auto-filled)</summary>
+
+            ```
+            \(tail)
+            ```
+            </details>
+            """
+        }
+        return body
     }
 
     /// Pre-filled `issues/new` URL. Uses `URLComponents`/`queryItems` so the

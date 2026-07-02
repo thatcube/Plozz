@@ -372,6 +372,26 @@ public final class AppState {
     @ObservationIgnored
     private var identityWarmTask: Task<Void, Never>?
 
+    /// Monotonically bumped every time the identity index is swapped out from under
+    /// an in-flight warm — on a profile reset and at the start of each warm wave
+    /// (which cancels its predecessor). A warm task captures the value at launch and
+    /// stamps every snapshot publish with it; a publish whose generation no longer
+    /// matches is dropped, so a task that slips past its cooperative cancellation
+    /// check can never republish a superseded (or another profile's) snapshot over
+    /// the live one. See ``publishWarmedSnapshot(_:generation:)``.
+    @ObservationIgnored
+    private var identityWarmGeneration = 0
+
+    /// High-water mark of `indexedAccountIDs.count` published within the current
+    /// warm generation. The index only grows as accounts finish within a wave, so a
+    /// snapshot carrying fewer accounts than one already published is a stale,
+    /// out-of-order fold from a concurrent warm task; rejecting it stops a smaller
+    /// snapshot clobbering a fuller one (last-writer-wins). Reset to 0 whenever the
+    /// generation bumps so a legitimately smaller set (accounts removed) still
+    /// publishes on the next wave.
+    @ObservationIgnored
+    private var publishedIndexAccountCount = 0
+
     /// An immutable snapshot of ``_identityIndex`` that synchronous callers read.
     /// `.empty` until the first account warms — every lookup then returns `[]`, so
     /// callers degrade to their existing on-demand discovery and never drop a write.
@@ -424,6 +444,14 @@ public final class AppState {
         let fanoutLimit = identityWarmFanoutLimit
 
         identityWarmTask?.cancel()
+        // Supersede any still-in-flight warm from a previous wave: bump the
+        // generation (and reset the per-wave high-water mark) so a stale publish
+        // that slips past its cancellation check is dropped, while a legitimately
+        // smaller account set for THIS wave (e.g. a server was removed) still
+        // publishes.
+        identityWarmGeneration &+= 1
+        publishedIndexAccountCount = 0
+        let warmGeneration = identityWarmGeneration
         identityWarmTask = Task { [weak self] in
             // B2: On the first warm this launch, seed the index from the persisted
             // membership and publish immediately, so cross-server unions are known
@@ -436,8 +464,7 @@ public final class AppState {
                 if !persisted.isEmpty, await index.restore(from: persisted, retaining: activeIDs) {
                     let snapshot = await index.snapshot()
                     await MainActor.run {
-                        self.identitySnapshot = snapshot
-                        self.identitySnapshotStore.update(snapshot)
+                        guard self.publishWarmedSnapshot(snapshot, generation: warmGeneration) else { return }
                         // Tell already-loaded surfaces (Home) that cross-server
                         // membership is now known so they re-fold the fuller source
                         // set into their in-place cards. Without this, a boot whose
@@ -491,8 +518,7 @@ public final class AppState {
                     // Publish progressively so surfaces see each warmed account.
                     let snapshot = await index.snapshot()
                     await MainActor.run {
-                        self?.identitySnapshot = snapshot
-                        self?.identitySnapshotStore.update(snapshot)
+                        guard let self, self.publishWarmedSnapshot(snapshot, generation: warmGeneration) else { return }
                         // Tell already-loaded surfaces (Home) that the shared
                         // cross-server membership just grew, so they can re-fold
                         // the fuller source set into their in-place cards without
@@ -504,7 +530,7 @@ public final class AppState {
                         // index finished warming re-expands against the larger
                         // union and fans out to the newly-known servers. No-op
                         // when the outbox is empty.
-                        self?.drainWatchOutbox()
+                        self.drainWatchOutbox()
                     }
                     // B1: persist the freshly-warmed membership so the next cold
                     // boot can seed it at t=0. Only warm accounts are exported, so
@@ -641,11 +667,40 @@ public final class AppState {
         }
     }
 
+    /// Publishes a warmed identity snapshot to the observed property + the
+    /// `@Sendable` store, but only when it is safe to do so. Returns whether the
+    /// publish was applied (callers gate the "membership grew" notification + outbox
+    /// re-drain on it).
+    ///
+    /// Rejected when:
+    ///  - `generation` no longer matches the live warm generation — the index was
+    ///    swapped out (profile reset) or a newer warm wave started, so this snapshot
+    ///    is from a superseded / different-profile index and must not overwrite the
+    ///    current one.
+    ///  - the snapshot carries fewer indexed accounts than one already published in
+    ///    this generation — within a wave the index only grows, so a smaller set is a
+    ///    stale, out-of-order fold from a concurrent warm task racing a fuller one.
+    @MainActor
+    private func publishWarmedSnapshot(_ snapshot: IdentityIndexSnapshot, generation: Int) -> Bool {
+        guard generation == identityWarmGeneration else { return false }
+        let accountCount = snapshot.indexedAccountIDs.count
+        guard accountCount >= publishedIndexAccountCount else { return false }
+        publishedIndexAccountCount = accountCount
+        identitySnapshot = snapshot
+        identitySnapshotStore.update(snapshot)
+        return true
+    }
+
     /// Flushes the identity index when the active profile changes so the next warm
     /// rebuilds it for the now-active profile's accounts.
     private func resetIdentityIndex() {
         identityWarmTask?.cancel()
         identityWarmTask = nil
+        // Supersede any in-flight warm publish so a task mid-`snapshot()` from the
+        // OLD profile's index can't overwrite the freshly-emptied snapshot once the
+        // new profile takes over.
+        identityWarmGeneration &+= 1
+        publishedIndexAccountCount = 0
         _identityIndex = IdentityIndex()
         _identityIndexStore = nil
         didRestorePersistedIndex = false

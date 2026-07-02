@@ -194,6 +194,42 @@ final class HomeAggregatorTests: XCTestCase {
         )
     }
 
+    func testContinueWatchingSingleSourceNextUpRanksAboveStalerForeignCard() async {
+        // Regression for the own-key carry-forward gap. Server A's feed is an
+        // in-progress episode (RECENT) followed by its untimestamped Next Up
+        // suggestion for a DIFFERENT episode of the same show — a single-source
+        // card the merger returns unchanged, so it carries an EMPTY `sources` array.
+        // Server B has an in-progress card that is OLDER than A's activity.
+        //
+        // The per-feed carry-forward records A-nextup's recency under its OWN
+        // (account,item) key, but `sortedByRecency` only walked each card's
+        // `sources` — which is empty here — so A-nextup got no effective recency and
+        // sank BELOW server B's staler card. Looking up the card's own key restores
+        // the intended order: A's recent activity (in-progress AND its Next Up) leads
+        // server B's older card.
+        let recent = Date(timeIntervalSince1970: 5_000)
+        let older = Date(timeIntervalSince1970: 3_000)
+        let aInProgress = MediaItem(id: "a-ip", title: "A In Progress", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: recent)
+        let aNextUp = MediaItem(id: "a-next", title: "A Next Up", kind: .episode)
+        let bInProgress = MediaItem(id: "b-ip", title: "B In Progress", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: older)
+        let a = AggregatorStub(continueWatching: [aInProgress, aNextUp])
+        let b = AggregatorStub(continueWatching: [bInProgress])
+        let accounts = [
+            resolved("acct-a", user: "A", server: "S-A", kind: .plex, provider: a),
+            resolved("acct-b", user: "B", server: "S-B", kind: .jellyfin, provider: b)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(
+            content.continueWatching.map(\.id),
+            ["a-ip", "a-next", "b-ip"],
+            "A single-source Next Up card must rank by its own carried recency, above a staler foreign server's card"
+        )
+    }
+
     func testContentCapsMergedRowsToRequestedLimits() async {
         let a = AggregatorStub(
             continueWatching: [item("a1"), item("a2"), item("a3")],

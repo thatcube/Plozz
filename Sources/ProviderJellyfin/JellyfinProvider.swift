@@ -58,18 +58,53 @@ public struct JellyfinProvider: MediaProvider {
     public func continueWatching(limit: Int) async throws -> [MediaItem] {
         async let resumeTask = client.resumeItems(userID: session.userID, limit: limit)
         async let nextUpTask = nextUpItemsBestEffort(limit: limit)
+        async let seriesDatesTask = seriesLastPlayedDatesBestEffort(limit: limit)
         let resume = try await resumeTask
         let nextUp = await nextUpTask
+        let seriesDates = await seriesDatesTask
 
         var seen = Set<String>()
         let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
-        return merged.prefix(limit).map(map(item:))
+        return merged.prefix(limit).map(map(item:)).map { stampingSeriesRecency($0, using: seriesDates) }
     }
 
     /// Wraps `/Shows/NextUp` so a failure never propagates into Continue
     /// Watching, which is anchored by the in-progress Resume items.
     private func nextUpItemsBestEffort(limit: Int) async -> [BaseItemDto] {
         (try? await client.nextUpItems(userID: session.userID, limit: limit)) ?? []
+    }
+
+    /// Best-effort map of `seriesID → series last-played date`, used to stamp
+    /// NextUp episodes with their series' true recency (see
+    /// ``JellyfinClient/recentlyWatchedSeries(userID:limit:)``). Run concurrently
+    /// with the Resume/NextUp fetches so it adds no latency to the common path; a
+    /// failure yields an empty map and Continue Watching falls back to unstamped
+    /// ordering.
+    private func seriesLastPlayedDatesBestEffort(limit: Int) async -> [String: Date] {
+        guard let series = try? await client.recentlyWatchedSeries(userID: session.userID, limit: limit) else {
+            return [:]
+        }
+        var result: [String: Date] = [:]
+        for dto in series {
+            guard let date = Self.parseDate(dto.UserData?.LastPlayedDate) else { continue }
+            result[dto.Id] = date
+        }
+        return result
+    }
+
+    /// Stamps a Continue Watching item that carries no play timestamp of its own —
+    /// a NextUp suggestion, whose next-episode `LastPlayedDate` is nil — with its
+    /// series' last-played date, so a just-finished show sorts by real recency in a
+    /// merged Continue Watching row instead of inheriting a foreign timestamp or
+    /// sinking to the bottom. In-progress Resume items (already timestamped) and
+    /// non-series items are returned unchanged.
+    private func stampingSeriesRecency(_ item: MediaItem, using seriesDates: [String: Date]) -> MediaItem {
+        guard item.lastPlayedAt == nil,
+              let seriesID = item.seriesID,
+              let date = seriesDates[seriesID] else { return item }
+        var copy = item
+        copy.lastPlayedAt = date
+        return copy
     }
 
     public func latest(limit: Int) async throws -> [MediaItem] {
@@ -88,6 +123,7 @@ public struct JellyfinProvider: MediaProvider {
 
         let userID = session.userID
         let client = self.client
+        async let seriesDatesTask = seriesLastPlayedDatesBestEffort(limit: limit)
         // Cap concurrent per-library requests: a user with many libraries would
         // otherwise fire 2×libraries requests (resume + next-up) in one burst,
         // flooding the shared URLSession pool and the server. 4 in flight keeps
@@ -111,11 +147,14 @@ public struct JellyfinProvider: MediaProvider {
             return libraryIDs.indices.compactMap { byIndex[$0] }
         }
 
+        // Series play dates are user-global (not library-scoped), so fetch once and
+        // stamp every library's NextUp suggestions with their series' true recency.
+        let seriesDates = await seriesDatesTask
         var seen = Set<String>()
         var result: [MediaItem] = []
         for (libraryID, dtos) in zip(libraryIDs, perLibrary) {
             for dto in dtos where seen.insert(dto.Id).inserted {
-                result.append(map(item: dto).taggingLibrary(libraryID))
+                result.append(stampingSeriesRecency(map(item: dto).taggingLibrary(libraryID), using: seriesDates))
             }
         }
         return Array(result.prefix(limit))

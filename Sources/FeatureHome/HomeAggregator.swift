@@ -154,7 +154,11 @@ public struct HomeAggregator: Sendable {
             var byIndex: [Int: T] = [:]
             while let (index, value) = await group.next() {
                 byIndex[index] = value
-                if nextIndex < accounts.count {
+                // Stop spooling up the remaining accounts once the aggregation has
+                // been cancelled (Home dismissed / re-triggered). Without this the
+                // window keeps refilling and fires a fetch for every remaining
+                // account even though nobody is waiting for the result.
+                if nextIndex < accounts.count, !Task.isCancelled {
                     let queuedIndex = nextIndex
                     nextIndex += 1
                     let resolved = accounts[queuedIndex]
@@ -320,6 +324,19 @@ public struct HomeAggregator: Sendable {
         let keyed = items.enumerated().map { offset, element -> (offset: Int, element: MediaItem, effective: Date?) in
             var effective = element.lastPlayedAt
             if !effectiveByRef.isEmpty {
+                // The card's OWN (account, item) key. A single-source card that the
+                // merger didn't touch (no cross-server twin, and episodes are never
+                // indexed) carries an EMPTY `sources` array, so the loop below would
+                // skip it — yet that is exactly the untimestamped "Next Up" episode
+                // the per-feed carry-forward exists to anchor. Look up its own key
+                // directly so its carried recency is applied. For a merged card this
+                // is redundant with its self-ref in `sources` (max() is idempotent).
+                if let account = element.sourceAccountID {
+                    let ownKey = "\(account):\(element.id)"
+                    if let candidate = effectiveByRef[ownKey], effective == nil || candidate > effective! {
+                        effective = candidate
+                    }
+                }
                 for ref in element.sources {
                     guard let candidate = effectiveByRef[ref.id] else { continue }
                     if effective == nil || candidate > effective! { effective = candidate }

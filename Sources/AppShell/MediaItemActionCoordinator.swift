@@ -76,7 +76,13 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
 
         var ids = Set(mutation.targets.map(\.itemID))
         ids.insert(item.id)
-        MediaItemMutation(itemIDs: ids, played: played).post()
+        // Account-scope the optimistic post to the exact (account,item) copies the
+        // fan-out targeted (the origin is always among them), mirroring
+        // `AppState.publishOptimisticWatchState`. Without this the bare `itemID` set
+        // would false-match an unrelated title that happens to share a Plex
+        // ratingKey on another server, flipping the wrong card's watched badge.
+        let scoped = Set(mutation.targets.map(\.id))
+        MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, played: played).post()
 
         appState.enqueueWatchMutation(mutation)
     }
@@ -90,7 +96,14 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         var ids = Set(context.precedingContainerIDs)
         ids.formUnion(MediaItemActionCatalog.siblingsToMarkUpToHere(item, in: context.orderedSiblings).map(\.id))
         ids.insert(item.id)
-        MediaItemMutation(itemIDs: ids, played: true).post()
+        // Account-scope the optimistic post so a Plex ratingKey shared with an
+        // unrelated title on another server can't flip the wrong card. Every id
+        // here is this server's own episode id, so they all carry the item's origin
+        // account. Falls back to bare-id matching for an untagged item.
+        let scoped: Set<String> = item.sourceAccountID.map { account in
+            Set(ids.map { "\(account):\($0)" })
+        } ?? []
+        MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, played: true).post()
         Task {
             for id in ids {
                 try? await watch.setPlayed(true, itemID: id)
@@ -119,8 +132,12 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
 
         // Account-scope the optimistic post to this card's real copies so a Plex
         // ratingKey shared with an unrelated title on another server can't flip the
-        // wrong card's favorite badge. Falls back to bare id for an untagged item.
-        let scoped = Set(item.sources.map(\.id))
+        // wrong card's favorite badge. Derived from the same unioned source set the
+        // fan-out writes to, plus the card's own (account,item) self-key so a
+        // single-source card (empty `sources`) is still scoped rather than falling
+        // back to a collision-prone bare id. Empty only for an untagged item.
+        var scoped = Set(unionedSourceRefs(for: item).map(\.id))
+        if let account = item.sourceAccountID { scoped.insert("\(account):\(item.id)") }
         MediaItemMutation(itemIDs: [item.id], scopedItemIDs: scoped, favorite: adding).post()
         Task {
             var anySucceeded = false

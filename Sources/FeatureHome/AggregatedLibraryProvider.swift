@@ -255,7 +255,13 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
             let nextOffset = currentOffset + page.items.count
             await cache.setOffset(nextOffset, for: result.accountID)
             await cache.setTotal(page.totalCount, for: result.accountID)
-            if page.items.isEmpty || nextOffset >= page.totalCount {
+            // Only trust `totalCount` as an end signal when the provider actually
+            // reports one (> 0), mirroring `AppState.indexAccount`. A provider that
+            // omits the server total falls back to `startIndex + items.count`, so a
+            // bare `nextOffset >= totalCount` would mark the source exhausted after
+            // the very first page and silently truncate that server's contribution
+            // to the grid. An empty page is the reliable cross-provider end signal.
+            if page.items.isEmpty || (page.totalCount > 0 && nextOffset >= page.totalCount) {
                 await cache.markExhausted(result.accountID)
             }
             grouped[result.accountID] = page.items.map { $0.taggingSource(result.accountID) }

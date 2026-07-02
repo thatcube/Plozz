@@ -566,7 +566,8 @@ private func bestSourcePlayItem(
     guard liveSources.count > 1,
           let selection = CrossSourceSelector.bestSelection(
               from: liveSources,
-              capabilities: .detected()
+              capabilities: .detected(),
+              preferring: item.selectedSourceAccountID ?? item.sourceAccountID
           )
     else {
         // One (or zero) live source. If pruning dropped servers, or the primary

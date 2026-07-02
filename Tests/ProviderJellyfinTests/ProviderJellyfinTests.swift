@@ -142,6 +142,70 @@ final class JellyfinProviderMappingTests: XCTestCase {
         XCTAssertEqual(items.first?.resumePosition, 1800, "Dedup must keep the Resume copy that carries resume position")
     }
 
+    func testContinueWatchingStampsNextUpWithSeriesLastPlayedDate() async throws {
+        // A just-finished show surfaces ONLY in NextUp (its next episode), after the
+        // whole Resume block, and its episode carries no LastPlayedDate. Without the
+        // series-recency stamp it has no timestamp and sinks to the bottom of a
+        // merged Continue Watching row — the "doesn't reflect what I watched last"
+        // bug. The provider must stamp it with its SERIES' LastPlayedDate (when the
+        // previous episode was watched) so it sorts by real recency.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"resume1","Name":"In Progress","Type":"Movie",
+        "UserData":{"PlaybackPositionTicks":18000000000,"Played":false,"LastPlayedDate":"2026-01-01T00:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        stub.stub(pathSuffix: "/Shows/NextUp", json: """
+        {"Items":[{"Id":"next1","Name":"Episode 6","Type":"Episode","SeriesId":"series-x",
+        "IndexNumber":6,"UserData":{"Played":false}}],"TotalRecordCount":1}
+        """)
+        // recentlyWatchedSeries → GET /Users/u1/Items (Series). Suffix "/Items"
+        // never collides with "/Items/Resume".
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[{"Id":"series-x","Name":"My Show","Type":"Series",
+        "UserData":{"Played":false,"LastPlayedDate":"2026-06-15T10:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 10)
+        let nextUp = try XCTUnwrap(items.first { $0.id == "next1" })
+        XCTAssertEqual(
+            nextUp.lastPlayedAt,
+            JellyfinProvider.parseDate("2026-06-15T10:00:00Z"),
+            "A NextUp episode with no play timestamp must inherit its series' LastPlayedDate so it sorts by real recency"
+        )
+
+        let query = try XCTUnwrap(stub.queryItems(forPathSuffix: "/Users/u1/Items"))
+        XCTAssertEqual(query.first(where: { $0.name == "IncludeItemTypes" })?.value, "Series")
+        XCTAssertEqual(query.first(where: { $0.name == "SortBy" })?.value, "DatePlayed")
+    }
+
+    func testContinueWatchingLeavesInProgressTimestampUntouchedBySeriesStamp() async throws {
+        // The stamp is scoped to untimestamped NextUp suggestions: an in-progress
+        // episode already carrying its own LastPlayedDate must NOT be overwritten by
+        // its series' (possibly different) date.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"ep5","Name":"Episode 5","Type":"Episode","SeriesId":"series-x",
+        "UserData":{"PlaybackPositionTicks":18000000000,"Played":false,"LastPlayedDate":"2026-03-03T08:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        stub.stub(pathSuffix: "/Shows/NextUp", json: """
+        {"Items":[],"TotalRecordCount":0}
+        """)
+        stub.stub(pathSuffix: "/Users/u1/Items", json: """
+        {"Items":[{"Id":"series-x","Name":"My Show","Type":"Series",
+        "UserData":{"Played":false,"LastPlayedDate":"2026-06-15T10:00:00Z"}}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(), http: stub)
+
+        let items = try await provider.continueWatching(limit: 10)
+        let inProgress = try XCTUnwrap(items.first { $0.id == "ep5" })
+        XCTAssertEqual(
+            inProgress.lastPlayedAt,
+            JellyfinProvider.parseDate("2026-03-03T08:00:00Z"),
+            "An already-timestamped Resume item keeps its own LastPlayedDate"
+        )
+    }
+
     func testContinueWatchingDegradesToResumeWhenNextUpFails() async throws {
         // /Shows/NextUp is intentionally not stubbed -> StubHTTPClient throws notFound.
         let stub = StubHTTPClient()

@@ -186,6 +186,34 @@ public struct JellyfinClient: Sendable {
         return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
     }
 
+    /// Series the user has watched, most-recently-played first, each carrying its
+    /// series-level `UserData.LastPlayedDate` (the date of the most recent episode
+    /// play). Used to stamp NextUp suggestions — whose own episode
+    /// `LastPlayedDate` is nil — with their series' true last-watched time.
+    ///
+    /// Without this a just-finished show (present only in `/Shows/NextUp`, after
+    /// the whole `/Items/Resume` block) has no timestamp and either inherits an
+    /// unrelated in-progress item's date or sinks to the bottom of a merged
+    /// Continue Watching row — so the row stops reflecting what was watched last.
+    /// `/Users/{id}/Items` returns `UserData` by default, so no extra field is
+    /// requested. Best-effort at the call site: an older server that rejects the
+    /// query degrades to unstamped ordering.
+    func recentlyWatchedSeries(userID: String, limit: Int) async throws -> [BaseItemDto] {
+        let endpoint = Endpoint(
+            path: "/Users/\(userID)/Items",
+            queryItems: [
+                URLQueryItem(name: "IncludeItemTypes", value: "Series"),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "SortBy", value: "DatePlayed"),
+                URLQueryItem(name: "SortOrder", value: "Descending"),
+                URLQueryItem(name: "Limit", value: String(limit)),
+                URLQueryItem(name: "Fields", value: "ProviderIds")
+            ],
+            headers: authHeaders
+        )
+        return try await http.decode(ItemsResponse.self, from: endpoint, baseURL: baseURL).Items
+    }
+
     func latestItems(userID: String, limit: Int, parentID: String? = nil) async throws -> [BaseItemDto] {
         var queryItems = [
             URLQueryItem(name: "Limit", value: String(limit)),

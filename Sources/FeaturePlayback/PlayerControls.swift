@@ -284,15 +284,18 @@ struct PlayerControls: View {
                     panelContainer(for: openPanel)
                         .focusSection()
                         // Grow + fade from the corner nearest the button that opened
-                        // it (panels open trailing, above the transport buttons; Info
-                        // opens leading) so it reads as springing from the control
-                        // rather than zooming out of screen-centre. Anchoring to the
-                        // full-width container's `.bottom` put the origin at screen
-                        // centre, not the right-aligned box.
+                        // it so it reads as springing from the control rather than
+                        // zooming out of screen-centre. Panels that pin to the trailing
+                        // edge (Audio/Subtitles/Sync) grow from `.bottomTrailing`; Info
+                        // and Speed align to the LEFT of their own button, so they grow
+                        // from `.bottomLeading`. Anchoring Speed to `.bottomTrailing`
+                        // put the origin at the box's far (right) edge, away from its
+                        // button — reading as a zoom from centre.
                         .transition(
                             .scale(
                                 scale: 0.9,
-                                anchor: openPanel == .info ? .bottomLeading : .bottomTrailing
+                                anchor: (openPanel == .info || openPanel == .speed)
+                                    ? .bottomLeading : .bottomTrailing
                             )
                             .combined(with: .opacity)
                         )

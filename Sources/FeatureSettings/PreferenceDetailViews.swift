@@ -402,21 +402,21 @@ struct PlaybackDetailView: View {
     }
 
     private var skipIntervalsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "skip-intervals", header: "Skip Intervals", rows: [
+        SettingsSplitSection(id: "skip-intervals", header: "Remote", rows: [
             SettingsSplitRow(
                 id: "skip-intervals",
                 title: "Skip Intervals",
                 description: "How far the remote's left and right buttons jump during playback.",
             ) {
                 VStack(alignment: .leading, spacing: 28) {
-                    LabeledSettingRow("Skip Backward") {
+                    LabeledSettingRow("Backward") {
                         SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipBackwardInterval,
                             title: { $0.title }
                         )
                     }
-                    LabeledSettingRow("Skip Forward") {
+                    LabeledSettingRow("Forward") {
                         SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipForwardInterval,

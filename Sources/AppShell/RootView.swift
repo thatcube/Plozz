@@ -128,6 +128,7 @@ public struct RootView: View {
                         crashReportingConfigured: crashReporting.isConfigured,
                         musicPlayerModel: appState.musicPlayerModel,
                         uiDensityModel: appState.uiDensityModel,
+                        cardStyleModel: appState.cardStyleModel,
                         nightShiftModel: appState.nightShiftModel,
                         audioController: appState.audioController,
                         homeVisibility: appState.homeLibraryVisibilityModel,
@@ -209,6 +210,7 @@ public struct RootView: View {
         .background { AppBackground(palette: resolvedPalette) }
         .environment(\.themePalette, resolvedPalette)
         .environment(\.plozzMetrics, PlozzMetrics(density: appState.uiDensityModel.density))
+        .environment(\.plozzCardStyle, appState.cardStyleModel.style)
         .environment(\.plozzReduceTransparency, (TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default).reducesTransparency(systemReduceTransparency: systemReduceTransparency))
         .environment(displayVeil)
         .preferredColorScheme(appState.themeModel.theme.preferredColorScheme)

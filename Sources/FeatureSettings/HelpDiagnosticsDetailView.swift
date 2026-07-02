@@ -49,6 +49,7 @@ struct HelpDiagnosticsDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 reportPanel
+                sendDiagnosticsPanel
                 crashReportingPanel
                 diagnosticsPanel
                 recentActivityPanel
@@ -59,6 +60,12 @@ struct HelpDiagnosticsDetailView: View {
             .padding(.vertical, 40)
         }
         .scrollClipDisabled()
+    }
+
+    /// Whether the on-demand diagnostics upload can run right now: the build
+    /// shipped with a crash-reporting endpoint AND the user has opted in.
+    private var canSendDiagnostics: Bool {
+        crashReportingConfigured && crashReporting.settings.isEnabled
     }
 
     // MARK: - Report a Problem
@@ -94,6 +101,20 @@ struct HelpDiagnosticsDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Send to Developer (surfaced here so it's discoverable, not buried)
+
+    /// The fastest bug-report path for anyone who's turned on crash reporting:
+    /// one tap sends the redacted recent-activity log straight to the developer.
+    /// Placed right under "Report a Problem" so people actually find it instead
+    /// of only stumbling on it deep inside the Recent Activity page.
+    private var sendDiagnosticsPanel: some View {
+        SendDiagnosticsCard(
+            canSend: canSendDiagnostics,
+            idleDescription: "Something not working? Send your recent activity straight to the developer — the quickest way to help track down a bug. Sent anonymously: no logins, tokens, servers, or titles.",
+            disabledDescription: "Turn on Share Crash Reports below to enable this. Your recent activity is then sent anonymously — no logins, tokens, servers, or titles."
+        )
     }
 
     // MARK: - Crash reporting (opt-in, off by default)

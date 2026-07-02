@@ -2,7 +2,6 @@
 import SwiftUI
 import CoreNetworking
 import CoreUI
-import CrashReporting
 
 /// Full-page, scrollable view of the recent-activity log.
 ///
@@ -25,9 +24,6 @@ struct RecentActivityDetailView: View {
     var canSendDiagnostics: Bool = false
 
     private let entries = PlozzLog.recentEntries(limit: 500)
-
-    private enum SendState { case idle, sent, failed }
-    @State private var sendState: SendState = .idle
 
     var body: some View {
         ScrollView {
@@ -68,57 +64,13 @@ struct RecentActivityDetailView: View {
 
     /// The whole point of this page for real debugging: hand the *full* log off
     /// to the developer's crash-reporting service in one click, so it can be read
-    /// on a computer instead of squinting at (or trying to QR-scan) a TV.
-    ///
-    /// Presented as a titled card matching the rest of Settings. When sending is
-    /// available the card holds a normal action button; when it isn't, a
-    /// focusable card explains how to turn it on (so the page never has a focus
-    /// dead-zone before the log rows).
-    @ViewBuilder
+    /// on a computer instead of squinting at (or trying to QR-scan) a TV. Shared
+    /// with the Help & Diagnostics page via `SendDiagnosticsCard`.
     private var sendSection: some View {
-        if canSendDiagnostics {
-            SettingsPanel(
-                title: "Send to Developer",
-                footer: sendStatusText
-            ) {
-                Button {
-                    let ok = CrashDiagnostics.send(
-                        logText: PlozzLog.recentLogText(limit: 500),
-                        note: "User diagnostics report"
-                    )
-                    sendState = ok ? .sent : .failed
-                } label: {
-                    Label(
-                        sendState == .sent ? "Sent" : "Send to Developer",
-                        systemImage: sendState == .sent ? "checkmark.circle.fill" : "paperplane.fill"
-                    )
-                    .font(.headline)
-                }
-                .buttonStyle(PlozzOpaquePillButtonStyle())
-                .disabled(sendState == .sent)
-            }
-        } else {
-            FocusableSettingsPanel(
-                title: "Send to Developer",
-                footer: "Turn on Share Crash Reports in Help & Diagnostics to enable this. The log is then sent anonymously — no logins, tokens, servers, or titles."
-            ) {
-                Label("Send to Developer", systemImage: "paperplane")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                    .opacity(0.5)
-            }
-        }
-    }
-
-    private var sendStatusText: String {
-        switch sendState {
-        case .idle:
-            return "Uploads the full log below so it can be read on a computer instead of scrolling here. Sent anonymously — no logins, tokens, servers, or titles are included."
-        case .sent:
-            return "Thanks! Your recent activity was sent to the developer."
-        case .failed:
-            return "Couldn't send — crash reporting isn't active. Turn on Share Crash Reports in Help & Diagnostics and try again."
-        }
+        SendDiagnosticsCard(
+            canSend: canSendDiagnostics,
+            idleDescription: "Uploads the full log below so it can be read on a computer instead of scrolling here. Sent anonymously — no logins, tokens, servers, or titles are included."
+        )
     }
 }
 

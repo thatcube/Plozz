@@ -22,6 +22,12 @@ public struct CrossSourceSelection: Sendable, Hashable {
 /// while every other server stays available as an explicit pick / fallback.
 ///
 /// Ranking (highest first):
+/// 0. **Local beats remote** — a copy on the same LAN as the Apple TV always
+///    wins over one reached over the internet / a Tailscale tunnel, *before*
+///    quality is even considered: a local 1080p that streams instantly is a
+///    better default than a remote 4K that buffers over a relay. Sources of
+///    unknown locality sit between known-local and known-remote so an
+///    unclassifiable host never loses to a known-remote server.
 /// 1. **Direct Play beats Transcode** — a 1080p file that plays untouched is a
 ///    better default than a 4K file the server must transcode (mirrors the
 ///    single-server policy).
@@ -35,6 +41,7 @@ public enum CrossSourceSelector {
         var order: Int
         var source: MediaSourceRef
         var version: MediaVersion?
+        var localityRank: Int
         var directPlays: Bool
         var hasVersions: Bool
         var qualityScore: Int
@@ -58,11 +65,13 @@ public enum CrossSourceSelector {
         guard !sources.isEmpty else { return nil }
 
         let candidates = sources.enumerated().map { offset, source -> Candidate in
+            let localityRank = (source.locality ?? .unknown).rank
             if let best = source.versions.recommendedSelection(for: capabilities) {
                 return Candidate(
                     order: offset,
                     source: source,
                     version: best,
+                    localityRank: localityRank,
                     directPlays: best.compatibility(with: capabilities) == .directPlay,
                     hasVersions: true,
                     qualityScore: best.qualityScore
@@ -72,6 +81,7 @@ public enum CrossSourceSelector {
                 order: offset,
                 source: source,
                 version: nil,
+                localityRank: localityRank,
                 directPlays: false,
                 hasVersions: false,
                 qualityScore: Int.min
@@ -79,6 +89,7 @@ public enum CrossSourceSelector {
         }
 
         let winner = candidates.max { lhs, rhs in
+            if lhs.localityRank != rhs.localityRank { return lhs.localityRank < rhs.localityRank }
             if lhs.directPlays != rhs.directPlays { return !lhs.directPlays && rhs.directPlays }
             if lhs.hasVersions != rhs.hasVersions { return !lhs.hasVersions && rhs.hasVersions }
             if lhs.qualityScore != rhs.qualityScore { return lhs.qualityScore < rhs.qualityScore }

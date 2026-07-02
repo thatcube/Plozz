@@ -39,9 +39,11 @@ public struct HomeAggregator: Sendable {
     }
 
     /// Loads and merges Continue Watching, Recently Added, and Libraries across
-    /// `accounts`. Per-account results keep their server order; rows from
-    /// different servers are round-robin interleaved so every server gets fair
-    /// top-of-row representation (`MediaItem` carries no timestamp to sort by).
+    /// `accounts`. Per-account results keep their server order; Recently Added and
+    /// Watchlist rows from different servers are round-robin interleaved so every
+    /// server gets fair top-of-row representation, while Continue Watching is
+    /// additionally sorted by ``MediaItem/lastPlayedAt`` (most-recent-wins across
+    /// servers) so it reflects what was actually watched last.
     public func content(
         from accounts: [ResolvedAccount],
         continueWatchingLimit: Int = 20,
@@ -79,7 +81,8 @@ public struct HomeAggregator: Sendable {
                 from: perAccount.map(\.continueWatching),
                 limit: continueWatchingLimit,
                 serverInfo: resolve,
-                identitySources: identitySources
+                identitySources: identitySources,
+                sortByRecency: true
             ),
             latest: Self.mergedRow(
                 from: perAccount.map(\.latest),
@@ -249,20 +252,53 @@ public struct HomeAggregator: Sendable {
 
     /// Interleaves and de-duplicates one Home row, then caps the rendered count so
     /// Home remains responsive with many accounts.
+    ///
+    /// When `sortByRecency` is set (the Continue Watching row) the merged result
+    /// is stable-sorted by ``MediaItem/lastPlayedAt`` descending *after* the
+    /// cross-server merge — so the unified most-recent-wins timestamp folded onto
+    /// each card (progress made on *any* server) drives the order, and the row
+    /// reflects what the user actually watched last instead of a round-robin
+    /// interleave that shuffles between launches. Cards without a timestamp
+    /// (e.g. Next Up entries that were never played, or a provider that doesn't
+    /// report one) keep their interleave order *after* the timestamped ones.
     private static func mergedRow(
         from groups: [[MediaItem]],
         limit: Int,
         serverInfo: (String) -> SourceServerInfo?,
-        identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] }
+        identitySources: (MediaItem) -> [MediaSourceRef] = { _ in [] },
+        sortByRecency: Bool = false
     ) -> [MediaItem] {
         guard limit > 0 else { return [] }
-        let merged = MediaItemMerger.merge(
+        var merged = MediaItemMerger.merge(
             Self.interleave(groups),
             serverInfo: serverInfo,
             identitySources: identitySources
         )
+        if sortByRecency {
+            merged = sortedByRecency(merged)
+        }
         guard merged.count > limit else { return merged }
         return Array(merged.prefix(limit))
+    }
+
+    /// Stable descending sort by ``MediaItem/lastPlayedAt``: timestamped cards
+    /// newest-first, untimestamped cards after them in their original (interleave)
+    /// order. Swift's `sort` isn't guaranteed stable, so ties are broken by the
+    /// original offset to keep the order deterministic across launches.
+    static func sortedByRecency(_ items: [MediaItem]) -> [MediaItem] {
+        items.enumerated().sorted { lhs, rhs in
+            switch (lhs.element.lastPlayedAt, rhs.element.lastPlayedAt) {
+            case let (l?, r?):
+                if l != r { return l > r }
+                return lhs.offset < rhs.offset
+            case (.some, nil):
+                return true
+            case (nil, .some):
+                return false
+            case (nil, nil):
+                return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
     }
 
     // MARK: - Merge

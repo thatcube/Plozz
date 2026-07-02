@@ -443,6 +443,59 @@ private func resolveLibraryBrowse(
     return (resolveProvider(library.sourceAccountID, in: accounts), library.sourceAccountID)
 }
 
+/// Retargets a cross-server-merged card to the **locality-best** copy before it
+/// is handed to the player, mirroring the detail page's best-source routing.
+///
+/// Home "Continue Watching" and Search play items directly (`requestPlay`)
+/// instead of opening the detail page, so without this they'd launch the
+/// arbitrary merge-primary source — which is why the server a card played from
+/// felt random. Routing through ``CrossSourceSelector/bestSelection(from:capabilities:)``
+/// makes a merged title stream from the copy on the same LAN when one exists
+/// (a remote/Tailscale copy only wins when it's the sole source), and
+/// ``MediaItem/retargetedForPlayback(item:sources:activeAccountID:versionID:)``
+/// reconciles resume to the cross-server furthest progress so switching to the
+/// local copy never rewinds. Single-source items pass through untouched.
+///
+/// `activeAccountIDs` are the currently signed-in accounts. A merged card's
+/// `sources` can still list a server the user has since removed (the eager index
+/// snapshot lags an account sign-out), and ``resolveProvider(_:in:)`` silently
+/// falls back to `accounts[0]` for an unknown account — so selecting a dead
+/// source would play the *wrong* server's copy (or fail). Pruning to live
+/// accounts before selection guarantees we only ever pick a server we can
+/// actually resolve, and drops the stale refs from the item handed to the player.
+private func bestSourcePlayItem(_ item: MediaItem, activeAccountIDs: Set<String>) -> MediaItem {
+    let liveSources = activeAccountIDs.isEmpty
+        ? item.sources
+        : item.sources.filter { activeAccountIDs.contains($0.accountID) }
+
+    guard liveSources.count > 1,
+          let selection = CrossSourceSelector.bestSelection(
+              from: liveSources,
+              capabilities: .detected()
+          )
+    else {
+        // One (or zero) live source. If pruning dropped servers, or the primary
+        // pointed at a now-removed account, retarget onto the surviving copy so we
+        // don't mis-resolve; otherwise the single-source item passes through.
+        if let only = liveSources.first,
+           liveSources.count < item.sources.count || only.accountID != item.sourceAccountID {
+            return MediaItem.retargetedForPlayback(
+                item: item,
+                sources: liveSources,
+                activeAccountID: only.accountID,
+                versionID: nil
+            )
+        }
+        return item
+    }
+    return MediaItem.retargetedForPlayback(
+        item: item,
+        sources: liveSources,
+        activeAccountID: selection.source.accountID,
+        versionID: selection.version?.id
+    )
+}
+
 /// Builds the player for a play request. Online (TMDb → YouTube) trailers carry a
 /// YouTube video-id marker and have no backing account, so they are routed to
 /// ``YouTubeTrailerProvider`` (which extracts a playable stream); every other
@@ -951,10 +1004,11 @@ private struct HomeTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
-        if let resume = item.resumePosition, resume > 1 {
-            resumePrompt = item
+        let target = bestSourcePlayItem(item, activeAccountIDs: Set(accounts.map(\.account.id)))
+        if let resume = target.resumePosition, resume > 1 {
+            resumePrompt = target
         } else {
-            playRequest = PlayRequest(item: item, startPosition: 0)
+            playRequest = PlayRequest(item: target, startPosition: 0)
         }
     }
 }
@@ -1231,10 +1285,11 @@ private struct SearchTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
-        if let resume = item.resumePosition, resume > 1 {
-            resumePrompt = item
+        let target = bestSourcePlayItem(item, activeAccountIDs: Set(accounts.map(\.account.id)))
+        if let resume = target.resumePosition, resume > 1 {
+            resumePrompt = target
         } else {
-            playRequest = PlayRequest(item: item, startPosition: 0)
+            playRequest = PlayRequest(item: target, startPosition: 0)
         }
     }
 }

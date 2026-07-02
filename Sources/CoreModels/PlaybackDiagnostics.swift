@@ -659,19 +659,38 @@ public extension PlaybackDiagnostics {
     /// A compact, **token-stripped** summary of the URL AVPlayer is playing. Local
     /// (app-owned) hosts are flagged as `App-local …`; the query string (which
     /// carries auth tokens) is always dropped so the overlay never leaks secrets.
+    /// The transport/container is appended when recognisable from the URL path
+    /// (`.m3u8` ⇒ `HLS`, progressive `.mp4`/`.m4v`/`.mov` ⇒ `fMP4/MP4`), which is
+    /// far more useful on the overlay than the bare scheme; when the container
+    /// can't be inferred a remote host falls back to its scheme.
     static func streamTransportSummary(url: URL?) -> String? {
         guard let url else { return nil }
         let host = (url.host ?? "").lowercased()
         let scheme = (url.scheme ?? "").uppercased()
+        let container = streamContainerLabel(for: url)
         let isLocal = host == "127.0.0.1" || host == "localhost" || host == "::1"
         if isLocal {
             let port = url.port.map { ":\($0)" } ?? ""
-            return "App-local \(host)\(port)"
+            let base = "App-local \(host)\(port)"
+            return container.map { "\(base) · \($0)" } ?? base
         }
         if host.isEmpty {
-            return scheme.isEmpty ? nil : scheme
+            return container ?? (scheme.isEmpty ? nil : scheme)
         }
-        return "\(host) · \(scheme)"
+        return "\(host) · \(container ?? scheme)"
+    }
+
+    /// Best-effort delivery/container label from a stream URL's path extension.
+    /// `nil` when the extension isn't a container we recognise.
+    static func streamContainerLabel(for url: URL) -> String? {
+        switch url.pathExtension.lowercased() {
+        case "m3u8": return "HLS"
+        case "mpd": return "DASH"
+        case "mp4", "m4v", "mov": return "fMP4/MP4"
+        case "mkv": return "MKV"
+        case "ts": return "MPEG-TS"
+        default: return nil
+        }
     }
 
     /// Formats a resolution with an optional quality label, e.g.

@@ -17,8 +17,14 @@ import Foundation
 public enum MediaIdentity: Hashable, Sendable, Codable {
     case external(source: String, value: String)
     case title(normalizedTitle: String, year: Int?, kind: MediaItemKind)
-    /// Same raw item ID — catches duplicates from the same server seen through
-    /// different user accounts (Jellyfin IDs are server-global, not per-user).
+    /// Same raw item ID on the **same physical server** — catches duplicates from
+    /// one server seen through two different user accounts (a server-global item
+    /// id returned by both). Deliberately **not** emitted by
+    /// ``MediaItemIdentity/identities(for:)`` (a bare item id collides across
+    /// servers — Plex `ratingKey`s are small per-server integers); the
+    /// same-server dedup that needs it is applied inside ``MediaItemMerger`` where
+    /// the physical server id is known. The case is retained for
+    /// ``FanoutDiagnostics`` / persisted-snapshot backward compatibility.
     case sameItemID(String)
 }
 
@@ -48,12 +54,15 @@ public enum MediaItemIdentity {
     ///    name routinely are not (original vs reboot, anime vs live-action), and
     ///    a wrong year on one server would silently collapse them. Series must
     ///    rely on external ids alone.
+    /// 3. **No bare `.sameItemID`.** A raw item id is only unique *within one
+    ///    server* — Plex `ratingKey`s are small per-server integers that collide
+    ///    across unrelated servers, so emitting `.sameItemID(item.id)` here would
+    ///    false-merge two different titles that happen to share a ratingKey. The
+    ///    same-server / two-account dedup that a bare id enables is applied inside
+    ///    ``MediaItemMerger`` instead, where the *physical server id* is known and
+    ///    the collision can't happen.
     public static func identities(for item: MediaItem) -> [MediaIdentity] {
         var result: [MediaIdentity] = []
-
-        // Always emit the raw item ID so same-server items seen through
-        // different user accounts (same Jellyfin ID) merge unconditionally.
-        result.append(.sameItemID(item.id))
 
         let normalizedIDs = Dictionary(
             item.providerIDs.compactMap { key, value -> (String, String)? in

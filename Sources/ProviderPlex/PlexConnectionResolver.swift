@@ -135,13 +135,28 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     }
 
     /// The first candidate that answers a lightweight `/identity` probe, or `nil`
-    /// if none respond. All candidates are probed concurrently; the **first to
-    /// answer wins** and resolution returns immediately — losing probes are
-    /// cancelled and left to unwind on their own, so a dead candidate (an
-    /// unreachable LAN/Docker/relay address that only fails after a connect
-    /// timeout) never stalls resolution behind its timeout.
+    /// if none respond — **locality-tiered**: same-LAN candidates are raced first
+    /// and a less-local tier (unknown hostname, then remote / Tailscale / relay)
+    /// is only tried when nothing more-local answers. This guarantees a reachable
+    /// LAN address is chosen over a reachable remote one even when the remote path
+    /// happens to answer first, which is the whole point of locality-first
+    /// playback (a title on both the local box and the sister's Tailscale server
+    /// must stream from the local box). Within a tier the **first to answer wins**
+    /// and losing probes are cancelled, so a dead candidate never stalls behind
+    /// its connect timeout.
     private func firstReachable(among urls: [URL]) async -> URL? {
         guard !urls.isEmpty else { return nil }
+        let grouped = Dictionary(grouping: urls) { SourceLocalityClassifier.classify(url: $0) }
+        for tier in [SourceLocality.local, .unknown, .remote] {
+            guard let tierURLs = grouped[tier], !tierURLs.isEmpty else { continue }
+            if let reachable = await raceReachable(among: tierURLs) { return reachable }
+        }
+        return nil
+    }
+
+    /// Races every URL in one locality tier concurrently, resuming with the first
+    /// to answer (cancelling the rest) or `nil` when none in the tier respond.
+    private func raceReachable(among urls: [URL]) async -> URL? {
         guard urls.count > 1 else {
             return await probeReachable(urls[0]) ? urls[0] : nil
         }

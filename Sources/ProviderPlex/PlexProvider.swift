@@ -72,6 +72,16 @@ public struct PlexProvider: MediaProvider {
 
     // MARK: Browsing
 
+    /// Locality of the connection the resolver actually settled on (not the raw
+    /// persisted `baseURL`): a Plex server advertises its own LAN address even to
+    /// remote clients, so classifying `session.server.baseURL` would wrongly mark
+    /// a server reached over the internet / Tailscale as local. `client.baseURL`
+    /// is the best-known **reachable** connection the resolver probed, which is
+    /// the truthful basis for best-source selection.
+    public var connectionLocality: SourceLocality {
+        SourceLocalityClassifier.classify(url: client.baseURL)
+    }
+
     public func libraries() async throws -> [MediaLibrary] {
         try await client.sections().compactMap { dir in
             guard let id = dir.key else { return nil }

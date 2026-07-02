@@ -23,6 +23,10 @@ public struct IndexedSource: Hashable, Sendable, Codable {
     public var serverName: String?
     /// Friendly signed-in user name for the picker, when known.
     public var accountName: String?
+    /// How reachable this source's server is from the device (same-LAN vs
+    /// remote/Tailscale), so an index-only membership fact still steers
+    /// best-source selection toward the local copy. `nil` when unclassified.
+    public var locality: SourceLocality?
     /// The catalogue kind the entry was indexed as (movie / series). Lets episode
     /// expansion ask the index only for series membership.
     public var kind: MediaItemKind
@@ -33,6 +37,7 @@ public struct IndexedSource: Hashable, Sendable, Codable {
         providerKind: ProviderKind? = nil,
         serverName: String? = nil,
         accountName: String? = nil,
+        locality: SourceLocality? = nil,
         kind: MediaItemKind = .unknown
     ) {
         self.accountID = accountID
@@ -40,6 +45,7 @@ public struct IndexedSource: Hashable, Sendable, Codable {
         self.providerKind = providerKind
         self.serverName = serverName
         self.accountName = accountName
+        self.locality = locality
         self.kind = kind
     }
 
@@ -60,7 +66,8 @@ public struct IndexedSource: Hashable, Sendable, Codable {
             itemID: itemID,
             providerKind: providerKind,
             serverName: serverName,
-            accountName: accountName
+            accountName: accountName,
+            locality: locality
         )
     }
 }
@@ -213,6 +220,7 @@ public actor IdentityIndex {
                 providerKind: serverInfo?.providerKind,
                 serverName: serverInfo?.serverName,
                 accountName: serverInfo?.accountName,
+                locality: serverInfo?.locality,
                 kind: item.kind
             )
             for identity in identities {

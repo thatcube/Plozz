@@ -96,8 +96,8 @@ public enum CrossServerSourceResolver {
         let primaryAccountID = primary.sourceAccountID
         let primaryItemID = primary.id
 
-        let hits: [MediaItem] = await withTaskGroup(of: [MediaItem].self) { group in
-            for accountID in otherAccountIDs {
+        let hits: [MediaItem] = await withTaskGroup(of: (Int, [MediaItem]).self) { group in
+            for (index, accountID) in otherAccountIDs.enumerated() {
                 group.addTask {
                     var seenItemIDs = Set<String>()
                     // The primary's own id is never a duplicate of itself —
@@ -115,11 +115,18 @@ public enum CrossServerSourceResolver {
                             accountHits.append(hit.taggingSource(accountID))
                         }
                     }
-                    return accountHits
+                    return (index, accountHits)
                 }
             }
+            // Collect keyed by account index and re-assemble in `otherAccountIDs`
+            // order: the task group yields in *completion* order, which varies with
+            // per-server latency, so without this the merged `sources` (and thus the
+            // detail server-picker order + any order-sensitive tiebreak) would shift
+            // between loads. Deterministic order in → deterministic picker out.
+            var byIndex: [Int: [MediaItem]] = [:]
+            for await (index, accountHits) in group { byIndex[index] = accountHits }
             var all: [MediaItem] = []
-            for await accountHits in group { all.append(contentsOf: accountHits) }
+            for index in otherAccountIDs.indices { all.append(contentsOf: byIndex[index] ?? []) }
             return all
         }
         guard !hits.isEmpty else { return [] }

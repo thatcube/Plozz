@@ -10,11 +10,30 @@ public struct SourceServerInfo: Sendable, Hashable {
     public var providerKind: ProviderKind?
     public var serverName: String?
     public var accountName: String?
+    /// The **physical** server id (``MediaServer/id``) this account connects to.
+    /// Stable across two user accounts on the *same* server, so the merge can
+    /// collapse a title returned by both accounts (same server-global item id)
+    /// without a bare `.sameItemID` that would also collide across *different*
+    /// servers. `nil` when the merge runs without an account→server resolver.
+    public var serverID: String?
+    /// How reachable this account's server is from the device right now
+    /// (same-LAN vs remote/Tailscale), used to prefer the local copy of a merged
+    /// title for playback. `nil` when unknown/unclassified (treated as the middle
+    /// tier by ``CrossSourceSelector``).
+    public var locality: SourceLocality?
 
-    public init(providerKind: ProviderKind? = nil, serverName: String? = nil, accountName: String? = nil) {
+    public init(
+        providerKind: ProviderKind? = nil,
+        serverName: String? = nil,
+        accountName: String? = nil,
+        serverID: String? = nil,
+        locality: SourceLocality? = nil
+    ) {
         self.providerKind = providerKind
         self.serverName = serverName
         self.accountName = accountName
+        self.serverID = serverID
+        self.locality = locality
     }
 }
 
@@ -100,14 +119,59 @@ public enum MediaItemMerger {
             if rootA < rootB { parent[rootB] = rootA } else { parent[rootA] = rootB }
         }
 
-        var seen: [MediaIdentity: Int] = [:]
+        // Union by shared identity, but scoped to the media **kind**: TMDb/TVDb
+        // reuse the same integer id space across movies and series (TMDb *movie*
+        // 550 is a different work from TMDb *tv* 550), so two items that merely
+        // share an id across kinds must NOT collapse into one card. We can't fix
+        // this in `identities(for:)` — several call sites/tests rely on it
+        // emitting bare, kind-less external ids — so the kind scoping lives here.
+        //
+        // Items whose kind is indeterminate (`.unknown`/`.folder`/`.collection`)
+        // act as a **wildcard**: they union with any kind sharing the identity, so
+        // this never *reduces* merging for an item we couldn't confidently type.
+        var seen: [KindScopedIdentity: Int] = [:]
+        var seenWildcard: [MediaIdentity: Int] = [:]
         for index in items.indices {
+            let bucket = mergeKindBucket(for: items[index].kind)
             for identity in MediaItemIdentity.identities(for: items[index]) {
-                if let existing = seen[identity] {
-                    union(existing, index)
+                // Union with a prior wildcard holder of this identity (either order).
+                if let existing = seenWildcard[identity] { union(existing, index) }
+                if let bucket {
+                    let key = KindScopedIdentity(identity: identity, bucket: bucket)
+                    if let existing = seen[key] {
+                        union(existing, index)
+                    } else {
+                        seen[key] = index
+                    }
                 } else {
-                    seen[identity] = index
+                    // Wildcard item: union with every already-seen kind for this id.
+                    for existing in seen.lazy.filter({ $0.key.identity == identity }).map(\.value) {
+                        union(existing, index)
+                    }
+                    if seenWildcard[identity] == nil { seenWildcard[identity] = index }
                 }
+            }
+        }
+
+        // Same-server / two-account dedup: a single physical server seen through
+        // two different user accounts returns the *same server-global item id* for
+        // a title, which must collapse to one card (fixes the "ghost spacing"
+        // empty gaps). This is scoped by the **physical server id** — a bare item
+        // id can't be a cross-server identity because Plex `ratingKey`s are small
+        // per-server integers that collide across unrelated servers. When no
+        // server resolver is supplied (serverID unknown) we fall back to the
+        // account id, which still collapses exact same-account duplicates and can
+        // never bridge two servers.
+        var seenServerItem: [String: Int] = [:]
+        for index in items.indices {
+            let item = items[index]
+            let scope = item.sourceAccountID.flatMap { serverInfo($0)?.serverID } ?? item.sourceAccountID
+            guard let scope else { continue }
+            let key = "\(scope)\u{1F}\(item.id)"
+            if let existing = seenServerItem[key] {
+                union(existing, index)
+            } else {
+                seenServerItem[key] = index
             }
         }
 
@@ -225,6 +289,7 @@ public enum MediaItemMerger {
             providerKind: info?.providerKind,
             serverName: info?.serverName,
             accountName: info?.accountName,
+            locality: info?.locality,
             versions: versions,
             resumePosition: item.resumePosition,
             playedPercentage: item.playedPercentage,
@@ -309,9 +374,38 @@ public extension Array where Element == ResolvedAccount {
             map[resolved.account.id] = SourceServerInfo(
                 providerKind: resolved.account.server.provider,
                 serverName: resolved.account.server.name,
-                accountName: resolved.account.userName
+                accountName: resolved.account.userName,
+                serverID: resolved.account.server.id,
+                locality: resolved.provider.connectionLocality
             )
         }
         return map
+    }
+}
+
+/// A ``MediaIdentity`` scoped to a media-kind bucket, so an external id shared
+/// across different kinds (TMDb/TVDb reuse integer ids between movies and series)
+/// can't merge a movie into a series. See the union step in ``MediaItemMerger``.
+private struct KindScopedIdentity: Hashable {
+    let identity: MediaIdentity
+    let bucket: MergeKindBucket
+}
+
+/// Coarse content classes whose external-id spaces are independent. Kinds that
+/// never carry a meaningful catalogue id (`.unknown`/`.folder`/`.collection`)
+/// map to `nil` (wildcard) so the merge never *loses* a match for an item we
+/// couldn't confidently type.
+private enum MergeKindBucket: Hashable {
+    case movie, series, season, episode, video
+}
+
+private func mergeKindBucket(for kind: MediaItemKind) -> MergeKindBucket? {
+    switch kind {
+    case .movie: return .movie
+    case .series: return .series
+    case .season: return .season
+    case .episode: return .episode
+    case .video: return .video
+    case .folder, .collection, .unknown: return nil
     }
 }

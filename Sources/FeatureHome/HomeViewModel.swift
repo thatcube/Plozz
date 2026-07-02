@@ -163,7 +163,24 @@ public final class HomeViewModel {
     /// add/remove also inserts/removes the title from the Watchlist row.
     public func applyWatchedState(_ mutation: MediaItemMutation) {
         guard case var .loaded(content) = state else { return }
-        content.continueWatching = content.continueWatching.map { apply(mutation, to: $0) }
+        // A resume/progress change means the user actually *played* the title just
+        // now, so bump its recency and re-sort Continue Watching to float it to the
+        // front without a full reload. A bare mark-watched / favourite toggle from
+        // the context menu carries no progress and must NOT reorder the row — the
+        // user's focus stays put while the badge flips in place.
+        let reflectsPlayback = (mutation.resumePosition ?? 0) > 0
+            || (mutation.playedPercentage.map { $0 > 0 && $0 < 1 } ?? false)
+        if reflectsPlayback {
+            let now = Date()
+            let stamped = content.continueWatching.map { item -> MediaItem in
+                var updated = apply(mutation, to: item)
+                if mutation.itemIDs.contains(item.id) { updated.lastPlayedAt = now }
+                return updated
+            }
+            content.continueWatching = HomeAggregator.sortedByRecency(stamped)
+        } else {
+            content.continueWatching = content.continueWatching.map { apply(mutation, to: $0) }
+        }
         content.latest = content.latest.map { apply(mutation, to: $0) }
         content.watchlist = updatedWatchlist(content.watchlist, mutation: mutation, in: content)
         state = .loaded(content)

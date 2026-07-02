@@ -23,11 +23,7 @@ struct AddAccountView: View {
         case .none:
             chooser
         case .jellyfin:
-            ServerPickerView { onJellyfinServerSelected($0) }
-                .overlay(alignment: .topLeading) {
-                    Button("Back") { choice = nil }
-                        .padding()
-                }
+            ServerPickerView(onBack: { choice = nil }) { onJellyfinServerSelected($0) }
         case .plex:
             PlexLinkView(
                 viewModel: PlexAuthViewModel(
@@ -41,24 +37,14 @@ struct AddAccountView: View {
 
     private var chooser: some View {
         VStack(spacing: 40) {
-            VStack(spacing: 8) {
-                Text("Add an account")
-                    .font(.largeTitle).bold()
-                Text("Connect a Jellyfin or Plex server.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-
             HStack(spacing: 32) {
                 providerButton(
-                    title: ProviderKind.jellyfin.displayName,
-                    systemImage: "play.tv.fill",
+                    provider: .jellyfin,
                     detail: "Find it on your network or enter an address."
                 ) { choice = .jellyfin }
 
                 providerButton(
-                    title: ProviderKind.plex.displayName,
-                    systemImage: "rectangle.stack.fill",
+                    provider: .plex,
                     detail: "Link this device at plex.tv/link."
                 ) { choice = .plex }
             }
@@ -74,16 +60,14 @@ struct AddAccountView: View {
     }
 
     private func providerButton(
-        title: String,
-        systemImage: String,
+        provider: ProviderKind,
         detail: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 16) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 64))
-                Text(title)
+                ProviderBrandMark(provider: provider, size: 100)
+                Text(provider.displayName)
                     .font(.title2).bold()
                 Text(detail)
                     .font(.callout)

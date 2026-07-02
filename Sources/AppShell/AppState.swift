@@ -222,8 +222,13 @@ public final class AppState {
             indexedSeriesSources: { [identitySnapshotStore] originSeries in
                 identitySnapshotStore.current.sources(for: originSeries).filter { $0.kind == .series }
             },
-            indexedSources: { [identitySnapshotStore] identities, kind in
-                identitySnapshotStore.current.sources(forIdentities: identities, kind: kind)
+            indexedSources: { [identitySnapshotStore] identities, kind, anchorTitle, anchorYear in
+                identitySnapshotStore.current.sources(
+                    forIdentities: identities,
+                    kind: kind,
+                    anchorTitle: anchorTitle,
+                    anchorYear: anchorYear
+                )
             },
             indexedAccountIDs: { [identitySnapshotStore] in
                 identitySnapshotStore.current.indexedAccountIDs

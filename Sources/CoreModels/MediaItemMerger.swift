@@ -205,9 +205,66 @@ public enum MediaItemMerger {
             let root = find(index)
             guard emitted.insert(root).inserted else { continue }
             let members = membersByRoot[root] ?? [index]
-            output.append(mergeGroup(members.map { items[$0] }, serverInfo: serverInfo, identitySources: identitySources))
+            // Split-guard: a shared *external id* is normally authoritative, but a
+            // single bad id on one server (e.g. an unreleased sequel scraped with
+            // its predecessor's TMDb/IMDb id) would otherwise collapse two distinct
+            // films into one card. Refine the union component into sub-groups of
+            // mutually-plausible items, ejecting any member that POSITIVELY
+            // contradicts the others (titles disagree AND years don't corroborate).
+            // Conservative by construction — sparse-metadata / id-less rows carry no
+            // positive contradiction, so the index-membership merges we rely on are
+            // never wrongly split; only a genuine mismatch separates.
+            for group in refineComponent(members.map { items[$0] }) {
+                output.append(mergeGroup(group, serverInfo: serverInfo, identitySources: identitySources))
+            }
         }
         return output
+    }
+
+    /// Partitions one union component into sub-groups of mutually-plausible items,
+    /// so a false merge (two different works bridged by a bad shared external id)
+    /// is broken back apart. Greedy: each member joins the first existing group it
+    /// contradicts no member of, else opens a new group. Order-preserving — the
+    /// anchor (first) member's group stays first, so the primary card keeps its
+    /// display position and any ejected impostor follows it. A single-member
+    /// component is returned unchanged.
+    static func refineComponent(_ members: [MediaItem]) -> [[MediaItem]] {
+        guard members.count > 1 else { return [members] }
+        var groups: [[MediaItem]] = []
+        for member in members {
+            if let idx = groups.firstIndex(where: { group in
+                !group.contains(where: { plausiblyContradicts($0, member) })
+            }) {
+                groups[idx].append(member)
+            } else {
+                groups.append([member])
+            }
+        }
+        return groups
+    }
+
+    /// Whether two items are almost certainly *different* works despite sharing a
+    /// merge key — the positive-contradiction signal the split-guard ejects on.
+    /// Delegates to the shared, index-reusable primitive so a bad shared external
+    /// id is split identically here (full-item merges) and inside the identity
+    /// index's membership walk (which stores only title/year per source).
+    static func plausiblyContradicts(_ a: MediaItem, _ b: MediaItem) -> Bool {
+        MediaItemIdentity.titlesPlausiblyContradict(
+            titleA: a.title,
+            yearA: a.productionYear,
+            kindA: a.kind,
+            titleB: b.title,
+            yearB: b.productionYear,
+            kindB: b.kind
+        )
+    }
+
+    /// Normalized titles are compatible when identical or one is a word-boundary
+    /// prefix of the other ("dune" vs "dune 2021"), so subtitle/year suffixes don't
+    /// read as a clash while a differing trailing token ("scream 6" vs "scream 7")
+    /// does.
+    static func titlesCompatible(_ a: String, _ b: String) -> Bool {
+        MediaItemIdentity.normalizedTitlesCompatible(a, b)
     }
 
     /// Merges one duplicate set (already in display order) into a single item:

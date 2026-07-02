@@ -110,6 +110,94 @@ final class CrossServerMergeEdgeTests: XCTestCase {
         XCTAssertEqual(card.sources[1].versions.first?.editionLabel, "Theatrical")
     }
 
+    // MARK: Split-guard: contradicting external-id false merge (Scream 6/7)
+
+    func testDifferentMoviesSharingBadExternalIDAreSplit() {
+        // Scream 7 (unreleased, sparsely scraped) is mis-tagged on one server with
+        // Scream 6's TMDb id. The shared id would otherwise collapse them into one
+        // card; the split-guard keeps them as two, since titles disagree AND the
+        // years don't corroborate.
+        let scream6 = item("s6", title: "Scream 6", kind: .movie, year: 2023, account: "plex", ids: ["Tmdb": "934433"])
+        let scream7 = item("s7", title: "Scream 7", kind: .movie, year: 2026, account: "jelly", ids: ["Tmdb": "934433"])
+        let merged = MediaItemMerger.merge([scream6, scream7])
+        XCTAssertEqual(merged.count, 2, "Two distinct films must not collapse via a single bad shared id")
+        XCTAssertEqual(Set(merged.map(\.id)), ["s6", "s7"])
+        XCTAssertTrue(merged.allSatisfy { $0.sources.isEmpty }, "Neither should absorb the other as a version")
+    }
+
+    func testContradictingMovieSplitEvenWhenImpostorIsPrimary() {
+        // Two legit copies of Scream 6 (real twins) plus a mis-tagged Scream 7, with
+        // the impostor listed first. The two Scream 6 copies still merge together and
+        // Scream 7 is ejected into its own card.
+        let scream7 = item("s7", title: "Scream 7", kind: .movie, year: 2026, account: "a", ids: ["Tmdb": "934433"])
+        let scream6a = item("s6a", title: "Scream 6", kind: .movie, year: 2023, account: "b", ids: ["Tmdb": "934433"])
+        let scream6b = item("s6b", title: "Scream 6", kind: .movie, year: 2023, account: "c", ids: ["Tmdb": "934433"])
+        let merged = MediaItemMerger.merge([scream7, scream6a, scream6b])
+        XCTAssertEqual(merged.count, 2)
+        let byIsScream7 = Dictionary(grouping: merged) { $0.title == "Scream 7" }
+        XCTAssertEqual(byIsScream7[true]?.first?.sources.isEmpty, true, "Scream 7 stands alone")
+        let scream6Card = byIsScream7[false]?.first
+        XCTAssertEqual(scream6Card?.sources.map(\.accountID).sorted(), ["b", "c"], "Both real Scream 6 copies merge")
+    }
+
+    func testMatchingYearRescuesSharedIDDespiteDifferentTitles() {
+        // Localized title on one server ("Panico") vs "Scream", same TMDb, SAME year.
+        // A corroborating year means the shared id is trusted — they stay merged.
+        let a = item("a", title: "Scream", kind: .movie, year: 2022, account: "plex", ids: ["Tmdb": "646385"])
+        let b = item("b", title: "Panico", kind: .movie, year: 2022, account: "jelly", ids: ["Tmdb": "646385"])
+        XCTAssertEqual(MediaItemMerger.merge([a, b]).count, 1, "A matching year rescues a shared id even when titles differ")
+    }
+
+    func testTitleSubtitleVariantStaysMerged() {
+        // "Dune" vs "Dune: Part Two" is a prefix at a word boundary — not a clash —
+        // so an intentional shared id (or same year) keeps them together.
+        let a = item("a", title: "Dune", kind: .movie, year: 2021, account: "plex", ids: ["Tmdb": "438631"])
+        let b = item("b", title: "Dune Part Two", kind: .movie, year: 2021, account: "jelly", ids: ["Tmdb": "438631"])
+        XCTAssertEqual(MediaItemMerger.merge([a, b]).count, 1)
+    }
+
+    func testSparseMetadataTwinIsNotSplit() {
+        // An id-less / yearless row recovered as a twin carries no positive
+        // contradiction, so it must NOT be ejected — protects membership-recovery
+        // merges. Here both share a TMDb id; one has no year and a bare title.
+        let full = item("a", title: "The Batman", kind: .movie, year: 2022, account: "plex", ids: ["Tmdb": "414906"])
+        let sparse = item("b", title: "The Batman", kind: .movie, year: nil, account: "jelly", ids: ["Tmdb": "414906"])
+        XCTAssertEqual(MediaItemMerger.merge([full, sparse]).count, 1, "A sparse-metadata twin is not split")
+    }
+
+    func testBaseTitleVsNumberedSequelSharingBadIDSplitsOnYearConflict() {
+        // The original "Scream" (1996) mis-tagged with "Scream 6"'s (2023) id.
+        // "scream" is a word-boundary prefix of "scream 6", so a naive prefix
+        // allowance would keep them merged — but the 27-year gap is a hard year
+        // conflict, so they must split.
+        let original = item("a", title: "Scream", kind: .movie, year: 1996, account: "plex", ids: ["Tmdb": "934433"])
+        let sixth = item("b", title: "Scream 6", kind: .movie, year: 2023, account: "jelly", ids: ["Tmdb": "934433"])
+        XCTAssertEqual(MediaItemMerger.merge([original, sixth]).count, 2, "A base title and its numbered sequel with a hard year conflict must not merge")
+    }
+
+    func testIdenticalTitleNeverSplitsEvenWithYearGap() {
+        // Deliberately conservative: two rows with the *identical* title sharing an
+        // id are never split on a year gap alone (a same-title remake sharing a bad
+        // id is far rarer than a single film whose year merely slips between
+        // servers, and a false split shows the user duplicate cards).
+        let a = item("a", title: "Halloween", kind: .movie, year: 1978, account: "plex", ids: ["Tmdb": "948"])
+        let b = item("b", title: "Halloween", kind: .movie, year: 2018, account: "jelly", ids: ["Tmdb": "948"])
+        XCTAssertEqual(MediaItemMerger.merge([a, b]).count, 1, "Identical titles stay merged; year slips must not false-split")
+    }
+
+    // MARK: - refineComponent / plausiblyContradicts unit edges
+
+    func testPlausiblyContradictsOnlyAppliesToMovies() {
+        let a = item("a", title: "Scream 6", kind: .series, year: 2023, account: "x")
+        let b = item("b", title: "Scream 7", kind: .series, year: 2026, account: "y")
+        XCTAssertFalse(MediaItemMerger.plausiblyContradicts(a, b), "Non-movies never contradict via this guard")
+    }
+
+    func testRefineComponentKeepsSingleMemberUntouched() {
+        let only = item("a", title: "Scream 6", kind: .movie, year: 2023, account: "x")
+        XCTAssertEqual(MediaItemMerger.refineComponent([only]).count, 1)
+    }
+
     // MARK: Conflicting progress reconciliation (criterion 5)
 
     func testConflictingProgressEqualTimestampsResolvesDeterministically() {

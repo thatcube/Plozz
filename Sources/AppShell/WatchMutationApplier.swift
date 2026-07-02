@@ -49,8 +49,11 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     /// every server as the index warms. Read live off the published snapshot so a
     /// queued mutation re-resolves against ever-more-complete data on each drain.
     /// Empty (cold index / no match) ⇒ no extra targets that pass, so a watch is
-    /// never dropped while the index warms.
-    var indexedSources: @Sendable ([MediaIdentity], MediaItemKind?) -> [IndexedSource] = { _, _ in [] }
+    /// never dropped while the index warms. The trailing `(anchorTitle, anchorYear)`
+    /// split the union apart when a server mis-tagged a *different* movie with the
+    /// same external id (so a Scream 7 watch never fans out to a mis-tagged
+    /// Scream 6); `nil` anchor ⇒ prior unguarded union.
+    var indexedSources: @Sendable ([MediaIdentity], MediaItemKind?, String?, Int?) -> [IndexedSource] = { _, _, _, _ in [] }
     /// Every `Account.id` the identity index has indexed at least once. A movie /
     /// series identity expansion is **conclusive** only once every active account
     /// appears here (the union can still grow until then), so a mutation stopped
@@ -163,7 +166,7 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
         // when a kind is supplied. Legacy mutations (nil kind, enqueued before this
         // field existed) get the prior unscoped single-level union so a queued write
         // is never dropped.
-        let scopedSources = indexedSources(mutation.identities, mutation.kind)
+        let scopedSources = indexedSources(mutation.identities, mutation.kind, mutation.anchorTitle, mutation.anchorYear)
         let targets = scopedSources.map(\.target)
         let everyAccount = Set(await allAccountIDs())
         // Conclusive only once every active account has been indexed at least once

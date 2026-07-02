@@ -30,6 +30,16 @@ public struct IndexedSource: Hashable, Sendable, Codable {
     /// The catalogue kind the entry was indexed as (movie / series). Lets episode
     /// expansion ask the index only for series membership.
     public var kind: MediaItemKind
+    /// The source's ``MediaItemIdentity/normalizedTitle(_:)`` title, retained so the
+    /// membership walk can split a bad shared external id apart (one server tagging
+    /// two different movies with the same TMDb/IMDb id). `nil` for entries indexed
+    /// before this field existed / titleless items — treated as "no title signal"
+    /// so a sparse twin is never split (only a positive title+year contradiction
+    /// ejects). Stored normalized so the split-guard needn't re-fold on every walk.
+    public var normalizedTitle: String?
+    /// The source's production year, paired with ``normalizedTitle`` for the
+    /// split-guard's year-corroboration check. `nil` = no year signal.
+    public var year: Int?
 
     public init(
         accountID: String,
@@ -38,7 +48,9 @@ public struct IndexedSource: Hashable, Sendable, Codable {
         serverName: String? = nil,
         accountName: String? = nil,
         locality: SourceLocality? = nil,
-        kind: MediaItemKind = .unknown
+        kind: MediaItemKind = .unknown,
+        normalizedTitle: String? = nil,
+        year: Int? = nil
     ) {
         self.accountID = accountID
         self.itemID = itemID
@@ -47,6 +59,8 @@ public struct IndexedSource: Hashable, Sendable, Codable {
         self.accountName = accountName
         self.locality = locality
         self.kind = kind
+        self.normalizedTitle = normalizedTitle
+        self.year = year
     }
 
     /// Stable identity: a title appears at most once per (account, item) pair.
@@ -204,6 +218,25 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// {M1, M2} as one movie. Only traversing and collecting same-kind sources keeps
     /// the component confined to the title's own kind.
     public func sources(forIdentities identities: [MediaIdentity], kind: MediaItemKind?) -> [IndexedSource] {
+        sources(forIdentities: identities, kind: kind, anchorTitle: nil, anchorYear: nil)
+    }
+
+    /// As ``sources(forIdentities:kind:)``, but with an optional **anchor** title/year
+    /// that splits a bad shared external id apart during the walk. When the anchor
+    /// is a movie with a usable title, any same-kind source whose stored
+    /// title/year ``MediaItemIdentity/titlesPlausiblyContradict`` the anchor is
+    /// dropped **and not traversed through** — so two different movies bridged by
+    /// one server's mis-tagged TMDb/IMDb id (e.g. Scream 6 tagged with Scream 7's
+    /// id) don't contaminate the anchor title's version picker, best-source
+    /// playback, or watch fan-out. `nil` anchor = the prior unguarded union, so
+    /// legacy/kind-unknown callers behave exactly as before. Absent title/year
+    /// signals on a source never contradict, so a sparse twin is never split.
+    public func sources(
+        forIdentities identities: [MediaIdentity],
+        kind: MediaItemKind?,
+        anchorTitle: String?,
+        anchorYear: Int?
+    ) -> [IndexedSource] {
         guard let kind else {
             // Kind-unknown (e.g. a legacy mutation predating the kind field): fall
             // back to a single-level union so a transitive walk can't fold unrelated
@@ -211,6 +244,9 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
             return sources(forIdentities: identities)
         }
         guard !identities.isEmpty else { return [] }
+        // Only movies with a usable title can positively contradict; anything else
+        // leaves the guard inert (the union is returned whole, as before).
+        let guardActive = kind == .movie && !(anchorTitle ?? "").isEmpty
         var visitedIdentities = Set<MediaIdentity>()
         var frontier = identities
         var seenSources = Set<String>()
@@ -219,6 +255,21 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
             guard visitedIdentities.insert(identity).inserted else { continue }
             guard let sources = byIdentity[identity] else { continue }
             for source in sources where source.kind == kind {
+                // A source that plausibly contradicts the anchor is a different work
+                // riding a bad shared id: exclude it from the result AND from the
+                // frontier, so nothing reachable only *through* it leaks in either.
+                if guardActive,
+                   let title = source.normalizedTitle,
+                   MediaItemIdentity.titlesPlausiblyContradict(
+                       titleA: anchorTitle ?? "",
+                       yearA: anchorYear,
+                       kindA: .movie,
+                       titleB: title,
+                       yearB: source.year,
+                       kindB: source.kind
+                   ) {
+                    continue
+                }
                 if seenSources.insert(source.id).inserted {
                     result.append(source)
                 }
@@ -242,6 +293,10 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// `identities(for:)` emits bare, kind-less external ids — so a kind-scoped walk
     /// keeps enrichment correct; episode expansion asks for series membership
     /// through the series probe, not here.
+    ///
+    /// The item's own title/year anchor the walk's split-guard, so a bad shared
+    /// external id can't fold a *different* movie into this title's picker / play /
+    /// watch-fan-out set (see ``sources(forIdentities:kind:anchorTitle:anchorYear:)``).
     public func sources(for item: MediaItem) -> [IndexedSource] {
         let kind = item.kind
         var identities = MediaItemIdentity.identities(for: item)
@@ -257,7 +312,13 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
            let recovered = bySource["\(accountID):\(item.id)"] {
             identities.append(contentsOf: recovered)
         }
-        return sources(forIdentities: identities, kind: kind)
+        let normalized = MediaItemIdentity.normalizedTitle(item.title)
+        return sources(
+            forIdentities: identities,
+            kind: kind,
+            anchorTitle: normalized.isEmpty ? nil : normalized,
+            anchorYear: item.productionYear
+        )
     }
 
     /// Membership ``MediaSourceRef``s for `item` — the picker / merge-enrichment view.
@@ -352,6 +413,7 @@ public actor IdentityIndex {
             guard item.kind == .movie || item.kind == .series else { continue }
             let identities = MediaItemIdentity.identities(for: item)
             guard !identities.isEmpty else { continue }
+            let normalized = MediaItemIdentity.normalizedTitle(item.title)
             let source = IndexedSource(
                 accountID: accountID,
                 itemID: item.id,
@@ -359,7 +421,9 @@ public actor IdentityIndex {
                 serverName: serverInfo?.serverName,
                 accountName: serverInfo?.accountName,
                 locality: serverInfo?.locality,
-                kind: item.kind
+                kind: item.kind,
+                normalizedTitle: normalized.isEmpty ? nil : normalized,
+                year: item.productionYear
             )
             for identity in identities {
                 bucket[identity, default: [:]][source.id] = source

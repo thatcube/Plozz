@@ -115,18 +115,23 @@ enum WatchMutationFactory {
         return (EpisodeOrigin(accountID: accountID, itemID: item.id), true)
     }
 
-    /// The persisted identity set + expansion flag for a **non-episode** title
-    /// (movie or whole series), so the reconciler can fan its watch out to every
-    /// server the eager identity index knows for the title — including servers that
-    /// hadn't finished indexing when the user stopped. Empty / not-pending for
-    /// episodes (they use ``episodeExpansion``) and for items with no strong
-    /// identity (nothing to index-match), so single-server convergence is unchanged.
+    /// The persisted identity set + expansion flag + split-guard anchor for a
+    /// **non-episode** title (movie or whole series), so the reconciler can fan its
+    /// watch out to every server the eager identity index knows for the title —
+    /// including servers that hadn't finished indexing when the user stopped —
+    /// **without** cross-marking a different movie a server mis-tagged with the same
+    /// external id (the anchor title/year splits that apart at drain time). Empty /
+    /// not-pending for episodes (they use ``episodeExpansion``) and for items with
+    /// no strong identity (nothing to index-match), so single-server convergence is
+    /// unchanged. The anchor is only meaningful for movies (the split-guard is
+    /// movies-only); it's carried for any non-episode title and left inert otherwise.
     private static func identityExpansion(
         for item: MediaItem
-    ) -> (identities: [MediaIdentity], pending: Bool) {
-        guard item.kind != .episode else { return ([], false) }
+    ) -> (identities: [MediaIdentity], pending: Bool, anchorTitle: String?, anchorYear: Int?) {
+        guard item.kind != .episode else { return ([], false, nil, nil) }
         let identities = MediaItemIdentity.identities(for: item)
-        return (identities, !identities.isEmpty)
+        let normalized = MediaItemIdentity.normalizedTitle(item.title)
+        return (identities, !identities.isEmpty, normalized.isEmpty ? nil : normalized, item.productionYear)
     }
 
     /// A mark-watched / mark-unwatched mutation. Marking watched clears resume
@@ -140,7 +145,7 @@ enum WatchMutationFactory {
         // would let the reconciler re-expand at drain time and silently undo the
         // opt-out, so the origin-only write must carry no expansion intent.
         let episode = crossServerSync ? episodeExpansion(for: item, primaryAccountID: primaryAccountID) : (origin: nil, pending: false)
-        let identity = crossServerSync ? identityExpansion(for: item) : (identities: [], pending: false)
+        let identity = crossServerSync ? identityExpansion(for: item) : (identities: [], pending: false, anchorTitle: nil, anchorYear: nil)
         return WatchMutation(
             capturedAt: capturedAt,
             canonicalMediaID: canonicalID(for: item),
@@ -153,7 +158,9 @@ enum WatchMutationFactory {
             episodeOrigin: episode.origin,
             expansionPending: episode.pending || identity.pending,
             identities: identity.identities,
-            kind: item.kind
+            kind: item.kind,
+            anchorTitle: identity.anchorTitle,
+            anchorYear: identity.anchorYear
         )
     }
 
@@ -168,7 +175,7 @@ enum WatchMutationFactory {
         guard !targets.isEmpty else { return nil }
         // OFF: origin-only convergence with no expansion seeds (see `playedToggle`).
         let episode = crossServerSync ? episodeExpansion(for: item, primaryAccountID: primaryAccountID) : (origin: nil, pending: false)
-        let identity = crossServerSync ? identityExpansion(for: item) : (identities: [], pending: false)
+        let identity = crossServerSync ? identityExpansion(for: item) : (identities: [], pending: false, anchorTitle: nil, anchorYear: nil)
 
         if watchedPercent >= finishedThreshold {
             return WatchMutation(
@@ -183,7 +190,9 @@ enum WatchMutationFactory {
                 episodeOrigin: episode.origin,
                 expansionPending: episode.pending || identity.pending,
                 identities: identity.identities,
-                kind: item.kind
+                kind: item.kind,
+                anchorTitle: identity.anchorTitle,
+                anchorYear: identity.anchorYear
             )
         }
 
@@ -199,7 +208,9 @@ enum WatchMutationFactory {
             episodeOrigin: episode.origin,
             expansionPending: episode.pending || identity.pending,
             identities: identity.identities,
-            kind: item.kind
+            kind: item.kind,
+            anchorTitle: identity.anchorTitle,
+            anchorYear: identity.anchorYear
         )
     }
 }

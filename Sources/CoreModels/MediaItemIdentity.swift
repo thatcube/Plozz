@@ -107,6 +107,84 @@ public enum MediaItemIdentity {
         return .title(normalizedTitle: normalized, year: year, kind: item.kind)
     }
 
+    /// Whether two movies almost certainly refer to **different works** despite
+    /// sharing a merge key — the positive-contradiction signal the cross-server
+    /// split-guard ejects on. Shared by both the full-item merger
+    /// (``MediaItemMerger/refineComponent(_:)``) and the identity index's
+    /// membership walk (``IdentityIndex``), which stores only a title/year per
+    /// source, so a bad shared external id (one server tagging Scream 7 with
+    /// Scream 6's TMDb id) is split back apart identically everywhere a title
+    /// resolves its cross-server set — Home cards, the detail version picker,
+    /// best-source playback, and the watch fan-out.
+    ///
+    /// Only applies when **both** sides are movies (`kindA`/`kindB` == `.movie`);
+    /// series/episodes rely on their own kind rules and never contradict here.
+    /// With both titles present and normalized, the decision is:
+    ///
+    /// - **Identical titles** → never contradict. This is deliberately
+    ///   conservative: a same-title remake sharing a bad id (rare) stays merged
+    ///   rather than risk false-splitting one film whose year merely slips between
+    ///   servers' metadata.
+    /// - **Prefix-compatible but not identical** (a base title vs an edition/year
+    ///   suffix — "Dune" vs "Dune 2021" — OR a base title vs a numbered sequel —
+    ///   "Scream" vs "Scream 6") → contradict **only** when both years are present
+    ///   and differ by more than one. A clear year conflict distinguishes the
+    ///   base-vs-sequel false merge from a same-film edition suffix; without two
+    ///   corroborating-or-conflicting years we keep them merged (edition case).
+    /// - **Fully different titles** (neither equal nor a prefix — a localized title
+    ///   or a genuinely different film) → contradict **unless** the years
+    ///   corroborate (both present within one year). A matching year rescues a
+    ///   localized twin; a missing or conflicting year lets the title clash stand,
+    ///   which is what splits "Scream 6" (2023) from a sparsely-scraped, yearless
+    ///   "Scream 7" that a server mis-tagged with the same id.
+    ///
+    /// Absent title signal (either normalized title empty) never contradicts, so a
+    /// title-less sparse row is always merged, never split. Titles may be raw or
+    /// already normalized — normalization is idempotent.
+    public static func titlesPlausiblyContradict(
+        titleA: String,
+        yearA: Int?,
+        kindA: MediaItemKind,
+        titleB: String,
+        yearB: Int?,
+        kindB: MediaItemKind
+    ) -> Bool {
+        guard kindA == .movie, kindB == .movie else { return false }
+        let a = normalizedTitle(titleA)
+        let b = normalizedTitle(titleB)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+
+        let yearsCorroborate: Bool
+        let yearsConflict: Bool
+        if let ya = yearA, let yb = yearB {
+            let gap = abs(ya - yb)
+            yearsCorroborate = gap <= 1
+            yearsConflict = gap > 1
+        } else {
+            yearsCorroborate = false
+            yearsConflict = false
+        }
+
+        if a == b { return false }
+        if normalizedTitlesCompatible(a, b) {
+            // Prefix (edition suffix vs base-vs-sequel): only a hard year conflict
+            // proves a different work; otherwise treat as the same film's variant.
+            return yearsConflict
+        }
+        // Fully different titles: a corroborating year rescues a localized twin;
+        // anything else (conflict or a missing year) lets the clash split them.
+        return !yearsCorroborate
+    }
+
+    /// Normalized titles are compatible when identical or one is a word-boundary
+    /// prefix of the other ("dune" vs "dune 2021"), so subtitle/year suffixes
+    /// don't read as a clash while a differing trailing token ("scream 6" vs
+    /// "scream 7") does. Inputs are assumed already ``normalizedTitle(_:)``-folded.
+    public static func normalizedTitlesCompatible(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        return a.hasPrefix(b + " ") || b.hasPrefix(a + " ")
+    }
+
     /// Canonical title form: lower-cased, accent-folded, punctuation removed and
     /// internal whitespace collapsed so "Spider-Man" and "spider man" match.
     public static func normalizedTitle(_ raw: String) -> String {

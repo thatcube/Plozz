@@ -61,6 +61,11 @@ public protocol ProfilePersisting: Sendable {
     func firstRunProfileSetupComplete() -> Bool
     /// Persists whether the one-time first-run profile setup has completed.
     func setFirstRunProfileSetupComplete(_ value: Bool)
+
+    /// Debug-only: wipes all household profile state (profiles, the active
+    /// selection, household preference overrides, and the first-run flag) so
+    /// the next launch behaves like a brand-new install.
+    func resetForDebugging()
 }
 
 extension ProfilePersisting {
@@ -72,6 +77,7 @@ extension ProfilePersisting {
     public func setProfilesEnabledOverride(_ value: Bool?) {}
     public func firstRunProfileSetupComplete() -> Bool { false }
     public func setFirstRunProfileSetupComplete(_ value: Bool) {}
+    public func resetForDebugging() {}
 }
 
 public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
@@ -180,6 +186,27 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     public func setFirstRunProfileSetupComplete(_ value: Bool) {
         lock.lock(); defer { lock.unlock() }
         writeSharedBool(value, forKey: firstRunSetupKey)
+    }
+
+    public func resetForDebugging() {
+        lock.lock(); defer { lock.unlock() }
+        for profile in loadProfilesLocked() {
+            removeShared(forKey: accountsKey(profile.id))
+        }
+        removeShared(forKey: profilesKey)
+        defaults.removeObject(forKey: activeProfileIDKey)
+        writeSharedBool(nil, forKey: askOnStartupKey)
+        writeSharedBool(nil, forKey: profilesEnabledKey)
+        writeSharedBool(nil, forKey: firstRunSetupKey)
+        didMigrateShared = false
+    }
+
+    private func removeShared(forKey key: String) {
+        if let secureStore {
+            try? secureStore.removeValue(for: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     private func readSharedBool(forKey key: String) -> Bool? {
@@ -463,6 +490,22 @@ public final class ProfilesModel {
         }
         update(profile)
         return profile
+    }
+
+    /// Debug-only: collapses back to a single pristine default profile ("Me")
+    /// and clears the first-run flag + household preferences, so the next
+    /// add-server reproduces a genuine first run and the launch picker won't
+    /// interfere.
+    public func resetToPristineDefaultForDebugging() {
+        store.resetForDebugging()
+        let migrated = store.migrateLegacyIfNeeded(defaultName: "Me", defaultActiveAccountIDs: [])
+        profiles = migrated
+        let remembered = store.activeProfileID()
+        hasRememberedSelection = remembered != nil
+        activeProfileID = remembered ?? migrated.first?.id ?? ProfileStore.defaultProfileID
+        let multi = migrated.count > 1
+        profilesEnabled = store.profilesEnabledOverride() ?? multi
+        askProfileOnStartup = store.askProfileOnStartupOverride() ?? multi
     }
 
     /// Removes a profile. The default profile can't be removed; removing the

@@ -140,6 +140,7 @@ struct MainTabView: View {
     let onRemoveAccount: (Account) -> Void
     let onSignOutAll: () -> Void
     let onSwitchProfile: () -> Void
+    let onResetToFirstRun: () -> Void
     let plexHomeUsersFetcher: (String) async -> [PlexHomeUser]
     let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
     /// The shared source-of-truth lookup: a title → its full cross-server source
@@ -256,6 +257,7 @@ struct MainTabView: View {
                 onAddAccount: onAddAccount,
                 onRemoveAccount: onRemoveAccount,
                 onSignOutAll: onSignOutAll,
+                onResetToFirstRun: onResetToFirstRun,
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSelectPlexHomeUser: onSelectPlexHomeUser
             )

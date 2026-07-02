@@ -68,4 +68,28 @@ final class FirstRunProfileSeedModelTests: XCTestCase {
         XCTAssertTrue(reloaded.firstRunProfileSetupComplete)
         XCTAssertEqual(reloaded.profiles.first?.name, "Alice")
     }
+
+    func testResetToPristineDefaultCollapsesProfilesAndClearsFlag() {
+        let defaults = makeDefaults()
+        let model = ProfilesModel(store: ProfileStore(defaults: defaults))
+        model.seedDefaultProfileIdentity(name: "Alice", avatarImageURL: "https://x/a.jpg")
+        model.markFirstRunProfileSetupComplete()
+        _ = model.add(name: "Bob")
+        XCTAssertEqual(model.profiles.count, 2)
+        XCTAssertTrue(model.firstRunProfileSetupComplete)
+
+        model.resetToPristineDefaultForDebugging()
+
+        // Collapses back to a single pristine "Me" and re-arms first run.
+        XCTAssertEqual(model.profiles.count, 1)
+        XCTAssertEqual(model.profiles.first?.name, "Me")
+        XCTAssertNil(model.profiles.first?.avatarImageURL)
+        XCTAssertFalse(model.firstRunProfileSetupComplete)
+
+        // The wipe must persist so the next launch is a genuine first run.
+        let reloaded = ProfilesModel(store: ProfileStore(defaults: defaults))
+        XCTAssertEqual(reloaded.profiles.count, 1)
+        XCTAssertEqual(reloaded.profiles.first?.name, "Me")
+        XCTAssertFalse(reloaded.firstRunProfileSetupComplete)
+    }
 }

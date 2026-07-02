@@ -1240,6 +1240,24 @@ public final class AppState {
         apply(.accountsChanged(accounts))
     }
 
+    /// Debug-only: wipes everything that gates the first-run experience —
+    /// accounts, profiles (collapsed to a single pristine default), the
+    /// first-run flag, and the recent-servers list — so the next server add
+    /// reproduces a genuine first run. Surfaced from a DEBUG-only Settings row.
+    public func resetToFirstRunForDebugging() {
+        try? accountStore.clearAll()
+        plexTokenOverrides.removeAll()
+        plexResolvedHomeUser.removeAll()
+        plexHomeUserTokenCache.removeAll()
+        profilesModel.resetToPristineDefaultForDebugging()
+        var recents = lastServerStore
+        recents.recentServers = []
+        isChoosingProfile = false
+        reloadAccounts()
+        rebuildSettingsModels()
+        apply(.accountsChanged(accounts))
+    }
+
     public func retry() {
         apply(.retry)
     }

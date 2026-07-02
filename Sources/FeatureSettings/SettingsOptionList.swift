@@ -17,7 +17,16 @@ struct SettingsOptionList<Option: Hashable>: View {
     let options: [Option]
     @Binding var selection: Option
     var icon: (Option) -> String? = { _ in nil }
+    /// Called with `true` when any row in the list gains focus and `false` when
+    /// focus leaves the list entirely. Mirrors ``SettingsOptionPicker``'s hook —
+    /// Circadian Mode uses it to flip the live tint preview on while a
+    /// Darkness/Warmth row is focused.
+    var onFocusChange: ((Bool) -> Void)? = nil
     let title: (Option) -> String
+
+    /// Tracks which row (if any) currently holds focus so the list can report
+    /// "I am focused" to its owner for live-preview hooks.
+    @FocusState private var focusedOption: Option?
 
     // ``SettingsRowLabel`` insets its content by 12pt horizontally; cancel the
     // leading inset so the option titles line up flush-left with the pane
@@ -57,9 +66,13 @@ struct SettingsOptionList<Option: Hashable>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(SettingsFocusButtonStyle())
+                .focused($focusedOption, equals: option)
                 .padding(.leading, -labelInset)
                 .accessibilityAddTraits(selection == option ? .isSelected : [])
             }
+        }
+        .onChange(of: focusedOption) { _, focused in
+            onFocusChange?(focused != nil)
         }
     }
 }

@@ -67,9 +67,9 @@ struct NightShiftDetailView: View {
                 SettingsSplitRow(
                     id: "darkness",
                     title: "Darkness",
-                    description: "Dims the whole picture like sunglasses. Focus this row's options to preview at full night strength.",
+                    description: "Dims the whole picture like sunglasses. Focus a row to preview at full night strength.",
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: NightShiftDimness.allCases,
                         selection: $model.settings.dimness,
                         onFocusChange: { model.isPreviewing = $0 },
@@ -79,9 +79,9 @@ struct NightShiftDetailView: View {
                 SettingsSplitRow(
                     id: "warmth",
                     title: "Warmth",
-                    description: "Tints the picture toward amber and red. Focus this row's options to preview at full night strength.",
+                    description: "Tints the picture toward amber and red. Focus a row to preview at full night strength.",
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: NightShiftWarmth.allCases,
                         selection: $model.settings.warmth,
                         onFocusChange: { model.isPreviewing = $0 },

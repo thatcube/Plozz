@@ -6,6 +6,7 @@ import AVFoundation
 import CoreModels
 import CoreNetworking
 import CoreUI
+import CrashReporting
 import FeatureAuth
 import FeatureDiscovery
 import FeatureHome
@@ -34,6 +35,12 @@ public struct RootView: View {
     /// `PlayerView` can `engage()` it on exit; rendered as the topmost overlay here.
     @State private var displayVeil = DisplayVeilModel()
 
+    /// Owns the opt-in crash reporter. Created once from the DSN baked into this
+    /// build (empty ⇒ a true no-op). Started/stopped in response to the app-wide
+    /// consent in `appState.crashReportingModel` — nothing is sent unless the user
+    /// has opted in AND a DSN is present.
+    @State private var crashReporting = CrashReportingController()
+
     @MainActor
     public init(appState: AppState? = nil) {
         _appState = State(initialValue: appState ?? AppState())
@@ -43,6 +50,31 @@ public struct RootView: View {
     /// chosen `AppTheme` or the device colour scheme changes.
     private var resolvedPalette: ThemePalette {
         ThemePalette.palette(for: appState.themeModel.theme, systemColorScheme: systemColorScheme)
+    }
+
+    /// Reconcile the crash reporter with the current opt-in consent. Safe to call
+    /// repeatedly: starts on the first opt-in, stops on opt-out, no-op otherwise
+    /// (and always a no-op when the build has no DSN).
+    private func reconcileCrashReporting() {
+        crashReporting.apply(
+            enabled: appState.crashReportingModel.settings.isEnabled,
+            context: makeCrashContext()
+        )
+    }
+
+    /// Non-secret context tagged onto crash reports: coarse provider *kinds*
+    /// (Jellyfin/Plex), version/build/tvOS/device — never server names or tokens.
+    private func makeCrashContext() -> CrashReportContext {
+        var seen = Set<String>()
+        let providers = appState.accounts
+            .map { $0.server.provider.displayName }
+            .filter { seen.insert($0).inserted }
+        return CrashReportContext.make(
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.thatcube.Plozz",
+            version: AppInfo.version,
+            build: AppInfo.build,
+            providers: providers
+        )
     }
 
     public var body: some View {
@@ -92,6 +124,8 @@ public struct RootView: View {
                         themeModel: appState.themeModel,
                         seriesTrackStore: SeriesTrackPreferenceStore(namespace: appState.profilesModel.activeNamespace),
                         diagnosticsModel: appState.diagnosticsModel,
+                        crashReportingModel: appState.crashReportingModel,
+                        crashReportingConfigured: crashReporting.isConfigured,
                         musicPlayerModel: appState.musicPlayerModel,
                         uiDensityModel: appState.uiDensityModel,
                         nightShiftModel: appState.nightShiftModel,
@@ -180,6 +214,10 @@ public struct RootView: View {
         .onAppear {
             if case .launching = appState.state { appState.bootstrap() }
             appState.drainWatchOutbox()
+            reconcileCrashReporting()
+        }
+        .onChange(of: appState.crashReportingModel.settings.isEnabled) { _, _ in
+            reconcileCrashReporting()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active { appState.drainWatchOutbox() }

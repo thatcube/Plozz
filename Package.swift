@@ -42,6 +42,7 @@ let package = Package(
         .library(name: "FeatureProfiles", targets: ["FeatureProfiles"]),
         .library(name: "FeatureMusic", targets: ["FeatureMusic"]),
         .library(name: "TopShelfKit", targets: ["TopShelfKit"]),
+        .library(name: "CrashReporting", targets: ["CrashReporting"]),
         .library(name: "AppShell", targets: ["AppShell"])
     ],
     dependencies: [
@@ -79,6 +80,13 @@ let package = Package(
         // build time). Used by AetherEngine for DV P7→8.1 NAL surgery; also
         // satisfies libmpv's dovi symbol references.
         .package(url: "https://github.com/superuser404notfound/LibDovi", from: "1.0.2"),
+
+        // Sentry (getsentry/sentry-cocoa) — powers the OPT-IN, off-by-default
+        // crash reporter (Settings ▸ Help & Diagnostics ▸ Share Crash Reports).
+        // Prebuilt binary xcframework (no build-time compilation of the SDK).
+        // Nothing is sent unless the user opts in AND a DSN was baked into the
+        // build; see the `CrashReporting` target for the privacy-hardened config.
+        .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.19.0"),
     ],
     targets: [
         // MARK: Core
@@ -249,7 +257,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", "LastFmService"]
+            dependencies: ["CoreModels", "CoreUI", "CoreNetworking", "CrashReporting", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", "LastFmService"]
         ),
         .target(
             name: "FeatureProfiles",
@@ -276,6 +284,22 @@ let package = Package(
         .target(
             name: "TopShelfKit",
             dependencies: ["CoreModels"]
+        ),
+
+        // MARK: Crash reporting (opt-in, off by default)
+        //
+        // Wraps Sentry behind a small `CrashReporter` protocol so the rest of the
+        // app never imports Sentry directly and builds without a DSN are a true
+        // no-op. Reports are only ever sent when the user has opted in (Settings ▸
+        // Help & Diagnostics) AND the build shipped with a `PLOZZ_SENTRY_DSN`.
+        // The Sentry config here is privacy-hardened: crash + hang captures only,
+        // all automatic UI/network telemetry disabled, and a hard scrub of PII in
+        // `beforeSend`/`beforeBreadcrumb`. Depends only on Sentry + Foundation.
+        .target(
+            name: "CrashReporting",
+            dependencies: [
+                .product(name: "Sentry", package: "sentry-cocoa"),
+            ]
         ),
 
         // MARK: AetherEngine integration (native HLS-fMP4 remux engine)
@@ -323,7 +347,8 @@ let package = Package(
                 "FeatureSettings",
                 "FeatureProfiles",
                 "FeatureMusic",
-                "TopShelfKit"
+                "TopShelfKit",
+                "CrashReporting"
             ]
         ),
 

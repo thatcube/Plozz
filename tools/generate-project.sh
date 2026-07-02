@@ -24,6 +24,36 @@ cd "$(dirname "$0")/.."
 
 xcodegen generate
 
+proj="Plozz.xcodeproj/project.pbxproj"
+
+# If PLOZZ_SENTRY_DSN wasn't provided in the environment, read it from the local,
+# gitignored .env.fastlane so one file feeds both local device builds and
+# `fastlane` (which also exports it). An explicit env override always wins.
+if [ -z "${PLOZZ_SENTRY_DSN:-}" ] && [ -f ".env.fastlane" ]; then
+  dsn_line=$(grep -E '^[[:space:]]*PLOZZ_SENTRY_DSN=' ".env.fastlane" | tail -n1 || true)
+  if [ -n "$dsn_line" ]; then
+    PLOZZ_SENTRY_DSN=$(printf '%s' "$dsn_line" \
+      | sed -E "s/^[[:space:]]*PLOZZ_SENTRY_DSN=//; s/^\"//; s/\"$//; s/^'//; s/'$//")
+    export PLOZZ_SENTRY_DSN
+  fi
+fi
+
+# --- Opt-in crash-reporting DSN bake -----------------------------------------
+# If PLOZZ_SENTRY_DSN is set in the environment, bake it into the generated
+# project so CrashReporting can read it from Info.plist at runtime. When unset
+# the project.yml default ("") is left in place and the app never sends anything.
+# The DSN is a secret-ish URL (contains '/', ':', '@') so we use '|' as the sed
+# delimiter and escape the few characters sed treats specially in a replacement.
+if [ -n "${PLOZZ_SENTRY_DSN:-}" ]; then
+  if [ -f "$proj" ]; then
+    esc_dsn=$(printf '%s' "${PLOZZ_SENTRY_DSN}" | sed -e 's/[\\&|]/\\&/g')
+    /usr/bin/sed -i '' -E "s|PLOZZ_SENTRY_DSN = [^;]*;|PLOZZ_SENTRY_DSN = \"${esc_dsn}\";|g" "$proj"
+    echo "Baked PLOZZ_SENTRY_DSN into ${proj} (crash reporting endpoint configured)"
+  else
+    echo "warning: $proj not found after xcodegen generate; skipping DSN bake"
+  fi
+fi
+
 if [ -n "${PLOZZ_BUILD_NUMBER:-}" ]; then
   build="${PLOZZ_BUILD_NUMBER}"
   src="PLOZZ_BUILD_NUMBER override"

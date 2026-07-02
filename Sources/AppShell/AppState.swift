@@ -81,6 +81,12 @@ public final class AppState {
     /// its overlay is installed at the app root in `RootView`.
     public private(set) var nightShiftModel: NightShiftSettingsModel
 
+    /// Opt-in, off-by-default consent for sending anonymised crash reports.
+    /// Deliberately **app-wide** (created once, never rebuilt per profile) and
+    /// stored under an un-namespaced key — crash reporting is a device/app-level
+    /// choice, not a per-profile persona. See `CrashReportingSettings`.
+    public let crashReportingModel = CrashReportingSettingsModel()
+
     /// The household's profiles + active selection. Owned at the app level and
     /// layered on top of the multi-account core.
     public let profilesModel: ProfilesModel

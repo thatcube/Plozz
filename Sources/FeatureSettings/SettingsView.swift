@@ -53,6 +53,9 @@ public struct SettingsView: View {
     private let theme: ThemeSettingsModel
     private let nightShift: NightShiftSettingsModel
     private let homeVisibility: HomeLibraryVisibilityModel
+    private let diagnostics: DiagnosticsSettingsModel
+    private let crashReporting: CrashReportingSettingsModel
+    private let crashReportingConfigured: Bool
     private let trakt: TraktService
     private let simkl: SimklService
     private let anilist: AniListService
@@ -92,6 +95,9 @@ public struct SettingsView: View {
         theme: ThemeSettingsModel,
         nightShift: NightShiftSettingsModel,
         homeVisibility: HomeLibraryVisibilityModel,
+        diagnostics: DiagnosticsSettingsModel,
+        crashReporting: CrashReportingSettingsModel,
+        crashReportingConfigured: Bool,
         trakt: TraktService,
         simkl: SimklService,
         anilist: AniListService,
@@ -130,6 +136,9 @@ public struct SettingsView: View {
         self.theme = theme
         self.nightShift = nightShift
         self.homeVisibility = homeVisibility
+        self.diagnostics = diagnostics
+        self.crashReporting = crashReporting
+        self.crashReportingConfigured = crashReportingConfigured
         self.trakt = trakt
         self.simkl = simkl
         self.anilist = anilist
@@ -429,6 +438,12 @@ public struct SettingsView: View {
                    value: nil,
                    route: .attributions)
 
+            // Help & Diagnostics: report a problem (GitHub-issue QR) + the
+            // playback diagnostics overlay toggle + recent redacted activity.
+            navRow("Help & Diagnostics", icon: "ladybug",
+                   value: nil,
+                   route: .help)
+
             // The only Sign-Out-All entry point now lives here, inline, guarded
             // by the are-you-sure confirmation alert on the root view.
             if !accounts.isEmpty {
@@ -485,6 +500,20 @@ public struct SettingsView: View {
             IntegrationsDetailView(trakt: trakt, simkl: simkl, anilist: anilist, mal: mal, lastfm: lastfm, playback: playback, serverCount: activeProfileServerCount)
         case .attributions:
             AttributionsDetailView()
+        case .help:
+            HelpDiagnosticsDetailView(
+                appVersion: appVersion,
+                appBuild: appBuild,
+                repoURL: repoURL,
+                accounts: accounts,
+                diagnostics: diagnostics,
+                crashReporting: crashReporting,
+                crashReportingConfigured: crashReportingConfigured
+            )
+        case .recentActivity:
+            RecentActivityDetailView(
+                canSendDiagnostics: crashReportingConfigured && crashReporting.settings.isEnabled
+            )
         case let .plexUser(accountID):
             PlexLinkedUserDetailView(context: context, accountID: accountID)
         case let .server(key):

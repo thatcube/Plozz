@@ -180,7 +180,7 @@ public struct ServerPickerView: View {
             // first line when a name/address wraps to two lines.
             HStack(alignment: .top, spacing: 20) {
                 ProviderBrandMark(provider: server.provider, size: 44)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(server.name).font(.headline)
                     if let host = server.baseURL.host {
                         Text(host).font(.subheadline).settingsRowSecondary()
@@ -196,7 +196,7 @@ public struct ServerPickerView: View {
                 statusBadge(for: server, isRecent: role.isRecent)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 12)
+            .padding(.vertical, 16)
             .padding(.horizontal, 12)
             .contentShape(Rectangle())
         }
@@ -220,11 +220,14 @@ public struct ServerPickerView: View {
     }
 
     /// The "who's signed in" annotation shown under a signed-in server's
-    /// address. Tapping the row starts sign-in for *another* user.
+    /// address. Tapping the row starts sign-in for *another* user. Uses the
+    /// shared theme-/focus-aware status style so it stays legible on the
+    /// inverted focus card (and in every theme) instead of vanishing when the
+    /// accent happens to match the focus fill.
     private func signedInLine(_ userNames: [String]) -> some View {
         Label(signedInSummary(userNames), systemImage: "checkmark.circle.fill")
             .font(.footnote)
-            .foregroundStyle(Color.accentColor)
+            .settingsRowGreenIndicator()
     }
 
     /// Human-readable summary of who's signed in on a server.

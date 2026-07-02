@@ -116,6 +116,7 @@ struct PlayerControls: View {
     @State private var openPanel: Category?
     @State private var subtitleScreen: SubtitleScreen = .tracks
     @FocusState private var focus: FocusSlot?
+    @Namespace private var panelFocusScope
 
     /// The transport control that was focused when the current panel was opened.
     /// Restored (deferred) whenever the panel fully closes so focus always lands
@@ -237,12 +238,14 @@ struct PlayerControls: View {
             // same-panel change is a morph (animate); a miss leaves it unmeasured so the
             // first measurement snaps.
             measuredPanel = styleBodyHeight > 0 ? panel : nil
-            if panel == .info {
-                focus = model.hasNextEpisode ? .infoNext
-                    : (model.hasPreviousEpisode ? .infoPrev : .infoRestart)
-            } else {
-                focus = .row(selectedRowIndex(for: panel))
-            }
+            // Opening a panel simultaneously INSERTS new focusable content and DISABLES
+            // the transport buttons that currently hold focus. A synchronous
+            // `@FocusState` write here races that relocation: tvOS often performs its
+            // own default-focus pass after this closure, once the panel's views
+            // actually exist, and overwrites the binding with the section's top row.
+            // Declare the preferred default INSIDE the panel's focus scope instead and
+            // let the focus engine choose it when the panel becomes focusable.
+            focus = nil
         }
         .onExitCommand { handleExit() }
         .onPlayPauseCommand { actions.togglePlayPause() }
@@ -263,6 +266,7 @@ struct PlayerControls: View {
                     .opacity(titleVisible ? 1 : 0)
                 if let openPanel {
                     panelContainer(for: openPanel)
+                        .focusScope(panelFocusScope)
                         .focusSection()
                         // Grow + fade from the corner nearest the button that opened
                         // it (panels open trailing, above the transport buttons; Info
@@ -581,6 +585,34 @@ struct PlayerControls: View {
         DispatchQueue.main.async { focus = slot }
     }
 
+    private var preferredPanelFocus: FocusSlot? {
+        guard let panel = openPanel else { return nil }
+        switch panel {
+        case .info:
+            return model.hasNextEpisode ? .infoNext
+                : (model.hasPreviousEpisode ? .infoPrev : .infoRestart)
+        case .subtitles:
+            switch subtitleScreen {
+            case .tracks:
+                return .row(selectedRowIndex(for: .subtitles))
+            case .download:
+                return .subBack
+            case .style:
+                return model.secondarySubtitleImagePrimaryFormat == nil ? .row(0) : .subBack
+            case .styleFont:
+                return .row(SubtitleFontFamily.allCases.firstIndex(of: model.subtitleStyle.fontFamily) ?? 0)
+            case .styleOutline, .styleBackground, .styleDual:
+                return .row(0)
+            }
+        case .audio, .speed:
+            return .row(selectedRowIndex(for: panel))
+        case .sync:
+            if model.engineCapabilities.contains(.audioDelay) { return .row(0) }
+            if model.engineCapabilities.contains(.subtitleDelay) { return .row(10) }
+            return nil
+        }
+    }
+
     // MARK: Panels
 
     @ViewBuilder
@@ -862,6 +894,7 @@ struct PlayerControls: View {
         }
         .playerGlassButton(prominent: prominent)
         .focused($focus, equals: slot)
+        .prefersDefaultFocus(preferredPanelFocus == slot, in: panelFocusScope)
     }
 
     /// Header of the floating panel: the screen title, plus — on the Subtitles
@@ -882,6 +915,7 @@ struct PlayerControls: View {
                 .buttonStyle(PanelHeaderButtonStyle())
                 .focusEffectDisabled()
                 .focused($focus, equals: .subBack)
+                .prefersDefaultFocus(preferredPanelFocus == .subBack, in: panelFocusScope)
                 // Pull the chip past the header gutter so it hugs the panel's
                 // leading edge, concentric with the rounded corner.
                 .padding(.leading, -10)
@@ -899,6 +933,7 @@ struct PlayerControls: View {
                 .buttonStyle(PanelHeaderButtonStyle())
                 .focusEffectDisabled()
                 .focused($focus, equals: .edit)
+                .prefersDefaultFocus(preferredPanelFocus == .edit, in: panelFocusScope)
                 // Mirror the back chip: hug the trailing edge, ignoring the gutter.
                 .padding(.trailing, -10)
             }
@@ -995,6 +1030,7 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .download)
+        .prefersDefaultFocus(preferredPanelFocus == .download, in: panelFocusScope)
     }
 
     // MARK: Subtitles sub-screens (Download stub / live Style editor)
@@ -1089,6 +1125,7 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(row.slot))
+        .prefersDefaultFocus(preferredPanelFocus == .row(row.slot), in: panelFocusScope)
     }
 
     @ViewBuilder
@@ -1256,6 +1293,7 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(index))
+        .prefersDefaultFocus(preferredPanelFocus == .row(index), in: panelFocusScope)
     }
 
     /// A SwiftUI `Font` that renders a family's name in that family's own Regular
@@ -1634,6 +1672,7 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(row.id))
+        .prefersDefaultFocus(preferredPanelFocus == .row(row.id), in: panelFocusScope)
     }
 
     private func compactToggleRow(_ row: TrackRow) -> some View {
@@ -1660,6 +1699,7 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(row.id))
+        .prefersDefaultFocus(preferredPanelFocus == .row(row.id), in: panelFocusScope)
     }
 
     @ViewBuilder
@@ -1772,6 +1812,7 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(index))
+        .prefersDefaultFocus(preferredPanelFocus == .row(index), in: panelFocusScope)
     }
 
     private func toggleRow(
@@ -1801,6 +1842,7 @@ struct PlayerControls: View {
         .buttonStyle(PlayerMenuRowButtonStyle())
         .focusEffectDisabled()
         .focused($focus, equals: .row(index))
+        .prefersDefaultFocus(preferredPanelFocus == .row(index), in: panelFocusScope)
     }
 
     private func delayRow(
@@ -1833,6 +1875,7 @@ struct PlayerControls: View {
             Text(title).font(.callout.weight(.medium))
         }
         .focused($focus, equals: .row(slot))
+        .prefersDefaultFocus(preferredPanelFocus == .row(slot), in: panelFocusScope)
     }
 
     // MARK: Model helpers

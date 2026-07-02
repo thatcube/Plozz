@@ -43,6 +43,10 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         let serverInfo: [String: SourceServerInfo]
         let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
 
+        /// Single-flight gate for page-fills. `false` when no fill is running.
+        private var fillInProgress = false
+        private var fillWaiters: [CheckedContinuation<Void, Never>] = []
+
         init(
             serverInfo: [String: SourceServerInfo],
             identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
@@ -79,6 +83,28 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         func totalUpperBound() -> Int { totals.values.reduce(0, +) }
         func allExhausted(sourceIDs: [String]) -> Bool {
             sourceIDs.allSatisfy { exhausted.contains($0) }
+        }
+
+        /// Acquires the page-fill gate, suspending until any in-flight fill
+        /// completes. Concurrent `items(...)` calls (tvOS grid prefetch racing a
+        /// scroll) would otherwise interleave `fetchNextBatch`'s per-source
+        /// offset read → fetch → advance across `await`s, letting one fill jump a
+        /// source's offset past a window the other never fetched — a permanent,
+        /// invisible page skip (the merge hides the gap). Serializing the fill
+        /// makes each read-fetch-advance sequence atomic with respect to others.
+        func acquireFill() async {
+            while fillInProgress {
+                await withCheckedContinuation { fillWaiters.append($0) }
+            }
+            fillInProgress = true
+        }
+
+        /// Releases the gate and wakes the next waiting fill, if any.
+        func releaseFill() {
+            fillInProgress = false
+            if !fillWaiters.isEmpty {
+                fillWaiters.removeFirst().resume()
+            }
         }
     }
 
@@ -125,19 +151,24 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         await cache.initialize(with: sourceIDs)
         let targetCount = page.startIndex + page.limit
 
+        // Serialize the fill: hold the single-flight gate across the whole
+        // read-fetch-advance loop AND the merged-buffer snapshot so a concurrent
+        // prefetch can't skip a page window nor observe a half-advanced buffer.
+        await cache.acquireFill()
         while await cache.mergedCount() < targetCount {
             if await cache.allExhausted(sourceIDs: sourceIDs) { break }
             let fetched = await fetchNextBatch(kind: kind, sort: page.sort, limit: page.limit)
             if fetched.isEmpty { break }
             await cache.appendMergedBatch(fetched)
         }
-
         let merged = await cache.mergedItems()
+        let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
+        let upperBound = await cache.totalUpperBound()
+        await cache.releaseFill()
+
         let start = min(page.startIndex, merged.count)
         let end = min(start + page.limit, merged.count)
         let pageItems = Array(merged[start..<end])
-        let allExhausted = await cache.allExhausted(sourceIDs: sourceIDs)
-        let upperBound = await cache.totalUpperBound()
         // Until every source is drained the true post-merge total is unknown;
         // report an optimistic upper bound (sum of per-server totals) so the grid
         // keeps requesting pages, then settle on the exact merged count.

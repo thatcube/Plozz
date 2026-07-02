@@ -199,9 +199,14 @@ final class HomeAggregatorTests: XCTestCase {
 
         _ = await HomeAggregator().content(from: accounts, continueWatchingLimit: 1, latestLimit: 1)
 
+        // Fan-out is bounded (never unbounded) so a large server list can't swamp
+        // the launch-time network/decoding pipeline. The bound is sized to fully
+        // parallelize a typical multi-server household (~5) in a single wave while
+        // still capping pathological (many-server) cases: 8 accounts here must
+        // still run at most 5 at a time.
         XCTAssertLessThanOrEqual(
             tracker.maxConcurrent,
-            3,
+            5,
             "Home aggregation should bound concurrent account fan-out to keep launch responsive"
         )
     }

@@ -143,9 +143,18 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
         return result
     }
 
-    /// Every indexed source for `item`, by its ``MediaItemIdentity`` identities.
+    /// Every indexed source for `item`, by its ``MediaItemIdentity`` identities,
+    /// **scoped to the item's kind**. TMDb/TVDb reuse the same integer id across
+    /// movies and series (movie 550 ≠ tv 550), and `identities(for:)` emits bare,
+    /// kind-less external ids — so an unscoped lookup would fold a same-id series
+    /// into a movie's source set (and vice-versa), polluting the picker and
+    /// letting best-source selection route playback to the wrong work. Restricting
+    /// to sources indexed under the *same kind* keeps enrichment correct; episode
+    /// expansion asks for series membership through the series probe, not here.
     public func sources(for item: MediaItem) -> [IndexedSource] {
-        sources(forIdentities: MediaItemIdentity.identities(for: item))
+        let kind = item.kind
+        return sources(forIdentities: MediaItemIdentity.identities(for: item))
+            .filter { $0.kind == kind }
     }
 
     /// Membership ``MediaSourceRef``s for `item` — the picker / merge-enrichment view.

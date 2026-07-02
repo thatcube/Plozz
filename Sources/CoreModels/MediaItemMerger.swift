@@ -124,31 +124,23 @@ public enum MediaItemMerger {
         // 550 is a different work from TMDb *tv* 550), so two items that merely
         // share an id across kinds must NOT collapse into one card. We can't fix
         // this in `identities(for:)` — several call sites/tests rely on it
-        // emitting bare, kind-less external ids — so the kind scoping lives here.
+        // emitting bare, kind-less external ids — so the kind scoping lives here:
+        // an identity is only a merge key *within* one kind.
         //
-        // Items whose kind is indeterminate (`.unknown`/`.folder`/`.collection`)
-        // act as a **wildcard**: they union with any kind sharing the identity, so
-        // this never *reduces* merging for an item we couldn't confidently type.
+        // There is deliberately NO cross-kind wildcard. An item we couldn't
+        // confidently type (`.unknown`/`.folder`/`.collection`) merges only with
+        // other items of the *same* kind sharing the identity — never bridging,
+        // say, a movie and a series that happen to reuse an external integer id,
+        // which a wildcard would collapse into one wrong card.
         var seen: [KindScopedIdentity: Int] = [:]
-        var seenWildcard: [MediaIdentity: Int] = [:]
         for index in items.indices {
-            let bucket = mergeKindBucket(for: items[index].kind)
+            let kind = items[index].kind
             for identity in MediaItemIdentity.identities(for: items[index]) {
-                // Union with a prior wildcard holder of this identity (either order).
-                if let existing = seenWildcard[identity] { union(existing, index) }
-                if let bucket {
-                    let key = KindScopedIdentity(identity: identity, bucket: bucket)
-                    if let existing = seen[key] {
-                        union(existing, index)
-                    } else {
-                        seen[key] = index
-                    }
+                let key = KindScopedIdentity(identity: identity, kind: kind)
+                if let existing = seen[key] {
+                    union(existing, index)
                 } else {
-                    // Wildcard item: union with every already-seen kind for this id.
-                    for existing in seen.lazy.filter({ $0.key.identity == identity }).map(\.value) {
-                        union(existing, index)
-                    }
-                    if seenWildcard[identity] == nil { seenWildcard[identity] = index }
+                    seen[key] = index
                 }
             }
         }
@@ -383,29 +375,13 @@ public extension Array where Element == ResolvedAccount {
     }
 }
 
-/// A ``MediaIdentity`` scoped to a media-kind bucket, so an external id shared
+/// A ``MediaIdentity`` scoped to a media **kind**, so an external id shared
 /// across different kinds (TMDb/TVDb reuse integer ids between movies and series)
 /// can't merge a movie into a series. See the union step in ``MediaItemMerger``.
-private struct KindScopedIdentity: Hashable {
+/// The scope is the raw ``MediaItemKind`` (not a coarse bucket) so every kind —
+/// including the untyped `.unknown`/`.folder`/`.collection` — only ever merges
+/// with its own kind, never bridging two kinds that happen to reuse an id.
+struct KindScopedIdentity: Hashable {
     let identity: MediaIdentity
-    let bucket: MergeKindBucket
-}
-
-/// Coarse content classes whose external-id spaces are independent. Kinds that
-/// never carry a meaningful catalogue id (`.unknown`/`.folder`/`.collection`)
-/// map to `nil` (wildcard) so the merge never *loses* a match for an item we
-/// couldn't confidently type.
-private enum MergeKindBucket: Hashable {
-    case movie, series, season, episode, video
-}
-
-private func mergeKindBucket(for kind: MediaItemKind) -> MergeKindBucket? {
-    switch kind {
-    case .movie: return .movie
-    case .series: return .series
-    case .season: return .season
-    case .episode: return .episode
-    case .video: return .video
-    case .folder, .collection, .unknown: return nil
-    }
+    let kind: MediaItemKind
 }

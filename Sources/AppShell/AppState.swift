@@ -462,6 +462,12 @@ public final class AppState {
                         await MainActor.run {
                             self?.identitySnapshot = snapshot
                             self?.identitySnapshotStore.update(snapshot)
+                            // Tell already-loaded surfaces (Home) that the shared
+                            // cross-server membership just grew, so they can re-fold
+                            // the fuller source set into their in-place cards without
+                            // a refetch. Cheap and idempotent: a surface whose rows
+                            // gained no new sources no-ops on the re-merge.
+                            NotificationCenter.default.post(name: .identityIndexDidUpdate, object: nil)
                             // Re-drain the watch outbox now that another account is
                             // indexed: a movie / series mutation stopped before the
                             // index finished warming re-expands against the larger
@@ -510,6 +516,20 @@ public final class AppState {
         let accountID = resolved.account.id
         guard let libraries = try? await provider.libraries() else { return }
 
+        // `libraries()` forced the connection resolver to probe and settle, so the
+        // provider now reports its truly-reachable locality. Refresh the captured
+        // serverInfo before it's ingested/persisted: it was sampled at warm-start
+        // (before any request), when a Plex provider still reports its first
+        // *advertised* connection — a server advertises its own LAN address even to
+        // remote clients, so the pre-probe value can wrongly read `.local` and get
+        // frozen into the persisted index. Sampling it post-probe keeps the stored
+        // local/remote classification honest for the server picker's default.
+        let liveServerInfo = serverInfo.map { info -> SourceServerInfo in
+            var copy = info
+            copy.locality = provider.connectionLocality
+            return copy
+        }
+
         await index.beginRebuild(for: accountID)
         // `true` if any page needed an enrichment fetch that failed, so we leave
         // the account un-finished (cold) and a later warm retries it — the index
@@ -534,7 +554,7 @@ public final class AppState {
                     try? await provider.item(id: item.id)
                 }
                 inconclusive = inconclusive || prepared.inconclusive
-                await index.ingest(prepared.indexable, accountID: accountID, serverInfo: serverInfo)
+                await index.ingest(prepared.indexable, accountID: accountID, serverInfo: liveServerInfo)
                 offset += page.items.count
                 if offset >= page.totalCount { break }
             }

@@ -95,6 +95,18 @@ public enum CrossServerSourceResolver {
         guard !queries.isEmpty, !otherAccountIDs.isEmpty else { return [] }
         let primaryAccountID = primary.sourceAccountID
         let primaryItemID = primary.id
+        // The primary's strong external identities (imdb/tmdb/tvdb). Once a query
+        // on an account yields a hit sharing one of these, that server's copy is
+        // confidently matched — the remaining title-variant queries only widen
+        // recall for a *differently-titled* copy we've now already found by id, so
+        // we stop early and free that account's search budget (each query carries
+        // its own 4s deadline; a cold Plex exhausting all four is up to ~16s).
+        let primaryStrongIDs = Set(
+            MediaItemIdentity.identities(for: primary).filter {
+                if case .external = $0 { return true }
+                return false
+            }
+        )
 
         let hits: [MediaItem] = await withTaskGroup(of: (Int, [MediaItem]).self) { group in
             for (index, accountID) in otherAccountIDs.enumerated() {
@@ -113,6 +125,14 @@ public enum CrossServerSourceResolver {
                     for query in queries {
                         for hit in await search(accountID, query) where seenItemIDs.insert(hit.id).inserted {
                             accountHits.append(hit.taggingSource(accountID))
+                        }
+                        // Strong-id match found → further title queries are
+                        // redundant for this account; stop probing it.
+                        if !primaryStrongIDs.isEmpty,
+                           accountHits.contains(where: {
+                               !primaryStrongIDs.isDisjoint(with: MediaItemIdentity.identities(for: $0))
+                           }) {
+                            break
                         }
                     }
                     return (index, accountHits)

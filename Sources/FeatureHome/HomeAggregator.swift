@@ -128,8 +128,10 @@ public struct HomeAggregator: Sendable {
 
     /// Bounded account-level fan-out for Home aggregation so launch-time network
     /// and decoding work can't swamp the UI and image pipeline when many accounts
-    /// are active.
-    private static let accountFanoutLimit = 3
+    /// are active. Sized to a typical multi-server household so the last accounts
+    /// don't wait behind the first few (a slow/asleep server in the first slots
+    /// would otherwise ~double the time the remaining accounts take to surface).
+    private static let accountFanoutLimit = 5
 
     /// Executes per-account work preserving account order while capping how many
     /// accounts run concurrently.
@@ -282,11 +284,20 @@ public struct HomeAggregator: Sendable {
     }
 
     /// Stable descending sort by ``MediaItem/lastPlayedAt``: timestamped cards
-    /// newest-first, untimestamped cards after them in their original (interleave)
-    /// order. Swift's `sort` isn't guaranteed stable, so ties are broken by the
-    /// original offset to keep the order deterministic across launches.
+    /// newest-first, untimestamped cards after them, **preserving the round-robin
+    /// interleave order for ties**.
+    ///
+    /// Swift's `sort` is not guaranteed stable, so we sort the *enumerated* array
+    /// and break every tie (equal timestamps, or two untimestamped cards) by the
+    /// original interleave index. That makes this a true stable sort layered on
+    /// top of recency: the most-recently-watched title is always first, and
+    /// anything the merge couldn't rank by recency keeps the deterministic
+    /// round-robin order `interleave(_:)` already produced from the (stable)
+    /// account order. Using the interleave index rather than the raw pre-sort
+    /// offset of an unstable `sort` is what stops the Continue Watching tail from
+    /// reshuffling between launches when nothing was actually watched.
     static func sortedByRecency(_ items: [MediaItem]) -> [MediaItem] {
-        items.enumerated().sorted { lhs, rhs in
+        return items.enumerated().sorted { lhs, rhs in
             switch (lhs.element.lastPlayedAt, rhs.element.lastPlayedAt) {
             case let (l?, r?):
                 if l != r { return l > r }

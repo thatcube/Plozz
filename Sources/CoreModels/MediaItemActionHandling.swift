@@ -24,6 +24,15 @@ public extension Notification.Name {
     /// (e.g. watched / unwatched). Screens showing media observe it and update
     /// in place. Read the payload via `Notification.mediaItemMutation`.
     static let mediaItemDidMutate = Notification.Name("PlozzMediaItemDidMutate")
+
+    /// Posted each time the cross-server identity index warms a little more (a new
+    /// account finishes indexing, so the shared source-of-truth membership grows).
+    /// Screens that merged their rows against an earlier, sparser snapshot observe
+    /// it and re-fold the *fresh* cross-server sources into their already-loaded
+    /// cards **in place** — no refetch, no focus reset — so a card that cold-loaded
+    /// before its local twin was known picks that twin up and can route playback to
+    /// it. Carries no payload; observers read the live snapshot on receipt.
+    static let identityIndexDidUpdate = Notification.Name("PlozzIdentityIndexDidUpdate")
 }
 
 /// The payload of a `.mediaItemDidMutate` notification: which items changed and

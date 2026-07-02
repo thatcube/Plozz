@@ -163,13 +163,18 @@ public final class HomeViewModel {
     /// add/remove also inserts/removes the title from the Watchlist row.
     public func applyWatchedState(_ mutation: MediaItemMutation) {
         guard case var .loaded(content) = state else { return }
-        // A resume/progress change means the user actually *played* the title just
-        // now, so bump its recency and re-sort Continue Watching to float it to the
-        // front without a full reload. A bare mark-watched / favourite toggle from
-        // the context menu carries no progress and must NOT reorder the row — the
-        // user's focus stays put while the badge flips in place.
+        // A resume/progress change — or a *completed* play — means the user
+        // actually played the title just now, so bump its recency and re-sort
+        // Continue Watching to float it to the front without a full reload. A bare
+        // mark-watched / favourite toggle from the context menu carries no playback
+        // progress (it sets `played` but no `playedPercentage`) and must NOT
+        // reorder the row — the user's focus stays put while the badge flips in
+        // place. A finished PLAY reports resume 0 but playedPercentage 1, so the
+        // range check must be `> 0` (not the old `> 0 && < 1`, which dropped the
+        // just-finished title so its row order didn't reflect the play until the
+        // next full reload removed it).
         let reflectsPlayback = (mutation.resumePosition ?? 0) > 0
-            || (mutation.playedPercentage.map { $0 > 0 && $0 < 1 } ?? false)
+            || (mutation.playedPercentage.map { $0 > 0 } ?? false)
         if reflectsPlayback {
             let now = Date()
             let stamped = content.continueWatching.map { item -> MediaItem in
@@ -211,6 +216,39 @@ public final class HomeViewModel {
             updated.removeAll { mutation.itemIDs.contains($0.id) }
         }
         return updated
+    }
+
+    /// Re-folds the *current* cross-server identity sources into the already-loaded
+    /// rows **in place**, without a refetch. Invoked when the identity index warms
+    /// further (a new account finishes indexing) so a card that cold-loaded before
+    /// its local twin was known picks that twin up — which is what lets play-time
+    /// selection route to the local (same-LAN) copy instead of a remote one.
+    ///
+    /// This mirrors ``HomeAggregator``'s row merge exactly: re-run the same
+    /// identity/merge core over the loaded cards with the live `identitySources`
+    /// closure (which reads the freshest snapshot) plus the accounts' server info,
+    /// then re-sort Continue Watching by recency. `MediaItemMerger.merge` is
+    /// idempotent and order-stable over already-merged cards, so positions — and
+    /// therefore the user's focus — are preserved; only each card's `sources` set
+    /// grows. State is only republished when something actually changed, so a
+    /// re-enrich that surfaces no new source is a true no-op (no view churn).
+    public func reenrich() {
+        guard case let .loaded(current) = state else { return }
+        let serverInfoMap = accounts.sourceServerInfo()
+        let resolve: (String) -> SourceServerInfo? = { serverInfoMap[$0] }
+        let sources = identitySources
+
+        var updated = current
+        updated.continueWatching = HomeAggregator.sortedByRecency(
+            MediaItemMerger.merge(current.continueWatching, serverInfo: resolve, identitySources: sources)
+        )
+        updated.latest = MediaItemMerger.merge(current.latest, serverInfo: resolve, identitySources: sources)
+        updated.watchlist = MediaItemMerger.merge(current.watchlist, serverInfo: resolve, identitySources: sources)
+
+        // Republish only on a real change so an index warm that adds no new source
+        // to any visible card doesn't churn the view or disturb focus.
+        guard updated != current else { return }
+        state = .loaded(updated)
     }
 
     private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {

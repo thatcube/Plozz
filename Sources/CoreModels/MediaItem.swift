@@ -489,7 +489,14 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         copy.id = source.itemID
         copy.sourceAccountID = source.accountID
         copy.selectedSourceAccountID = source.accountID
-        copy.versions = source.versions
+        // Keep the current versions when the target source ref carries none:
+        // Home / Search source refs are membership-only (versions are populated
+        // live by a detail fetch, never on those refs), so overwriting with an
+        // empty list here would strip a title's known versions — losing a
+        // remembered per-title version preference the next time detail opens.
+        if !source.versions.isEmpty {
+            copy.versions = source.versions
+        }
         copy.resumePosition = source.resumePosition
         copy.playedPercentage = source.playedPercentage
         copy.isPlayed = source.isPlayed

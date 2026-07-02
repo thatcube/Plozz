@@ -39,6 +39,11 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     private var candidates: [URL]
     private var cached: URL?
     private var inFlight: Task<URL, Never>?
+    /// The last-known-good connection persisted across launches, if any. Probed
+    /// first *within its rank group* so a warm server re-confirms on a single
+    /// probe and the winner among otherwise-equivalent same-rank candidates is
+    /// deterministic. It never competes across ranks, so locality still wins.
+    private let reachableSeed: URL?
 
     public init(
         candidates: [URL],
@@ -55,6 +60,7 @@ public final class PlexConnectionResolver: @unchecked Sendable {
         self.probe = probe
         self.refresh = refresh
         self.onReachable = onReachable
+        self.reachableSeed = reachableSeed
         // Seed with the last-known-good connection (persisted across launches) so
         // a previously-reachable server resolves on the first probe instead of
         // re-discovering through dead/stale addresses.
@@ -135,21 +141,47 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     }
 
     /// The first candidate that answers a lightweight `/identity` probe, or `nil`
-    /// if none respond — **locality-tiered**: same-LAN candidates are raced first
-    /// and a less-local tier (unknown hostname, then remote / Tailscale / relay)
-    /// is only tried when nothing more-local answers. This guarantees a reachable
-    /// LAN address is chosen over a reachable remote one even when the remote path
-    /// happens to answer first, which is the whole point of locality-first
-    /// playback (a title on both the local box and the sister's Tailscale server
-    /// must stream from the local box). Within a tier the **first to answer wins**
-    /// and losing probes are cancelled, so a dead candidate never stalls behind
-    /// its connect timeout.
+    /// if none respond — **locality-tiered, then rank-ordered within a tier**:
+    /// same-LAN candidates are tried before a less-local tier (unknown hostname,
+    /// then remote / Tailscale / relay), and *within* the local tier a real home
+    /// LAN address (192.168/10) is tried before a container-bridge address
+    /// (172.16/12) that shares the same RFC1918 `.local` classification. This
+    /// guarantees a reachable LAN address is chosen over a reachable remote *or*
+    /// Docker-bridge one even when the other path happens to answer first, which
+    /// is the whole point of locality-first playback (a title on both the local
+    /// box and the sister's Tailscale server must stream from the local box, and
+    /// the LAN address must win over the machine's own Docker gateway). Within a
+    /// single rank group the **first to answer wins** and losing probes are
+    /// cancelled, so a dead candidate never stalls behind its connect timeout.
     private func firstReachable(among urls: [URL]) async -> URL? {
         guard !urls.isEmpty else { return nil }
-        let grouped = Dictionary(grouping: urls) { SourceLocalityClassifier.classify(url: $0) }
+        let byTier = Dictionary(grouping: urls) { SourceLocalityClassifier.classify(url: $0) }
         for tier in [SourceLocality.local, .unknown, .remote] {
-            guard let tierURLs = grouped[tier], !tierURLs.isEmpty else { continue }
-            if let reachable = await raceReachable(among: tierURLs) { return reachable }
+            guard let tierURLs = byTier[tier], !tierURLs.isEmpty else { continue }
+            // The coarse locality tier can't distinguish a real LAN address from a
+            // Docker-bridge address (both are RFC1918 `.local`), so racing the
+            // whole tier makes the winner depend on which probe answers first —
+            // non-deterministic under load. Sub-group by the finer connection rank
+            // and probe rank groups in order so the preferred address wins
+            // deterministically; equally-ranked candidates still race for liveness.
+            let byRank = Dictionary(grouping: tierURLs) { Self.rank($0) }
+            for rank in byRank.keys.sorted() {
+                guard let group = byRank[rank], !group.isEmpty else { continue }
+                // Prefer the last-known-good seed within its rank group: probe it
+                // first so a warm server re-confirms on a single probe and the
+                // winner among equivalent same-rank candidates is deterministic
+                // (a concurrent race would otherwise pick whichever probe answers
+                // first). Falls through to racing the rest only if the seed is
+                // now stale/unreachable.
+                if let seed = reachableSeed,
+                   group.contains(where: { $0.absoluteString == seed.absoluteString }) {
+                    if await probeReachable(seed) { return seed }
+                    let rest = group.filter { $0.absoluteString != seed.absoluteString }
+                    if !rest.isEmpty, let reachable = await raceReachable(among: rest) { return reachable }
+                    continue
+                }
+                if let reachable = await raceReachable(among: group) { return reachable }
+            }
         }
         return nil
     }

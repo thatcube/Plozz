@@ -77,6 +77,13 @@ public struct HomeView: View {
                 Task { await viewModel.load() }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .identityIndexDidUpdate)) { _ in
+            // The cross-server index warmed further; re-fold the fuller source set
+            // into the loaded cards in place so a title that cold-loaded before its
+            // local twin was known can now route playback to that local copy. No
+            // refetch, and a no-op when no visible card gained a source.
+            viewModel.reenrich()
+        }
     }
 
     /// Renders one resolved `HomeRow`. The per-kind wiring (card style, and

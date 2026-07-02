@@ -367,6 +367,7 @@ private func crossServerSourceResolver(
 ) -> (@Sendable (MediaItem) async -> [MediaSourceRef])? {
     guard !accounts.isEmpty else { return nil }
     let serverInfo = accounts.sourceServerInfo()
+    let orderedAccountIDs = accounts.map(\.account.id)
     let providersByAccountID: [String: any MediaProvider] = Dictionary(
         accounts.map { ($0.account.id, $0.provider) },
         uniquingKeysWith: { first, _ in first }
@@ -382,7 +383,14 @@ private func crossServerSourceResolver(
         // duplicate movie items (two Jellyfin items, one film) group into one
         // detail with a multi-entry version picker — without this only OTHER
         // servers' twins were discovered and a same-server duplicate was invisible.
-        let everyAccount = Array(providersByAccountID.keys)
+        //
+        // Use the caller's stable `accounts` order (NOT `Dictionary.keys`, whose
+        // iteration order is unspecified and re-hashed per process): the resolver
+        // reassembles hits by this input order and `bestSelection`'s final
+        // primary-first tiebreak reads it, so a dictionary order would flip which
+        // server backs a tied merged card between launches — a source of the
+        // "server feels random" symptom.
+        let everyAccount = orderedAccountIDs
         let resolved = await CrossServerSourceResolver.resolve(
             primary: primary,
             otherAccountIDs: everyAccount,
@@ -456,17 +464,56 @@ private func resolveLibraryBrowse(
 /// reconciles resume to the cross-server furthest progress so switching to the
 /// local copy never rewinds. Single-source items pass through untouched.
 ///
-/// `activeAccountIDs` are the currently signed-in accounts. A merged card's
-/// `sources` can still list a server the user has since removed (the eager index
-/// snapshot lags an account sign-out), and ``resolveProvider(_:in:)`` silently
-/// falls back to `accounts[0]` for an unknown account — so selecting a dead
-/// source would play the *wrong* server's copy (or fail). Pruning to live
-/// accounts before selection guarantees we only ever pick a server we can
-/// actually resolve, and drops the stale refs from the item handed to the player.
-private func bestSourcePlayItem(_ item: MediaItem, activeAccountIDs: Set<String>) -> MediaItem {
-    let liveSources = activeAccountIDs.isEmpty
+/// Locality is refreshed **live** from each owning provider right here, at the
+/// moment of selection, rather than trusting the value the merge/index captured
+/// earlier. Locality is a runtime property — it flips the instant you leave the
+/// LAN, and a Plex server advertises its own LAN address even to remote clients,
+/// so a value sampled before the connection resolver had probed (and then
+/// persisted in the identity index) can wrongly read `.local`. By play time every
+/// provider has been exercised, so its resolver has settled on the truly-reachable
+/// connection; reading `provider.connectionLocality` now and overriding each
+/// source's stale locality is what makes "play from the local server" actually
+/// hold instead of feeling random.
+///
+/// `accounts` are the currently signed-in accounts. A merged card's `sources`
+/// can still list a server the user has since removed (the eager index snapshot
+/// lags an account sign-out), and ``resolveProvider(_:in:)`` silently falls back
+/// to `accounts[0]` for an unknown account — so selecting a dead source would
+/// play the *wrong* server's copy (or fail). Pruning to live accounts before
+/// selection guarantees we only ever pick a server we can actually resolve, and
+/// drops the stale refs from the item handed to the player.
+private func bestSourcePlayItem(_ item: MediaItem, accounts: [ResolvedAccount]) -> MediaItem {
+    let activeAccountIDs = Set(accounts.map(\.account.id))
+    let liveLocality: [String: SourceLocality] = Dictionary(
+        accounts.map { ($0.account.id, $0.provider.connectionLocality) },
+        uniquingKeysWith: { first, _ in first }
+    )
+    func withLiveLocality(_ source: MediaSourceRef) -> MediaSourceRef {
+        guard let locality = liveLocality[source.accountID] else { return source }
+        var copy = source
+        copy.locality = locality
+        return copy
+    }
+
+    let liveSources = (activeAccountIDs.isEmpty
         ? item.sources
-        : item.sources.filter { activeAccountIDs.contains($0.accountID) }
+        : item.sources.filter { activeAccountIDs.contains($0.accountID) })
+        .map(withLiveLocality)
+
+    // Honor an already-applied EXPLICIT source pick. The detail page's play path
+    // retargets through `MediaItem.retargetedForPlayback` first, stamping
+    // `selectedSourceAccountID` from the server picker (or its origin-aware smart
+    // default) and repointing the item — but it preserves the full `sources`
+    // array for further switching. Re-running best-source selection here would
+    // then clobber that pick back to the locality-best copy, making the picker
+    // cosmetic (a user who deliberately chose the remote/Tailscale copy would
+    // still be sent to the LAN one). Only best-source-route items that carry NO
+    // explicit selection — Home "Continue Watching" and Search play directly,
+    // never through detail, and leave `selectedSourceAccountID` nil.
+    if let picked = item.selectedSourceAccountID,
+       liveSources.contains(where: { $0.accountID == picked }) {
+        return item
+    }
 
     guard liveSources.count > 1,
           let selection = CrossSourceSelector.bestSelection(
@@ -1004,7 +1051,7 @@ private struct HomeTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
-        let target = bestSourcePlayItem(item, activeAccountIDs: Set(accounts.map(\.account.id)))
+        let target = bestSourcePlayItem(item, accounts: accounts)
         if let resume = target.resumePosition, resume > 1 {
             resumePrompt = target
         } else {
@@ -1285,7 +1332,7 @@ private struct SearchTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
-        let target = bestSourcePlayItem(item, activeAccountIDs: Set(accounts.map(\.account.id)))
+        let target = bestSourcePlayItem(item, accounts: accounts)
         if let resume = target.resumePosition, resume > 1 {
             resumePrompt = target
         } else {

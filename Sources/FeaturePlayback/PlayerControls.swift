@@ -237,9 +237,19 @@ struct PlayerControls: View {
                 if let openPanel {
                     panelContainer(for: openPanel)
                         .focusSection()
-                        // Grow + fade from the bottom so the panel reads as opening
-                        // up out of the transport rather than just appearing.
-                        .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                        // Grow + fade from the corner nearest the button that opened
+                        // it (panels open trailing, above the transport buttons; Info
+                        // opens leading) so it reads as springing from the control
+                        // rather than zooming out of screen-centre. Anchoring to the
+                        // full-width container's `.bottom` put the origin at screen
+                        // centre, not the right-aligned box.
+                        .transition(
+                            .scale(
+                                scale: 0.9,
+                                anchor: openPanel == .info ? .bottomLeading : .bottomTrailing
+                            )
+                            .combined(with: .opacity)
+                        )
                 }
             }
             // Transport block (scrubber + buttons). Hidden entirely while the
@@ -633,9 +643,14 @@ struct PlayerControls: View {
                 alignment: .top
             )
         } else {
-            // Pre-measurement (first frame of a fresh open): size to content, capped,
-            // so it renders correctly before the measured height takes over.
-            scroll.frame(maxHeight: Self.panelBodyMaxHeight)
+            // Pre-measurement (first frame of a fresh open): size the ScrollView to
+            // its content instead of framing it — a framed ScrollView is greedy and
+            // fills the whole cap (e.g. 440), then snaps down to the measured height,
+            // which reads as the panel visibly shrinking right after it appears. A
+            // content-sized ScrollView spawns at the correct height. (A very long
+            // track list may exceed the cap for a single frame before the measured
+            // height clamps + enables scroll — imperceptible and rare.)
+            scroll.fixedSize(horizontal: false, vertical: true)
         }
     }
 

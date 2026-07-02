@@ -805,7 +805,7 @@ struct PlayerControls: View {
                 Button {
                     openSubtitleScreen(.style)
                 } label: {
-                    Label("Edit", systemImage: "pencil")
+                    Label("Style", systemImage: "paintpalette")
                 }
                 .buttonStyle(PanelHeaderButtonStyle())
                 .focusEffectDisabled()

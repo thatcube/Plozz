@@ -21,14 +21,18 @@ import CoreModels
 /// front with a very high `zPosition`, which keeps it above the modally-presented
 /// covers (player, etc.) that are sibling subviews of that same window.
 ///
-/// The tint is a plain `UIView` whose `CALayer.backgroundColor` we set directly,
-/// *not* a hosted SwiftUI view. A `UIHostingController` attached straight to the
-/// window (outside the view-controller graph, as this must be to float above
-/// covers) never gets its SwiftUI update loop driven, so it renders once at
-/// launch and then ignores later `@Observable` changes — the tint would only
-/// refresh on the next launch. Painting the layer colour ourselves, driven by an
-/// explicit observation loop, repaints reliably the instant warmth/darkness/
-/// schedule change.
+/// Two things make the tint update *live* rather than only on the next launch:
+///  1. It's a plain `UIView` whose `CALayer.backgroundColor` we set directly, not
+///     a hosted SwiftUI view. A `UIHostingController` attached straight to the
+///     window (outside the view-controller graph, as this must be to float above
+///     covers) never gets its SwiftUI update loop driven, so it renders once and
+///     then ignores later changes.
+///  2. `AppState` rebuilds `nightShiftModel` on every profile switch (which also
+///     happens once at launch when the active profile is restored), so the model
+///     instance we're handed changes over the app's life. The coordinator
+///     re-points at the current instance on every SwiftUI update and re-arms its
+///     observation — otherwise it would keep tracking the original, now-dead
+///     model, and edits would only appear after a relaunch.
 
 // MARK: - Installer
 
@@ -45,24 +49,25 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let probe = UIView(frame: .zero)
         probe.isHidden = true
-        context.coordinator.installIfNeeded()
+        context.coordinator.sync(model: model)
         return probe
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.installIfNeeded()
+        context.coordinator.sync(model: model)
     }
 
     @MainActor
     final class Coordinator {
-        private let model: NightShiftSettingsModel
+        /// The *current* profile-scoped model. Re-pointed by `sync(model:)`
+        /// whenever `AppState` hands us a freshly rebuilt instance.
+        private var model: NightShiftSettingsModel
         private var tintView: UIView?
         private var attempts = 0
-        /// The tint lives straight on the `UIWindow`, so SwiftUI's implicit
-        /// `@Observable` tracking never re-runs against it. We drive repaints
-        /// ourselves with `withObservationTracking`; without this loop a live
-        /// warmth/darkness/schedule change would only take effect next launch.
-        private var isObserving = false
+        private var hasArmed = false
+        /// Bumped each time the observation loop is (re)armed so a loop left over
+        /// from a previous model instance self-terminates the next time it fires.
+        private var observationGeneration = 0
 
         private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
@@ -70,14 +75,24 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
             self.model = model
         }
 
-        func installIfNeeded() {
-            // Already attached to a window — just make sure it shows the current
-            // colour (e.g. after the model instance was swapped on a profile
-            // switch) and keep it frontmost.
-            if let view = tintView, view.superview != nil {
+        /// Called on every SwiftUI update with the current model. Attaches the
+        /// tint view if needed, and — when the model instance has changed (profile
+        /// switch) or we haven't armed yet — re-arms observation against it and
+        /// repaints so the new profile's tint shows immediately.
+        func sync(model newModel: NightShiftSettingsModel) {
+            let changed = newModel !== model
+            model = newModel
+            installIfNeeded()
+            if changed || !hasArmed {
+                hasArmed = true
+                armObservation()
                 paintTint(animated: false)
-                return
             }
+        }
+
+        private func installIfNeeded() {
+            // Already attached to a window — nothing to do.
+            if let view = tintView, view.superview != nil { return }
 
             guard let window = Self.mainWindow() else {
                 // The window can lag the first few layout passes — retry briefly.
@@ -103,34 +118,31 @@ private struct NightShiftOverlayInstaller: UIViewRepresentable {
 
             window.addSubview(view)
             paintTint(animated: false)
-            startObservingModel()
         }
 
         /// Repaints the tint whenever any value the multiply colour derives from
         /// changes. `withObservationTracking` is one-shot, so the change handler
-        /// repaints and then re-arms itself for the next change.
-        private func startObservingModel() {
-            guard !isObserving else { return }
-            isObserving = true
-            observeTintOnce()
-        }
-
-        private func observeTintOnce() {
+        /// repaints and then re-arms itself; a generation token drops any loop
+        /// still bound to a previous model instance.
+        private func armObservation() {
+            observationGeneration += 1
+            let generation = observationGeneration
+            let tracked = model
             withObservationTracking {
                 // Read the stored inputs directly (so `\.settings`, the preview
                 // sweep and the calibration flag all register) plus the derived
                 // colour (so the minute `tick` registers via its getter).
-                _ = model.settings
-                _ = model.isPreviewing
-                _ = model.previewDate
-                _ = model.channelScalars
+                _ = tracked.settings
+                _ = tracked.isPreviewing
+                _ = tracked.previewDate
+                _ = tracked.channelScalars
             } onChange: { [weak self] in
                 // `onChange` fires just before the value settles, so hop to the
                 // next main-actor turn to read the new value, repaint, and re-arm.
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, self.observationGeneration == generation else { return }
                     self.paintTint(animated: true)
-                    self.observeTintOnce()
+                    self.armObservation()
                 }
             }
         }

@@ -1020,6 +1020,10 @@ struct PlayerControls: View {
         .padding(.horizontal, 28)
         .padding(.top, 18)
         .padding(.bottom, 18)
+        // Group the header as a focus section so directional focus can reach it
+        // from anywhere below — e.g. pressing Up from the right (+) chip of the
+        // sync stepper lands on Back even though nothing is geometrically above it.
+        .focusSection()
     }
 
     private func headerTitle(for category: Category) -> String {
@@ -1121,9 +1125,10 @@ struct PlayerControls: View {
 
     /// Compact timing screen reached from the header Sync chip: nudge the primary
     /// subtitle earlier/later to line it up with the audio. A single − / value / +
-    /// stepper in 50 ms steps (matching the Speed stepper's look). Only offered
-    /// when the app's overlay owns the active subtitle, so the chip that opens it
-    /// is gated the same way.
+    /// stepper in 50 ms steps (matching the Speed stepper's look), with a dynamic
+    /// hint that states the current earlier/later result. Only offered when the
+    /// app's overlay owns the active subtitle, so the chip that opens it is gated
+    /// the same way.
     private var subtitleSyncScreen: some View {
         VStack(spacing: 16) {
             Text("Delay")
@@ -1136,11 +1141,13 @@ struct PlayerControls: View {
                 step: 0.05,
                 onAdjust: { actions.setSubtitleDelay(model.subtitleDelaySeconds + $0) }
             )
-            Text("Nudge the subtitles earlier or later to match the audio.")
+            Text(Self.subtitleSyncHint(model.subtitleDelaySeconds))
                 .font(.callout)
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .animation(.easeInOut(duration: 0.15), value: model.subtitleDelaySeconds)
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 6)
@@ -2186,6 +2193,21 @@ struct PlayerControls: View {
         let ms = Int((seconds * 1000).rounded())
         if ms == 0 { return "0 ms" }
         return ms > 0 ? "+\(ms) ms" : "\(ms) ms"
+    }
+
+    /// Human explanation of the current subtitle delay, shown under the sync
+    /// stepper. At 0 it teaches which chip does what; once adjusted it states the
+    /// actual result (positive delay = subtitles show later than the audio),
+    /// which resolves the perennial "does + make them earlier or later?" confusion.
+    static func subtitleSyncHint(_ seconds: TimeInterval) -> String {
+        let ms = Int((seconds * 1000).rounded())
+        if ms == 0 {
+            return "− shows subtitles earlier · + shows them later"
+        }
+        let magnitude = abs(ms)
+        return ms > 0
+            ? "Subtitles show \(magnitude) ms later than the audio"
+            : "Subtitles show \(magnitude) ms earlier than the audio"
     }
 
     static func timeLabel(_ seconds: TimeInterval) -> String {

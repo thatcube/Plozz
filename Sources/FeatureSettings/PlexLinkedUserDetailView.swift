@@ -36,10 +36,11 @@ struct PlexLinkedUserDetailView: View {
                         title: "On \(account.server.name)",
                         footer: "The account owner is the main Plex account holder; the others are managed/family users under it and may need a PIN. Plozz asks for the PIN on playback and never stores it."
                     ) {
-                        VStack(spacing: 0) {
+                        // Rows separated by a gap rather than flush dividers so
+                        // the focus lift doesn't paint over a divider line.
+                        VStack(spacing: 14) {
                             ownerRow(admin: admin, account: account)
                             if loading && users.isEmpty {
-                                Divider()
                                 HStack(spacing: 12) {
                                     ProgressView()
                                     Text("Loading Plex users…")
@@ -47,7 +48,6 @@ struct PlexLinkedUserDetailView: View {
                                 }
                                 .padding(.vertical, 16)
                             } else if managed.isEmpty {
-                                Divider()
                                 Text(users.isEmpty
                                      ? "No Plex Home users found for this account."
                                      : "No managed users on this Plex account.")
@@ -55,7 +55,6 @@ struct PlexLinkedUserDetailView: View {
                                     .padding(.vertical, 12)
                             } else {
                                 ForEach(managed) { user in
-                                    Divider()
                                     userRow(user, account: account)
                                 }
                             }

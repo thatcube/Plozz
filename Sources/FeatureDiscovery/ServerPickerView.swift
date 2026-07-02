@@ -50,19 +50,21 @@ public struct ServerPickerView: View {
                             .padding(.vertical, 8)
                             .padding(.horizontal, 12)
                     } else {
-                        VStack(spacing: 0) {
+                        // No flush dividers between rows: the focus highlight
+                        // bleeds a few points outward, so a divider sitting
+                        // directly against a row gets painted over on focus. A
+                        // gap lets each row's focus lift breathe and act as its
+                        // own separator (matches the Settings pages' row lists).
+                        VStack(spacing: 16) {
                             // Servers you already have accounts on come first —
                             // tap to add another user to them.
-                            ForEach(Array(signedIn.enumerated()), id: \.element.server) { idx, entry in
-                                if idx > 0 { Divider() }
+                            ForEach(signedIn, id: \.server) { entry in
                                 serverRow(entry.server, role: .signedIn(entry.userNames))
                             }
-                            ForEach(Array(recents.enumerated()), id: \.element) { idx, server in
-                                if idx > 0 || !signedIn.isEmpty { Divider() }
+                            ForEach(recents, id: \.self) { server in
                                 serverRow(server, role: .recent)
                             }
-                            ForEach(Array(discovered.enumerated()), id: \.element) { idx, server in
-                                if idx > 0 || !signedIn.isEmpty || !recents.isEmpty { Divider() }
+                            ForEach(discovered, id: \.self) { server in
                                 serverRow(server, role: .discovered)
                             }
                         }

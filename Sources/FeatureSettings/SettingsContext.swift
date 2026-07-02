@@ -60,23 +60,35 @@ enum SettingsRoute: Hashable {
 /// detail page so the visual treatment is consistent.
 struct SettingsPanel<Content: View>: View {
     let title: String?
+    var subtitle: String?
     var footer: String?
     @ViewBuilder let content: Content
 
-    init(title: String? = nil, footer: String? = nil, @ViewBuilder content: () -> Content) {
+    init(title: String? = nil, subtitle: String? = nil, footer: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.subtitle = subtitle
         self.footer = footer
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let title {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .textCase(.uppercase)
-                    .tracking(1.0)
-                    .foregroundStyle(.secondary)
+            if title != nil || subtitle != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let title {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                            .textCase(.uppercase)
+                            .tracking(1.0)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             content
             if let footer {

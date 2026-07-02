@@ -94,6 +94,11 @@ public enum PlozzTheme {
         public static let sectionTitleSpacing = Spacing.medium
         /// Standard horizontal inset from the screen edge.
         public static let screenPadding = Spacing.xLarge
+        /// Max content width for the Settings screens so cards/lists don't
+        /// stretch edge-to-edge on a wide TV. Shared by the root Settings page
+        /// and the drill-in detail pages (Servers, Profiles) so they all read
+        /// at the same width.
+        public static let settingsContentMaxWidth: CGFloat = 1200
         /// Vertical inset at the very top/bottom of a screen's scroll content.
         public static let screenVerticalPadding = Spacing.xLarge
         /// Headroom above a horizontal rail so a focused card's upward lift is
@@ -147,8 +152,10 @@ public enum PlozzTheme {
         public static let cardInset: CGFloat = 12
         /// Corner radius for standalone glass *panels* (settings cards, the mini
         /// player) — surfaces that don't nest inset artwork, so they aren't bound
-        /// by the concentric rule above and keep a fixed radius.
-        public static let mediumCardCornerRadius: CGFloat = 22
+        /// by the concentric rule above and keep a fixed radius. Tuned to match
+        /// the aggressive rounding of Home's poster glass (`posterArtCornerRadius`
+        /// + `cardInset` = 28) so panels read as part of the same card family.
+        public static let mediumCardCornerRadius: CGFloat = 28
         /// Optical clearance factor for a media card's caption: the title/metadata
         /// text is inset horizontally from the glass edge by this fraction of the
         /// card's *outer* corner radius, so left-aligned text clears the rounded

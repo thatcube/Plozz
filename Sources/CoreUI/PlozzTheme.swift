@@ -147,8 +147,10 @@ public enum PlozzTheme {
         public static let cardInset: CGFloat = 12
         /// Corner radius for standalone glass *panels* (settings cards, the mini
         /// player) — surfaces that don't nest inset artwork, so they aren't bound
-        /// by the concentric rule above and keep a fixed radius.
-        public static let mediumCardCornerRadius: CGFloat = 22
+        /// by the concentric rule above and keep a fixed radius. Tuned to match
+        /// the aggressive rounding of Home's poster glass (`posterArtCornerRadius`
+        /// + `cardInset` = 28) so panels read as part of the same card family.
+        public static let mediumCardCornerRadius: CGFloat = 28
         /// Optical clearance factor for a media card's caption: the title/metadata
         /// text is inset horizontally from the glass edge by this fraction of the
         /// card's *outer* corner radius, so left-aligned text clears the rounded

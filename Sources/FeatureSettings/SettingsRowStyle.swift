@@ -42,12 +42,12 @@ private struct SettingsFocusBody: View {
     @Environment(\.colorScheme) private var colorScheme
 
     // Concentric focus card: the top-level Settings cards use an outer radius
-    // of `mediumCardCornerRadius` (22) with 28pt horizontal / 16pt vertical
+    // of `mediumCardCornerRadius` (28) with 28pt horizontal / 16pt vertical
     // content padding. Extending the focus fill outward by 16pt H / 4pt V
     // leaves a UNIFORM 12pt gap on every side (28−16 = 16−4 = 12), and a focus
-    // corner of 22−12 = 10 makes the fill's corners concentric with the card's.
+    // corner of 28−12 = 16 makes the fill's corners concentric with the card's.
     // `.prominent` (taller server-list rows) keeps its own larger geometry.
-    private var corner: CGFloat { size == .prominent ? 18 : 10 }
+    private var corner: CGFloat { size == .prominent ? 18 : 16 }
     private var focusInsetH: CGFloat { size == .prominent ? 10 : 16 }
     private var focusInsetV: CGFloat { size == .prominent ? 6 : 4 }
 

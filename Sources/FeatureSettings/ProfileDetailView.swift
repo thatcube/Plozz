@@ -79,7 +79,7 @@ struct ProfileDetailView: View {
     private var profilesListPanel: some View {
         SettingsPanel(
             title: "Profiles",
-            footer: "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home customization. The only thing shared across every profile is the servers this Apple TV is signed in to (managed under This Apple TV › Servers)."
+            subtitle: "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared."
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(context.profiles) { profile in

@@ -700,6 +700,20 @@ struct PlayerControls: View {
             Divider().background(.white.opacity(0.15))
             morphingBody(styleFamily: styleFamily, category: category) { panelBodyContent(for: category) }
         }
+        // Hard-swap the panel chrome + content on the tracks↔Style flip instead of
+        // cross-fading it. `styleEditing` toggles ONLY on tracks→Style, and the
+        // ambient `.animation(.easeInOut, value: styleEditing)` up in `body` would
+        // otherwise capture this content-identity change and dissolve the track list
+        // into the Style editor: the header title ("Subtitles"→"Subtitle Style") and
+        // the rows ghost over each other, and the taller editor spills past the
+        // still-growing box. Nil-ing animation for styleEditing-driven changes on the
+        // whole panel makes header + rows swap instantly — exactly how the Style
+        // *sub-screen* morphs already behave (they don't flip styleEditing, so they
+        // never cross-fade). Only the box height then animates, via the explicit
+        // `withAnimation` in `onPreferenceChange`: "animate the container, not what's
+        // inside." The Spacer/transport layout flip keeps its animation (that modifier
+        // lives on `body`, above this override).
+        .animation(nil, value: styleEditing)
         .frame(width: panelWidth(for: category), alignment: .leading)
         .colorScheme(.dark)
         .modifier(PanelGlassBackground())
@@ -770,19 +784,6 @@ struct PlayerControls: View {
                 )
             }
         )
-        // Hard-swap the panel *content* on the tracks↔Style flip instead of
-        // cross-fading it. `styleEditing` toggles ONLY on tracks→Style, and the
-        // ambient `.animation(.easeInOut, value: styleEditing)` up in `body` would
-        // otherwise capture this content-identity change and dissolve the track
-        // list into the Style editor (the two ghost over each other, and the taller
-        // editor spills past the still-growing box). Nil-ing animation for
-        // styleEditing-driven changes on THIS subtree makes the rows swap instantly
-        // — exactly how the Style *sub-screen* morphs already behave (they don't flip
-        // styleEditing, so they never cross-fade). Only the box height then animates,
-        // via the explicit `withAnimation` in `onPreferenceChange`: "animate the
-        // container, not what's inside." The Spacer/transport layout flip keeps its
-        // animation because that lives on `body`, above this override.
-        .animation(nil, value: styleEditing)
 
         if styleBodyHeight > 0 {
             ScrollView {
@@ -1665,6 +1666,24 @@ struct PlayerControls: View {
     }
 
     private func openSubtitleScreen(_ screen: SubtitleScreen) {
+        // Entering the Style editor from the (non-style) track list flips the body
+        // from the capped, scrollable list to the UNCAPPED Style column. At this point
+        // `styleBodyHeight` still holds the track list's full measured content height,
+        // which for a film with ~60 language tracks is ~2000pt — far past the cap it
+        // was actually displayed at. Uncapping without clamping would snap the box to
+        // that stale height and then shrink it down to the ~700pt editor: a violent
+        // overshoot (invisible on short lists, where the stale height already ≈ the
+        // editor height). Clamp the morph baseline to the height the list was really
+        // showing so the box grows cleanly from the cap up to the editor instead of
+        // collapsing into it from far above. The snap is un-animated; the subsequent
+        // grow to the editor's true height animates via `onPreferenceChange`.
+        if !subtitleScreen.isStyleFamily && screen.isStyleFamily {
+            var snap = Transaction()
+            snap.disablesAnimations = true
+            withTransaction(snap) {
+                styleBodyHeight = min(styleBodyHeight, Self.panelBodyMaxHeight)
+            }
+        }
         subtitleScreen = screen
         switch screen {
         case .tracks: focus = .row(selectedRowIndex(for: .subtitles))

@@ -118,17 +118,19 @@ public struct RootView: View {
                 if appState.isChoosingProfile {
                     ProfileSelectionView(appState: appState, canCancel: appState.isProfileSelectionCancelable)
                         .transition(.opacity)
-                } else if !hasSeenWelcome {
-                    // First run after the first sign-in: introduce Plozz's
-                    // features (dual-provider libraries, profiles, trackers,
-                    // cinema playback, customization) before dropping the user
-                    // into Home. Shown once; always re-viewable from
-                    // Settings ▸ "What Plozz Can Do".
-                    WelcomeView(onGetStarted: { hasSeenWelcome = true })
-                        .transition(.opacity)
                 } else {
                     let accounts = appState.homeAccounts
                     if !accounts.isEmpty {
+                    if !hasSeenWelcome {
+                        // First run after the first sign-in: introduce Plozz's
+                        // features (dual-provider libraries, profiles, trackers,
+                        // cinema playback, customization) before dropping the
+                        // user into Home. Shown once; always re-viewable from
+                        // Settings ▸ "What Plozz Can Do". Gated on having a
+                        // usable account so it never appears over an empty Home.
+                        WelcomeView(onGetStarted: { hasSeenWelcome = true })
+                            .transition(.opacity)
+                    } else {
                     MainTabView(
                         accounts: accounts,
                         subtitleBehaviorModel: appState.subtitleBehaviorModel,
@@ -198,6 +200,7 @@ public struct RootView: View {
                     )
                     .id("\(appState.profilesModel.activeProfileID)#\(appState.plexIdentityGeneration)")
                     .transition(.opacity)
+                    }
                     }
                 }
                 }

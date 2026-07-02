@@ -151,6 +151,17 @@ struct PlayerControls: View {
     /// open always snaps.
     @State private var measuredPanel: Category? = nil
 
+    /// Last measured natural body height per panel, so a *reopen* can seed
+    /// `styleBodyHeight` with the right value from frame one. That keeps the panel in
+    /// the measured (`ScrollView`) branch from the first frame instead of starting in
+    /// the pre-measure branch and structurally swapping to the ScrollView a frame
+    /// later — that swap tore down and rebuilt the focusable rows mid-open, letting
+    /// the focus engine write its default (top row) back into `focus` before our
+    /// intended `.row(selected)` could claim it. Seeding removes the swap, so initial
+    /// focus lands consistently on the active row. (For Subtitles we only cache the
+    /// tracks-screen height, since a fresh open always starts on the track list.)
+    @State private var cachedPanelHeight: [Category: CGFloat] = [:]
+
     /// Hold-to-accelerate state for the numeric style rows. `.onMoveCommand`
     /// repeats while a direction is held on the remote, so we ramp the step size
     /// as a same-direction streak builds on one focused row (fine taps stay 1×;
@@ -217,6 +228,15 @@ struct PlayerControls: View {
                 return
             }
             titleVisible = false
+            // Seed the box height from the last time this panel was open so it renders
+            // in the measured (ScrollView) branch immediately — no pre-measure→measured
+            // structural swap that would rebuild the rows and knock initial focus to the
+            // top. A cache miss (first open) falls back to 0 → pre-measure branch.
+            styleBodyHeight = cachedPanelHeight[panel] ?? 0
+            // A cache hit means we already "know" this panel's height, so a later
+            // same-panel change is a morph (animate); a miss leaves it unmeasured so the
+            // first measurement snaps.
+            measuredPanel = styleBodyHeight > 0 ? panel : nil
             if panel == .info {
                 focus = model.hasNextEpisode ? .infoNext
                     : (model.hasPreviousEpisode ? .infoPrev : .infoRestart)
@@ -621,6 +641,13 @@ struct PlayerControls: View {
                   newHeight > 0,
                   newHeight != styleBodyHeight
             else { return }
+            // Remember this panel's natural height so the next open can seed it and skip
+            // the pre-measure→measured swap (see cachedPanelHeight). For Subtitles only
+            // cache the tracks-list height — a fresh open always starts on the track list,
+            // so we must not seed it with the taller Style-editor height.
+            if panel != .subtitles || subtitleScreen == .tracks {
+                cachedPanelHeight[panel] = newHeight
+            }
             if measuredPanel != panel {
                 // First measurement for THIS panel → snap to its natural size.
                 // This write runs *inside* the ambient `.animation(value: openPanel)`

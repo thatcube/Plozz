@@ -159,6 +159,12 @@ public final class PlayerControlsModel {
     public var audioDelaySeconds: TimeInterval = 0
     /// Subtitle offset in seconds (positive = subs later than video).
     public var subtitleDelaySeconds: TimeInterval = 0
+    /// Whether subtitle timing can actually be shifted right now: true when the
+    /// app's overlay owns the active primary subtitle (a sidecar timeline or an
+    /// engine live-feed), so the app-side offset moves the on-screen track.
+    /// False when subtitles are off or the underlying player draws an embedded
+    /// text track we can't shift. Gates the in-player "Sync" control.
+    public var subtitleDelayAdjustable: Bool = false
     /// Whether the dialog-enhance audio filter is engaged (when supported).
     public var dialogEnhanceEnabled: Bool = false
 

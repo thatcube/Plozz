@@ -1098,6 +1098,7 @@ public final class PlayerViewModel {
         #endif
         liveSubtitles.offset = 0
         liveSubtitles.clear()
+        refreshSubtitleDelayAvailability()
 
         // Route the load-time DEFAULT subtitle through Plozz's own overlay (same
         // as a manual pick) instead of letting AVPlayer / the engine draw it, so
@@ -1647,6 +1648,16 @@ public final class PlayerViewModel {
         // shift an injected sidecar, so when our overlay owns the track this is
         // what actually makes "Subtitle delay" work for text subtitles.
         liveSubtitles.offset = clamped
+    }
+
+    /// Mirrors whether the overlay owns the active *primary* subtitle into the
+    /// controls model. The in-player "Sync" control is gated on this: app-side
+    /// ``LiveSubtitleModel/offset`` only shifts the on-screen track when the
+    /// overlay drives it (sidecar timeline or engine live-feed), so the chip is
+    /// hidden for subtitles-off and player-drawn embedded text. Call after any
+    /// change to the primary overlay stream.
+    private func refreshSubtitleDelayAvailability() {
+        controls.subtitleDelayAdjustable = liveSubtitles.rendersPrimary
     }
 
     public func setDialogEnhanceEnabled(_ enabled: Bool) {
@@ -2234,6 +2245,7 @@ public final class PlayerViewModel {
         subtitleCueLoadTask?.cancel()
         subtitleCueLoadTask = nil
         liveSubtitles.beginLiveFeed()
+        refreshSubtitleDelayAvailability()
         engine.selectSubtitleTrack(track)
         selectedSubtitleTrackID = id
         #if DEBUG
@@ -2249,6 +2261,7 @@ public final class PlayerViewModel {
         subtitleCueLoadTask?.cancel()
         subtitleCueLoadTask = nil
         liveSubtitles.loadPrimary(nil)
+        refreshSubtitleDelayAvailability()
     }
 
     /// Fetches the selected text sidecar, parses it to cues off the main actor,
@@ -2259,6 +2272,7 @@ public final class PlayerViewModel {
         // Clear only the primary stream; a selected dual/secondary line survives a
         // primary track change.
         liveSubtitles.loadPrimary(nil)
+        refreshSubtitleDelayAvailability()
         guard let url = track.deliveryURL else {
             // Embedded text without a sidecar URL: container extraction arrives
             // with the Plozzigen cue path; leave nothing showing until then.
@@ -2298,6 +2312,7 @@ public final class PlayerViewModel {
                     if let detected, storedNew { self.detectedSubtitleLanguages[id] = detected }
                     if self.selectedSubtitleTrackID == id {
                         self.liveSubtitles.loadPrimary(stream)
+                        self.refreshSubtitleDelayAvailability()
                         #if DEBUG
                         self.setPrimarySubtitleDiagnostic(route: "overlay", cues: stream.cues.count)
                         #endif

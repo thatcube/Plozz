@@ -989,9 +989,10 @@ struct PlayerControls: View {
                 .foregroundStyle(.white)
             Spacer(minLength: 12)
             if category == .subtitles && subtitleScreen == .tracks {
-                // Timing (Sync) chip — only when the engine can actually shift
-                // subtitle timing. Sits left of Style; opens a compact delay screen.
-                if model.engineCapabilities.contains(.subtitleDelay) {
+                // Timing (Sync) chip — only when the app's overlay owns the active
+                // subtitle, so the app-side offset can actually shift it. Sits left
+                // of Style; opens a compact delay screen.
+                if model.subtitleDelayAdjustable {
                     Button {
                         openSubtitleScreen(.sync)
                     } label: {
@@ -1117,8 +1118,8 @@ struct PlayerControls: View {
 
     /// Compact timing screen reached from the header Sync chip: nudge the primary
     /// subtitle earlier/later to line it up with the audio. Reuses the delay stepper
-    /// (coarse ±500 ms / fine ±50 ms / Reset). Only offered when the engine reports
-    /// `.subtitleDelay`, so the chip that opens it is gated the same way.
+    /// (coarse ±500 ms / fine ±50 ms / Reset). Only offered when the app's overlay
+    /// owns the active subtitle, so the chip that opens it is gated the same way.
     private var subtitleSyncScreen: some View {
         VStack(alignment: .leading, spacing: 12) {
             delayRow(

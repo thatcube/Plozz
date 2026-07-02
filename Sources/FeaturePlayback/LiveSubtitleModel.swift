@@ -68,6 +68,16 @@ public final class LiveSubtitleModel {
         primaryTimeline != nil || secondaryTimeline != nil || isLiveFeed || isSecondaryLiveFeed
     }
 
+    /// `true` when the overlay owns the **primary** subtitle — either a sidecar
+    /// timeline we drive or an engine live-feed we time-filter. This is exactly
+    /// when ``offset`` (app-side subtitle sync) actually shifts the on-screen
+    /// track, so the host gates the in-player "Sync" control on it. False for
+    /// subtitles-off and for embedded text the underlying player draws itself
+    /// (where the app can't shift the timeline).
+    public var rendersPrimary: Bool {
+        primaryTimeline != nil || isLiveFeed
+    }
+
     /// Global sync offset in seconds (positive = show subtitles later). Applied to
     /// both tracks and forces the next ``tick(_:)`` to recompute.
     public var offset: Double {

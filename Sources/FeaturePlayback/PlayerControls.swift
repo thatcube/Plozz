@@ -634,8 +634,9 @@ struct PlayerControls: View {
             case .download:
                 return .subBack
             case .sync:
-                // Land on the centre Reset — the neutral anchor between the ± nudges.
-                return .row(2)
+                // Land on the − nudge (leftmost control); the value and + sit to
+                // its right.
+                return .row(0)
             case .style:
                 return model.secondarySubtitleImagePrimaryFormat == nil ? .row(0) : .subBack
             case .styleFont:
@@ -991,12 +992,14 @@ struct PlayerControls: View {
             if category == .subtitles && subtitleScreen == .tracks {
                 // Timing (Sync) chip — only when the app's overlay owns the active
                 // subtitle, so the app-side offset can actually shift it. Sits left
-                // of Style; opens a compact delay screen.
+                // of Style; opens a compact delay screen. Icon-only (clock) so the
+                // header fits the title plus both chips.
                 if model.subtitleDelayAdjustable {
                     Button {
                         openSubtitleScreen(.sync)
                     } label: {
-                        Label("Sync", systemImage: "clock")
+                        Image(systemName: "clock")
+                            .accessibilityLabel("Subtitle Sync")
                     }
                     .buttonStyle(PanelHeaderButtonStyle())
                     .focusEffectDisabled()
@@ -1117,25 +1120,69 @@ struct PlayerControls: View {
     }
 
     /// Compact timing screen reached from the header Sync chip: nudge the primary
-    /// subtitle earlier/later to line it up with the audio. Reuses the delay stepper
-    /// (coarse ±500 ms / fine ±50 ms / Reset). Only offered when the app's overlay
-    /// owns the active subtitle, so the chip that opens it is gated the same way.
+    /// subtitle earlier/later to line it up with the audio. A single − / value / +
+    /// stepper in 50 ms steps (matching the Speed stepper's look). Only offered
+    /// when the app's overlay owns the active subtitle, so the chip that opens it
+    /// is gated the same way.
     private var subtitleSyncScreen: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            delayRow(
-                title: "Delay",
+        VStack(spacing: 16) {
+            Text("Delay")
+                .font(.title3.weight(.medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            delayStepper(
                 value: model.subtitleDelaySeconds,
-                firstSlot: 0,
-                onAdjust: { actions.setSubtitleDelay(model.subtitleDelaySeconds + $0) },
-                onReset: { actions.setSubtitleDelay(0) }
+                minusSlot: 0,
+                plusSlot: 1,
+                step: 0.05,
+                onAdjust: { actions.setSubtitleDelay(model.subtitleDelaySeconds + $0) }
             )
             Text("Nudge the subtitles earlier or later to match the audio.")
                 .font(.callout)
                 .foregroundStyle(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 6)
+    }
+
+    /// A compact − / value / + stepper for the subtitle-sync screen. The ± are
+    /// discrete focusable chips (bound to `minusSlot` / `plusSlot`) that reuse the
+    /// Speed stepper's circular `StepperButtonStyle`; the live value sits centred
+    /// between them in ms.
+    private func delayStepper(
+        value: TimeInterval,
+        minusSlot: Int,
+        plusSlot: Int,
+        step: TimeInterval,
+        onAdjust: @escaping (TimeInterval) -> Void
+    ) -> some View {
+        HStack(spacing: 24) {
+            Button { onAdjust(-step) } label: {
+                Image(systemName: "minus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 56, height: 56)
+            }
+            .buttonStyle(StepperButtonStyle())
+            .focused($focus, equals: .row(minusSlot))
+
+            Text(Self.delayLabel(value))
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
+                .animation(.easeOut(duration: 0.16), value: value)
+                .frame(minWidth: 104)
+
+            Button { onAdjust(step) } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 56, height: 56)
+            }
+            .buttonStyle(StepperButtonStyle())
+            .focused($focus, equals: .row(plusSlot))
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: Subtitle style editor (hybrid full-width rows)

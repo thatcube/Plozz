@@ -93,9 +93,11 @@ public struct SettingsStepper<Value: Hashable>: View {
 
 /// Round step button mirroring the segmented picker's theme-aware focus thumb:
 /// a subtle neutral chip at rest, the bright inverted thumb (white-on-dark /
-/// black-on-light) when focused.
-private struct StepperButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
+/// black-on-light) when focused. Public so compact ± steppers built outside this
+/// component (e.g. the in-player subtitle-sync control) share the exact look.
+public struct StepperButtonStyle: ButtonStyle {
+    public init() {}
+    public func makeBody(configuration: Configuration) -> some View {
         StepperButtonBody(configuration: configuration)
     }
 

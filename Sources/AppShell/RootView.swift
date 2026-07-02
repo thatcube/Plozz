@@ -107,6 +107,19 @@ public struct RootView: View {
                     onCancel: { appState.cancelAuthentication() }
                 )
 
+            case .onboarding(.selectPlexUser, _):
+                if let selection = appState.pendingPlexUserSelection {
+                    PlexUserSelectionView(
+                        selection: selection,
+                        onSelect: { user in appState.selectPlexUserDuringOnboarding(user) }
+                    )
+                } else {
+                    LaunchView()
+                }
+
+            case .onboarding(.enableProfilesPrompt, _):
+                EnableProfilesView(appState: appState)
+
             case .onboarding(.confirmProfile, _):
                 FirstRunProfileView(appState: appState)
 

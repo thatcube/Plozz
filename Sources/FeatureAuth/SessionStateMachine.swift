@@ -27,6 +27,14 @@ public enum OnboardingStep: Equatable, Sendable {
     case selectingServer
     /// Server chosen, running Quick Connect / password sign-in.
     case authenticating(MediaServer)
+    /// Plex account with 2+ Home users just signed in — pick which Home user
+    /// this profile watches as ("Which Plex user are you?"). Shown the first
+    /// time a profile encounters a given Plex account (both first run and later
+    /// adds); the choice is remembered on the profile afterward.
+    case selectPlexUser
+    /// First-ever account on a brand-new install — ask whether to set up
+    /// multiple Plozz profiles for this Apple TV (the explainer screen).
+    case enableProfilesPrompt
     /// First-ever account was just added on a brand-new install; confirm (or
     /// edit) the profile we seeded from the sign-in before entering the app.
     case confirmProfile
@@ -57,8 +65,16 @@ public enum SessionEvent: Sendable {
     /// An account finished authenticating and was persisted.
     case accountAuthenticated
     /// The *first-ever* account finished authenticating on a brand-new install;
-    /// detour through the one-time profile confirm step before the app.
+    /// detour through the one-time profile-setup sub-flow (enable-profiles
+    /// prompt, then confirm) before the app.
     case accountAuthenticatedNeedsProfile
+    /// A signed-in Plex account has 2+ Home users and this profile hasn't bound
+    /// one yet — show the "Which Plex user are you?" picker.
+    case plexUserSelectionRequired
+    /// The user chose to set up profiles on the first-run prompt.
+    case profilesEnabled
+    /// The user declined profiles on the first-run prompt ("Not Now — Just Me").
+    case profilesDeclined
     /// The user confirmed (or edited) their seeded profile on first run.
     case profileConfirmed
     case authenticationFailed(AppError)
@@ -106,13 +122,29 @@ public struct SessionStateMachine: Sendable {
         // Authentication outcomes.
         case (.onboarding(.authenticating, _), .accountAuthenticated):
             return .ready
+        // A Plex account with 2+ Home users needs the "Which Plex user are you?"
+        // step. There is now ≥1 account behind it, so `canReturnToApp` is true.
+        case (.onboarding(.authenticating, _), .plexUserSelectionRequired):
+            return .onboarding(.selectPlexUser, canReturnToApp: true)
         // First-ever account on a fresh install: detour through the one-time
-        // profile confirm step before entering the app. There is now ≥1 account
-        // behind it, so `canReturnToApp` is true.
-        case (.onboarding(.authenticating, _), .accountAuthenticatedNeedsProfile):
-            return .onboarding(.confirmProfile, canReturnToApp: true)
+        // profile-setup sub-flow before entering the app. There is now ≥1 account
+        // behind it, so `canReturnToApp` is true. Reachable straight from auth
+        // (Jellyfin, or Plex with <2 Home users) or after the Plex-user pick.
+        case (.onboarding(.authenticating, _), .accountAuthenticatedNeedsProfile),
+             (.onboarding(.selectPlexUser, _), .accountAuthenticatedNeedsProfile):
+            return .onboarding(.enableProfilesPrompt, canReturnToApp: true)
         case let (.onboarding(.authenticating, canReturn), .authenticationFailed(error)):
             return .failed(error, canReturnToApp: canReturn)
+
+        // Plex-user pick on a *later* add (not first run) goes straight to the app.
+        case (.onboarding(.selectPlexUser, _), .accountAuthenticated):
+            return .ready
+
+        // First-run enable-profiles decision.
+        case (.onboarding(.enableProfilesPrompt, _), .profilesEnabled):
+            return .onboarding(.confirmProfile, canReturnToApp: true)
+        case (.onboarding(.enableProfilesPrompt, _), .profilesDeclined):
+            return .ready
 
         // Finished the one-time first-run profile confirm step.
         case (.onboarding(.confirmProfile, _), .profileConfirmed):

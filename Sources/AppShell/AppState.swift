@@ -127,6 +127,21 @@ public final class AppState {
     /// Plex Home user.
     public private(set) var plexIdentityGeneration = 0
 
+    /// A pending "Which Plex user are you?" step, populated after a Plex account
+    /// with 2+ Home users signs in (and this profile hasn't bound one yet).
+    /// `RootView` presents the picker bound to this; `nil` when none is pending.
+    public private(set) var pendingPlexUserSelection: PendingPlexUserSelection?
+
+    /// Context for the "Which Plex user are you?" onboarding step.
+    public struct PendingPlexUserSelection: Equatable, Sendable {
+        public let accountID: String
+        public let serverName: String
+        public let users: [PlexHomeUser]
+        /// Whether this selection is happening during a brand-new-install first
+        /// run (drives whether we continue to profile-setup or the app).
+        public let isFirstRun: Bool
+    }
+
     /// A profile activation waiting on a Plex Home user's PIN.
     public struct PlexPINRequest: Identifiable, Equatable, Sendable {
         /// The id of the profile being activated.
@@ -1157,19 +1172,105 @@ public final class AppState {
             return
         }
         reloadAccounts()
-        if isFirstRun {
-            // Default the profile to who they just signed in as; the confirm
-            // step lets them keep or edit it before entering the app.
-            profilesModel.seedDefaultProfileIdentity(
-                name: session.userName,
-                avatarImageURL: session.avatarURL?.absoluteString
+        // Flow finished — next add-account starts at the chooser.
+        pendingOnboardingProvider = nil
+        finishAuthentication(session: session, accountID: account.id, isFirstRun: isFirstRun)
+    }
+
+    /// After an account is persisted, decides the next onboarding step. A Plex
+    /// account with 2+ Home users that this profile hasn't bound yet detours
+    /// through the "Which Plex user are you?" picker first; otherwise we proceed
+    /// straight to the profile-setup sub-flow (first run) or the app.
+    private func finishAuthentication(session: UserSession, accountID: String, isFirstRun: Bool) {
+        if session.server.provider == .plex,
+           profilesModel.activeProfile.homeUserBinding(forPlexAccount: accountID) == nil {
+            Task { [weak self] in
+                guard let self else { return }
+                let users = await self.plexHomeUsers(forAccountID: accountID)
+                if users.count >= 2 {
+                    self.pendingPlexUserSelection = PendingPlexUserSelection(
+                        accountID: accountID,
+                        serverName: session.server.name,
+                        users: users,
+                        isFirstRun: isFirstRun
+                    )
+                    self.apply(.plexUserSelectionRequired)
+                } else {
+                    self.proceedAfterAuth(
+                        isFirstRun: isFirstRun,
+                        seedName: session.userName,
+                        seedAvatar: session.avatarURL?.absoluteString
+                    )
+                }
+            }
+        } else {
+            proceedAfterAuth(
+                isFirstRun: isFirstRun,
+                seedName: session.userName,
+                seedAvatar: session.avatarURL?.absoluteString
             )
+        }
+    }
+
+    /// Enters the first-run profile-setup sub-flow (seeding the default profile
+    /// from the signed-in identity) or, for a later add, drops straight into the
+    /// app.
+    private func proceedAfterAuth(isFirstRun: Bool, seedName: String, seedAvatar: String?) {
+        if isFirstRun {
+            profilesModel.seedDefaultProfileIdentity(name: seedName, avatarImageURL: seedAvatar)
             apply(.accountAuthenticatedNeedsProfile)
         } else {
             apply(.accountAuthenticated)
         }
-        // Flow finished — next add-account starts at the chooser.
-        pendingOnboardingProvider = nil
+    }
+
+    /// Handles the "Which Plex user are you?" pick. Binds the chosen Home user to
+    /// the active profile, and on first run re-seeds the profile identity from
+    /// that user (so the confirm screen shows *who's watching*, not the account
+    /// owner). Then continues to the profile-setup sub-flow (first run) or the
+    /// app, applying the binding so the Plex identity switches.
+    public func selectPlexUserDuringOnboarding(_ user: PlexHomeUser?) {
+        guard let pending = pendingPlexUserSelection else { return }
+        if let user {
+            let binding = PlexHomeUserBinding(
+                homeUserID: user.id,
+                name: user.name,
+                avatarURL: user.avatarURL?.absoluteString,
+                requiresPIN: user.requiresPIN
+            )
+            let updated = profilesModel.activeProfile
+                .settingHomeUserBinding(binding, forPlexAccount: pending.accountID)
+            profilesModel.update(updated)
+        }
+        pendingPlexUserSelection = nil
+        if pending.isFirstRun {
+            profilesModel.seedDefaultProfileIdentity(
+                name: user?.name ?? "",
+                avatarImageURL: user?.avatarURL?.absoluteString
+            )
+            apply(.accountAuthenticatedNeedsProfile)
+        } else {
+            apply(.accountAuthenticated)
+            // Apply the freshly-picked binding now (a protected user raises the
+            // PIN prompt); first run applies it once onboarding completes.
+            ensurePlexIdentityForActiveProfile()
+        }
+    }
+
+    /// First-run "Set Up Profiles": turns on the profiles feature (making it
+    /// visible in Settings + Apple-TV-user aware) and advances to the confirm
+    /// screen so they can keep or edit the seeded profile.
+    public func enableProfilesForFirstRun() {
+        profilesModel.enableProfiles()
+        apply(.profilesEnabled)
+    }
+
+    /// First-run "Not Now — Just Me": keeps profiles hidden/disabled, marks
+    /// first-run setup done, and enters the app with the single seeded profile.
+    public func declineProfilesForFirstRun() {
+        profilesModel.markFirstRunProfileSetupComplete()
+        apply(.profilesDeclined)
+        ensurePlexIdentityForActiveProfile()
     }
 
     /// Completes the one-time first-run profile confirm step and enters the app.
@@ -1177,6 +1278,9 @@ public final class AppState {
     public func confirmFirstRunProfile() {
         profilesModel.markFirstRunProfileSetupComplete()
         apply(.profileConfirmed)
+        // Apply any Plex Home-user binding picked during onboarding now that we
+        // enter the app (a protected user raises the PIN prompt here).
+        ensurePlexIdentityForActiveProfile()
     }
 
     /// Completes a Plex sign-in started from the provider chooser.
@@ -1252,6 +1356,7 @@ public final class AppState {
         profilesModel.resetToPristineDefaultForDebugging()
         var recents = lastServerStore
         recents.recentServers = []
+        pendingPlexUserSelection = nil
         isChoosingProfile = false
         reloadAccounts()
         rebuildSettingsModels()

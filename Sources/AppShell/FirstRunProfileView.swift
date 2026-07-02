@@ -4,10 +4,11 @@ import CoreModels
 import CoreUI
 import FeatureProfiles
 
-/// One-time first-run step shown right after the very first server is added on
-/// a brand-new install. The always-present default profile has already been
+/// One-time first-run step shown after the user chose to set up profiles on a
+/// brand-new install. The always-present default profile has already been
 /// seeded with the signed-in identity (name + photo); this lets the user keep
-/// it ("Looks good") or open the shared editor to change the name/avatar.
+/// it ("Looks good") or open the shared editor to change the name/avatar. The
+/// Apple-TV-user explanation lives on the preceding `EnableProfilesView`.
 ///
 /// It never appears again once completed — signing out of everything and
 /// re-adding a server skips straight into the app (see
@@ -34,7 +35,7 @@ struct FirstRunProfileView: View {
                         .font(.largeTitle.weight(.bold))
                         .multilineTextAlignment(.center)
 
-                    Text("We set up your profile from your sign-in. It’s linked to your Apple TV user — switching users switches your Plozz profile too, but everyone here shares the same servers.")
+                    Text("This is your profile — keep it or make it your own.")
                         .font(.title3)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

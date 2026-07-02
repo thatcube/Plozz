@@ -39,19 +39,51 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .ready)
     }
 
-    func testFirstRunAuthDetoursThroughProfileConfirm() {
-        // First-ever account: auth success routes to the one-time profile
-        // confirm step (not straight to the app), then confirming enters it.
+    func testFirstRunAuthDetoursThroughProfileSetup() {
+        // First-ever account: auth success routes into the profile-setup
+        // sub-flow (enable-profiles prompt → confirm), not straight to the app.
         var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
         m.apply(.accountAuthenticatedNeedsProfile)
+        XCTAssertEqual(m.state, .onboarding(.enableProfilesPrompt, canReturnToApp: true))
+        m.apply(.profilesEnabled)
         XCTAssertEqual(m.state, .onboarding(.confirmProfile, canReturnToApp: true))
         m.apply(.profileConfirmed)
         XCTAssertEqual(m.state, .ready)
     }
 
-    func testAddAnotherAccountNeverShowsProfileConfirm() {
+    func testFirstRunDeclineProfilesGoesStraightToApp() {
+        // "Not Now — Just Me" on the enable-profiles prompt enters the app
+        // without the confirm screen.
+        var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
+        m.apply(.accountAuthenticatedNeedsProfile)
+        XCTAssertEqual(m.state, .onboarding(.enableProfilesPrompt, canReturnToApp: true))
+        m.apply(.profilesDeclined)
+        XCTAssertEqual(m.state, .ready)
+    }
+
+    func testPlexUserSelectionThenFirstRunProfileSetup() {
+        // Plex with 2+ Home users on first run: pick the Plex user, then enter
+        // the profile-setup sub-flow.
+        var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
+        m.apply(.plexUserSelectionRequired)
+        XCTAssertEqual(m.state, .onboarding(.selectPlexUser, canReturnToApp: true))
+        m.apply(.accountAuthenticatedNeedsProfile)
+        XCTAssertEqual(m.state, .onboarding(.enableProfilesPrompt, canReturnToApp: true))
+    }
+
+    func testPlexUserSelectionOnLaterAddReturnsToApp() {
+        // Plex with 2+ Home users added later (not first run): pick the user,
+        // then straight back to the app — no profile-setup detour.
+        var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: true))
+        m.apply(.plexUserSelectionRequired)
+        XCTAssertEqual(m.state, .onboarding(.selectPlexUser, canReturnToApp: true))
+        m.apply(.accountAuthenticated)
+        XCTAssertEqual(m.state, .ready)
+    }
+
+    func testAddAnotherAccountNeverShowsProfileSetup() {
         // Adding a server later uses the plain `.accountAuthenticated` event and
-        // must not detour through the confirm step.
+        // must not detour through the profile-setup sub-flow.
         var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: true))
         m.apply(.accountAuthenticated)
         XCTAssertEqual(m.state, .ready)

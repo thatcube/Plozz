@@ -14,17 +14,33 @@ public final class ServerPickerViewModel {
         case error(String)
     }
 
+    /// Live status of a server row, driving its trailing badge.
+    public enum ServerStatus: Equatable, Sendable {
+        /// Heard from on the local network during this scan.
+        case onNetwork
+        /// Not on the LAN, but a direct probe confirmed it's reachable
+        /// (e.g. a remote or Tailscale server).
+        case online
+        /// A direct probe failed — likely offline or unreachable right now.
+        case offline
+        /// Not yet determined (probe still running, or never probed).
+        case unknown
+    }
+
     public private(set) var phase: Phase = .idle
     public private(set) var discoveredServers: [MediaServer] = []
     /// Whether this Apple TV is currently connected to a Tailscale network.
     /// Drives the conditional Tailscale guidance in the picker.
     public private(set) var isOnTailscale: Bool = false
-    /// This device's own Tailscale IPv4 address when connected, for display.
+    /// This device's own Tailscale IPv4 address when connected. Retained for
+    /// detection/telemetry; the picker no longer surfaces it to the user.
     public private(set) var tailscaleIP: String?
-    /// Reachability of `lastServer`: `nil` while unknown/checking, then the
-    /// result of a live probe (or `true` the moment LAN discovery re-finds it).
-    public private(set) var lastServerReachable: Bool?
     public var manualURLText: String = ""
+
+    /// Per-server reachability from direct probes, keyed by `ServerIdentity.key`.
+    private var reachabilityByKey: [String: Bool] = [:]
+    /// Servers heard from on the LAN during the current scan, keyed the same way.
+    private var lanKeys: Set<String> = []
 
     private let discovery: ServerDiscovering
     private let validator: ServerValidator
@@ -54,23 +70,50 @@ public final class ServerPickerViewModel {
     }
     #endif
 
-    /// The previously-used server, offered as a one-tap reconnect option.
+    /// Recently-used servers, most-recent first, offered as one-tap reconnects.
+    /// Includes manually-entered and Tailscale servers that LAN discovery can't
+    /// re-find on its own.
+    public var recentServers: [MediaServer] { store.recentServers }
+
+    /// The single most-recently-used server, if any.
     public var lastServer: MediaServer? { store.lastServer }
 
+    /// Reachability of the most-recent server, derived from its live status.
+    /// Kept as a convenience for callers (and tests) that only care about the
+    /// primary reconnect target.
+    public var lastServerReachable: Bool? {
+        guard let last = store.recentServers.first else { return nil }
+        switch status(for: last) {
+        case .onNetwork, .online: return true
+        case .offline: return false
+        case .unknown: return nil
+        }
+    }
+
+    /// The live status for a server row (LAN presence + probe result).
+    public func status(for server: MediaServer) -> ServerStatus {
+        let key = ServerIdentity.key(for: server)
+        if lanKeys.contains(key) { return .onNetwork }
+        switch reachabilityByKey[key] {
+        case .some(true): return .online
+        case .some(false): return .offline
+        case .none: return .unknown
+        }
+    }
+
     /// Starts a LAN scan, appending servers as they answer. In parallel, probes
-    /// the saved server directly so we can tell the user whether it's online
-    /// even when broadcast discovery comes back empty.
+    /// every recent server directly so we can tell the user whether each is
+    /// online even when broadcast discovery comes back empty.
     public func startScan(timeout: TimeInterval = 6) {
         scanTask?.cancel()
         reachabilityTask?.cancel()
         discoveredServers = []
+        lanKeys = []
+        reachabilityByKey = [:]
         phase = .scanning
         refreshTailscaleState()
 
-        if store.lastServer != nil {
-            lastServerReachable = nil
-            startReachabilityProbe()
-        }
+        probeRecents()
 
         scanTask = Task { [weak self] in
             guard let self else { return }
@@ -97,42 +140,40 @@ public final class ServerPickerViewModel {
         isOnTailscale = tailscaleIP != nil
     }
 
-    /// Directly hits the saved server's public endpoint to confirm it's online.
-    private func startReachabilityProbe() {
-        guard let last = store.lastServer else { return }
+    /// Directly probes each recent server (most-recent first) to confirm it's
+    /// online, so remote/Tailscale entries show a real status without waiting
+    /// on LAN discovery. Probing the primary reconnect target first keeps its
+    /// status snappy.
+    private func probeRecents() {
+        let recents = store.recentServers
+        guard !recents.isEmpty else { return }
         reachabilityTask = Task { [weak self] in
             guard let self else { return }
-            let reachable = await validator.isReachable(last.baseURL)
-            if Task.isCancelled { return }
-            // Don't override a positive result already established by discovery.
-            if self.lastServerReachable == nil {
-                self.lastServerReachable = reachable
+            for server in recents {
+                if Task.isCancelled { return }
+                let key = ServerIdentity.key(for: server)
+                // Discovery may already have proven it's on the LAN — that's a
+                // stronger signal than a probe, so don't overwrite it.
+                if self.lanKeys.contains(key) { continue }
+                let reachable = await self.validator.isReachable(server.baseURL)
+                if Task.isCancelled { return }
+                if self.lanKeys.contains(key) { continue }
+                self.reachabilityByKey[key] = reachable
             }
         }
     }
 
     private func merge(_ server: MediaServer) {
-        // If the LAN scan re-finds the saved server, surface it as "online"
-        // rather than listing it twice (once here, once under "Recently used").
-        if isLastServer(server) {
-            lastServerReachable = true
-            return
-        }
-        if !discoveredServers.contains(where: { isSameServer($0, server) }) {
+        let key = ServerIdentity.key(for: server)
+        // Hearing from a server on the LAN is definitive: mark it present and
+        // reachable so its row (recent or discovered) reads "On your network".
+        lanKeys.insert(key)
+        // A server already in the recents list is shown there — don't also list
+        // it under discovered.
+        if store.recentServers.contains(where: { ServerIdentity.isSame($0, server) }) { return }
+        if !discoveredServers.contains(where: { ServerIdentity.isSame($0, server) }) {
             discoveredServers.append(server)
         }
-    }
-
-    /// Whether `server` is the same box as the saved last-used server, matched
-    /// by Jellyfin server id when available, else by host + port.
-    private func isLastServer(_ server: MediaServer) -> Bool {
-        guard let last = store.lastServer else { return false }
-        return isSameServer(server, last)
-    }
-
-    private func isSameServer(_ a: MediaServer, _ b: MediaServer) -> Bool {
-        if !a.id.isEmpty, !b.id.isEmpty, a.id == b.id { return true }
-        return a.baseURL.host == b.baseURL.host && a.baseURL.port == b.baseURL.port
     }
 
     /// Validates and selects a manually entered URL. Returns the server on
@@ -155,9 +196,9 @@ public final class ServerPickerViewModel {
         }
     }
 
-    /// Persists the chosen server as the "last successful" one.
+    /// Records the chosen server at the top of the recents list.
     public func select(_ server: MediaServer) {
-        store.lastServer = server
+        store.remember(server)
         phase = .idle
     }
 }

@@ -77,6 +77,9 @@ struct AddAccountView: View {
             }
             .frame(width: 420, height: 320)
         }
+        // Same focus treatment as the Settings About / Report a Problem cards:
+        // accent outline + gentle lift, no contrast inversion.
+        .buttonStyle(SettingsCardButtonStyle())
     }
 }
 

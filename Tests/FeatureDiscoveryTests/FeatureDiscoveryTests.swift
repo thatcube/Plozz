@@ -159,8 +159,8 @@ private final class StubDiscovery: ServerDiscovering, @unchecked Sendable {
 }
 
 private final class StubLastServerStore: LastServerStoring, @unchecked Sendable {
-    var lastServer: MediaServer?
-    init(lastServer: MediaServer?) { self.lastServer = lastServer }
+    var recentServers: [MediaServer]
+    init(lastServer: MediaServer?) { self.recentServers = lastServer.map { [$0] } ?? [] }
 }
 
 final class ServerPickerViewModelTests: XCTestCase {

@@ -34,30 +34,35 @@ public struct ServerPickerView: View {
             VStack(alignment: .leading, spacing: 28) {
                 header
 
-                if let last = viewModel.lastServer {
-                    PickerPanel(title: "Recently used") {
-                        serverRow(last, subtitle: lastServerSubtitle)
-                    }
-                }
-
-                PickerPanel(title: "On your network", titleAccessory: { scanIndicator }) {
-                    if viewModel.discoveredServers.isEmpty {
-                        discoveredPlaceholder
+                // One combined card: recently-used servers (reconnect targets,
+                // including manual/Tailscale entries) first, then anything new
+                // found on the network — no more confusing split sections.
+                PickerPanel(title: "Servers", titleAccessory: { scanIndicator }) {
+                    let recents = viewModel.recentServers
+                    let discovered = viewModel.discoveredServers
+                    if recents.isEmpty && discovered.isEmpty {
+                        emptyServersPlaceholder
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 8)
                             .padding(.horizontal, 12)
                     } else {
                         VStack(spacing: 0) {
-                            ForEach(Array(viewModel.discoveredServers.enumerated()), id: \.element) { idx, server in
+                            ForEach(Array(recents.enumerated()), id: \.element) { idx, server in
                                 if idx > 0 { Divider() }
-                                serverRow(server, subtitle: server.baseURL.host)
+                                serverRow(server, isRecent: true)
+                            }
+                            ForEach(Array(discovered.enumerated()), id: \.element) { idx, server in
+                                if idx > 0 || !recents.isEmpty { Divider() }
+                                serverRow(server, isRecent: false)
                             }
                         }
                     }
                 }
 
                 if viewModel.isOnTailscale {
-                    PickerPanel(title: "Tailscale") {
+                    // Headerless card: its own "Connected to Tailscale" title says
+                    // what it is, so a section header would just be redundant.
+                    PickerPanel {
                         tailscaleGuidance
                     }
                 }
@@ -119,58 +124,44 @@ public struct ServerPickerView: View {
         }
     }
 
-    /// Small trailing spinner shown beside the "On your network" header while a
+    /// Small trailing spinner shown beside the "Servers" card header while a
     /// scan is in flight.
     @ViewBuilder
     private var scanIndicator: some View {
         if case .scanning = viewModel.phase { ProgressView() }
     }
 
-    private var discoveredPlaceholder: some View {
+    private var emptyServersPlaceholder: some View {
         Group {
             if case .scanning = viewModel.phase {
-                Label("Searching for Jellyfin servers…", systemImage: "antenna.radiowaves.left.and.right")
-                    .foregroundStyle(.secondary)
-            } else if viewModel.lastServerReachable == true {
-                // The saved server above is confirmed online, so an empty
-                // discovered list isn't a dead end — point the user up.
-                Label("Your saved server above is online and ready.", systemImage: "checkmark.circle")
+                Label("Searching for servers…", systemImage: "antenna.radiowaves.left.and.right")
                     .foregroundStyle(.secondary)
             } else {
-                Label("No servers found yet. Make sure your Jellyfin server is on and that Plozz is allowed Local Network access (tvOS Settings ▸ General ▸ Privacy), then rescan — or enter an address below.", systemImage: "magnifyingglass")
+                Label("No servers found yet. Make sure your server is on and that Plozz is allowed Local Network access (tvOS Settings ▸ General ▸ Privacy), then rescan — or enter an address below.", systemImage: "magnifyingglass")
                     .foregroundStyle(.secondary)
             }
         }
     }
 
     /// Tailscale guidance, shown only when this Apple TV is on a tailnet. Its
-    /// real purpose is to tell you Tailscale servers can't be auto-discovered
-    /// and must be entered manually.
+    /// real purpose is to say Tailscale servers can't be auto-discovered and
+    /// must be entered manually. The logo matches the server-row logo size.
     private var tailscaleGuidance: some View {
-        HStack(alignment: .top, spacing: 24) {
+        HStack(alignment: .top, spacing: 20) {
             TailscaleLogo()
-                .frame(width: 56, height: 56)
+                .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Tailscale servers can't be found automatically.")
+                Text("Connected to Tailscale")
                     .font(.headline)
-                Text("Type your server's Tailscale IP or MagicDNS name in the address field below.")
+                Text("Tailscale servers can't be found automatically. Manually type your Tailscale IP or MagicDNS name below.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    /// Subtitle for the saved server, reflecting live reachability.
-    private var lastServerSubtitle: String {
-        switch viewModel.lastServerReachable {
-        case .some(true): return "Reconnect · On your network"
-        case .some(false): return "Reconnect · Offline right now"
-        case .none: return "Reconnect"
-        }
-    }
-
-    private func serverRow(_ server: MediaServer, subtitle: String?) -> some View {
+    private func serverRow(_ server: MediaServer, isRecent: Bool) -> some View {
         Button {
             viewModel.select(server)
             onSelect(server)
@@ -181,11 +172,12 @@ public struct ServerPickerView: View {
                 ProviderBrandMark(provider: server.provider, size: 44)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(server.name).font(.headline)
-                    if let subtitle {
-                        Text(subtitle).font(.subheadline).settingsRowSecondary()
+                    if let host = server.baseURL.host {
+                        Text(host).font(.subheadline).settingsRowSecondary()
                     }
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: 12)
+                statusBadge(for: server, isRecent: isRecent)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 12)
@@ -193,6 +185,31 @@ public struct ServerPickerView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
+    }
+
+    /// Trailing status for a server row. Discovered servers are always on the
+    /// network; recents show their live probe result, or a plain "Recently
+    /// used" tag until a probe resolves.
+    @ViewBuilder
+    private func statusBadge(for server: MediaServer, isRecent: Bool) -> some View {
+        switch viewModel.status(for: server) {
+        case .onNetwork:
+            statusText("On your network", systemImage: "wifi")
+        case .online:
+            statusText("Online", systemImage: "checkmark.circle")
+        case .offline:
+            statusText("Offline", systemImage: "exclamationmark.triangle")
+        case .unknown:
+            if isRecent { statusText("Recently used", systemImage: "clock.arrow.circlepath") }
+        }
+    }
+
+    private func statusText(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.footnote)
+            .settingsRowSecondary()
+            .layoutPriority(1)
+            .fixedSize()
     }
 
     private func connectManually() async {

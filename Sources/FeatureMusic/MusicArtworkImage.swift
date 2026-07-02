@@ -201,7 +201,9 @@ struct MusicCard: View {
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
-        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        // See PosterCardView.borderlessCard: composite (never rasterize) so the
+        // focus halo + scale bloom that extend beyond the bounds aren't clipped.
+        .compositingGroup()
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
     }

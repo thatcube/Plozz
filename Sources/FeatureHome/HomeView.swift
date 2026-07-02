@@ -172,6 +172,10 @@ private struct LibraryCardView: View {
     @Environment(\.themePalette) private var palette
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.plozzMetrics) private var metrics
+    /// Per-profile card presentation, so a Home "Libraries" tile switches between
+    /// the framed glass card and the borderless "Posters" look with every other
+    /// card on Home.
+    @Environment(\.plozzCardStyle) private var cardStyle
 
     /// Title/subtitle colour, flipped to dark ink over a focused card's opaque
     /// "lift" surface — shared with every other card via `PlozzCardCaption` so the
@@ -184,6 +188,15 @@ private struct LibraryCardView: View {
     }
 
     var body: some View {
+        switch cardStyle {
+        case .framed:
+            framedCard
+        case .borderless:
+            borderlessCard
+        }
+    }
+
+    private var framedCard: some View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: metrics.landscapeWidth, height: metrics.landscapeHeight)
@@ -210,6 +223,41 @@ private struct LibraryCardView: View {
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
+    }
+
+    /// The borderless ("Posters") Libraries tile: the library artwork with no glass
+    /// surface, rounded at the outer radius, wearing the shared `plozzFocusHalo`
+    /// focus ring and dropping its caption on focus — exactly like the borderless
+    /// Continue Watching / Latest landscape cards, so a Libraries tile stays flush
+    /// with them in either card style.
+    private var borderlessCard: some View {
+        let width = metrics.landscapeCardSlotWidth - metrics.borderlessCardSideMargin * 2
+        return VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush) {
+            Color.clear
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .frame(width: width)
+                .overlay { artwork }
+                .clipShape(RoundedRectangle(cornerRadius: metrics.landscapeCardCornerRadius, style: .continuous))
+                .plozzMediaEdge(cornerRadius: metrics.landscapeCardCornerRadius)
+                .plozzFocusHalo(
+                    cornerRadius: metrics.landscapeCardCornerRadius,
+                    focusScale: PlozzTheme.Metrics.mediumFocusedCardScale,
+                    isFocused: isFocused
+                )
+
+            BorderlessCardCaption(
+                title: aggregated.library.title,
+                subtitle: subtitle.isEmpty ? nil : subtitle,
+                horizontalInset: metrics.landscapeCaptionInset
+            )
+            .frame(width: width)
+            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+        }
+        .padding(.horizontal, metrics.borderlessCardSideMargin)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+        .compositingGroup()
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
     }

@@ -185,7 +185,11 @@ public struct PosterCardView: View {
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: borderlessCornerRadius, action: action)
-        .plozzCardRasterize(reduceTransparency: reduceTransparency)
+        // A borderless card's focus halo + scale bloom extend *beyond* the layout
+        // bounds. `compositingGroup` composites them as one unit without clipping;
+        // `drawingGroup` (what `plozzCardRasterize` uses under Reduce Transparency)
+        // would rasterize to the layout bounds and shear off the halo + bloom.
+        .compositingGroup()
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
     }

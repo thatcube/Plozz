@@ -167,6 +167,33 @@ public enum MediaItemMerger {
             }
         }
 
+        // Cross-server union by the eager index's **membership**, to recover rows
+        // the identity keys above can't merge. A row whose list payload lacked a
+        // strong external id (Plex omits `Guid` on some list responses) shares no
+        // `.external` key with a twin that *does* carry one — and rule #1 suppresses
+        // the twin's `.title` key — so the two stay separate cards even though the
+        // index, enriched via per-item fetch during warm, knows both are one title.
+        // `identitySources(row)` returns that recovered membership set (each entry a
+        // server's own item id, incl. via the snapshot's reverse (account,item)→
+        // identity lookup for the id-less row itself); if a row's membership names
+        // another *loaded* row's own (account,item) they are the same work and must
+        // collapse. Safe: it unions only on the index's confident per-item
+        // enrichment, never a guessed title, so it can't false-merge distinct works.
+        // A no-op `identitySources` (cold start / most tests) skips this entirely.
+        var ownerByRef: [String: Int] = [:]
+        for index in items.indices {
+            guard let accountID = items[index].sourceAccountID else { continue }
+            ownerByRef["\(accountID):\(items[index].id)"] = index
+        }
+        if !ownerByRef.isEmpty {
+            for index in items.indices {
+                for ref in identitySources(items[index]) {
+                    guard let owner = ownerByRef["\(ref.accountID):\(ref.itemID)"], owner != index else { continue }
+                    union(index, owner)
+                }
+            }
+        }
+
         var membersByRoot: [Int: [Int]] = [:]
         for index in items.indices {
             membersByRoot[find(index), default: []].append(index)

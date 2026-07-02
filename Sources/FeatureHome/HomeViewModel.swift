@@ -54,6 +54,20 @@ public final class HomeViewModel {
     private nonisolated(unsafe) var aggregationTask: Task<HomeAggregator.Content, Never>?
     private nonisolated(unsafe) var topShelfPublishTask: Task<Void, Never>?
 
+    /// Coalesces the burst of `identityIndexDidUpdate` notifications posted while
+    /// the index warms: each active account publishes independently, so a fresh
+    /// boot with N servers fires N notifications back-to-back. Re-folding every
+    /// Home row (Continue Watching + Latest + Watchlist) on the main actor once
+    /// per notification is O(N × rows) of avoidable churn during the most
+    /// contended moment of launch. Debouncing collapses the burst into a single
+    /// re-enrich after the warm settles; the last snapshot is authoritative, so
+    /// nothing is lost. Cancelled on teardown alongside the other tasks.
+    private nonisolated(unsafe) var reenrichTask: Task<Void, Never>?
+
+    /// How long to wait for the warm burst to settle before re-folding. Short
+    /// enough to feel immediate, long enough to swallow a multi-server burst.
+    private static let reenrichDebounce: Duration = .milliseconds(200)
+
     /// The hidden-library set the currently-loaded content was aggregated for.
     /// `nil` until the first successful load. Used by ``loadIfNeeded(excludedKeys:)``
     /// to tell a genuine input change (hide/show a library) apart from a mere view
@@ -81,6 +95,7 @@ public final class HomeViewModel {
     deinit {
         aggregationTask?.cancel()
         topShelfPublishTask?.cancel()
+        reenrichTask?.cancel()
     }
 
     /// User-facing name for the greeting header — the primary (first) account.
@@ -263,6 +278,22 @@ public final class HomeViewModel {
         // to any visible card doesn't churn the view or disturb focus.
         guard updated != current else { return }
         state = .loaded(updated)
+    }
+
+    /// Coalesced entry point for the `identityIndexDidUpdate` notification. The
+    /// index publishes once per warmed account, so on a multi-server boot this
+    /// fires in a tight burst; debouncing collapses it to a single ``reenrich()``
+    /// once the burst settles, avoiding O(accounts × rows) redundant main-actor
+    /// merges. A prior pending pass is cancelled so only the latest snapshot is
+    /// folded. Callers that need a synchronous fold (tests, explicit refresh) call
+    /// ``reenrich()`` directly.
+    public func scheduleReenrich() {
+        reenrichTask?.cancel()
+        reenrichTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.reenrichDebounce)
+            guard !Task.isCancelled, let self else { return }
+            self.reenrich()
+        }
     }
 
     private func apply(_ mutation: MediaItemMutation, to item: MediaItem) -> MediaItem {

@@ -93,11 +93,25 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// identity → its sources, de-duplicated by `IndexedSource.id` and kept in a
     /// stable (sorted) order so lookups are deterministic across rebuilds.
     private let byIdentity: [MediaIdentity: [IndexedSource]]
+    /// Reverse map: a source's `id` ("accountID:itemID") → every identity it was
+    /// indexed under. Lets a **loaded row whose payload carried no strong external
+    /// id** (Plex list responses can omit the `Guid` array) recover the index's
+    /// enriched identities for that exact physical item, so it still resolves its
+    /// full cross-server set and merges with a twin that *does* carry an id.
+    private let bySource: [String: [MediaIdentity]]
 
     public init(byIdentity: [MediaIdentity: [IndexedSource]]) {
-        self.byIdentity = byIdentity.mapValues { sources in
+        let sorted = byIdentity.mapValues { sources in
             sources.sorted { $0.id < $1.id }
         }
+        self.byIdentity = sorted
+        var reverse: [String: [MediaIdentity]] = [:]
+        for (identity, sources) in sorted {
+            for source in sources {
+                reverse[source.id, default: []].append(identity)
+            }
+        }
+        self.bySource = reverse
     }
 
     public var isEmpty: Bool { byIdentity.isEmpty }
@@ -153,8 +167,20 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// expansion asks for series membership through the series probe, not here.
     public func sources(for item: MediaItem) -> [IndexedSource] {
         let kind = item.kind
-        return sources(forIdentities: MediaItemIdentity.identities(for: item))
-            .filter { $0.kind == kind }
+        var identities = MediaItemIdentity.identities(for: item)
+        // Recover the index's enriched identities for this *exact* physical item
+        // when its loaded payload carried no strong external id (or fewer ids than
+        // the index found by per-item fetch during warm). Without this an id-less
+        // Plex row can't share an identity key with a Jellyfin twin that carries an
+        // IMDb/TMDb id — rule #1 suppresses the twin's title key — so they'd stay
+        // two cards even though the index knows they're one title. Keyed by the
+        // row's own (account,item), so it's the index's confident per-item truth,
+        // never a guess: no false-merge risk.
+        if let accountID = item.sourceAccountID,
+           let recovered = bySource["\(accountID):\(item.id)"] {
+            identities.append(contentsOf: recovered)
+        }
+        return sources(forIdentities: identities).filter { $0.kind == kind }
     }
 
     /// Membership ``MediaSourceRef``s for `item` — the picker / merge-enrichment view.
@@ -189,6 +215,13 @@ public actor IdentityIndex {
     private var warmAccounts: Set<String> = []
     /// When each account's catalogue was last (re)built, for staleness checks.
     private var builtAtByAccount: [String: Date] = [:]
+    /// Memoized fold of `byAccount` into one identity → sources snapshot. Cleared
+    /// by every content mutation (`ingest` / `beginRebuild` / `removeAccount` /
+    /// `restore`) so a stale merge is never served, and repopulated lazily on the
+    /// next ``snapshot()``. Lets repeated reads with no intervening mutation — the
+    /// post-warm steady state, diagnostics, and the skip-warm restore path — reuse
+    /// the built value instead of re-deriving the full map each time.
+    private var cachedSnapshot: IdentityIndexSnapshot?
     private let now: @Sendable () -> Date
 
     public init(now: @Sendable @escaping () -> Date = { Date() }) {
@@ -196,15 +229,19 @@ public actor IdentityIndex {
     }
 
     /// Folds every account's bucket into one identity → sources map. Cheap enough
-    /// to call after each account finishes warming so readers see progress early.
+    /// to call after each account finishes warming so readers see progress early;
+    /// memoized so a call with no intervening mutation reuses the built value.
     public func snapshot() -> IdentityIndexSnapshot {
+        if let cachedSnapshot { return cachedSnapshot }
         var merged: [MediaIdentity: [IndexedSource]] = [:]
         for (_, identityMap) in byAccount {
             for (identity, sourcesByID) in identityMap {
                 merged[identity, default: []].append(contentsOf: sourcesByID.values)
             }
         }
-        return IdentityIndexSnapshot(byIdentity: merged)
+        let built = IdentityIndexSnapshot(byIdentity: merged)
+        cachedSnapshot = built
+        return built
     }
 
     /// Indexes a freshly fetched page of catalogue `items` for `accountID`,
@@ -237,6 +274,7 @@ public actor IdentityIndex {
             }
         }
         byAccount[accountID] = bucket
+        cachedSnapshot = nil
     }
 
     /// Clears `accountID`'s bucket so a full re-scan replaces it cleanly. Marks the
@@ -244,6 +282,7 @@ public actor IdentityIndex {
     public func beginRebuild(for accountID: String) {
         byAccount[accountID] = [:]
         warmAccounts.remove(accountID)
+        cachedSnapshot = nil
     }
 
     /// Marks `accountID`'s scan complete and records its freshness timestamp.
@@ -258,6 +297,7 @@ public actor IdentityIndex {
         byAccount[accountID] = nil
         warmAccounts.remove(accountID)
         builtAtByAccount[accountID] = nil
+        cachedSnapshot = nil
     }
 
     /// Prunes any indexed account not in `accountIDs` (e.g. after a profile switch
@@ -317,6 +357,7 @@ public actor IdentityIndex {
             builtAtByAccount[accountID] = persisted.builtAtByAccount[accountID] ?? .distantPast
             restoredAny = true
         }
+        if restoredAny { cachedSnapshot = nil }
         return restoredAny
     }
 

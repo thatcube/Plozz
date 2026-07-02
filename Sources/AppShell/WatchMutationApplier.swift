@@ -26,8 +26,13 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     let anilistScrobbler: @Sendable () async -> any AniListScrobbling
     /// The active MAL scrobbler.
     let malScrobbler: @Sendable () async -> any MALScrobbling
-    /// Every signed-in `Account.id`, so episode twin expansion knows which *other*
-    /// servers to probe. Resolved live (main-actor) so a sign-in/out is reflected.
+    /// The **active** `Account.id`s (the set the identity index warms and that
+    /// Home/Search fan out over), so episode twin expansion knows which *other*
+    /// servers to probe and identity expansion can conclude once they're all
+    /// indexed. Resolved live (main-actor) so a sign-in/out or profile switch is
+    /// reflected. Deliberately NOT every signed-in account: an inactive account is
+    /// never indexed, so including it would keep expansion perpetually inconclusive
+    /// and make episode expansion probe servers outside the active profile.
     var allAccountIDs: @Sendable () async -> [String] = { [] }
     /// The eager identity index's known **series** sources for an origin series —
     /// the shared source of truth for "which servers host this show", each carrying

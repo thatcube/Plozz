@@ -210,7 +210,14 @@ public final class AppState {
                 await MainActor.run { self?.malService.scrobbler ?? DisabledMALScrobbler() }
             },
             allAccountIDs: { [weak self] in
-                await MainActor.run { self?.accounts.map(\.id) ?? [] }
+                // The set the identity index actually warms and that Home/Search
+                // fan out over — `homeAccounts` (the active accounts, with the
+                // primary fallback). Using *all* signed-in accounts here would list
+                // inactive accounts the index never warms, so `notYetIndexed` could
+                // never empty (expansion perpetually "inconclusive" until the retry
+                // cap) and episode expansion would probe servers outside the active
+                // profile. Scope must match what gets indexed.
+                await MainActor.run { self?.homeAccounts.map(\.account.id) ?? [] }
             },
             indexedSeriesSources: { [identitySnapshotStore] originSeries in
                 identitySnapshotStore.current.sources(for: originSeries).filter { $0.kind == .series }
@@ -531,9 +538,11 @@ public final class AppState {
         }
 
         await index.beginRebuild(for: accountID)
-        // `true` if any page needed an enrichment fetch that failed, so we leave
-        // the account un-finished (cold) and a later warm retries it — the index
-        // grows toward completeness and never drops a server permanently.
+        // `true` if any page needed an enrichment fetch that failed **or** a
+        // catalogue page fetch itself failed, so we leave the account un-finished
+        // (cold) and a later warm retries it — the index grows toward completeness
+        // and never drops a server permanently, and a transient network blip is
+        // never frozen as a "complete" (but truncated) scan until the TTL.
         var inconclusive = false
         for library in libraries where library.kind == .movie || library.kind == .series {
             if Task.isCancelled { return }
@@ -544,7 +553,15 @@ public final class AppState {
                     in: library.id,
                     kind: library.kind,
                     page: PageRequest(startIndex: offset, limit: chunkSize, sort: .default)
-                ) else { break }
+                ) else {
+                    // A page fetch threw (network / server error), not a clean end
+                    // of catalogue. Mark the scan inconclusive so this library —
+                    // and thus the account — is re-warmed rather than finished as
+                    // complete while only partially indexed (which would silently
+                    // drop that server's memberships from merges until the TTL).
+                    inconclusive = true
+                    break
+                }
                 if page.items.isEmpty { break }
                 // Enrich any guid-less movie/series (e.g. a Plex series whose list
                 // response omitted its Guid array) via its fuller per-item record,

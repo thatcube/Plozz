@@ -88,15 +88,22 @@ public struct JellyfinProvider: MediaProvider {
 
         let userID = session.userID
         let client = self.client
+        // Cap concurrent per-library requests: a user with many libraries would
+        // otherwise fire 2×libraries requests (resume + next-up) in one burst,
+        // flooding the shared URLSession pool and the server. 4 in flight keeps
+        // Home load fast without swamping either.
+        let limiter = ConcurrencyLimiter(limit: 4)
         let perLibrary: [[BaseItemDto]] = await withTaskGroup(of: (Int, [BaseItemDto]).self) { group in
             for (index, libraryID) in libraryIDs.enumerated() {
                 group.addTask {
-                    async let resumeTask = try? client.resumeItems(userID: userID, limit: limit, parentID: libraryID)
-                    let nextUp = (try? await client.nextUpItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
-                    let resume = (await resumeTask) ?? []
-                    var seen = Set<String>()
-                    let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
-                    return (index, Array(merged.prefix(limit)))
+                    await limiter.run {
+                        async let resumeTask = try? client.resumeItems(userID: userID, limit: limit, parentID: libraryID)
+                        let nextUp = (try? await client.nextUpItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
+                        let resume = (await resumeTask) ?? []
+                        var seen = Set<String>()
+                        let merged = (resume + nextUp).filter { seen.insert($0.Id).inserted }
+                        return (index, Array(merged.prefix(limit)))
+                    }
                 }
             }
             var byIndex: [Int: [BaseItemDto]] = [:]
@@ -122,11 +129,15 @@ public struct JellyfinProvider: MediaProvider {
 
         let userID = session.userID
         let client = self.client
+        // Bound concurrent per-library fetches (see continueWatching above).
+        let limiter = ConcurrencyLimiter(limit: 4)
         let perLibrary: [[BaseItemDto]] = await withTaskGroup(of: (Int, [BaseItemDto]).self) { group in
             for (index, libraryID) in libraryIDs.enumerated() {
                 group.addTask {
-                    let items = (try? await client.latestItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
-                    return (index, items)
+                    await limiter.run {
+                        let items = (try? await client.latestItems(userID: userID, limit: limit, parentID: libraryID)) ?? []
+                        return (index, items)
+                    }
                 }
             }
             var byIndex: [Int: [BaseItemDto]] = [:]

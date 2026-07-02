@@ -105,16 +105,24 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
     /// across **every** account that holds this (possibly merged) title and can
     /// express a watchlist, so a save lands on both the user's Jellyfin Favorites
     /// and their Plex Watchlist when a title exists on both servers.
+    ///
+    /// Each server is written with the item **retargeted to that server's own id**
+    /// (`selectingSource`): a favorite write is addressed by `item.id`, which is
+    /// the *primary* server's local id (a Jellyfin item id or Plex ratingKey). Sent
+    /// unchanged to another server it would hit a wrong / nonexistent id and the
+    /// save would silently miss. The target set unions the card's own `sources`
+    /// with the live identity index — the same source of truth the mark-watched
+    /// fan-out uses — so a title only one server surfaced still saves everywhere.
     private func performWatchlist(adding: Bool, on item: MediaItem) {
-        let providers = watchlistProviders(for: item)
-        guard !providers.isEmpty else { return }
+        let targets = watchlistTargets(for: item)
+        guard !targets.isEmpty else { return }
 
         MediaItemMutation(itemIDs: [item.id], favorite: adding).post()
         Task {
             var anySucceeded = false
-            for provider in providers {
+            for target in targets {
                 do {
-                    try await provider.setWatchlisted(adding, item: item)
+                    try await target.provider.setWatchlisted(adding, item: target.item)
                     anySucceeded = true
                 } catch {
                     PlozzLog.app.error("Watchlist \(adding ? "add" : "remove") failed on a provider")
@@ -127,14 +135,36 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         }
     }
 
-    /// Every `WatchlistProviding` provider that holds this title: the primary
-    /// owner plus any de-duplicated cross-server alternates.
-    private func watchlistProviders(for item: MediaItem) -> [any WatchlistProviding] {
-        let accountIDs = item.allSourceAccountIDs
-        if accountIDs.isEmpty {
-            return [appState.primaryProvider as? WatchlistProviding].compactMap { $0 }
+    /// Every server holding this title paired with the item retargeted to that
+    /// server's own id. One target per distinct account (the card's own sources
+    /// win over index entries), so no server is double-written.
+    private func watchlistTargets(for item: MediaItem) -> [(provider: any WatchlistProviding, item: MediaItem)] {
+        let refs = unionedSourceRefs(for: item)
+        guard !refs.isEmpty else {
+            // Untagged single-account item: write to the primary as-is.
+            let provider = (item.sourceAccountID.flatMap { appState.provider(forAccountID: $0) }
+                ?? appState.primaryProvider) as? WatchlistProviding
+            return provider.map { [(provider: $0, item: item)] } ?? []
         }
-        return accountIDs.compactMap { appState.provider(forAccountID: $0) as? WatchlistProviding }
+        return refs.compactMap { ref in
+            guard let provider = appState.provider(forAccountID: ref.accountID) as? WatchlistProviding else { return nil }
+            // The primary's own ref already points at `item.id`, so `selectingSource`
+            // is a no-op there and repoints only the alternate servers.
+            return (provider: provider, item: item.selectingSource(ref))
+        }
+    }
+
+    /// The per-server references for a (possibly merged) title, one per distinct
+    /// account: the card's own `sources` first, then any additional server the
+    /// live identity index knows. Empty only for an untagged single-account item.
+    private func unionedSourceRefs(for item: MediaItem) -> [MediaSourceRef] {
+        var refs = item.sources
+        var seenAccounts = Set(refs.map(\.accountID))
+        for ref in appState.identitySnapshot.sourceRefs(for: item)
+        where seenAccounts.insert(ref.accountID).inserted {
+            refs.append(ref)
+        }
+        return refs
     }
 
     // MARK: - Refresh metadata

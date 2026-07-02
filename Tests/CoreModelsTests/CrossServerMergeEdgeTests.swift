@@ -165,4 +165,52 @@ final class CrossServerMergeEdgeTests: XCTestCase {
         XCTAssertEqual(merged.map(\.id), ["dp", "ar", "sh"], "First-seen order preserved; only Dune collapses")
         XCTAssertEqual(merged[0].sources.map(\.accountID), ["plex", "jelly"])
     }
+
+    // MARK: ID-less row recovery via the identity index (criterion 2/4)
+
+    /// A Jellyfin twin carrying an IMDb id and a Plex row whose list payload
+    /// omitted its `Guid` array share no identity key — rule #1 suppresses the
+    /// Jellyfin row's title key — so the pure identity passes leave them as two
+    /// cards. When the eager index (enriched by per-item fetch during warm) knows
+    /// both belong to one title, `identitySources` must recover the id-less row and
+    /// collapse them. This is the r3-idless-no-merge regression.
+    func testIdlessRowMergesWithExternalTwinViaIndexMembership() {
+        let jelly = item("j1", title: "The Matrix", kind: .movie, year: 1999, account: "jelly", ids: ["Imdb": "tt0133093"])
+        // Plex row: correct kind/title but NO external id and no year, so it has no
+        // identity key at all on its own.
+        let plex = item("p1", title: "The Matrix", kind: .movie, account: "plex")
+
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            .external(source: "imdb", value: "tt0133093"): [
+                IndexedSource(accountID: "jelly", itemID: "j1", kind: .movie),
+                IndexedSource(accountID: "plex", itemID: "p1", kind: .movie)
+            ]
+        ])
+        let merged = MediaItemMerger.merge(
+            [jelly, plex],
+            identitySources: { snapshot.sourceRefs(for: $0) }
+        )
+        XCTAssertEqual(merged.count, 1, "The index knows both are one title, so the id-less row must collapse into the twin")
+        XCTAssertEqual(Set(merged[0].sources.map(\.accountID)), ["jelly", "plex"])
+    }
+
+    /// The recovery is index-driven, never a title guess: an id-less row the index
+    /// does NOT know stays a separate card even next to a same-title twin, so a
+    /// cold/unknown index can never manufacture a false cross-server merge.
+    func testIdlessRowStaysSeparateWhenIndexDoesNotKnowIt() {
+        let jelly = item("j1", title: "The Matrix", kind: .movie, year: 1999, account: "jelly", ids: ["Imdb": "tt0133093"])
+        let plex = item("p1", title: "The Matrix", kind: .movie, account: "plex")
+
+        // Index knows only the Jellyfin copy — nothing ties the id-less Plex row in.
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            .external(source: "imdb", value: "tt0133093"): [
+                IndexedSource(accountID: "jelly", itemID: "j1", kind: .movie)
+            ]
+        ])
+        let merged = MediaItemMerger.merge(
+            [jelly, plex],
+            identitySources: { snapshot.sourceRefs(for: $0) }
+        )
+        XCTAssertEqual(merged.count, 2, "No index knowledge of the id-less row ⇒ no guess-merge")
+    }
 }

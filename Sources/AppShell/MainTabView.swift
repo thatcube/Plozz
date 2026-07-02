@@ -495,7 +495,22 @@ private func resolveLibraryBrowse(
 /// play the *wrong* server's copy (or fail). Pruning to live accounts before
 /// selection guarantees we only ever pick a server we can actually resolve, and
 /// drops the stale refs from the item handed to the player.
-private func bestSourcePlayItem(_ item: MediaItem, accounts: [ResolvedAccount]) -> MediaItem {
+///
+/// `identitySources` folds in cross-server twins the **live** identity index
+/// knows but this card's own `sources` don't yet carry. Home "Continue Watching"
+/// and Search play directly (no detail-page resolver runs), so a card that was
+/// merged before a local twin finished indexing lists only the server(s) known
+/// then — often the remote merge-primary. By play time the index has usually
+/// warmed the local copy; unioning it here (deduped by `account:item`, the
+/// card's own refs winning on collision because they carry live versions and
+/// watch-state) lets the locality selection route to the LAN copy instead of
+/// streaming remotely. This is the direct-play counterpart to the detail page's
+/// cross-server resolver.
+private func bestSourcePlayItem(
+    _ item: MediaItem,
+    accounts: [ResolvedAccount],
+    identitySources: (MediaItem) -> [MediaSourceRef]
+) -> MediaItem {
     let activeAccountIDs = Set(accounts.map(\.account.id))
     let liveLocality: [String: SourceLocality] = Dictionary(
         accounts.map { ($0.account.id, $0.provider.connectionLocality) },
@@ -508,9 +523,17 @@ private func bestSourcePlayItem(_ item: MediaItem, accounts: [ResolvedAccount]) 
         return copy
     }
 
+    // Union the card's own sources with any twin the live index knows. The card's
+    // refs come first and win on id collision (live versions/watch-state).
+    var unioned = item.sources
+    var seen = Set(unioned.map(\.id))
+    for ref in identitySources(item) where seen.insert(ref.id).inserted {
+        unioned.append(ref)
+    }
+
     let liveSources = (activeAccountIDs.isEmpty
-        ? item.sources
-        : item.sources.filter { activeAccountIDs.contains($0.accountID) })
+        ? unioned
+        : unioned.filter { activeAccountIDs.contains($0.accountID) })
         .map(withLiveLocality)
 
     // Honor an already-applied EXPLICIT source pick. The detail page's play path
@@ -541,7 +564,7 @@ private func bestSourcePlayItem(_ item: MediaItem, accounts: [ResolvedAccount]) 
         // pointed at a now-removed account, retarget onto the surviving copy so we
         // don't mis-resolve; otherwise the single-source item passes through.
         if let only = liveSources.first,
-           liveSources.count < item.sources.count || only.accountID != item.sourceAccountID {
+           liveSources.count < unioned.count || only.accountID != item.sourceAccountID {
             return MediaItem.retargetedForPlayback(
                 item: item,
                 sources: liveSources,
@@ -1067,7 +1090,7 @@ private struct HomeTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
-        let target = bestSourcePlayItem(item, accounts: accounts)
+        let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
         if let resume = target.resumePosition, resume > 1 {
             resumePrompt = target
         } else {
@@ -1348,7 +1371,7 @@ private struct SearchTab: View {
     /// In-progress items prompt "Resume vs Start Over"; fully-unwatched items
     /// play immediately from the start.
     private func requestPlay(_ item: MediaItem) {
-        let target = bestSourcePlayItem(item, accounts: accounts)
+        let target = bestSourcePlayItem(item, accounts: accounts, identitySources: identitySources)
         if let resume = target.resumePosition, resume > 1 {
             resumePrompt = target
         } else {

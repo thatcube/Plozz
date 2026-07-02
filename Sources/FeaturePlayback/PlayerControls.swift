@@ -2204,7 +2204,7 @@ struct PlayerControls: View {
     static func subtitleSyncHint(_ seconds: TimeInterval) -> String {
         let rounded = (seconds * 100).rounded() / 100
         if rounded == 0 {
-            return "− shows subtitles earlier · + shows them later"
+            return "− shows subtitles earlier\n+ shows them later"
         }
         let magnitude = String(format: "%.2f", abs(rounded))
         return rounded > 0

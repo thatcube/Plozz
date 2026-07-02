@@ -1685,19 +1685,14 @@ struct PlayerControls: View {
             }
         }
         subtitleScreen = screen
-        switch screen {
-        case .tracks: focus = .row(selectedRowIndex(for: .subtitles))
-        case .download: focus = .subBack
-        case .style:
-            // The style editor collapses to a non-focusable explanation when the
-            // primary is a bitmap sub, so land on the header Back instead of a row
-            // that isn't there.
-            focus = model.secondarySubtitleImagePrimaryFormat == nil ? .row(0) : .subBack
-        case .styleFont:
-            // Land on the currently-selected font so the checkmark is in view.
-            focus = .row(SubtitleFontFamily.allCases.firstIndex(of: model.subtitleStyle.fontFamily) ?? 0)
-        case .styleOutline, .styleBackground, .styleDual: focus = .row(0)
-        }
+        // Defer the focus write to the next runloop tick (same mechanism as
+        // panel-open, via `restoreFocus`). Swapping the header chips + rows for the
+        // new sub-screen makes tvOS's focus engine run its own default pass in this
+        // same update; a synchronous @FocusState write races it and the engine wins —
+        // landing on the header Back chip instead of the intended row (e.g. Font at
+        // the top of the Style editor). `preferredPanelFocus` already encodes the
+        // correct target for every sub-screen, so reuse it.
+        restoreFocus(preferredPanelFocus)
     }
 
     /// The Audio menu: one full-width column of selectable tracks plus the

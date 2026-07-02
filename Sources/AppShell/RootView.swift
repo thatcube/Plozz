@@ -107,6 +107,9 @@ public struct RootView: View {
                     onCancel: { appState.cancelAuthentication() }
                 )
 
+            case .onboarding(.confirmProfile, _):
+                FirstRunProfileView(appState: appState)
+
             case .ready:
                 ZStack {
                 if appState.isChoosingProfile {

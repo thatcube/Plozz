@@ -39,6 +39,24 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .ready)
     }
 
+    func testFirstRunAuthDetoursThroughProfileConfirm() {
+        // First-ever account: auth success routes to the one-time profile
+        // confirm step (not straight to the app), then confirming enters it.
+        var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: false))
+        m.apply(.accountAuthenticatedNeedsProfile)
+        XCTAssertEqual(m.state, .onboarding(.confirmProfile, canReturnToApp: true))
+        m.apply(.profileConfirmed)
+        XCTAssertEqual(m.state, .ready)
+    }
+
+    func testAddAnotherAccountNeverShowsProfileConfirm() {
+        // Adding a server later uses the plain `.accountAuthenticated` event and
+        // must not detour through the confirm step.
+        var m = SessionStateMachine(state: .onboarding(.authenticating(server), canReturnToApp: true))
+        m.apply(.accountAuthenticated)
+        XCTAssertEqual(m.state, .ready)
+    }
+
     func testCancelAddingAnotherAccountReturnsToApp() {
         var m = SessionStateMachine(state: .onboarding(.selectingServer, canReturnToApp: true))
         m.apply(.cancelOnboarding)

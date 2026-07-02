@@ -1142,7 +1142,13 @@ public final class AppState {
     }
 
     /// Persists a freshly-authenticated account and advances the machine.
+    ///
+    /// On a brand-new install (no prior accounts and the one-time first-run
+    /// setup not yet done) this seeds the always-present default profile from
+    /// the sign-in identity and detours through the profile confirm step;
+    /// otherwise it enters the app directly.
     public func didAuthenticate(_ session: UserSession) {
+        let isFirstRun = accounts.isEmpty && !profilesModel.firstRunProfileSetupComplete
         let account = Account(from: session)
         do {
             try accountStore.add(account, token: session.accessToken)
@@ -1151,9 +1157,26 @@ public final class AppState {
             return
         }
         reloadAccounts()
-        apply(.accountAuthenticated)
+        if isFirstRun {
+            // Default the profile to who they just signed in as; the confirm
+            // step lets them keep or edit it before entering the app.
+            profilesModel.seedDefaultProfileIdentity(
+                name: session.userName,
+                avatarImageURL: session.avatarURL?.absoluteString
+            )
+            apply(.accountAuthenticatedNeedsProfile)
+        } else {
+            apply(.accountAuthenticated)
+        }
         // Flow finished — next add-account starts at the chooser.
         pendingOnboardingProvider = nil
+    }
+
+    /// Completes the one-time first-run profile confirm step and enters the app.
+    /// Marks the setup done so re-adding a server later never re-runs it.
+    public func confirmFirstRunProfile() {
+        profilesModel.markFirstRunProfileSetupComplete()
+        apply(.profileConfirmed)
     }
 
     /// Completes a Plex sign-in started from the provider chooser.

@@ -53,6 +53,14 @@ public protocol ProfilePersisting: Sendable {
     func profilesEnabledOverride() -> Bool?
     /// Persists (or clears with `nil`) the profiles-enabled preference.
     func setProfilesEnabledOverride(_ value: Bool?)
+
+    /// Whether the one-time first-run profile setup (seed the default profile
+    /// from the first sign-in, then confirm it) has completed. Household-wide,
+    /// so signing out of everything and re-adding a server never re-seeds a
+    /// profile the user has since customized.
+    func firstRunProfileSetupComplete() -> Bool
+    /// Persists whether the one-time first-run profile setup has completed.
+    func setFirstRunProfileSetupComplete(_ value: Bool)
 }
 
 extension ProfilePersisting {
@@ -62,6 +70,8 @@ extension ProfilePersisting {
     public func setAskProfileOnStartupOverride(_ value: Bool?) {}
     public func profilesEnabledOverride() -> Bool? { nil }
     public func setProfilesEnabledOverride(_ value: Bool?) {}
+    public func firstRunProfileSetupComplete() -> Bool { false }
+    public func setFirstRunProfileSetupComplete(_ value: Bool) {}
 }
 
 public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
@@ -82,6 +92,7 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     private let perProfileActiveAccountsPrefix = "com.plozz.profile.activeAccounts."
     private let askOnStartupKey = "com.plozz.profiles.askOnStartup"
     private let profilesEnabledKey = "com.plozz.profiles.enabled"
+    private let firstRunSetupKey = "com.plozz.profiles.firstRunSetupComplete"
     /// Stable id assigned to the migrated default profile so its identity is the
     /// same across launches and its `isDefault` status is unambiguous.
     public static let defaultProfileID = "com.plozz.profile.default"
@@ -159,6 +170,16 @@ public final class ProfileStore: ProfilePersisting, @unchecked Sendable {
     public func setProfilesEnabledOverride(_ value: Bool?) {
         lock.lock(); defer { lock.unlock() }
         writeSharedBool(value, forKey: profilesEnabledKey)
+    }
+
+    public func firstRunProfileSetupComplete() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return readSharedBool(forKey: firstRunSetupKey) ?? false
+    }
+
+    public func setFirstRunProfileSetupComplete(_ value: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        writeSharedBool(value, forKey: firstRunSetupKey)
     }
 
     private func readSharedBool(forKey key: String) -> Bool? {
@@ -412,6 +433,36 @@ public final class ProfilesModel {
         guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
         profiles[idx] = profile
         store.saveProfiles(profiles)
+    }
+
+    // MARK: First-run setup
+
+    /// Whether the one-time first-run profile setup has completed.
+    public var firstRunProfileSetupComplete: Bool {
+        store.firstRunProfileSetupComplete()
+    }
+
+    /// Marks the one-time first-run profile setup as done so it never runs
+    /// again — even if the user later signs out of every server and re-adds one.
+    public func markFirstRunProfileSetupComplete() {
+        store.setFirstRunProfileSetupComplete(true)
+    }
+
+    /// Seeds the default profile's identity (name + optional real photo) from
+    /// the first signed-in account, so a brand-new install's profile looks like
+    /// whoever just signed in. Only the default profile is touched, and empty
+    /// values are ignored. Returns the updated profile (`nil` if none exists).
+    @discardableResult
+    public func seedDefaultProfileIdentity(name: String, avatarImageURL: String?) -> Profile? {
+        guard var profile = profiles.first else { return nil }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty { profile.name = trimmedName }
+        if let avatarImageURL,
+           !avatarImageURL.trimmingCharacters(in: .whitespaces).isEmpty {
+            profile.avatarImageURL = avatarImageURL
+        }
+        update(profile)
+        return profile
     }
 
     /// Removes a profile. The default profile can't be removed; removing the

@@ -27,6 +27,9 @@ public enum OnboardingStep: Equatable, Sendable {
     case selectingServer
     /// Server chosen, running Quick Connect / password sign-in.
     case authenticating(MediaServer)
+    /// First-ever account was just added on a brand-new install; confirm (or
+    /// edit) the profile we seeded from the sign-in before entering the app.
+    case confirmProfile
 }
 
 public enum SessionState: Equatable, Sendable {
@@ -53,6 +56,11 @@ public enum SessionEvent: Sendable {
     case serverSelected(MediaServer)
     /// An account finished authenticating and was persisted.
     case accountAuthenticated
+    /// The *first-ever* account finished authenticating on a brand-new install;
+    /// detour through the one-time profile confirm step before the app.
+    case accountAuthenticatedNeedsProfile
+    /// The user confirmed (or edited) their seeded profile on first run.
+    case profileConfirmed
     case authenticationFailed(AppError)
     /// Back out of onboarding without adding an account.
     case cancelOnboarding
@@ -98,8 +106,17 @@ public struct SessionStateMachine: Sendable {
         // Authentication outcomes.
         case (.onboarding(.authenticating, _), .accountAuthenticated):
             return .ready
+        // First-ever account on a fresh install: detour through the one-time
+        // profile confirm step before entering the app. There is now ≥1 account
+        // behind it, so `canReturnToApp` is true.
+        case (.onboarding(.authenticating, _), .accountAuthenticatedNeedsProfile):
+            return .onboarding(.confirmProfile, canReturnToApp: true)
         case let (.onboarding(.authenticating, canReturn), .authenticationFailed(error)):
             return .failed(error, canReturnToApp: canReturn)
+
+        // Finished the one-time first-run profile confirm step.
+        case (.onboarding(.confirmProfile, _), .profileConfirmed):
+            return .ready
 
         // Cancelling the Quick Connect / password step steps BACK to the
         // picker (preserving the return-to-app context), so the user lands on

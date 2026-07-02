@@ -140,15 +140,28 @@ public struct RootView: View {
                         lastfm: appState.lastfmService,
                         mediaItemActionHandler: appState.mediaItemActionHandler,
                         enqueueWatchMutation: { appState.enqueueWatchMutation($0) },
+                        // These bridge closures are `@Sendable` (the player may invoke
+                        // them off the main actor), but every `appState` watch method is
+                        // `@MainActor`-isolated. Hop to the main actor so the calls are
+                        // data-race-safe. The hop is semantically free: each method's real
+                        // work is already async (an enqueue+drain on the reconciler actor),
+                        // and the reconciler's newest-wins `capturedAt` clock tolerates the
+                        // ordering.
                         watchBridge: WatchOutboxBridge(
                             beginLiveSession: { accountID, itemID in
-                                appState.beginLiveWatchSession(accountID: accountID, itemID: itemID)
+                                Task { @MainActor in
+                                    appState.beginLiveWatchSession(accountID: accountID, itemID: itemID)
+                                }
                             },
                             finishPlayback: { accountID, itemID, watchedPercent, mutation in
-                                appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, watchedPercent: watchedPercent, mutation: mutation)
+                                Task { @MainActor in
+                                    appState.finishLiveWatchSession(accountID: accountID, itemID: itemID, watchedPercent: watchedPercent, mutation: mutation)
+                                }
                             },
                             checkpoint: { mutation in
-                                appState.checkpointWatchState(mutation: mutation)
+                                Task { @MainActor in
+                                    appState.checkpointWatchState(mutation: mutation)
+                                }
                             },
                             crossServerSync: { [namespace = appState.profilesModel.activeNamespace] in
                                 PlaybackSettingsStore.currentSyncAcrossServers(namespace: namespace)

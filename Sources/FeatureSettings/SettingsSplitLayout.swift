@@ -191,7 +191,7 @@ struct SettingsSplitLayout: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(32)
+            .padding(80)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(

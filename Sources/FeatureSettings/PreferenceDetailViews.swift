@@ -35,7 +35,7 @@ struct AppearanceDetailView: View {
                     title: "Theme",
                     description: "The overall light or dark appearance of the app.",
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: AppTheme.allCases,
                         selection: $theme.theme,
                         icon: { $0.symbolName },
@@ -47,7 +47,7 @@ struct AppearanceDetailView: View {
                     title: "Display Size",
                     description: "Scales card size, columns and spacing across the app.",
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: UIDensity.allCases,
                         selection: $density.density,
                         icon: { $0.symbolName },
@@ -59,11 +59,11 @@ struct AppearanceDetailView: View {
                     title: "Transparency",
                     description: "Liquid glass — translucent panels and cards. Turn off for solid backgrounds.",
                 ) {
-                    SettingsOptionPicker(
+                    DescribedSegmentedPicker(
                         options: TransparencyPreference.allCases,
                         selection: transparencyBinding,
-                        icon: { $0.symbolName },
-                        title: { $0.displayName }
+                        title: { $0.displayName },
+                        detail: { $0.detail }
                     )
                 }
             ]),
@@ -73,7 +73,7 @@ struct AppearanceDetailView: View {
                     title: "Style",
                     description: "How the now-playing music screen is presented.",
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: MusicPlayerAppearance.allCases,
                         selection: $musicPlayer.appearance,
                         icon: { $0.symbolName },

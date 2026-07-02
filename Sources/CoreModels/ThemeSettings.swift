@@ -127,6 +127,16 @@ public enum TransparencyPreference: String, CaseIterable, Identifiable, Codable,
         }
     }
 
+    /// One-line explanation of what each option does, shown live under the
+    /// tri-toggle as focus moves across it (mirrors `SkipIntrosMode.detail`).
+    public var detail: String {
+        switch self {
+        case .system: return "Follow the tvOS “Reduce Transparency” accessibility setting."
+        case .on: return "Always use translucent liquid-glass panels and cards."
+        case .off: return "Always use solid backgrounds — no translucency."
+        }
+    }
+
     public static let `default`: TransparencyPreference = .system
 
     /// AppStorage key shared by RootView (reads it to drive the environment) and

@@ -311,7 +311,7 @@ public struct SettingsView: View {
             navRow("Spoilers", icon: "eye.slash",
                    value: nil,
                    route: .spoilers)
-            navRow("Trackers — Trakt, Simkl, AniList, MyAnimeList", icon: "link",
+            navRow("Trackers — Trakt, Simkl, AniList, MyAnimeList, Last.fm", icon: "link",
                    value: nil,
                    route: .integrations)
         }

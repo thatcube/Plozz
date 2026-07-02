@@ -512,6 +512,14 @@ public struct PosterCardView: View {
     @ViewBuilder
     private func progressBar(height: CGFloat, hInset: CGFloat, bottomInset: CGFloat) -> some View {
         if let percentage = item.playedPercentage, percentage > 0.01, percentage < 0.99 {
+            // Everything here scales with the (density-driven) bar `height` so the
+            // indicator stays proportionate at every display size instead of feeling
+            // heavy at the smallest one: the scrim's reach, the fill's drop shadow,
+            // and the bar itself all key off it. The factors are chosen so that at
+            // the framed card's fixed 12pt height they resolve to the original
+            // 90pt reach / 3pt shadow, leaving framed cards visually unchanged.
+            let scrimReach = height * 7.5
+            let shadowRadius = height * 0.25
             ZStack(alignment: .bottom) {
                 // Scrim: a slight black gradient that fades up from the bottom edge,
                 // reaching above the bar so the indicator pops off bright artwork.
@@ -520,40 +528,23 @@ public struct PosterCardView: View {
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: height + 90)
+                .frame(height: height + scrimReach)
                 .frame(maxWidth: .infinity)
                 .allowsHitTesting(false)
 
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        // Track: matches the main player's scrubber — Liquid Glass on
-                        // tvOS 26+, with a translucent-white fallback on older systems
-                        // *and* whenever Reduce Transparency is on (OS or in-app), so
-                        // the scrubber turns solid alongside every other glass surface.
-                        if #available(tvOS 26.0, *), !reduceTransparency {
-                            Capsule(style: .continuous)
-                                .fill(.clear)
-                                .glassEffect(.regular, in: Capsule(style: .continuous))
-                        } else {
-                            Capsule(style: .continuous)
-                                .fill(.white.opacity(0.22))
-                        }
+                        // Rendered as flat, solid shapes — never Liquid Glass — even on
+                        // tvOS 26+. A translucent scrubber over a borderless card would
+                        // be glass-inside-glass and pull focus from the artwork; a solid
+                        // track + brand-blue fill reads cleaner and still stands out.
+                        Capsule(style: .continuous)
+                            .fill(.white.opacity(0.22))
 
-                        // Fill: Plozz's brand blue rendered as Liquid Glass on
-                        // tvOS 26+ (a tinted glass capsule), with a solid brand-blue
-                        // fallback on older systems and under Reduce Transparency.
-                        Group {
-                            if #available(tvOS 26.0, *), !reduceTransparency {
-                                Capsule(style: .continuous)
-                                    .fill(.clear)
-                                    .glassEffect(.regular.tint(ThemePalette.brandBlue), in: Capsule(style: .continuous))
-                            } else {
-                                Capsule(style: .continuous)
-                                    .fill(ThemePalette.brandBlue)
-                            }
-                        }
-                        .frame(width: max(height, geo.size.width * percentage))
-                        .shadow(color: .black.opacity(0.35), radius: 3)
+                        Capsule(style: .continuous)
+                            .fill(ThemePalette.brandBlue)
+                            .frame(width: max(height, geo.size.width * percentage))
+                            .shadow(color: .black.opacity(0.35), radius: shadowRadius)
                     }
                 }
                 .frame(height: height)

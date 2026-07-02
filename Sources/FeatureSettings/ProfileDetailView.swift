@@ -33,9 +33,6 @@ struct ProfileDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 profilesListPanel
-                if context.profiles.count > 1 {
-                    startupPanel
-                }
                 if context.profiles.count == 1 {
                     disablePanel
                 }
@@ -94,6 +91,17 @@ struct ProfileDetailView: View {
                     Label("Add Profile", systemImage: "plus.circle")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                // Whether the "Who's watching?" picker appears at launch. Only
+                // meaningful with 2+ profiles, so it rides at the bottom of the
+                // list rather than in its own section.
+                if context.profiles.count > 1 {
+                    Divider()
+                    Toggle("Ask who's watching on startup", isOn: Binding(
+                        get: { context.askProfileOnStartup },
+                        set: { context.onSetAskProfileOnStartup($0) }
+                    ))
+                    .toggleStyle(SettingsSwitchToggleStyle())
+                }
             }
             .focusSection()
         }
@@ -119,36 +127,6 @@ struct ProfileDetailView: View {
             .accessibilityLabel("Edit \(profile.name)")
         }
         .padding(.vertical, 2)
-    }
-
-    /// Launch picker toggle. Device-wide behaviour (it governs the whole Apple
-    /// TV's startup), but it lives here because it's about *which profile* opens
-    /// — only meaningful with 2+ profiles, so the caller gates it on that.
-    private var startupPanel: some View {
-        SettingsPanel(
-            title: "Startup",
-            footer: "Show the “Who's watching?” picker each time Plozz opens, so anyone can pick their profile. Off opens straight into the last-used profile."
-        ) {
-            Button {
-                context.onSetAskProfileOnStartup(!context.askProfileOnStartup)
-            } label: {
-                HStack(spacing: 16) {
-                    Image(systemName: "person.crop.circle.badge.questionmark")
-                        .font(.system(size: 22, weight: .regular))
-                        .frame(width: 30, height: 30)
-                        .settingsRowIcon()
-                    Text("Ask on startup").font(.headline)
-                    Spacer()
-                    Text(context.askProfileOnStartup ? "On" : "Off")
-                        .font(.subheadline)
-                        .settingsRowSecondary()
-                }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 12)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(SettingsFocusButtonStyle())
-        }
     }
 
     private var disablePanel: some View {

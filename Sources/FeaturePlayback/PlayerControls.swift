@@ -623,8 +623,15 @@ struct PlayerControls: View {
             else { return }
             if measuredPanel != panel {
                 // First measurement for THIS panel → snap to its natural size.
+                // This write runs *inside* the ambient `.animation(value: openPanel)`
+                // transaction that opening the panel started, so without explicitly
+                // disabling animations the height correction would be interpolated and
+                // the box would visibly resize on open. Disable animation for the snap
+                // only; the tracks↔Style morph below keeps its explicit animation.
                 measuredPanel = panel
-                styleBodyHeight = newHeight
+                var snap = Transaction()
+                snap.disablesAnimations = true
+                withTransaction(snap) { styleBodyHeight = newHeight }
             } else {
                 // Same panel, content morphed (tracks↔Style) → animate the box.
                 withAnimation(.easeInOut(duration: 0.28)) { styleBodyHeight = newHeight }
@@ -673,18 +680,23 @@ struct PlayerControls: View {
             )
         } else {
             // Pre-measurement (first frame of a fresh open — always the track list,
-            // as the Style editor is only reached from it). Render the body directly
-            // as a plain VStack, clamped to the cap: `.frame(maxHeight:)` around a
-            // naturally-sized VStack reports min(content, cap), so the panel spawns at
-            // the right height for BOTH a short list (appears short) and a long
-            // 30-track list (appears at the cap) — no wrong-height first frame that
-            // then snaps/shrinks. (A framed ScrollView here is greedy and fills the
-            // cap → short lists shrink; a bare fixedSize ScrollView overshoots → long
-            // lists shrink. A plain VStack sizes to min correctly and avoids both.)
-            // The GeometryReader still reports the true height for the handoff to the
-            // scrolling branch, which then enables scrolling for over-cap lists.
+            // as the Style editor is only reached from it). Render the body as a plain
+            // VStack clamped to the cap.
+            //
+            // CRITICAL: a flexible `.frame(maxHeight:)` is GREEDY — given a tall
+            // proposal (the bottom cluster proposes far more than the cap) it fills to
+            // the cap regardless of content, so a 2-row Audio menu would paint at 440
+            // and then shrink to its real ~166 once measured. Wrapping it in an outer
+            // `.fixedSize(vertical:)` feeds the frame a nil proposal, so it falls back
+            // to the child's ideal height clamped to the cap = min(content, cap). Now
+            // the first painted frame equals the settled measured height for BOTH a
+            // short list (→ its natural height) and a long 30-track list (→ the cap),
+            // leaving zero height delta to animate on open.
+            // The GeometryReader still reports the true content height for the handoff
+            // to the scrolling branch, which enables scrolling for over-cap lists.
             body
                 .frame(maxHeight: Self.panelBodyMaxHeight, alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
                 .clipped()
         }
     }

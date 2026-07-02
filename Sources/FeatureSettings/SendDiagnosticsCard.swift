@@ -24,32 +24,40 @@ struct SendDiagnosticsCard: View {
 
     private enum SendState { case idle, sent, failed }
     @State private var sendState: SendState = .idle
+    @State private var message: String = ""
 
     var body: some View {
         if canSend {
             SettingsPanel(title: "Send to Developer", footer: footer) {
-                Button {
-                    let ok = CrashDiagnostics.send(
-                        logText: PlozzLog.recentLogText(limit: 500),
-                        note: "User diagnostics report"
-                    )
-                    sendState = ok ? .sent : .failed
-                } label: {
-                    Label(
-                        sendState == .sent ? "Sent" : "Send to Developer",
-                        systemImage: sendState == .sent ? "checkmark.circle.fill" : "paperplane.fill"
-                    )
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 18) {
+                    TextField("Add a message (optional) — e.g. what went wrong", text: $message)
+                        .disabled(sendState == .sent)
+
+                    Button {
+                        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let ok = CrashDiagnostics.send(
+                            logText: PlozzLog.recentLogText(limit: 500),
+                            note: trimmed.isEmpty ? nil : trimmed
+                        )
+                        sendState = ok ? .sent : .failed
+                        if ok { message = "" }
+                    } label: {
+                        Label(
+                            sendState == .sent ? "Sent" : "Send Recent Activity to Developer",
+                            systemImage: sendState == .sent ? "checkmark.circle.fill" : "paperplane.fill"
+                        )
+                        .font(.headline)
+                    }
+                    .buttonStyle(PlozzOpaquePillButtonStyle())
+                    .disabled(sendState == .sent)
                 }
-                .buttonStyle(PlozzOpaquePillButtonStyle())
-                .disabled(sendState == .sent)
             }
         } else {
             FocusableSettingsPanel(
                 title: "Send to Developer",
                 footer: disabledDescription
             ) {
-                Label("Send to Developer", systemImage: "paperplane")
+                Label("Send Recent Activity to Developer", systemImage: "paperplane")
                     .font(.headline)
                     .foregroundStyle(.secondary)
                     .opacity(0.5)

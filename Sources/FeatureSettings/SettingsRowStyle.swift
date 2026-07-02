@@ -12,6 +12,19 @@ import CoreUI
 
 // MARK: - Shared row body (one- or two-line)
 
+private extension VerticalAlignment {
+    /// Aligns the leading icon to the vertical center of the *title line* rather
+    /// than the whole title+subtitle block, so on two-line rows the icon pairs
+    /// with the title instead of floating between the two lines. On one-line rows
+    /// the title *is* the block, so this collapses to a plain centered icon.
+    enum RowTitleIcon: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat {
+            d[VerticalAlignment.center]
+        }
+    }
+    static let rowTitleIcon = VerticalAlignment(RowTitleIcon.self)
+}
+
 /// The shared body of a Settings list row: a leading icon, a primary `title`,
 /// an optional SECOND line beneath the title, and a trailing accessory.
 ///
@@ -46,15 +59,23 @@ struct SettingsRowLabel<Secondary: View, Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            if let icon {
-                Image(systemName: icon)
-                    .font(.system(size: 22, weight: .regular))
-                    .frame(width: 30, height: 30)
-                    .settingsRowIcon()
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.callout.weight(.medium))
-                secondary
+            // Icon + text share a custom alignment so the icon centers on the
+            // TITLE line, not the two-line block. The trailing accessory stays in
+            // the outer HStack (default center), so the chevron keeps centering on
+            // the full row height.
+            HStack(alignment: .rowTitleIcon, spacing: 16) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 22, weight: .regular))
+                        .frame(width: 30, height: 30)
+                        .settingsRowIcon()
+                        .alignmentGuide(.rowTitleIcon) { $0[VerticalAlignment.center] }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title).font(.callout.weight(.medium))
+                        .alignmentGuide(.rowTitleIcon) { $0[VerticalAlignment.center] }
+                    secondary
+                }
             }
             Spacer(minLength: 12)
             trailing

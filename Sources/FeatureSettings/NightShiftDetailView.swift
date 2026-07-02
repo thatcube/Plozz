@@ -27,8 +27,8 @@ struct NightShiftDetailView: View {
         var primaryRows: [SettingsSplitRow] = [
             SettingsSplitRow(
                 id: "night-shift",
-                title: "Night Shift",
-                description: "A warm, dimming tint that eases late-night watching.",
+                title: "Circadian Mode",
+                description: "Warms and dims the display at night to help you sleep.",
             ) {
                 NightShiftScheduleControl(model: model)
             }

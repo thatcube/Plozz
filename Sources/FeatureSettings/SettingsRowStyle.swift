@@ -41,7 +41,15 @@ private struct SettingsFocusBody: View {
     @Environment(\.isFocused) private var isFocused
     @Environment(\.colorScheme) private var colorScheme
 
-    private var corner: CGFloat { size == .prominent ? 18 : 14 }
+    // Concentric focus card: the top-level Settings cards use an outer radius
+    // of `mediumCardCornerRadius` (22) with 28pt horizontal / 16pt vertical
+    // content padding. Extending the focus fill outward by 16pt H / 4pt V
+    // leaves a UNIFORM 12pt gap on every side (28−16 = 16−4 = 12), and a focus
+    // corner of 22−12 = 10 makes the fill's corners concentric with the card's.
+    // `.prominent` (taller server-list rows) keeps its own larger geometry.
+    private var corner: CGFloat { size == .prominent ? 18 : 10 }
+    private var focusInsetH: CGFloat { size == .prominent ? 10 : 16 }
+    private var focusInsetV: CGFloat { size == .prominent ? 6 : 4 }
 
     private var focusFill: Color {
         colorScheme == .dark ? Color.white : Color.black
@@ -67,8 +75,8 @@ private struct SettingsFocusBody: View {
             .background(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .fill(isFocused ? focusFill : Color.clear)
-                    .padding(.horizontal, isFocused ? -10 : 0)
-                    .padding(.vertical, isFocused ? -6 : 0)
+                    .padding(.horizontal, isFocused ? -focusInsetH : 0)
+                    .padding(.vertical, isFocused ? -focusInsetV : 0)
                     .shadow(
                         color: Color.black.opacity(isFocused ? 0.30 : 0),
                         radius: isFocused ? 14 : 0,

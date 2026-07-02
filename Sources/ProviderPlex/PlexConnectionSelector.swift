@@ -1,4 +1,5 @@
 import Foundation
+import CoreModels
 
 /// A reachable Plex Media Server discovered through the account's resources.
 ///
@@ -55,6 +56,10 @@ public enum PlexConnectionSelector {
         var isLocal: Bool
         var isRelay: Bool
         var isSecure: Bool
+        /// Positive locality classification of the connection host, independent of
+        /// Plex's own `local` flag (which it sets to `1` on *every* bound
+        /// interface, including a Tailscale/VPN tunnel).
+        var locality: SourceLocality
     }
 
     static func best(from connections: [PlexConnectionDTO]) -> URL? {
@@ -74,7 +79,8 @@ public enum PlexConnectionSelector {
                 uri: $0.uri,
                 isLocal: $0.local ?? false,
                 isRelay: $0.relay ?? false,
-                isSecure: ($0.protocol ?? ($0.uri?.hasPrefix("https") == true ? "https" : "http")) == "https"
+                isSecure: ($0.protocol ?? ($0.uri?.hasPrefix("https") == true ? "https" : "http")) == "https",
+                locality: SourceLocalityClassifier.classify(url: $0.uri.flatMap { URL(string: $0) })
             )
         }
         let ranked = candidates
@@ -97,9 +103,22 @@ public enum PlexConnectionSelector {
 }
 
 private extension PlexConnectionSelector.Candidate {
-    /// Lower tier == more preferred.
+    /// Lower tier == more preferred: `0` same-LAN direct, `1` remote direct,
+    /// `2` relay.
+    ///
+    /// A *positive* `.remote` classification (Tailscale CGNAT `100.64/10`,
+    /// `*.ts.net`, Tailscale ULA, or a public IP) **overrides** Plex's `local`
+    /// flag so a tunnel connection can never share the LAN tier with a real
+    /// same-subnet address — Plex marks every bound interface `local=1`, so
+    /// trusting the flag alone routed playback over a sister's Tailscale server
+    /// whenever it was listed first. The flag is still trusted for a host the
+    /// classifier can't place (e.g. a split-horizon LAN domain), and a positive
+    /// `.local` classification wins even if the flag is unset. Mirrors the
+    /// locality tiering ``PlexConnectionResolver`` applies at probe time.
     var tier: Int {
         if isRelay { return 2 }
-        return isLocal ? 0 : 1
+        if locality == .remote { return 1 }
+        if locality == .local || isLocal { return 0 }
+        return 1
     }
 }

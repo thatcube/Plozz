@@ -86,6 +86,39 @@ final class PlexConnectionSelectorTests: XCTestCase {
             "https://relay.plex.direct:443"
         ])
     }
+
+    func testTailscaleConnectionFlaggedLocalIsDemotedBelowRealLAN() {
+        // Plex marks EVERY bound interface local=1, including a Tailscale tunnel.
+        // A positive .remote classification (CGNAT 100.64/10, *.ts.net) must
+        // override the flag so the real LAN address wins even when the tunnel is
+        // listed first. This is the user's sister-over-Tailscale complaint.
+        let conns = connections("""
+        [
+          {"protocol":"https","uri":"https://100-72-0-9.abcdef.plex.direct:32400","local":true,"relay":false},
+          {"protocol":"https","uri":"https://192-168-1-5.abcdef.plex.direct:32400","local":true,"relay":false}
+        ]
+        """)
+        XCTAssertEqual(
+            PlexConnectionSelector.ranked(from: conns).map(\.absoluteString),
+            [
+                "https://192-168-1-5.abcdef.plex.direct:32400",
+                "https://100-72-0-9.abcdef.plex.direct:32400"
+            ]
+        )
+    }
+
+    func testTailscaleMagicDNSFlaggedLocalIsDemoted() {
+        let conns = connections("""
+        [
+          {"protocol":"https","uri":"https://server.tail1234.ts.net:32400","local":true,"relay":false},
+          {"protocol":"https","uri":"https://192-168-1-5.abcdef.plex.direct:32400","local":true,"relay":false}
+        ]
+        """)
+        XCTAssertEqual(
+            PlexConnectionSelector.best(from: conns)?.absoluteString,
+            "https://192-168-1-5.abcdef.plex.direct:32400"
+        )
+    }
 }
 
 // MARK: - Reachability-aware server resolution

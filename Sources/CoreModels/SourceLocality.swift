@@ -54,6 +54,9 @@ public enum SourceLocalityClassifier {
         // Loopback (the app's own remux proxy or a same-box server).
         if host == "localhost" || host == "127.0.0.1" || host == "::1" { return .local }
 
+        // IPv6 literal (URL hosts may arrive bracketed and/or zone-scoped).
+        if let ipv6 = classifyIPv6(host) { return ipv6 }
+
         // A `plex.direct` host embeds the server's real IP as its first label
         // (`192-168-1-5.<hash>.plex.direct`); classify by that embedded address.
         if let octets = leadingIPv4(host) {
@@ -68,6 +71,38 @@ public enum SourceLocalityClassifier {
 
         // A bare public-looking IPv6 or an arbitrary hostname can't be placed.
         return .unknown
+    }
+
+    /// Classifies an IPv6 literal host (possibly bracketed and/or zone-scoped)
+    /// into a ``SourceLocality``, or `nil` when the host is not an IPv6 literal.
+    ///
+    /// - Loopback `::1` → local.
+    /// - Link-local `fe80::/10` and Unique-Local `fc00::/7` (ULA) → local, the
+    ///   IPv6 equivalents of RFC1918 — a home LAN reached over IPv6.
+    /// - **Tailscale's ULA range `fd7a:115c:a1e0::/48` → remote.** It is
+    ///   ULA-shaped but is the tunnel, not the LAN, so it must be caught *before*
+    ///   the generic ULA rule (mirrors the CGNAT `100.64/10` carve-out for v4).
+    /// - Any other global-unicast IPv6 → remote.
+    static func classifyIPv6(_ rawHost: String) -> SourceLocality? {
+        var host = rawHost
+        if host.hasPrefix("[") && host.hasSuffix("]") {
+            host = String(host.dropFirst().dropLast())
+        }
+        // Strip an interface zone id (`fe80::1%en0`).
+        let addr = (host.split(separator: "%").first.map(String.init) ?? host).lowercased()
+        // An IPv6 literal contains at least two colons; a bare hostname never does
+        // (URL.host has already stripped any `:port`).
+        guard addr.contains("::") || addr.filter({ $0 == ":" }).count >= 2 else { return nil }
+
+        if addr == "::1" { return .local }                 // loopback
+        if addr.hasPrefix("fd7a:115c:a1e0") { return .remote } // Tailscale ULA — the tunnel
+        // Link-local fe80::/10 (fe80–febf).
+        if addr.hasPrefix("fe8") || addr.hasPrefix("fe9")
+            || addr.hasPrefix("fea") || addr.hasPrefix("feb") { return .local }
+        // Unique-Local fc00::/7 (fc00–fdff) — the IPv6 "private LAN" range.
+        if addr.hasPrefix("fc") || addr.hasPrefix("fd") { return .local }
+        // Anything else that parsed as IPv6 is a routable/global address.
+        return .remote
     }
 
     /// Classifies four IPv4 octets by RFC1918 / loopback / CGNAT membership.

@@ -275,26 +275,23 @@ private struct LibraryCardView: View {
         }
     }
 
-    /// Themed empty-state for an imageless library: a soft accent→surface gradient
-    /// behind a large, low-contrast per-kind glyph. An opaque `cardSurface` base
-    /// sits under the gradient so the focus glass halo behind the card can't bleed
-    /// through the (otherwise translucent) placeholder on focus. Base, gradient and
-    /// glyph all read from the active theme palette, so the tile tracks light / dark
-    /// / OLED and never changes on focus.
+    /// Themed empty-state for an imageless library. A subtle vertical gradient
+    /// between the page's `backgroundBase` (top) and the opaque `cardOpaqueSurface`
+    /// (bottom): close in value so the fill reads a touch brighter than the page
+    /// yet never as a heavy gradient, and — because both stops come straight from
+    /// the palette — it tracks light / dark and collapses to pure black in OLED
+    /// (both stops are black there). Opaque, so the focus glass halo behind the
+    /// card can't bleed through, and focus-independent so nothing jumps on focus.
     private var placeholder: some View {
         ZStack {
-            palette.cardSurface
             LinearGradient(
-                colors: [
-                    palette.accent.opacity(palette.isLight ? 0.22 : 0.32),
-                    palette.cardSurface.opacity(0.45)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                colors: [palette.backgroundBase, palette.cardOpaqueSurface],
+                startPoint: .top,
+                endPoint: .bottom
             )
             Image(systemName: librarySymbol)
                 .font(.system(size: 64, weight: .semibold))
-                .foregroundStyle(palette.secondaryText.opacity(0.5))
+                .foregroundStyle(palette.secondaryText.opacity(0.4))
         }
     }
 

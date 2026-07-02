@@ -80,10 +80,12 @@ public final class ItemDetailViewModel {
     /// drive the default source.
     ///
     /// Set only when the detail was reached from a single specific server's
-    /// **library tile** (browse): the cross-server picker then defaults to *this*
-    /// account's copy/version (the user can still switch). `nil` for titles opened
-    /// from the cross-server-merged Home/Search rows, which keep the smart
-    /// best-version default. See ``CrossSourceSelector/selection(from:capabilities:preferredAccountID:)``.
+    /// **library tile** (browse): the cross-server picker uses *this* account as a
+    /// **soft** tie-break — its copy wins only among otherwise-equal candidates,
+    /// never over a more-local or higher-quality copy (the user can still switch).
+    /// `nil` for titles opened from the cross-server-merged Home/Search rows, which
+    /// keep the smart best default. See
+    /// ``CrossSourceSelector/bestSelection(from:capabilities:preferring:)``.
     public let originSourceAccountID: String?
 
     /// The cross-server sources of this (possibly merged) title, threaded in from
@@ -128,6 +130,11 @@ public final class ItemDetailViewModel {
     /// Set once the live fetch publishes fresh detail, so a late snapshot restore
     /// never clobbers a fresher hero.
     private var hasPaintedFreshDetail = false
+    /// Guards the one-time initial locality retarget in ``load()`` so it runs at
+    /// most once and can never override a later user server switch. Set the first
+    /// time `load()` evaluates the preference, and eagerly by ``switchToSource``
+    /// so an explicit pick is always authoritative.
+    private var didApplyInitialLocalityPreference = false
     /// Coalesces snapshot writes to AT MOST one in flight per view model: a burst
     /// of state changes (children arrive, episodes prewarm, cross-server discovery,
     /// alternate-source updates) used to each fire a full-snapshot encode+write,
@@ -269,6 +276,13 @@ public final class ItemDetailViewModel {
         crossServerDiscoveryTask?.cancel()
         crossServerDiscoveryTask = nil
         hasPaintedFreshDetail = false
+
+        // Before the very first fetch, retarget a cross-server-merged Home/Search
+        // open onto its most-local copy (see doc on the method): a SERIES loads
+        // its whole tree from ONE server and its per-server episodes can't
+        // cross-server re-select at play time, so the initial server MUST be the
+        // local one or every episode streams from a remote/Tailscale merge-primary.
+        applyInitialLocalityPreferenceIfNeeded()
 
         // Stale-while-revalidate restore, RACED OFF THE CRITICAL PATH. The snapshot
         // read used to be the FIRST await in load() — so a disk-contended read (the
@@ -683,6 +697,56 @@ public final class ItemDetailViewModel {
         return true
     }
 
+    /// Retargets the initial active server to the most-local copy of a
+    /// cross-server-merged title — **once**, before the first fetch.
+    ///
+    /// A movie re-selects its best (most-local) copy at play time via the picker
+    /// and `bestSourcePlayItem`, so its initial load server doesn't affect where
+    /// it plays. A **series** is different: the whole season/episode tree loads
+    /// from ONE server, and each per-server episode carries only its own single
+    /// source — so `bestSourcePlayItem` can't cross-server re-select at play time.
+    /// If the merge-primary happens to be a remote/Tailscale server, every episode
+    /// would then stream remotely even when a same-LAN copy exists. Picking the
+    /// local server up front fixes that (the picker still lets the user switch).
+    ///
+    /// Scope guards:
+    ///  * Only for titles opened from a cross-server-merged Home/Search row
+    ///    (`originSourceAccountID == nil`). A deliberate library-tile browse keeps
+    ///    that library's server.
+    ///  * Only when there's a real cross-server choice (`initialSources > 1`).
+    ///  * Runs at most once and is disabled by an explicit `switchToSource`, so it
+    ///    never fights a user's manual server pick.
+    ///
+    /// Locality is read LIVE from each source's provider (falling back to the
+    /// stored ref locality) so a network change since the card was built is
+    /// honored.
+    private func applyInitialLocalityPreferenceIfNeeded() {
+        guard !didApplyInitialLocalityPreference else { return }
+        didApplyInitialLocalityPreference = true
+        guard originSourceAccountID == nil, initialSources.count > 1 else { return }
+
+        let liveRanked = initialSources.map { source -> MediaSourceRef in
+            let provider = source.accountID == activeSourceAccountID
+                ? activeProvider
+                : alternateProviderResolver(source.accountID)
+            guard let locality = provider?.connectionLocality else { return source }
+            var copy = source
+            copy.locality = locality
+            return copy
+        }
+
+        guard let best = CrossSourceSelector.bestSelection(
+                  from: liveRanked,
+                  capabilities: .detected()
+              )?.source,
+              best.accountID != activeSourceAccountID,
+              let provider = alternateProviderResolver(best.accountID) else { return }
+
+        activeProvider = provider
+        activeItemID = best.itemID
+        activeSourceAccountID = best.accountID
+    }
+
     /// Switches the page to another server's copy of this title IN PLACE — without
     /// pushing a navigation entry — and reloads that server's children/episodes.
     ///
@@ -699,6 +763,10 @@ public final class ItemDetailViewModel {
         guard accountID != activeSourceAccountID,
               let source = sources.first(where: { $0.accountID == accountID }),
               let provider = alternateProviderResolver(accountID) else { return }
+
+        // An explicit user pick is authoritative — never let a subsequent
+        // `load()` re-apply the automatic initial locality preference over it.
+        didApplyInitialLocalityPreference = true
 
         // Stop the old server's speculative enrichment so it can't clobber the new
         // server's source list after the switch.
@@ -1040,13 +1108,32 @@ public final class ItemDetailViewModel {
             // Already had a (seeded) picker: union in any newly-found servers,
             // preserving existing order + already-enriched versions.
             result = sources
+            // Refresh each KEPT source's locality from the re-discovery first: a
+            // repeated discovery may re-classify a server local↔remote after a
+            // network change (e.g. the device got home onto the LAN, or dropped
+            // off it onto Tailscale) WITHOUT surfacing any new server. That
+            // must still update the picker highlight and the play default, so we
+            // publish on a locality change even when the server count is
+            // unchanged (the count-grew guard below alone would swallow it).
+            let discoveredLocality = Dictionary(
+                discovered.compactMap { ref in ref.locality.map { (sourceKey(ref), $0) } },
+                uniquingKeysWith: { first, _ in first }
+            )
+            result = result.map { existing in
+                guard let refreshed = discoveredLocality[sourceKey(existing)],
+                      refreshed != existing.locality else { return existing }
+                var copy = existing
+                copy.locality = refreshed
+                return copy
+            }
             var keys = Set(result.map(sourceKey))
             for source in discovered where keys.insert(sourceKey(source)).inserted {
                 result.append(source)
             }
         }
-        // Only publish when discovery actually expanded the server list.
-        guard result.count > 1, result.count > sources.count else { return }
+        // Publish when discovery expanded the server list OR refreshed a kept
+        // server's locality (result differs from the current sources).
+        guard result.count > 1, result != sources else { return }
         sources = result
         applyUnifiedWatchState()
         persistSnapshot()

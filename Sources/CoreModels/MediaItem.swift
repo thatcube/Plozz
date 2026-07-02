@@ -238,6 +238,19 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// fresh play request. `nil` means "use the primary source".
     public var selectedSourceAccountID: String?
 
+    /// Whether ``selectedSourceAccountID`` reflects a **deliberate user choice**
+    /// (the server picker, or a version pick that names its own server) rather
+    /// than an auto-computed default. **Transient UI state** — excluded from
+    /// `Codable` like the other per-play selections, but kept in
+    /// `Equatable`/`Hashable`.
+    ///
+    /// The best-source play router (`bestSourcePlayItem`) uses this to decide
+    /// whether it may re-select a better (more-local) server using *live*
+    /// locality: an explicit pick is always honored, but an auto-default is
+    /// re-evaluated against the reachable-right-now locality so a title opened
+    /// from a remote/Tailscale library still plays from a same-LAN copy when one
+    /// exists. `false` for every non-picked item (Home / Search / auto default).
+    public var explicitSourceSelection: Bool
     public init(
         id: String,
         title: String,
@@ -277,7 +290,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         selectedVersionID: String? = nil,
         sources: [MediaSourceRef] = [],
         lastPlayedAt: Date? = nil,
-        selectedSourceAccountID: String? = nil
+        selectedSourceAccountID: String? = nil,
+        explicitSourceSelection: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -318,6 +332,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         self.sources = sources
         self.lastPlayedAt = lastPlayedAt
         self.selectedSourceAccountID = selectedSourceAccountID
+        self.explicitSourceSelection = explicitSourceSelection
     }
 
     /// Persisted keys. `selectedVersionID` is intentionally omitted so it is
@@ -379,6 +394,7 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         lastPlayedAt = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
         selectedVersionID = nil
         selectedSourceAccountID = nil
+        explicitSourceSelection = false
     }
 
     /// Returns a copy of this item tagged as belonging to `accountID`, used by the
@@ -484,11 +500,12 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
     /// `selectedVersionID`) targets the right file on the right server, while
     /// `sources`/identity are preserved for further switching. A no-op-safe
     /// `versionID` that isn't on the target server is dropped (server default).
-    public func selectingSource(_ source: MediaSourceRef, versionID: String? = nil) -> MediaItem {
+    public func selectingSource(_ source: MediaSourceRef, versionID: String? = nil, explicit: Bool = false) -> MediaItem {
         var copy = self
         copy.id = source.itemID
         copy.sourceAccountID = source.accountID
         copy.selectedSourceAccountID = source.accountID
+        copy.explicitSourceSelection = explicit
         // Keep the current versions when the target source ref carries none:
         // Home / Search source refs are membership-only (versions are populated
         // live by a detail fetch, never on those refs), so overwriting with an
@@ -527,9 +544,10 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         item: MediaItem,
         sources: [MediaSourceRef],
         activeAccountID: String?,
-        versionID: String?
+        versionID: String?,
+        explicit: Bool = false
     ) -> MediaItem {
-        let routed = routedForPlayback(item: item, sources: sources, activeAccountID: activeAccountID, versionID: versionID)
+        let routed = routedForPlayback(item: item, sources: sources, activeAccountID: activeAccountID, versionID: versionID, explicit: explicit)
         // Resume reconciliation: whichever server backs the chosen stream, seek to
         // the cross-server FURTHEST progress so best-source routing can't rewind
         // playback to 0 when the merged card shows progress made on another server.
@@ -543,7 +561,8 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
         item: MediaItem,
         sources: [MediaSourceRef],
         activeAccountID: String?,
-        versionID: String?
+        versionID: String?,
+        explicit: Bool
     ) -> MediaItem {
         let version = versionID.flatMap { id in
             sources.flatMap(\.versions).first(where: { $0.id == id })
@@ -552,18 +571,18 @@ public struct MediaItem: Codable, Hashable, Identifiable, Sendable {
            let backingID = version.sourceItemID,
            let backingAccountID = version.sourceAccountID {
             if let backingSource = sources.first(where: { $0.accountID == backingAccountID && $0.itemID == backingID }) {
-                return item.selectingSource(backingSource, versionID: nil)
+                return item.selectingSource(backingSource, versionID: nil, explicit: explicit)
             }
             let fallback = MediaSourceRef(
                 accountID: backingAccountID,
                 itemID: backingID,
                 versions: [version]
             )
-            return item.selectingSource(fallback, versionID: nil)
+            return item.selectingSource(fallback, versionID: nil, explicit: explicit)
         }
         if let activeAccountID,
            let primary = sources.first(where: { $0.accountID == activeAccountID }) {
-            return item.selectingSource(primary, versionID: versionID)
+            return item.selectingSource(primary, versionID: versionID, explicit: explicit)
         }
         return item.selectingVersion(versionID)
     }

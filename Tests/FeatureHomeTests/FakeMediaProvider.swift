@@ -112,6 +112,13 @@ final class FakeMediaProvider: MediaProvider, @unchecked Sendable {
 
     func search(query: String, limit: Int) async throws -> [MediaItem] { [] }
 
+    /// Overrides the default (baseURL-derived) locality so tests can model a
+    /// LAN vs remote/Tailscale server without a real network.
+    var localityOverride: SourceLocality?
+    var connectionLocality: SourceLocality {
+        localityOverride ?? SourceLocalityClassifier.classify(url: session.server.baseURL)
+    }
+
     func playbackInfo(for itemID: String) async throws -> PlaybackRequest { throw AppError.notFound }
     func reportPlayback(_ progress: PlaybackProgress, event: PlaybackEvent) async throws {}
     func imageURL(itemID: String, kind: ImageKind, maxWidth: Int?) -> URL? { nil }

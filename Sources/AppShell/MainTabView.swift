@@ -520,10 +520,13 @@ private func bestSourcePlayItem(_ item: MediaItem, accounts: [ResolvedAccount]) 
     // array for further switching. Re-running best-source selection here would
     // then clobber that pick back to the locality-best copy, making the picker
     // cosmetic (a user who deliberately chose the remote/Tailscale copy would
-    // still be sent to the LAN one). Only best-source-route items that carry NO
-    // explicit selection — Home "Continue Watching" and Search play directly,
-    // never through detail, and leave `selectedSourceAccountID` nil.
-    if let picked = item.selectedSourceAccountID,
+    // still be sent to the LAN one). Only honor picks the user actually made
+    // (`explicitSourceSelection`): an AUTO default (origin-following detail
+    // default, or a Home/Search item that carries no explicit choice) is instead
+    // re-selected below against *live* locality, so a title opened from a
+    // remote/Tailscale library still plays from a same-LAN copy when one exists.
+    if item.explicitSourceSelection,
+       let picked = item.selectedSourceAccountID,
        liveSources.contains(where: { $0.accountID == picked }) {
         return item
     }

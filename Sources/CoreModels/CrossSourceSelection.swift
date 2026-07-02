@@ -45,6 +45,7 @@ public enum CrossSourceSelector {
         var directPlays: Bool
         var hasVersions: Bool
         var qualityScore: Int
+        var isPreferred: Bool
     }
 
     /// The default server+version to play for `item`, or `nil` when `item` has no
@@ -58,14 +59,24 @@ public enum CrossSourceSelector {
     }
 
     /// The default server+version to play across `sources`, or `nil` when empty.
+    ///
+    /// `preferring` is a **soft** origin/library hint used only as the *last*
+    /// tie-break (after locality, Direct-Play, known-versions and quality): when
+    /// the item was opened from a particular server's library tile, that server
+    /// wins **only** among otherwise-equal candidates. It never overrides
+    /// locality — a local copy still beats a remote/Tailscale origin — so the
+    /// "play from the closest server" guarantee holds while a genuine tie
+    /// resolves to the browsed library deterministically.
     public static func bestSelection(
         from sources: [MediaSourceRef],
-        capabilities: MediaCapabilities
+        capabilities: MediaCapabilities,
+        preferring preferredAccountID: String? = nil
     ) -> CrossSourceSelection? {
         guard !sources.isEmpty else { return nil }
 
         let candidates = sources.enumerated().map { offset, source -> Candidate in
             let localityRank = (source.locality ?? .unknown).rank
+            let isPreferred = preferredAccountID != nil && source.accountID == preferredAccountID
             if let best = source.versions.recommendedSelection(for: capabilities) {
                 return Candidate(
                     order: offset,
@@ -74,7 +85,8 @@ public enum CrossSourceSelector {
                     localityRank: localityRank,
                     directPlays: best.compatibility(with: capabilities) == .directPlay,
                     hasVersions: true,
-                    qualityScore: best.qualityScore
+                    qualityScore: best.qualityScore,
+                    isPreferred: isPreferred
                 )
             }
             return Candidate(
@@ -84,7 +96,8 @@ public enum CrossSourceSelector {
                 localityRank: localityRank,
                 directPlays: false,
                 hasVersions: false,
-                qualityScore: Int.min
+                qualityScore: Int.min,
+                isPreferred: isPreferred
             )
         }
 
@@ -93,37 +106,13 @@ public enum CrossSourceSelector {
             if lhs.directPlays != rhs.directPlays { return !lhs.directPlays && rhs.directPlays }
             if lhs.hasVersions != rhs.hasVersions { return !lhs.hasVersions && rhs.hasVersions }
             if lhs.qualityScore != rhs.qualityScore { return lhs.qualityScore < rhs.qualityScore }
+            // Soft origin/library preference: only breaks an otherwise-exact tie.
+            if lhs.isPreferred != rhs.isPreferred { return !lhs.isPreferred && rhs.isPreferred }
             // Lower order (primary) should win the tie → it must be the "max".
             return lhs.order > rhs.order
         }
 
         guard let winner else { return nil }
         return CrossSourceSelection(source: winner.source, version: winner.version)
-    }
-
-    /// The default server+version to play across `sources`, honoring an explicit
-    /// **origin** preference.
-    ///
-    /// When `preferredAccountID` matches one of the `sources` — i.e. the item was
-    /// opened from *that* server's library tile — that source is the default, with
-    /// its own smart recommended version selected, so the detail page and playback
-    /// follow the library's server (the picker still lets the user switch). When
-    /// `preferredAccountID` is `nil` or no source matches it (e.g. a title opened
-    /// from a cross-server-merged Home/Search row), it falls back to the smart
-    /// cross-server best (``bestSelection(from:capabilities:)``).
-    public static func selection(
-        from sources: [MediaSourceRef],
-        capabilities: MediaCapabilities,
-        preferredAccountID: String?
-    ) -> CrossSourceSelection? {
-        guard !sources.isEmpty else { return nil }
-        if let preferredAccountID,
-           let origin = sources.first(where: { $0.accountID == preferredAccountID }) {
-            return CrossSourceSelection(
-                source: origin,
-                version: origin.versions.recommendedSelection(for: capabilities)
-            )
-        }
-        return bestSelection(from: sources, capabilities: capabilities)
     }
 }

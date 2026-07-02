@@ -253,10 +253,10 @@ public struct ItemDetailView: View {
         if let sourceOverride, let match = serverChoices.first(where: { $0.accountID == sourceOverride }) {
             return match
         }
-        if let selection = CrossSourceSelector.selection(
+        if let selection = CrossSourceSelector.bestSelection(
             from: serverChoices,
             capabilities: capabilities,
-            preferredAccountID: viewModel.originSourceAccountID
+            preferring: viewModel.originSourceAccountID
         ) {
             return selection.source
         }
@@ -296,6 +296,12 @@ public struct ItemDetailView: View {
     /// Builds the retargeted item `Play` should launch — see
     /// `MediaItem.retargetedForPlayback` for the actual routing rules. Kept as
     /// a thin wrapper so callers in this view can use familiar argument names.
+    ///
+    /// `explicit` marks the retarget as a deliberate user choice (server or
+    /// version picker) so the best-source router honors it as-is; an auto default
+    /// (the user opened the page and pressed Play without touching a picker) is
+    /// left non-explicit so the router may re-select a more-local copy using live
+    /// locality.
     private func playItem(
         for item: MediaItem,
         sources: [MediaSourceRef],
@@ -306,7 +312,8 @@ public struct ItemDetailView: View {
             item: item,
             sources: sources,
             activeAccountID: activeAccountID,
-            versionID: versionID
+            versionID: versionID,
+            explicit: sourceOverride != nil || versionOverride != nil
         )
     }
 

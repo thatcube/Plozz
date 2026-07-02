@@ -76,6 +76,28 @@ suites (handled automatically by `tools/test-fast.sh`).
 
 ## Known issues to fix (do NOT mask by weakening tests)
 
+- **CoreModelsTests:** 21 assertions fail on clean `main`, all in the
+  **media-identity / cross-server merging** area — **not** subtitles/captions,
+  playback transport, or settings. Agents keep re-discovering these and burning a
+  ~10-min recompile each time; they are pre-existing and unrelated to most work.
+  The failing cases (as of this writing):
+  - `IdentityIndexTests` (6): `testEnrichmentFetchFailureIsInconclusiveNotDropped`,
+    `testEnrichmentFillsGuidlessPlexSeries`, `testEnrichmentGenuinelyUnmatchableIsConclusive`,
+    `testEnrichmentNeverLoosensSeriesToTitle`, `testEnrichmentProcessesMixedPageConcurrently`,
+    `testSymmetricFanOutToFormerlyGuidlessPlexSeries`.
+  - `MediaItemIdentityTests` (`CrossServerIdentityTests`, 4):
+    `testExternalIDSuppressesTitleKey`, `testMultipleExternalIDsEmittedInPriorityOrder`,
+    `testTitleIdentityIsMoviesOnly`, `testTitleIdentityRequiresYear`.
+  - `MediaItemMergerTests` (1): `testMergesMovieByTitleAndYearWithoutExternalIDs`.
+  - `SameAccountVersionGroupingTests` (1): `testTwoSameTitleSameYearMoviesGroupViaTitleIdentityWhenNoIDs`.
+  - `PlaybackDiagnosticsEnrichedTests` (1): `testStreamTransportSummaryFlagsLocalAndStripsTokens`.
+  Common thread: `MediaIdentity` now emits a `sameItemID(...)` identity and no
+  longer emits bare `title(...)`/some `external(...)` in the cases these tests
+  assert, and the diagnostics transport summary dropped the `· HLS` suffix. Fix =
+  reconcile these tests with the current identity/merging + diagnostics behaviour
+  (or fix the behaviour if it regressed) — do **not** weaken assertions to hide
+  them. **If you are working on subtitles/playback/settings and see exactly these
+  21, they are not your regression — carry on.**
 - **FeatureHomeTests:** 23 assertions fail on clean `main`
   (`ItemDetailViewModelTests` — trailer resolution / alternate-source
   enrichment / "Condition not met before timeout"). The suite also hangs the

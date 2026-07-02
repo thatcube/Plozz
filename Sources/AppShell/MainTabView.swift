@@ -69,7 +69,11 @@ struct RealtimePlaybackScrobbler: TraktScrobbling {
 /// checklist, and caption/spoiler/theme settings.
 struct MainTabView: View {
     let accounts: [ResolvedAccount]
-    let captionModel: CaptionSettingsModel
+    /// Subtitle behaviour (mode / language / auto-download) and appearance
+    /// (`SubtitleStyle`) split out of the retired `CaptionSettings`. Behaviour
+    /// feeds the policy resolver; style seeds the player + live overlay.
+    let subtitleBehaviorModel: SubtitleBehaviorModel
+    let subtitleStyleModel: SubtitleStyleModel
     let spoilerModel: SpoilerSettingsModel
     let playbackModel: PlaybackSettingsModel
     /// Per-profile per-content-type subtitle policy overrides, threaded into the
@@ -156,9 +160,10 @@ struct MainTabView: View {
                 accounts: accounts,
                 homeVisibility: homeVisibility,
                 homeLayoutStore: homeLayoutStore,
-                captionSettings: captionModel.settings,
+                behavior: subtitleBehaviorModel.settings,
+                style: subtitleStyleModel.style,
                 playbackSettings: playbackModel.settings,
-                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(caption: captionModel.settings),
+                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(behavior: subtitleBehaviorModel.settings),
                 audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
                 seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
@@ -169,15 +174,17 @@ struct MainTabView: View {
                 enqueueWatchMutation: enqueueWatchMutation,
                 watchBridge: watchBridge,
                 identitySources: identitySources,
-                pendingPlayItemID: $pendingPlayItemID
+                pendingPlayItemID: $pendingPlayItemID,
+                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
 
             SearchTab(
                 accounts: accounts,
-                captionSettings: captionModel.settings,
+                behavior: subtitleBehaviorModel.settings,
+                style: subtitleStyleModel.style,
                 playbackSettings: playbackModel.settings,
-                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(caption: captionModel.settings),
+                subtitlePolicy: subtitlePolicyModel.resolvedPolicy(behavior: subtitleBehaviorModel.settings),
                 audioPolicy: audioPolicyModel.resolvedPolicy(settings: playbackModel.settings),
                 seriesTrackStore: seriesTrackStore,
                 spoilerSettings: spoilerModel.settings,
@@ -187,7 +194,8 @@ struct MainTabView: View {
                 scrobbler: RealtimePlaybackScrobbler(trakt: trakt.scrobbler, simkl: simkl.scrobbler),
                 enqueueWatchMutation: enqueueWatchMutation,
                 watchBridge: watchBridge,
-                identitySources: identitySources
+                identitySources: identitySources,
+                onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
@@ -206,7 +214,7 @@ struct MainTabView: View {
             }
 
             SettingsView(
-                captions: captionModel,
+                subtitleBehavior: subtitleBehaviorModel,
                 spoilers: spoilerModel,
                 playback: playbackModel,
                 subtitlePolicy: subtitlePolicyModel,
@@ -248,14 +256,6 @@ struct MainTabView: View {
                 onSelectPlexHomeUser: onSelectPlexHomeUser
             )
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-
-            #if DEBUG
-            // DEBUG-only live-preview harness for the subtitle renderer. Lets us
-            // design the subtitle look on-device without starting playback.
-            // Compiled out of Release/TestFlight.
-            SubtitleLabView()
-                .tabItem { Label("Sub Lab", systemImage: "captions.bubble") }
-            #endif
         }
         .environment(musicPlayerModel)
         .environment(uiDensityModel)
@@ -451,7 +451,8 @@ private func resolveLibraryBrowse(
 private func makePlayerViewModel(
     for request: PlayRequest,
     accounts: [ResolvedAccount],
-    captionSettings: CaptionSettings,
+    behavior: SubtitleBehavior,
+    style: SubtitleStyle,
     playbackSettings: PlaybackSettings,
     spoilerSettings: SpoilerSettings,
     subtitlePolicy: SubtitlePolicy,
@@ -459,13 +460,14 @@ private func makePlayerViewModel(
     seriesTrackStore: any SeriesTrackPreferenceStoring,
     scrobbler: any TraktScrobbling,
     watchBridge: WatchOutboxBridge,
-    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef]
+    identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
+    onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void = { _ in }
 ) -> PlayerViewModel {
     if let videoID = request.item.youTubeTrailerVideoID {
         let trailerItem = request.item
         let onlineTrailerResolver = ItemDetailViewModel.defaultOnlineTrailerResolver
         let engineFactory = HybridPlayback.engineFactory()
-        return PlayerViewModel(
+        let trailerViewModel = PlayerViewModel(
             provider: YouTubeTrailerProvider(
                 item: trailerItem,
                 videoID: videoID,
@@ -479,12 +481,16 @@ private func makePlayerViewModel(
                     )
                     return results.compactMap(\.youTubeTrailerVideoID)
                 },
-                // Only resolve the higher-resolution adaptive (separate audio)
-                // path when a hybrid engine is wired in to mux the two tracks.
-                allowsSeparateAudio: engineFactory.hybridAvailable
+                // Adaptive (separate audio) trailers need an on-device muxer to
+                // pair the video+audio streams; none exists now that the mpv
+                // hybrid engine is retired, so use the progressive **muxed** path
+                // (AVPlayer/Plozzigen play it directly). Trailers stay playable,
+                // capped to the muxed resolution YouTube serves.
+                allowsSeparateAudio: false
             ),
             itemID: videoID,
-            captionSettings: captionSettings,
+            behavior: behavior,
+            style: style,
             subtitlePolicy: subtitlePolicy,
             audioPolicy: audioPolicy,
             playbackSettings: playbackSettings,
@@ -495,6 +501,8 @@ private func makePlayerViewModel(
             engineFactory: engineFactory,
             autoDismissOnEnd: true
         )
+        trailerViewModel.onSubtitleStyleChanged = onSubtitleStyleChanged
+        return trailerViewModel
     }
     // Capture only Sendable value types / closures for the durable convergence hook
     // so it can run off the main actor when the player stops. The eager identity
@@ -534,11 +542,12 @@ private func makePlayerViewModel(
     } else {
         seriesIDResolver = nil
     }
-    return PlayerViewModel(
+    let episodeViewModel = PlayerViewModel(
         provider: episodeProvider,
         itemID: request.item.id,
         mediaSourceID: request.item.selectedVersionID,
-        captionSettings: captionSettings,
+        behavior: behavior,
+        style: style,
         subtitlePolicy: subtitlePolicy,
         audioPolicy: audioPolicy,
         playbackSettings: playbackSettings,
@@ -572,6 +581,8 @@ private func makePlayerViewModel(
             identitySources: identitySources
         )
     )
+    episodeViewModel.onSubtitleStyleChanged = onSubtitleStyleChanged
+    return episodeViewModel
 }
 
 /// Builds the periodic mid-play convergence hook. Mirrors
@@ -737,7 +748,8 @@ private struct HomeTab: View {
     let accounts: [ResolvedAccount]
     let homeVisibility: HomeLibraryVisibilityModel
     let homeLayoutStore: HomeLayoutStoring
-    let captionSettings: CaptionSettings
+    let behavior: SubtitleBehavior
+    let style: SubtitleStyle
     let playbackSettings: PlaybackSettings
     let subtitlePolicy: SubtitlePolicy
     let audioPolicy: AudioPolicy
@@ -751,6 +763,8 @@ private struct HomeTab: View {
     let watchBridge: WatchOutboxBridge
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
     @Binding var pendingPlayItemID: String?
+    /// Persist an in-player subtitle-appearance edit to the profile store.
+    let onSubtitleStyleChanged: (SubtitleStyle) -> Void
 
     @State private var path = NavigationPath()
     @State private var playRequest: PlayRequest?
@@ -851,7 +865,8 @@ private struct HomeTab: View {
             playRequest: $playRequest,
             resumePrompt: $resumePrompt,
             accounts: accounts,
-            captionSettings: captionSettings,
+            behavior: behavior,
+            style: style,
             playbackSettings: playbackSettings,
             spoilerSettings: spoilerSettings,
             subtitlePolicy: subtitlePolicy,
@@ -861,7 +876,8 @@ private struct HomeTab: View {
             watchBridge: watchBridge,
             identitySources: identitySources,
             showDiagnostics: showDiagnostics,
-            themePalette: themePalette
+            themePalette: themePalette,
+            onSubtitleStyleChanged: onSubtitleStyleChanged
         )
         .task(id: pendingPlayItemID) { await handleDeepLink() }
         .mediaItemNavigator { navigate($0) }
@@ -959,7 +975,8 @@ private extension View {
         playRequest: Binding<PlayRequest?>,
         resumePrompt: Binding<MediaItem?>,
         accounts: [ResolvedAccount],
-        captionSettings: CaptionSettings,
+        behavior: SubtitleBehavior,
+        style: SubtitleStyle,
         playbackSettings: PlaybackSettings,
         spoilerSettings: SpoilerSettings,
         subtitlePolicy: SubtitlePolicy,
@@ -969,7 +986,8 @@ private extension View {
         watchBridge: WatchOutboxBridge,
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef],
         showDiagnostics: Bool,
-        themePalette: ThemePalette
+        themePalette: ThemePalette,
+        onSubtitleStyleChanged: @escaping (SubtitleStyle) -> Void
     ) -> some View {
         fullScreenCover(item: playRequest) { request in
             PlayerPresentation(
@@ -978,7 +996,8 @@ private extension View {
                     makePlayerViewModel(
                         for: $0,
                         accounts: accounts,
-                        captionSettings: captionSettings,
+                        behavior: behavior,
+                        style: style,
                         playbackSettings: playbackSettings,
                         spoilerSettings: spoilerSettings,
                         subtitlePolicy: subtitlePolicy,
@@ -986,7 +1005,8 @@ private extension View {
                         seriesTrackStore: seriesTrackStore,
                         scrobbler: scrobbler,
                         watchBridge: watchBridge,
-                        identitySources: identitySources
+                        identitySources: identitySources,
+                        onSubtitleStyleChanged: onSubtitleStyleChanged
                     )
                 },
                 showDiagnostics: showDiagnostics,
@@ -1071,7 +1091,8 @@ private extension View {
 /// across every active account; results route to their owning provider.
 private struct SearchTab: View {
     let accounts: [ResolvedAccount]
-    let captionSettings: CaptionSettings
+    let behavior: SubtitleBehavior
+    let style: SubtitleStyle
     let playbackSettings: PlaybackSettings
     let subtitlePolicy: SubtitlePolicy
     let audioPolicy: AudioPolicy
@@ -1084,6 +1105,8 @@ private struct SearchTab: View {
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
+    /// Persist an in-player subtitle-appearance edit to the profile store.
+    let onSubtitleStyleChanged: (SubtitleStyle) -> Void
 
     @State private var path = NavigationPath()
     @State private var playRequest: PlayRequest?
@@ -1175,7 +1198,8 @@ private struct SearchTab: View {
             playRequest: $playRequest,
             resumePrompt: $resumePrompt,
             accounts: accounts,
-            captionSettings: captionSettings,
+            behavior: behavior,
+            style: style,
             playbackSettings: playbackSettings,
             spoilerSettings: spoilerSettings,
             subtitlePolicy: subtitlePolicy,
@@ -1185,7 +1209,8 @@ private struct SearchTab: View {
             watchBridge: watchBridge,
             identitySources: identitySources,
             showDiagnostics: showDiagnostics,
-            themePalette: themePalette
+            themePalette: themePalette,
+            onSubtitleStyleChanged: onSubtitleStyleChanged
         )
     }
 

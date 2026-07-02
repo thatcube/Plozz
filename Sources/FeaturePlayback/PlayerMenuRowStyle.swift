@@ -30,21 +30,59 @@ private struct PlayerMenuRowBody: View {
             .environment(\.playerMenuRowIsFocused, isFocused)
             .foregroundStyle(isFocused ? AnyShapeStyle(Color.black) : AnyShapeStyle(.primary))
             .background(
-                // Inset the fitted card a few points within the full-width row
-                // so it carries an EQUAL gutter on both sides instead of
-                // full-bleeding to the column edge / center divider on one side
-                // while sitting off the panel edge on the other (which read as
-                // "uneven left/right spacing"). Text stays anchored by the row's
-                // own padding, so titles still line up under the section header.
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                // Concentric focus card: inset 4 within the row (which already sits
+                // 14 from the panel edge) → an 18 gutter on every side, matching the
+                // header chips. With the panel's 32 corner, a 14 radius (32 − 18)
+                // makes the card corners share a centre with the panel's, and the
+                // equal gutter keeps an edge row equidistant from top/bottom/left/
+                // right. Text stays anchored by the row's own padding so titles still
+                // line up under the section header.
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(isFocused ? Color.white : Color.clear)
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, 4)
             )
             .opacity(configuration.isPressed ? 0.9 : 1)
             // Switch color + fill INSTANTLY on focus change. An animated fade
             // lingers as a ghost card when navigating away and, over moving
             // Dolby Vision video, reads as a laggy "fade behind". Instant is
             // both crisper and cheaper (no per-frame animated blend over HDR).
+            .animation(nil, value: isFocused)
+    }
+}
+
+/// Compact rounded-chip style for the panel header's Edit / Back controls.
+///
+/// Sized to match the menu rows (`.body`, low height) rather than the taller
+/// system glass button, with a nested corner radius that reads as concentric
+/// with the panel's rounded edge. Idle shows a faint translucent fill + hairline
+/// stroke; focus flips to a solid white card with black content, mirroring
+/// `PlayerMenuRowButtonStyle`. Deliberately *no* drop shadow (same HDR frame-drop
+/// reason as the rows). Pair with `.focusEffectDisabled()`.
+struct PanelHeaderButtonStyle: ButtonStyle {
+    var cornerRadius: CGFloat = 14
+    func makeBody(configuration: Configuration) -> some View {
+        PanelHeaderButtonBody(configuration: configuration, cornerRadius: cornerRadius)
+    }
+}
+
+private struct PanelHeaderButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let cornerRadius: CGFloat
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(isFocused ? AnyShapeStyle(Color.black) : AnyShapeStyle(Color.white))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(shape.fill(isFocused ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.white.opacity(0.12))))
+            .overlay(shape.stroke(.white.opacity(isFocused ? 0 : 0.18), lineWidth: 1))
+            .contentShape(shape)
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            // Instant focus flip (no lingering ghost card over moving HDR video),
+            // matching PlayerMenuRowButtonStyle.
             .animation(nil, value: isFocused)
     }
 }

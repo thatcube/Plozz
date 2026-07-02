@@ -76,6 +76,28 @@ public struct MediaTrack: Codable, Hashable, Identifiable, Sendable {
         self.deliveryURL = deliveryURL
         self.isImageBasedSubtitle = isImageBasedSubtitle
     }
+
+    /// Codec tokens that identify a **bitmap** (image-based) subtitle format —
+    /// PGS (Blu-ray), DVD (VOBSUB), DVB, XSUB. Matched case-insensitively, with a
+    /// `contains("pgs")` catch for the several PGS spellings
+    /// (`pgssub`/`hdmv_pgs_subtitle`/`pgs`).
+    public static func isImageSubtitleCodec(_ codec: String?) -> Bool {
+        guard let codec = codec?.lowercased(), !codec.isEmpty else { return false }
+        if codec.contains("pgs") { return true }
+        return ["dvdsub", "dvd_subtitle", "dvbsub", "dvb_subtitle", "vobsub", "xsub"].contains(codec)
+    }
+
+    /// Authoritative "is this a bitmap subtitle" across engines. `true` when the
+    /// provider flagged `isImageBasedSubtitle` **or** the codec token is a known
+    /// bitmap format. The Plozzigen engine leaves `isImageBasedSubtitle` at its
+    /// default (`false`) and reports only `codec`, so cross-engine callers — e.g.
+    /// the dual-subtitle picker, which must positionally stack two *text* lines —
+    /// should key off this, not the raw flag. The raw flag stays reserved for
+    /// default-subtitle **routing** (a `true` there suppresses auto-selection),
+    /// which must remain `false` on Plozzigen so PGS still auto-selects and draws.
+    public var isBitmapSubtitle: Bool {
+        isImageBasedSubtitle || MediaTrack.isImageSubtitleCodec(codec)
+    }
 }
 
 /// Source-of-truth media facts a provider knows about the *original* file,

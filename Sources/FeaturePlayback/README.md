@@ -18,9 +18,11 @@ and the diagnostics overlay.
     selection, scrub state, resume, and progress reporting.
   - `PlayerView` + `CustomPlayerContainer` host the engine's vended
     bare video surface and overlay the shared transport chrome.
-- **Caption rendering** — `CaptionStyleRules` translates
-  `CoreModels.CaptionSettings` (font, size, color, opacity, background,
-  edge style) into `AVPlayer` text style rules.
+- **Subtitle rendering** — `SubtitleStyleRules` translates
+  `CoreModels.SubtitleStyle` (font, size, colour, opacity, background,
+  edge / outline) into `AVPlayer` text style rules for the native draw path;
+  the custom `SubtitleOverlayView` renders the full styled look (including
+  dual subtitles) on the overlay path.
 - **Subtitles** — `SubtitleHLSComposer`, `SubtitleInjectingResourceLoader`,
   `WebVTTNormalizer`: inject external sidecar subtitles into the
   AVPlayer pipeline as a synthesized HLS variant and normalize timing /
@@ -43,8 +45,8 @@ and the diagnostics overlay.
   (libmpv/VLCKit) must work with the same chrome and `PlayerViewModel`.
 - **Resume is the contract.** Progress reports back to the provider on
   pause/seek/end so `Continue Watching` is always accurate.
-- **Captions through the rules pipeline.** No view directly twiddles
-  AVPlayer text style — it all flows through `CaptionStyleRules`.
+- **Subtitles through the rules pipeline.** No view directly twiddles
+  AVPlayer text style — it all flows through `SubtitleStyleRules`.
 - **No secrets in URLs logged.** Stream URLs frequently embed tokens —
   `PlayerViewModel` redacts before logging.
 
@@ -52,6 +54,6 @@ and the diagnostics overlay.
 
 - `VideoEngine.swift` — the protocol every engine implements.
 - `PlayerViewModel.swift` — the orchestration & resume contract.
-- `EngineFactory.swift` — how the libmpv engine is plugged in without
-  this module depending on it.
-- `CaptionStyleRules.swift` — caption settings → AVPlayer text rules.
+- `EngineFactory.swift` — how the alternate on-device engine (Plozzigen)
+  is plugged in without this module depending on it.
+- `SubtitleStyleRules.swift` — `SubtitleStyle` → AVPlayer text rules.

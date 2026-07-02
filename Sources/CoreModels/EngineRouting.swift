@@ -5,15 +5,17 @@ import Foundation
 /// Which playback engine should handle a resolved stream.
 ///
 /// `CoreModels` only names the *decision*; mapping a kind onto a concrete engine
-/// (the `AVPlayer`-backed native engine vs. the mpv hybrid engine) happens up
-/// in `FeaturePlayback`, which alone knows the engine types. Keeping the decision
-/// here means it stays pure, dependency-free, and unit-testable on Linux/CI.
+/// (the `AVPlayer`-backed native engine vs. the Plozzigen on-device decode engine)
+/// happens up in `FeaturePlayback`, which alone knows the engine types. Keeping the
+/// decision here means it stays pure, dependency-free, and unit-testable on Linux/CI.
 public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
     /// `NativeVideoEngine` (AVPlayer). The default, power-efficient path; the only
     /// engine that renders Dolby Vision correctly on tvOS.
     case native
-    /// `MPVVideoEngine` (libmpv). Decodes AVPlayer-incompatible sources on-device
-    /// (MKV, DTS / DTS-HD / TrueHD, odd codecs) without a server transcode.
+    /// Abstract "needs on-device decode" signal for AVPlayer-incompatible sources
+    /// (MKV, DTS / DTS-HD / TrueHD, odd codecs). Resolved to the Plozzigen engine
+    /// in `FeaturePlayback` (the former mpv backing is retired); kept as a distinct
+    /// routing value so the pure router stays engine-agnostic and its tests hold.
     case hybrid
     /// `AetherVideoEngine`. FFmpeg demux → HLS-fMP4 copy-remux → localhost →
     /// AVPlayer. Handles DoVi + Atmos MKV with full seek, bounded memory, and
@@ -28,30 +30,30 @@ public enum PlaybackEngineKind: String, Sendable, Equatable, CaseIterable {
 ///
 /// ## Policy (CONSERVATIVE)
 /// Preserve the rock-solid, power-efficient `AVPlayer` path for everything it
-/// handles well; use the mpv hybrid engine **only** for what AVPlayer can't
-/// direct-play without a server transcode:
+/// handles well; use the on-device decode engine (Plozzigen) **only** for what
+/// AVPlayer can't direct-play without a server transcode:
 ///
 ///   * **Dolby Vision in an Apple container** → ``PlaybackEngineKind/native``.
 ///     AVPlayer renders DoVi with full dynamic metadata on tvOS. But AVPlayer
 ///     cannot demux Matroska and a server transcode of DoVi is unreliable, so
 ///     **DoVi in an MKV** goes to the on-device engine (which decodes the HEVC
 ///     base layer), matching Infuse.
-///   * **Hybrid-only containers (Matroska/WebM/transport-stream variants),
+///   * **On-device-only containers (Matroska/WebM/transport-stream variants),
 ///     AV1, DTS/DTS-HD/TrueHD audio, interlaced video, or an
 ///     AVPlayer-incompatible video codec** → ``PlaybackEngineKind/hybrid``
 ///     (decode on-device, no transcode). Plain HDR10/HLG in an *Apple* container
 ///     stays native — AVPlayer renders it on the efficient hardware path.
-///   * **Ambiguous/unknown, already transcoding, or no hybrid engine available**
+///   * **Ambiguous/unknown, already transcoding, or no on-device engine available**
 ///     → ``PlaybackEngineKind/native`` (it carries the server-transcode safety net).
 ///
 /// ## Lockstep with the capability layer
 /// The router and the provider capability profiles must advertise the *same* set
 /// of formats as direct-play: never advertise something the router can't route to
-/// a working engine. The capability expansion (gated by the same hybrid flag that
-/// sets `hybridAvailable` here) advertises raw MKV for every display-supported
-/// range — SDR, HDR10/HLG, **and Dolby Vision** (decoded on-device) — plus
-/// DTS/TrueHD and AV1, which is exactly what the rules below send to the hybrid
-/// engine.
+/// a working engine. The capability expansion (gated by the same on-device-decode
+/// flag that sets `hybridAvailable` here) advertises raw MKV for every
+/// display-supported range — SDR, HDR10/HLG, **and Dolby Vision** (decoded
+/// on-device) — plus DTS/TrueHD and AV1, which is exactly what the rules below send
+/// to the on-device decode engine.
 public enum EngineRouter {
 
     /// Picks the engine for a resolved stream.
@@ -63,16 +65,17 @@ public enum EngineRouter {
     ///     video codecs).
     ///   - isTranscoding: whether the resolved stream is a server transcode (HLS),
     ///     which AVPlayer always handles.
-    ///   - hybridAvailable: whether a hybrid (mpv) engine is actually wired in.
-    ///     When `false` the result is always native — the non-regression default.
+    ///   - hybridAvailable: whether an on-device decode engine (Plozzigen) is
+    ///     actually wired in. When `false` the result is always native — the
+    ///     non-regression default.
     public static func selectEngine(
         source: MediaSourceMetadata?,
         capabilities: MediaCapabilities,
         isTranscoding: Bool,
         hybridAvailable: Bool
     ) -> PlaybackEngineKind {
-        // No hybrid engine wired in → AVPlayer for everything (it already has the
-        // server-transcode auto-fallback). Byte-for-byte today's behaviour.
+        // No on-device decode engine wired in → AVPlayer for everything (it already
+        // has the server-transcode auto-fallback). Byte-for-byte today's behaviour.
         guard hybridAvailable else { return .native }
 
         // A server transcode is always a seekable HLS stream AVPlayer plays well.

@@ -74,7 +74,7 @@ public final class PlozzigenVideoEngine: VideoEngine {
     public var displayName: String { "Plozzigen" }
 
     public var capabilities: PlayerEngineCapabilities {
-        [.playbackSpeed]
+        [.playbackSpeed, .dualSubtitleDecode]
     }
 
     deinit {
@@ -93,6 +93,11 @@ public final class PlozzigenVideoEngine: VideoEngine {
     /// Plozz's cue model, so the owned overlay draws them. This is the decoded
     /// read-ahead buffer — the host time-filters it against the playhead.
     public var onSubtitleCues: (@MainActor ([CoreModels.SubtitleCue]) -> Void)?
+    /// Fired with AetherEngine's decoded *secondary* (dual-line) subtitle cues,
+    /// mapped to Plozz's cue model, so the owned overlay draws a second line from
+    /// the container itself — no fetchable sidecar URL needed. This is what makes
+    /// dual subtitles work for embedded tracks (e.g. Plex direct-play MKV).
+    public var onSecondarySubtitleCues: (@MainActor ([CoreModels.SubtitleCue]) -> Void)?
 
     // MARK: - Private
 
@@ -231,6 +236,14 @@ public final class PlozzigenVideoEngine: VideoEngine {
         }
     }
 
+    public func selectSecondarySubtitleTrack(_ track: MediaTrack?) {
+        if let track {
+            engine.selectSecondarySubtitleTrack(index: track.id)
+        } else {
+            engine.clearSecondarySubtitle()
+        }
+    }
+
     // MARK: - View
 
     #if canImport(UIKit)
@@ -348,6 +361,38 @@ public final class PlozzigenVideoEngine: VideoEngine {
                     )
                 }
                 self.onSubtitleCues?(mapped)
+            }
+            .store(in: &cancellables)
+
+        // Same bridge for the SECONDARY (dual) channel: AetherEngine decodes a
+        // second subtitle stream concurrently and publishes it here, so Plozz's
+        // overlay can draw a dual line straight from the container — the path that
+        // enables dual subtitles for embedded tracks (Plex direct-play) that have
+        // no fetchable sidecar URL. Mapped inline for the same type-inference
+        // reason as the primary above.
+        engine.$secondarySubtitleCues
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] cues in
+                guard let self else { return }
+                let mapped: [CoreModels.SubtitleCue] = cues.map { cue in
+                    let body: CoreModels.SubtitleCue.Body
+                    switch cue.body {
+                    case .text(let string):
+                        body = .text(CoreModels.SubtitleText(string))
+                    case .image(let image):
+                        body = .image(CoreModels.SubtitleImage(
+                            cgImage: image.cgImage,
+                            normalizedRect: image.position
+                        ))
+                    }
+                    return CoreModels.SubtitleCue(
+                        id: cue.id,
+                        start: cue.startTime,
+                        end: cue.endTime,
+                        body: body
+                    )
+                }
+                self.onSecondarySubtitleCues?(mapped)
             }
             .store(in: &cancellables)
     }

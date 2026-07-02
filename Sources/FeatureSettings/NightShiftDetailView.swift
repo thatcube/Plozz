@@ -43,7 +43,7 @@ struct NightShiftDetailView: View {
                     title: "Fade",
                     description: "How gradually the tint ramps on and off around the scheduled times.",
                 ) {
-                    SettingsOptionPicker(
+                    SettingsStepper(
                         options: NightShiftSettingsModel.fadeOptions,
                         selection: Binding(
                             get: { clampedFade },
@@ -67,9 +67,9 @@ struct NightShiftDetailView: View {
                 SettingsSplitRow(
                     id: "darkness",
                     title: "Darkness",
-                    description: "Dims the whole picture like sunglasses. Focus this row's options to preview at full night strength.",
+                    description: "Dims the whole picture like sunglasses. Focus a row to preview at full night strength.",
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: NightShiftDimness.allCases,
                         selection: $model.settings.dimness,
                         onFocusChange: { model.isPreviewing = $0 },
@@ -79,9 +79,9 @@ struct NightShiftDetailView: View {
                 SettingsSplitRow(
                     id: "warmth",
                     title: "Warmth",
-                    description: "Tints the picture toward amber and red. Focus this row's options to preview at full night strength.",
+                    description: "Tints the picture toward amber and red. Focus a row to preview at full night strength.",
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: NightShiftWarmth.allCases,
                         selection: $model.settings.warmth,
                         onFocusChange: { model.isPreviewing = $0 },
@@ -261,36 +261,43 @@ private struct NightShiftScheduleControl: View {
         .buttonStyle(PlozzSeasonTabStyle(isSelected: false))
     }
 
-    /// A ±15-minute clock stepper that wraps around midnight. The arrows never
-    /// disable; they nudge the manual on/off time by one step per press.
+    /// A ±15-minute clock stepper that wraps around midnight, reusing the shared
+    /// ``SettingsStepper`` so the manual on/off times get the same − / value / +
+    /// control as Fade and the Skip Intervals. The arrows never disable; they
+    /// nudge the manual on/off time by one step per press and wrap past midnight.
     private func timeStepper(
         minutes: Int,
         commit: @escaping (Int) -> Void
     ) -> some View {
-        let step = NightShiftSettingsModel.manualStepMinutes
-        return HStack(spacing: 16) {
-            Button {
-                commit(wrappedMinutes(minutes - step))
-            } label: {
-                Image(systemName: "minus").font(.headline)
-            }
-            .plozzGlassPillButton(shape: .circle)
-
-            Text(model.clockLabel(minutes: minutes))
-                .font(.headline.monospacedDigit())
-                .frame(minWidth: 110)
-
-            Button {
-                commit(wrappedMinutes(minutes + step))
-            } label: {
-                Image(systemName: "plus").font(.headline)
-            }
-            .plozzGlassPillButton(shape: .circle)
-        }
+        SettingsStepper(
+            options: Self.clockOptions,
+            selection: Binding(
+                get: { Self.nearestClockOption(to: minutes) },
+                set: { commit($0) }
+            ),
+            wraps: true,
+            title: { model.clockLabel(minutes: $0) }
+        )
     }
 
-    private func wrappedMinutes(_ raw: Int) -> Int {
-        ((raw % 1440) + 1440) % 1440
+    /// Every step across a day (00:00 … 23:45 at the manual step granularity),
+    /// the option set the manual on/off steppers cycle through.
+    private static let clockOptions: [Int] =
+        Array(stride(from: 0, to: 24 * 60, by: NightShiftSettingsModel.manualStepMinutes))
+
+    /// Snaps an arbitrary minutes-since-midnight value onto the nearest clock
+    /// option so a persisted off-grid time still highlights a valid step. Uses
+    /// circular distance so a time just before midnight (e.g. 23:59) snaps to
+    /// 00:00 rather than the linearly-closer 23:45.
+    private static func nearestClockOption(to minutes: Int) -> Int {
+        let wrapped = ((minutes % 1440) + 1440) % 1440
+        func circularDistance(_ option: Int) -> Int {
+            let raw = abs(option - wrapped)
+            return min(raw, 1440 - raw)
+        }
+        return clockOptions.min(by: {
+            circularDistance($0) < circularDistance($1)
+        }) ?? wrapped
     }
 }
 

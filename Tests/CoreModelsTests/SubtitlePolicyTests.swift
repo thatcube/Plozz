@@ -24,9 +24,9 @@ final class SubtitlePolicyTests: XCTestCase {
 
     // MARK: - inheriting(from:) is behaviour-preserving
 
-    func testInheritingMirrorsCaptionSettings() {
-        let caption = CaptionSettings(autoDownloadSubtitles: true, subtitleMode: .forcedOnly, preferredSubtitleLanguage: "fr")
-        let policy = SubtitlePolicy.inheriting(from: caption)
+    func testInheritingMirrorsBehavior() {
+        let behavior = SubtitleBehavior(subtitleMode: .forcedOnly, preferredSubtitleLanguage: "fr", autoDownloadSubtitles: true)
+        let policy = SubtitlePolicy.inheriting(from: behavior)
         let rule = policy.effectiveRule(for: .movie)
         XCTAssertEqual(rule.mode, .forcedOnly)
         XCTAssertEqual(rule.preferredLanguages, ["fr"])
@@ -36,9 +36,9 @@ final class SubtitlePolicyTests: XCTestCase {
 
     func testInheritingUsesResolvedLanguageWhenUnset() {
         // No explicit language → resolvedPreferredLanguage falls back to device.
-        let caption = CaptionSettings(preferredSubtitleLanguage: nil)
-        let policy = SubtitlePolicy.inheriting(from: caption)
-        XCTAssertEqual(policy.basePolicy.preferredLanguages, caption.resolvedPreferredLanguage.map { [$0] } ?? [])
+        let behavior = SubtitleBehavior(preferredSubtitleLanguage: nil)
+        let policy = SubtitlePolicy.inheriting(from: behavior)
+        XCTAssertEqual(policy.basePolicy.preferredLanguages, behavior.resolvedPreferredLanguage.map { [$0] } ?? [])
     }
 
     // MARK: - smartDefaultOverrides seed (the user's example matrix)
@@ -123,8 +123,8 @@ final class SubtitlePolicyTests: XCTestCase {
     func testStoreStartsEmptyAndInherits() {
         let store = SubtitlePolicyStore(defaults: makeDefaults())
         XCTAssertTrue(store.overrides().isEmpty)
-        let caption = CaptionSettings(subtitleMode: .all, preferredSubtitleLanguage: "en")
-        let resolved = store.resolvedPolicy(caption: caption)
+        let behavior = SubtitleBehavior(subtitleMode: .all, preferredSubtitleLanguage: "en")
+        let resolved = store.resolvedPolicy(behavior: behavior)
         // With no overrides, every category resolves to the caption-derived base.
         XCTAssertEqual(resolved.effectiveRule(for: .movie).mode, .all)
         XCTAssertEqual(resolved.effectiveRule(for: .movie).preferredLanguages, ["en"])
@@ -145,8 +145,8 @@ final class SubtitlePolicyTests: XCTestCase {
     func testStoreResolvedPolicyCombinesBaseAndOverrides() {
         let store = SubtitlePolicyStore(defaults: makeDefaults())
         store.setRule(SubtitlePolicy.Rule(mode: .forcedOnly, preferredLanguages: ["en"]), for: .movie)
-        let caption = CaptionSettings(subtitleMode: .all, preferredSubtitleLanguage: "en")
-        let resolved = store.resolvedPolicy(caption: caption)
+        let behavior = SubtitleBehavior(subtitleMode: .all, preferredSubtitleLanguage: "en")
+        let resolved = store.resolvedPolicy(behavior: behavior)
         XCTAssertEqual(resolved.effectiveRule(for: .movie).mode, .forcedOnly, "override wins for movies")
         XCTAssertEqual(resolved.effectiveRule(for: .anime).mode, .all, "anime inherits the caption base")
     }
@@ -187,8 +187,8 @@ final class SubtitlePolicyTests: XCTestCase {
         let staleOverride = SubtitlePolicy.Rule(mode: .forcedOnly, preferredLanguages: ["en"], autoDownloadIfMissing: false)
         // …must adopt the profile's *current* language once it changes to German,
         // rather than keep serving the frozen "en".
-        let caption = CaptionSettings(subtitleMode: .all, preferredSubtitleLanguage: "de")
-        let resolved = SubtitlePolicy.resolved(caption: caption, overrides: [.movie: staleOverride])
+        let behavior = SubtitleBehavior(subtitleMode: .all, preferredSubtitleLanguage: "de")
+        let resolved = SubtitlePolicy.resolved(behavior: behavior, overrides: [.movie: staleOverride])
         let movieRule = resolved.effectiveRule(for: .movie)
         XCTAssertEqual(movieRule.preferredLanguages, ["de"], "override language tracks the current caption base")
         XCTAssertEqual(movieRule.mode, .forcedOnly, "the per-category mode is preserved")
@@ -197,9 +197,9 @@ final class SubtitlePolicyTests: XCTestCase {
 
     func testResolvedKeepsOverrideAutoDownloadIndependentOfCaption() {
         // Global auto-download ON, but the movie override says don't auto-download.
-        let caption = CaptionSettings(autoDownloadSubtitles: true, subtitleMode: .all, preferredSubtitleLanguage: "en")
+        let behavior = SubtitleBehavior(subtitleMode: .all, preferredSubtitleLanguage: "en", autoDownloadSubtitles: true)
         let overrides = SubtitlePolicy.smartDefaultOverrides(base: SubtitlePolicy.Rule(preferredLanguages: ["en"]))
-        let resolved = SubtitlePolicy.resolved(caption: caption, overrides: overrides)
+        let resolved = SubtitlePolicy.resolved(behavior: behavior, overrides: overrides)
         XCTAssertFalse(resolved.effectiveRule(for: .movie).autoDownloadIfMissing, "movie override can disable auto-download even when the global flag is on")
         XCTAssertTrue(resolved.effectiveRule(for: .anime).autoDownloadIfMissing, "anime override keeps auto-download on")
         XCTAssertTrue(resolved.effectiveRule(for: .other).autoDownloadIfMissing, "un-overridden categories follow the caption base")
@@ -226,8 +226,8 @@ final class SubtitlePolicyTests: XCTestCase {
     func testModelResolvedPolicyCombinesBaseAndOverrides() {
         let model = SubtitlePolicyModel(store: SubtitlePolicyStore(defaults: makeDefaults()))
         model.overrides = [.movie: SubtitlePolicy.Rule(mode: .forcedOnly, preferredLanguages: ["en"])]
-        let caption = CaptionSettings(subtitleMode: .all, preferredSubtitleLanguage: "en")
-        let resolved = model.resolvedPolicy(caption: caption)
+        let behavior = SubtitleBehavior(subtitleMode: .all, preferredSubtitleLanguage: "en")
+        let resolved = model.resolvedPolicy(behavior: behavior)
         XCTAssertEqual(resolved.effectiveRule(for: .movie).mode, .forcedOnly)
         XCTAssertEqual(resolved.effectiveRule(for: .anime).mode, .all, "anime inherits the caption base")
     }

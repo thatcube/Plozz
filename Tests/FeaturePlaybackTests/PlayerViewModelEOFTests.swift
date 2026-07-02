@@ -20,7 +20,6 @@ final class PlayerViewModelEOFTests: XCTestCase {
         let viewModel = PlayerViewModel(
             provider: provider,
             itemID: item.id,
-            captionSettings: CaptionSettings(),
             engineFactory: EngineFactory(makeNative: { _ in engine }),
             onPlaybackStopped: { position, percent in
                 stopped.record(position: position, percent: percent)
@@ -103,6 +102,9 @@ private final class SpyVideoEngine: VideoEngine {
     var onProgress: (@MainActor () -> Void)?
     var onFailure: (@MainActor (AppError) -> Void)?
     var onEnded: (@MainActor () -> Void)?
+    var onTracksChanged: (@MainActor () -> Void)?
+    var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
+    var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 
     func load(request: PlaybackRequest, startPosition: TimeInterval) async {
         status = .ready

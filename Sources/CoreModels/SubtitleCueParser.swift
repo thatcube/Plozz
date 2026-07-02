@@ -65,22 +65,69 @@ public enum SubtitleCueParser {
     // MARK: - Byte decoding
 
     /// Decodes raw subtitle-file bytes into text, tolerating the encodings
-    /// sidecar files actually appear in. Tries, in order: an explicit BOM
-    /// (UTF-8 / UTF-16), then strict UTF-8, then Windows-1252, then ISO Latin-1 —
-    /// the last of which decodes *any* byte sequence, so a non-empty input never
-    /// returns `nil`. Many real-world `.srt` files (older/European subs, and the
-    /// raw sidecar parts Plex serves) are Windows-1252/Latin-1 rather than UTF-8;
-    /// decoding them as UTF-8 only would fail and silently show no subtitles.
+    /// sidecar files actually appear in. Order: an explicit BOM (UTF-8 / UTF-16),
+    /// then strict UTF-8, then — when strict UTF-8 fails — a choice between a
+    /// **lenient** UTF-8 decode and a single-byte codepage, and finally
+    /// Windows-1252 / ISO Latin-1 (the last decodes *any* byte sequence, so a
+    /// non-empty input never returns `nil`).
+    ///
+    /// The lenient step matters: a file that is *almost* clean UTF-8 (a couple of
+    /// stray bytes) would otherwise fail strict UTF-8 and fall through to CP1252,
+    /// which mojibakes every multi-byte character of an otherwise-UTF-8 file
+    /// (`é` → `Ã©`, `—` → `â€"`). When the bytes look like UTF-8 we instead
+    /// decode leniently (replacing only the bad bytes), preserving all the valid
+    /// accents. Genuine CP1252/Latin-1 subs (older/European `.srt`, the raw
+    /// sidecar parts Plex serves) have no valid multi-byte runs, so they still
+    /// take the codepage path.
     public static func decodeText(_ data: Data) -> String? {
         guard !data.isEmpty else { return nil }
         if data.starts(with: [0xEF, 0xBB, 0xBF]),
            let utf8 = String(data: data, encoding: .utf8) { return utf8 }
         if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
            let utf16 = String(data: data, encoding: .utf16) { return utf16 }
-        for encoding: String.Encoding in [.utf8, .windowsCP1252, .isoLatin1] {
+        // Clean UTF-8 — the overwhelmingly common case (Jellyfin Stream.vtt,
+        // modern subs). Strict decode succeeds only when every byte is valid.
+        if let utf8 = String(data: data, encoding: .utf8) { return utf8 }
+        // Not clean UTF-8. If it still *looks* like UTF-8 (has valid multi-byte
+        // runs and only a negligible number of bad bytes), decode leniently so
+        // accents survive instead of mojibake-ing the whole file via CP1252.
+        if looksLikeUTF8(data) { return String(decoding: data, as: UTF8.self) }
+        for encoding: String.Encoding in [.windowsCP1252, .isoLatin1] {
             if let decoded = String(data: data, encoding: encoding) { return decoded }
         }
-        return nil
+        // Unreachable for non-empty data (Latin-1 accepts any bytes), but keep a
+        // lenient UTF-8 backstop rather than returning nil.
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Whether `data` is UTF-8 that merely has a few malformed bytes, versus a
+    /// genuine single-byte codepage. True when it contains at least one
+    /// well-formed multi-byte UTF-8 sequence and only a negligible count of
+    /// invalid bytes — the signature of a mostly-UTF-8 file we should decode
+    /// leniently (preserving accents) instead of mojibake-ing via CP1252.
+    private static func looksLikeUTF8(_ data: Data) -> Bool {
+        var index = 0
+        let bytes = [UInt8](data)
+        let count = bytes.count
+        var multibyte = 0
+        var invalid = 0
+        while index < count {
+            let b = bytes[index]
+            if b < 0x80 { index += 1; continue }
+            let need: Int
+            if b & 0xE0 == 0xC0 { need = 1 }
+            else if b & 0xF0 == 0xE0 { need = 2 }
+            else if b & 0xF8 == 0xF0 { need = 3 }
+            else { invalid += 1; index += 1; continue }
+            var ok = true
+            for k in 1...need {
+                let j = index + k
+                if j >= count || bytes[j] & 0xC0 != 0x80 { ok = false; break }
+            }
+            if ok { multibyte += 1; index += need + 1 }
+            else { invalid += 1; index += 1 }
+        }
+        return multibyte > 0 && invalid <= max(2, count / 100)
     }
 
     // MARK: - Format detection

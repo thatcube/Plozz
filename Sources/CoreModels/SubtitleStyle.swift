@@ -12,56 +12,139 @@ import Foundation
 public enum SubtitleFontFamily: String, Codable, Sendable, Equatable, CaseIterable {
     case atkinson
     case system
+    case sfRounded
+    case roboto
+    case lexend
+    case fredoka
+    case openDyslexic
 
     public var displayName: String {
         switch self {
         case .atkinson: return "Atkinson Hyperlegible"
         case .system: return "System (SF)"
+        case .sfRounded: return "SF Rounded"
+        case .roboto: return "Roboto"
+        case .lexend: return "Lexend"
+        case .fredoka: return "Fredoka"
+        case .openDyslexic: return "OpenDyslexic"
         }
     }
 
     /// The PostScript family stem of the bundled face, or `nil` to use the system
-    /// font. The renderer appends the weight/slant suffix (`-Regular`/`-Bold`/
-    /// `-Italic`/`-BoldItalic`).
+    /// font. The renderer appends the weight/slant suffix (`-Regular`/`-Medium`/
+    /// `-SemiBold`/`-Bold`/`-Italic`/`-BoldItalic`), degrading to a lighter/upright
+    /// face when a family doesn't bundle every combination (e.g. Lexend ships no
+    /// italics). `system` and `sfRounded` render via the system font (no bundle).
     public var postScriptStem: String? {
         switch self {
         case .atkinson: return "AtkinsonHyperlegible"
-        case .system: return nil
+        case .system, .sfRounded: return nil
+        case .roboto: return "Roboto"
+        case .lexend: return "Lexend"
+        case .fredoka: return "Fredoka"
+        case .openDyslexic: return "OpenDyslexic"
+        }
+    }
+
+    /// True when the family is drawn with the tvOS system font rather than a
+    /// bundled face (SF and SF Rounded).
+    public var usesSystemFont: Bool { postScriptStem == nil }
+
+    /// True when the system font should adopt the rounded design (SF Rounded).
+    public var usesRoundedDesign: Bool { self == .sfRounded }
+
+    /// The weights this family actually offers. A global weight choice snaps to
+    /// the nearest of these, so the picker only ever shows real faces: the system
+    /// families expose the full range; the static bundled faces (Atkinson,
+    /// OpenDyslexic) only Regular/Bold; the variable-derived faces (Lexend,
+    /// Roboto, Fredoka) ship Regular/Medium/SemiBold/Bold.
+    public var availableWeights: [SubtitleFontWeight] {
+        switch self {
+        case .atkinson, .openDyslexic:
+            return [.regular, .bold]
+        case .system, .sfRounded, .roboto, .lexend, .fredoka:
+            return [.regular, .medium, .semibold, .bold]
         }
     }
 }
 
 
+/// A subtitle typeface weight. The user picks a global weight; each family snaps
+/// it to the nearest weight it actually bundles (``SubtitleFontFamily/availableWeights``).
+public enum SubtitleFontWeight: String, Codable, Sendable, Equatable, CaseIterable {
+    case regular
+    case medium
+    case semibold
+    case bold
+
+    public var displayName: String {
+        switch self {
+        case .regular: return "Regular"
+        case .medium: return "Medium"
+        case .semibold: return "Semibold"
+        case .bold: return "Bold"
+        }
+    }
+
+    /// CSS-style numeric weight, used to snap to the nearest available face.
+    public var value: Int {
+        switch self {
+        case .regular: return 400
+        case .medium: return 500
+        case .semibold: return 600
+        case .bold: return 700
+        }
+    }
+
+    /// The PostScript suffix token for a bundled face name (`<stem>-<token>`).
+    public var faceToken: String {
+        switch self {
+        case .regular: return "Regular"
+        case .medium: return "Medium"
+        case .semibold: return "SemiBold"
+        case .bold: return "Bold"
+        }
+    }
+
+    /// The nearest weight in `available` (by numeric distance), so a global choice
+    /// always resolves to a face the family really ships.
+    public func snapped(to available: [SubtitleFontWeight]) -> SubtitleFontWeight {
+        guard !available.isEmpty else { return self }
+        if available.contains(self) { return self }
+        return available.min(by: { abs($0.value - value) < abs($1.value - value) }) ?? self
+    }
+}
+
+
+/// This is the style model for Plozz's owned subtitle renderer and the persisted
+/// source of truth for subtitle appearance. It covers every knob the product
+/// brief calls for: size, position, offset, colour, overall opacity, an
+/// HDR-luminance control, a background box, an edge (shadow) treatment and an
+/// explicit border — each with adjustable colour, opacity and thickness where it
+/// applies — plus an optional secondary style for dual subtitles.
 ///
-/// This is the **forward** style model for Plozz's owned subtitle renderer. It
-/// is intentionally richer than the currently-persisted ``CaptionSettings`` and
-/// covers every knob the product brief calls for: size, position, offset,
-/// colour, overall opacity, an HDR-luminance control, a background box, an edge
-/// (shadow) treatment and an explicit border — each with adjustable colour,
-/// opacity and thickness where it applies — plus an optional secondary style for
-/// dual subtitles.
-///
-/// ## Relationship to `CaptionSettings` (deliberately non-destructive)
-/// `CaptionSettings` remains the persisted per-profile model **for now**. This
-/// type bridges from it via ``init(from:)`` so existing user settings carry over,
-/// and it ships its own tolerant `Codable` so it is *persist-ready* — but we do
-/// not migrate persistence until the renderer is validated on-device. That
-/// staging is intentional: prove the model + renderer first, then move the
-/// source of truth, so a wrong early guess can't strand saved settings.
+/// It ships a tolerant `Codable` and is persisted via `SubtitleStyleStore`. A
+/// profile's previously-saved look carries over from the retired `CaptionSettings`
+/// via ``init(from:)`` (the decode-only `LegacyCaptionSettings` shim) during the
+/// one-time migration.
 ///
 /// Lives in `CoreModels` (dependency-free) so the renderer, the settings UI and
 /// the future policy engine all share one definition.
 public struct SubtitleStyle: Codable, Equatable, Sendable {
 
-    // Reuse the existing, already-persisted colour and edge primitives so there
-    // is exactly one colour type and one edge vocabulary across the app.
-    public typealias Color = CaptionSettings.RGBAColor
-    public typealias EdgeStyle = CaptionSettings.EdgeStyle
+    // Reuse the shared, neutral colour and edge primitives so there is exactly
+    // one colour type and one edge vocabulary across behaviour, style and policy.
+    public typealias Color = SubtitleColor
+    public typealias EdgeStyle = SubtitleEdgeStyle
 
     // MARK: Size & placement
 
     /// The subtitle typeface. Defaults to bundled Atkinson Hyperlegible.
     public var fontFamily: SubtitleFontFamily
+    /// The global typeface weight. The active family snaps this to the nearest
+    /// weight it actually bundles, so the value persists across family switches
+    /// even when a family (e.g. Atkinson) offers fewer weights.
+    public var fontWeight: SubtitleFontWeight
     /// Multiplier on the base caption size (1.0 == default).
     public var fontScale: Double
     /// Vertical seat of the subtitle block, `0` = bottom safe edge … `1` = top.
@@ -196,12 +279,13 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
 
     // MARK: Behaviour
 
-    /// When true, defer entirely to the system/Settings caption style (parity
-    /// with `CaptionSettings.followsSystemStyle`).
+    /// When true, defer entirely to the system/Settings caption style (no
+    /// in-app style overrides are applied).
     public var followsSystemStyle: Bool
 
     public init(
         fontFamily: SubtitleFontFamily = .atkinson,
+        fontWeight: SubtitleFontWeight = .regular,
         fontScale: Double = 1.0,
         verticalPosition: Double = 0.06,
         horizontalOffset: Double = 0,
@@ -215,6 +299,7 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
         followsSystemStyle: Bool = false
     ) {
         self.fontFamily = fontFamily
+        self.fontWeight = fontWeight
         self.fontScale = fontScale
         self.verticalPosition = verticalPosition
         self.horizontalOffset = horizontalOffset
@@ -241,22 +326,61 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
     )
 }
 
-// MARK: - Bridge from the persisted CaptionSettings (non-destructive)
+// MARK: - Per-content-type resolution seam
 
 public extension SubtitleStyle {
-    /// Build a forward style from the currently-persisted ``CaptionSettings`` so
-    /// existing per-profile preferences are honoured before persistence migrates.
-    init(from caption: CaptionSettings) {
+    /// The appearance to use for a given content category. Today appearance is a
+    /// single global base, so this returns `self` for every category — but it is
+    /// the resolution seam the renderer/policy call through, so adding a
+    /// `[SubtitleContentCategory: SubtitleStyle]` overrides map later (in
+    /// `SubtitleStyleStore`) is a drop-in with zero call-site churn.
+    func style(for category: SubtitleContentCategory) -> SubtitleStyle {
+        self
+    }
+}
+
+// MARK: - Migration from the retired CaptionSettings
+
+public extension SubtitleStyle {
+    /// Build appearance from a decoded legacy `CaptionSettings` blob so a
+    /// profile's previously-saved look (size / colour / background / edge) carries
+    /// over into the new persisted style store.
+    ///
+    /// `followsSystemStyle` is deliberately **not** carried over. The old flag was
+    /// honoured only on the AVPlayer path and is ignored by Plozz's own overlay
+    /// renderer, so preserving it would give a migrated viewer system captions on
+    /// one path and Plozz styling on the other. Normalising it to `false` (the new
+    /// default) makes Plozz own subtitle appearance consistently everywhere.
+    init(from legacy: LegacyCaptionSettings) {
         self.init(
-            fontScale: caption.fontScale,
-            textColor: caption.textColor,
+            fontScale: legacy.fontScale,
+            textColor: legacy.textColor,
             background: Background(
-                isEnabled: caption.backgroundColor.alpha > 0.001,
-                color: caption.backgroundColor
+                isEnabled: legacy.backgroundColor.alpha > 0.001,
+                color: legacy.backgroundColor
             ),
-            edge: Edge(style: caption.edgeStyle),
-            followsSystemStyle: caption.followsSystemStyle
+            edge: Edge(style: legacy.edgeStyle)
+            // followsSystemStyle intentionally omitted → defaults to false.
         )
+        foldUniformEdgeIntoBorder()
+    }
+}
+
+// MARK: - Edge normalisation
+
+extension SubtitleStyle {
+    /// Folds a legacy `.uniform` edge — the old "second outline" — into the single
+    /// explicit `border`, then drops the edge to shadow-only. Shadow and outline
+    /// are now two independent concerns in the model and menu, so any persisted
+    /// style, migrated `CaptionSettings`, or preset that expressed an outline via
+    /// the edge round-trips through the one Outline control, and no live style
+    /// carries a `.uniform` edge any more.
+    mutating func foldUniformEdgeIntoBorder() {
+        guard edge.style == .uniform else { return }
+        if !border.isEnabled {
+            border = Border(isEnabled: true, color: edge.color, width: edge.thickness)
+        }
+        edge.style = .none
     }
 }
 
@@ -282,7 +406,7 @@ public extension SubtitleStyle {
         )),
         Preset(id: "outline", name: "Outline", style: SubtitleStyle(
             background: Background(isEnabled: false),
-            edge: Edge(style: .uniform, thickness: 2),
+            edge: Edge(style: .none),
             border: Border(isEnabled: true, color: .black, width: 1.5)
         )),
         Preset(id: "classic-yellow", name: "Classic Yellow", style: SubtitleStyle(
@@ -297,7 +421,7 @@ public extension SubtitleStyle {
 
 extension SubtitleStyle {
     private enum CodingKeys: String, CodingKey {
-        case fontFamily, fontScale, verticalPosition, horizontalOffset
+        case fontFamily, fontWeight, fontScale, verticalPosition, horizontalOffset
         case textColor, opacity, hdrLuminanceScale
         case background, edge, border, secondary, followsSystemStyle
     }
@@ -309,6 +433,7 @@ extension SubtitleStyle {
         let d = SubtitleStyle.default
         self.init(
             fontFamily: try c.decodeIfPresent(SubtitleFontFamily.self, forKey: .fontFamily) ?? d.fontFamily,
+            fontWeight: try c.decodeIfPresent(SubtitleFontWeight.self, forKey: .fontWeight) ?? d.fontWeight,
             fontScale: try c.decodeIfPresent(Double.self, forKey: .fontScale) ?? d.fontScale,
             verticalPosition: try c.decodeIfPresent(Double.self, forKey: .verticalPosition) ?? d.verticalPosition,
             horizontalOffset: try c.decodeIfPresent(Double.self, forKey: .horizontalOffset) ?? d.horizontalOffset,
@@ -321,5 +446,6 @@ extension SubtitleStyle {
             secondary: try c.decodeIfPresent(Secondary.self, forKey: .secondary),
             followsSystemStyle: try c.decodeIfPresent(Bool.self, forKey: .followsSystemStyle) ?? d.followsSystemStyle
         )
+        foldUniformEdgeIntoBorder()
     }
 }

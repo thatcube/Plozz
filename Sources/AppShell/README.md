@@ -31,9 +31,9 @@ registry.
   resume, mark watched, open detail) so any view can request an action
   without knowing the playback / detail routing.
 - `PlaybackEngineComposition` — the **only** module that imports
-  `EngineMPV` (and any future engine packages). Builds the
-  `EngineFactory` closure injected into `FeaturePlayback`, keeping libmpv
-  out of every other module's dependency graph.
+  `EnginePlozzigen` (and any future engine packages). Builds the
+  `EngineFactory` closure injected into `FeaturePlayback`, keeping the
+  heavy on-device decode binaries out of every other module's dependency graph.
 - `AppInfo` — version / build / display-name helpers read from
   `Info.plist`.
 

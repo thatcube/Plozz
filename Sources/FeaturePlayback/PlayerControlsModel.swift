@@ -21,6 +21,19 @@ public struct PlayerTrackOption: Identifiable, Hashable, Sendable {
     }
 }
 
+/// Load state of a selected second (dual) subtitle track, surfaced on the
+/// "Second Track" row. Lets the viewer see why a picked track isn't drawing.
+public enum SecondarySubtitleStatus: Equatable, Sendable {
+    /// The second line is Off — nothing to report.
+    case idle
+    /// Fetching + parsing the track's sidecar.
+    case loading
+    /// Loaded with this many cues (0 means the file yielded no lines).
+    case loaded(cueCount: Int)
+    /// The sidecar couldn't be fetched or decoded.
+    case unavailable
+}
+
 /// Shared, observable state for the custom player's transport overlay.
 ///
 /// `PlayerViewModel` writes live playback facts (position, duration, buffered,
@@ -93,6 +106,48 @@ public final class PlayerControlsModel {
     // MARK: Track menus
     public var audioOptions: [PlayerTrackOption] = []
     public var subtitleOptions: [PlayerTrackOption] = []
+    /// Eligible tracks for the **second** (dual) subtitle line, as an ordered
+    /// picker: "Off" first, then the text subtitle tracks that can drive Plozz's
+    /// overlay (a sidecar URL, non-image) excluding whatever is the primary. The
+    /// selected entry is flagged `isSelected`. Empty of real tracks means the
+    /// current media has nothing a second line could show.
+    public var secondarySubtitleOptions: [PlayerTrackOption] = []
+    /// Load state of the currently-selected second subtitle track, surfaced on the
+    /// "Second Track" row so the viewer can see *why* a picked track isn't drawing
+    /// (fetching, no cues in the file, or the sidecar was unavailable) instead of
+    /// silently showing nothing. `.idle` when the second line is Off.
+    public var secondarySubtitleStatus: SecondarySubtitleStatus = .idle
+    /// When non-`nil`, the dual (second) subtitle line is *disallowed* because the
+    /// PRIMARY subtitle is a bitmap format (PGS/DVD/DVB/VobSub) that draws at its
+    /// own uncontrollable authored position and so can't be positionally stacked
+    /// against a second line. Carries the primary's short format hint (e.g. "PGS",
+    /// "DVD", "Image") so the picker can explain the reason ("Unavailable with PGS
+    /// subtitles") instead of an ambiguous "None available". `nil` when dual is
+    /// available — including when it's empty for the ordinary reason that the media
+    /// simply has no other text track to show.
+    public var secondarySubtitleImagePrimaryFormat: String? = nil
+
+    #if DEBUG
+    /// DEBUG-only readout of how the *primary* selected subtitle is being routed:
+    /// active engine · path (overlay-sidecar / avplayer-draw / live-feed) · live
+    /// cue count. Surfaced at the bottom of the Subtitles list so we can see — on
+    /// a device whose logs are unreadable in this environment — exactly why a
+    /// Plex embedded track lists but never draws. Empty when nothing is selected.
+    public var primarySubtitleDiagnostic: String = ""
+    #endif
+
+    /// The current subtitle **appearance**, mirrored here so the in-player
+    /// appearance editor (hosted in `PlayerControls`) can two-way bind it. The
+    /// view model seeds this from the profile's persisted style and updates it
+    /// on every edit, keeping the live overlay, this mirror, and persistence in
+    /// lock-step.
+    public var subtitleStyle: SubtitleStyle = .default
+
+    /// Whether the subtitle overlay is currently rendering over an HDR frame
+    /// (the panel is being driven to an HDR/DV display mode). Only then does the
+    /// style's `hdrLuminanceScale` do anything, so the menu shows the "HDR
+    /// Brightness" row exclusively while this is true — no dead control on SDR.
+    public var subtitlesRenderHDR: Bool = false
 
     // MARK: Live tunables (mirrors of engine state)
     /// What the active engine supports — drives which rows the options menu
@@ -104,6 +159,12 @@ public final class PlayerControlsModel {
     public var audioDelaySeconds: TimeInterval = 0
     /// Subtitle offset in seconds (positive = subs later than video).
     public var subtitleDelaySeconds: TimeInterval = 0
+    /// Whether subtitle timing can actually be shifted right now: true when the
+    /// app's overlay owns the active primary subtitle (a sidecar timeline or an
+    /// engine live-feed), so the app-side offset moves the on-screen track.
+    /// False when subtitles are off or the underlying player draws an embedded
+    /// text track we can't shift. Gates the in-player "Sync" control.
+    public var subtitleDelayAdjustable: Bool = false
     /// Whether the dialog-enhance audio filter is engaged (when supported).
     public var dialogEnhanceEnabled: Bool = false
 

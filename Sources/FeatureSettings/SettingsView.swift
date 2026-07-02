@@ -45,7 +45,7 @@ public struct SettingsView: View {
     /// Tune this single value to make the page wider/narrower.
     private static let contentMaxWidth: CGFloat = PlozzTheme.Metrics.settingsContentMaxWidth
 
-    private let captions: CaptionSettingsModel
+    private let subtitleBehavior: SubtitleBehaviorModel
     private let spoilers: SpoilerSettingsModel
     private let playback: PlaybackSettingsModel
     private let subtitlePolicy: SubtitlePolicyModel
@@ -87,7 +87,7 @@ public struct SettingsView: View {
     private let onSelectPlexHomeUser: (String, PlexHomeUser?) -> Void
 
     public init(
-        captions: CaptionSettingsModel,
+        subtitleBehavior: SubtitleBehaviorModel,
         spoilers: SpoilerSettingsModel,
         playback: PlaybackSettingsModel,
         subtitlePolicy: SubtitlePolicyModel,
@@ -128,7 +128,7 @@ public struct SettingsView: View {
         plexHomeUsersFetcher: @escaping (String) async -> [PlexHomeUser],
         onSelectPlexHomeUser: @escaping (String, PlexHomeUser?) -> Void
     ) {
-        self.captions = captions
+        self.subtitleBehavior = subtitleBehavior
         self.spoilers = spoilers
         self.playback = playback
         self.subtitlePolicy = subtitlePolicy
@@ -172,7 +172,6 @@ public struct SettingsView: View {
 
     private var context: SettingsContext {
         SettingsContext(
-            captions: captions,
             spoilers: spoilers,
             playback: playback,
             theme: theme,
@@ -500,7 +499,7 @@ public struct SettingsView: View {
         case .nightShift:
             NightShiftDetailView(model: nightShift)
         case .playback:
-            PlaybackDetailView(playback: playback, captions: captions, subtitlePolicy: subtitlePolicy, audioPolicy: audioPolicy)
+            PlaybackDetailView(playback: playback, subtitleBehavior: subtitleBehavior, subtitlePolicy: subtitlePolicy, audioPolicy: audioPolicy)
         case .spoilers:
             SpoilersDetailView(spoilers: spoilers)
         case .integrations:

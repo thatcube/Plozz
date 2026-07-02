@@ -77,12 +77,14 @@ public final class NativeVideoEngine: VideoEngine {
     /// protocol.
     public var onTracksChanged: (@MainActor () -> Void)?
     public var onSubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
+    public var onSecondarySubtitleCues: (@MainActor ([SubtitleCue]) -> Void)?
 
     // MARK: Configuration
 
-    /// Caption styling + default-subtitle preferences. The engine applies these
-    /// when building the player item and when choosing the default subtitle.
-    private let captionSettings: CaptionSettings
+    /// Subtitle appearance. The engine applies these style rules when building
+    /// the player item, and re-applies them live via ``updateSubtitleStyle(_:)``
+    /// when the viewer edits the look mid-playback.
+    private var style: SubtitleStyle
 
     // MARK: Private playback state
 
@@ -135,8 +137,8 @@ public final class NativeVideoEngine: VideoEngine {
     @ObservationIgnored private weak var displayCriteriaWindow: UIWindow?
     #endif
 
-    public init(captionSettings: CaptionSettings = .default) {
-        self.captionSettings = captionSettings
+    public init(style: SubtitleStyle = .default) {
+        self.style = style
         PlaybackInstrumentation.increment(.nativeEngine)
     }
 
@@ -165,8 +167,8 @@ public final class NativeVideoEngine: VideoEngine {
 
         let asset = makeAsset(for: request)
         let item = AVPlayerItem(asset: asset)
-        // Apply in-app caption styling overrides if the user set any.
-        item.textStyleRules = captionSettings.textStyleRules()
+        // Apply in-app subtitle styling overrides if the user set any.
+        item.textStyleRules = style.textStyleRules()
         // Drive the tvOS display into the right dynamic range (true Dolby
         // Vision / HDR10 / HLG) for this source before playback begins.
         configureDynamicRange(for: request, item: item)
@@ -765,6 +767,16 @@ public final class NativeVideoEngine: VideoEngine {
             guard let self, let group = await self.legibleGroup(for: item.asset) else { return }
             self.select(track: track, in: group, on: item)
         }
+    }
+
+    /// Re-applies subtitle styling to the *current* player item so an in-player
+    /// Style edit updates an embedded text track AVFoundation draws itself (e.g. an
+    /// MKV SRT on Plex direct-play, which has no sidecar the overlay could redraw).
+    /// Harmless for overlay-drawn subtitles: AVFoundation's legible selection is off
+    /// in that case, so it isn't rendering a track for these rules to affect.
+    public func updateSubtitleStyle(_ style: SubtitleStyle) {
+        self.style = style
+        player?.currentItem?.textStyleRules = style.textStyleRules()
     }
 
     /// Best-effort manual audio selection. As with subtitles, the native picker

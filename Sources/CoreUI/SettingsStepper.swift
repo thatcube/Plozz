@@ -18,6 +18,11 @@ public struct SettingsStepper<Value: Hashable>: View {
     /// so the stepper doesn't tower over the list. Defaults to the roomy style used
     /// on the full Settings pages.
     public let compact: Bool
+    /// When true the value wraps from the last option back to the first (and vice
+    /// versa) and the − / + buttons never dim — for cyclic ranges like a clock
+    /// time. When false (the default) the value clamps at the ends of the preset
+    /// list and the end arrow dims.
+    public let wraps: Bool
 
     @Environment(\.themePalette) private var palette
 
@@ -25,17 +30,30 @@ public struct SettingsStepper<Value: Hashable>: View {
         options: [Value],
         selection: Binding<Value>,
         compact: Bool = false,
+        wraps: Bool = false,
         title: @escaping (Value) -> String
     ) {
         self.options = options
         self._selection = selection
         self.compact = compact
+        self.wraps = wraps
         self.title = title
     }
 
     private var index: Int { options.firstIndex(of: selection) ?? 0 }
-    private var canDecrement: Bool { index > 0 }
-    private var canIncrement: Bool { index < options.count - 1 }
+    private var canDecrement: Bool { wraps || index > 0 }
+    private var canIncrement: Bool { wraps || index < options.count - 1 }
+
+    private func stepped(by delta: Int) -> Value? {
+        guard !options.isEmpty else { return nil }
+        let count = options.count
+        if wraps {
+            return options[((index + delta) % count + count) % count]
+        }
+        let target = index + delta
+        guard options.indices.contains(target) else { return nil }
+        return options[target]
+    }
 
     private var buttonSize: CGFloat { compact ? 46 : 72 }
     private var glyphSize: CGFloat { compact ? 16 : 26 }
@@ -46,7 +64,7 @@ public struct SettingsStepper<Value: Hashable>: View {
     public var body: some View {
         HStack(spacing: rowSpacing) {
             stepButton(symbol: "minus", dimmed: !canDecrement) {
-                if canDecrement { selection = options[index - 1] }
+                if let next = stepped(by: -1) { selection = next }
             }
 
             // Reserve the widest option's width (hidden sizers behind the live
@@ -63,7 +81,7 @@ public struct SettingsStepper<Value: Hashable>: View {
             .animation(.easeOut(duration: 0.16), value: index)
 
             stepButton(symbol: "plus", dimmed: !canIncrement) {
-                if canIncrement { selection = options[index + 1] }
+                if let next = stepped(by: 1) { selection = next }
             }
         }
         .fixedSize()
@@ -93,9 +111,11 @@ public struct SettingsStepper<Value: Hashable>: View {
 
 /// Round step button mirroring the segmented picker's theme-aware focus thumb:
 /// a subtle neutral chip at rest, the bright inverted thumb (white-on-dark /
-/// black-on-light) when focused.
-private struct StepperButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
+/// black-on-light) when focused. Public so compact ± steppers built outside this
+/// component (e.g. the in-player subtitle-sync control) share the exact look.
+public struct StepperButtonStyle: ButtonStyle {
+    public init() {}
+    public func makeBody(configuration: Configuration) -> some View {
         StepperButtonBody(configuration: configuration)
     }
 

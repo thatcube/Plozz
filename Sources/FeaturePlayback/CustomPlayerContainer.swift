@@ -16,10 +16,15 @@ struct PlayerActions {
     var togglePlayPause: () -> Void = {}
     var selectAudio: (Int) -> Void = { _ in }
     var selectSubtitle: (Int) -> Void = { _ in }
+    /// Pick the second (dual) subtitle track by option id, or `offID` for off.
+    var selectSecondarySubtitle: (Int) -> Void = { _ in }
     var setPlaybackSpeed: (Double) -> Void = { _ in }
     var setAudioDelay: (TimeInterval) -> Void = { _ in }
     var setSubtitleDelay: (TimeInterval) -> Void = { _ in }
     var setDialogEnhance: (Bool) -> Void = { _ in }
+    /// Apply an edited subtitle appearance (in-player Style screen), for live
+    /// preview + persistence.
+    var setSubtitleStyle: (SubtitleStyle) -> Void = { _ in }
     /// Advance to the next episode (Info card → Next Episode).
     var playNextEpisode: () -> Void = {}
     /// Return to the previous episode (Info card → Previous).
@@ -368,10 +373,12 @@ final class PlayerInputViewController: UIViewController {
             togglePlayPause: { [weak self] in self?.actions.togglePlayPause() },
             selectAudio: { [weak self] in self?.actions.selectAudio($0) },
             selectSubtitle: { [weak self] in self?.actions.selectSubtitle($0) },
+            selectSecondarySubtitle: { [weak self] in self?.actions.selectSecondarySubtitle($0) },
             setPlaybackSpeed: { [weak self] in self?.actions.setPlaybackSpeed($0) },
             setAudioDelay: { [weak self] in self?.actions.setAudioDelay($0) },
             setSubtitleDelay: { [weak self] in self?.actions.setSubtitleDelay($0) },
             setDialogEnhance: { [weak self] in self?.actions.setDialogEnhance($0) },
+            setSubtitleStyle: { [weak self] in self?.actions.setSubtitleStyle($0) },
             playNextEpisode: { [weak self] in self?.actions.playNextEpisode() },
             playPreviousEpisode: { [weak self] in self?.actions.playPreviousEpisode() },
             restart: { [weak self] in self?.actions.restart() }

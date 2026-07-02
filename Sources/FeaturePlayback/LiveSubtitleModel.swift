@@ -27,6 +27,13 @@ public final class LiveSubtitleModel {
     public private(set) var primary: [SubtitleCue] = []
     /// Cues on screen for an optional secondary (dual-subtitle) track.
     public private(set) var secondary: [SubtitleCue] = []
+    /// `true` while a secondary (dual) subtitle track is actively selected — a
+    /// sidecar timeline or an engine live-feed. The overlay reserves the second
+    /// dual-subtitle lane only while this holds, so a *persisted* `style.secondary`
+    /// (dual appearance the viewer configured in an earlier session) can't reserve
+    /// a phantom empty lane — and shift the primary line — on a later
+    /// single-subtitle playback.
+    public private(set) var hasSecondaryTrack: Bool = false
     /// The resolved appearance the overlay renders with.
     public var style: SubtitleStyle = .default
     /// Whether the current video frame is HDR, so the overlay can clamp luminance.
@@ -49,6 +56,13 @@ public final class LiveSubtitleModel {
     /// IDs of the currently-seated live cues, so we only republish `primary` when
     /// the active set actually changes (not every 60 Hz tick).
     @ObservationIgnored private var liveActiveIDs: [Int] = []
+    /// Live-feed state for the SECONDARY (dual) channel, mirroring the primary
+    /// live feed above. Lets an engine that decodes a second subtitle stream
+    /// (AetherEngine/Plozzigen) push its cues for the dual line — the path that
+    /// makes dual subtitles work for embedded tracks with no sidecar URL.
+    @ObservationIgnored private var isSecondaryLiveFeed = false
+    @ObservationIgnored private var secondaryLiveCues: [SubtitleCue] = []
+    @ObservationIgnored private var secondaryLiveActiveIDs: [Int] = []
     /// Last clock value seen by ``tick(_:)``, so a fresh ``updateLiveCues(_:)``
     /// push can re-seat against the current playhead between ticks.
     @ObservationIgnored private var lastTickTime: Double = 0
@@ -57,7 +71,19 @@ public final class LiveSubtitleModel {
 
     /// `true` when a primary (or secondary) cue stream is loaded, or an engine is
     /// live-feeding cues, so the host can decide whether the overlay needs driving.
-    public var hasContent: Bool { primaryTimeline != nil || secondaryTimeline != nil || isLiveFeed }
+    public var hasContent: Bool {
+        primaryTimeline != nil || secondaryTimeline != nil || isLiveFeed || isSecondaryLiveFeed
+    }
+
+    /// `true` when the overlay owns the **primary** subtitle — either a sidecar
+    /// timeline we drive or an engine live-feed we time-filter. This is exactly
+    /// when ``offset`` (app-side subtitle sync) actually shifts the on-screen
+    /// track, so the host gates the in-player "Sync" control on it. False for
+    /// subtitles-off and for embedded text the underlying player draws itself
+    /// (where the app can't shift the timeline).
+    public var rendersPrimary: Bool {
+        primaryTimeline != nil || isLiveFeed
+    }
 
     /// Global sync offset in seconds (positive = show subtitles later). Applied to
     /// both tracks and forces the next ``tick(_:)`` to recompute.
@@ -89,11 +115,13 @@ public final class LiveSubtitleModel {
     public func beginLiveFeed() {
         isLiveFeed = true
         primaryTimeline = nil
-        secondaryTimeline = nil
         liveCues = []
         liveActiveIDs = []
         primary = []
-        secondary = []
+        // NOTE: deliberately does NOT touch the secondary channel. A primary
+        // track change routes through here, and the dual line (sidecar timeline
+        // OR its own engine live feed) must survive that switch. Full resets go
+        // through `clear()`.
     }
 
     /// Replaces the live cue buffer from an engine feed and re-seats the on-screen
@@ -117,23 +145,65 @@ public final class LiveSubtitleModel {
         }
     }
 
-    /// Loads (or clears) the secondary/dual cue stream.
+    /// Loads (or clears) the secondary/dual cue stream. Switches the secondary
+    /// channel out of engine-live mode: a parsed sidecar timeline takes over.
     public func loadSecondary(_ stream: SubtitleCueStream?) {
+        isSecondaryLiveFeed = false
+        secondaryLiveCues = []
+        secondaryLiveActiveIDs = []
         if let stream {
             secondaryTimeline = SubtitleCueTimeline(stream: stream, offset: storedOffset)
         } else {
             secondaryTimeline = nil
         }
+        hasSecondaryTrack = stream != nil
         secondary = []
+    }
+
+    /// Switches the SECONDARY (dual) channel into engine live-feed mode: drops any
+    /// sidecar timeline and lets an engine push its decoded second-stream cues via
+    /// ``updateSecondaryLiveCues(_:)``. This is how dual subtitles work for
+    /// embedded tracks (Plex direct-play) that have no fetchable sidecar URL —
+    /// AetherEngine/Plozzigen demuxes and decodes the second track itself.
+    public func beginSecondaryLiveFeed() {
+        isSecondaryLiveFeed = true
+        secondaryTimeline = nil
+        secondaryLiveCues = []
+        secondaryLiveActiveIDs = []
+        hasSecondaryTrack = true
+        secondary = []
+    }
+
+    /// Replaces the secondary live cue buffer from an engine feed and re-seats the
+    /// on-screen set. No-op unless ``beginSecondaryLiveFeed()`` is active.
+    public func updateSecondaryLiveCues(_ cues: [SubtitleCue]) {
+        guard isSecondaryLiveFeed else { return }
+        secondaryLiveCues = cues
+        recomputeSecondaryLiveActive(at: lastTickTime)
+    }
+
+    /// Seats the secondary live cues visible at `time`, republishing `secondary`
+    /// only when the active set changes.
+    private func recomputeSecondaryLiveActive(at time: Double) {
+        let active = secondaryLiveCues.active(at: time, offset: storedOffset)
+        let ids = active.map(\.id)
+        if ids != secondaryLiveActiveIDs {
+            secondaryLiveActiveIDs = ids
+            secondary = active
+        }
     }
 
     /// Drops all cue streams and clears the screen.
     public func clear() {
         isLiveFeed = false
+        isSecondaryLiveFeed = false
+        hasSecondaryTrack = false
         primaryTimeline = nil
         secondaryTimeline = nil
         liveCues = []
         liveActiveIDs = []
+        secondaryLiveCues = []
+        secondaryLiveActiveIDs = []
         primary = []
         secondary = []
     }
@@ -143,13 +213,21 @@ public final class LiveSubtitleModel {
     public func tick(_ time: Double) {
         lastTickTime = time
         if isLiveFeed {
+            // Live feed drives the PRIMARY only (the engine decodes it). Fall
+            // through so the secondary sidecar timeline below still advances.
             recomputeLiveActive(at: time)
-            return
-        }
-        if let p = primaryTimeline, p.update(to: time) {
+        } else if let p = primaryTimeline, p.update(to: time) {
             primary = p.active
         }
-        if let s = secondaryTimeline, s.update(to: time) { secondary = s.active }
+        // The secondary/dual line is either its own engine live feed (embedded
+        // track decoded by the engine) or a sidecar timeline — independent of the
+        // primary's source. Seat whichever is active every tick, including while
+        // the primary is a live feed, or the second line never shows.
+        if isSecondaryLiveFeed {
+            recomputeSecondaryLiveActive(at: time)
+        } else if let s = secondaryTimeline, s.update(to: time) {
+            secondary = s.active
+        }
     }
 }
 
@@ -163,6 +241,7 @@ struct LiveSubtitleOverlay: View {
         SubtitleOverlayView(
             primary: model.primary,
             secondary: model.secondary,
+            secondaryActive: model.hasSecondaryTrack,
             style: model.style,
             isHDR: model.isHDR,
             videoRect: model.videoRect

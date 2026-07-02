@@ -94,6 +94,11 @@ public enum PlozzTheme {
         public static let sectionTitleSpacing = Spacing.medium
         /// Standard horizontal inset from the screen edge.
         public static let screenPadding = Spacing.xLarge
+        /// Max content width for the Settings screens so cards/lists don't
+        /// stretch edge-to-edge on a wide TV. Shared by the root Settings page
+        /// and the drill-in detail pages (Servers, Profiles) so they all read
+        /// at the same width.
+        public static let settingsContentMaxWidth: CGFloat = 1200
         /// Vertical inset at the very top/bottom of a screen's scroll content.
         public static let screenVerticalPadding = Spacing.xLarge
         /// Headroom above a horizontal rail so a focused card's upward lift is

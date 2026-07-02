@@ -43,7 +43,7 @@ public struct SettingsView: View {
     /// Caps the root "Settings" page content and centers it, so the profile
     /// card and About/Sign Out list don't stretch edge-to-edge on a wide TV.
     /// Tune this single value to make the page wider/narrower.
-    private static let contentMaxWidth: CGFloat = 1200
+    private static let contentMaxWidth: CGFloat = PlozzTheme.Metrics.settingsContentMaxWidth
 
     private let captions: CaptionSettingsModel
     private let spoilers: SpoilerSettingsModel

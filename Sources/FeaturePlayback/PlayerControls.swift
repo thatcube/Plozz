@@ -86,6 +86,7 @@ struct PlayerControls: View {
         case edit       // Subtitles header ✎ Edit (appearance) button
         case download   // Trailing "Search for subtitles…" row
         case subBack    // Back control inside a Subtitles sub-screen
+        case subSync    // Subtitles header Sync (timing) button
     }
 
     /// Sub-screens of the Subtitles panel. `tracks` is the default list; the
@@ -93,22 +94,23 @@ struct PlayerControls: View {
     /// Style screen has its own detail sub-screens (`styleOutline` / `styleBackground`
     /// / `styleDual`). Back steps to a screen's PARENT rather than closing the panel.
     private enum SubtitleScreen {
-        case tracks, download, style, styleFont, styleOutline, styleBackground, styleDual
+        case tracks, download, sync, style, styleFont, styleOutline, styleBackground, styleDual
 
         /// The screen a Back / Menu press should return to.
         var parent: SubtitleScreen {
             switch self {
-            case .tracks, .download, .style: return .tracks
+            case .tracks, .download, .sync, .style: return .tracks
             case .styleFont, .styleOutline, .styleBackground, .styleDual: return .style
             }
         }
 
         /// Whether this is the Style editor or one of its detail sub-screens (they
-        /// share the taller upward-growing panel).
+        /// share the taller upward-growing panel). Sync is a compact, bottom-anchored
+        /// screen like the track list / Download, so it stays out of this family.
         var isStyleFamily: Bool {
             switch self {
             case .style, .styleFont, .styleOutline, .styleBackground, .styleDual: return true
-            case .tracks, .download: return false
+            case .tracks, .download, .sync: return false
             }
         }
     }
@@ -631,6 +633,9 @@ struct PlayerControls: View {
                 return .row(selectedRowIndex(for: .subtitles))
             case .download:
                 return .subBack
+            case .sync:
+                // Land on the centre Reset — the neutral anchor between the ± nudges.
+                return .row(2)
             case .style:
                 return model.secondarySubtitleImagePrimaryFormat == nil ? .row(0) : .subBack
             case .styleFont:
@@ -984,6 +989,18 @@ struct PlayerControls: View {
                 .foregroundStyle(.white)
             Spacer(minLength: 12)
             if category == .subtitles && subtitleScreen == .tracks {
+                // Timing (Sync) chip — only when the engine can actually shift
+                // subtitle timing. Sits left of Style; opens a compact delay screen.
+                if model.engineCapabilities.contains(.subtitleDelay) {
+                    Button {
+                        openSubtitleScreen(.sync)
+                    } label: {
+                        Label("Sync", systemImage: "clock")
+                    }
+                    .buttonStyle(PanelHeaderButtonStyle())
+                    .focusEffectDisabled()
+                    .focused($focus, equals: .subSync)
+                }
                 Button {
                     openSubtitleScreen(.style)
                 } label: {
@@ -1006,6 +1023,7 @@ struct PlayerControls: View {
         switch subtitleScreen {
         case .tracks: return "Subtitles"
         case .download: return "Download Subtitles"
+        case .sync: return "Subtitle Sync"
         case .style: return "Subtitle Style"
         case .styleFont: return "Font"
         case .styleOutline: return "Shadow & Outline"
@@ -1021,6 +1039,7 @@ struct PlayerControls: View {
         switch subtitleScreen {
         case .tracks: subtitlePane
         case .download: subtitleDownloadStub
+        case .sync: subtitleSyncScreen
         case .style:
             // A bitmap primary (PGS/DVD/…) is pre-rendered by the source, so NONE
             // of the appearance controls apply. Replace the whole editor with a
@@ -1094,6 +1113,28 @@ struct PlayerControls: View {
 
     private var subtitleDownloadStub: some View {
         subScreenStub(message: "Search the server's providers for a subtitle in your language and load it right here.")
+    }
+
+    /// Compact timing screen reached from the header Sync chip: nudge the primary
+    /// subtitle earlier/later to line it up with the audio. Reuses the delay stepper
+    /// (coarse ±500 ms / fine ±50 ms / Reset). Only offered when the engine reports
+    /// `.subtitleDelay`, so the chip that opens it is gated the same way.
+    private var subtitleSyncScreen: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            delayRow(
+                title: "Delay",
+                value: model.subtitleDelaySeconds,
+                firstSlot: 0,
+                onAdjust: { actions.setSubtitleDelay(model.subtitleDelaySeconds + $0) },
+                onReset: { actions.setSubtitleDelay(0) }
+            )
+            Text("Nudge the subtitles earlier or later to match the audio.")
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.6))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 6)
     }
 
     // MARK: Subtitle style editor (hybrid full-width rows)

@@ -30,16 +30,30 @@ struct SettingsOptionList<Option: Hashable>: View {
                 Button {
                     selection = option
                 } label: {
-                    SettingsRowLabel(
-                        icon: icon(option),
-                        title: title(option),
-                        trailing: {
-                            Image(systemName: "checkmark")
-                                .font(.headline.weight(.bold))
-                                .opacity(selection == option ? 1 : 0)
-                                .accessibilityHidden(true)
+                    // Mirror SettingsSwitchToggleBody's metrics exactly (spacing
+                    // 20, headline-semibold label, 14pt vertical padding, 46pt
+                    // min height) so a checkable option row carries the same
+                    // visual weight as a toggle row elsewhere on this screen.
+                    HStack(spacing: 20) {
+                        if let symbol = icon(option) {
+                            Image(systemName: symbol)
+                                .font(.system(size: 24, weight: .semibold))
+                                .frame(width: 34, alignment: .center)
+                                .settingsRowIcon()
                         }
-                    )
+                        Text(title(option))
+                            .font(.headline.weight(.semibold))
+                            .lineLimit(1)
+                        Spacer(minLength: 20)
+                        Image(systemName: "checkmark")
+                            .font(.title3.weight(.bold))
+                            .opacity(selection == option ? 1 : 0)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(minHeight: 46)
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, labelInset)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(SettingsFocusButtonStyle())
                 .padding(.leading, -labelInset)

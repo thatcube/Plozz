@@ -57,6 +57,11 @@ public struct PlozzMetrics: Equatable, Sendable {
     /// its slot, so cards separate and the focus outline has room (scaled).
     public let borderlessCardSideMargin: CGFloat
 
+    /// Height of a card's watched-progress bar, scaled with density and floored at
+    /// `PlozzTheme.Metrics.progressBarMinHeight` so it tracks the display-size
+    /// setting without ever shrinking to an illegible sliver.
+    public let progressBarHeight: CGFloat
+
     // MARK: Media spacing (scaled)
 
     /// Gap between adjacent media cards in a rail and gutter in a poster grid —
@@ -199,6 +204,10 @@ public struct PlozzMetrics: Equatable, Sendable {
 
         self.focusCaptionPush = step(PlozzTheme.Metrics.focusCaptionPush)
         self.borderlessCardSideMargin = step(PlozzTheme.Metrics.borderlessCardSideMargin)
+        self.progressBarHeight = max(
+            step(PlozzTheme.Metrics.progressBarHeight),
+            PlozzTheme.Metrics.progressBarMinHeight
+        )
 
         self.cardSpacing = step(PlozzTheme.Metrics.cardSpacing)
         self.gridSpacing = step(PlozzTheme.Metrics.gridSpacing)

@@ -167,6 +167,7 @@ public struct RootView: View {
                                 PlaybackSettingsStore.currentSyncAcrossServers(namespace: namespace)
                             }
                         ),
+                        pendingWatchMutations: { await appState.pendingWatchMutations() },
                         displayAccounts: appState.accounts,
                         activeAccountID: appState.primaryActiveAccount?.id,
                         profiles: appState.profilesModel.profiles,

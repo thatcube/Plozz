@@ -368,6 +368,60 @@ final class CrossSourceSelectorTests: XCTestCase {
     func testOriginPreferenceEmptySourcesIsNil() {
         XCTAssertNil(CrossSourceSelector.bestSelection(from: [], capabilities: .default, preferring: "x"))
     }
+
+    // MARK: - Failover exclusion (r8-play-failover)
+
+    func testExcludingSkipsTriedServerAndPicksNextBest() {
+        // The local copy failed to start; failover excludes it and must fall
+        // through to the next-best (remote) copy rather than re-trying the dead one.
+        let localFailed = source("local", versions: [h264], locality: .local)
+        let remote = source("remote", versions: [h264], locality: .remote)
+        let pick = CrossSourceSelector.bestSelection(
+            from: [localFailed, remote],
+            capabilities: .default,
+            preferring: nil,
+            excluding: ["local"]
+        )
+        XCTAssertEqual(pick?.source.accountID, "remote", "A tried (failed) server must be skipped")
+    }
+
+    func testExcludingAllSourcesIsNilExhaustion() {
+        // Every server has been tried → true exhaustion, so the caller surfaces the
+        // graceful error instead of looping.
+        let pick = CrossSourceSelector.bestSelection(
+            from: [source("a", versions: [h264]), source("b", versions: [h264])],
+            capabilities: .default,
+            preferring: nil,
+            excluding: ["a", "b"]
+        )
+        XCTAssertNil(pick, "No untried source remains → nil")
+    }
+
+    func testExcludingStillPrefersLocalAmongUntried() {
+        // First attempt was the remote copy (excluded); of the two remaining, the
+        // local one must still win — failover keeps the local-first guarantee.
+        let remoteTried = source("remote", versions: [h264], locality: .remote)
+        let localA = source("localA", versions: [h264], locality: .local)
+        let unknownB = source("unknownB", versions: [h264], locality: .unknown)
+        let pick = CrossSourceSelector.bestSelection(
+            from: [remoteTried, unknownB, localA],
+            capabilities: .default,
+            preferring: nil,
+            excluding: ["remote"]
+        )
+        XCTAssertEqual(pick?.source.accountID, "localA", "Failover still prefers a local copy among untried servers")
+    }
+
+    func testExcludingUnknownAccountIsNoOp() {
+        // Excluding an account that isn't present behaves like no exclusion.
+        let pick = CrossSourceSelector.bestSelection(
+            from: [source("a", versions: [h264])],
+            capabilities: .default,
+            preferring: nil,
+            excluding: ["ghost"]
+        )
+        XCTAssertEqual(pick?.source.accountID, "a")
+    }
 }
 
 final class MediaItemSourceHelpersTests: XCTestCase {

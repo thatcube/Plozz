@@ -73,12 +73,16 @@ enum WatchMutationFactory {
         // which would coalesce two different series' S1E1 into one outbox entry and
         // cross-apply watched state. The season/episode numbers on the coalesce key
         // then disambiguate within the series. Fall back to the episode title only
-        // when the parent series title is unavailable.
+        // when the parent series title is unavailable. Passing `kind` lets
+        // `canonicalMediaID` scope the fallback to what the merger actually unites
+        // (movies-by-title only with a year; episodes by series-title+s/e; nothing
+        // for whole series / no-year movies) — see r8-canonicalid.
         let canonicalTitle = (item.kind == .episode ? item.parentTitle : nil) ?? item.title
         return WatchMutation.canonicalMediaID(
             providerIDs: item.providerIDs,
             title: canonicalTitle,
             year: item.productionYear,
+            kind: item.kind,
             fallback: item.id
         )
     }

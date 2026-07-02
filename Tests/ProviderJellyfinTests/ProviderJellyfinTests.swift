@@ -1210,4 +1210,47 @@ final class JellyfinConnectionLocalityTests: XCTestCase {
         XCTAssertEqual(provider.connectionLocality, .unknown,
                        "An unreachable LAN server must not claim local locality")
     }
+
+    func testLocalityRevertsToUnknownWhenConfirmedServerDiesMidSession() async throws {
+        // r8-stale-reachability-locality: the reachability signal is no longer
+        // one-way. Once a confirmed LAN server stops answering mid-session, its
+        // locality must drop back to `.unknown` so a reachable remote twin can win
+        // best-source selection instead of the selector clinging to the dead LAN box.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"i1","Name":"Movie","Type":"Movie"}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(host: "http://192.168.1.50:8096"), http: stub)
+
+        _ = try await provider.continueWatching(limit: 10)
+        XCTAssertEqual(provider.connectionLocality, .local, "A reachable LAN server confirms local")
+
+        // The server goes down mid-session.
+        stub.error = .serverUnreachable
+        _ = try? await provider.continueWatching(limit: 10)
+
+        XCTAssertEqual(provider.connectionLocality, .unknown,
+                       "A confirmed server that dies must drop back to unknown locality")
+    }
+
+    func testHttpStatusErrorDoesNotInvalidateConfirmedLocality() async throws {
+        // Only a transport-level failure (the server not answering) invalidates the
+        // latch. A 404/401 proves the server DID answer, so a confirmed connection
+        // must stay `.local` — reachability is about the transport, not the resource.
+        let stub = StubHTTPClient()
+        stub.stub(pathSuffix: "/Users/u1/Items/Resume", json: """
+        {"Items":[{"Id":"i1","Name":"Movie","Type":"Movie"}],"TotalRecordCount":1}
+        """)
+        let provider = JellyfinProvider(session: makeSession(host: "http://192.168.1.50:8096"), http: stub)
+
+        _ = try await provider.continueWatching(limit: 10)
+        XCTAssertEqual(provider.connectionLocality, .local)
+
+        // The server answers, but with a 404 (resource gone) — still reachable.
+        stub.error = .notFound
+        _ = try? await provider.continueWatching(limit: 10)
+
+        XCTAssertEqual(provider.connectionLocality, .local,
+                       "A 404 proves the server answered; confirmed locality must persist")
+    }
 }

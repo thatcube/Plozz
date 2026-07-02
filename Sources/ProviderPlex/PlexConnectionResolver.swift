@@ -39,6 +39,13 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     private var candidates: [URL]
     private var cached: URL?
     private var inFlight: Task<URL, Never>?
+    /// Set once a reported failure clears the cache, or a full probe sweep finds
+    /// nothing reachable (the persisted seed itself was probed and failed). While
+    /// set, the last-known-good `reachableSeed` is no longer trusted for the
+    /// synchronous `hasConfirmedReachableConnection` read, so locality falls back
+    /// to `.unknown` until a fresh probe re-confirms a live connection. Cleared by
+    /// `store` the moment any probe succeeds. (r8-stale-reachability-locality)
+    private var reachabilityInvalidated = false
     /// The last-known-good connection persisted across launches, if any. Probed
     /// first *within its rank group* so a warm server re-confirms on a single
     /// probe and the winner among otherwise-equivalent same-rank candidates is
@@ -89,15 +96,22 @@ public final class PlexConnectionResolver: @unchecked Sendable {
 
     /// True when the resolver has a connection whose locality can be trusted: a
     /// probe-confirmed `cached` URL or a persisted last-known-good `reachableSeed`
-    /// (an address that demonstrably worked). When BOTH are nil, `current` falls
-    /// back to the most-preferred but **unproven** candidate — and because a Plex
-    /// server advertises its own LAN address even to remote clients, that guess can
-    /// be a local-looking URL that isn't actually reachable. Best-source selection
-    /// must treat locality as `.unknown` until this is true, or a dead LAN-shaped
-    /// guess would wrongly win as `.local`.
+    /// (an address that demonstrably worked) that has **not** since been
+    /// invalidated by a reported failure or a failed probe sweep. When neither
+    /// holds, `current` falls back to the most-preferred but **unproven** candidate
+    /// — and because a Plex server advertises its own LAN address even to remote
+    /// clients, that guess can be a local-looking URL that isn't actually
+    /// reachable. Best-source selection must treat locality as `.unknown` until
+    /// this is true, or a dead LAN-shaped guess would wrongly win as `.local`.
+    ///
+    /// Crucially this drops back to `false` after a failure until a fresh probe
+    /// re-confirms: a server that dies mid-session must stop advertising itself as
+    /// a confirmed-local candidate, so a genuinely reachable remote twin can take
+    /// over playback instead of the selector clinging to the now-dead LAN box.
     public var hasConfirmedReachableConnection: Bool {
         lock.lock(); defer { lock.unlock() }
-        return cached != nil || reachableSeed != nil
+        if cached != nil { return true }
+        return !reachabilityInvalidated && reachableSeed != nil
     }
 
     /// The base URL to use for the next request. Probes for a reachable
@@ -133,10 +147,15 @@ public final class PlexConnectionResolver: @unchecked Sendable {
 
     /// Reports that `url` failed to respond. If it was the cached choice, the
     /// cache is cleared so the next `resolved()` re-probes (and re-heals onto a
-    /// reachable connection).
+    /// reachable connection), and reachability confidence is invalidated so the
+    /// synchronous locality read reports `.unknown` until a fresh probe confirms a
+    /// live connection (a dead server must not keep winning as `.local`).
     public func reportFailure(_ url: URL) {
         lock.lock(); defer { lock.unlock() }
-        if cached == url { cached = nil }
+        if cached == url {
+            cached = nil
+            reachabilityInvalidated = true
+        }
     }
 
     private func performResolve() async -> URL {
@@ -159,8 +178,15 @@ public final class PlexConnectionResolver: @unchecked Sendable {
             }
         }
         // Still nothing reachable: return the most-preferred candidate WITHOUT
-        // caching, so the next attempt re-probes once connectivity returns.
-        return currentCandidates()[0]
+        // caching, so the next attempt re-probes once connectivity returns. The
+        // persisted seed was just probed (within its rank group) and did not
+        // answer, so invalidate reachability confidence — the synchronous locality
+        // read must now report `.unknown` rather than trusting a stale seed.
+        lock.lock()
+        reachabilityInvalidated = true
+        let fallback = candidates[0]
+        lock.unlock()
+        return fallback
     }
 
     /// The first candidate that answers a lightweight `/identity` probe, or `nil`
@@ -250,6 +276,7 @@ public final class PlexConnectionResolver: @unchecked Sendable {
     private func store(_ url: URL) {
         lock.lock()
         cached = url
+        reachabilityInvalidated = false
         lock.unlock()
         onReachable?(url)
     }

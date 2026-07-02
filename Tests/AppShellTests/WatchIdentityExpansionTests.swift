@@ -15,7 +15,7 @@ import MALService
 final class WatchIdentityExpansionTests: XCTestCase {
     private func applier(
         allAccounts: @escaping @Sendable () async -> [String],
-        indexedSources: @escaping @Sendable ([MediaIdentity]) -> [IndexedSource],
+        indexedSources: @escaping @Sendable ([MediaIdentity], MediaItemKind?) -> [IndexedSource],
         indexedAccountIDs: @escaping @Sendable () -> Set<String>,
         maxAttempts: Int = 6
     ) -> AppShellWatchMutationApplier {
@@ -53,7 +53,7 @@ final class WatchIdentityExpansionTests: XCTestCase {
         var union: [IndexedSource] = [IndexedSource(accountID: "a", itemID: "420", providerKind: .plex, kind: .movie)]
         let applier = applier(
             allAccounts: { ["a", "b", "c", "d"] },
-            indexedSources: { _ in union },
+            indexedSources: { _, _ in union },
             indexedAccountIDs: { indexed }
         )
         let mutation = movieMutation()
@@ -82,7 +82,7 @@ final class WatchIdentityExpansionTests: XCTestCase {
     func testAttemptBudgetForcesConclusionSoOutboxCantLeak() async {
         let applier = applier(
             allAccounts: { ["a", "ghost"] },
-            indexedSources: { _ in [IndexedSource(accountID: "a", itemID: "420", kind: .movie)] },
+            indexedSources: { _, _ in [IndexedSource(accountID: "a", itemID: "420", kind: .movie)] },
             indexedAccountIDs: { ["a"] }, // "ghost" never indexes
             maxAttempts: 3
         )
@@ -100,7 +100,7 @@ final class WatchIdentityExpansionTests: XCTestCase {
     func testIdentitylessMutationIsConclusiveNoOp() async {
         let applier = applier(
             allAccounts: { ["a", "b"] },
-            indexedSources: { _ in [] },
+            indexedSources: { _, _ in [] },
             indexedAccountIDs: { ["a"] }
         )
         var mutation = movieMutation()

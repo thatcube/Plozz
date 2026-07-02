@@ -44,6 +44,16 @@ public final class HomeViewModel {
     /// need no re-fetch (Plex, already-tagged items) apply instantly.
     private let currentVisibility: () -> HomeLibraryVisibility
 
+    /// A snapshot of the durable watch-outbox's not-yet-confirmed mutations, read
+    /// at load time so the freshly-fetched Continue Watching row reflects plays the
+    /// user just performed in-app that the servers haven't recorded yet (the outbox
+    /// write is still queued / in-flight, or the server's Resume/OnDeck query is
+    /// eventually-consistent). Without this, a reload momentarily reverts the row to
+    /// stale pre-play order — the reported "Continue Watching keeps shifting / isn't
+    /// what I watched last" symptom. Defaults to none so existing callers/tests are
+    /// unaffected. (r8-cw-outbox-patch)
+    private let pendingWatchMutations: @Sendable () async -> [WatchMutation]
+
     /// In-flight content aggregation (run off the main actor) and the fire-and-
     /// forget Top Shelf publish. Tracked so ``deinit`` can cancel them — otherwise
     /// a Home model torn down mid-load (or one that just falls out of scope in a
@@ -81,13 +91,15 @@ public final class HomeViewModel {
         aggregator: HomeAggregator = HomeAggregator(),
         layoutStore: HomeLayoutStoring = HomeLayoutStore(),
         identitySources: @escaping @Sendable (MediaItem) -> [MediaSourceRef] = { _ in [] },
-        currentVisibility: @escaping () -> HomeLibraryVisibility = { .default }
+        currentVisibility: @escaping () -> HomeLibraryVisibility = { .default },
+        pendingWatchMutations: @escaping @Sendable () async -> [WatchMutation] = { [] }
     ) {
         self.accounts = accounts
         self.aggregator = aggregator
         self.layoutStore = layoutStore
         self.identitySources = identitySources
         self.currentVisibility = currentVisibility
+        self.pendingWatchMutations = pendingWatchMutations
         let persisted = layoutStore.load()
         self.skeletonLayout = persisted.isEmpty ? HomeRowKind.defaultSkeletonLayout : persisted
     }
@@ -145,8 +157,13 @@ public final class HomeViewModel {
         self.aggregationTask = aggregationTask
         let merged = await aggregationTask.value
         guard !Task.isCancelled else { return }
+        // Overlay the durable outbox's not-yet-confirmed plays onto the freshly
+        // fetched Continue Watching row so a reload doesn't revert it to stale
+        // pre-play order while the server catches up (r8-cw-outbox-patch).
+        let pending = await pendingWatchMutations()
+        let reconciledCW = Self.reconcileContinueWatching(merged.continueWatching, pending: pending)
         let content = Content(
-            continueWatching: merged.continueWatching,
+            continueWatching: reconciledCW,
             latest: merged.latest,
             watchlist: merged.watchlist,
             libraries: merged.libraries
@@ -227,6 +244,84 @@ public final class HomeViewModel {
         content.latest = content.latest.map { apply(mutation, to: $0) }
         content.watchlist = updatedWatchlist(content.watchlist, mutation: mutation, in: content)
         state = .loaded(content)
+    }
+
+    /// Overlays the durable watch-outbox's **not-yet-confirmed** mutations onto a
+    /// freshly-fetched Continue Watching row, so a reload reflects what the user
+    /// just played in-app even before every server's Resume/OnDeck query catches up.
+    ///
+    /// Matching is by **exact server target** — a pending mutation's
+    /// `(accountID, itemID)` targets against each card's source refs (and the card's
+    /// own `sourceAccountID:id` for un-merged single-source cards). No canonical-id
+    /// recomputation: the outbox already addresses the precise server rows, so this
+    /// can't accidentally re-merge unrelated titles.
+    ///
+    /// For each matched card, only when the pending action is at least as recent as
+    /// the card's server-reported recency (older/superseded writes are ignored):
+    ///  - a **finished** play (`played == true`) drops the card — a watched title
+    ///    leaves Continue Watching, anticipating the server's own removal;
+    ///  - an **in-progress** play (`resumePosition > 0`) stamps the card (and its
+    ///    matching source refs) with the play's `capturedAt` recency + resume, so it
+    ///    floats to the correct spot;
+    ///  - anything else (e.g. a bare mark-*unwatched*) is left untouched — we never
+    ///    fabricate recency for a non-play, nor invent a card the feed didn't return.
+    ///
+    /// The row is then re-sorted with the aggregator's exact recency comparator so
+    /// the overlaid stamps take effect. Pure and side-effect-free for testability.
+    nonisolated static func reconcileContinueWatching(
+        _ items: [MediaItem],
+        pending: [WatchMutation]
+    ) -> [MediaItem] {
+        guard !pending.isEmpty else { return items }
+
+        func targetKey(_ accountID: String, _ itemID: String) -> String { accountID + "\u{1}" + itemID }
+        let pendingByTarget: [String: [WatchMutation]] = pending.reduce(into: [:]) { acc, m in
+            for t in m.targets { acc[targetKey(t.accountID, t.itemID), default: []].append(m) }
+        }
+
+        func newestMatch(for item: MediaItem) -> WatchMutation? {
+            var keys = Set(item.sources.map { targetKey($0.accountID, $0.itemID) })
+            if let account = item.sourceAccountID { keys.insert(targetKey(account, item.id)) }
+            guard !keys.isEmpty else { return nil }
+            var best: WatchMutation?
+            for key in keys {
+                for m in pendingByTarget[key] ?? [] where best == nil || m.capturedAt > best!.capturedAt {
+                    best = m
+                }
+            }
+            return best
+        }
+
+        var overlaid: [MediaItem] = []
+        overlaid.reserveCapacity(items.count)
+        for item in items {
+            guard let m = newestMatch(for: item) else { overlaid.append(item); continue }
+            // Ignore a pending write the server has already superseded with a newer play.
+            guard m.capturedAt >= (item.lastPlayedAt ?? .distantPast) else { overlaid.append(item); continue }
+
+            if m.played == true {
+                // Finished / marked-watched: the title leaves Continue Watching.
+                continue
+            }
+            guard let resume = m.resumePosition, resume > 0 else {
+                // A non-play mutation (e.g. mark-unwatched) — don't reorder or drop.
+                overlaid.append(item)
+                continue
+            }
+            var updated = item
+            updated.lastPlayedAt = m.capturedAt
+            updated.resumePosition = resume
+            let targetKeys = Set(m.targets.map { targetKey($0.accountID, $0.itemID) })
+            updated.sources = updated.sources.map { ref in
+                guard targetKeys.contains(targetKey(ref.accountID, ref.itemID)) else { return ref }
+                var r = ref
+                if (r.lastPlayedAt ?? .distantPast) < m.capturedAt { r.lastPlayedAt = m.capturedAt }
+                r.resumePosition = resume
+                return r
+            }
+            overlaid.append(updated)
+        }
+        return HomeAggregator.sortedByRecency(overlaid)
     }
 
     /// Reconciles the Watchlist row with a favorite mutation: removes titles that

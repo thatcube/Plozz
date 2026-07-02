@@ -222,8 +222,8 @@ public final class AppState {
             indexedSeriesSources: { [identitySnapshotStore] originSeries in
                 identitySnapshotStore.current.sources(for: originSeries).filter { $0.kind == .series }
             },
-            indexedSources: { [identitySnapshotStore] identities in
-                identitySnapshotStore.current.sources(forIdentities: identities)
+            indexedSources: { [identitySnapshotStore] identities, kind in
+                identitySnapshotStore.current.sources(forIdentities: identities, kind: kind)
             },
             indexedAccountIDs: { [identitySnapshotStore] in
                 identitySnapshotStore.current.indexedAccountIDs
@@ -245,6 +245,12 @@ public final class AppState {
     public func drainWatchOutbox() {
         let reconciler = watchReconciler
         Task { await reconciler.drain() }
+    }
+
+    /// The outbox's not-yet-confirmed mutations, so the Home Continue Watching row
+    /// can reflect in-app plays the servers haven't recorded yet (r8-cw-outbox-patch).
+    public func pendingWatchMutations() async -> [WatchMutation] {
+        await watchReconciler.snapshot().pending
     }
 
     /// Records a watch mutation's intent durably (stale-suppressed + coalesced) and

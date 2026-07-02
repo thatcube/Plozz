@@ -261,6 +261,59 @@ final class PlexConnectionResolverTests: XCTestCase {
         XCTAssertEqual(healed.absoluteString, "https://b.host:32400")
     }
 
+    func testReportFailureInvalidatesConfirmedReachabilityUntilReProbe() async {
+        // r8-stale-reachability-locality: a confirmed connection that later fails
+        // must revert `hasConfirmedReachableConnection` to false, so locality reads
+        // as `.unknown` (not a stale `.local`) until a fresh probe re-confirms —
+        // otherwise a dead LAN box keeps winning best-source selection over a
+        // genuinely reachable remote twin.
+        let probe = MutableProbe(reachable: ["lan.host"])
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://lan.host:32400"), url("https://remote.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: nil
+        )
+        let first = await resolver.resolved()
+        XCTAssertEqual(first.absoluteString, "https://lan.host:32400")
+        XCTAssertTrue(resolver.hasConfirmedReachableConnection, "A probed connection is confirmed")
+
+        // The LAN box dies. Reporting the failure clears the cache AND the
+        // confidence flag — no probe has re-confirmed anything yet.
+        probe.setReachable([])
+        resolver.reportFailure(first)
+        XCTAssertFalse(
+            resolver.hasConfirmedReachableConnection,
+            "A reported failure must drop confirmed reachability until a fresh probe re-confirms"
+        )
+
+        // Remote comes up; a successful re-resolve re-confirms.
+        probe.setReachable(["remote.host"])
+        let healed = await resolver.resolved()
+        XCTAssertEqual(healed.absoluteString, "https://remote.host:32400")
+        XCTAssertTrue(resolver.hasConfirmedReachableConnection, "A fresh successful probe re-confirms")
+    }
+
+    func testFailedProbeSweepInvalidatesPersistedSeedConfidence() async {
+        // A persisted last-known-good seed makes `hasConfirmedReachableConnection`
+        // true up front (it worked last launch). But once a full probe sweep runs
+        // and even the seed does not answer, confidence must drop to false so the
+        // seed's locality is no longer trusted — the server is demonstrably down.
+        let probe = MutableProbe(reachable: [])   // nothing answers this session
+        let resolver = PlexConnectionResolver(
+            candidates: [url("https://lan.host:32400"), url("https://remote.host:32400")],
+            deviceProfile: profile, token: "T", probe: probe, refresh: { [] },
+            reachableSeed: url("https://lan.host:32400")
+        )
+        XCTAssertTrue(
+            resolver.hasConfirmedReachableConnection,
+            "A persisted seed is trusted before any probe disproves it"
+        )
+        _ = await resolver.resolved()   // full sweep finds nothing reachable
+        XCTAssertFalse(
+            resolver.hasConfirmedReachableConnection,
+            "Once the seed itself fails its probe, its locality is no longer trusted"
+        )
+    }
+
     func testFallsBackToFirstCandidateWhenNothingReachable() async {
         let probe = MutableProbe(reachable: [])
         let resolver = PlexConnectionResolver(

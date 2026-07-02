@@ -50,7 +50,7 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     /// queued mutation re-resolves against ever-more-complete data on each drain.
     /// Empty (cold index / no match) ⇒ no extra targets that pass, so a watch is
     /// never dropped while the index warms.
-    var indexedSources: @Sendable ([MediaIdentity]) -> [IndexedSource] = { _ in [] }
+    var indexedSources: @Sendable ([MediaIdentity], MediaItemKind?) -> [IndexedSource] = { _, _ in [] }
     /// Every `Account.id` the identity index has indexed at least once. A movie /
     /// series identity expansion is **conclusive** only once every active account
     /// appears here (the union can still grow until then), so a mutation stopped
@@ -156,15 +156,14 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     private func expandIdentityTargets(for mutation: WatchMutation) async -> WatchTargetExpansion {
         guard !mutation.identities.isEmpty else { return .none }
         // TMDb/TVDb reuse one integer id space across movies and series
-        // (movie 550 ≠ tv 550), so an unscoped index union could fan a movie's
-        // watched-write out to a *series* on another server that merely shares the
-        // id (and vice-versa). Scope the union to the played title's kind when it's
-        // known. Legacy mutations (nil kind, enqueued before this field existed)
-        // keep the prior unscoped behaviour so a queued write is never dropped.
-        let allSources = indexedSources(mutation.identities)
-        let scopedSources = mutation.kind.map { kind in
-            allSources.filter { $0.kind == kind }
-        } ?? allSources
+        // (movie 550 ≠ tv 550), so the union must be scoped to the played title's
+        // kind — otherwise a movie's watched-write could fan out to a *series* on
+        // another server that merely shares the id (and vice-versa). The index does
+        // the kind-scoping (and the transitive connected-component walk) internally
+        // when a kind is supplied. Legacy mutations (nil kind, enqueued before this
+        // field existed) get the prior unscoped single-level union so a queued write
+        // is never dropped.
+        let scopedSources = indexedSources(mutation.identities, mutation.kind)
         let targets = scopedSources.map(\.target)
         let everyAccount = Set(await allAccountIDs())
         // Conclusive only once every active account has been indexed at least once

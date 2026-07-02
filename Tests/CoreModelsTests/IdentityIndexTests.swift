@@ -96,6 +96,62 @@ final class IdentityIndexTests: XCTestCase {
         )
     }
 
+    // MARK: Transitive connected-component union (r8-transitive-component)
+
+    func testTransitiveUnionFromSparseNodeReachesWholeComponent() {
+        // The identity graph: A carries BOTH ids, B only IMDb, C only TMDb. B and C
+        // are the same title (bridged by A) though they share no id directly. A
+        // lookup from the SPARSE node B must still reach C — the single-level union
+        // (B's own [imdb] → {A, B}) misses C; the transitive walk recovers it, so the
+        // index agrees with MediaItemMerger's union-find.
+        let imdb = MediaIdentity.external(source: "imdb", value: "tt1")
+        let tmdb = MediaIdentity.external(source: "tmdb", value: "42")
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            imdb: [indexed("a", "x"), indexed("b", "y")],  // A + B (sparse: imdb only)
+            tmdb: [indexed("a", "x"), indexed("c", "z")]   // A + C (sparse: tmdb only)
+        ])
+        // Probe from B, whose loaded payload carries ONLY the imdb id.
+        var fromB = MediaItem(id: "y", title: "Film", kind: .movie,
+                              productionYear: 2010, providerIDs: ["Imdb": "tt1"])
+        fromB.sourceAccountID = "b"
+        XCTAssertEqual(
+            Set(snapshot.sources(for: fromB).map(\.id)),
+            ["a:x", "b:y", "c:z"],
+            "A lookup from a sparse node must reach the whole connected component"
+        )
+        // And from C (the other sparse node) the answer is identical — origin-agnostic.
+        var fromC = MediaItem(id: "z", title: "Film", kind: .movie,
+                              productionYear: 2010, providerIDs: ["Tmdb": "42"])
+        fromC.sourceAccountID = "c"
+        XCTAssertEqual(Set(snapshot.sources(for: fromC).map(\.id)), ["a:x", "b:y", "c:z"])
+    }
+
+    func testTransitiveUnionDoesNotBridgeAcrossKindsThroughSharedID() {
+        // TMDb/TVDb reuse one integer id space across movies and series. Here movie
+        // M1 and series S1 share tmdb:550, and series S1 and movie M2 share tvdb:100.
+        // A kind-agnostic closure would bridge the two UNRELATED movies M1↔M2 through
+        // the series S1 and (after a trailing kind filter) return them as one movie.
+        // Kind-scoping DURING the walk must confine M1's component to {M1}.
+        let tmdb550 = MediaIdentity.external(source: "tmdb", value: "550")
+        let tvdb100 = MediaIdentity.external(source: "tvdb", value: "100")
+        let snapshot = IdentityIndexSnapshot(byIdentity: [
+            tmdb550: [indexed("a", "m1", kind: .movie), indexed("b", "s1", kind: .series)],
+            tvdb100: [indexed("b", "s1", kind: .series), indexed("c", "m2", kind: .movie)]
+        ])
+        var m1 = MediaItem(id: "m1", title: "Film", kind: .movie,
+                           productionYear: 2010, providerIDs: ["Tmdb": "550"])
+        m1.sourceAccountID = "a"
+        XCTAssertEqual(
+            Set(snapshot.sources(for: m1).map(\.id)),
+            ["a:m1"],
+            "A movie must not merge with an unrelated movie bridged only through a same-id series"
+        )
+        // The series probe stays in series-land too: it sees S1, never the movies.
+        var s1 = MediaItem(id: "s1", title: "Show", kind: .series, providerIDs: ["Tvdb": "100"])
+        s1.sourceAccountID = "b"
+        XCTAssertEqual(Set(snapshot.sources(for: s1).map(\.id)), ["b:s1"])
+    }
+
     func testSnapshotDeduplicatesByAccountItem() {
         let identity = MediaIdentity.external(source: "tmdb", value: "42")
         let snapshot = IdentityIndexSnapshot(byIdentity: [

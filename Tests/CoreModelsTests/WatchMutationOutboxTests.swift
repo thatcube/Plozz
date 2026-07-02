@@ -344,3 +344,109 @@ final class WatchOutboxLiveSessionTests: XCTestCase {
         XCTAssertEqual(done, 0)
     }
 }
+
+// MARK: - Actor reentrancy during apply (r8-reconciler-reentrancy)
+
+/// An applier whose FIRST write parks in-flight until the test releases it, so we
+/// can drive the actor-reentrancy race: while a drain is suspended writing the
+/// older action, a NEWER action for the same coalesce key is enqueued (and
+/// coalesces onto the same pending entry). Without the drain-time guard the newer
+/// action was silently lost; this fixture proves it now converges.
+private final class GatedWatchApplier: WatchMutationApplying, @unchecked Sendable {
+    struct ResumeWrite: Equatable { let seconds: TimeInterval; let accountID: String; let itemID: String }
+
+    private let lock = NSLock()
+    private(set) var resumeWrites: [ResumeWrite] = []
+
+    private var gateArmed = true            // only the first write parks
+    private var enteredAlready = false
+    private var enteredWaiter: CheckedContinuation<Void, Never>?
+    private var releaser: CheckedContinuation<Void, Never>?
+    private var releaseSignalled = false
+
+    /// Suspends until the first gated write is parked in-flight.
+    func waitUntilFirstWriteInFlight() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if enteredAlready { lock.unlock(); cont.resume() }
+            else { enteredWaiter = cont; lock.unlock() }
+        }
+    }
+
+    /// Releases the parked first write so the drain resumes.
+    func releaseFirstWrite() {
+        lock.lock()
+        if let r = releaser { releaser = nil; lock.unlock(); r.resume() }
+        else { releaseSignalled = true; lock.unlock() }
+    }
+
+    private func gateIfNeeded() async {
+        lock.lock()
+        guard gateArmed else { lock.unlock(); return }
+        gateArmed = false
+        enteredAlready = true
+        let waiter = enteredWaiter; enteredWaiter = nil
+        lock.unlock()
+        waiter?.resume()
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if releaseSignalled { releaseSignalled = false; lock.unlock(); cont.resume() }
+            else { releaser = cont; lock.unlock() }
+        }
+    }
+
+    func setPlayed(_ played: Bool, on target: WatchMutationTarget) async throws {
+        await gateIfNeeded()
+    }
+
+    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget, capturedAt: Date) async throws {
+        await gateIfNeeded()
+        lock.lock()
+        resumeWrites.append(.init(seconds: seconds, accountID: target.accountID, itemID: target.itemID))
+        lock.unlock()
+    }
+
+    func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws {}
+}
+
+final class WatchOutboxReentrancyTests: XCTestCase {
+    private func resume(_ seconds: TimeInterval, at capturedAt: Date, target t: WatchMutationTarget) -> WatchMutation {
+        WatchMutation(capturedAt: capturedAt, canonicalMediaID: "imdb:ttReentrant",
+                      resumePosition: seconds, targets: [t])
+    }
+
+    /// A newer action that coalesces onto the pending entry *while the drain is
+    /// suspended applying the older one* must still converge — the drain must not
+    /// write its stale in-flight copy back over the coalesced newer state (or, if
+    /// the older copy finished, drop the newer entry entirely).
+    func testCoalesceDuringApplyDoesNotLoseNewerWrite() async throws {
+        let store = InMemoryWatchMutationStore()
+        let applier = GatedWatchApplier()
+        let reconciler = WatchStateReconciler(store: store, applier: applier)
+        let t = target("a", "x")
+
+        let t1 = Date()
+        await reconciler.enqueue(resume(100, at: t1, target: t))
+
+        // Drain parks inside the first setResumePosition(100).
+        let drainTask = Task { await reconciler.drain() }
+        await applier.waitUntilFirstWriteInFlight()
+
+        // While parked, a NEWER resume for the same title coalesces in.
+        await reconciler.enqueue(resume(250, at: t1.addingTimeInterval(5), target: t))
+
+        applier.releaseFirstWrite()
+        await drainTask.value
+
+        XCTAssertTrue(
+            applier.resumeWrites.contains(.init(seconds: 250, accountID: "a", itemID: "x")),
+            "The newer resume that coalesced during apply must still be written"
+        )
+        XCTAssertEqual(
+            applier.resumeWrites.last, .init(seconds: 250, accountID: "a", itemID: "x"),
+            "Final converged state must reflect the NEWER action, not the stale in-flight one"
+        )
+        let pending = await reconciler.pendingCount
+        XCTAssertEqual(pending, 0, "Both writes converge and the entry is pruned")
+    }
+}

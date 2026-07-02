@@ -70,11 +70,18 @@ public enum CrossSourceSelector {
     public static func bestSelection(
         from sources: [MediaSourceRef],
         capabilities: MediaCapabilities,
-        preferring preferredAccountID: String? = nil
+        preferring preferredAccountID: String? = nil,
+        excluding excludedAccountIDs: Set<String> = []
     ) -> CrossSourceSelection? {
-        guard !sources.isEmpty else { return nil }
+        // Drop sources on servers already attempted (failover). Done first so an
+        // empty remainder returns `nil` (true exhaustion) rather than re-selecting
+        // a server that just failed.
+        let pool = excludedAccountIDs.isEmpty
+            ? sources
+            : sources.filter { !excludedAccountIDs.contains($0.accountID) }
+        guard !pool.isEmpty else { return nil }
 
-        let candidates = sources.enumerated().map { offset, source -> Candidate in
+        let candidates = pool.enumerated().map { offset, source -> Candidate in
             let localityRank = (source.locality ?? .unknown).rank
             let isPreferred = preferredAccountID != nil && source.accountID == preferredAccountID
             if let best = source.versions.recommendedSelection(for: capabilities) {

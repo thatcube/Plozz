@@ -217,7 +217,25 @@ public actor WatchStateReconciler {
                 mutation.attempts += 1
 
                 if let idx = state.pending.firstIndex(where: { $0.id == mutationID }) {
-                    if mutation.isFullyApplied {
+                    // Actor reentrancy guard. `apply` suspends on the network, and
+                    // this reconciler is an actor, so a concurrently-enqueued NEWER
+                    // action for the same `coalesceKey` can run during that
+                    // suspension: `enqueue` → `coalesce` keeps the same entry id but
+                    // bumps `capturedAt`, unions the target set, and advances the
+                    // clock. Our local `mutation` copy is now stale. Writing it back
+                    // would clobber the newer desired state (played / resumePosition)
+                    // and the unioned targets; and if our OLD copy happened to be
+                    // fully applied, `remove(at:)` would DROP the newer action
+                    // entirely — the classic "Continue Watching reverted to what I
+                    // watched before" loss. Detect the coalesce by `capturedAt`
+                    // advancing and leave the live (newer) entry untouched, requesting
+                    // a follow-up drain to apply it. Every server / tracker write is
+                    // idempotent (setting played/resume is a no-op if already set, and
+                    // the applied-caches suppress duplicate scrobbles), so re-applying
+                    // the shared targets on the next drain is safe.
+                    if state.pending[idx].capturedAt > mutation.capturedAt {
+                        drainRequestedWhileDraining = true
+                    } else if mutation.isFullyApplied {
                         state.pending.remove(at: idx)
                     } else {
                         state.pending[idx] = mutation

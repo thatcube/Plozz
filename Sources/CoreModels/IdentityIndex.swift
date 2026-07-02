@@ -167,6 +167,13 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// de-duplicated by `(account,item)`, in stable order. The union is what makes
     /// a title's set **origin-agnostic**: the same answer whether it was reached
     /// from a Plex or a Jellyfin card.
+    ///
+    /// This is a **single-level** union (the sources indexed directly under the
+    /// given identities). For the transitive connected-component union — needed
+    /// when a title's metadata is spread unevenly across servers — use
+    /// ``sources(forIdentities:kind:)`` or ``sources(for:)``, which walk the shared
+    /// id graph. This kind-less single-level form is kept for the legacy /
+    /// kind-unknown path where a transitive walk could bridge across kinds.
     public func sources(forIdentities identities: [MediaIdentity]) -> [IndexedSource] {
         guard !identities.isEmpty else { return [] }
         var seen = Set<String>()
@@ -180,14 +187,61 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
         return result
     }
 
+    /// The transitive, **kind-scoped** connected-component union for a set of seed
+    /// identities. External ids form a graph: two items are the same title if a
+    /// chain of shared ids links them, even when no single id is shared by all
+    /// (A=IMDb+TMDb, B=IMDb-only, C=TMDb-only — B and C are the same title bridged
+    /// by A, though they share no id directly). A single-level union from the
+    /// *sparse* node B would miss C; ``MediaItemMerger`` recovers this via union-find,
+    /// but the direct snapshot lookups did not, so a card resolved from B's
+    /// perspective was missing C's server (r8-transitive-component). Walking the
+    /// closure here makes the index agree with the merger.
+    ///
+    /// Kind is enforced **during** the walk, not merely at the end: TMDb/TVDb reuse
+    /// one integer id space across movies and series (movie 550 ≠ tv 550), so an
+    /// unscoped closure could bridge two unrelated movies *through* a same-id series
+    /// (M1—tmdb:550—S1—tvdb:100—M2) and a trailing kind filter would still hand back
+    /// {M1, M2} as one movie. Only traversing and collecting same-kind sources keeps
+    /// the component confined to the title's own kind.
+    public func sources(forIdentities identities: [MediaIdentity], kind: MediaItemKind?) -> [IndexedSource] {
+        guard let kind else {
+            // Kind-unknown (e.g. a legacy mutation predating the kind field): fall
+            // back to a single-level union so a transitive walk can't fold unrelated
+            // kinds together on a shared external id.
+            return sources(forIdentities: identities)
+        }
+        guard !identities.isEmpty else { return [] }
+        var visitedIdentities = Set<MediaIdentity>()
+        var frontier = identities
+        var seenSources = Set<String>()
+        var result: [IndexedSource] = []
+        while let identity = frontier.popLast() {
+            guard visitedIdentities.insert(identity).inserted else { continue }
+            guard let sources = byIdentity[identity] else { continue }
+            for source in sources where source.kind == kind {
+                if seenSources.insert(source.id).inserted {
+                    result.append(source)
+                }
+                // Expand through this same-kind source's other identities so a
+                // sparse twin (that shares only *one* of the seed's ids) still pulls
+                // in the rest of the component.
+                if let more = bySource[source.id] {
+                    for next in more where !visitedIdentities.contains(next) {
+                        frontier.append(next)
+                    }
+                }
+            }
+        }
+        return result.sorted { $0.id < $1.id }
+    }
+
     /// Every indexed source for `item`, by its ``MediaItemIdentity`` identities,
-    /// **scoped to the item's kind**. TMDb/TVDb reuse the same integer id across
-    /// movies and series (movie 550 ≠ tv 550), and `identities(for:)` emits bare,
-    /// kind-less external ids — so an unscoped lookup would fold a same-id series
-    /// into a movie's source set (and vice-versa), polluting the picker and
-    /// letting best-source selection route playback to the wrong work. Restricting
-    /// to sources indexed under the *same kind* keeps enrichment correct; episode
-    /// expansion asks for series membership through the series probe, not here.
+    /// **scoped to the item's kind** and unioned across the full transitive
+    /// connected component (see ``sources(forIdentities:kind:)``). TMDb/TVDb reuse
+    /// the same integer id across movies and series (movie 550 ≠ tv 550), and
+    /// `identities(for:)` emits bare, kind-less external ids — so a kind-scoped walk
+    /// keeps enrichment correct; episode expansion asks for series membership
+    /// through the series probe, not here.
     public func sources(for item: MediaItem) -> [IndexedSource] {
         let kind = item.kind
         var identities = MediaItemIdentity.identities(for: item)
@@ -203,7 +257,7 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
            let recovered = bySource["\(accountID):\(item.id)"] {
             identities.append(contentsOf: recovered)
         }
-        return sources(forIdentities: identities).filter { $0.kind == kind }
+        return sources(forIdentities: identities, kind: kind)
     }
 
     /// Membership ``MediaSourceRef``s for `item` — the picker / merge-enrichment view.

@@ -866,11 +866,16 @@ private struct UpdateUserItemDataBody: Encodable {
 
 // MARK: - Reachability latching
 
-/// A thread-safe, one-way latch that flips to confirmed the first time a request
-/// through the connection succeeds. Jellyfin, unlike Plex, has no connection
-/// resolver, so this is where a Jellyfin connection records that it has actually
-/// answered — letting ``JellyfinProvider/connectionLocality`` withhold a `.local`
-/// verdict for a saved-but-now-unreachable LAN server until it is proven live.
+/// A thread-safe reachability signal for a Jellyfin connection. It flips to
+/// *confirmed* the first time a request through the connection succeeds, and back
+/// to *unconfirmed* when a request fails with a transport-level `serverUnreachable`
+/// error (the server stopped answering). Jellyfin, unlike Plex, has no connection
+/// resolver, so this is where a Jellyfin connection records whether it is
+/// *currently* answering — letting ``JellyfinProvider/connectionLocality`` withhold
+/// a `.local` verdict for a saved-but-now-unreachable LAN server until it is proven
+/// live, AND drop the `.local` verdict again the instant the server dies
+/// mid-session so a reachable remote twin can take over playback rather than the
+/// selector clinging to the dead LAN box. (r8-stale-reachability-locality)
 final class ReachabilityLatch: @unchecked Sendable {
     private let lock = NSLock()
     private var confirmed = false
@@ -884,19 +889,34 @@ final class ReachabilityLatch: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         confirmed = true
     }
+
+    /// Drops the confirmed state after a transport failure, so locality reverts to
+    /// `.unknown` until the next successful request re-confirms a live connection.
+    func invalidate() {
+        lock.lock(); defer { lock.unlock() }
+        confirmed = false
+    }
 }
 
 /// Decorates an `HTTPClient`, confirming a ``ReachabilityLatch`` the first time a
-/// request completes without throwing. A non-2xx status or transport failure
-/// throws inside the wrapped `send`, so only a genuinely reachable server (one
-/// that returned a success response) latches — matching Plex's probe semantics.
+/// request completes without throwing and invalidating it when a request fails
+/// with a transport-level `serverUnreachable`. A non-2xx status maps to a
+/// *different* `AppError` (`.notFound`, `.unauthorized`, …) — the server DID
+/// answer — so those propagate without touching the latch; only a genuine
+/// transport failure (host unreachable / timeout / connection lost) flips the
+/// connection back to unconfirmed, matching Plex's probe semantics.
 struct ReachabilityObservingHTTPClient: HTTPClient {
     let wrapped: HTTPClient
     let latch: ReachabilityLatch
 
     func send(_ endpoint: Endpoint, baseURL: URL) async throws -> (Data, HTTPURLResponse) {
-        let result = try await wrapped.send(endpoint, baseURL: baseURL)
-        latch.confirm()
-        return result
+        do {
+            let result = try await wrapped.send(endpoint, baseURL: baseURL)
+            latch.confirm()
+            return result
+        } catch AppError.serverUnreachable {
+            latch.invalidate()
+            throw AppError.serverUnreachable
+        }
     }
 }

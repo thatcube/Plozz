@@ -118,6 +118,10 @@ struct MainTabView: View {
     let mediaItemActionHandler: any MediaItemActionHandling
     let enqueueWatchMutation: (WatchMutation) -> Void
     let watchBridge: WatchOutboxBridge
+    /// Snapshot of the durable outbox's not-yet-confirmed plays, so Home's Continue
+    /// Watching row reflects in-app plays the servers haven't recorded yet
+    /// (r8-cw-outbox-patch).
+    let pendingWatchMutations: @Sendable () async -> [WatchMutation]
     let displayAccounts: [Account]
     let activeAccountID: String?
     let profiles: [Profile]
@@ -175,6 +179,7 @@ struct MainTabView: View {
                 watchBridge: watchBridge,
                 identitySources: identitySources,
                 pendingPlayItemID: $pendingPlayItemID,
+                pendingWatchMutations: pendingWatchMutations,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
             .tabItem { Label("Home", systemImage: "house.fill") }
@@ -601,6 +606,73 @@ private func bestSourcePlayItem(
     )
 }
 
+/// Re-selects the next-best playable source after the server a card was already
+/// routed to failed to start playback, so a dead/unreachable copy transparently
+/// falls through to another server's copy instead of dead-ending on an error
+/// screen (r8-play-failover). `tried` is the set of source account IDs already
+/// attempted (the just-failed one included); the function returns `nil` once every
+/// live source has been exhausted, letting the caller surface the graceful player
+/// error rather than loop forever.
+///
+/// It mirrors ``bestSourcePlayItem``'s live-locality refresh and identity-index
+/// union so failover still prefers a same-LAN copy, but differs in two ways that
+/// matter only on the failure path: it does **not** honor an explicit user pick
+/// (that pick is exactly what just failed, so it must be allowed to fall through),
+/// and it does **not** pass a single source through untouched — a lone source that
+/// failed has no alternative, so an empty untried set is a real dead end. Resume
+/// is still reconciled across the full live source set (not just the untried
+/// subset) so switching servers mid-title never rewinds.
+private func failoverPlayItem(
+    _ item: MediaItem,
+    accounts: [ResolvedAccount],
+    identitySources: (MediaItem) -> [MediaSourceRef],
+    tried: Set<String>
+) -> MediaItem? {
+    let activeAccountIDs = Set(accounts.map(\.account.id))
+    let liveLocality: [String: SourceLocality] = Dictionary(
+        accounts.map { ($0.account.id, $0.provider.connectionLocality) },
+        uniquingKeysWith: { first, _ in first }
+    )
+    func withLiveLocality(_ source: MediaSourceRef) -> MediaSourceRef {
+        guard let locality = liveLocality[source.accountID] else { return source }
+        var copy = source
+        copy.locality = locality
+        return copy
+    }
+
+    var unioned = item.sources
+    var seen = Set(unioned.map(\.id))
+    for ref in identitySources(item) where seen.insert(ref.id).inserted {
+        unioned.append(ref)
+    }
+
+    let liveSources = (activeAccountIDs.isEmpty
+        ? unioned
+        : unioned.filter { activeAccountIDs.contains($0.accountID) })
+        .map(withLiveLocality)
+
+    // Delegate the exclusion + exhaustion decision to the (tested) selector: it
+    // drops every already-tried server and returns nil when none remain.
+    guard let selection = CrossSourceSelector.bestSelection(
+        from: liveSources,
+        capabilities: .detected(),
+        preferring: nil,
+        excluding: tried
+    ) else {
+        return nil
+    }
+
+    // Retarget against the FULL live source set so resume reconciliation still sees
+    // every server's progress (furthest-wins), while the chosen account comes from
+    // the untried subset the selector picked.
+    return MediaItem.retargetedForPlayback(
+        item: item,
+        sources: liveSources,
+        activeAccountID: selection.source.accountID,
+        versionID: selection.version?.id
+    )
+}
+
 /// Builds the player for a play request. Online (TMDb → YouTube) trailers carry a
 /// YouTube video-id marker and have no backing account, so they are routed to
 /// ``YouTubeTrailerProvider`` (which extracts a playable stream); every other
@@ -847,20 +919,30 @@ func makePlaybackStoppedHandler(
 @MainActor
 private struct PlayerPresentation: View {
     let make: (PlayRequest) -> PlayerViewModel
+    /// Re-selects the next-best source after the current target fails to start,
+    /// excluding every account already attempted; `nil` means no untried source
+    /// remains, so the player's own error state stays on screen (r8-play-failover).
+    let makeFailover: (_ failedItem: MediaItem, _ tried: Set<String>) -> MediaItem?
     let showDiagnostics: Bool
     let themePalette: ThemePalette
 
     /// The currently-active play request; changes when auto-advancing episodes.
     @State private var activeRequest: PlayRequest
     @State private var viewModel: PlayerViewModel?
+    /// Source account IDs already attempted for the active title, so failover never
+    /// re-tries a server that already failed and can detect true exhaustion. Reset
+    /// whenever the title changes (episode auto-advance).
+    @State private var triedAccountIDs: Set<String> = []
 
     init(
         request: PlayRequest,
         make: @escaping (PlayRequest) -> PlayerViewModel,
+        makeFailover: @escaping (_ failedItem: MediaItem, _ tried: Set<String>) -> MediaItem?,
         showDiagnostics: Bool,
         themePalette: ThemePalette
     ) {
         self.make = make
+        self.makeFailover = makeFailover
         self.showDiagnostics = showDiagnostics
         self.themePalette = themePalette
         self._activeRequest = State(initialValue: request)
@@ -892,6 +974,33 @@ private struct PlayerPresentation: View {
                 // block so SwiftUI batches the render: the .id change forces a
                 // fresh PlayerView that picks up the new VM via @State init.
                 let newRequest = PlayRequest(item: next, startPosition: 0)
+                // A new title starts its own failover attempt history.
+                triedAccountIDs = []
+                viewModel = make(newRequest)
+                activeRequest = newRequest
+            }
+        }
+        .onChange(of: viewModel?.phase) { _, phase in
+            // Playback failed to start on the routed server. Silently retarget to
+            // the next-best untried source (a dead/unreachable copy falls through to
+            // another server's copy) and re-present at the same resume point. When
+            // no untried source remains, the player's `.failed` error stays visible.
+            guard case .failed = phase else { return }
+            let failedAccountID = activeRequest.item.selectedSourceAccountID
+                ?? activeRequest.item.sourceAccountID
+            var attempted = triedAccountIDs
+            if let failedAccountID { attempted.insert(failedAccountID) }
+            guard let nextItem = makeFailover(activeRequest.item, attempted) else {
+                triedAccountIDs = attempted
+                return
+            }
+            Task { @MainActor in
+                await viewModel?.stop()
+                let newRequest = PlayRequest(
+                    item: nextItem,
+                    startPosition: activeRequest.startPosition
+                )
+                triedAccountIDs = attempted
                 viewModel = make(newRequest)
                 activeRequest = newRequest
             }
@@ -921,6 +1030,10 @@ private struct HomeTab: View {
     let watchBridge: WatchOutboxBridge
     let identitySources: @Sendable (MediaItem) -> [MediaSourceRef]
     @Binding var pendingPlayItemID: String?
+    /// Snapshot of the durable outbox's not-yet-confirmed plays, folded into the
+    /// Continue Watching row so a reload reflects in-app plays the servers haven't
+    /// recorded yet (r8-cw-outbox-patch).
+    let pendingWatchMutations: @Sendable () async -> [WatchMutation]
     /// Persist an in-player subtitle-appearance edit to the profile store.
     let onSubtitleStyleChanged: (SubtitleStyle) -> Void
 
@@ -935,7 +1048,8 @@ private struct HomeTab: View {
                     accounts: accounts,
                     layoutStore: homeLayoutStore,
                     identitySources: identitySources,
-                    currentVisibility: { homeVisibility.visibility }
+                    currentVisibility: { homeVisibility.visibility },
+                    pendingWatchMutations: pendingWatchMutations
                 ),
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
@@ -1166,6 +1280,14 @@ private extension View {
                         watchBridge: watchBridge,
                         identitySources: identitySources,
                         onSubtitleStyleChanged: onSubtitleStyleChanged
+                    )
+                },
+                makeFailover: { failedItem, tried in
+                    failoverPlayItem(
+                        failedItem,
+                        accounts: accounts,
+                        identitySources: identitySources,
+                        tried: tried
                     )
                 },
                 showDiagnostics: showDiagnostics,

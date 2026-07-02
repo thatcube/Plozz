@@ -269,17 +269,33 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     /// Derives a stable cross-server canonical id from a provider id map, preferring
     /// the most authoritative namespace. After Trakt (the watch-sync authority, which
     /// is not a merge namespace) this mirrors ``MediaItemIdentity/strongExternalNamespaces``
-    /// **exactly** — same order, same alias resolution, same canonical tokens — and
-    /// falls back to the same ``MediaItemIdentity/normalizedTitle(_:)`` (+year) the
-    /// merger uses, so the outbox's notion of "same title across servers" matches the
-    /// identity index. If they diverged, a mutation could fail to coalesce or fan out
-    /// across servers the merger treats as one title (r6-canonical-weak). A final
-    /// per-item fallback keeps a title with no external ids enqueuing safely (it just
-    /// won't coalesce across servers — which it couldn't have merged across anyway).
+    /// **exactly** — same order, same alias resolution, same canonical tokens — so the
+    /// outbox's notion of "same title across servers" matches the identity index. If
+    /// they diverged, a mutation could fail to coalesce or fan out across servers the
+    /// merger treats as one title (r6-canonical-weak).
+    ///
+    /// The **title fallback is kind-scoped** so it never coalesces two titles the
+    /// merger would not have united (r8-canonicalid):
+    ///  - `.movie` falls back to `title:slug:year` **only when a year is present**,
+    ///    mirroring ``MediaItemIdentity/titleIdentity(for:)`` exactly (movies-only,
+    ///    year-required). A year-less movie has no title identity in the merger, so a
+    ///    bare `title:slug` here would collapse two *different* same-named movies that
+    ///    were never merged, cross-applying watched state.
+    ///  - `.episode` falls back to a `title:slug(:year)` keyed on the **series (parent)
+    ///    title** the caller supplies. This is a deliberate outbox-coalescing behavior
+    ///    (NOT a merge-identity mirror): the season/episode numbers on ``coalesceKey``
+    ///    disambiguate within the series and the parent title disambiguates across
+    ///    series, so the *same* episode reached through two servers with no external
+    ///    ids still collapses into one write.
+    ///  - Everything else (whole `.series`, `.season`, unknown/`nil` kind) gets **no**
+    ///    title fallback — the merger has no title identity for these, so we must not
+    ///    invent one. They use the per-item fallback (never coalesces across servers,
+    ///    which is correct because they could not have merged across them either).
     public static func canonicalMediaID(
         providerIDs: [String: String],
         title: String? = nil,
         year: Int? = nil,
+        kind: MediaItemKind? = nil,
         fallback: String
     ) -> String {
         // Trakt is the watch-sync authority and is NOT one of the merge identity's
@@ -298,13 +314,20 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
                 return "\(entry.canonical):\(value.lowercased())"
             }
         }
-        // Title fallback uses the SAME normalization as the merge identity
-        // (accent-fold + punctuation-strip + whitespace-collapse) so "Spider-Man"
-        // and "spider man" canonicalise identically here too.
+        // Kind-scoped title fallback (see doc above). Uses the SAME normalization as
+        // the merge identity (accent-fold + punctuation-strip + whitespace-collapse)
+        // so "Spider-Man" and "spider man" canonicalise identically.
         if let title {
             let slug = MediaItemIdentity.normalizedTitle(title)
             if !slug.isEmpty {
-                return year.map { "title:\(slug):\($0)" } ?? "title:\(slug)"
+                switch kind {
+                case .movie:
+                    if let year { return "title:\(slug):\(year)" }
+                case .episode:
+                    return year.map { "title:\(slug):\($0)" } ?? "title:\(slug)"
+                default:
+                    break
+                }
             }
         }
         return "local:\(fallback)"

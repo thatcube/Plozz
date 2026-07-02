@@ -254,9 +254,15 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         var grouped: [String: [MediaItem]] = [:]
         for result in results {
             guard let page = result.page else {
-                // A failed/offline source is dropped from this batch but the
-                // others still merge, so one slow server never blocks the grid.
-                await cache.markExhausted(result.accountID)
+                // No page this round: the source was either already exhausted
+                // (short-circuited above without a fetch) or hit a transient
+                // error / offline blip on this page. Either way, contribute nothing
+                // THIS batch but do NOT mark it exhausted — exhaustion is a one-way
+                // latch, so silencing a healthy server on a single failed page would
+                // drop it from the entire browse session (r8-agg-transient-exhaust).
+                // A later batch simply retries it from the same offset. Genuine
+                // end-of-list is detected below, only on a SUCCESSFUL page (empty
+                // page, or offset past the provider-reported total).
                 continue
             }
 

@@ -78,4 +78,65 @@ final class WatchMutationCoalesceScopeTests: XCTestCase {
             "The same episode on two servers must share a coalesce key so the writes coalesce"
         )
     }
+
+    // MARK: - Title-fallback must mirror the merge identity (r8-canonicalid)
+
+    func testTwoDifferentSeriesSharingTitleWithoutIDsDoNotCoalesce() {
+        // The merger only falls back to a title identity for MOVIES (with a year) —
+        // never for whole series. So two unrelated shows that happen to share a name
+        // and carry no external ids must NOT coalesce their series-level watch writes;
+        // a bare `title:slug` key here would cross-apply "mark whole series watched"
+        // from one server's "Sherlock" to a totally different "Sherlock" on another.
+        let bbcSherlock = MediaItem(id: "srv-a-100", title: "Sherlock", kind: .series,
+                                    productionYear: 2010, sourceAccountID: "acct-a")
+        let oldSherlock = MediaItem(id: "srv-b-200", title: "Sherlock", kind: .series,
+                                    productionYear: 1954, sourceAccountID: "acct-b")
+
+        let a = key(bbcSherlock)
+        let b = key(oldSherlock)
+        XCTAssertNotNil(a)
+        XCTAssertNotNil(b)
+        XCTAssertNotEqual(
+            a, b,
+            "Two different id-less series sharing a title must not share a coalesce key"
+        )
+    }
+
+    func testTwoDifferentYearlessMoviesSharingTitleWithoutIDsDoNotCoalesce() {
+        // MediaItemIdentity.titleIdentity requires a year, so a year-less id-less movie
+        // has NO title identity in the merger. Two different such movies sharing a name
+        // must not coalesce (they were never merged), so the canonical id must drop to
+        // the per-item fallback rather than a shared `title:slug`.
+        let clipA = MediaItem(id: "srv-a-clip", title: "Home Video", kind: .movie,
+                              sourceAccountID: "acct-a")
+        let clipB = MediaItem(id: "srv-b-clip", title: "Home Video", kind: .movie,
+                              sourceAccountID: "acct-b")
+
+        let a = key(clipA)
+        let b = key(clipB)
+        XCTAssertNotNil(a)
+        XCTAssertNotNil(b)
+        XCTAssertNotEqual(
+            a, b,
+            "Two different year-less id-less movies sharing a title must not coalesce"
+        )
+    }
+
+    func testSameMovieWithYearAcrossTwoServersWithoutIDsStillCoalesces() {
+        // The merger DOES merge movies by (normalized title + year), so the outbox must
+        // coalesce the genuinely-same movie reached through two servers with no external
+        // ids — this is the positive case the kind-scoping must preserve.
+        let onServerA = MediaItem(id: "srv-a-film", title: "The Matrix", kind: .movie,
+                                  productionYear: 1999, sourceAccountID: "acct-a")
+        let onServerB = MediaItem(id: "srv-b-film", title: "The Matrix", kind: .movie,
+                                  productionYear: 1999, sourceAccountID: "acct-b")
+
+        let a = key(onServerA)
+        let b = key(onServerB)
+        XCTAssertNotNil(a)
+        XCTAssertEqual(
+            a, b,
+            "The same year-stamped movie on two servers must share a coalesce key"
+        )
+    }
 }

@@ -145,6 +145,12 @@ struct PlayerControls: View {
     /// size and clipped, so they never fade or spill during the height morph.
     @State private var styleBodyHeight: CGFloat = 0
 
+    /// Which panel `styleBodyHeight` was last measured for. Lets the height reader
+    /// tell a *fresh open* (snap to natural size) apart from a *content morph within
+    /// the same panel* (animate the box). Reset when the panel closes so the next
+    /// open always snaps.
+    @State private var measuredPanel: Category? = nil
+
     /// Hold-to-accelerate state for the numeric style rows. `.onMoveCommand`
     /// repeats while a direction is held on the remote, so we ramp the step size
     /// as a same-direction streak builds on one focused row (fine taps stay 1×;
@@ -199,6 +205,7 @@ struct PlayerControls: View {
                 // value. (We deliberately DON'T reset on the tracks↔Style flip so
                 // that Edit/Back morphs the box height between them.)
                 styleBodyHeight = 0
+                measuredPanel = nil
                 // Return focus to whatever transport control opened it (skip while
                 // the whole bar is hiding — focus is intentionally cleared then).
                 // Then let the title fade back in after a short beat.
@@ -594,23 +601,32 @@ struct PlayerControls: View {
         VStack(alignment: .leading, spacing: 0) {
             panelHeader(for: category)
             Divider().background(.white.opacity(0.15))
-            morphingBody(styleFamily: styleFamily) { panelBodyContent(for: category) }
+            morphingBody(styleFamily: styleFamily, category: category) { panelBodyContent(for: category) }
         }
         .frame(width: 520, alignment: .leading)
         .colorScheme(.dark)
         .modifier(PanelGlassBackground())
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        // Drive the height change explicitly (see note above). The very first
-        // measurement snaps in (no grow-from-zero); every later change morphs.
-        .onPreferenceChange(PanelBodyHeightKey.self) { newHeight in
-            // Ignore measurements while no panel is open: a closing panel keeps
-            // reporting its (tall) height through its exit transition, which would
-            // otherwise clobber the reset-to-0 and leave the NEXT panel opening from
-            // a stale height (spawning tall, then animating down to its real size).
-            guard openPanel != nil, newHeight > 0, newHeight != styleBodyHeight else { return }
-            if styleBodyHeight == 0 {
+        // Drive the height change explicitly (see note above). The first
+        // measurement for a given panel snaps in (no grow-from-zero / no
+        // shrink-from-stale); later changes *within the same panel* (the
+        // tracks↔Style morph) animate.
+        .onPreferenceChange(PanelBodyHeightKey.self) { heights in
+            // Only ever read the currently-open panel's own height. A closing panel
+            // keeps reporting its (tall) height through its 0.2s exit transition; by
+            // keying on category we ignore it entirely instead of letting it size the
+            // panel that's replacing it.
+            guard let panel = openPanel,
+                  let newHeight = heights[panel],
+                  newHeight > 0,
+                  newHeight != styleBodyHeight
+            else { return }
+            if measuredPanel != panel {
+                // First measurement for THIS panel → snap to its natural size.
+                measuredPanel = panel
                 styleBodyHeight = newHeight
             } else {
+                // Same panel, content morphed (tracks↔Style) → animate the box.
                 withAnimation(.easeInOut(duration: 0.28)) { styleBodyHeight = newHeight }
             }
         }
@@ -622,6 +638,7 @@ struct PlayerControls: View {
     @ViewBuilder
     private func morphingBody<Content: View>(
         styleFamily: Bool,
+        category: Category,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let body = VStack(alignment: .leading, spacing: 0) {
@@ -634,7 +651,10 @@ struct PlayerControls: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             GeometryReader { proxy in
-                Color.clear.preference(key: PanelBodyHeightKey.self, value: proxy.size.height)
+                Color.clear.preference(
+                    key: PanelBodyHeightKey.self,
+                    value: [category: proxy.size.height]
+                )
             }
         )
 
@@ -1990,15 +2010,25 @@ private struct TransportHeightKey: PreferenceKey {
     }
 }
 
-/// Reports the Style panel's natural (unclipped) content height so the glass box
-/// can animate ONLY its clip window to that height. The rows are laid out at full
-/// size and clipped to the animating frame, so they never cross-fade or spill past
-/// the rounded border when a sub-screen adds/removes rows — "animate the container,
-/// not what's inside".
+/// Reports each panel's natural (unclipped) content height, **keyed by category**,
+/// so the glass box can animate ONLY its clip window to that height. The rows are
+/// laid out at full size and clipped to the animating frame, so they never
+/// cross-fade or spill past the rounded border when a sub-screen adds/removes rows
+/// — "animate the container, not what's inside".
+///
+/// The height is tagged with its owning `Category` because panels overlap during
+/// the 0.2s open/close transition: a *closing* panel stays mounted and keeps
+/// reporting its (tall) height while the *next* panel is already opening. Keying by
+/// category lets the reader pick out only the currently-open panel's height, so a
+/// closing panel can never size the panel that's replacing it (which caused short
+/// menus like Audio to spawn tall and then animate down).
 private struct PanelBodyHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+    static let defaultValue: [PlayerControls.Category: CGFloat] = [:]
+    static func reduce(
+        value: inout [PlayerControls.Category: CGFloat],
+        nextValue: () -> [PlayerControls.Category: CGFloat]
+    ) {
+        value.merge(nextValue()) { max($0, $1) }
     }
 }
 

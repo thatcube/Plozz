@@ -207,6 +207,27 @@ public enum PlozzTheme {
         /// Scale applied to a focused browsing tile (matches Twozz Browse).
         public static let focusedCardScale: CGFloat = 1.08
 
+        // MARK: Borderless ("Posters") card style
+
+        /// Width of the focus **outline** drawn tight around a borderless card's
+        /// artwork on focus (the "Posters" card style has no glass surface, so the
+        /// focus visual is this ring rather than a lifted glass card). Base
+        /// standard-density value; density-scaled in `PlozzMetrics`.
+        public static let borderlessFocusOutlineWidth: CGFloat = 5
+        /// Extra vertical gap pushed between a borderless card's artwork and its
+        /// caption while focused, so the growing (scaled) poster doesn't crowd its
+        /// title. Base value; density-scaled in `PlozzMetrics` so it tracks the
+        /// display-size preference like every other card metric.
+        public static let borderlessCaptionFocusPush: CGFloat = 16
+        /// Horizontal breathing room reserved on each side of a borderless card
+        /// *inside* its layout slot. It restores the separation the glass frame's
+        /// `cardInset` used to provide (borderless artwork would otherwise butt
+        /// right up to the inter-card gap) and gives the focus outline + lift room
+        /// to bloom without touching the neighbouring card. Kept smaller than
+        /// `cardInset` so a borderless poster still reads larger than the framed
+        /// card's inset artwork. Base value; density-scaled in `PlozzMetrics`.
+        public static let borderlessCardSideMargin: CGFloat = 10
+
         // MARK: Detail
 
         /// Leading inset for the detail hero's title/metadata block, shared by the

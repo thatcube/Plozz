@@ -45,6 +45,16 @@ public struct PlozzMetrics: Equatable, Sendable {
     /// Clearance between a circular avatar and its focus glass halo (scaled).
     public let circleFocusPadding: CGFloat
 
+    // MARK: Borderless ("Posters") card style (scaled)
+
+    /// Width of the focus outline hugging a borderless card's artwork (scaled).
+    public let borderlessFocusOutlineWidth: CGFloat
+    /// Extra artwork↔caption gap added while a borderless card is focused (scaled).
+    public let borderlessCaptionFocusPush: CGFloat
+    /// Horizontal breathing room reserved on each side of a borderless card inside
+    /// its slot, so cards separate and the focus outline has room (scaled).
+    public let borderlessCardSideMargin: CGFloat
+
     // MARK: Media spacing (scaled)
 
     /// Gap between adjacent media cards in a rail and gutter in a poster grid —
@@ -184,6 +194,10 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.artistTileDiameter = step(PlozzTheme.Metrics.artistTileDiameter)
         self.castTileDiameter = step(PlozzTheme.Metrics.castTileDiameter)
         self.circleFocusPadding = step(PlozzTheme.Metrics.circleFocusPadding)
+
+        self.borderlessFocusOutlineWidth = step(PlozzTheme.Metrics.borderlessFocusOutlineWidth)
+        self.borderlessCaptionFocusPush = step(PlozzTheme.Metrics.borderlessCaptionFocusPush)
+        self.borderlessCardSideMargin = step(PlozzTheme.Metrics.borderlessCardSideMargin)
 
         self.cardSpacing = step(PlozzTheme.Metrics.cardSpacing)
         self.gridSpacing = step(PlozzTheme.Metrics.gridSpacing)

@@ -159,34 +159,32 @@ public struct PosterCardView: View {
     // MARK: Borderless (no card background)
 
     /// The "Posters" card style: no glass surface at all — just the artwork and
-    /// its sub-text. The image fills the whole card slot (so it reads larger than
-    /// the framed card's inset artwork), is rounded at the framed card's *outer*
-    /// radius, and carries no padding around the image or the caption (so the text
-    /// gets the full width). At rest there is no surface; on focus the same liquid
-    /// -glass halo the artist/cast circular tiles use blooms behind the artwork,
-    /// with a gentle lift + drop shadow. Shared by poster and landscape shapes —
-    /// only the aspect ratio and corner radius differ.
+    /// its sub-text. The image fills the card slot (minus a small side margin that
+    /// keeps cards separated), is rounded at the framed card's *outer* radius, and
+    /// gains a crisp focus **outline** that hugs the artwork and scales with it on
+    /// focus (plus a soft lift). The caption keeps the same horizontal clearance
+    /// the framed caption uses, so text lines up with the artwork's rounded edge,
+    /// and is pushed down while focused so the growing poster never crowds it.
+    /// Shared by poster and landscape shapes — only aspect ratio, corner radius
+    /// and focus scale differ.
     private var borderlessCard: some View {
-        // Caption sits clear of the focus halo (which extends `circleFocusPadding`
-        // past the artwork) plus the shared base gap, so the glass never reaches
-        // the text.
-        VStack(alignment: .leading, spacing: metrics.circleFocusPadding + PlozzTheme.Metrics.cardCaptionSpacing) {
+        VStack(alignment: .leading, spacing: borderlessCaptionSpacing) {
             borderlessArtwork
-            borderlessCaption
+            BorderlessCardCaption(
+                title: primaryText,
+                subtitle: subtitleText,
+                horizontalInset: borderlessCaptionInset
+            )
         }
+        .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: borderlessCornerRadius, action: action)
         .plozzCardRasterize(reduceTransparency: reduceTransparency)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 
-    /// The artwork block for a borderless card: a full-bleed image rounded at the
-    /// outer radius, with the focus glass halo behind it. The halo is a fixed
-    /// background sized to the artwork's (unscaled) layout frame extended by
-    /// `circleFocusPadding`, so — exactly like `CircularFocusHalo` — the artwork
-    /// scales *within* the halo on focus and the halo itself never grows into the
-    /// inter-card gap (the resting slot width, and thus the margin between cards,
-    /// is unchanged).
+    /// The full-bleed artwork for a borderless card, clipped to the outer radius
+    /// with the shared focus outline + lift applied.
     private var borderlessArtwork: some View {
         Color.clear
             .aspectRatio(borderlessAspectRatio, contentMode: .fit)
@@ -196,33 +194,34 @@ public struct PosterCardView: View {
             .overlay(alignment: .bottom) { progressBar(height: 12) }
             .clipShape(RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous))
             .plozzMediaEdge(cornerRadius: borderlessCornerRadius)
-            .scaleEffect(isFocused ? borderlessFocusScale : 1)
-            .background {
-                Color.clear
-                    .plozzGlassCard(cornerRadius: borderlessCornerRadius + metrics.circleFocusPadding, isFocused: true)
-                    .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
-                    .padding(-metrics.circleFocusPadding)
-                    .opacity(isFocused ? 1 : 0)
-            }
+            .plozzBorderlessArtworkFocus(
+                cornerRadius: borderlessCornerRadius,
+                focusScale: borderlessFocusScale,
+                isFocused: isFocused
+            )
     }
 
-    /// Caption for a borderless card: full-width, no inset, and — because it sits
-    /// on the page rather than on a glass surface — it never flips to dark ink on
-    /// focus (unlike the framed caption). Same title/subtitle content as the
-    /// framed card.
-    private var borderlessCaption: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(primaryText)
-                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-            Text(subtitleText ?? " ")
-                .font(.system(size: metrics.cardSubtitleFontSize))
-                .foregroundStyle(Color.secondary)
-                .lineLimit(1)
-                .opacity(subtitleText == nil ? 0 : 1)
+    /// Artwork↔caption gap for a borderless card. Uses the same base gap the
+    /// framed card of this shape uses, then pushes the caption further down while
+    /// focused so the scaled-up poster clears its title. The push is density-scaled
+    /// like every other card metric.
+    private var borderlessCaptionSpacing: CGFloat {
+        let base: CGFloat
+        switch style {
+        case .poster: base = metrics.posterCaptionTopSpacing
+        case .landscape: base = metrics.landscapeCaptionTopSpacing
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        return base + (isFocused ? metrics.borderlessCaptionFocusPush : 0)
+    }
+
+    /// Horizontal caption clearance for a borderless card — the same optical inset
+    /// the framed caption uses for this shape, so text lines up with the rounded
+    /// artwork edge instead of butting against it.
+    private var borderlessCaptionInset: CGFloat {
+        switch style {
+        case .poster: return metrics.posterCaptionInset
+        case .landscape: return metrics.landscapeCaptionInset
+        }
     }
 
     /// Outer corner radius reused for a borderless image — the framed card's outer
@@ -244,7 +243,7 @@ public struct PosterCardView: View {
     }
 
     /// Focus lift for a borderless image — the same scale the framed card of this
-    /// shape uses, applied to the artwork within its focus halo.
+    /// shape uses, applied to the artwork within its focus outline.
     private var borderlessFocusScale: CGFloat {
         switch style {
         case .poster: return PlozzTheme.Metrics.focusedCardScale

@@ -79,6 +79,8 @@ struct MusicLandingView: View {
                             AlbumCard(album: album) { onSelectRoute(.album(album)) }
                         case let .track(track):
                             RecentTrackCard(track: track) { onPlayTrack(track) }
+                        case let .playlist(playlist):
+                            PlaylistCard(playlist: playlist) { onSelectRoute(.playlist(playlist)) }
                         }
                     }
                 }

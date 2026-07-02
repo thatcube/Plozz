@@ -193,7 +193,30 @@ extension PlexProvider: MusicProvider {
         )
     }
 
-    // MARK: Detail
+    public func recentlyPlayedPlaylists(limit: Int) async throws -> [MusicPlaylist] {
+        try await recentlyPlayedPlaylists(limit: limit, sectionFilter: nil)
+    }
+
+    public func recentlyPlayedPlaylists(limit: Int, libraryIDs: [String]?) async throws -> [MusicPlaylist] {
+        try await recentlyPlayedPlaylists(limit: limit, sectionFilter: libraryIDs)
+    }
+
+    private func recentlyPlayedPlaylists(limit: Int, sectionFilter: [String]?) async throws -> [MusicPlaylist] {
+        guard limit > 0 else { return [] }
+
+        // Playlists are account-global in Plex (not under a music section), so the
+        // library scope doesn't apply. Plex stamps a playlist's `lastViewedAt` /
+        // `viewCount` when it's played, so keep only played playlists and sort by
+        // real recency — the same rule the album/track rails use.
+        let playlists = (try? await client.audioPlaylists()) ?? []
+        return Array(
+            playlists
+                .filter { ($0.viewCount ?? 0) >= 1 && ($0.lastViewedAt ?? 0) > 0 }
+                .map(mapPlaylist(_:))
+                .sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) }
+                .prefix(limit)
+        )
+    }
 
     public func album(id: String) async throws -> MusicAlbum {
         mapAlbum(try await client.metadata(ratingKey: id))
@@ -421,7 +444,8 @@ extension PlexProvider: MusicProvider {
             title: dto.title ?? "Playlist",
             artworkURL: artwork(dto.composite ?? dto.thumb),
             trackCount: dto.leafCount,
-            totalDuration: PlexTime.seconds(fromMilliseconds: dto.duration)
+            totalDuration: PlexTime.seconds(fromMilliseconds: dto.duration),
+            lastPlayedAt: dto.lastViewedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
     }
 }

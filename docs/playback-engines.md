@@ -77,6 +77,16 @@ Native handles content the server has already prepared:
 | DTS bitstream | ❌ (bridged to FLAC) | ❌ (decoded to PCM) | ❌ |
 | TrueHD bitstream | ❌ (bridged to FLAC) | ❌ (decoded to PCM) | ❌ |
 
+## AirPlay 2 / HomePod Audio Recovery
+
+The Plozzigen and Native engines both output audio through `AVPlayer` +
+`AVAudioSession`, so they are subject to the **AirPlay 2 / HomePod silent-drop**
+that was root-caused and fixed for music. The cure (a full audio-session
+deactivate→reactivate cycle — `setActive(true)` alone is a no-op), plus what
+did/didn't work and how to port it to video seek/route-change handling, is
+documented in **[airplay-audio-recovery.md](./airplay-audio-recovery.md)**. mpv
+uses its own audio output (`MPVSafeAudio`) and is a separate path.
+
 ## Source Code References
 
 - Eligibility gate: `Sources/CoreModels/LocalRemuxModels.swift` → `plozzigenEligibility`

@@ -200,13 +200,15 @@ public struct MusicTrack: Codable, Hashable, Identifiable, Sendable {
 public enum RecentlyPlayedItem: Codable, Hashable, Identifiable, Sendable {
     case album(MusicAlbum)
     case track(MusicTrack)
+    case playlist(MusicPlaylist)
 
-    /// Stable, type-prefixed identity for `ForEach` (an album and a track can
-    /// never collide even if their backend ids coincide).
+    /// Stable, type-prefixed identity for `ForEach` (an album, a track and a
+    /// playlist can never collide even if their backend ids coincide).
     public var id: String {
         switch self {
         case let .album(album): return "album:\(album.id)"
         case let .track(track): return "track:\(track.id)"
+        case let .playlist(playlist): return "playlist:\(playlist.id)"
         }
     }
 
@@ -215,6 +217,7 @@ public enum RecentlyPlayedItem: Codable, Hashable, Identifiable, Sendable {
         switch self {
         case let .album(album): return album.lastPlayedAt
         case let .track(track): return track.lastPlayedAt
+        case let .playlist(playlist): return playlist.lastPlayedAt
         }
     }
 }
@@ -227,6 +230,10 @@ public struct MusicPlaylist: Codable, Hashable, Identifiable, Sendable {
     public var trackCount: Int?
     public var totalDuration: TimeInterval?
     public var sourceAccountID: String?
+    /// Real last-played timestamp (backend `DatePlayed`/`lastViewedAt`), used to
+    /// place the playlist in the unified "Recently Played" rail. `nil` for
+    /// never-played playlists (which are excluded from that rail).
+    public var lastPlayedAt: Date?
     /// Every backend copy of this playlist after a cross-server de-dup merge.
     public var sources: [MusicSourceRef]
 
@@ -237,6 +244,7 @@ public struct MusicPlaylist: Codable, Hashable, Identifiable, Sendable {
         trackCount: Int? = nil,
         totalDuration: TimeInterval? = nil,
         sourceAccountID: String? = nil,
+        lastPlayedAt: Date? = nil,
         sources: [MusicSourceRef] = []
     ) {
         self.id = id
@@ -245,6 +253,7 @@ public struct MusicPlaylist: Codable, Hashable, Identifiable, Sendable {
         self.trackCount = trackCount
         self.totalDuration = totalDuration
         self.sourceAccountID = sourceAccountID
+        self.lastPlayedAt = lastPlayedAt
         self.sources = sources
     }
 

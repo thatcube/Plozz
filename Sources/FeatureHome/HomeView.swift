@@ -277,8 +277,10 @@ private struct LibraryCardView: View {
 
     /// Themed empty-state for an imageless library: a soft accent→surface gradient
     /// behind a large, low-contrast per-kind glyph. Tracks the active theme so it
-    /// never reads as a dead gray box on any palette. Icon flips to dark ink on
-    /// focus when reduced-transparency is on.
+    /// never reads as a dead gray box on any palette. The glyph colour is
+    /// focus-independent — the gradient behind it doesn't change on focus, so
+    /// flipping the icon's contrast would just make it jump against a static
+    /// backdrop.
     private var placeholder: some View {
         ZStack {
             LinearGradient(
@@ -291,7 +293,7 @@ private struct LibraryCardView: View {
             )
             Image(systemName: librarySymbol)
                 .font(.system(size: 64, weight: .semibold))
-                .foregroundStyle(subtitleColor.opacity(0.5))
+                .foregroundStyle(PlozzCardCaption.subtitleColor(isFocused: false, reduceTransparency: reduceTransparency).opacity(0.5))
         }
     }
 

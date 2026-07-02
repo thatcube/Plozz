@@ -23,7 +23,7 @@
 # FFmpeg configure to drop `--enable-nonfree` → `--disable-nonfree` (FFmpeg uses
 # gnutls for TLS, not OpenSSL, so nonfree is unnecessary). It keeps
 # `--enable-version3` and never passes `--enable-gpl`, yielding a decode-only
-# build whose FFMPEG_LICENSE is "LGPL version 3 or later". See LGPL_COMPLIANCE.md.
+# build whose FFMPEG_LICENSE is "LGPL version 3 or later". See NOTICE.md.
 #
 # Usage:
 #   tools/build-mpv-tvos.sh                 # build tvOS device + simulator (LGPL)
@@ -98,4 +98,4 @@ find dist -name '*.xcframework' -maxdepth 3 ! -name '*-GPL*' -exec cp -Rv {} "$O
 
 echo "==> Done. Artifacts in: $OUT_DIR"
 echo "    Next: zip each .xcframework, run 'swift package compute-checksum',"
-echo "    and reference them from a SwiftPM .binaryTarget (see spikes/README.md §1A)."
+echo "    and reference them from a SwiftPM .binaryTarget."

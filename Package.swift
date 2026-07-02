@@ -128,7 +128,7 @@ let package = Package(
         //
         // The FFmpeg + libmpv xcframeworks are LGPLv3 / decode-only (rebuilt by
         // tools/build-mpv-tvos.sh with `--disable-nonfree`, no `--enable-gpl`;
-        // see LGPL_COMPLIANCE.md) and are referenced from local paths under
+        // see NOTICE.md) and are referenced from local paths under
         // Frameworks/mpv/ (gitignored, staged by tools/stage-mpv-frameworks.sh).
         // The remaining prebuilt dependency xcframeworks are MPVKit's published,
         // checksummed binaries (license-unaffected by the FFmpeg config) pulled by

@@ -29,11 +29,21 @@ public struct SettingsView: View {
     /// instead of popping back.
     @State private var path: [SettingsRoute] = []
     @State private var confirmSignOutAll = false
+    /// Presents the profile editor sheet for the active profile (Edit button in
+    /// the profile header). Mirrors the editor flow in ``ProfileDetailView``.
+    @State private var editingProfile: Profile?
+
+    /// Shared sizing for the two identity headers (This Apple TV + the active
+    /// profile) so their avatar/icon and title read as the same component. The
+    /// circle is sized to sit between the old TV glyph (64) and profile avatar
+    /// (104), roughly the combined height of the title + subtitle lines.
+    private static let identityAvatarSize: CGFloat = 84
+    private static let identityTitleFont: Font = .system(size: 36, weight: .bold)
 
     /// Caps the root "Settings" page content and centers it, so the profile
     /// card and About/Sign Out list don't stretch edge-to-edge on a wide TV.
     /// Tune this single value to make the page wider/narrower.
-    private static let contentMaxWidth: CGFloat = 1200
+    private static let contentMaxWidth: CGFloat = PlozzTheme.Metrics.settingsContentMaxWidth
 
     private let captions: CaptionSettingsModel
     private let spoilers: SpoilerSettingsModel
@@ -236,6 +246,23 @@ public struct SettingsView: View {
         } message: {
             Text("This removes every Plex and Jellyfin sign-in on this Apple TV. You'll need to sign in again.")
         }
+        .sheet(item: $editingProfile) { profile in
+            ProfileEditorView(
+                editingProfile: profile,
+                canDelete: profile.id != profiles.first?.id,
+                photoSourceAccounts: accounts,
+                plexHomeUsersFetcher: plexHomeUsersFetcher,
+                onSave: { draft in
+                    onSaveProfile(draft)
+                    editingProfile = nil
+                },
+                onDelete: {
+                    onDeleteProfile(profile.id)
+                    editingProfile = nil
+                },
+                onCancel: { editingProfile = nil }
+            )
+        }
     }
 
     // MARK: - Profile container (header + all settings this profile owns)
@@ -304,23 +331,28 @@ public struct SettingsView: View {
             // profile's Home. The personal mirror of This Apple TV › Servers.
             // Its second line glances the household's server sign-ins.
             navRow("Your Libraries", icon: "rectangle.stack",
-                   value: myLibrariesSummary,
+                   value: nil,
                    route: .myLibraries) {
                 signedInStrip
             }
             navRow("Appearance", icon: "paintpalette",
-                   value: theme.theme.displayName,
+                   value: nil,
                    route: .appearance)
-            navRow("Night Shift", icon: "moon.stars",
-                   value: nightShift.settings.isEnabled ? "On" : "Off",
-                   route: .nightShift)
+            navRow("Circadian Mode", icon: "moon.stars",
+                   value: nil,
+                   route: .nightShift) {
+                Text("Warms the display at night to help you sleep")
+                    .font(.footnote)
+                    .settingsRowSecondary()
+                    .lineLimit(2)
+            }
             navRow("Playback", icon: "play.rectangle",
-                   value: playback.settings.skipIntros == .off ? nil : "Skip: \(playback.settings.skipIntros.title)",
+                   value: nil,
                    route: .playback)
             navRow("Spoilers", icon: "eye.slash",
-                   value: spoilers.settings.isEnabled ? "On" : "Off",
+                   value: nil,
                    route: .spoilers)
-            navRow("Trackers — Trakt, Simkl, AniList, MyAnimeList", icon: "link",
+            navRow("Trackers — Trakt, Simkl, AniList, MyAnimeList, Last.fm", icon: "link",
                    value: nil,
                    route: .integrations)
         }
@@ -339,15 +371,16 @@ public struct SettingsView: View {
             // Device "identity on top": an Apple-TV glyph + name + scope note,
             // mirroring the profile card's avatar header.
             HStack(spacing: 20) {
-                Image(systemName: "tv")
-                    .font(.system(size: 32, weight: .regular))
+                Image(systemName: "appletv")
+                    .font(.system(size: 40, weight: .regular))
                     .foregroundStyle(.secondary)
-                    .frame(width: 64, height: 64)
+                    .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
                     .background(Circle().fill(Color.primary.opacity(0.06)))
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("This Apple TV")
-                        .font(.system(size: 32, weight: .bold))
+                        .font(Self.identityTitleFont)
                     Text("Servers and profiles, shared by everyone here.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -493,16 +526,13 @@ public struct SettingsView: View {
     /// container card. Visually fused with the rows below (no card divider).
     private var profileHeaderInline: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 24) {
-                ProfileAvatarView(profile: activeProfile, size: 104)
-                    .overlay(
-                        Circle().strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 2)
-                    )
-                    .shadow(color: Color.accentColor.opacity(0.25), radius: 10, y: 4)
+            HStack(spacing: 20) {
+                ProfileAvatarView(profile: activeProfile, size: Self.identityAvatarSize)
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(activeProfile.name)
-                        .font(.system(size: 44, weight: .bold))
+                        .font(Self.identityTitleFont)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                     Text("Settings below are saved on this profile.")
@@ -510,10 +540,15 @@ public struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(action: onSwitchProfile) {
-                    Label("Switch Profile", systemImage: "person.2.circle")
-                        .labelStyle(.titleAndIcon)
-                        .font(.headline)
+                HStack(spacing: 12) {
+                    Button {
+                        editingProfile = activeProfile
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    Button(action: onSwitchProfile) {
+                        Text("Switch Profile")
+                    }
                 }
             }
         }
@@ -615,21 +650,6 @@ public struct SettingsView: View {
         if accounts.isEmpty { return "Add a server" }
         // Row already says "Servers", so show a bare count (no repeated noun).
         return "\(Set(accounts.map { $0.server.id }).count)"
-    }
-
-    /// Per-profile summary for the Your Libraries row: how many of the household's
-    /// servers this profile is actually watching (its active-account subset).
-    private var myLibrariesSummary: String? {
-        if accounts.isEmpty { return nil }
-        let allServers = Set(accounts.map { $0.server.id })
-        let watchedServers = Set(
-            accounts.filter { isAccountIncludedInActiveProfile($0.id) }.map { $0.server.id }
-        )
-        if watchedServers.isEmpty { return "Not watching any" }
-        if profilesEnabled, watchedServers.count != allServers.count {
-            return "\(watchedServers.count) of \(allServers.count)"
-        }
-        return watchedServers.count == 1 ? "1 server" : "\(watchedServers.count) servers"
     }
 
     /// Number of distinct servers the active profile can watch from. Cross-server

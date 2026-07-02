@@ -34,9 +34,8 @@ struct AppearanceDetailView: View {
                     id: "theme",
                     title: "Theme",
                     description: "The overall light or dark appearance of the app.",
-                    valueSummary: theme.theme.displayName
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: AppTheme.allCases,
                         selection: $theme.theme,
                         icon: { $0.symbolName },
@@ -47,9 +46,8 @@ struct AppearanceDetailView: View {
                     id: "display-size",
                     title: "Display Size",
                     description: "Scales card size, columns and spacing across the app.",
-                    valueSummary: density.density.displayName
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: UIDensity.allCases,
                         selection: $density.density,
                         icon: { $0.symbolName },
@@ -60,13 +58,12 @@ struct AppearanceDetailView: View {
                     id: "transparency",
                     title: "Transparency",
                     description: "Liquid glass — translucent panels and cards. Turn off for solid backgrounds.",
-                    valueSummary: transparencyPreference.displayName
                 ) {
-                    SettingsOptionPicker(
+                    DescribedSegmentedPicker(
                         options: TransparencyPreference.allCases,
                         selection: transparencyBinding,
-                        icon: { $0.symbolName },
-                        title: { $0.displayName }
+                        title: { $0.displayName },
+                        detail: { $0.detail }
                     )
                 }
             ]),
@@ -75,9 +72,8 @@ struct AppearanceDetailView: View {
                     id: "music-style",
                     title: "Style",
                     description: "How the now-playing music screen is presented.",
-                    valueSummary: musicPlayer.appearance.displayName
                 ) {
-                    SettingsOptionPicker(
+                    SettingsOptionList(
                         options: MusicPlayerAppearance.allCases,
                         selection: $musicPlayer.appearance,
                         icon: { $0.symbolName },
@@ -88,7 +84,6 @@ struct AppearanceDetailView: View {
                     id: "music-track-details",
                     title: "Track details",
                     description: "Show album name, audio quality & lyrics source on the now-playing screen.",
-                    valueSummary: musicPlayer.showTrackDetails ? "On" : "Off"
                 ) {
                     Toggle("Show track details", isOn: $musicPlayer.showTrackDetails)
                 }
@@ -119,7 +114,6 @@ struct SpoilersDetailView: View {
                 id: "hide-spoilers",
                 title: "Hide spoilers for unwatched episodes",
                 description: "Blur or replace episode thumbnails and keep titles and descriptions hidden until you finish an episode.",
-                valueSummary: spoilers.settings.isEnabled ? "On" : "Off"
             ) {
                 Toggle("Hide spoilers", isOn: $spoilers.settings.isEnabled)
             }
@@ -131,7 +125,6 @@ struct SpoilersDetailView: View {
                     id: "spoiler-mode",
                     title: "Mode",
                     description: modeExplanation,
-                    valueSummary: spoilers.settings.mode.displayName,
                     indented: true
                 ) {
                     SettingsOptionPicker(
@@ -148,7 +141,6 @@ struct SpoilersDetailView: View {
                 id: "hide-ratings",
                 title: "Hide ratings until watched",
                 description: "Keeps IMDb, Rotten Tomatoes and other scores hidden on a movie or episode until you've finished it, so the ratings don't bias you beforehand. They appear once it's marked watched.",
-                valueSummary: spoilers.settings.hideRatingsUntilWatched ? "On" : "Off"
             ) {
                 Toggle("Hide ratings", isOn: $spoilers.settings.hideRatingsUntilWatched)
             }
@@ -306,10 +298,7 @@ struct PlaybackDetailView: View {
             SettingsSplitRow(
                 id: "subtitle-default",
                 title: "Show subtitles",
-                description: "What Plozz does with subtitles when playback starts. You can still change them while watching.",
-                valueSummary: perContentTypeEnabled
-                    ? "Per type"
-                    : captions.settings.subtitleMode.displayName
+                description: "What Plozz does with subtitles when playback starts. You can still change them while watching."
             ) {
                 SubtitleModeControl(
                     baseMode: $captions.settings.subtitleMode,
@@ -323,7 +312,6 @@ struct PlaybackDetailView: View {
                 id: "subtitle-language",
                 title: "Subtitle language",
                 description: "The language Plozz prefers when auto-selecting or downloading subtitles.",
-                valueSummary: subtitleLanguageName(for: subtitleLanguageSelection.wrappedValue)
             ) {
                 Menu {
                     Picker("Subtitle language", selection: subtitleLanguageSelection) {
@@ -340,7 +328,6 @@ struct PlaybackDetailView: View {
                 id: "subtitle-auto-download",
                 title: "Automatically download subtitles",
                 description: "When an item has no suitable subtitle in your preferred language, Plozz asks the Jellyfin server to fetch the best match so every client benefits.",
-                valueSummary: captions.settings.autoDownloadSubtitles ? "On" : "Off"
             ) {
                 Toggle("Auto-download subtitles", isOn: $captions.settings.autoDownloadSubtitles)
             },
@@ -348,7 +335,6 @@ struct PlaybackDetailView: View {
                 id: "subtitle-remember",
                 title: "Remember subtitles per series",
                 description: "When you change the subtitle track while watching a series, reuse that choice for the rest of the series.",
-                valueSummary: playback.settings.rememberSubtitleTrackPerSeries ? "On" : "Off"
             ) {
                 Toggle("Remember per series", isOn: $playback.settings.rememberSubtitleTrackPerSeries)
             },
@@ -356,7 +342,6 @@ struct PlaybackDetailView: View {
                 id: "subtitle-style",
                 title: "Subtitle style",
                 description: "Adjust subtitle font, size and colours. These settings are also available from the player while you watch.",
-                valueSummary: captions.settings.followsSystemStyle ? "System" : "Custom"
             ) {
                 SubtitleStyleEditor(settings: $captions.settings)
             }
@@ -369,7 +354,6 @@ struct PlaybackDetailView: View {
                 id: "audio-preferred",
                 title: "Preferred language",
                 description: "The audio language Plozz selects automatically when a title offers more than one.",
-                valueSummary: Self.audioPreferenceName(playback.settings.audioLanguagePreference)
             ) {
                 audioLanguageMenu($playback.settings.audioLanguagePreference)
             },
@@ -377,7 +361,6 @@ struct PlaybackDetailView: View {
                 id: "audio-per-type",
                 title: "Different audio default per type",
                 description: "Use a separate preferred audio language for each kind of content — for example original audio for anime but your device language elsewhere.",
-                valueSummary: audioPerContentTypeEnabled ? "On" : "Off"
             ) {
                 SettingsRevealSection(
                     isOn: audioPerContentTypeBinding,
@@ -395,7 +378,6 @@ struct PlaybackDetailView: View {
                 id: "audio-remember",
                 title: "Remember audio per series",
                 description: "When you change the audio track while watching a series, reuse that choice for the rest of the series.",
-                valueSummary: playback.settings.rememberAudioTrackPerSeries ? "On" : "Off"
             ) {
                 Toggle("Remember per series", isOn: $playback.settings.rememberAudioTrackPerSeries)
             }
@@ -408,7 +390,6 @@ struct PlaybackDetailView: View {
                 id: "skip-intros-mode",
                 title: "Skip Intros",
                 description: "Uses intro and credit markers from your server. Requires Plex Pass on Plex, or Media Segments / Intro Skipper on Jellyfin.",
-                valueSummary: playback.settings.skipIntros.title
             ) {
                 DescribedSegmentedPicker(
                     options: SkipIntrosMode.allCases,
@@ -421,22 +402,21 @@ struct PlaybackDetailView: View {
     }
 
     private var skipIntervalsSection: SettingsSplitSection {
-        SettingsSplitSection(id: "skip-intervals", header: "Skip Intervals", rows: [
+        SettingsSplitSection(id: "skip-intervals", header: "Remote", rows: [
             SettingsSplitRow(
                 id: "skip-intervals",
                 title: "Skip Intervals",
                 description: "How far the remote's left and right buttons jump during playback.",
-                valueSummary: "\(playback.settings.skipBackwardInterval.title) / \(playback.settings.skipForwardInterval.title)"
             ) {
                 VStack(alignment: .leading, spacing: 28) {
-                    LabeledSettingRow("Skip Backward") {
+                    LabeledSettingRow("Backward") {
                         SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipBackwardInterval,
                             title: { $0.title }
                         )
                     }
-                    LabeledSettingRow("Skip Forward") {
+                    LabeledSettingRow("Forward") {
                         SettingsStepper(
                             options: SkipInterval.allCases,
                             selection: $playback.settings.skipForwardInterval,
@@ -456,7 +436,6 @@ struct PlaybackDetailView: View {
                 description: playback.settings.seekWithoutPausing
                     ? "Swipe to scrub while a title is playing and it resumes the moment you land — faster, but a stray swipe can move your position."
                     : "You must pause before you can scrub — a swipe while playing won't seek or pause. Pause (Play/Pause, or center-press the scrubber), scrub, then press Play to resume. Prevents accidental seeks.",
-                valueSummary: playback.settings.seekWithoutPausing ? "On" : "Off"
             ) {
                 Toggle("Seek without pausing", isOn: $playback.settings.seekWithoutPausing)
             }
@@ -471,7 +450,6 @@ struct PlaybackDetailView: View {
                 description: playback.settings.showUpNextCard
                     ? "During an episode's closing credits, show a card with the next episode so you can jump straight to it. Respects your Spoilers settings, and replaces the Skip Credits button when there's a next episode."
                     : "Don't show the Up Next card. Episode credits behave like everything else — Skip Credits (if enabled) and the usual auto-advance at the very end.",
-                valueSummary: playback.settings.showUpNextCard ? "On" : "Off"
             ) {
                 Toggle("Show Up Next card", isOn: $playback.settings.showUpNextCard)
             }

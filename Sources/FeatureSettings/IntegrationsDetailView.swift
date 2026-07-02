@@ -39,7 +39,6 @@ struct IntegrationsDetailView: View {
                 id: "trakt",
                 title: "Trakt",
                 description: "Scrobble and sync your Jellyfin watch history to Trakt.",
-                valueSummary: statusSummary(traktRowPhase)
             ) {
                 if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
                     DeviceCodeConnectingView(
@@ -63,7 +62,6 @@ struct IntegrationsDetailView: View {
                 id: "simkl",
                 title: "Simkl",
                 description: "Sync your watch history and track what to watch next with Simkl.",
-                valueSummary: statusSummary(simklRowPhase)
             ) {
                 if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
                     DeviceCodeConnectingView(
@@ -87,7 +85,6 @@ struct IntegrationsDetailView: View {
                 id: "anilist",
                 title: "AniList",
                 description: "Track anime and manga progress on your AniList profile.",
-                valueSummary: statusSummary(anilistRowPhase)
             ) {
                 if case .awaitingToken = anilist.phase {
                     AniListTokenEntryView(anilist: anilist)
@@ -104,7 +101,6 @@ struct IntegrationsDetailView: View {
                 id: "mal",
                 title: "MyAnimeList",
                 description: "Track anime and manga progress on your MyAnimeList profile.",
-                valueSummary: statusSummary(malRowPhase)
             ) {
                 if case .awaitingAuthorizationCode = mal.phase {
                     MALAuthorizationCodeEntryView(mal: mal)
@@ -116,15 +112,11 @@ struct IntegrationsDetailView: View {
                         onDisconnect: { Task { await mal.disconnect() } }
                     )
                 }
-            }
-        ])
-
-        let music = SettingsSplitSection(id: "music", header: "Music", rows: [
+            },
             SettingsSplitRow(
                 id: "lastfm",
                 title: "Last.fm",
                 description: "Scrobble the music you play in Plozz to your Last.fm profile.",
-                valueSummary: statusSummary(lastfmRowPhase)
             ) {
                 if case let .connecting(authURL, _) = lastfm.phase {
                     LastFmConnectingView(
@@ -151,14 +143,13 @@ struct IntegrationsDetailView: View {
                         ? "Marking or resuming a title updates every server that has it."
                         : "Only the server you watched on is updated.")
                     : "Add another server to sync watch status across servers.",
-                valueSummary: !canSyncAcrossServers ? "Unavailable" : (playback.settings.syncWatchAcrossServers ? "On" : "Off")
             ) {
                 Toggle("Sync across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
                     .disabled(!canSyncAcrossServers)
             }
         ])
 
-        return [trackers, music, watchStatus]
+        return [trackers, watchStatus]
     }
 
     /// The status + action controls shown in a tracker's detail pane for every
@@ -210,18 +201,6 @@ struct IntegrationsDetailView: View {
                     Label("Retry", systemImage: "arrow.clockwise")
                 }
             }
-        }
-    }
-
-    /// Compact current-status hint shown on a tracker row's trailing edge.
-    private func statusSummary(_ phase: TrackerRowPhase) -> String {
-        switch phase {
-        case .loading: return "…"
-        case .unavailable: return "Not configured"
-        case .disconnected: return "Not connected"
-        case .connecting: return "Connecting…"
-        case let .connected(name): return name
-        case .error: return "Error"
         }
     }
 

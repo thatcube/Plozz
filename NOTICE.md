@@ -19,9 +19,9 @@ passed). Verified result, on every FFmpeg slice:
 #define CONFIG_VERSION3 1
 ```
 
-## The problem (from the P2 de-risk spike)
+## The problem
 
-`spikes/MPV_BUILD_RESULTS.md` found that MPVKit's **default** (non-GPL) build
+MPVKit's **default** (non-GPL) build
 still passes `--enable-nonfree` **unconditionally** in its FFmpeg `configure`
 (`Sources/BuildScripts/XCFrameworkBuild/main.swift`). That makes every FFmpeg
 slice:

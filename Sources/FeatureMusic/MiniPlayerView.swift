@@ -45,6 +45,11 @@ struct NowPlayingCard: View {
     var controller: AudioPlaybackController
     @Environment(\.openNowPlaying) private var openNowPlaying
 
+    /// The card's fixed rendered height: the 64pt artwork plus its 16pt top and
+    /// bottom padding (see `NowPlayingCardContent`). Exposed so sibling controls
+    /// — the Browse category buttons — can match the card's height exactly.
+    static let nominalHeight: CGFloat = 64 + 16 * 2
+
     /// Maximum width for the title/subtitle column. Wider than the old pill so
     /// the average song title + "Artist · Album" line fits without truncation.
     var textWidth: CGFloat = 320
@@ -84,6 +89,7 @@ private struct NowPlayingCardContent: View {
 
     @Environment(\.nowPlayingCardFocused) private var isFocused
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.plozzMetrics) private var metrics
 
     // Idle: liquid glass with normal theme content colors.
     // Focused: solid contrast-flip fill, so content inverts to stay legible.
@@ -91,12 +97,21 @@ private struct NowPlayingCardContent: View {
     //   Dark / OLED focus → white card, black content.
     private var focusForeground: Color { colorScheme == .dark ? .black : .white }
 
+    /// The artwork's corner radius, kept concentric with the card's outer radius:
+    /// the artwork is inset by a uniform 16pt ring (see the paddings below), so
+    /// `inner = outer − ring` puts the two rounded corners on the same centre, the
+    /// same "outer = inner + inset" rule the media cards use.
+    private var artworkCornerRadius: CGFloat {
+        max(metrics.landscapeCardCornerRadius - artworkRingInset, 6)
+    }
+    private let artworkRingInset: CGFloat = 16
+
     var body: some View {
         HStack(spacing: 16) {
             MusicArtworkImage(
                 url: track.artworkURL,
                 systemPlaceholder: "music.note",
-                cornerRadius: 8,
+                cornerRadius: artworkCornerRadius,
                 asyncFallbackURL: MusicArtworkFallback.trackCover(
                     title: track.title,
                     album: track.albumTitle,
@@ -104,7 +119,7 @@ private struct NowPlayingCardContent: View {
                 )
             )
                 .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: artworkCornerRadius, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
@@ -135,9 +150,9 @@ private struct NowPlayingCardContent: View {
                 }
             }
         }
-        .padding(.leading, 18)
+        .padding(.leading, artworkRingInset)
         .padding(.trailing, 28)
-        .padding(.vertical, 16)
+        .padding(.vertical, artworkRingInset)
         .frame(maxWidth: fillWidth ? .infinity : nil, alignment: .leading)
     }
 }
@@ -155,12 +170,14 @@ private struct NowPlayingCardButtonStyle: ButtonStyle {
         let configuration: Configuration
         @Environment(\.isFocused) private var isFocused
         @Environment(\.colorScheme) private var colorScheme
+        @Environment(\.plozzMetrics) private var metrics
 
-        // Match the browsing tiles below: same rounded glass corner radius.
-        private let shape = RoundedRectangle(
-            cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius,
-            style: .continuous
-        )
+        // Match the media cards (e.g. Recently Played): the app's shared
+        // `landscapeCardCornerRadius` (inner media radius + `cardInset`), so the
+        // Now Playing card's outline is geometrically identical to the cards below.
+        private var shape: RoundedRectangle {
+            RoundedRectangle(cornerRadius: metrics.landscapeCardCornerRadius, style: .continuous)
+        }
 
         // Focused fill is the contrast flip: black card on a light theme, white
         // card on a dark/OLED theme. Idle uses liquid glass instead.
@@ -176,7 +193,7 @@ private struct NowPlayingCardButtonStyle: ButtonStyle {
                 .background {
                     Color.clear
                         .plozzGlassCard(
-                            cornerRadius: PlozzTheme.Metrics.mediumCardCornerRadius,
+                            cornerRadius: metrics.landscapeCardCornerRadius,
                             isFocused: false
                         )
                         .overlay { shape.fill(focusFill).opacity(isFocused ? 1 : 0) }

@@ -8,7 +8,7 @@ final class MusicLandingLayoutTests: XCTestCase {
     func testDefaultOrder() {
         XCTAssertEqual(
             MusicLandingLayout.default.visibleSections,
-            [.recentlyPlayed, .browse, .albums, .artists, .playlists]
+            [.browse, .recentlyPlayed, .playlists, .albums, .artists]
         )
     }
 
@@ -32,7 +32,7 @@ final class MusicLandingLayoutTests: XCTestCase {
         ])
         XCTAssertEqual(
             layout.visibleSections,
-            [.albums, .artists, .recentlyPlayed, .browse, .playlists]
+            [.albums, .artists, .browse, .recentlyPlayed, .playlists]
         )
     }
 

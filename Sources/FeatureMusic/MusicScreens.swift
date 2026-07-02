@@ -79,6 +79,8 @@ struct MusicLandingView: View {
                             AlbumCard(album: album) { onSelectRoute(.album(album)) }
                         case let .track(track):
                             RecentTrackCard(track: track) { onPlayTrack(track) }
+                        case let .playlist(playlist):
+                            PlaylistCard(playlist: playlist) { onSelectRoute(.playlist(playlist)) }
                         }
                     }
                 }
@@ -87,7 +89,7 @@ struct MusicLandingView: View {
             entryTiles(trailing: trailing)
         case .albums:
             if !content.albums.isEmpty {
-                MusicRow(title: "Albums", seeAll: { onSelectRoute(.grid(.album)) }, trailing: trailing) {
+                MusicRow(title: "Albums", trailing: trailing) {
                     ForEach(content.albums) { album in
                         AlbumCard(album: album) { onSelectRoute(.album(album)) }
                     }
@@ -95,7 +97,7 @@ struct MusicLandingView: View {
             }
         case .artists:
             if !content.artists.isEmpty {
-                MusicRow(title: "Artists", seeAll: { onSelectRoute(.grid(.artist)) }, trailing: trailing) {
+                MusicRow(title: "Artists", trailing: trailing) {
                     ForEach(content.artists) { artist in
                         ArtistCard(artist: artist) { onSelectRoute(.artist(artist)) }
                     }
@@ -103,7 +105,7 @@ struct MusicLandingView: View {
             }
         case .playlists:
             if !content.playlists.isEmpty {
-                MusicRow(title: "Playlists", seeAll: { onSelectRoute(.grid(.playlist)) }, trailing: trailing) {
+                MusicRow(title: "Playlists", trailing: trailing) {
                     ForEach(content.playlists) { playlist in
                         PlaylistCard(playlist: playlist) { onSelectRoute(.playlist(playlist)) }
                     }
@@ -112,41 +114,30 @@ struct MusicLandingView: View {
         }
     }
 
+    /// The Browse row: text-only category buttons on the leading edge with the
+    /// scrolling Now Playing card pinned to the trailing screen edge. Both insets
+    /// are the standard `screenPadding`, so the card's right margin matches the
+    /// buttons' left margin. No header — the labelled buttons are self-evident.
     private func entryTiles(trailing: AnyView?) -> some View {
-        VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
-            HStack {
-                Text("Browse")
-                    .font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
-                Spacer()
-                if let trailing { trailing }
-            }
-            .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-            ScrollView(.horizontal, showsIndicators: false) {
-                // Lazy so only on-screen tiles build their Liquid Glass surface —
-                // eager rails kept every card's glass effect live, which made
-                // focus navigation recompute every tile's SDF and lag the UI.
-                LazyHStack(spacing: metrics.cardSpacing) {
-                    EntryTile(title: "Artists", icon: "music.mic") { onSelectRoute(.grid(.artist)) }
-                    EntryTile(title: "Albums", icon: "opticaldisc") { onSelectRoute(.grid(.album)) }
-                    EntryTile(title: "Playlists", icon: "music.note.list") { onSelectRoute(.grid(.playlist)) }
-                    EntryTile(title: "Genres", icon: "guitars") { onSelectRoute(.grid(.genre)) }
-                }
-                .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
-                // Keep the rail clipping (no `scrollClipDisabled`) so the focus
-                // engine holds the first/last tile at its inset, and reserve room
-                // *inside* the clip for the focused tile's lift + shadow. The
-                // negative outer padding restores the original inset, so the row's
-                // height is unchanged — only the clip grows.
-                .padding(.vertical, metrics.railShadowClearance)
-            }
-            .padding(.vertical, metrics.railClearanceOffset(for: PlozzTheme.Spacing.small))
+        HStack(alignment: .center, spacing: metrics.cardSpacing) {
+            BrowseButton(title: "Playlists") { onSelectRoute(.grid(.playlist)) }
+            BrowseButton(title: "Albums") { onSelectRoute(.grid(.album)) }
+            BrowseButton(title: "Artists") { onSelectRoute(.grid(.artist)) }
+            BrowseButton(title: "Genres") { onSelectRoute(.grid(.genre)) }
+            Spacer(minLength: metrics.cardSpacing)
+            if let trailing { trailing }
         }
+        .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
     }
 }
 
-private struct EntryTile: View {
+/// A text-only Browse category button. Its height matches the Now Playing card
+/// (`NowPlayingCard.nominalHeight`) so the buttons and the card line up on one
+/// row. Uses the app's shared media-card corner radius (`landscapeCardCornerRadius`,
+/// the same radius the Recently Played cards use) and the shared glass-card focus
+/// — the same treatment as every other media card — rather than a bespoke style.
+private struct BrowseButton: View {
     let title: String
-    let icon: String
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -157,36 +148,25 @@ private struct EntryTile: View {
         PlozzCardCaption.titleColor(isFocused: isFocused, reduceTransparency: reduceTransparency)
     }
 
-    /// Scale the tile size with the density setting so it grows/shrinks alongside
-    /// media cards when appearance is changed.
-    private var tileWidth: CGFloat { (260 * metrics.scale).rounded() }
-    private var tileHeight: CGFloat { (150 * metrics.scale).rounded() }
-    private var iconSize: CGFloat { (40 * metrics.scale).rounded() }
-
     var body: some View {
-        VStack(spacing: (12 * metrics.scale).rounded()) {
-            Image(systemName: icon)
-                .font(.system(size: iconSize))
-                .foregroundStyle(isFocused ? titleColor : Color.accentColor)
-            Text(title)
-                .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
-                .foregroundStyle(titleColor)
-        }
-        .frame(width: tileWidth, height: tileHeight)
-        .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
-        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
-        .plozzCardRasterize(reduceTransparency: reduceTransparency)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
-        .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
-        .zIndex(isFocused ? 2 : 0)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
+        Text(title)
+            .font(.system(size: metrics.cardTitleFontSize, weight: .semibold))
+            .foregroundStyle(titleColor)
+            .padding(.horizontal, PlozzTheme.Spacing.xLarge)
+            .frame(height: NowPlayingCard.nominalHeight)
+            .plozzGlassCard(cornerRadius: metrics.landscapeCardCornerRadius, isFocused: isFocused)
+            .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+            .plozzCardRasterize(reduceTransparency: reduceTransparency)
+            .shadow(color: .black.opacity(isFocused ? 0.36 : 0.15), radius: isFocused ? 20 : 8, y: isFocused ? 10 : 4)
+            .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
+            .zIndex(isFocused ? 2 : 0)
+            .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 }
 
-/// A horizontal rail with a title and an optional "See All".
+/// A horizontal rail with a title.
 private struct MusicRow<Content: View>: View {
     let title: String
-    var seeAll: (() -> Void)?
     /// Optional trailing accessory (used to hang the scrolling Now Playing card
     /// on the first section's header).
     var trailing: AnyView? = nil
@@ -195,15 +175,10 @@ private struct MusicRow<Content: View>: View {
     @Environment(\.plozzMetrics) private var metrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: metrics.sectionTitleSpacing) {
             HStack(spacing: 24) {
                 Text(title).font(.system(size: metrics.sectionHeaderFontSize, weight: .bold))
                 Spacer()
-                if let seeAll {
-                    Button("See All", action: seeAll)
-                        .buttonStyle(.plain)
-                        .font(.headline)
-                }
                 if let trailing { trailing }
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
@@ -224,7 +199,11 @@ private struct MusicRow<Content: View>: View {
                 // the row's height is unchanged — only the clip grows.
                 .padding(.vertical, metrics.railShadowClearance)
             }
-            .padding(.vertical, metrics.railBottomClearanceOffset)
+            // Match the shared rails: a tight `railTopPadding`-based gap above the
+            // cards (not the wide `railVerticalPadding` used below the row), so the
+            // section header hugs the cards instead of floating far above them.
+            .padding(.top, metrics.railTopClearanceOffset)
+            .padding(.bottom, metrics.railBottomClearanceOffset)
         }
     }
 }
@@ -408,6 +387,10 @@ struct AlbumDetailView: View {
     @State var viewModel: AlbumDetailViewModel
     let controller: AudioPlaybackController
 
+    /// Lands initial focus on the Play button rather than the top of the track
+    /// list. Set once tracks load (Play is disabled until then).
+    @FocusState private var playFocused: Bool
+
     var body: some View {
         MusicDetailLayout(
             tracks: viewModel.tracks,
@@ -419,7 +402,15 @@ struct AlbumDetailView: View {
         ) {
             infoColumn
         }
-        .task { await viewModel.load() }
+        .defaultFocus($playFocused, true)
+        .task {
+            await viewModel.load()
+            // Play is disabled until tracks exist, so a declarative default alone
+            // can't land on it at appear. Set focus explicitly once loaded, after
+            // a short runloop hop so the focus engine sees the now-enabled button.
+            try? await Task.sleep(for: .milliseconds(50))
+            if !viewModel.tracks.isEmpty { playFocused = true }
+        }
     }
 
     private let columnWidth: CGFloat = 480
@@ -446,7 +437,8 @@ struct AlbumDetailView: View {
                 isEmpty: viewModel.tracks.isEmpty,
                 onPlay: { play(from: nil) },
                 onShuffle: { shuffle() },
-                fillWidth: true
+                fillWidth: true,
+                playFocus: $playFocused
             )
             .frame(width: columnWidth)
             .padding(.top, 8)
@@ -491,6 +483,10 @@ struct PlaylistDetailView: View {
     @State var viewModel: PlaylistDetailViewModel
     let controller: AudioPlaybackController
 
+    /// Lands initial focus on the Play button rather than the top of the track
+    /// list. Set once tracks load (Play is disabled until then).
+    @FocusState private var playFocused: Bool
+
     var body: some View {
         MusicDetailLayout(
             tracks: viewModel.tracks,
@@ -504,7 +500,15 @@ struct PlaylistDetailView: View {
         ) {
             infoColumn
         }
-        .task { await viewModel.load() }
+        .defaultFocus($playFocused, true)
+        .task {
+            await viewModel.load()
+            // Play is disabled until tracks exist, so a declarative default alone
+            // can't land on it at appear. Set focus explicitly once loaded, after
+            // a short runloop hop so the focus engine sees the now-enabled button.
+            try? await Task.sleep(for: .milliseconds(50))
+            if !viewModel.tracks.isEmpty { playFocused = true }
+        }
     }
 
     private let columnWidth: CGFloat = 480
@@ -519,7 +523,8 @@ struct PlaylistDetailView: View {
                 isEmpty: viewModel.tracks.isEmpty,
                 onPlay: { play(from: nil) },
                 onShuffle: { shuffle() },
-                fillWidth: true
+                fillWidth: true,
+                playFocus: $playFocused
             )
             .frame(width: columnWidth)
             .padding(.top, 8)
@@ -567,17 +572,14 @@ struct PlayShuffleButtons: View {
     /// When true the row spans its container with Play stretching to fill the
     /// leftover width and Shuffle keeping its natural size.
     var fillWidth: Bool = false
+    /// When provided, the Play button binds this focus state so the enclosing
+    /// detail view can land initial focus on Play (via `.defaultFocus` plus an
+    /// explicit set once tracks load) instead of the top of the track list.
+    var playFocus: FocusState<Bool>.Binding? = nil
 
     var body: some View {
         HStack(spacing: 20) {
-            Button(action: onPlay) {
-                Label("Play", systemImage: "play.fill")
-                    .padding(.horizontal, 12)
-                    .frame(maxWidth: fillWidth ? .infinity : nil)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isEmpty)
-
+            playButton
             Button(action: onShuffle) {
                 Label("Shuffle", systemImage: "shuffle").padding(.horizontal, 12)
             }
@@ -585,6 +587,23 @@ struct PlayShuffleButtons: View {
             .disabled(isEmpty)
         }
         .frame(maxWidth: fillWidth ? .infinity : nil, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var playButton: some View {
+        let button = Button(action: onPlay) {
+            Label("Play", systemImage: "play.fill")
+                .padding(.horizontal, 12)
+                .frame(maxWidth: fillWidth ? .infinity : nil)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(isEmpty)
+
+        if let playFocus {
+            button.focused(playFocus, equals: true)
+        } else {
+            button
+        }
     }
 }
 
@@ -834,7 +853,10 @@ struct NowPlayingEqualizer: View {
     private let barCount = 4
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.08, paused: !isAnimating)) { context in
+        // No `minimumInterval` so the timeline updates at the display's native
+        // refresh rate (60fps on Apple TV). A throttled interval here made the
+        // sine-driven bars visibly step/stutter.
+        TimelineView(.animation(paused: !isAnimating)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             HStack(alignment: .bottom, spacing: 3 * scale) {
                 ForEach(0..<barCount, id: \.self) { i in
@@ -849,10 +871,16 @@ struct NowPlayingEqualizer: View {
 
     private func height(bar i: Int, at t: TimeInterval) -> CGFloat {
         guard isAnimating else { return 9 * scale }
-        let speed = 6.0
-        let phase = Double(i) * 0.8
-        let v = (sin(t * speed + phase) + 1) / 2 // 0...1
-        return (5 + CGFloat(v) * 17) * scale // (5...22) * scale
+        // Sum of a few incommensurate sine waves per bar: unlike a single sine
+        // (a repeating wave) it never settles into a visible period, and unlike
+        // value noise it moves continuously with momentum — no start/stop stutter.
+        let p = Double(i) * 1.7            // per-bar phase offset (decorrelates bars)
+        let f = 1.0 + Double(i) * 0.04     // slight per-bar detune so they never sync
+        let s = sin(t * 6.4 * f + p)                       // primary bounce (a touch faster)
+              + 0.4  * sin(t * 3.4 * f + p * 1.3 + 1.1)    // slower swell (tamed)
+              + 0.26 * sin(t * 9.0 * f + p * 0.7 + 2.2)    // faster shimmer (tamed)
+        let v = min(max(s / 3.32 + 0.5, 0), 1) // 0...1
+        return (4 + CGFloat(v) * 18) * scale  // (4...22) * scale
     }
 }
 #endif

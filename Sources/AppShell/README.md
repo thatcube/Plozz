@@ -56,5 +56,5 @@ registry.
 
 - `AppState.swift` — the orchestration entry point.
 - `RootView.swift` + `MainTabView.swift` — the root navigation.
-- `PlaybackEngineComposition.swift` — how libmpv is injected without
-  leaking past this module.
+- `PlaybackEngineComposition.swift` — how the Plozzigen (AetherEngine) engine
+  is injected without leaking past this module.

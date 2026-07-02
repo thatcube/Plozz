@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run Plozz's Swift Package unit tests on a tvOS Simulator.
 #
-# `swift test` cannot be used on macOS because EngineMPV's mpv xcframeworks are
-# tvOS-only. Instead we drive the auto-generated per-module *Tests schemes that
+# `swift test` cannot be used on macOS because AetherEngine's FFmpeg xcframeworks
+# are tvOS-only. Instead we drive the auto-generated per-module *Tests schemes that
 # Xcode publishes when it integrates the local Swift Package, via xcodebuild on
 # a tvOS Simulator destination.
 #

@@ -25,6 +25,8 @@ public struct PosterCardView: View {
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.themePalette) private var palette
     @Environment(\.plozzMetrics) private var metrics
+    /// Per-profile card presentation (framed glass card vs borderless artwork).
+    @Environment(\.plozzCardStyle) private var cardStyle
 
     public init(
         item: MediaItem,
@@ -69,11 +71,16 @@ public struct PosterCardView: View {
 
     @ViewBuilder
     private var cardBody: some View {
-        switch style {
-        case .poster:
-            posterCard
-        case .landscape:
-            landscapeCard
+        switch cardStyle {
+        case .framed:
+            switch style {
+            case .poster:
+                posterCard
+            case .landscape:
+                landscapeCard
+            }
+        case .borderless:
+            borderlessCard
         }
     }
 
@@ -85,8 +92,8 @@ public struct PosterCardView: View {
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .overlay { artwork }
-                .overlay(alignment: .topTrailing) { watchedBadge }
-                .overlay(alignment: .bottom) { progressBar(height: 12) }
+                .overlay(alignment: .topTrailing) { watchedBadge(inset: 8) }
+                .overlay(alignment: .bottom) { progressBar(height: 12, hInset: 16, bottomInset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
 
@@ -120,8 +127,8 @@ public struct PosterCardView: View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: size.width, height: size.height)
-                .overlay(alignment: .topTrailing) { watchedBadge }
-                .overlay(alignment: .bottom) { progressBar(height: 12) }
+                .overlay(alignment: .topTrailing) { watchedBadge(inset: 8) }
+                .overlay(alignment: .bottom) { progressBar(height: 12, hInset: 16, bottomInset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
@@ -147,6 +154,136 @@ public struct PosterCardView: View {
         .scaleEffect(isFocused ? PlozzTheme.Metrics.mediumFocusedCardScale : 1)
         .zIndex(isFocused ? 2 : 0)
         .animation(.easeOut(duration: 0.18), value: isFocused)
+    }
+
+    // MARK: Borderless (no card background)
+
+    /// The "Posters" card style: no glass surface at all — just the artwork and
+    /// its sub-text. The image fills the card slot (minus a small side margin that
+    /// keeps cards separated), is rounded at the framed card's *outer* radius, and
+    /// gains a crisp focus **outline** that hugs the artwork and scales with it on
+    /// focus (plus a soft lift). The caption keeps the same horizontal clearance
+    /// the framed caption uses, so text lines up with the artwork's rounded edge,
+    /// and is pushed down while focused so the growing poster never crowds it.
+    /// Shared by poster and landscape shapes — only aspect ratio, corner radius
+    /// and focus scale differ.
+    private var borderlessCard: some View {
+        VStack(alignment: .leading, spacing: borderlessCaptionSpacing) {
+            borderlessArtwork
+            BorderlessCardCaption(
+                title: primaryText,
+                subtitle: subtitleText,
+                horizontalInset: borderlessCaptionInset
+            )
+            // Push the caption down on focus with a pure transform, never a layout
+            // change: the gap slot is always reserved at its focused size (see
+            // `borderlessCaptionSpacing`) and the caption rides *up* to the resting
+            // gap when unfocused, dropping back down on focus. Because it's an
+            // offset (like `scaleEffect`), the card's footprint is identical in both
+            // states, so focusing one card can't shift the row or the page.
+            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+        }
+        .padding(.horizontal, metrics.borderlessCardSideMargin)
+        .focusableCard(isFocused: $isFocused, cornerRadius: borderlessCornerRadius, action: action)
+        // A borderless card's focus halo + scale bloom extend *beyond* the layout
+        // bounds. `compositingGroup` composites them as one unit without clipping;
+        // `drawingGroup` (what `plozzCardRasterize` uses under Reduce Transparency)
+        // would rasterize to the layout bounds and shear off the halo + bloom.
+        .compositingGroup()
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
+    }
+
+    /// The full-bleed artwork for a borderless card, clipped to the outer radius
+    /// with the shared focus outline + lift applied.
+    private var borderlessArtwork: some View {
+        Color.clear
+            .aspectRatio(borderlessAspectRatio, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay { artwork }
+            .overlay(alignment: .topTrailing) { watchedBadge(inset: borderlessBadgeInset) }
+            .overlay(alignment: .bottom) {
+                progressBar(
+                    height: metrics.progressBarHeight,
+                    hInset: borderlessProgressInset,
+                    bottomInset: borderlessProgressInset
+                )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous))
+            .plozzMediaEdge(cornerRadius: borderlessCornerRadius)
+            .plozzFocusHalo(
+                cornerRadius: borderlessCornerRadius,
+                focusScale: borderlessFocusScale,
+                isFocused: isFocused
+            )
+    }
+
+    /// Artwork↔caption gap for a borderless card. The slot is **always** reserved
+    /// at its focused size (base gap + the density-scaled focus push) so the card's
+    /// footprint never changes with focus; the caption itself rides up to the base
+    /// gap when unfocused via a transform offset (see `borderlessCard`). Reserving
+    /// the larger gap here is what keeps the row/page from shifting when a card is
+    /// focused, and gives the scaled-up poster room to clear its title.
+    private var borderlessCaptionSpacing: CGFloat {
+        let base: CGFloat
+        switch style {
+        case .poster: base = metrics.posterCaptionTopSpacing
+        case .landscape: base = metrics.landscapeCaptionTopSpacing
+        }
+        return base + metrics.focusCaptionPush
+    }
+
+    /// Horizontal caption clearance for a borderless card — the same optical inset
+    /// the framed caption uses for this shape, so text lines up with the rounded
+    /// artwork edge instead of butting against it.
+    private var borderlessCaptionInset: CGFloat {
+        switch style {
+        case .poster: return metrics.posterCaptionInset
+        case .landscape: return metrics.landscapeCaptionInset
+        }
+    }
+
+    /// Outer corner radius reused for a borderless image — the framed card's outer
+    /// (glass) radius, so a borderless poster/landscape keeps the exact rounding
+    /// the framed card's surface had.
+    private var borderlessCornerRadius: CGFloat {
+        switch style {
+        case .poster: return metrics.posterCardCornerRadius
+        case .landscape: return metrics.landscapeCardCornerRadius
+        }
+    }
+
+    /// Even inset that keeps the borderless progress bar concentric with the card's
+    /// rounded corner — the same inner/outer relationship the framed card's glass
+    /// ring uses: an inner shape shares a corner's centre only when its inset equals
+    /// `outerRadius − innerRadius`. The bar is a capsule (corner radius =
+    /// `height / 2`), so this inset makes the gap even along the bottom edge *and*
+    /// around both corners. It scales with density through the corner radius and the
+    /// (scaled) bar height, and is floored so it never crowds the edge.
+    private var borderlessProgressInset: CGFloat {
+        max(borderlessCornerRadius - metrics.progressBarHeight / 2, 12)
+    }
+
+    /// Inset that keeps the watched badge concentric with the borderless card's
+    /// rounded corner. The badge is a 30pt circle (radius 15), so its inset is
+    /// `outerRadius − 15`, matching the progress bar's even spacing.
+    private var borderlessBadgeInset: CGFloat {
+        max(borderlessCornerRadius - 15, 8)
+    }
+
+    /// Aspect ratio for the borderless full-bleed image.
+    private var borderlessAspectRatio: CGFloat {
+        switch style {
+        case .poster: return 2.0 / 3.0
+        case .landscape: return 16.0 / 9.0
+        }
+    }
+
+    /// Focus lift for a borderless image — the shared tile focus scale
+    /// (`mediumFocusedCardScale`), so borderless posters, landscape cards and the
+    /// circular artist/cast tiles all zoom by the same amount on focus.
+    private var borderlessFocusScale: CGFloat {
+        PlozzTheme.Metrics.mediumFocusedCardScale
     }
 
     // MARK: Text
@@ -347,7 +484,7 @@ public struct PosterCardView: View {
     /// played. Hidden under spoiler thumbnail-masking so it never reveals that an
     /// unseen episode exists. Mirrors the watched state the context menu toggles.
     @ViewBuilder
-    private var watchedBadge: some View {
+    private func watchedBadge(inset: CGFloat) -> some View {
         if item.isPlayed && !hideThumbnail {
             Image(systemName: "checkmark")
                 .font(.system(size: 16, weight: .bold))
@@ -359,7 +496,7 @@ public struct PosterCardView: View {
                         .inset(by: -0.5)
                         .stroke(watchedBadgeRim, lineWidth: 1.5)
                 }
-                .padding(8)
+                .padding(inset)
                 .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
         }
     }
@@ -373,8 +510,16 @@ public struct PosterCardView: View {
     }
 
     @ViewBuilder
-    private func progressBar(height: CGFloat) -> some View {
+    private func progressBar(height: CGFloat, hInset: CGFloat, bottomInset: CGFloat) -> some View {
         if let percentage = item.playedPercentage, percentage > 0.01, percentage < 0.99 {
+            // Everything here scales with the (density-driven) bar `height` so the
+            // indicator stays proportionate at every display size instead of feeling
+            // heavy at the smallest one: the scrim's reach, the fill's drop shadow,
+            // and the bar itself all key off it. The factors are chosen so that at
+            // the framed card's fixed 12pt height they resolve to the original
+            // 90pt reach / 3pt shadow, leaving framed cards visually unchanged.
+            let scrimReach = height * 7.5
+            let shadowRadius = height * 0.25
             ZStack(alignment: .bottom) {
                 // Scrim: a slight black gradient that fades up from the bottom edge,
                 // reaching above the bar so the indicator pops off bright artwork.
@@ -383,43 +528,28 @@ public struct PosterCardView: View {
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: height + 90)
+                .frame(height: height + scrimReach)
                 .frame(maxWidth: .infinity)
                 .allowsHitTesting(false)
 
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        // Track: matches the main player's scrubber — Liquid Glass on
-                        // tvOS 26+, with a translucent-white fallback on older systems.
-                        if #available(tvOS 26.0, *) {
-                            Capsule(style: .continuous)
-                                .fill(.clear)
-                                .glassEffect(.regular, in: Capsule(style: .continuous))
-                        } else {
-                            Capsule(style: .continuous)
-                                .fill(.white.opacity(0.22))
-                        }
+                        // Rendered as flat, solid shapes — never Liquid Glass — even on
+                        // tvOS 26+. A translucent scrubber over a borderless card would
+                        // be glass-inside-glass and pull focus from the artwork; a solid
+                        // track + brand-blue fill reads cleaner and still stands out.
+                        Capsule(style: .continuous)
+                            .fill(.white.opacity(0.22))
 
-                        // Fill: Plozz's brand blue rendered as Liquid Glass on
-                        // tvOS 26+ (a tinted glass capsule), with a solid brand-blue
-                        // fallback on older systems.
-                        Group {
-                            if #available(tvOS 26.0, *) {
-                                Capsule(style: .continuous)
-                                    .fill(.clear)
-                                    .glassEffect(.regular.tint(ThemePalette.brandBlue), in: Capsule(style: .continuous))
-                            } else {
-                                Capsule(style: .continuous)
-                                    .fill(ThemePalette.brandBlue)
-                            }
-                        }
-                        .frame(width: max(height, geo.size.width * percentage))
-                        .shadow(color: .black.opacity(0.35), radius: 3)
+                        Capsule(style: .continuous)
+                            .fill(ThemePalette.brandBlue)
+                            .frame(width: max(height, geo.size.width * percentage))
+                            .shadow(color: .black.opacity(0.35), radius: shadowRadius)
                     }
                 }
                 .frame(height: height)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 16)
+                .padding(.horizontal, hInset)
+                .padding(.bottom, bottomInset)
             }
         }
     }

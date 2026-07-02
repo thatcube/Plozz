@@ -9,9 +9,8 @@ On an Apple TV 4K simulator (tvOS 27.0), warm DerivedData:
 
 | Action | Time | Note |
 |---|---|---|
-| `tools/setup-mpv.sh` | 0.27s | idempotent |
 | `tools/generate-project.sh` | ~0.08s | negligible — regenerating is not a cost |
-| `swift test` (macOS host) | fails ~10s | mpv xcframeworks have no macOS slice |
+| `swift test` (macOS host) | fails ~10s | AetherEngine's FFmpeg xcframeworks are tvOS-only |
 | Full `Plozz-Package` suite (cold) | 653s | full-graph compile |
 | Full `Plozz-Package` suite (warm) | 627s | ~11s CPU; rest is sim orchestration |
 | `CoreModelsTests` (483 tests) | 5.5s | exec 0.36s |
@@ -19,7 +18,7 @@ On an Apple TV 4K simulator (tvOS 27.0), warm DerivedData:
 | `FeatureHomeTests` (120) | 606s | exec 1.14s + ~600s sim watchdog; 23 failing |
 | `run-tests.sh CoreNetworkingTests` | 19.5s | no "xcodeproj aside" dance needed |
 
-All 1088 tests *execute* in under 1 second of CPU. Nearly all wall-clock cost is
+All 1068 tests *execute* in under 1 second of CPU. Nearly all wall-clock cost is
 compile + tvOS-simulator orchestration. So: run only the suite(s) you need.
 
 ## SOURCE → TEST map
@@ -33,7 +32,6 @@ test target: `FeatureSettings`, `AppShell`, `TopShelfKit`.
 | CoreNetworking | CoreNetworkingTests | 14 | ⚡ |
 | CoreUI | CoreUITests | 18 | ⚡ |
 | MetadataKit | MetadataKitTests | 45 | ⚡ |
-| EngineMPV | EngineMPVTests | 20 | needs mpv + tvOS sim |
 | FeatureDiscovery | FeatureDiscoveryTests | 19 | ⚡ |
 | ProviderJellyfin | ProviderJellyfinTests | 107 | ⚡ ~5s |
 | ProviderPlex | ProviderPlexTests | 102 | ⚡ (injected probe doubles; no real network) |
@@ -65,11 +63,11 @@ suites (handled automatically by `tools/test-fast.sh`).
 
 ## Notes / gotchas
 
-- **`swift test` does not work on this Mac** — the mpv binary xcframeworks have
-  no macOS slice, so SwiftPM resolution fails. It only runs in the Linux CI
-  container (`swift:6.0`), where the Apple xcframeworks are ignored and the
-  UI modules compile out behind `#if canImport(...)`. Locally, use
-  `tools/run-tests.sh <Suite>` / `tools/test-fast.sh` (simulator).
+- **`swift test` does not work on this Mac** — AetherEngine's FFmpeg binary
+  xcframeworks are tvOS-only (no macOS slice), so SwiftPM resolution fails. It
+  only runs in the Linux CI container (`swift:6.0`), where the Apple xcframeworks
+  are ignored and the UI modules compile out behind `#if canImport(...)`.
+  Locally, use `tools/run-tests.sh <Suite>` / `tools/test-fast.sh` (simulator).
 - **No shadow dance for targeted suites.** `tools/run-tests.sh <Suite>` runs a
   per-module scheme on the simulator with `Plozz.xcodeproj` in place. Moving the
   project aside is only needed for the aggregate `Plozz-Package` scheme.

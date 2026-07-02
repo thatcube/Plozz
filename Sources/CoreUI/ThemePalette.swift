@@ -153,7 +153,7 @@ public extension ThemePalette {
         topGlow: nil,
         focusedCardGlassTint: Color.white.opacity(0.10),
         liftSurface: .white,
-        cardOpaqueSurface: Color(red: 0.10, green: 0.10, blue: 0.12),
+        cardOpaqueSurface: .black,
         cardOpaqueBorder: Color.white.opacity(0.16),
         isLight: false
     )

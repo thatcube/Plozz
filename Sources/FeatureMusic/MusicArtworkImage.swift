@@ -102,6 +102,7 @@ struct MusicCard: View {
     @FocusState private var isFocused: Bool
     @Environment(\.plozzReduceTransparency) private var reduceTransparency
     @Environment(\.plozzMetrics) private var metrics
+    @Environment(\.plozzCardStyle) private var cardStyle
 
     /// The artwork edge length, scaled by the active UI density so music tiles
     /// grow/shrink in step with the movie/show cards.
@@ -136,6 +137,15 @@ struct MusicCard: View {
     }
 
     var body: some View {
+        switch cardStyle {
+        case .framed:
+            framedCard
+        case .borderless:
+            borderlessCard
+        }
+    }
+
+    private var framedCard: some View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: scaledWidth, height: scaledWidth)
@@ -164,6 +174,48 @@ struct MusicCard: View {
         .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 
+    /// Borderless ("Posters") music card: the square artwork with no glass
+    /// surface, rounded at the outer radius, with the shared focus outline + lift
+    /// and an on-page caption. Mirrors `PosterCardView`'s borderless card so movie
+    /// and music grids look identical.
+    private var borderlessCard: some View {
+        VStack(alignment: .leading, spacing: borderlessCaptionSpacing) {
+            borderlessArtwork
+                .frame(width: scaledWidth, height: scaledWidth)
+                .plozzFocusHalo(
+                    cornerRadius: metrics.landscapeCardCornerRadius,
+                    focusScale: PlozzTheme.Metrics.mediumFocusedCardScale,
+                    isFocused: isFocused
+                )
+
+            BorderlessCardCaption(
+                title: title,
+                subtitle: subtitle,
+                horizontalInset: metrics.landscapeCaptionInset
+            )
+            .frame(width: scaledWidth)
+            // Push the caption down on focus with a pure transform (see
+            // `borderlessCaptionSpacing`) so the footprint stays fixed and focusing
+            // a tile never shifts the grid/row.
+            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
+        }
+        .padding(.horizontal, metrics.borderlessCardSideMargin)
+        .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
+        // See PosterCardView.borderlessCard: composite (never rasterize) so the
+        // focus halo + scale bloom that extend beyond the bounds aren't clipped.
+        .compositingGroup()
+        .zIndex(isFocused ? 2 : 0)
+        .animation(.easeOut(duration: 0.18), value: isFocused)
+    }
+
+    /// Artwork↔caption gap for the borderless music card. Always reserved at its
+    /// focused size (base + density-scaled push); the caption rides up when
+    /// unfocused via a transform offset, so the tile's footprint never changes with
+    /// focus and neighbours don't move.
+    private var borderlessCaptionSpacing: CGFloat {
+        metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush
+    }
+
     @ViewBuilder
     private var artwork: some View {
         MusicArtworkImage(
@@ -172,6 +224,19 @@ struct MusicCard: View {
             cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius,
             asyncFallbackURL: asyncFallbackURL,
             placeholderColor: subtitleColor
+        )
+    }
+
+    /// Borderless artwork rounds the image itself at the *outer* radius (there's
+    /// no glass border to supply it) so it matches the poster borderless look.
+    @ViewBuilder
+    private var borderlessArtwork: some View {
+        MusicArtworkImage(
+            url: artworkURL,
+            systemPlaceholder: systemPlaceholder,
+            cornerRadius: metrics.landscapeCardCornerRadius,
+            asyncFallbackURL: asyncFallbackURL,
+            placeholderColor: .secondary
         )
     }
 }

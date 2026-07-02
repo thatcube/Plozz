@@ -45,6 +45,23 @@ public struct PlozzMetrics: Equatable, Sendable {
     /// Clearance between a circular avatar and its focus glass halo (scaled).
     public let circleFocusPadding: CGFloat
 
+    // MARK: Focus caption movement (scaled)
+
+    /// Distance a focused tile's caption drops on focus (scaled). Shared by the
+    /// circular artist/cast tiles and the borderless cards.
+    public let focusCaptionPush: CGFloat
+
+    // MARK: Borderless ("Posters") card style (scaled)
+
+    /// Horizontal breathing room reserved on each side of a borderless card inside
+    /// its slot, so cards separate and the focus outline has room (scaled).
+    public let borderlessCardSideMargin: CGFloat
+
+    /// Height of a card's watched-progress bar, scaled with density and floored at
+    /// `PlozzTheme.Metrics.progressBarMinHeight` so it tracks the display-size
+    /// setting without ever shrinking to an illegible sliver.
+    public let progressBarHeight: CGFloat
+
     // MARK: Media spacing (scaled)
 
     /// Gap between adjacent media cards in a rail and gutter in a poster grid —
@@ -184,6 +201,13 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.artistTileDiameter = step(PlozzTheme.Metrics.artistTileDiameter)
         self.castTileDiameter = step(PlozzTheme.Metrics.castTileDiameter)
         self.circleFocusPadding = step(PlozzTheme.Metrics.circleFocusPadding)
+
+        self.focusCaptionPush = step(PlozzTheme.Metrics.focusCaptionPush)
+        self.borderlessCardSideMargin = step(PlozzTheme.Metrics.borderlessCardSideMargin)
+        self.progressBarHeight = max(
+            step(PlozzTheme.Metrics.progressBarHeight),
+            PlozzTheme.Metrics.progressBarMinHeight
+        )
 
         self.cardSpacing = step(PlozzTheme.Metrics.cardSpacing)
         self.gridSpacing = step(PlozzTheme.Metrics.gridSpacing)

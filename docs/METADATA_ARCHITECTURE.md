@@ -208,6 +208,6 @@ Sources/MetadataKit/
 
 ---
 
-*Verification: `swift test` runs the pure-logic suite without linking EngineMPV's
-tvOS-only mpv xcframeworks; the tvOS simulator/app build and `EngineMPVProbe`
-remain the authoritative compile/link checks for the on-device engine.*
+*Verification: `swift test` runs the pure-logic suite without linking
+AetherEngine's tvOS-only FFmpeg xcframeworks; the tvOS simulator/app build
+remains the authoritative compile/link check for the on-device engine.*

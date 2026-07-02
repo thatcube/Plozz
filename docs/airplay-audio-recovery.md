@@ -173,9 +173,6 @@ The same root cause applies wherever we drive audio through **`AVPlayer`**:
 - **Native engine** (`AVPlayer` directly) and **Plozzigen** (FFmpeg → localhost
   HLS-fMP4 → `AVPlayer`) both output audio via `AVAudioSession` and are subject to
   the same HomePod renegotiation on **seek** and on any player-item swap.
-- **mpv** (`.hybrid`) drives its **own** audio output (`MPVSafeAudio`), a
-  different path — the `AVAudioSession` reactivate cycle does not directly apply
-  there; treat it separately.
 
 ### Known gap in the video path (as of this writing)
 

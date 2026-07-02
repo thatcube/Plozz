@@ -321,16 +321,21 @@ public struct SettingsView: View {
             // profile's Home. The personal mirror of This Apple TV › Servers.
             // Its second line glances the household's server sign-ins.
             navRow("Your Libraries", icon: "rectangle.stack",
-                   value: myLibrariesSummary,
+                   value: nil,
                    route: .myLibraries) {
                 signedInStrip
             }
             navRow("Appearance", icon: "paintpalette",
                    value: nil,
                    route: .appearance)
-            navRow("Night Shift", icon: "moon.stars",
+            navRow("Circadian Mode", icon: "moon.stars",
                    value: nil,
-                   route: .nightShift)
+                   route: .nightShift) {
+                Text("Warms the display at night to help you sleep")
+                    .font(.footnote)
+                    .settingsRowSecondary()
+                    .lineLimit(2)
+            }
             navRow("Playback", icon: "play.rectangle",
                    value: nil,
                    route: .playback)
@@ -356,7 +361,7 @@ public struct SettingsView: View {
             // Device "identity on top": an Apple-TV glyph + name + scope note,
             // mirroring the profile card's avatar header.
             HStack(spacing: 20) {
-                Image(systemName: "tv")
+                Image(systemName: "appletv")
                     .font(.system(size: 40, weight: .regular))
                     .foregroundStyle(.secondary)
                     .frame(width: Self.identityAvatarSize, height: Self.identityAvatarSize)
@@ -617,21 +622,6 @@ public struct SettingsView: View {
         if accounts.isEmpty { return "Add a server" }
         // Row already says "Servers", so show a bare count (no repeated noun).
         return "\(Set(accounts.map { $0.server.id }).count)"
-    }
-
-    /// Per-profile summary for the Your Libraries row: how many of the household's
-    /// servers this profile is actually watching (its active-account subset).
-    private var myLibrariesSummary: String? {
-        if accounts.isEmpty { return nil }
-        let allServers = Set(accounts.map { $0.server.id })
-        let watchedServers = Set(
-            accounts.filter { isAccountIncludedInActiveProfile($0.id) }.map { $0.server.id }
-        )
-        if watchedServers.isEmpty { return "Not watching any" }
-        if profilesEnabled, watchedServers.count != allServers.count {
-            return "\(watchedServers.count) of \(allServers.count)"
-        }
-        return watchedServers.count == 1 ? "1 server" : "\(watchedServers.count) servers"
     }
 
     /// Number of distinct servers the active profile can watch from. Cross-server

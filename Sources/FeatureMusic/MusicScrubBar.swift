@@ -149,6 +149,14 @@ struct MusicScrubBar: View {
     /// progress (`knobX`) spring, which would otherwise fire on every playback
     /// tick mid-slide and give the fill/knob a different easing than the track.
     var suppressProgressAnimation: Bool = false
+    /// Gates the focusable scrub surface. While `false` (the transport bar is
+    /// hidden, and briefly during its reveal) the `MusicScrubSurface` is removed
+    /// from the hierarchy entirely — not merely marked non-focusable — because on
+    /// tvOS an off-screen / zero-opacity view can still win a *directional-click*
+    /// focus move. With the surface absent, a down-click on the hidden player has
+    /// no focus neighbour, so `.onMoveCommand` fires and reveals the controls with
+    /// the pause button focused instead of the click jumping onto the scrubber.
+    var isFocusable: Bool = true
 
     var body: some View {
         GeometryReader { geo in
@@ -181,7 +189,7 @@ struct MusicScrubBar: View {
             .animation(.easeOut(duration: 0.18), value: focused)
             .animation(.easeOut(duration: 0.12), value: model.isScrubbing)
             .animation((model.isScrubbing || suppressProgressAnimation) ? nil : .spring(response: 0.34, dampingFraction: 0.85), value: knobX)
-            .overlay { MusicScrubSurface(model: model) }
+            .overlay { if isFocusable { MusicScrubSurface(model: model) } }
         }
     }
 

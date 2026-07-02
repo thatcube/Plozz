@@ -1,5 +1,6 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import CoreUI
 
 /// A vertical, checkable list of options for the Settings detail pane: one
 /// focusable row per option with a leading icon, its title, and a trailing

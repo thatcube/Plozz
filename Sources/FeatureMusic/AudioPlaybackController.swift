@@ -668,6 +668,18 @@ public final class AudioPlaybackController {
         prepareNextInQueue()
     }
 
+    /// Builds a fresh random order for a repeat-all loop so each pass differs
+    /// (rather than replaying the same shuffled sequence). Reshuffles the whole
+    /// original list and nudges the just-finished track out of the first slot so
+    /// the new loop doesn't replay it back-to-back.
+    private func reshuffleForRepeat(justPlayed: MusicTrack?) {
+        var shuffled = orderedQueue.shuffled()
+        if shuffled.count > 1, let justPlayed, shuffled.first == justPlayed {
+            shuffled.swapAt(0, Int.random(in: 1..<shuffled.count))
+        }
+        queue = shuffled
+    }
+
     // MARK: Queue advancement
 
     private func advance(by offset: Int, userInitiated: Bool) {
@@ -681,6 +693,15 @@ public final class AudioPlaybackController {
         if next >= queue.count {
             // Past the end: wrap on repeat-all, otherwise stop at the last track.
             if repeatMode == .all {
+                if isShuffled {
+                    // Reshuffle for a fresh pass so each repeat-all loop differs
+                    // rather than replaying the same shuffled order. The loop track
+                    // is intentionally NOT pre-enqueued while shuffled (see
+                    // sequentialNextTrack), so drop any stale treadmill item and
+                    // take the normal start path into the newly shuffled order.
+                    reshuffleForRepeat(justPlayed: currentTrack)
+                    clearPreparedNext(removeFromPlayer: true)
+                }
                 index = 0
                 scheduleStart(debounced: userInitiated)
             } else if userInitiated {
@@ -962,8 +983,11 @@ public final class AudioPlaybackController {
         let next = index + 1
         if queue.indices.contains(next) { return queue[next] }
         // Past the end: repeat-all loops back to the top (but a single-track queue
-        // has no distinct "next" to enqueue).
-        if repeatMode == .all, queue.count > 1 { return queue.first }
+        // has no distinct "next" to enqueue). While shuffled we deliberately DON'T
+        // pre-enqueue the loop-around — the queue is reshuffled at the wrap for a
+        // fresh pass, so any pre-enqueued loop track would be the wrong one. That
+        // costs a tiny gap once per full loop, which is fine.
+        if repeatMode == .all, queue.count > 1, !isShuffled { return queue.first }
         return nil
     }
 

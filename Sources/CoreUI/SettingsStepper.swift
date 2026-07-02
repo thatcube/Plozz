@@ -41,7 +41,7 @@ public struct SettingsStepper<Value: Hashable>: View {
     private var glyphSize: CGFloat { compact ? 16 : 26 }
     private var rowSpacing: CGFloat { compact ? 12 : 24 }
     private var valueMinWidth: CGFloat { compact ? 52 : 96 }
-    private var valueFont: Font { compact ? .body : .title3.weight(.semibold) }
+    private var valueFont: Font { compact ? .body : .headline.weight(.semibold) }
 
     public var body: some View {
         HStack(spacing: rowSpacing) {

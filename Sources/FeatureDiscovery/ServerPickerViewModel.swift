@@ -133,7 +133,7 @@ public final class ServerPickerViewModel {
         phase = .scanning
         refreshTailscaleState()
 
-        probeRecents()
+        probeKnownServers()
 
         scanTask = Task { [weak self] in
             guard let self else { return }
@@ -160,16 +160,17 @@ public final class ServerPickerViewModel {
         isOnTailscale = tailscaleIP != nil
     }
 
-    /// Directly probes each recent server (most-recent first) to confirm it's
-    /// online, so remote/Tailscale entries show a real status without waiting
-    /// on LAN discovery. Probing the primary reconnect target first keeps its
-    /// status snappy.
-    private func probeRecents() {
-        let recents = store.recentServers
-        guard !recents.isEmpty else { return }
+    /// Directly probes each known server we might list but that LAN discovery
+    /// can't confirm on its own — recents *and* servers we already have accounts
+    /// on — so remote/Tailscale entries show a real online/offline status
+    /// without waiting on LAN discovery. Recents are probed first so the primary
+    /// reconnect target's status stays snappy.
+    private func probeKnownServers() {
+        let targets = recentServers + signedInServers.map(\.server)
+        guard !targets.isEmpty else { return }
         reachabilityTask = Task { [weak self] in
             guard let self else { return }
-            for server in recents {
+            for server in targets {
                 if Task.isCancelled { return }
                 let key = ServerIdentity.key(for: server)
                 // Discovery may already have proven it's on the LAN — that's a

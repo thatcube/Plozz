@@ -185,9 +185,15 @@ public struct ServerPickerView: View {
                     if let host = server.baseURL.host {
                         Text(host).font(.subheadline).settingsRowSecondary()
                     }
+                    // Who's signed in lives here — under the address — so the
+                    // trailing badge can consistently mean "reachable right now".
+                    if case let .signedIn(userNames) = role {
+                        signedInLine(userNames)
+                    }
                 }
                 Spacer(minLength: 12)
-                trailingBadge(for: server, role: role)
+                // Trailing badge always answers "can I connect right now?".
+                statusBadge(for: server, isRecent: role.isRecent)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 12)
@@ -197,30 +203,31 @@ public struct ServerPickerView: View {
         .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
     }
 
-    /// Distinguishes the three kinds of rows in the "Servers" card so each gets
-    /// the right trailing badge: an account you're already signed into, a
-    /// recent reconnect target, or a freshly discovered LAN server.
+    /// Distinguishes the three kinds of rows in the "Servers" card: an account
+    /// you're already signed into, a recent reconnect target, or a freshly
+    /// discovered LAN server.
     private enum RowRole {
         case signedIn([String])
         case recent
         case discovered
-    }
 
-    /// Trailing status/annotation for a server row.
-    @ViewBuilder
-    private func trailingBadge(for server: MediaServer, role: RowRole) -> some View {
-        switch role {
-        case let .signedIn(userNames):
-            statusText(signedInSummary(userNames), systemImage: "checkmark.circle.fill")
-        case .recent:
-            statusBadge(for: server, isRecent: true)
-        case .discovered:
-            statusBadge(for: server, isRecent: false)
+        /// Whether this row is a recent reconnect target (drives the "Recently
+        /// used" fallback badge before a probe resolves).
+        var isRecent: Bool {
+            if case .recent = self { return true }
+            return false
         }
     }
 
-    /// Human-readable summary of who's signed in on a server, shown as its
-    /// badge. Tapping the row starts sign-in for *another* user.
+    /// The "who's signed in" annotation shown under a signed-in server's
+    /// address. Tapping the row starts sign-in for *another* user.
+    private func signedInLine(_ userNames: [String]) -> some View {
+        Label(signedInSummary(userNames), systemImage: "checkmark.circle.fill")
+            .font(.footnote)
+            .foregroundStyle(Color.accentColor)
+    }
+
+    /// Human-readable summary of who's signed in on a server.
     private func signedInSummary(_ userNames: [String]) -> String {
         switch userNames.count {
         case 0: return "Signed in"
@@ -230,9 +237,10 @@ public struct ServerPickerView: View {
         }
     }
 
-    /// Trailing status for a discovered/recent server row. Discovered servers
-    /// are always on the network; recents show their live probe result, or a
-    /// plain "Recently used" tag until a probe resolves.
+    /// Trailing reachability status for a server row. Discovered servers are
+    /// always on the network; recents and signed-in servers show their live
+    /// probe result, with recents falling back to a "Recently used" tag until a
+    /// probe resolves.
     @ViewBuilder
     private func statusBadge(for server: MediaServer, isRecent: Bool) -> some View {
         switch viewModel.status(for: server) {

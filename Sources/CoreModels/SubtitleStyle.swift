@@ -343,8 +343,14 @@ public extension SubtitleStyle {
 
 public extension SubtitleStyle {
     /// Build appearance from a decoded legacy `CaptionSettings` blob so a
-    /// profile's previously-saved look (size / colour / background / edge / follow
-    /// system) carries over into the new persisted style store.
+    /// profile's previously-saved look (size / colour / background / edge) carries
+    /// over into the new persisted style store.
+    ///
+    /// `followsSystemStyle` is deliberately **not** carried over. The old flag was
+    /// honoured only on the AVPlayer path and is ignored by Plozz's own overlay
+    /// renderer, so preserving it would give a migrated viewer system captions on
+    /// one path and Plozz styling on the other. Normalising it to `false` (the new
+    /// default) makes Plozz own subtitle appearance consistently everywhere.
     init(from legacy: LegacyCaptionSettings) {
         self.init(
             fontScale: legacy.fontScale,
@@ -353,8 +359,8 @@ public extension SubtitleStyle {
                 isEnabled: legacy.backgroundColor.alpha > 0.001,
                 color: legacy.backgroundColor
             ),
-            edge: Edge(style: legacy.edgeStyle),
-            followsSystemStyle: legacy.followsSystemStyle
+            edge: Edge(style: legacy.edgeStyle)
+            // followsSystemStyle intentionally omitted → defaults to false.
         )
         foldUniformEdgeIntoBorder()
     }

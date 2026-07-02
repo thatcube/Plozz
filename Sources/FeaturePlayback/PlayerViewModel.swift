@@ -1667,13 +1667,16 @@ public final class PlayerViewModel {
 
     /// Applies a subtitle **appearance** edit from the in-player Style screen.
     /// Updates the live overlay for instant preview, keeps the controls mirror
-    /// (which the editor binds) in sync, and notifies the host so the new look is
-    /// persisted to the profile's appearance store. Kept as the single funnel so
-    /// live preview and persistence can never drift apart.
+    /// (which the editor binds) in sync, pushes the look to the engine so a
+    /// natively-drawn embedded track (AVPlayer `textStyleRules`) restyles live too,
+    /// and notifies the host so the new look is persisted to the profile's
+    /// appearance store. Kept as the single funnel so live preview and persistence
+    /// can never drift apart.
     public func applySubtitleStyle(_ newStyle: SubtitleStyle) {
         style = newStyle
         liveSubtitles.style = newStyle
         controls.subtitleStyle = newStyle
+        engine.updateSubtitleStyle(newStyle)
         onSubtitleStyleChanged(newStyle)
     }
 
@@ -2117,7 +2120,13 @@ public final class PlayerViewModel {
             if track.isBitmapSubtitle == provider.isBitmapSubtitle { s += 1 }
             return s
         }
-        return candidates.max { score($0) < score($1) }
+        guard let best = candidates.max(by: { score($0) < score($1) }) else { return nil }
+        // Require an unambiguous winner: if two or more candidates tie on the top
+        // score we can't tell which subtitle the viewer meant, so decline rather
+        // than swap in an arbitrary one.
+        let topScore = score(best)
+        guard candidates.filter({ score($0) == topScore }).count == 1 else { return nil }
+        return best
     }
 
     /// Picks the default subtitle for the user's mode + preferred language from

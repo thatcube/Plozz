@@ -279,6 +279,21 @@ final class SubtitleBehaviorTests: XCTestCase {
         XCTAssertFalse(style.followsSystemStyle)
     }
 
+    func testLegacyFollowSystemStyleNormalizesToPlozzRendering() throws {
+        // The old flag was honoured only on the AVPlayer path and is ignored by
+        // Plozz's own overlay renderer, so migration deliberately normalises it to
+        // `false` (Plozz owns subtitle appearance everywhere) rather than carrying
+        // a legacy `true` that would render inconsistently across the two paths.
+        let legacyJSON = """
+        {"fontScale":1.0,"textColor":{"red":1,"green":1,"blue":1,"alpha":1},
+        "backgroundColor":{"red":0,"green":0,"blue":0,"alpha":0.5},
+        "edgeStyle":"none","followsSystemStyle":true}
+        """
+        let legacy = try JSONDecoder().decode(LegacyCaptionSettings.self, from: Data(legacyJSON.utf8))
+        let style = SubtitleStyle(from: legacy)
+        XCTAssertFalse(style.followsSystemStyle)
+    }
+
     func testLegacyDecodeFallsBackForMissingBehaviourFields() throws {
         // JSON persisted before the subtitle behaviour fields existed: only the
         // old appearance keys are present, so behaviour must fall back to defaults.

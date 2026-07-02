@@ -82,8 +82,9 @@ public final class NativeVideoEngine: VideoEngine {
     // MARK: Configuration
 
     /// Subtitle appearance. The engine applies these style rules when building
-    /// the player item.
-    private let style: SubtitleStyle
+    /// the player item, and re-applies them live via ``updateSubtitleStyle(_:)``
+    /// when the viewer edits the look mid-playback.
+    private var style: SubtitleStyle
 
     // MARK: Private playback state
 
@@ -766,6 +767,16 @@ public final class NativeVideoEngine: VideoEngine {
             guard let self, let group = await self.legibleGroup(for: item.asset) else { return }
             self.select(track: track, in: group, on: item)
         }
+    }
+
+    /// Re-applies subtitle styling to the *current* player item so an in-player
+    /// Style edit updates an embedded text track AVFoundation draws itself (e.g. an
+    /// MKV SRT on Plex direct-play, which has no sidecar the overlay could redraw).
+    /// Harmless for overlay-drawn subtitles: AVFoundation's legible selection is off
+    /// in that case, so it isn't rendering a track for these rules to affect.
+    public func updateSubtitleStyle(_ style: SubtitleStyle) {
+        self.style = style
+        player?.currentItem?.textStyleRules = style.textStyleRules()
     }
 
     /// Best-effort manual audio selection. As with subtitles, the native picker

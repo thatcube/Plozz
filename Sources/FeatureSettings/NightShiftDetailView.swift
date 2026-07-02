@@ -286,11 +286,17 @@ private struct NightShiftScheduleControl: View {
         Array(stride(from: 0, to: 24 * 60, by: NightShiftSettingsModel.manualStepMinutes))
 
     /// Snaps an arbitrary minutes-since-midnight value onto the nearest clock
-    /// option so a persisted off-grid time still highlights a valid step.
+    /// option so a persisted off-grid time still highlights a valid step. Uses
+    /// circular distance so a time just before midnight (e.g. 23:59) snaps to
+    /// 00:00 rather than the linearly-closer 23:45.
     private static func nearestClockOption(to minutes: Int) -> Int {
         let wrapped = ((minutes % 1440) + 1440) % 1440
+        func circularDistance(_ option: Int) -> Int {
+            let raw = abs(option - wrapped)
+            return min(raw, 1440 - raw)
+        }
         return clockOptions.min(by: {
-            abs($0 - wrapped) < abs($1 - wrapped)
+            circularDistance($0) < circularDistance($1)
         }) ?? wrapped
     }
 }

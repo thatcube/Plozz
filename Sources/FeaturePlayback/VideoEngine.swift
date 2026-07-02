@@ -124,6 +124,13 @@ public protocol VideoEngine: AnyObject {
     /// `.subtitleDelay`.
     func setSubtitleDelay(_ seconds: TimeInterval)
 
+    /// Pushes a live subtitle **appearance** update to engines that draw subtitles
+    /// themselves (AVFoundation via `AVPlayerItem.textStyleRules`), so the in-player
+    /// Style editor restyles an embedded text track the player renders natively.
+    /// Overlay-drawn subtitles restyle through `LiveSubtitleModel` instead, so this
+    /// is a no-op by default (engines that emit cues don't render subtitles).
+    func updateSubtitleStyle(_ style: SubtitleStyle)
+
     /// Enables or disables an engine-side dialog-enhancement audio filter.
     /// No-op when the engine doesn't advertise `.dialogEnhance`.
     func setDialogEnhanceEnabled(_ enabled: Bool)
@@ -316,6 +323,7 @@ public extension VideoEngine {
     func setPlaybackSpeed(_ rate: Double) {}
     func setAudioDelay(_ seconds: TimeInterval) {}
     func setSubtitleDelay(_ seconds: TimeInterval) {}
+    func updateSubtitleStyle(_ style: SubtitleStyle) {}
     func setDialogEnhanceEnabled(_ enabled: Bool) {}
     func setScrubRefreshBoost(_ enabled: Bool) {}
 }

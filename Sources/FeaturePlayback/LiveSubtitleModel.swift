@@ -27,6 +27,13 @@ public final class LiveSubtitleModel {
     public private(set) var primary: [SubtitleCue] = []
     /// Cues on screen for an optional secondary (dual-subtitle) track.
     public private(set) var secondary: [SubtitleCue] = []
+    /// `true` while a secondary (dual) subtitle track is actively selected — a
+    /// sidecar timeline or an engine live-feed. The overlay reserves the second
+    /// dual-subtitle lane only while this holds, so a *persisted* `style.secondary`
+    /// (dual appearance the viewer configured in an earlier session) can't reserve
+    /// a phantom empty lane — and shift the primary line — on a later
+    /// single-subtitle playback.
+    public private(set) var hasSecondaryTrack: Bool = false
     /// The resolved appearance the overlay renders with.
     public var style: SubtitleStyle = .default
     /// Whether the current video frame is HDR, so the overlay can clamp luminance.
@@ -149,6 +156,7 @@ public final class LiveSubtitleModel {
         } else {
             secondaryTimeline = nil
         }
+        hasSecondaryTrack = stream != nil
         secondary = []
     }
 
@@ -162,6 +170,7 @@ public final class LiveSubtitleModel {
         secondaryTimeline = nil
         secondaryLiveCues = []
         secondaryLiveActiveIDs = []
+        hasSecondaryTrack = true
         secondary = []
     }
 
@@ -188,6 +197,7 @@ public final class LiveSubtitleModel {
     public func clear() {
         isLiveFeed = false
         isSecondaryLiveFeed = false
+        hasSecondaryTrack = false
         primaryTimeline = nil
         secondaryTimeline = nil
         liveCues = []
@@ -231,6 +241,7 @@ struct LiveSubtitleOverlay: View {
         SubtitleOverlayView(
             primary: model.primary,
             secondary: model.secondary,
+            secondaryActive: model.hasSecondaryTrack,
             style: model.style,
             isHDR: model.isHDR,
             videoRect: model.videoRect

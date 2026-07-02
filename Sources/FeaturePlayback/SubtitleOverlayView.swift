@@ -33,6 +33,10 @@ public struct SubtitleOverlayView: View {
     public var primary: [SubtitleCue]
     /// Cues for an optional secondary (dual-subtitle) track.
     public var secondary: [SubtitleCue]
+    /// Whether a secondary (dual) track is actively selected. The reserved second
+    /// lane is drawn only when this is `true`, so a persisted secondary *style*
+    /// alone (with no active second track) never reserves a phantom empty lane.
+    public var secondaryActive: Bool
     public var style: SubtitleStyle
     /// Whether the underlying video frame is HDR; gates luminance scaling.
     public var isHDR: Bool
@@ -43,12 +47,14 @@ public struct SubtitleOverlayView: View {
     public init(
         primary: [SubtitleCue],
         secondary: [SubtitleCue] = [],
+        secondaryActive: Bool = false,
         style: SubtitleStyle,
         isHDR: Bool = false,
         videoRect: CGRect? = nil
     ) {
         self.primary = primary
         self.secondary = secondary
+        self.secondaryActive = secondaryActive
         self.style = style
         self.isHDR = isHDR
         self.videoRect = videoRect
@@ -180,7 +186,7 @@ public struct SubtitleOverlayView: View {
     /// the two tracks' cues rarely start/end together.
     @ViewBuilder
     private func dialogueStack(_ dialogue: [SubtitleCue]) -> some View {
-        if let sec = style.secondary {
+        if secondaryActive, let sec = style.secondary {
             let above = sec.placement == .above
             let secScale = sec.differentiate ? sec.relativeScale : 1.0
             let primaryLane = reservedLineHeight(scale: 1.0)

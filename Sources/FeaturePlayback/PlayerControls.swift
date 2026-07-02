@@ -603,7 +603,11 @@ struct PlayerControls: View {
         // Drive the height change explicitly (see note above). The very first
         // measurement snaps in (no grow-from-zero); every later change morphs.
         .onPreferenceChange(PanelBodyHeightKey.self) { newHeight in
-            guard newHeight > 0, newHeight != styleBodyHeight else { return }
+            // Ignore measurements while no panel is open: a closing panel keeps
+            // reporting its (tall) height through its exit transition, which would
+            // otherwise clobber the reset-to-0 and leave the NEXT panel opening from
+            // a stale height (spawning tall, then animating down to its real size).
+            guard openPanel != nil, newHeight > 0, newHeight != styleBodyHeight else { return }
             if styleBodyHeight == 0 {
                 styleBodyHeight = newHeight
             } else {

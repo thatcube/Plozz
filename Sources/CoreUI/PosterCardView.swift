@@ -181,7 +181,7 @@ public struct PosterCardView: View {
             // gap when unfocused, dropping back down on focus. Because it's an
             // offset (like `scaleEffect`), the card's footprint is identical in both
             // states, so focusing one card can't shift the row or the page.
-            .offset(y: isFocused ? 0 : -metrics.borderlessCaptionFocusPush)
+            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: borderlessCornerRadius, action: action)
@@ -201,7 +201,7 @@ public struct PosterCardView: View {
             .overlay(alignment: .bottom) { progressBar(height: 12) }
             .clipShape(RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous))
             .plozzMediaEdge(cornerRadius: borderlessCornerRadius)
-            .plozzBorderlessArtworkFocus(
+            .plozzFocusHalo(
                 cornerRadius: borderlessCornerRadius,
                 focusScale: borderlessFocusScale,
                 isFocused: isFocused
@@ -220,7 +220,7 @@ public struct PosterCardView: View {
         case .poster: base = metrics.posterCaptionTopSpacing
         case .landscape: base = metrics.landscapeCaptionTopSpacing
         }
-        return base + metrics.borderlessCaptionFocusPush
+        return base + metrics.focusCaptionPush
     }
 
     /// Horizontal caption clearance for a borderless card — the same optical inset
@@ -251,13 +251,11 @@ public struct PosterCardView: View {
         }
     }
 
-    /// Focus lift for a borderless image — the same scale the framed card of this
-    /// shape uses, applied to the artwork within its focus outline.
+    /// Focus lift for a borderless image — the shared tile focus scale
+    /// (`mediumFocusedCardScale`), so borderless posters, landscape cards and the
+    /// circular artist/cast tiles all zoom by the same amount on focus.
     private var borderlessFocusScale: CGFloat {
-        switch style {
-        case .poster: return PlozzTheme.Metrics.focusedCardScale
-        case .landscape: return PlozzTheme.Metrics.mediumFocusedCardScale
-        }
+        PlozzTheme.Metrics.mediumFocusedCardScale
     }
 
     // MARK: Text

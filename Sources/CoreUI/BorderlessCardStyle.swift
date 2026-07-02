@@ -6,27 +6,29 @@ import SwiftUI
 /// `PosterCardView` and the music `MusicCard` compose these so the two stay
 /// pixel-identical.
 public extension View {
-    /// Applies the borderless card's focus treatment to an already-clipped
-    /// artwork view — the **same** liquid-glass focus surface the circular artist /
-    /// cast tiles use (`CircularFocusHalo` → `plozzGlassCard`), so the two share one
-    /// theme-aware, translucent, Reduce-Transparency-aware focus look instead of a
-    /// bespoke ring.
+    /// The shared focus **halo** for artwork tiles — one theme-aware, translucent
+    /// liquid-glass focus frame used by BOTH the circular artist/cast tiles and the
+    /// borderless ("Posters") cards, so focus looks identical across them. It is the
+    /// same surface (`plozzGlassCard`) the app's cards lift to on focus.
     ///
-    /// On focus a `plozzGlassCard` blooms *around* the artwork as a concentric
-    /// band: it's drawn in the **background** (so it never changes layout) and
-    /// extended `circleFocusPadding` beyond every edge (exactly the artist halo's
-    /// clearance), with the opaque artwork on top masking the centre — leaving only
-    /// a soft glass frame + drop shadow. At rest there's no surface at all, just the
-    /// artwork. The whole thing scales together on focus so the frame keeps hugging
-    /// the artwork. This is a pure render treatment (`background` + `scaleEffect`);
-    /// it never alters the card's footprint, so focusing a card can't nudge the row
-    /// or its neighbours.
-    func plozzBorderlessArtworkFocus(
+    /// On focus a `plozzGlassCard` blooms *around* the already-clipped artwork as a
+    /// concentric band: it's drawn in the **background** (so it never changes
+    /// layout) and extended `circleFocusPadding` beyond every edge, its radius
+    /// bumped to stay concentric, with the opaque artwork on top masking the centre
+    /// — leaving only a soft glass ring + drop shadow. At rest there's no surface at
+    /// all, just the artwork. The whole thing scales together on focus so the ring
+    /// keeps hugging the artwork and stays `circleFocusPadding` wide at any tile
+    /// size. Being a pure render treatment (`background` + `scaleEffect`), it never
+    /// alters the tile's footprint, so focusing can't nudge the row or neighbours.
+    ///
+    /// Pass `cornerRadius: side / 2` for a circular avatar (the band becomes a ring)
+    /// or the artwork's outer radius for a rounded-rect card.
+    func plozzFocusHalo(
         cornerRadius: CGFloat,
         focusScale: CGFloat,
         isFocused: Bool
     ) -> some View {
-        modifier(BorderlessArtworkFocusModifier(
+        modifier(FocusHaloModifier(
             cornerRadius: cornerRadius,
             focusScale: focusScale,
             isFocused: isFocused
@@ -34,7 +36,7 @@ public extension View {
     }
 }
 
-private struct BorderlessArtworkFocusModifier: ViewModifier {
+private struct FocusHaloModifier: ViewModifier {
     let cornerRadius: CGFloat
     let focusScale: CGFloat
     let isFocused: Bool
@@ -42,8 +44,6 @@ private struct BorderlessArtworkFocusModifier: ViewModifier {
     @Environment(\.plozzMetrics) private var metrics
 
     func body(content: Content) -> some View {
-        // Reuse the artist tiles' halo clearance verbatim so the borderless focus
-        // frame reads as the same family of focus treatment across the app.
         let pad = metrics.circleFocusPadding
         content
             .background {

@@ -182,7 +182,7 @@ struct MusicCard: View {
         VStack(alignment: .leading, spacing: borderlessCaptionSpacing) {
             borderlessArtwork
                 .frame(width: scaledWidth, height: scaledWidth)
-                .plozzBorderlessArtworkFocus(
+                .plozzFocusHalo(
                     cornerRadius: metrics.landscapeCardCornerRadius,
                     focusScale: PlozzTheme.Metrics.mediumFocusedCardScale,
                     isFocused: isFocused
@@ -197,7 +197,7 @@ struct MusicCard: View {
             // Push the caption down on focus with a pure transform (see
             // `borderlessCaptionSpacing`) so the footprint stays fixed and focusing
             // a tile never shifts the grid/row.
-            .offset(y: isFocused ? 0 : -metrics.borderlessCaptionFocusPush)
+            .offset(y: isFocused ? 0 : -metrics.focusCaptionPush)
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
@@ -211,7 +211,7 @@ struct MusicCard: View {
     /// unfocused via a transform offset, so the tile's footprint never changes with
     /// focus and neighbours don't move.
     private var borderlessCaptionSpacing: CGFloat {
-        metrics.landscapeCaptionTopSpacing + metrics.borderlessCaptionFocusPush
+        metrics.landscapeCaptionTopSpacing + metrics.focusCaptionPush
     }
 
     @ViewBuilder

@@ -69,9 +69,13 @@ public enum PlozzTheme {
         /// Diameter of a cast member's circular tile — a deliberately smaller
         /// variant of the same style. Density-scaled in `PlozzMetrics`.
         public static let castTileDiameter: CGFloat = 150
-        /// Clearance between a circular avatar and the focus glass halo around it
-        /// (the visible "padding" the halo adds when focused). Density-scaled.
-        public static let circleFocusPadding: CGFloat = 16
+        /// Thickness of the shared focus **halo** — the translucent liquid-glass
+        /// ring that blooms around a focused tile. Used identically by the circular
+        /// artist/cast tiles and the borderless ("Posters") card style, so all three
+        /// share one focus-frame thickness. It is the width of the visible ring on
+        /// focus (the halo scales with its content, so the band stays this wide at
+        /// any tile size). Density-scaled in `PlozzMetrics`.
+        public static let circleFocusPadding: CGFloat = 8
 
         // MARK: Spacing (derived from the `Spacing` scale)
 
@@ -207,13 +211,18 @@ public enum PlozzTheme {
         /// Scale applied to a focused browsing tile (matches Twozz Browse).
         public static let focusedCardScale: CGFloat = 1.08
 
+        // MARK: Focus caption movement
+
+        /// Vertical distance a focused tile's caption drops on focus, shared by the
+        /// circular artist/cast tiles and the borderless ("Posters") cards so labels
+        /// move identically everywhere. The gap slot is always reserved at this
+        /// larger size and the caption rides *up* when unfocused via a transform, so
+        /// the drop never changes the tile's footprint. Base value; density-scaled
+        /// in `PlozzMetrics` so it tracks the display-size preference.
+        public static let focusCaptionPush: CGFloat = 16
+
         // MARK: Borderless ("Posters") card style
 
-        /// Extra vertical gap pushed between a borderless card's artwork and its
-        /// caption while focused, so the growing (scaled) poster doesn't crowd its
-        /// title. Base value; density-scaled in `PlozzMetrics` so it tracks the
-        /// display-size preference like every other card metric.
-        public static let borderlessCaptionFocusPush: CGFloat = 16
         /// Horizontal breathing room reserved on each side of a borderless card
         /// *inside* its layout slot. It restores the separation the glass frame's
         /// `cardInset` used to provide (borderless artwork would otherwise butt

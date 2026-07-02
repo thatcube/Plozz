@@ -182,8 +182,6 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
     public var liveViewModels: Int?
     /// Live `NativeVideoEngine` (AVPlayer) instances. See `liveViewModels`.
     public var liveNativeEngines: Int?
-    /// Live `MPVVideoEngine` (libmpv) instances. See `liveViewModels`.
-    public var liveMPVEngines: Int?
     /// Which backend resolved this playback (Plex / Jellyfin), shown in the
     /// "Source Provider" row.
     public var sourceProvider: ProviderKind?
@@ -252,7 +250,6 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         thermalState: ThermalLevel? = nil,
         liveViewModels: Int? = nil,
         liveNativeEngines: Int? = nil,
-        liveMPVEngines: Int? = nil,
         sourceProvider: ProviderKind? = nil,
         videoCodecTag: String? = nil,
         videoBitDepth: Int? = nil,
@@ -296,7 +293,6 @@ public struct PlaybackDiagnostics: Equatable, Sendable {
         self.thermalState = thermalState
         self.liveViewModels = liveViewModels
         self.liveNativeEngines = liveNativeEngines
-        self.liveMPVEngines = liveMPVEngines
         self.sourceProvider = sourceProvider
         self.videoCodecTag = videoCodecTag
         self.videoBitDepth = videoBitDepth
@@ -883,19 +879,18 @@ public extension PlaybackDiagnostics {
         thermalState?.displayName ?? Self.placeholder
     }
 
-    /// Live-instance line, e.g. `Players 1 · AVPlayer 0 · mpv 1`. Outside the
-    /// player all three should read 0; during playback exactly one player session
-    /// + one engine (the engine kind matching the file — AVPlayer or mpv). Values
-    /// that climb and never fall as you leave/re-enter the player name a leak; a
-    /// count that climbs then "corrects down" names over-construction (throwaway
-    /// instances built on the render path). `Players` counts live
-    /// `PlayerViewModel`s; `AVPlayer` counts `NativeVideoEngine`s; `mpv` counts
-    /// `MPVVideoEngine`s.
+    /// Live-instance line, e.g. `Players 1 · AVPlayer 1`. Outside the player both
+    /// should read 0; during playback exactly one player session + one AVPlayer
+    /// engine. Values that climb and never fall as you leave/re-enter the player
+    /// name a leak; a count that climbs then "corrects down" names
+    /// over-construction (throwaway instances built on the render path).
+    /// `Players` counts live `PlayerViewModel`s; `AVPlayer` counts
+    /// `NativeVideoEngine`s.
     var liveInstancesText: String {
-        guard liveViewModels != nil || liveNativeEngines != nil || liveMPVEngines != nil else {
+        guard liveViewModels != nil || liveNativeEngines != nil else {
             return Self.placeholder
         }
-        return "Players \(liveViewModels ?? 0) · AVPlayer \(liveNativeEngines ?? 0) · mpv \(liveMPVEngines ?? 0)"
+        return "Players \(liveViewModels ?? 0) · AVPlayer \(liveNativeEngines ?? 0)"
     }
 }
 

@@ -87,6 +87,19 @@ public struct MediaItemMutation: Sendable, Equatable {
         static let playedPercentage = "playedPercentage"
     }
 
+    /// Whether this mutation targets `item`. Matches the item's own id **or any of
+    /// its cross-server source item ids**: a merged card's primary is only one of
+    /// several servers' ids for the title, and the mutation may have been built
+    /// against a *different* server (e.g. the user finished the copy on server B,
+    /// or the identity index was still cold when the stop mutation was assembled so
+    /// its fanned-out `targets` didn't yet include this card's primary id). Because
+    /// the loaded card already knows its full `sources` set, matching against those
+    /// makes the in-place update robust regardless of how complete the mutation's
+    /// own id set was.
+    public func targets(_ item: MediaItem) -> Bool {
+        itemIDs.contains(item.id) || item.sources.contains { itemIDs.contains($0.itemID) }
+    }
+
     /// Applies this mutation to `item` in place, returning the updated copy. Only
     /// the fields the mutation actually carries are touched, so a screen can fold a
     /// mutation over every visible card without disturbing unrelated state. Items
@@ -94,7 +107,7 @@ public struct MediaItemMutation: Sendable, Equatable {
     /// is normalised to `nil` (no resume point) so finished/restarted titles drop
     /// their progress bar.
     public func applied(to item: MediaItem) -> MediaItem {
-        guard itemIDs.contains(item.id) else { return item }
+        guard targets(item) else { return item }
         var copy = item
         if let played { copy.isPlayed = played }
         if let favorite { copy.isFavorite = favorite }

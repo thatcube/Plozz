@@ -179,7 +179,7 @@ public final class HomeViewModel {
             let now = Date()
             let stamped = content.continueWatching.map { item -> MediaItem in
                 var updated = apply(mutation, to: item)
-                if mutation.itemIDs.contains(item.id) { updated.lastPlayedAt = now }
+                if mutation.targets(item) { updated.lastPlayedAt = now }
                 return updated
             }
             content.continueWatching = HomeAggregator.sortedByRecency(stamped)

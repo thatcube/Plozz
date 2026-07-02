@@ -78,6 +78,39 @@ final class MediaItemMutationOptionalTests: XCTestCase {
         let note = Notification(name: .mediaItemDidMutate, object: nil, userInfo: ["itemIDs": ["a"]])
         XCTAssertNil(MediaItemMutation.from(note))
     }
+
+    func testTargetsMatchesPrimaryID() {
+        let item = MediaItem(id: "primary", title: "T", kind: .movie)
+        XCTAssertTrue(MediaItemMutation(itemIDs: ["primary"], played: true).targets(item))
+        XCTAssertFalse(MediaItemMutation(itemIDs: ["other"], played: true).targets(item))
+    }
+
+    func testTargetsMatchesNonPrimarySourceItemID() {
+        // A merged card whose PRIMARY is server A's id, but which also lists a
+        // twin on server B. A mutation built against server B (e.g. the user
+        // finished the copy there, or the index was cold so the fan-out never
+        // reached server A's id) must still match this card via its sources.
+        let item = MediaItem(
+            id: "A-id", title: "Dune", kind: .movie,
+            sources: [
+                MediaSourceRef(accountID: "A", itemID: "A-id", providerKind: .jellyfin),
+                MediaSourceRef(accountID: "B", itemID: "B-id", providerKind: .plex)
+            ]
+        )
+        let mutation = MediaItemMutation(itemIDs: ["B-id"], played: true, resumePosition: 0, playedPercentage: 1)
+        XCTAssertTrue(mutation.targets(item), "Play on a non-primary server's copy must still target the merged card")
+
+        let applied = mutation.applied(to: item)
+        XCTAssertTrue(applied.isPlayed, "The merged card must reflect the play made on any of its sources")
+    }
+
+    func testTargetsDoesNotMatchUnrelatedCard() {
+        let item = MediaItem(
+            id: "A-id", title: "Dune", kind: .movie,
+            sources: [MediaSourceRef(accountID: "A", itemID: "A-id", providerKind: .jellyfin)]
+        )
+        XCTAssertFalse(MediaItemMutation(itemIDs: ["Z-id"], played: true).targets(item))
+    }
 }
 
 // MARK: - Action catalog: watchlist + refresh gating

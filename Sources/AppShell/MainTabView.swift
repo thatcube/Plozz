@@ -301,11 +301,24 @@ struct MainTabView: View {
 }
 
 /// Resolves the provider that owns `accountID`, falling back to the primary
-/// (first) account for untagged items. `accounts` is guaranteed non-empty by the
-/// caller (`RootView`).
+/// (first) account. `accounts` is guaranteed non-empty by the caller
+/// (`RootView`).
+///
+/// The fallback is legitimate only for a **nil** `accountID` (a genuinely
+/// untagged item — e.g. a route with no owning server — plays from the primary
+/// account). A **non-nil but unmatched** `accountID` is different: it means the
+/// caller handed an explicit source whose account is no longer signed in, and
+/// silently playing it from `accounts[0]` is the "random / wrong server" symptom
+/// — you'd stream a *different server's* copy than the one selected. The play
+/// paths prune to live accounts first (`bestSourcePlayItem`) so this shouldn't
+/// be reached in practice; when it is, emit a (gated) diagnostic so the stale
+/// pick is observable on device rather than masquerading as a successful play.
 private func resolveProvider(_ accountID: String?, in accounts: [ResolvedAccount]) -> any MediaProvider {
-    if let accountID, let match = accounts.first(where: { $0.account.id == accountID }) {
-        return match.provider
+    if let accountID {
+        if let match = accounts.first(where: { $0.account.id == accountID }) {
+            return match.provider
+        }
+        FanoutDiagnostics.emit("resolveProvider fallback: explicit account \(accountID) not signed in; using primary \(accounts[0].account.id)")
     }
     return accounts[0].provider
 }

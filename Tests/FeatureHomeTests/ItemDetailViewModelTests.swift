@@ -121,6 +121,56 @@ final class ItemDetailViewModelTests: XCTestCase {
         XCTAssertTrue(vm.sources.isEmpty, "A single-server title carries no sources (no server picker)")
     }
 
+    func testSeedSourcesPrunesInactiveAccountFromPicker() async {
+        // A merged card built while three servers were enabled, but "gone" has
+        // since signed out / been excluded from the active profile (its resolver
+        // returns nil). The picker must seed only the two reachable servers.
+        let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021, sourceAccountID: "plex")
+        let provider = FakeMediaProvider(allItems: [primary])
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "p1", sourceAccountID: "plex",
+            initialSources: [
+                MediaSourceRef(accountID: "plex", itemID: "p1"),
+                MediaSourceRef(accountID: "jelly", itemID: "j1"),
+                MediaSourceRef(accountID: "gone", itemID: "g1")
+            ],
+            alternateProviderResolver: { accountID in
+                accountID == "jelly" ? provider : nil
+            }
+        )
+
+        await vm.load()
+
+        XCTAssertFalse(
+            vm.sources.contains { $0.accountID == "gone" },
+            "A source whose account is no longer active must be pruned from the picker"
+        )
+        XCTAssertTrue(vm.sources.contains { $0.accountID == "plex" }, "Active primary source retained")
+        XCTAssertTrue(vm.sources.contains { $0.accountID == "jelly" }, "Other active source retained")
+    }
+
+    func testSeedSourcesDropsPickerWhenPruningLeavesOneServer() async {
+        // Same card, but now only the primary survives pruning — the second server
+        // is dead. That collapses to a single-server title: no picker.
+        let primary = MediaItem(id: "p1", title: "Dune", kind: .movie, productionYear: 2021, sourceAccountID: "plex")
+        let provider = FakeMediaProvider(allItems: [primary])
+        let vm = ItemDetailViewModel(
+            provider: provider, itemID: "p1", sourceAccountID: "plex",
+            initialSources: [
+                MediaSourceRef(accountID: "plex", itemID: "p1"),
+                MediaSourceRef(accountID: "gone", itemID: "g1")
+            ],
+            alternateProviderResolver: { _ in nil }
+        )
+
+        await vm.load()
+
+        XCTAssertTrue(
+            vm.sources.isEmpty,
+            "Pruning to a single reachable server yields no picker (single-server contract)"
+        )
+    }
+
     func testOriginSourceAccountIDDefaultsNilForHomeAndSearchFlows() {
         let provider = FakeMediaProvider(allItems: [])
         let vm = ItemDetailViewModel(provider: provider, itemID: "m1", sourceAccountID: "plex")

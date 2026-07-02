@@ -1,6 +1,9 @@
 import XCTest
 import CoreModels
 import TraktService
+import SimklService
+import AniListService
+import MALService
 @testable import AppShell
 
 /// Unit tests for ``AppShellWatchMutationApplier``'s **movie / series** identity
@@ -19,6 +22,9 @@ final class WatchIdentityExpansionTests: XCTestCase {
         AppShellWatchMutationApplier(
             resolveProvider: { _ in nil },
             traktScrobbler: { DisabledTraktScrobbler() },
+            simklScrobbler: { DisabledSimklScrobbler() },
+            anilistScrobbler: { DisabledAniListScrobbler() },
+            malScrobbler: { DisabledMALScrobbler() },
             allAccountIDs: allAccounts,
             indexedSeriesSources: { _ in [] },
             indexedSources: indexedSources,

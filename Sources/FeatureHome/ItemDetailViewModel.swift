@@ -941,7 +941,21 @@ public final class ItemDetailViewModel {
             }
             return
         }
-        sources = initialSources.map { source in
+        // Prune any source whose owning account is no longer active (signed out
+        // or excluded from the active profile) BEFORE seeding, exactly as the
+        // cache-restore and single-server paths do — otherwise a merged card
+        // built while a server was enabled would seed a picker entry the app
+        // can't reach or switch to (`switchToSource`/enrichment already guard on
+        // the resolver, so it would sit there dead). The active/primary source is
+        // always retained by `prunedToActiveAccounts`.
+        let activeSources = prunedToActiveAccounts(initialSources)
+        guard activeSources.count > 1 else {
+            // Pruning collapsed us to a single reachable server: no picker, same
+            // contract as a single-server card above.
+            sources = []
+            return
+        }
+        sources = activeSources.map { source in
             guard source.itemID == primary.id else { return source }
             var seeded = source
             // Single-file primary items report no intrinsic versions; synthesise

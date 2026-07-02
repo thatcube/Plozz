@@ -128,6 +128,21 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
     public func latest(limit: Int) async throws -> [MediaItem] { [] }
     public func search(query: String, limit: Int) async throws -> [MediaItem] { [] }
 
+    /// Protocol-conformance fallback only — **not** the routing path for a user
+    /// action. The grid pages exclusively through ``items(in:kind:page:)`` (the
+    /// only method `LibraryBrowseViewModel` calls on this provider), and every
+    /// paged item is tagged with its owning `sourceAccountID`, so tapping a grid
+    /// cell opens its detail through the **real per-account provider** (resolved
+    /// from that tag), never through this aggregate.
+    ///
+    /// That invariant matters because a bare `id` is **not globally unique** here:
+    /// Plex `ratingKey`s are small per-server integers, so the same `id` can name
+    /// *different* titles on two servers. This method can't disambiguate a bare id
+    /// (the `MediaProvider` contract gives it no account scope), so it returns the
+    /// first source that resolves it — which is only safe *because* nothing on the
+    /// user-action path relies on it. If a future caller ever needs id lookup on
+    /// the aggregate, the id must be account-scoped (e.g. resolve via the tagged
+    /// `sourceAccountID`) rather than passed bare through here.
     public func item(id: String) async throws -> MediaItem {
         for source in sources {
             if let item = try? await source.provider.item(id: id) {
@@ -137,6 +152,9 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         throw AppError.notFound
     }
 
+    /// Protocol-conformance fallback only — see ``item(id:)`` for why a bare id is
+    /// not disambiguated here and why that's safe (the grid never routes user
+    /// actions through the aggregate).
     public func children(of itemID: String) async throws -> [MediaItem] {
         for source in sources {
             if let children = try? await source.provider.children(of: itemID), !children.isEmpty {

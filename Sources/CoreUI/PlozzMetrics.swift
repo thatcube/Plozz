@@ -47,8 +47,6 @@ public struct PlozzMetrics: Equatable, Sendable {
 
     // MARK: Borderless ("Posters") card style (scaled)
 
-    /// Width of the focus outline hugging a borderless card's artwork (scaled).
-    public let borderlessFocusOutlineWidth: CGFloat
     /// Extra artwork↔caption gap added while a borderless card is focused (scaled).
     public let borderlessCaptionFocusPush: CGFloat
     /// Horizontal breathing room reserved on each side of a borderless card inside
@@ -195,7 +193,6 @@ public struct PlozzMetrics: Equatable, Sendable {
         self.castTileDiameter = step(PlozzTheme.Metrics.castTileDiameter)
         self.circleFocusPadding = step(PlozzTheme.Metrics.circleFocusPadding)
 
-        self.borderlessFocusOutlineWidth = step(PlozzTheme.Metrics.borderlessFocusOutlineWidth)
         self.borderlessCaptionFocusPush = step(PlozzTheme.Metrics.borderlessCaptionFocusPush)
         self.borderlessCardSideMargin = step(PlozzTheme.Metrics.borderlessCardSideMargin)
 

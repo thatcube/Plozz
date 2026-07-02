@@ -175,6 +175,13 @@ public struct PosterCardView: View {
                 subtitle: subtitleText,
                 horizontalInset: borderlessCaptionInset
             )
+            // Push the caption down on focus with a pure transform, never a layout
+            // change: the gap slot is always reserved at its focused size (see
+            // `borderlessCaptionSpacing`) and the caption rides *up* to the resting
+            // gap when unfocused, dropping back down on focus. Because it's an
+            // offset (like `scaleEffect`), the card's footprint is identical in both
+            // states, so focusing one card can't shift the row or the page.
+            .offset(y: isFocused ? 0 : -metrics.borderlessCaptionFocusPush)
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: borderlessCornerRadius, action: action)
@@ -201,17 +208,19 @@ public struct PosterCardView: View {
             )
     }
 
-    /// Artwork↔caption gap for a borderless card. Uses the same base gap the
-    /// framed card of this shape uses, then pushes the caption further down while
-    /// focused so the scaled-up poster clears its title. The push is density-scaled
-    /// like every other card metric.
+    /// Artwork↔caption gap for a borderless card. The slot is **always** reserved
+    /// at its focused size (base gap + the density-scaled focus push) so the card's
+    /// footprint never changes with focus; the caption itself rides up to the base
+    /// gap when unfocused via a transform offset (see `borderlessCard`). Reserving
+    /// the larger gap here is what keeps the row/page from shifting when a card is
+    /// focused, and gives the scaled-up poster room to clear its title.
     private var borderlessCaptionSpacing: CGFloat {
         let base: CGFloat
         switch style {
         case .poster: base = metrics.posterCaptionTopSpacing
         case .landscape: base = metrics.landscapeCaptionTopSpacing
         }
-        return base + (isFocused ? metrics.borderlessCaptionFocusPush : 0)
+        return base + metrics.borderlessCaptionFocusPush
     }
 
     /// Horizontal caption clearance for a borderless card — the same optical inset

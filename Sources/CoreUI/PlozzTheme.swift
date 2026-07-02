@@ -209,11 +209,6 @@ public enum PlozzTheme {
 
         // MARK: Borderless ("Posters") card style
 
-        /// Width of the focus **outline** drawn tight around a borderless card's
-        /// artwork on focus (the "Posters" card style has no glass surface, so the
-        /// focus visual is this ring rather than a lifted glass card). Base
-        /// standard-density value; density-scaled in `PlozzMetrics`.
-        public static let borderlessFocusOutlineWidth: CGFloat = 5
         /// Extra vertical gap pushed between a borderless card's artwork and its
         /// caption while focused, so the growing (scaled) poster doesn't crowd its
         /// title. Base value; density-scaled in `PlozzMetrics` so it tracks the

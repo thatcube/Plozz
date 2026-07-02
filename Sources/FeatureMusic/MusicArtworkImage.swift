@@ -194,6 +194,10 @@ struct MusicCard: View {
                 horizontalInset: metrics.landscapeCaptionInset
             )
             .frame(width: scaledWidth)
+            // Push the caption down on focus with a pure transform (see
+            // `borderlessCaptionSpacing`) so the footprint stays fixed and focusing
+            // a tile never shifts the grid/row.
+            .offset(y: isFocused ? 0 : -metrics.borderlessCaptionFocusPush)
         }
         .padding(.horizontal, metrics.borderlessCardSideMargin)
         .focusableCard(isFocused: $isFocused, cornerRadius: metrics.landscapeCardCornerRadius, action: action)
@@ -202,10 +206,12 @@ struct MusicCard: View {
         .animation(.easeOut(duration: 0.18), value: isFocused)
     }
 
-    /// Artwork↔caption gap for the borderless music card, pushed down while
-    /// focused so the scaled poster clears its title (density-scaled).
+    /// Artwork↔caption gap for the borderless music card. Always reserved at its
+    /// focused size (base + density-scaled push); the caption rides up when
+    /// unfocused via a transform offset, so the tile's footprint never changes with
+    /// focus and neighbours don't move.
     private var borderlessCaptionSpacing: CGFloat {
-        metrics.landscapeCaptionTopSpacing + (isFocused ? metrics.borderlessCaptionFocusPush : 0)
+        metrics.landscapeCaptionTopSpacing + metrics.borderlessCaptionFocusPush
     }
 
     @ViewBuilder

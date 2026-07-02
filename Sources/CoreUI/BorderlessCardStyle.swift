@@ -7,14 +7,20 @@ import SwiftUI
 /// pixel-identical.
 public extension View {
     /// Applies the borderless card's focus treatment to an already-clipped
-    /// artwork view: a crisp **outline** hugging the rounded artwork edge, a soft
-    /// lift shadow, and the focus scale — all animating in together on focus.
+    /// artwork view — the **same** liquid-glass focus surface the circular artist /
+    /// cast tiles use (`CircularFocusHalo` → `plozzGlassCard`), so the two share one
+    /// theme-aware, translucent, Reduce-Transparency-aware focus look instead of a
+    /// bespoke ring.
     ///
-    /// The outline is an `overlay` drawn *before* the `scaleEffect`, so it scales
-    /// with the artwork and always frames the card exactly (a real outline around
-    /// the card, never a detached ring behind it). It's outset by its own width so
-    /// it sits just outside the artwork edge, concentric with the corner. At rest
-    /// there is no surface or ring at all — just the artwork.
+    /// On focus a `plozzGlassCard` blooms *around* the artwork as a concentric
+    /// band: it's drawn in the **background** (so it never changes layout) and
+    /// extended `circleFocusPadding` beyond every edge (exactly the artist halo's
+    /// clearance), with the opaque artwork on top masking the centre — leaving only
+    /// a soft glass frame + drop shadow. At rest there's no surface at all, just the
+    /// artwork. The whole thing scales together on focus so the frame keeps hugging
+    /// the artwork. This is a pure render treatment (`background` + `scaleEffect`);
+    /// it never alters the card's footprint, so focusing a card can't nudge the row
+    /// or its neighbours.
     func plozzBorderlessArtworkFocus(
         cornerRadius: CGFloat,
         focusScale: CGFloat,
@@ -36,19 +42,21 @@ private struct BorderlessArtworkFocusModifier: ViewModifier {
     @Environment(\.plozzMetrics) private var metrics
 
     func body(content: Content) -> some View {
-        let outline = metrics.borderlessFocusOutlineWidth
+        // Reuse the artist tiles' halo clearance verbatim so the borderless focus
+        // frame reads as the same family of focus treatment across the app.
+        let pad = metrics.circleFocusPadding
         content
-            .overlay {
-                // Concentric outset ring: the shape frame is grown by `outline` on
-                // every side (padding(-outline)) and its radius bumped to match, so
-                // `strokeBorder` paints the ring in the band immediately *outside*
-                // the artwork edge — framing it rather than covering the art.
-                RoundedRectangle(cornerRadius: cornerRadius + outline, style: .continuous)
-                    .strokeBorder(Color.white, lineWidth: outline)
-                    .padding(-outline)
+            .background {
+                // The shared liquid-glass focus surface, bloomed into a band around
+                // the artwork: sized to the artwork by `.background`, then grown
+                // `pad` beyond every edge with negative padding (backgrounds draw
+                // outside the content bounds), its radius bumped to stay concentric.
+                Color.clear
+                    .plozzGlassCard(cornerRadius: cornerRadius + pad, isFocused: true)
+                    .padding(-pad)
+                    .shadow(color: .black.opacity(0.36), radius: 20, y: 10)
                     .opacity(isFocused ? 1 : 0)
             }
-            .shadow(color: .black.opacity(isFocused ? 0.35 : 0), radius: 18, y: 8)
             .scaleEffect(isFocused ? focusScale : 1)
     }
 }

@@ -620,41 +620,46 @@ struct PlayerControls: View {
         styleFamily: Bool,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        let scroll = ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                content()
-            }
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: PanelBodyHeightKey.self, value: proxy.size.height)
-                }
-            )
+        let body = VStack(alignment: .leading, spacing: 0) {
+            content()
         }
-        .scrollIndicators(.hidden)
-        // The Style editor never scrolls (it grows to full height); disabling scroll
-        // keeps the height morph a clean top-down clip reveal with no bounce.
-        .scrollDisabled(styleFamily)
+        // Equal top/bottom gutter so the first/last row's focus card sits the same
+        // distance from the panel edge as its left/right gutter (18) — see the row
+        // style's concentric card inset.
+        .padding(.vertical, 18)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: PanelBodyHeightKey.self, value: proxy.size.height)
+            }
+        )
 
         if styleBodyHeight > 0 {
-            scroll.frame(
+            ScrollView {
+                body
+            }
+            .scrollIndicators(.hidden)
+            // The Style editor never scrolls (it grows to full height); disabling
+            // scroll keeps the height morph a clean top-down clip reveal with no
+            // bounce.
+            .scrollDisabled(styleFamily)
+            .frame(
                 height: styleFamily ? styleBodyHeight : min(styleBodyHeight, Self.panelBodyMaxHeight),
                 alignment: .top
             )
         } else {
-            // Pre-measurement (first frame of a fresh open, always the track list —
-            // the Style editor is only ever reached from it, so styleBodyHeight is
-            // already set by then). Size the ScrollView to its content but clamp to
-            // the cap, so it spawns at min(content, cap): a short list appears short,
-            // a long (30-track) list appears at the capped height — neither one
-            // renders at the wrong height and then visibly snaps/shrinks. A framed
-            // ScrollView alone is greedy (fills the cap → short lists shrink); a bare
-            // fixedSize alone overshoots (long lists spawn huge → shrink). The
-            // GeometryReader inside still measures the true content height for the
-            // handoff to the measured branch, so scrolling works once open.
-            scroll
-                .fixedSize(horizontal: false, vertical: true)
+            // Pre-measurement (first frame of a fresh open — always the track list,
+            // as the Style editor is only reached from it). Render the body directly
+            // as a plain VStack, clamped to the cap: `.frame(maxHeight:)` around a
+            // naturally-sized VStack reports min(content, cap), so the panel spawns at
+            // the right height for BOTH a short list (appears short) and a long
+            // 30-track list (appears at the cap) — no wrong-height first frame that
+            // then snaps/shrinks. (A framed ScrollView here is greedy and fills the
+            // cap → short lists shrink; a bare fixedSize ScrollView overshoots → long
+            // lists shrink. A plain VStack sizes to min correctly and avoids both.)
+            // The GeometryReader still reports the true height for the handoff to the
+            // scrolling branch, which then enables scrolling for over-cap lists.
+            body
                 .frame(maxHeight: Self.panelBodyMaxHeight, alignment: .top)
                 .clipped()
         }

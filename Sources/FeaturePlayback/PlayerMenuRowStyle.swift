@@ -30,14 +30,16 @@ private struct PlayerMenuRowBody: View {
             .environment(\.playerMenuRowIsFocused, isFocused)
             .foregroundStyle(isFocused ? AnyShapeStyle(Color.black) : AnyShapeStyle(.primary))
             .background(
-                // Inset the fitted card a hair within the full-width row so it
-                // carries an EQUAL, minimal gutter on both sides — wide enough that
-                // the highlight reads as covering the row evenly rather than a
-                // narrow pill floating off-centre. Text stays anchored by the row's
-                // own padding, so titles still line up under the section header.
+                // Concentric focus card: inset 4 within the row (which already sits
+                // 14 from the panel edge) → an 18 gutter on every side, matching the
+                // header chips. With the panel's 32 corner, a 14 radius (32 − 18)
+                // makes the card corners share a centre with the panel's, and the
+                // equal gutter keeps an edge row equidistant from top/bottom/left/
+                // right. Text stays anchored by the row's own padding so titles still
+                // line up under the section header.
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(isFocused ? Color.white : Color.clear)
-                    .padding(.horizontal, 2)
+                    .padding(.horizontal, 4)
             )
             .opacity(configuration.isPressed ? 0.9 : 1)
             // Switch color + fill INSTANTLY on focus change. An animated fade

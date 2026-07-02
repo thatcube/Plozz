@@ -770,6 +770,19 @@ struct PlayerControls: View {
                 )
             }
         )
+        // Hard-swap the panel *content* on the tracks↔Style flip instead of
+        // cross-fading it. `styleEditing` toggles ONLY on tracks→Style, and the
+        // ambient `.animation(.easeInOut, value: styleEditing)` up in `body` would
+        // otherwise capture this content-identity change and dissolve the track
+        // list into the Style editor (the two ghost over each other, and the taller
+        // editor spills past the still-growing box). Nil-ing animation for
+        // styleEditing-driven changes on THIS subtree makes the rows swap instantly
+        // — exactly how the Style *sub-screen* morphs already behave (they don't flip
+        // styleEditing, so they never cross-fade). Only the box height then animates,
+        // via the explicit `withAnimation` in `onPreferenceChange`: "animate the
+        // container, not what's inside." The Spacer/transport layout flip keeps its
+        // animation because that lives on `body`, above this override.
+        .animation(nil, value: styleEditing)
 
         if styleBodyHeight > 0 {
             ScrollView {

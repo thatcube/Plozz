@@ -952,7 +952,12 @@ extension PlexProvider: ResumeStateWriting {
     /// reported `/:/timeline?state=stopped`, which **ends the session** and would
     /// snap a concurrent now-playing dashboard to 0:00 — the bug this avoids. A
     /// position of `0` clears the resume point.
-    public func setResumePosition(_ seconds: TimeInterval, itemID: String) async throws {
+    /// `capturedAt` (the play's real time) is accepted for protocol parity but not
+    /// forwarded: Plex's `/:/progress` stamps its own server-side view timestamp
+    /// and exposes no field to backdate it, so an offline-drained Plex write always
+    /// converges at the server's clock. (Jellyfin, which *does* accept a
+    /// `LastPlayedDate`, honours `capturedAt` — see its `ResumeStateWriting`.)
+    public func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date = Date()) async throws {
         try await client.reportProgress(
             ratingKey: itemID,
             timeMs: PlexTime.milliseconds(fromSeconds: max(seconds, 0))

@@ -13,7 +13,10 @@ public protocol WatchMutationApplying: Sendable {
     /// Marks `target` played/unplayed on its server (addressed by `target.itemID`).
     func setPlayed(_ played: Bool, on target: WatchMutationTarget) async throws
     /// Writes a resume position (seconds) to `target`'s server, session-lessly.
-    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget) async throws
+    /// `capturedAt` is the play's real timestamp (see ``ResumeStateWriting``), used
+    /// for the server's recency stamp so an offline-drained write doesn't falsely
+    /// float a stale title to the top of Continue Watching.
+    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget, capturedAt: Date) async throws
     /// Mirrors a finished watch to Trakt.
     func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws
     /// Mirrors a finished watch to Simkl.
@@ -285,10 +288,10 @@ public actor WatchStateReconciler {
                     outcome += "setPlayed(\(played))=OK "
                 }
                 if let resume = mutation.resumePosition {
-                    try await applier.setResumePosition(resume, on: target)
+                    try await applier.setResumePosition(resume, on: target, capturedAt: mutation.capturedAt)
                     outcome += "setResume(\(Int(resume)))=OK"
                 } else if mutation.clearResume {
-                    try await applier.setResumePosition(0, on: target)
+                    try await applier.setResumePosition(0, on: target, capturedAt: mutation.capturedAt)
                     outcome += "clearResume=OK"
                 }
                 FanoutDiagnostics.emit(FanoutDiagnostics.drainTargetLine(

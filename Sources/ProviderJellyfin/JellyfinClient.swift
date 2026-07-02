@@ -439,7 +439,7 @@ public struct JellyfinClient: Sendable {
     ///
     /// Available on Jellyfin **10.9+**. Older servers (10.8) lack this endpoint
     /// and return `404`/``AppError/notFound``; the caller handles that fallback.
-    func updatePlaybackPosition(_ seconds: TimeInterval, userID: String, itemID: String) async throws {
+    func updatePlaybackPosition(_ seconds: TimeInterval, userID: String, itemID: String, lastPlayedAt: Date = Date()) async throws {
         var endpoint = Endpoint(
             method: .post,
             path: "/UserItems/\(itemID)/UserData",
@@ -448,7 +448,7 @@ public struct JellyfinClient: Sendable {
         )
         endpoint = try endpoint.jsonBody(UpdateUserItemDataBody(
             PlaybackPositionTicks: JellyfinTicks.ticks(fromSeconds: max(seconds, 0)),
-            LastPlayedDate: JellyfinDate.iso8601(from: Date())
+            LastPlayedDate: JellyfinDate.iso8601(from: lastPlayedAt)
         ))
         _ = try await http.send(endpoint, baseURL: baseURL)
     }

@@ -77,7 +77,7 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
         try await watch.setPlayed(played, itemID: target.itemID)
     }
 
-    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget) async throws {
+    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget, capturedAt: Date) async throws {
         guard let provider = await resolveProvider(target.accountID) else {
             FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=nil (unreachable/unresolved, will retry)")
             throw AppError.serverUnreachable
@@ -86,7 +86,7 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
             FanoutDiagnostics.emit("write.setResume acct=\(target.accountID) item=\(target.itemID) -> provider=\(provider.kind.rawValue) NOT ResumeStateWriting (no write, treated success)")
             return
         }
-        try await resumeWriter.setResumePosition(seconds, itemID: target.itemID)
+        try await resumeWriter.setResumePosition(seconds, itemID: target.itemID, capturedAt: capturedAt)
     }
 
     func scrobbleTrakt(_ intent: TraktScrobbleIntent) async throws {

@@ -24,7 +24,7 @@ private final class FakeWatchApplier: WatchMutationApplying, @unchecked Sendable
         lock.lock(); playedWrites.append(.init(played: played, accountID: target.accountID, itemID: target.itemID)); lock.unlock()
     }
 
-    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget) async throws {
+    func setResumePosition(_ seconds: TimeInterval, on target: WatchMutationTarget, capturedAt: Date) async throws {
         if failingAccounts.contains(target.accountID) { throw AppError.serverUnreachable }
         lock.lock(); resumeWrites.append(.init(seconds: seconds, accountID: target.accountID, itemID: target.itemID)); lock.unlock()
     }

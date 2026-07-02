@@ -283,22 +283,38 @@ public struct HomeAggregator: Sendable {
         return Array(merged.prefix(limit))
     }
 
-    /// Stable descending sort by ``MediaItem/lastPlayedAt``: timestamped cards
-    /// newest-first, untimestamped cards after them, **preserving the round-robin
-    /// interleave order for ties**.
+    /// Stable descending sort by an **effective** recency that carries the last
+    /// seen timestamp forward onto untimestamped cards.
     ///
-    /// Swift's `sort` is not guaranteed stable, so we sort the *enumerated* array
-    /// and break every tie (equal timestamps, or two untimestamped cards) by the
-    /// original interleave index. That makes this a true stable sort layered on
-    /// top of recency: the most-recently-watched title is always first, and
-    /// anything the merge couldn't rank by recency keeps the deterministic
-    /// round-robin order `interleave(_:)` already produced from the (stable)
-    /// account order. Using the interleave index rather than the raw pre-sort
-    /// offset of an unstable `sort` is what stops the Continue Watching tail from
-    /// reshuffling between launches when nothing was actually watched.
+    /// Continue Watching feeds arrive newest-first, and each "Next Up" suggestion
+    /// sits right below the in-progress episode whose series spawned it — but those
+    /// suggestions carry no play timestamp of their own (`lastPlayedAt == nil`). A
+    /// naive "timestamped first, nil last" sort dumps every suggestion beneath every
+    /// timestamped card *from every server*, so the next episode of the show you
+    /// just finished sinks below week-old progress on another server — exactly the
+    /// "Continue Watching is different from what I watched last" symptom.
+    ///
+    /// Instead each untimestamped card inherits the recency of the most-recent
+    /// timestamped card **above it in the incoming order** (carry-forward), so a
+    /// suggestion travels with its series' recency through the cross-server merge.
+    /// *Leading* untimestamped cards (nothing timestamped above them yet) keep no
+    /// anchor and still fall after timestamped cards.
+    ///
+    /// The sort is stable (equal effective recency breaks by the original offset)
+    /// **and idempotent**: re-running it over an already-sorted row reproduces the
+    /// same order, so an identity-index warm / re-merge (``reenrich``) never
+    /// reshuffles Continue Watching when nothing was actually watched.
     static func sortedByRecency(_ items: [MediaItem]) -> [MediaItem] {
-        return items.enumerated().sorted { lhs, rhs in
-            switch (lhs.element.lastPlayedAt, rhs.element.lastPlayedAt) {
+        var carry: Date? = nil
+        let keyed = items.enumerated().map { offset, element -> (offset: Int, element: MediaItem, effective: Date?) in
+            if let timestamp = element.lastPlayedAt {
+                carry = timestamp
+                return (offset, element, timestamp)
+            }
+            return (offset, element, carry)
+        }
+        return keyed.sorted { lhs, rhs in
+            switch (lhs.effective, rhs.effective) {
             case let (l?, r?):
                 if l != r { return l > r }
                 return lhs.offset < rhs.offset

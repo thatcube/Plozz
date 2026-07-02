@@ -1005,9 +1005,9 @@ extension JellyfinProvider: ResumeStateWriting {
     /// silently dropped (durability / never-drop). Documented caveat: on that
     /// older-server fallback only, a convergence write can still disturb a
     /// concurrent live session of the same title.
-    public func setResumePosition(_ seconds: TimeInterval, itemID: String) async throws {
+    public func setResumePosition(_ seconds: TimeInterval, itemID: String, capturedAt: Date = Date()) async throws {
         do {
-            try await client.updatePlaybackPosition(max(seconds, 0), userID: session.userID, itemID: itemID)
+            try await client.updatePlaybackPosition(max(seconds, 0), userID: session.userID, itemID: itemID, lastPlayedAt: capturedAt)
         } catch AppError.notFound {
             let progress = PlaybackProgress(
                 itemID: itemID,

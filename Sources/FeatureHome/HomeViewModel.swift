@@ -179,7 +179,21 @@ public final class HomeViewModel {
             let now = Date()
             let stamped = content.continueWatching.map { item -> MediaItem in
                 var updated = apply(mutation, to: item)
-                if mutation.targets(item) { updated.lastPlayedAt = now }
+                if mutation.targets(item) {
+                    updated.lastPlayedAt = now
+                    // Also stamp the played source ref(s) so a subsequent
+                    // cross-server re-merge folds `now` back onto the card via
+                    // `unifiedWatchState` (most-recent-wins) instead of reverting
+                    // the card's recency to the source's pre-play timestamp.
+                    if !updated.sources.isEmpty {
+                        updated.sources = updated.sources.map { ref in
+                            guard mutation.itemIDs.contains(ref.itemID) else { return ref }
+                            var r = ref
+                            r.lastPlayedAt = now
+                            return r
+                        }
+                    }
+                }
                 return updated
             }
             content.continueWatching = HomeAggregator.sortedByRecency(stamped)

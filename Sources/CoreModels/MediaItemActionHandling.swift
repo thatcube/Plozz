@@ -113,6 +113,24 @@ public struct MediaItemMutation: Sendable, Equatable {
         if let favorite { copy.isFavorite = favorite }
         if let resumePosition { copy.resumePosition = resumePosition > 0 ? resumePosition : nil }
         if let playedPercentage { copy.playedPercentage = playedPercentage }
+        // Fold the change into the matching cross-server source ref(s) as well.
+        // The top-level watch-state above is authoritative for the card *now*, but
+        // a later cross-server re-merge (`MediaItemMerger.mergeGroup`) rebuilds the
+        // top-level state from `sources` via `unifiedWatchState`. If we only touch
+        // the top level, that re-fold reverts the change to each source's stale
+        // pre-mutation state — the "Continue Watching card snaps back" bug. Keeping
+        // the played source(s) in sync means the fold preserves the mutation.
+        if !copy.sources.isEmpty {
+            copy.sources = copy.sources.map { ref in
+                guard itemIDs.contains(ref.itemID) else { return ref }
+                var updated = ref
+                if let played { updated.isPlayed = played }
+                if let favorite { updated.isFavorite = favorite }
+                if let resumePosition { updated.resumePosition = resumePosition > 0 ? resumePosition : nil }
+                if let playedPercentage { updated.playedPercentage = playedPercentage }
+                return updated
+            }
+        }
         return copy
     }
 

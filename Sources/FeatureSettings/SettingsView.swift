@@ -515,7 +515,7 @@ public struct SettingsView: View {
                         Label("Edit", systemImage: "pencil")
                     }
                     Button(action: onSwitchProfile) {
-                        Label("Switch Profile", systemImage: "person.2.circle")
+                        Text("Switch Profile")
                     }
                 }
             }

@@ -1291,7 +1291,7 @@ struct PlayerControls: View {
         rows.append(numberRow(slot, "Text Size", options: Self.sizeOptions, current: Int((s.fontScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.fontScale = Double(v) / 100 } }); slot += 1
         rows.append(numberRow(slot, "Position", options: Self.positionOptions, current: Int((s.verticalPosition * 100).rounded()), label: Self.positionLabel) { v in updateStyle { $0.verticalPosition = Double(v) / 100 } }); slot += 1
         rows.append(numberRow(slot, "Horizontal Offset", options: Self.hOffsetOptions, current: Int((s.horizontalOffset * 100).rounded()), label: Self.hOffsetLabel) { v in updateStyle { $0.horizontalOffset = Double(v) / 100 } }); slot += 1
-        rows.append(colorRow(slot, "Text Colour", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } }); slot += 1
+        rows.append(colorRow(slot, "Text Color", options: Self.textColorOptions, current: s.textColor, label: Self.colorLabel) { c in updateStyle { $0.textColor = c } }); slot += 1
         rows.append(numberRow(slot, "Opacity", options: Self.opacityOptions, current: Int((s.opacity * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.opacity = Double(v) / 100 } }); slot += 1
         // Only affects HDR frames, so it appears exclusively while HDR is live —
         // mirroring how the bitmap-primary gate hides controls that can't act.
@@ -1375,13 +1375,13 @@ struct PlayerControls: View {
 
         rows.append(choiceRow(slot, "Shadow", options: Self.shadowStyleOptions, current: s.edge.style, label: { $0.displayName }) { v in updateStyle { $0.edge.style = v } }); slot += 1
         if s.edge.style != .none {
-            rows.append(colorRow(slot, "Shadow Colour", options: Self.textColorOptions, current: s.edge.color, label: Self.colorLabel) { c in updateStyle { $0.edge.color = c } }); slot += 1
+            rows.append(colorRow(slot, "Shadow Color", options: Self.textColorOptions, current: s.edge.color, label: Self.colorLabel) { c in updateStyle { $0.edge.color = c } }); slot += 1
             rows.append(numberRow(slot, "Shadow Thickness", options: Self.thicknessOptions, current: Int(s.edge.thickness.rounded()), label: { "\($0)" }) { v in updateStyle { $0.edge.thickness = Double(v) } }); slot += 1
         }
 
         rows.append(StyleRowSpec(slot: slot, title: "Outline", kind: .toggle(isOn: s.border.isEnabled, flip: { updateStyle { $0.border.isEnabled.toggle() } }))); slot += 1
         if s.border.isEnabled {
-            rows.append(colorRow(slot, "Outline Colour", options: Self.textColorOptions, current: s.border.color, label: Self.colorLabel) { c in updateStyle { $0.border.color = c } }); slot += 1
+            rows.append(colorRow(slot, "Outline Color", options: Self.textColorOptions, current: s.border.color, label: Self.colorLabel) { c in updateStyle { $0.border.color = c } }); slot += 1
             rows.append(numberRow(slot, "Outline Width", options: Self.thicknessOptions, current: Int(s.border.width.rounded()), label: { "\($0)" }) { v in updateStyle { $0.border.width = Double(v) } }); slot += 1
         }
         return rows
@@ -1398,7 +1398,7 @@ struct PlayerControls: View {
         // (matching the Outline and Dual screens' gating).
         guard s.background.isEnabled else { return rows }
         var slot = 1
-        rows.append(colorRow(slot, "Colour", options: Self.boxColorOptions, current: s.background.color, label: Self.boxColorLabel) { c in updateStyle { $0.background.color = c } }); slot += 1
+        rows.append(colorRow(slot, "Color", options: Self.boxColorOptions, current: s.background.color, label: Self.boxColorLabel) { c in updateStyle { $0.background.color = c } }); slot += 1
         rows.append(numberRow(slot, "Box Opacity", options: Self.boxOpacityOptions, current: Int((s.background.color.alpha * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.background.color.alpha = Double(v) / 100 } }); slot += 1
         rows.append(numberRow(slot, "Corner Radius", options: Self.cornerOptions, current: Int(s.background.cornerRadius.rounded()), label: Self.cornerLabel) { v in updateStyle { $0.background.cornerRadius = Double(v) } }); slot += 1
         rows.append(numberRow(slot, "Horizontal Padding", options: Self.paddingOptions, current: Int(s.background.horizontalPadding.rounded()), label: { "\($0)" }) { v in updateStyle { $0.background.horizontalPadding = Double(v) } }); slot += 1
@@ -1460,7 +1460,7 @@ struct PlayerControls: View {
             // they're not dead controls.
             if sec.differentiate {
                 rows.append(numberRow(slot, "Size", options: Self.secondarySizeOptions, current: Int((sec.relativeScale * 100).rounded()), label: { "\($0)%" }) { v in updateStyle { $0.secondary?.relativeScale = Double(v) / 100 } }); slot += 1
-                rows.append(colorRow(slot, "Colour", options: Self.textColorOptions, current: sec.textColor, label: Self.colorLabel) { c in updateStyle { $0.secondary?.textColor = c } }); slot += 1
+                rows.append(colorRow(slot, "Color", options: Self.textColorOptions, current: sec.textColor, label: Self.colorLabel) { c in updateStyle { $0.secondary?.textColor = c } }); slot += 1
             }
             rows.append(numberRow(slot, "Gap", options: Self.gapOptions, current: Int(sec.gap.rounded()), label: { "\($0)" }) { v in updateStyle { $0.secondary?.gap = Double(v) } }); slot += 1
         }

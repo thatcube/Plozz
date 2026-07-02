@@ -26,12 +26,22 @@ public struct SubtitleColor: Codable, Equatable, Sendable, Hashable {
     public static let white = SubtitleColor(red: 1, green: 1, blue: 1)
     public static let black = SubtitleColor(red: 0, green: 0, blue: 0)
     public static let yellow = SubtitleColor(red: 1, green: 0.85, blue: 0)
+    public static let lightGray = SubtitleColor(red: 0.78, green: 0.78, blue: 0.78)
+    public static let cyan = SubtitleColor(red: 0.25, green: 0.85, blue: 1)
+    public static let pink = SubtitleColor(red: 1, green: 0.55, blue: 0.75)
+    public static let orange = SubtitleColor(red: 1, green: 0.6, blue: 0.15)
+    public static let green = SubtitleColor(red: 0.45, green: 0.85, blue: 0.45)
     public static let clear = SubtitleColor(red: 0, green: 0, blue: 0, alpha: 0)
 
     /// The curated palette offered by the appearance editor's colour picker.
     public static let presets: [(name: String, color: SubtitleColor)] = [
         ("White", .white),
         ("Yellow", .yellow),
+        ("Light Gray", .lightGray),
+        ("Cyan", .cyan),
+        ("Pink", .pink),
+        ("Orange", .orange),
+        ("Green", .green),
         ("Black", .black)
     ]
 

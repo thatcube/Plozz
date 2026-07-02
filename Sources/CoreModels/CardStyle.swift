@@ -36,5 +36,5 @@ public enum CardStyle: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    public static let `default`: CardStyle = .framed
+    public static let `default`: CardStyle = .borderless
 }

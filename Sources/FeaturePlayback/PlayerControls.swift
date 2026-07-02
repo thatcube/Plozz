@@ -1133,10 +1133,7 @@ struct PlayerControls: View {
     /// app's overlay owns the active subtitle, so the chip that opens it is gated
     /// the same way.
     private var subtitleSyncScreen: some View {
-        VStack(spacing: 16) {
-            Text("Delay")
-                .font(.title3.weight(.medium))
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(spacing: 20) {
             delayStepper(
                 value: model.subtitleDelaySeconds,
                 minusSlot: 0,
@@ -1153,7 +1150,7 @@ struct PlayerControls: View {
                 .animation(.easeInOut(duration: 0.15), value: model.subtitleDelaySeconds)
         }
         .padding(.horizontal, 28)
-        .padding(.vertical, 6)
+        .padding(.vertical, 28)
     }
 
     /// A compact − / value / + stepper for the subtitle-sync screen. The ± are
@@ -2193,9 +2190,11 @@ struct PlayerControls: View {
     }
 
     static func delayLabel(_ seconds: TimeInterval) -> String {
-        let ms = Int((seconds * 1000).rounded())
-        if ms == 0 { return "0 ms" }
-        return ms > 0 ? "+\(ms) ms" : "\(ms) ms"
+        // Seconds with two decimals: matches the 50 ms step (0.05 increments) and
+        // reads cleaner at TV distance than a 4-digit millisecond value.
+        let rounded = (seconds * 100).rounded() / 100
+        if rounded == 0 { return "0.00s" }
+        return String(format: rounded > 0 ? "+%.2fs" : "%.2fs", rounded)
     }
 
     /// Human explanation of the current subtitle delay, shown under the sync
@@ -2203,14 +2202,14 @@ struct PlayerControls: View {
     /// actual result (positive delay = subtitles show later than the audio),
     /// which resolves the perennial "does + make them earlier or later?" confusion.
     static func subtitleSyncHint(_ seconds: TimeInterval) -> String {
-        let ms = Int((seconds * 1000).rounded())
-        if ms == 0 {
+        let rounded = (seconds * 100).rounded() / 100
+        if rounded == 0 {
             return "− shows subtitles earlier · + shows them later"
         }
-        let magnitude = abs(ms)
-        return ms > 0
-            ? "Subtitles show \(magnitude) ms later than the audio"
-            : "Subtitles show \(magnitude) ms earlier than the audio"
+        let magnitude = String(format: "%.2f", abs(rounded))
+        return rounded > 0
+            ? "Subtitles show \(magnitude)s later than the audio"
+            : "Subtitles show \(magnitude)s earlier than the audio"
     }
 
     static func timeLabel(_ seconds: TimeInterval) -> String {

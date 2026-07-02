@@ -127,10 +127,17 @@ public enum CrossServerSourceResolver {
                             accountHits.append(hit.taggingSource(accountID))
                         }
                         // Strong-id match found → further title queries are
-                        // redundant for this account; stop probing it.
+                        // redundant for this account; stop probing it. Require the
+                        // hit to be the **same kind** as the primary: TMDb/TVDb
+                        // reuse one integer id space across movies and series, so a
+                        // wrong-kind hit sharing id 550 must NOT satisfy the abort
+                        // (the kind-scoped merge would discard it anyway) or we'd
+                        // stop before finding the real same-kind twin on this
+                        // account and drop it from the picker.
                         if !primaryStrongIDs.isEmpty,
                            accountHits.contains(where: {
-                               !primaryStrongIDs.isDisjoint(with: MediaItemIdentity.identities(for: $0))
+                               $0.kind == primary.kind
+                                   && !primaryStrongIDs.isDisjoint(with: MediaItemIdentity.identities(for: $0))
                            }) {
                             break
                         }

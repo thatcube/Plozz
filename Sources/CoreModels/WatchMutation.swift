@@ -149,6 +149,16 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
     /// these identities (movie / series index union).
     public var identities: [MediaIdentity]
 
+    /// The played title's media **kind** (movie / series), persisted so the
+    /// identity fan-out at drain time can scope the eager index lookup to the same
+    /// kind. TMDb/TVDb reuse one integer id space across movies and series
+    /// (movie 550 ≠ tv 550), so an unscoped union could fan a movie's watched-write
+    /// out to a *series* on another server that merely shares the id. `nil` for
+    /// mutations enqueued before this field existed — treated as "don't scope" so a
+    /// legacy queued write keeps its prior (unscoped) behaviour rather than
+    /// silently fanning out to nothing.
+    public var kind: MediaItemKind?
+
     public init(
         id: UUID = UUID(),
         capturedAt: Date,
@@ -164,6 +174,7 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         episodeOrigin: EpisodeOrigin? = nil,
         expansionPending: Bool = false,
         identities: [MediaIdentity] = [],
+        kind: MediaItemKind? = nil,
         simklPending: Bool? = nil,
         anilistPending: Bool? = nil,
         malPending: Bool? = nil
@@ -186,6 +197,7 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         self.episodeOrigin = episodeOrigin
         self.expansionPending = expansionPending
         self.identities = identities
+        self.kind = kind
     }
 
     // MARK: - Codable (back-compatible)
@@ -194,12 +206,12 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         case id, capturedAt, canonicalMediaID, seasonNumber, episodeNumber
         case resumePosition, played, clearResume, targets, trakt, traktPending
         case simklPending, anilistPending, malPending
-        case attempts, episodeOrigin, expansionPending, identities
+        case attempts, episodeOrigin, expansionPending, identities, kind
     }
 
     /// Decodes tolerating outbox files written before `episodeOrigin` /
-    /// `expansionPending` / `identities` / tracker pending flags existed (they
-    /// decode to `nil` / `false` / `[]`), so an in-app upgrade never drops a
+    /// `expansionPending` / `identities` / `kind` / tracker pending flags existed
+    /// (they decode to `nil` / `false` / `[]`), so an in-app upgrade never drops a
     /// queued watch. `encode(to:)` is synthesized.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -221,6 +233,7 @@ public struct WatchMutation: Codable, Hashable, Sendable, Identifiable {
         episodeOrigin = try container.decodeIfPresent(EpisodeOrigin.self, forKey: .episodeOrigin)
         expansionPending = try container.decodeIfPresent(Bool.self, forKey: .expansionPending) ?? false
         identities = try container.decodeIfPresent([MediaIdentity].self, forKey: .identities) ?? []
+        kind = try container.decodeIfPresent(MediaItemKind.self, forKey: .kind)
     }
 
     /// Title-level key used to COALESCE queued mutations (latest wins, targets

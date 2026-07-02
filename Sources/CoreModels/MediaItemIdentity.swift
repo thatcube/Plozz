@@ -36,19 +36,39 @@ public enum MediaIdentity: Hashable, Sendable, Codable {
 /// so the safety carve-outs are encoded once, here, and exhaustively tested.
 public enum MediaItemIdentity {
     /// External id namespaces that uniquely identify a catalogue entry across
-    /// providers, in match-priority order. Lower-cased for case-insensitive
-    /// comparison against `MediaItem.providerIDs` keys.
-    public static let strongExternalSources = ["imdb", "tmdb", "tvdb"]
+    /// providers, in match-priority order, each paired with the canonical token
+    /// used as its merge key.
+    ///
+    /// Resolution goes through ``ProviderIDNamespace`` so every backend spelling
+    /// of a key collapses to one identity: `IMDb`/`imdb`, `Tmdb`/`tmdbid`,
+    /// `Tvdb`/`TheTvdb`, `AniList`/`anilistid`, `myanimelist`/`mal`, `anidb`, …
+    /// Anime namespaces are included so anime series — which frequently carry
+    /// **only** an AniList/MAL/AniDB/TVmaze id and no IMDb/TMDb/TVDb — still merge
+    /// across servers. Cross-kind false merges are impossible: an identity is only
+    /// a merge key *within one media kind* (see ``MediaItemMerger/merge(_:serverInfo:identitySources:)``),
+    /// and each of these ids is unique per work within its kind.
+    public static let strongExternalNamespaces: [(namespace: ProviderIDNamespace, canonical: String)] = [
+        (.imdb, "imdb"),
+        (.tmdb, "tmdb"),
+        (.tvdb, "tvdb"),
+        (.tvmaze, "tvmaze"),
+        (.aniList, "anilist"),
+        (.myAnimeList, "myanimelist"),
+        (.aniDB, "anidb")
+    ]
+
+    /// The canonical strong-external tokens (back-compat / diagnostics).
+    public static let strongExternalSources = strongExternalNamespaces.map(\.canonical)
 
     /// The candidate identities for an item, strongest first. Two items are the
     /// same title when *any* of their identities match.
     ///
     /// ## Safety rules (do not relax without new tests)
-    /// 1. **External ids win and suppress the title key.** An item with a
-    ///    TMDb/IMDb/TVDb id has a well-defined catalogue identity; adding a title
-    ///    key on top risks bridging two completely different shows that merely
-    ///    share a name/year via a false transitive merge (anime vs live-action
-    ///    remake with bad year metadata).
+    /// 1. **External ids win and suppress the title key.** An item with a strong
+    ///    external id has a well-defined catalogue identity; adding a title key on
+    ///    top risks bridging two completely different shows that merely share a
+    ///    name/year via a false transitive merge (anime vs live-action remake with
+    ///    bad year metadata).
     /// 2. **Title identity is movies-only.** Two films with the same title and
     ///    year are almost certainly the same release; two *series* with the same
     ///    name routinely are not (original vs reboot, anime vs live-action), and
@@ -64,16 +84,12 @@ public enum MediaItemIdentity {
     public static func identities(for item: MediaItem) -> [MediaIdentity] {
         var result: [MediaIdentity] = []
 
-        let normalizedIDs = Dictionary(
-            item.providerIDs.compactMap { key, value -> (String, String)? in
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : (key.lowercased(), trimmed.lowercased())
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        for source in strongExternalSources {
-            if let value = normalizedIDs[source] {
-                result.append(.external(source: source, value: value))
+        // Alias- and punctuation-insensitive resolution (`providerID(_:)`) so a
+        // backend that spells a key `TheTvdb`, `TMDb ID` or `myanimelist` still
+        // matches — the old plain-`.lowercased()` compare missed those.
+        for entry in strongExternalNamespaces {
+            if let value = item.providerIDs.providerID(entry.namespace) {
+                result.append(.external(source: entry.canonical, value: value.lowercased()))
             }
         }
 

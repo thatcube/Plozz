@@ -140,7 +140,8 @@ enum WatchMutationFactory {
             trakt: played ? traktIntent(for: item, progress: 100) : nil,
             episodeOrigin: episode.origin,
             expansionPending: episode.pending || identity.pending,
-            identities: identity.identities
+            identities: identity.identities,
+            kind: item.kind
         )
     }
 
@@ -169,7 +170,8 @@ enum WatchMutationFactory {
                 trakt: traktIntent(for: item, progress: 100),
                 episodeOrigin: episode.origin,
                 expansionPending: episode.pending || identity.pending,
-                identities: identity.identities
+                identities: identity.identities,
+                kind: item.kind
             )
         }
 
@@ -184,7 +186,8 @@ enum WatchMutationFactory {
             targets: targets,
             episodeOrigin: episode.origin,
             expansionPending: episode.pending || identity.pending,
-            identities: identity.identities
+            identities: identity.identities,
+            kind: item.kind
         )
     }
 }

@@ -150,7 +150,17 @@ struct AppShellWatchMutationApplier: WatchMutationApplying {
     /// error, and the origin target is written regardless.
     private func expandIdentityTargets(for mutation: WatchMutation) async -> WatchTargetExpansion {
         guard !mutation.identities.isEmpty else { return .none }
-        let targets = indexedSources(mutation.identities).map(\.target)
+        // TMDb/TVDb reuse one integer id space across movies and series
+        // (movie 550 ≠ tv 550), so an unscoped index union could fan a movie's
+        // watched-write out to a *series* on another server that merely shares the
+        // id (and vice-versa). Scope the union to the played title's kind when it's
+        // known. Legacy mutations (nil kind, enqueued before this field existed)
+        // keep the prior unscoped behaviour so a queued write is never dropped.
+        let allSources = indexedSources(mutation.identities)
+        let scopedSources = mutation.kind.map { kind in
+            allSources.filter { $0.kind == kind }
+        } ?? allSources
+        let targets = scopedSources.map(\.target)
         let everyAccount = Set(await allAccountIDs())
         // Conclusive only once every active account has been indexed at least once
         // (the union can still grow until then), unless we've exhausted the attempt

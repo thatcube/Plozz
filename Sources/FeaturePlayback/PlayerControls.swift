@@ -643,14 +643,20 @@ struct PlayerControls: View {
                 alignment: .top
             )
         } else {
-            // Pre-measurement (first frame of a fresh open): size the ScrollView to
-            // its content instead of framing it — a framed ScrollView is greedy and
-            // fills the whole cap (e.g. 440), then snaps down to the measured height,
-            // which reads as the panel visibly shrinking right after it appears. A
-            // content-sized ScrollView spawns at the correct height. (A very long
-            // track list may exceed the cap for a single frame before the measured
-            // height clamps + enables scroll — imperceptible and rare.)
-            scroll.fixedSize(horizontal: false, vertical: true)
+            // Pre-measurement (first frame of a fresh open, always the track list —
+            // the Style editor is only ever reached from it, so styleBodyHeight is
+            // already set by then). Size the ScrollView to its content but clamp to
+            // the cap, so it spawns at min(content, cap): a short list appears short,
+            // a long (30-track) list appears at the capped height — neither one
+            // renders at the wrong height and then visibly snaps/shrinks. A framed
+            // ScrollView alone is greedy (fills the cap → short lists shrink); a bare
+            // fixedSize alone overshoots (long lists spawn huge → shrink). The
+            // GeometryReader inside still measures the true content height for the
+            // handoff to the measured branch, so scrolling works once open.
+            scroll
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxHeight: Self.panelBodyMaxHeight, alignment: .top)
+                .clipped()
         }
     }
 

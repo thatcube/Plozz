@@ -92,8 +92,8 @@ public struct PosterCardView: View {
                 .aspectRatio(2.0 / 3.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .overlay { artwork }
-                .overlay(alignment: .topTrailing) { watchedBadge }
-                .overlay(alignment: .bottom) { progressBar(height: 12) }
+                .overlay(alignment: .topTrailing) { watchedBadge(inset: 8) }
+                .overlay(alignment: .bottom) { progressBar(height: 12, inset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.posterArtCornerRadius)
 
@@ -127,8 +127,8 @@ public struct PosterCardView: View {
         VStack(alignment: .leading, spacing: metrics.landscapeCaptionTopSpacing) {
             artwork
                 .frame(width: size.width, height: size.height)
-                .overlay(alignment: .topTrailing) { watchedBadge }
-                .overlay(alignment: .bottom) { progressBar(height: 12) }
+                .overlay(alignment: .topTrailing) { watchedBadge(inset: 8) }
+                .overlay(alignment: .bottom) { progressBar(height: 12, inset: 16) }
                 .clipShape(RoundedRectangle(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius, style: .continuous))
                 .plozzMediaEdge(cornerRadius: PlozzTheme.Metrics.mediumMediaCornerRadius)
 
@@ -201,8 +201,8 @@ public struct PosterCardView: View {
             .aspectRatio(borderlessAspectRatio, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .overlay { artwork }
-            .overlay(alignment: .topTrailing) { watchedBadge }
-            .overlay(alignment: .bottom) { progressBar(height: 12) }
+            .overlay(alignment: .topTrailing) { watchedBadge(inset: borderlessBadgeInset) }
+            .overlay(alignment: .bottom) { progressBar(height: 12, inset: borderlessProgressInset) }
             .clipShape(RoundedRectangle(cornerRadius: borderlessCornerRadius, style: .continuous))
             .plozzMediaEdge(cornerRadius: borderlessCornerRadius)
             .plozzFocusHalo(
@@ -245,6 +245,23 @@ public struct PosterCardView: View {
         case .poster: return metrics.posterCardCornerRadius
         case .landscape: return metrics.landscapeCardCornerRadius
         }
+    }
+
+    /// Inset that keeps the progress bar concentric with the borderless card's
+    /// rounded corner: for an inner shape to share a corner's centre, its inset
+    /// must equal `outerRadius − innerRadius` (the same inner/outer relationship a
+    /// framed card's surface has). The bar is a capsule, so its corner radius is
+    /// `height / 2`; inset accordingly so the gap is even along every edge and
+    /// around the corners. Clamped so it never collapses below the framed inset.
+    private var borderlessProgressInset: CGFloat {
+        max(borderlessCornerRadius - 12 / 2, 16)
+    }
+
+    /// Inset that keeps the watched badge concentric with the borderless card's
+    /// rounded corner. The badge is a 30pt circle (radius 15), so its inset is
+    /// `outerRadius − 15`, matching the progress bar's even spacing.
+    private var borderlessBadgeInset: CGFloat {
+        max(borderlessCornerRadius - 15, 8)
     }
 
     /// Aspect ratio for the borderless full-bleed image.
@@ -460,7 +477,7 @@ public struct PosterCardView: View {
     /// played. Hidden under spoiler thumbnail-masking so it never reveals that an
     /// unseen episode exists. Mirrors the watched state the context menu toggles.
     @ViewBuilder
-    private var watchedBadge: some View {
+    private func watchedBadge(inset: CGFloat) -> some View {
         if item.isPlayed && !hideThumbnail {
             Image(systemName: "checkmark")
                 .font(.system(size: 16, weight: .bold))
@@ -472,7 +489,7 @@ public struct PosterCardView: View {
                         .inset(by: -0.5)
                         .stroke(watchedBadgeRim, lineWidth: 1.5)
                 }
-                .padding(8)
+                .padding(inset)
                 .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
         }
     }
@@ -486,7 +503,7 @@ public struct PosterCardView: View {
     }
 
     @ViewBuilder
-    private func progressBar(height: CGFloat) -> some View {
+    private func progressBar(height: CGFloat, inset: CGFloat) -> some View {
         if let percentage = item.playedPercentage, percentage > 0.01, percentage < 0.99 {
             ZStack(alignment: .bottom) {
                 // Scrim: a slight black gradient that fades up from the bottom edge,
@@ -531,8 +548,8 @@ public struct PosterCardView: View {
                     }
                 }
                 .frame(height: height)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 16)
+                .padding(.horizontal, inset)
+                .padding(.bottom, inset)
             }
         }
     }

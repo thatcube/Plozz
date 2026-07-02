@@ -22,8 +22,6 @@ public enum PlaybackInstrumentation {
         case viewModel
         /// `NativeVideoEngine` (AVPlayer).
         case nativeEngine
-        /// `MPVVideoEngine` (libmpv / gpu-next).
-        case mpvEngine
     }
 
     private static let lock = NSLock()

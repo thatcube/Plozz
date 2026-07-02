@@ -3,8 +3,8 @@
 # One-command build / deploy loop for the paired Apple TV.
 #
 # This is the rapid-iteration entry point for on-device work: it runs the build
-# pre-flight (the git-config workaround + mpv framework staging), does an
-# *incremental* device build, then installs and launches on the Apple TV.
+# pre-flight (the git-config workaround), does an *incremental* device build, then
+# installs and launches on the Apple TV.
 #
 # Usage:
 #   tools/deploy-tv.sh                 # build → install → launch on the Apple TV
@@ -17,7 +17,7 @@
 #
 # Notes:
 #   * Editing an EXISTING file does NOT need --regen; SPM globs the module dirs.
-#   * Never `rm -rf` the shared SwiftPM / mpv caches — only --clean (per-worktree
+#   * Never `rm -rf` the shared SwiftPM cache — only --clean (per-worktree
 #     DerivedData) is safe. See the BUILD PRE-FLIGHT block in AGENTS.local.md.
 #   * The Apple TV is a shared, single-install lock across agents. Only the agent
 #     whose turn it is should install; everyone else can --build-only freely.
@@ -51,12 +51,6 @@ done
 # The host injects `safe.bareRepository=explicit`; without this export SwiftPM's
 # git resolve fails with "cannot use bare repository". This is EXPECTED.
 export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS-'safe.bareRepository=all'}"
-
-# Stage the mpv xcframeworks (instant copy-on-write from the shared cache).
-if [[ -x tools/setup-mpv.sh ]]; then
-  echo "▸ Pre-flight: staging mpv frameworks…"
-  tools/setup-mpv.sh >/dev/null
-fi
 
 if [[ "$CLEAN" == "1" ]]; then
   echo "▸ Cleaning this worktree's DerivedData…"

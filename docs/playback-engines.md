@@ -1,6 +1,6 @@
 # Playback Engine Architecture
 
-Plozz uses three playback engines, automatically selected per-item based on
+Plozz uses two playback engines, automatically selected per-item based on
 container, codecs, and subtitle requirements. The goal is maximum format coverage
 with the best possible quality (Dolby Vision, Atmos, full-timeline seek).
 
@@ -9,8 +9,13 @@ with the best possible quality (Dolby Vision, Atmos, full-timeline seek).
 | Engine | Internal name | Underlying tech | Primary use case |
 |--------|--------------|-----------------|------------------|
 | **Plozzigen** | `.plozzigen` | AetherEngine (FFmpeg demux → HLS-fMP4 → localhost → AVPlayer) | MKV library content — the workhorse (~95% of local files) |
-| **mpv** | `.hybrid` | libmpv (software decode + system audio output) | Edge cases: PGS subs, external audio, exotic codecs |
 | **Native** | `.native` | AVPlayer directly | Server-delivered HLS/fMP4 (transcodes, direct-play manifests) |
+
+> `.hybrid` is a legacy routing value meaning "this item needs on-device
+> decode." It historically selected a libmpv-backed `EngineMPV`, which has been
+> **retired** (recoverable at the `archive/mpv-engine` git tag). The router still
+> emits `.hybrid` as its abstract "needs on-device decode" signal, but it now
+> resolves to **Plozzigen** — the sole on-device decode engine.
 
 ## Routing Logic
 
@@ -22,17 +27,12 @@ Engine selection happens in `PlayerViewModel` at playback start:
    YES → continue
 
 2. Is plozzigenEligibility == .eligible?
-   NO  → mpv (codec/container not supported by Plozzigen)
-   YES → continue
-
-3. Does the default subtitle track use PGS (bitmap) format?
-   YES → mpv (AVPlayer can't render bitmap subs)
-   NO  → continue
-
-4. Is there an external audio URL?
-   YES → mpv (only mpv can mux two separate URLs)
-   NO  → Plozzigen ✓
+   NO  → Native (Plozzigen can't handle this container/codec)
+   YES → Plozzigen ✓
 ```
+
+When the router asks for on-device decode (`.hybrid`), it resolves to Plozzigen
+if that engine is linked in; otherwise it falls back to Native (AVPlayer).
 
 ## Plozzigen Eligibility Gate
 
@@ -45,17 +45,18 @@ Plozzigen accepts content when ALL of these are true:
 - **Byte-range readable:** HTTP range requests or local file access
 - **NOT Dolby Vision Profile 7** (dual-layer BL+EL+RPU — unsupported everywhere)
 
-## When mpv Takes Over
+## Edge Cases the Engines Don't Fully Cover
 
-mpv is the fallback for content Plozzigen can't handle optimally:
+The retired mpv engine used to absorb these cases. They now route to Plozzigen
+(when eligible) or fall back to Native (AVPlayer):
 
-| Scenario | Why mpv? |
-|----------|----------|
-| PGS bitmap subtitles active | AVPlayer has no bitmap subtitle renderer |
-| External audio URL | Only mpv can combine two separate media URLs |
-| Non-MKV containers (rare edge cases) | Plozzigen gate requires Matroska |
+| Scenario | Current handling |
+|----------|------------------|
+| PGS bitmap subtitles active | AVPlayer has no bitmap subtitle renderer; server-side burn-in/transcode is the path |
+| External audio URL | Plozzigen/AVPlayer play the primary track; server-side mux is the path |
+| Non-MKV containers (rare edge cases) | Native AVPlayer / server transcode |
 | DV Profile 7 dual-layer | Can't be remuxed to single-layer fMP4 |
-| Exotic video codecs (MPEG-2, VC-1) | Not in the Plozzigen codec set |
+| Exotic video codecs (MPEG-2, VC-1) | Native AVPlayer / server transcode |
 
 ## When Native AVPlayer Is Used
 
@@ -67,15 +68,15 @@ Native handles content the server has already prepared:
 
 ## Quality Capabilities by Engine
 
-| Feature | Plozzigen | mpv | Native |
-|---------|-----------|-----|--------|
-| Dolby Vision | ✅ (Profile 5/8) | ❌ (tone-mapped) | ✅ (if server delivers DV) |
-| Dolby Atmos | ✅ (passthrough) | ❌ (decoded to PCM) | ✅ (if stream has E-AC3 JOC) |
-| HDR10 / HLG | ✅ | ✅ (tone-mapped) | ✅ |
-| Full-timeline seek | ✅ | ✅ | ✅ (if not live transcode) |
-| PGS subtitles | ❌ | ✅ | ❌ |
-| DTS bitstream | ❌ (bridged to FLAC) | ❌ (decoded to PCM) | ❌ |
-| TrueHD bitstream | ❌ (bridged to FLAC) | ❌ (decoded to PCM) | ❌ |
+| Feature | Plozzigen | Native |
+|---------|-----------|--------|
+| Dolby Vision | ✅ (Profile 5/8) | ✅ (if server delivers DV) |
+| Dolby Atmos | ✅ (passthrough) | ✅ (if stream has E-AC3 JOC) |
+| HDR10 / HLG | ✅ | ✅ |
+| Full-timeline seek | ✅ | ✅ (if not live transcode) |
+| PGS subtitles | ❌ | ❌ |
+| DTS bitstream | ❌ (bridged to FLAC) | ❌ |
+| TrueHD bitstream | ❌ (bridged to FLAC) | ❌ |
 
 ## AirPlay 2 / HomePod Audio Recovery
 
@@ -84,8 +85,7 @@ The Plozzigen and Native engines both output audio through `AVPlayer` +
 that was root-caused and fixed for music. The cure (a full audio-session
 deactivate→reactivate cycle — `setActive(true)` alone is a no-op), plus what
 did/didn't work and how to port it to video seek/route-change handling, is
-documented in **[airplay-audio-recovery.md](./airplay-audio-recovery.md)**. mpv
-uses its own audio output (`MPVSafeAudio`) and is a separate path.
+documented in **[airplay-audio-recovery.md](./airplay-audio-recovery.md)**.
 
 ## Source Code References
 
@@ -105,3 +105,8 @@ preserved under `preserve/remux-*` git tags for reference but are not used.
 AetherEngine was adopted because it solves the exact same problem (MKV → AVPlayer
 with DoVi + Atmos + seeking) with a battle-tested pipeline. Plozz wraps it via
 the `PlozzigenVideoEngine` adapter conforming to the `VideoEngine` protocol.
+
+An earlier libmpv-backed `EngineMPV` engine (routed via `.hybrid`) was also
+retired once Plozzigen covered the on-device decode path. Its source, build
+scripts, and staged xcframeworks were removed; it's fully recoverable at the
+`archive/mpv-engine` git tag.

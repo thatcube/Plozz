@@ -1,4 +1,22 @@
-# LGPL Compliance — libmpv + FFmpeg (EngineMPV)
+# LGPL Compliance — libmpv + FFmpeg (EngineMPV) — ⚠️ HISTORICAL / RETIRED
+
+> **⚠️ This document describes the RETIRED local mpv build pipeline.**
+> The `EngineMPV` engine, `tools/build-mpv-tvos.sh`, `tools/stage-mpv-frameworks.sh`,
+> `tools/setup-mpv.sh`, and the local `Frameworks/mpv/` xcframeworks referenced
+> below **no longer exist** in the tree — they were removed when mpv was retired
+> (recoverable at the `archive/mpv-engine` git tag). The content below is kept as
+> the compliance record for that archived build.
+>
+> **Open item for Brandon (FFmpeg LGPL still applies via a different source):**
+> the shipping app still bundles FFmpeg — now through the **AetherEngine** /
+> **FFmpegBuild** Swift Package (URL-pulled prebuilt xcframeworks), *not* this
+> local build. The LGPL relink / source-offer / attribution obligations in the
+> "Obligations" section below therefore still need to be satisfied against
+> **FFmpegBuild's** build, and this NOTICE should be rewritten to document that
+> package rather than the retired mpv pipeline. Flagging rather than editing the
+> body, since compliance wording is your call.
+
+---
 
 This documents the licensing of the libmpv + FFmpeg binaries that back the
 optional `EngineMPV` video engine, the exact build change that makes them

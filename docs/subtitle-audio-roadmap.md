@@ -110,8 +110,10 @@ The capabilities that are the whole reason we own the renderer.
 
 ### F. Cleanup
 
-- **Retire mpv** (P5) — trailer-audio fix, then delete the mpv engine + build
-  wiring.
+- **Retire mpv** (P5) — ✅ **DONE.** The mpv (`EngineMPV`) engine, its build
+  wiring, and staged xcframeworks were removed; recoverable at the
+  `archive/mpv-engine` git tag. Plozzigen (AetherEngine) is the sole on-device
+  decode engine.
 - **Deferred review MEDIUM/LOWs** from the overnight run — forward-compat decode
   of unknown policy keys, store lock-race, guard `.other` overridability,
   override-language drift, hoist per-profile stores into AppState.

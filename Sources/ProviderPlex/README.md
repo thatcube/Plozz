@@ -18,8 +18,8 @@ first-class backends; co-equal with `ProviderJellyfin`.
   reachable server connection from `plex.tv` (LAN vs WAN vs relayed),
   prioritising local & direct over relayed.
 - `PlexDeviceProfile` — the direct-play / transcode capability matrix sent
-  to the server, parameterised by whether the on-device hybrid engine
-  (libmpv) is linked.
+  to the server, parameterised by whether the on-device decode engine
+  (Plozzigen) is linked.
 - `PlexDTOs` — Plex JSON shapes, mapped into `CoreModels` at the seam.
 
 ## Invariants

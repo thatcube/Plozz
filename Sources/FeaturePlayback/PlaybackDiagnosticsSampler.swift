@@ -223,7 +223,6 @@ public final class PlaybackDiagnosticsSampler {
         diagnostics.thermalState = currentThermalLevel()
         diagnostics.liveViewModels = PlaybackInstrumentation.count(.viewModel)
         diagnostics.liveNativeEngines = PlaybackInstrumentation.count(.nativeEngine)
-        diagnostics.liveMPVEngines = PlaybackInstrumentation.count(.mpvEngine)
     }
 
     private static func currentThermalLevel() -> PlaybackDiagnostics.ThermalLevel {

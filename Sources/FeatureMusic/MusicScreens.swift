@@ -871,10 +871,16 @@ struct NowPlayingEqualizer: View {
 
     private func height(bar i: Int, at t: TimeInterval) -> CGFloat {
         guard isAnimating else { return 9 * scale }
-        let speed = 6.0
-        let phase = Double(i) * 0.8
-        let v = (sin(t * speed + phase) + 1) / 2 // 0...1
-        return (5 + CGFloat(v) * 17) * scale // (5...22) * scale
+        // Sum of a few incommensurate sine waves per bar: unlike a single sine
+        // (a repeating wave) it never settles into a visible period, and unlike
+        // value noise it moves continuously with momentum — no start/stop stutter.
+        let p = Double(i) * 1.7            // per-bar phase offset (decorrelates bars)
+        let f = 1.0 + Double(i) * 0.04     // slight per-bar detune so they never sync
+        let s = sin(t * 6.4 * f + p)                       // primary bounce (a touch faster)
+              + 0.4  * sin(t * 3.4 * f + p * 1.3 + 1.1)    // slower swell (tamed)
+              + 0.26 * sin(t * 9.0 * f + p * 0.7 + 2.2)    // faster shimmer (tamed)
+        let v = min(max(s / 3.32 + 0.5, 0), 1) // 0...1
+        return (4 + CGFloat(v) * 18) * scale  // (4...22) * scale
     }
 }
 #endif

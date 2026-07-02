@@ -47,6 +47,37 @@ struct NowPlayingView: View {
     /// can navigate up into the bar to scrub.
     @State private var scrubFocusable = false
 
+    /// Whether the transport *buttons* may take focus, held separately from
+    /// `controlsVisible` (which only drives the visual slide). On a reveal the bar
+    /// is shown immediately but this stays `false` for a couple of frames so the
+    /// transport is NOT yet a focus candidate. A directional Siri-Remote *press*
+    /// is delivered to the focus engine as a move it resolves in the same pass as
+    /// the reveal; if the buttons became focusable in that pass the move landed on
+    /// one of them (the leftmost "shuffle") instead of where we asked. Keeping
+    /// them non-focusable until a later, separate pass means the only focusable
+    /// view during the press is the reveal catcher, which harmlessly absorbs the
+    /// move — after which we place focus deliberately. A *swipe* queues no move,
+    /// which is why swipes alone ever worked before this split.
+    @State private var transportFocusable = true
+
+    /// Whether the transparent reveal catcher is mounted. It stays up while the
+    /// controls are hidden AND across the brief reveal hand-off window — so it,
+    /// the sole focusable view at that moment, is the target of the relocation a
+    /// directional press triggers. It's unmounted only once focus has been placed
+    /// on the intended control, turning the hand-off into a neutral relocation
+    /// (identical to a swipe's) that honours `defaultFocus`/`resetFocus`.
+    @State private var revealCatcherMounted = false
+
+    /// A brief, non-interactive confirmation shown when a *toggle* transport
+    /// control (shuffle / repeat) changes, so the user sees exactly what their
+    /// press did. The glass buttons convey active state only by tint, and the
+    /// tvOS focus highlight washes that tint out while the button is focused —
+    /// making, e.g., repeat-off and repeat-all look identical. This pill states
+    /// the new mode in words, which reads regardless of focus styling.
+    @State private var transportStatus: TransportStatus?
+    /// Auto-dismiss for `transportStatus`; re-armed on every change.
+    @State private var statusTask: Task<Void, Never>?
+
     /// True while the control bar is mid slide-in/out. During the slide the
     /// scrub bar suppresses its progress spring so the fill + knob ride the slide
     /// in lockstep with the glass track (rather than picking up a separate easing
@@ -80,6 +111,16 @@ struct NowPlayingView: View {
         case playPause, shuffle, previous, next, repeatMode, lyrics, revealCatcher
     }
     @FocusState private var focus: Focus?
+
+    /// Focus scope wrapping the transport controls. When the reveal catcher (a
+    /// focused view) is removed on reveal, tvOS runs a "first available" focus
+    /// relocation that ignores both `.defaultFocus` and a `focus =` assignment —
+    /// so a directional *press* landed on whatever view came first, not the play
+    /// button. `resetFocus(in:)` on this scope is the one API that overrides that
+    /// relocation and forces `defaultFocus` (the play button) to win. A *swipe*
+    /// never triggers the relocation, which is why swipes always worked.
+    @Namespace private var controlsFocusScope
+    @Environment(\.resetFocus) private var resetFocus
 
     /// Seconds of inactivity before the control bar fades away.
     private static let controlsAutoHideDelay: TimeInterval = 5
@@ -206,38 +247,54 @@ struct NowPlayingView: View {
             bottomControls
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .allowsHitTesting(controlsVisible)
-                // Make the entire transport cluster non-focusable while hidden.
-                // Its rows only slide off via offset + opacity-0, and tvOS keeps
-                // offset / zero-opacity views as focus candidates — so without this
-                // a directional *click* on the hidden player moves focus straight
-                // into the (invisible) controls instead of firing the reveal
-                // catcher's .onMoveCommand. With the whole cluster disabled the
-                // catcher is the only focus target, so a down-click reveals the
-                // controls and lands on the pause button just like a swipe does.
-                .disabled(!controlsVisible)
+                // Gate the transport's focusability on `transportFocusable`, NOT
+                // `controlsVisible`. The bar slides in the instant `controlsVisible`
+                // flips, but the buttons must not become focus candidates in that
+                // same pass — otherwise the focus-move a directional *press*
+                // queues lands on one of them. `transportFocusable` is held false
+                // for a couple of frames across a reveal (see `showControls`) so
+                // the reveal catcher stays the only focusable view while the press
+                // resolves, then we enable the buttons and place focus ourselves.
+                .disabled(!transportFocusable)
                 // Bias the focus engine toward the pause button so it's the
                 // default landing spot when the controls appear, rather than the
                 // scrub surface that sits above it.
                 .defaultFocus($focus, .playPause)
+                // Group the controls into a focus scope so showControls() can
+                // call resetFocus(in:) and force the engine to honour the
+                // defaultFocus above on a vertical/select reveal.
+                .focusScope(controlsFocusScope)
 
-            // While the bar is hidden, a transparent full-screen catcher takes
-            // focus so a Select/click brings the controls back. It uses a fully
-            // custom button style that renders *only* its (clear) label, so tvOS
-            // never draws a focus highlight plate over the screen.
-            if !controlsVisible {
-                Button { showControls() } label: { Color.clear }
-                    .buttonStyle(InvisibleButtonStyle())
-                    .focused($focus, equals: .revealCatcher)
-                    // Reveal on any directional press, but honour the axis: a
-                    // horizontal press lands on the scrub bar (scrubbing IS
-                    // horizontal), while a vertical press lands on the play/pause
-                    // button. See showControls(preferScrubber:).
-                    .onMoveCommand { direction in
-                        switch direction {
-                        case .left, .right: showControls(preferScrubber: true)
-                        default: showControls(preferScrubber: false)
-                        }
+            // While the bar is hidden — and across the brief reveal hand-off — a
+            // transparent, focusable UIKit surface takes focus so the Siri Remote's
+            // presses/swipes are delivered to it (rather than moving focus onto an
+            // invisible or freshly-revealed control). It reports the reveal axis: a
+            // horizontal gesture reveals onto the scrub bar (scrubbing is
+            // horizontal), a vertical/select gesture onto the play/pause button.
+            // It stays mounted until `showControls` has placed focus, so it — the
+            // sole focus candidate during the press — absorbs the move the press
+            // queues; see NowPlayingRevealSurface for the full rationale.
+            if revealCatcherMounted {
+                NowPlayingRevealSurface { reveal in
+                    switch reveal {
+                    case .horizontal: showControls(preferScrubber: true)
+                    case .vertical: showControls(preferScrubber: false)
                     }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+                .focused($focus, equals: .revealCatcher)
+            }
+
+            // Transient toggle confirmation ("Repeat All", "Shuffle On", …),
+            // floating just above the control bar. Non-interactive and
+            // non-focusable so it never disturbs the transport focus flow.
+            if let status = transportStatus {
+                transportStatusPill(status)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, bottomBarHeight + 20)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
         }
         // mainContent's bottom-padding re-center still rides one shared spring;
@@ -268,6 +325,7 @@ struct NowPlayingView: View {
             setIdleTimerDisabled(false)
             hideTask?.cancel()
             focusTask?.cancel()
+            statusTask?.cancel()
         }
         .onChange(of: scrubModel.isScrubbing) { _, _ in scheduleHide() }
         // Any focus movement among the controls (or onto the scrub bar, which
@@ -367,33 +425,64 @@ struct NowPlayingView: View {
         .animation(.easeInOut(duration: 0.25), value: showsLyricsPanel)
     }
 
-    /// Reveals the control bar and (re)arms the auto-hide timer, focusing
-    /// play/pause so the bar always returns with it highlighted.
+    /// Reveals the control bar and (re)arms the auto-hide timer, landing focus on
+    /// play/pause (vertical/select) or the scrub bar (horizontal).
+    ///
+    /// The reveal happens in two passes so a directional Siri-Remote *press*
+    /// lands where we ask rather than on whatever control the focus engine would
+    /// otherwise relocate to. A press is delivered to the engine as a focus-move
+    /// resolved in the *same* pass as any state change; the trick is to make sure
+    /// that during that pass the reveal catcher is the only focusable view, so the
+    /// move is absorbed by it, then place focus deliberately on a later pass (a
+    /// neutral relocation, exactly like a swipe — which is why swipes always
+    /// worked).
     private func showControls(preferScrubber: Bool = false) {
+        // Phase 1 — this transaction: show the bar visually, but keep the whole
+        // transport non-focusable and the reveal catcher mounted + focused as the
+        // sole focus candidate. The press's queued focus-move resolves onto the
+        // catcher (a no-op) instead of jumping onto a button/the scrub surface.
         controlsVisible = true
-        // Keep the scrub surface out of the hierarchy during a *vertical* reveal
-        // so it can't win the focus relocation that fires when the (focused)
-        // reveal catcher is removed — that relocation is what was landing a
-        // down-press on the scrubber. With the surface gone, focus falls to the
-        // play/pause button (see .defaultFocus on bottomControls). A *horizontal*
-        // reveal keeps the surface so the scrub bar itself can take focus, since
-        // scrubbing is a horizontal gesture.
-        scrubFocusable = preferScrubber
-        focus = preferScrubber ? nil : .playPause
-        // Re-assert on the next runloop, then make the scrub bar focusable a beat
-        // later regardless of direction so up-navigation to it always works. When
-        // the bar reveals, the transport row slides up from off-screen and a
-        // single synchronous set doesn't reliably land on play/pause; setting it
-        // again once the buttons are on-screen makes the pause button the
-        // dependable default for a vertical/select reveal.
+        transportFocusable = false
+        scrubFocusable = false
+        revealCatcherMounted = true
+        focus = .revealCatcher
         focusTask?.cancel()
         focusTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 50_000_000)
+            // Phase 2 — a couple of frames later, a fresh transaction: the move
+            // has already drained onto the catcher, so it's now safe to hand off.
+            // Unmounting the catcher triggers a *neutral* relocation onto the
+            // control we make focusable + target below.
+            try? await Task.sleep(nanoseconds: 40_000_000)
             guard !Task.isCancelled, controlsVisible else { return }
-            if !preferScrubber { focus = .playPause }
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !Task.isCancelled, controlsVisible else { return }
-            scrubFocusable = true
+            if preferScrubber {
+                // Land on the scrub bar: mount its focusable surface and unmount
+                // the catcher while the buttons stay non-focusable, so the surface
+                // is the sole target of the relocation. Enable the buttons a beat
+                // later once focus is settled on the bar.
+                scrubFocusable = true
+                revealCatcherMounted = false
+                focus = nil
+                try? await Task.sleep(nanoseconds: 60_000_000)
+                guard !Task.isCancelled, controlsVisible else { return }
+                transportFocusable = true
+            } else {
+                // Land on play/pause: enable the buttons and unmount the catcher
+                // with the scrub surface still out, so play/pause (defaultFocus)
+                // is the only place focus can go. Re-assert once the row has slid
+                // on-screen, then finally allow the scrub bar so Up-navigation can
+                // reach it.
+                transportFocusable = true
+                revealCatcherMounted = false
+                focus = .playPause
+                resetFocus(in: controlsFocusScope)
+                try? await Task.sleep(nanoseconds: 60_000_000)
+                guard !Task.isCancelled, controlsVisible else { return }
+                focus = .playPause
+                resetFocus(in: controlsFocusScope)
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled, controlsVisible else { return }
+                scrubFocusable = true
+            }
         }
         scheduleHide()
     }
@@ -406,13 +495,15 @@ struct NowPlayingView: View {
     }
 
     /// Collapses the controls and parks focus on the reveal catcher. Shared by
-    /// the explicit hide and the auto-hide timer so *both* paths reset
-    /// `scrubFocusable` — otherwise the scrub surface stays mounted and focusable
-    /// while hidden, giving a directional press a real neighbour to move to and
-    /// stealing the reveal (the catcher's .onMoveCommand never fires).
+    /// the explicit hide and the auto-hide timer so *both* paths make the whole
+    /// transport non-focusable and re-mount the catcher — otherwise a hidden
+    /// control stays a focus candidate and a directional press moves onto it
+    /// instead of revealing the bar.
     private func collapseControls() {
         focusTask?.cancel()
+        transportFocusable = false
         scrubFocusable = false
+        revealCatcherMounted = true
         controlsVisible = false
         focus = .revealCatcher
     }
@@ -704,8 +795,11 @@ struct NowPlayingView: View {
             HStack(spacing: 28) {
                 transportButton(
                     icon: "shuffle",
-                    tint: controller.isShuffled ? Color.accentColor : .primary
-                ) { controller.toggleShuffle() }
+                    active: controller.isShuffled
+                ) {
+                    controller.toggleShuffle()
+                    flashStatus(icon: "shuffle", text: controller.isShuffled ? "Shuffle On" : "Shuffle Off")
+                }
                     .focused($focus, equals: .shuffle)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -726,8 +820,12 @@ struct NowPlayingView: View {
             HStack(spacing: 28) {
                 transportButton(
                     icon: repeatIcon,
-                    tint: controller.repeatMode == .off ? .primary : Color.accentColor
-                ) { controller.cycleRepeatMode() }
+                    active: controller.repeatMode != .off
+                ) {
+                    controller.cycleRepeatMode()
+                    let label = repeatStatusLabel(controller.repeatMode)
+                    flashStatus(icon: label.icon, text: label.text)
+                }
                     .focused($focus, equals: .repeatMode)
 
                 lyricsToggleButton
@@ -764,8 +862,8 @@ struct NowPlayingView: View {
         let hasLyrics = controller.lyricsState.hasLyrics
         let blocked = lyricsEnabled && !hasLyrics
         return transportButton(
-            icon: lyricsEnabled ? "quote.bubble.fill" : "quote.bubble",
-            tint: (lyricsEnabled && hasLyrics) ? Color.accentColor : .primary
+            icon: "quote.bubble",
+            active: lyricsEnabled && hasLyrics
         ) {
             lyricsEnabled.toggle()
         }
@@ -781,6 +879,7 @@ struct NowPlayingView: View {
     private func transportButton(
         icon: String,
         tint: Color = .primary,
+        active: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button {
@@ -791,6 +890,23 @@ struct NowPlayingView: View {
                 .foregroundStyle(tint)
         }
         .musicGlassButton(prominent: false)
+        .overlay(alignment: .bottom) { activeUnderline(active) }
+    }
+
+    /// A selected-tab-style "on" indicator: a short accent bar that sits on the
+    /// bar *below* the button, outside the button's own surface. Because it
+    /// lives outside the focus-highlighted material, the accent stays vibrant
+    /// whether the button is focused or not — unlike a glyph tint, which the
+    /// tvOS focus highlight washes out. It's an overlay (offset clear of the
+    /// button), so it never changes the button's shape, size, or the row layout.
+    @ViewBuilder
+    private func activeUnderline(_ active: Bool) -> some View {
+        Capsule(style: .continuous)
+            .fill(Color.accentColor)
+            .frame(width: 24, height: 4)
+            .offset(y: 13)
+            .opacity(active ? 1 : 0)
+            .animation(.easeInOut(duration: 0.2), value: active)
     }
 
     private var repeatIcon: String {
@@ -798,6 +914,48 @@ struct NowPlayingView: View {
         case .off, .all: return "repeat"
         case .one: return "repeat.1"
         }
+    }
+
+    /// The icon + wording for the transient confirmation shown when repeat is
+    /// cycled. `.off` and `.all` share the `repeat` glyph (they differ only by
+    /// tint), so the words are what actually tell the two apart.
+    private func repeatStatusLabel(_ mode: AudioPlaybackController.RepeatMode) -> (icon: String, text: String) {
+        switch mode {
+        case .off: return ("repeat", "Repeat Off")
+        case .all: return ("repeat", "Repeat All")
+        case .one: return ("repeat.1", "Repeat One")
+        }
+    }
+
+    /// Shows `text` (with `icon`) in the transient status pill and re-arms its
+    /// auto-dismiss. Called from the toggle transport actions.
+    private func flashStatus(icon: String, text: String) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            transportStatus = TransportStatus(icon: icon, text: text)
+        }
+        statusTask?.cancel()
+        statusTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.3)) {
+                transportStatus = nil
+            }
+        }
+    }
+
+    /// The floating confirmation pill for a toggle change.
+    private func transportStatusPill(_ status: TransportStatus) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: status.icon)
+            Text(status.text)
+        }
+        .font(.system(size: 22, weight: .semibold))
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 13)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(isLightPlayer ? 0.15 : 0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(isLightPlayer ? 0.12 : 0.4), radius: 12, y: 4)
     }
 
     /// Best-effort album-cover fallback for `track`, used only when the server
@@ -1113,6 +1271,14 @@ private extension View {
             }
         }
     }
+}
+
+/// A transient confirmation for a toggle transport control (shuffle / repeat),
+/// shown in a floating pill so the user sees what their press did even when the
+/// button's active tint is washed out by the tvOS focus highlight.
+private struct TransportStatus: Equatable {
+    let icon: String
+    let text: String
 }
 
 /// Reports the natural height of the bottom control bar so the player can slide

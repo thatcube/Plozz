@@ -19,7 +19,7 @@
 #
 # NOTE: build-mpv-tvos.sh MUST have been run with the `--disable-nonfree` patch
 # (no `--enable-nonfree`, no `--enable-gpl`) so the FFmpeg slices are
-# "LGPL version 3 or later". See LGPL_COMPLIANCE.md.
+# "LGPL version 3 or later". See NOTICE.md.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -129,6 +129,15 @@ targets:
         # AniList client ID/secret for anime tracking (authorization code grant).
         AniListClientID: "$(ANILIST_CLIENT_ID)"
         AniListClientSecret: "$(ANILIST_CLIENT_SECRET)"
+        # Last.fm music scrobbling. The API key + shared secret sign every call
+        # on-device (like Trakt/Simkl above, whose secrets also ship here) so the
+        # TV can run the no-typing desktop-auth poll flow. Substituted from
+        # LASTFM_API_KEY / LASTFM_SHARED_SECRET (gitignored
+        # Config/Secrets.local.xcconfig). Empty by default, which disables
+        # scrobbling (Settings shows Last.fm as unavailable). Register at
+        # https://www.last.fm/api/account/create to get these.
+        LastFmAPIKey: "$(LASTFM_API_KEY)"
+        LastFmSharedSecret: "$(LASTFM_SHARED_SECRET)"
         # Local network access is required for LAN server discovery on tvOS.
         NSLocalNetworkUsageDescription: "Plozz uses your local network to discover Jellyfin servers automatically."
         NSBonjourServices:

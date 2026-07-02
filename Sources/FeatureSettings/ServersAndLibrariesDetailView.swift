@@ -18,37 +18,42 @@ struct ServersAndLibrariesDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                if context.accounts.isEmpty {
-                    emptyState
-                } else {
-                    SettingsPanel(
-                        footer: "These sign-ins are shared by everyone on this Apple TV. Tap a server to add or sign out accounts. Set what each profile sees under Profile › Your Libraries."
-                    ) {
-                        VStack(spacing: 0) {
+                SettingsPanel(
+                    title: "Servers",
+                    subtitle: "Sign-ins are shared by everyone on this Apple TV. Choose what each profile sees under Profile › Your Libraries."
+                ) {
+                    VStack(spacing: 0) {
+                        if context.accounts.isEmpty {
+                            Text("You're not signed in to any servers yet.")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 14)
+                                .padding(.horizontal, 14)
+                        } else {
                             let groups = serverGroups(from: context.accounts)
                             ForEach(Array(groups.enumerated()), id: \.element.serverKey) { idx, group in
                                 if idx > 0 { Divider() }
                                 serverSummaryRow(group)
                             }
                         }
+                        Divider()
+                        Button(action: context.onAddAccount) {
+                            Label(context.accounts.isEmpty ? "Sign In to a Server" : "Add Server", systemImage: "plus.circle")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 14)
+                                .padding(.horizontal, 14)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(SettingsFocusButtonStyle(size: .prominent))
                     }
                 }
-
-                addServerPanel
             }
+            .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
         }
         .scrollClipDisabled()
-    }
-
-    private var emptyState: some View {
-        SettingsPanel(
-            footer: "Sign in to a Jellyfin or Plex server. Sign-ins are shared across every profile on this Apple TV."
-        ) {
-            Text("You're not signed in to any servers yet.")
-                .font(.headline)
-        }
     }
 
     /// One server's at-a-glance row with a clear chevron so the affordance
@@ -86,17 +91,6 @@ struct ServersAndLibrariesDetailView: View {
             return "Signed in as \(only.userName)"
         } else {
             return "\(accountCount) sign-ins"
-        }
-    }
-
-    private var addServerPanel: some View {
-        SettingsPanel(
-            footer: "Add another Jellyfin or Plex server. Plex shares one sign-in across profiles; each Jellyfin profile signs in with its own credentials."
-        ) {
-            Button(action: context.onAddAccount) {
-                Label(context.accounts.isEmpty ? "Sign In to a Server" : "Add Server", systemImage: "plus.circle")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
     }
 }

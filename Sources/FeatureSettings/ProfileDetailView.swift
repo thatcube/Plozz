@@ -32,15 +32,13 @@ struct ProfileDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                activeProfilePanel
                 profilesListPanel
-                if context.profiles.count > 1 {
-                    startupPanel
-                }
                 if context.profiles.count == 1 {
                     disablePanel
                 }
             }
+            .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
         }
@@ -78,36 +76,10 @@ struct ProfileDetailView: View {
         }
     }
 
-    private var activeProfilePanel: some View {
-        SettingsPanel(
-            title: "Current profile",
-            footer: "Switching profiles swaps every setting on this Settings screen (theme, subtitles, spoilers, Trakt) and which servers/libraries you watch. The last-used profile is remembered for this Apple TV user."
-        ) {
-            HStack(spacing: 20) {
-                ProfileAvatarView(profile: context.activeProfile, size: 64)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(context.activeProfile.name).font(.title3.weight(.semibold))
-                    Text("Active profile")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    editorContext = .edit(context.activeProfile)
-                } label: {
-                    Label("Edit", systemImage: "pencil")
-                }
-                Button(action: context.onSwitchProfile) {
-                    Label("Switch Profile", systemImage: "person.2.circle")
-                }
-            }
-        }
-    }
-
     private var profilesListPanel: some View {
         SettingsPanel(
             title: "Profiles",
-            footer: "Each profile keeps its own preferences, Home customization, and Trakt account. Server logins live in the household pool — share them between profiles under This Apple TV › Servers."
+            subtitle: "Each profile keeps its own settings — theme, playback, subtitles, spoilers, trackers, and Home layout. Only your servers are shared."
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(context.profiles) { profile in
@@ -118,6 +90,17 @@ struct ProfileDetailView: View {
                 } label: {
                     Label("Add Profile", systemImage: "plus.circle")
                         .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                // Whether the "Who's watching?" picker appears at launch. Only
+                // meaningful with 2+ profiles, so it rides at the bottom of the
+                // list rather than in its own section.
+                if context.profiles.count > 1 {
+                    Divider()
+                    Toggle("Ask who's watching on startup", isOn: Binding(
+                        get: { context.askProfileOnStartup },
+                        set: { context.onSetAskProfileOnStartup($0) }
+                    ))
+                    .toggleStyle(SettingsSwitchToggleStyle())
                 }
             }
             .focusSection()
@@ -144,36 +127,6 @@ struct ProfileDetailView: View {
             .accessibilityLabel("Edit \(profile.name)")
         }
         .padding(.vertical, 2)
-    }
-
-    /// Launch picker toggle. Device-wide behaviour (it governs the whole Apple
-    /// TV's startup), but it lives here because it's about *which profile* opens
-    /// — only meaningful with 2+ profiles, so the caller gates it on that.
-    private var startupPanel: some View {
-        SettingsPanel(
-            title: "Startup",
-            footer: "Show the “Who's watching?” picker each time Plozz opens, so anyone can pick their profile. Off opens straight into the last-used profile."
-        ) {
-            Button {
-                context.onSetAskProfileOnStartup(!context.askProfileOnStartup)
-            } label: {
-                HStack(spacing: 16) {
-                    Image(systemName: "person.crop.circle.badge.questionmark")
-                        .font(.system(size: 22, weight: .regular))
-                        .frame(width: 30, height: 30)
-                        .settingsRowIcon()
-                    Text("Ask on startup").font(.headline)
-                    Spacer()
-                    Text(context.askProfileOnStartup ? "On" : "Off")
-                        .font(.subheadline)
-                        .settingsRowSecondary()
-                }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 12)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(SettingsFocusButtonStyle())
-        }
     }
 
     private var disablePanel: some View {

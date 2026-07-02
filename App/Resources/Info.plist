@@ -33,6 +33,10 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LastFmAPIKey</key>
+	<string>$(LASTFM_API_KEY)</string>
+	<key>LastFmSharedSecret</key>
+	<string>$(LASTFM_SHARED_SECRET)</string>
 	<key>MALClientID</key>
 	<string>$(MAL_CLIENT_ID)</string>
 	<key>NSAppTransportSecurity</key>

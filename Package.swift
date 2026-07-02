@@ -33,6 +33,7 @@ let package = Package(
         .library(name: "SimklService", targets: ["SimklService"]),
         .library(name: "AniListService", targets: ["AniListService"]),
         .library(name: "MALService", targets: ["MALService"]),
+        .library(name: "LastFmService", targets: ["LastFmService"]),
         .library(name: "FeatureAuth", targets: ["FeatureAuth"]),
         .library(name: "FeatureHome", targets: ["FeatureHome"]),
         .library(name: "FeaturePlayback", targets: ["FeaturePlayback"]),
@@ -59,16 +60,17 @@ let package = Package(
         // decodes cleanly (#92), software-path seek holds last frame (#90). See
         // AGENTS.local.md › "Playback engine (AetherEngine / Plozzigen)".
         //
-        // TEMP fork override → thatcube/AetherEngine @ fix/vod-audio-eac3-wedge
-        // (4.8.0 + the backward-seek muxer wedge fix; upstream PR #94). Under
-        // +delay_moov the fMP4 muxer writes moov lazily on the first flush; for
-        // AC-3/E-AC-3/TrueHD the audio sample entry (dac3/dec3/dmlp) can only be
-        // built from a PARSED audio packet, so a fresh restart muxer whose first
-        // moov flush fired video-only errored "Cannot write moov atom before EAC3
-        // packets parsed" → wedged muxer + forever-loading on a mid-file backward
-        // seek. The fix primes moov with a parsed audio packet, codec-scoped so AAC
-        // keeps the exact stock path. Revert to a released upstream tag once #94 merges.
-        .package(url: "https://github.com/thatcube/AetherEngine", branch: "fix/vod-audio-eac3-wedge"),
+        // Pinned to the upstream merge commit for the backward-seek muxer wedge
+        // fix (PR #94, merged into superuser404notfound/AetherEngine main as
+        // 8e4ed87 — 4.8.0 plus the fix). Under +delay_moov the fMP4 muxer writes
+        // moov lazily on the first flush; for AC-3/E-AC-3/TrueHD the audio sample
+        // entry (dac3/dec3/dmlp) can only be built from a PARSED audio packet, so a
+        // fresh restart muxer whose first moov flush fired video-only errored
+        // "Cannot write moov atom before EAC3 packets parsed" → wedged muxer +
+        // forever-loading on a mid-file backward seek. The fix primes moov with a
+        // parsed audio packet, codec-scoped so AAC keeps the exact stock path. Bump
+        // to the released upstream tag (`from:`) once one past 4.8.0 is cut.
+        .package(url: "https://github.com/superuser404notfound/AetherEngine", revision: "8e4ed87c6a46a1e05164a1a556f942989eb8a7d0"),
         // AetherEngine's FFmpeg build (n8.1.2, minimal LGPL decode-only). Shared
         // by AetherEngine and EngineMPV — replaces the locally-staged
         // Frameworks/mpv/Libav*.xcframework set (same n8.1 ABI).
@@ -118,7 +120,7 @@ let package = Package(
         //
         // The FFmpeg + libmpv xcframeworks are LGPLv3 / decode-only (rebuilt by
         // tools/build-mpv-tvos.sh with `--disable-nonfree`, no `--enable-gpl`;
-        // see LGPL_COMPLIANCE.md) and are referenced from local paths under
+        // see NOTICE.md) and are referenced from local paths under
         // Frameworks/mpv/ (gitignored, staged by tools/stage-mpv-frameworks.sh).
         // The remaining prebuilt dependency xcframeworks are MPVKit's published,
         // checksummed binaries (license-unaffected by the FFmpeg config) pulled by
@@ -210,6 +212,10 @@ let package = Package(
             name: "MALService",
             dependencies: ["CoreModels", "CoreNetworking"]
         ),
+        .target(
+            name: "LastFmService",
+            dependencies: ["CoreModels", "CoreNetworking"]
+        ),
 
         // MARK: Features
         .target(
@@ -243,7 +249,7 @@ let package = Package(
         ),
         .target(
             name: "FeatureSettings",
-            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService"]
+            dependencies: ["CoreModels", "CoreUI", "FeatureProfiles", "TraktService", "SimklService", "AniListService", "MALService", "LastFmService"]
         ),
         .target(
             name: "FeatureProfiles",
@@ -258,7 +264,7 @@ let package = Package(
         // it stays decoupled from the video feature modules.
         .target(
             name: "FeatureMusic",
-            dependencies: ["CoreModels", "CoreUI", "MetadataKit"]
+            dependencies: ["CoreModels", "CoreUI", "MetadataKit", "CoreNetworking"]
         ),
 
         // MARK: Top Shelf (shared with the tvOS Top Shelf extension)
@@ -310,6 +316,7 @@ let package = Package(
                 "SimklService",
                 "AniListService",
                 "MALService",
+                "LastFmService",
                 "FeatureHome",
                 "FeaturePlayback",
                 "FeatureSearch",

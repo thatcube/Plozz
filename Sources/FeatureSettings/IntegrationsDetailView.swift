@@ -6,25 +6,28 @@ import TraktService
 import SimklService
 import AniListService
 import MALService
+import LastFmService
 
 struct IntegrationsDetailView: View {
     let trakt: TraktService
     let simkl: SimklService
     let anilist: AniListService
     let mal: MALService
+    let lastfm: LastFmService
     @Bindable var playback: PlaybackSettingsModel
     let serverCount: Int
 
     var body: some View {
         SettingsSplitLayout(sections: sections)
             .task {
-                // Load all four statuses up front so the left list's value
+                // Load all statuses up front so the left list's value
                 // summaries are correct before any row is focused.
                 async let t: Void = trakt.refreshStatus()
                 async let s: Void = simkl.refreshStatus()
                 async let a: Void = anilist.refreshStatus()
                 async let m: Void = mal.refreshStatus()
-                _ = await (t, s, a, m)
+                async let l: Void = lastfm.refreshStatus()
+                _ = await (t, s, a, m, l)
             }
     }
 
@@ -36,7 +39,6 @@ struct IntegrationsDetailView: View {
                 id: "trakt",
                 title: "Trakt",
                 description: "Scrobble and sync your Jellyfin watch history to Trakt.",
-                valueSummary: statusSummary(traktRowPhase)
             ) {
                 if case let .connecting(userCode, verificationURL, expiresAt) = trakt.phase {
                     DeviceCodeConnectingView(
@@ -60,7 +62,6 @@ struct IntegrationsDetailView: View {
                 id: "simkl",
                 title: "Simkl",
                 description: "Sync your watch history and track what to watch next with Simkl.",
-                valueSummary: statusSummary(simklRowPhase)
             ) {
                 if case let .connecting(userCode, verificationURL, expiresAt) = simkl.phase {
                     DeviceCodeConnectingView(
@@ -84,7 +85,6 @@ struct IntegrationsDetailView: View {
                 id: "anilist",
                 title: "AniList",
                 description: "Track anime and manga progress on your AniList profile.",
-                valueSummary: statusSummary(anilistRowPhase)
             ) {
                 if case .awaitingToken = anilist.phase {
                     AniListTokenEntryView(anilist: anilist)
@@ -101,7 +101,6 @@ struct IntegrationsDetailView: View {
                 id: "mal",
                 title: "MyAnimeList",
                 description: "Track anime and manga progress on your MyAnimeList profile.",
-                valueSummary: statusSummary(malRowPhase)
             ) {
                 if case .awaitingAuthorizationCode = mal.phase {
                     MALAuthorizationCodeEntryView(mal: mal)
@@ -111,6 +110,25 @@ struct IntegrationsDetailView: View {
                         onConnect: { mal.connect() },
                         onCancel: { mal.cancelConnect() },
                         onDisconnect: { Task { await mal.disconnect() } }
+                    )
+                }
+            },
+            SettingsSplitRow(
+                id: "lastfm",
+                title: "Last.fm",
+                description: "Scrobble the music you play in Plozz to your Last.fm profile.",
+            ) {
+                if case let .connecting(authURL, _) = lastfm.phase {
+                    LastFmConnectingView(
+                        authURL: authURL,
+                        onCancel: { lastfm.cancelConnect() }
+                    )
+                } else {
+                    trackerActionBar(
+                        phase: lastfmRowPhase,
+                        onConnect: { lastfm.connect() },
+                        onCancel: { lastfm.cancelConnect() },
+                        onDisconnect: { Task { await lastfm.disconnect() } }
                     )
                 }
             }
@@ -125,7 +143,6 @@ struct IntegrationsDetailView: View {
                         ? "Marking or resuming a title updates every server that has it."
                         : "Only the server you watched on is updated.")
                     : "Add another server to sync watch status across servers.",
-                valueSummary: !canSyncAcrossServers ? "Unavailable" : (playback.settings.syncWatchAcrossServers ? "On" : "Off")
             ) {
                 Toggle("Sync across all my servers", isOn: $playback.settings.syncWatchAcrossServers)
                     .disabled(!canSyncAcrossServers)
@@ -187,18 +204,6 @@ struct IntegrationsDetailView: View {
         }
     }
 
-    /// Compact current-status hint shown on a tracker row's trailing edge.
-    private func statusSummary(_ phase: TrackerRowPhase) -> String {
-        switch phase {
-        case .loading: return "…"
-        case .unavailable: return "Not configured"
-        case .disconnected: return "Not connected"
-        case .connecting: return "Connecting…"
-        case let .connected(name): return name
-        case .error: return "Error"
-        }
-    }
-
     // MARK: - Row phase mapping
 
     private var canSyncAcrossServers: Bool { serverCount >= 2 }
@@ -242,6 +247,17 @@ struct IntegrationsDetailView: View {
         case .unavailable: .unavailable
         case .disconnected: .disconnected
         case .awaitingAuthorizationCode: .connecting
+        case let .connected(name): .connected(name)
+        case .error: .error
+        }
+    }
+
+    private var lastfmRowPhase: TrackerRowPhase {
+        switch lastfm.phase {
+        case .unknown: .loading
+        case .unavailable: .unavailable
+        case .disconnected: .disconnected
+        case .connecting: .connecting
         case let .connected(name): .connected(name)
         case .error: .error
         }
@@ -337,6 +353,45 @@ struct MALAuthorizationCodeEntryView: View {
 }
 
 // MARK: - Shared Components
+
+/// Last.fm desktop-auth connecting view. Shows a QR to the Last.fm approval page;
+/// the user scans it and approves on their phone (NO code typed on the TV), and
+/// the service polls in the background until it flips to Connected.
+struct LastFmConnectingView: View {
+    let authURL: String
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 32) {
+            QRCodeView(authURL)
+                .frame(width: 180, height: 180)
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 16))
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Scan to connect Last.fm")
+                    .font(.title2.weight(.semibold))
+                Text("Scan the code with your phone and approve access on Last.fm. There's no code to type — this screen updates automatically once you approve.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 460, alignment: .leading)
+                HStack(spacing: 14) {
+                    ProgressView().controlSize(.small)
+                    Text("Waiting for approval…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 4)
+                Button(role: .cancel, action: onCancel) {
+                    Text("Cancel")
+                }
+                .padding(.top, 16)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}
 
 /// Reusable device-code connecting view (QR + code + countdown) for Trakt/Simkl.
 struct DeviceCodeConnectingView: View {

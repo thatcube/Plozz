@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Branding/plozz_logo.svg" alt="Plozz logo" width="128" />
+  <img src="App/Resources/Assets.xcassets/PlozzLogo.imageset/plozz_logo.svg" alt="Plozz logo" width="128" />
 </p>
 
 <h1 align="center">Plozz</h1>
@@ -9,10 +9,18 @@
 </p>
 
 <p align="center">
+  <a href="https://testflight.apple.com/join/EKfReNMu"><img src="docs/assets/testflight-button.png" alt="Join the Plozz public beta on TestFlight" width="264" /></a>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="License: GPL-3.0" /></a>
   <a href="https://www.apple.com/apple-tv-4k/"><img src="https://img.shields.io/badge/Platform-tvOS-black.svg?logo=apple" alt="Platform: tvOS" /></a>
   <a href="https://github.com/sponsors/thatcube"><img src="https://img.shields.io/badge/Donate-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white" alt="Donate" /></a>
 </p>
+
+## Try the beta
+
+Plozz is in **public beta** on TestFlight. [**Join the beta →**](https://testflight.apple.com/join/EKfReNMu) to install it on your Apple TV (tvOS 17 or later) and stream from your own Jellyfin or Plex server.
 
 ## Features
 
@@ -155,7 +163,7 @@ by any of the services below.
   decode) by Vincent Herbst, LGPL-3.0 with an App Store exception.
   [superuser404notfound/AetherEngine](https://github.com/superuser404notfound/AetherEngine).
 - **libmpv / FFmpeg** — a decode-only, LGPL-3.0 build backs the optional
-  `EngineMPV` (see [`LGPL_COMPLIANCE.md`](LGPL_COMPLIANCE.md)).
+  `EngineMPV` (see [`NOTICE.md`](NOTICE.md)).
 - **The Movie Database (TMDB)** — some artwork and metadata is provided by the
   TMDB API. This product uses the TMDB API but is not endorsed or certified by
   TMDB. TMDB's marks and logos are trademarks of TMDB.

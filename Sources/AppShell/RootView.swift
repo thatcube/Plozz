@@ -29,6 +29,14 @@ public struct RootView: View {
     /// belong to the household, not an individual profile. See AGENTS.local.md
     /// ("Per-profile vs app-wide settings").
     @AppStorage(TransparencyPreference.storageKey) private var transparencyPreferenceRaw = TransparencyPreference.default.rawValue
+    /// One-time first-run welcome gate. App-wide (device/household first-run, like
+    /// `transparencyPreferenceRaw`): a plain un-namespaced `@AppStorage` key,
+    /// deliberately NOT part of `AppState.rebuildSettingsModels()`, so it isn't
+    /// reset when switching profiles. Flipped to `true` when the user taps
+    /// "Get Started"; the same highlights are always re-viewable from
+    /// Settings ▸ "What Plozz Can Do". See AGENTS.local.md ("Per-profile vs
+    /// app-wide settings").
+    @AppStorage(OnboardingWelcome.storageKey) private var hasSeenWelcome = OnboardingWelcome.defaultSeen
     /// Window-level black veil that survives the player's dismiss into Home so it
     /// can cover the TV's *physical* HDR/DV → SDR panel switch (which on some TVs
     /// lags ~1s behind tvOS's `displayDidSettle`). Injected into the environment so
@@ -110,6 +118,14 @@ public struct RootView: View {
                 if appState.isChoosingProfile {
                     ProfileSelectionView(appState: appState, canCancel: appState.isProfileSelectionCancelable)
                         .transition(.opacity)
+                } else if !hasSeenWelcome {
+                    // First run after the first sign-in: introduce Plozz's
+                    // features (dual-provider libraries, profiles, trackers,
+                    // cinema playback, customization) before dropping the user
+                    // into Home. Shown once; always re-viewable from
+                    // Settings ▸ "What Plozz Can Do".
+                    WelcomeView(onGetStarted: { hasSeenWelcome = true })
+                        .transition(.opacity)
                 } else {
                     let accounts = appState.homeAccounts
                     if !accounts.isEmpty {
@@ -185,6 +201,7 @@ public struct RootView: View {
                 }
                 }
                 .animation(.easeInOut(duration: 0.5), value: appState.isChoosingProfile)
+                .animation(.easeInOut(duration: 0.5), value: hasSeenWelcome)
 
             case let .failed(error, _):
                 FailureView(message: error.userMessage) {

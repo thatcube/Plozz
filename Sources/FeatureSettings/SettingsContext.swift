@@ -54,6 +54,7 @@ enum SettingsRoute: Hashable {
     case attributions
     case help
     case recentActivity
+    case featureTour
     case plexUser(accountID: String)
     case server(key: String)
 }

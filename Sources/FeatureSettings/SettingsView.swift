@@ -434,6 +434,12 @@ public struct SettingsView: View {
             // build / disclaimers / QR) — perfect to drop in inline.
             SettingsAboutSection(version: appVersion, build: appBuild, repoURL: repoURL)
 
+            // Re-viewable feature tour — the same highlights shown on first run,
+            // so a user who skipped the welcome can revisit what Plozz can do.
+            navRow("What Plozz Can Do", icon: "sparkles",
+                   value: nil,
+                   route: .featureTour)
+
             // The one acceptable deeper page: open-source credits & licensing.
             navRow("Attributions & Licensing", icon: "doc.text.magnifyingglass",
                    value: nil,
@@ -515,6 +521,8 @@ public struct SettingsView: View {
             RecentActivityDetailView(
                 canSendDiagnostics: crashReportingConfigured && crashReporting.settings.isEnabled
             )
+        case .featureTour:
+            FeatureTourDetailView()
         case let .plexUser(accountID):
             PlexLinkedUserDetailView(context: context, accountID: accountID)
         case let .server(key):

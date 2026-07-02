@@ -32,7 +32,6 @@ struct ProfileDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                activeProfilePanel
                 profilesListPanel
                 if context.profiles.count > 1 {
                     startupPanel
@@ -76,32 +75,6 @@ struct ProfileDetailView: View {
                     },
                     onCancel: { editorContext = nil }
                 )
-            }
-        }
-    }
-
-    private var activeProfilePanel: some View {
-        SettingsPanel(
-            title: "Current profile",
-            footer: "Switching profiles swaps every setting on this Settings screen (theme, subtitles, spoilers, Trakt) and which servers/libraries you watch. The last-used profile is remembered for this Apple TV user."
-        ) {
-            HStack(spacing: 20) {
-                ProfileAvatarView(profile: context.activeProfile, size: 64)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(context.activeProfile.name).font(.title3.weight(.semibold))
-                    Text("Active profile")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    editorContext = .edit(context.activeProfile)
-                } label: {
-                    Label("Edit", systemImage: "pencil")
-                }
-                Button(action: context.onSwitchProfile) {
-                    Label("Switch Profile", systemImage: "person.2.circle")
-                }
             }
         }
     }

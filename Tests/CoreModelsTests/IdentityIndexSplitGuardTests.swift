@@ -2,17 +2,21 @@ import XCTest
 @testable import CoreModels
 
 /// Tests for the identity index's **split-guard**: when one server mis-tags a
-/// *different* movie with another film's strong external id (the real-world
-/// "Scream 6 shows up as a version of Scream 7" bug), the transitive membership
-/// walk must not fold that impostor into the anchor title's resolved source set.
-/// This is the index-layer twin of `MediaItemMerger.refineComponent` — it protects
-/// the detail version picker, best-source playback, and the watch fan-out, all of
-/// which resolve their servers through `IdentityIndexSnapshot.sources(for:)`.
+/// *different* work with another title's strong external id, the transitive
+/// membership walk must not fold that impostor into the anchor title's resolved
+/// source set. Two real-world bugs this protects against: the movie "Scream 6
+/// shows up as a version of Scream 7" false-merge (split on title/year), and the
+/// series "One Piece 1999 anime collapses with the 2023 live-action" false-merge
+/// (split on the large production-year gap). This is the index-layer twin of
+/// `MediaItemMerger.refineComponent` — it protects the detail version picker,
+/// best-source playback, and the watch fan-out, all of which resolve their servers
+/// through `IdentityIndexSnapshot.sources(for:)`.
 ///
 /// The guard is deliberately conservative (a false merge is worse than a missed
 /// one): it only ejects a source that *positively contradicts* the anchor — a
-/// different movie title whose year doesn't corroborate — and never splits on an
-/// absent signal (missing title/year) or a non-movie kind.
+/// different-titled movie whose year doesn't corroborate, or a series a large
+/// production-year gap apart — and never splits on an absent signal (a movie with
+/// no title, a series with no year) or a cross-kind pair.
 final class IdentityIndexSplitGuardTests: XCTestCase {
     /// A movie the index would have ingested, carrying the title/year the guard
     /// compares. `tmdb` is the (possibly bad, shared) external id both films key on.
@@ -166,5 +170,89 @@ final class IdentityIndexSplitGuardTests: XCTestCase {
         var probe7 = MediaItem(id: "s7", title: "Scream 7", kind: .movie, productionYear: 2026, providerIDs: ["Tmdb": "934433"])
         probe7.sourceAccountID = "plex"
         XCTAssertEqual(Set(snapshot.sourceRefs(for: probe7).map(\.id)), ["plex:s7"])
+    }
+
+    // MARK: - Series split-guard (One Piece anime vs live-action)
+
+    private func indexedSeries(
+        _ account: String,
+        _ itemID: String,
+        title: String,
+        year: Int?,
+        provider: ProviderKind = .plex
+    ) -> IndexedSource {
+        IndexedSource(
+            accountID: account,
+            itemID: itemID,
+            providerKind: provider,
+            kind: .series,
+            normalizedTitle: MediaItemIdentity.normalizedTitle(title),
+            year: year
+        )
+    }
+
+    private func seriesProbe(_ account: String, _ itemID: String, title: String, year: Int?, tvdb: String) -> MediaItem {
+        var item = MediaItem(id: itemID, title: title, kind: .series, productionYear: year, providerIDs: ["Tvdb": tvdb])
+        item.sourceAccountID = account
+        return item
+    }
+
+    func testSeriesSharingBadExternalIDWithLargeYearGapAreSplitAtIndex() {
+        // One server tags the 2023 live-action "One Piece" with the 1999 anime's
+        // TVDb id. The index-layer guard must resolve each to only its own server so
+        // the detail version picker / best-source play / watch fan-out never cross
+        // the anime with the live-action.
+        let sharedID = MediaIdentity.external(source: "tvdb", value: "81797")
+        let anime = indexedSeries("plex", "op-anime", title: "One Piece", year: 1999, provider: .plex)
+        let live = indexedSeries("jf", "op-live", title: "One Piece", year: 2023, provider: .jellyfin)
+        let snapshot = IdentityIndexSnapshot(byIdentity: [sharedID: [anime, live]])
+
+        let animeRefs = snapshot.sourceRefs(for: seriesProbe("plex", "op-anime", title: "One Piece", year: 1999, tvdb: "81797"))
+        XCTAssertEqual(Set(animeRefs.map(\.id)), ["plex:op-anime"], "Live-action must not appear as a source of the anime")
+
+        let liveRefs = snapshot.sourceRefs(for: seriesProbe("jf", "op-live", title: "One Piece", year: 2023, tvdb: "81797"))
+        XCTAssertEqual(Set(liveRefs.map(\.id)), ["jf:op-live"], "Anime must not appear as a source of the live-action")
+    }
+
+    func testSameYearSeriesTwinStaysMergedAtIndex() {
+        // A genuinely-shared series stored under a localized/"(Subtitled)" title on
+        // one server, SAME debut year: the guard keys off year, so gap 0 keeps the
+        // two servers merged into one picker.
+        let sharedID = MediaIdentity.external(source: "tvdb", value: "81797")
+        let a = indexedSeries("plex", "op-a", title: "One Piece", year: 1999)
+        let b = indexedSeries("jf", "op-b", title: "ONE PIECE (Subtitled)", year: 1999, provider: .jellyfin)
+        let snapshot = IdentityIndexSnapshot(byIdentity: [sharedID: [a, b]])
+        let refs = snapshot.sourceRefs(for: seriesProbe("plex", "op-a", title: "One Piece", year: 1999, tvdb: "81797"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:op-b", "plex:op-a"], "A same-year series twin must stay merged")
+    }
+
+    func testYearlessSeriesAnchorLeavesUnionUnguardedAtIndex() {
+        // The series guard needs a year on the anchor to measure the large gap; with
+        // none we can't confidently contradict, so return the union whole (prior
+        // behaviour) rather than guess.
+        let sharedID = MediaIdentity.external(source: "tvdb", value: "81797")
+        let anime = indexedSeries("plex", "op-anime", title: "One Piece", year: 1999)
+        let live = indexedSeries("jf", "op-live", title: "One Piece", year: 2023, provider: .jellyfin)
+        let snapshot = IdentityIndexSnapshot(byIdentity: [sharedID: [anime, live]])
+        let refs = snapshot.sourceRefs(for: seriesProbe("plex", "op-anime", title: "One Piece", year: nil, tvdb: "81797"))
+        XCTAssertEqual(Set(refs.map(\.id)), ["jf:op-live", "plex:op-anime"], "No anchor year ⇒ unguarded union")
+    }
+
+    func testSeriesWatchFanoutSplitsBadIDViaAnchor() {
+        // The watch reconciler expands a series mutation by RAW identities + kind +
+        // the persisted anchor year (no MediaItem at drain time). A large-gap
+        // impostor riding the shared id must not become a fan-out target.
+        let sharedID = MediaIdentity.external(source: "tvdb", value: "81797")
+        let anime = indexedSeries("plex", "op-anime", title: "One Piece", year: 1999)
+        let live = indexedSeries("jf", "op-live", title: "One Piece", year: 2023, provider: .jellyfin)
+        let snapshot = IdentityIndexSnapshot(byIdentity: [sharedID: [anime, live]])
+
+        let guarded = snapshot.sources(
+            forIdentities: [sharedID],
+            kind: .series,
+            anchorTitle: MediaItemIdentity.normalizedTitle("One Piece"),
+            anchorYear: 1999
+        )
+        XCTAssertEqual(Set(guarded.map(\.id)), ["plex:op-anime"], "Watch fan-out must not target the live-action")
     }
 }

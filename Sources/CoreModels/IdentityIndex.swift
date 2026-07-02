@@ -222,15 +222,17 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     }
 
     /// As ``sources(forIdentities:kind:)``, but with an optional **anchor** title/year
-    /// that splits a bad shared external id apart during the walk. When the anchor
-    /// is a movie with a usable title, any same-kind source whose stored
-    /// title/year ``MediaItemIdentity/titlesPlausiblyContradict`` the anchor is
-    /// dropped **and not traversed through** — so two different movies bridged by
-    /// one server's mis-tagged TMDb/IMDb id (e.g. Scream 6 tagged with Scream 7's
-    /// id) don't contaminate the anchor title's version picker, best-source
-    /// playback, or watch fan-out. `nil` anchor = the prior unguarded union, so
-    /// legacy/kind-unknown callers behave exactly as before. Absent title/year
-    /// signals on a source never contradict, so a sparse twin is never split.
+    /// that splits a bad shared external id apart during the walk. Any same-kind
+    /// source whose stored title/year ``MediaItemIdentity/titlesPlausiblyContradict``
+    /// the anchor is dropped **and not traversed through** — so two different works
+    /// bridged by one server's mis-tagged TMDb/IMDb/TVDb id don't contaminate the
+    /// anchor title's version picker, best-source playback, or watch fan-out. This
+    /// covers both a mis-tagged **movie** pair (Scream 6 tagged with Scream 7's id,
+    /// split on title/year) and a mis-tagged **series** pair (a server emitting one
+    /// TVDb id for both the 1999 anime and 2023 live-action "One Piece", split on the
+    /// large production-year gap). `nil`/kind-unknown anchor = the prior unguarded
+    /// union, so legacy callers behave exactly as before. Absent title/year signals
+    /// on a source never contradict, so a sparse twin is never split.
     public func sources(
         forIdentities identities: [MediaIdentity],
         kind: MediaItemKind?,
@@ -244,9 +246,18 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
             return sources(forIdentities: identities)
         }
         guard !identities.isEmpty else { return [] }
-        // Only movies with a usable title can positively contradict; anything else
-        // leaves the guard inert (the union is returned whole, as before).
-        let guardActive = kind == .movie && !(anchorTitle ?? "").isEmpty
+        // The split-guard can only positively contradict a same-kind movie (needs a
+        // usable title) or series (needs a year to measure the large-gap remake /
+        // anime-vs-live-action signal); anything else leaves it inert (the union is
+        // returned whole, as before). The primitive itself is the final arbiter —
+        // this just skips the call when there's provably no anchor signal.
+        let guardActive: Bool = {
+            switch kind {
+            case .movie: return !(anchorTitle ?? "").isEmpty
+            case .series: return anchorYear != nil
+            default: return false
+            }
+        }()
         var visitedIdentities = Set<MediaIdentity>()
         var frontier = identities
         var seenSources = Set<String>()
@@ -259,12 +270,11 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
                 // riding a bad shared id: exclude it from the result AND from the
                 // frontier, so nothing reachable only *through* it leaks in either.
                 if guardActive,
-                   let title = source.normalizedTitle,
                    MediaItemIdentity.titlesPlausiblyContradict(
                        titleA: anchorTitle ?? "",
                        yearA: anchorYear,
-                       kindA: .movie,
-                       titleB: title,
+                       kindA: kind,
+                       titleB: source.normalizedTitle ?? "",
                        yearB: source.year,
                        kindB: source.kind
                    ) {
@@ -295,7 +305,8 @@ public struct IdentityIndexSnapshot: Sendable, Equatable {
     /// through the series probe, not here.
     ///
     /// The item's own title/year anchor the walk's split-guard, so a bad shared
-    /// external id can't fold a *different* movie into this title's picker / play /
+    /// external id can't fold a *different* work (a mis-tagged movie, or the anime
+    /// vs live-action of a same-named series) into this title's picker / play /
     /// watch-fan-out set (see ``sources(forIdentities:kind:anchorTitle:anchorYear:)``).
     public func sources(for item: MediaItem) -> [IndexedSource] {
         let kind = item.kind

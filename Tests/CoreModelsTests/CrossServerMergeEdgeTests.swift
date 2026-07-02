@@ -185,12 +185,80 @@ final class CrossServerMergeEdgeTests: XCTestCase {
         XCTAssertEqual(MediaItemMerger.merge([a, b]).count, 1, "Identical titles stay merged; year slips must not false-split")
     }
 
+    // MARK: Split-guard: series false merge (One Piece anime vs live-action)
+
+    func testSeriesSharingBadExternalIDWithLargeYearGapAreSplit() {
+        // A server emits ONE TVDb id for both the 1999 anime and the 2023
+        // live-action "One Piece". The shared id would otherwise collapse them into
+        // one card (hiding one show from Home/Search); the 24-year production gap
+        // splits them back into two.
+        let anime = item("a", title: "One Piece", kind: .series, year: 1999, account: "plex", ids: ["Tvdb": "81797"])
+        let live = item("l", title: "One Piece", kind: .series, year: 2023, account: "jelly", ids: ["Tvdb": "81797"])
+        let merged = MediaItemMerger.merge([anime, live])
+        XCTAssertEqual(merged.count, 2, "Anime and live-action must not collapse via a single bad shared id")
+        XCTAssertEqual(Set(merged.map(\.id)), ["a", "l"])
+        XCTAssertTrue(merged.allSatisfy { $0.sources.isEmpty }, "Neither should absorb the other as a source")
+    }
+
+    func testSameShowSeriesWithMatchingYearStaysMerged() {
+        // The decisive regression guard for the split-guard: a genuinely-shared
+        // series stored under a *different title* on each server (localized /
+        // "(Subtitled)") but the SAME debut year must still merge — the large-gap
+        // rule keys off the year, not the title, so gap 0 keeps them together.
+        let a = item("a", title: "One Piece", kind: .series, year: 1999, account: "plex", ids: ["Tvdb": "81797"])
+        let b = item("b", title: "ONE PIECE (Subtitled)", kind: .series, year: 1999, account: "jelly", ids: ["Tvdb": "81797"])
+        let merged = MediaItemMerger.merge([a, b])
+        XCTAssertEqual(merged.count, 1, "A same-year same-show series must stay merged across differing titles")
+        XCTAssertEqual(merged[0].sources.map(\.accountID).sorted(), ["jelly", "plex"])
+    }
+
+    func testTransitiveSeriesFalseMergeAcrossThreeServersIsSplit() {
+        // Brandon's real setup: local Plex + local Jellyfin each hold BOTH shows,
+        // and one Jellyfin item bridges anime↔live-action by carrying the anime's
+        // TVDb id on the live-action entry. The two anime copies (gap 0) merge into
+        // one card; both live-action entries eject — anime stays visible, live-action
+        // is its own card, nothing disappears.
+        let animePlex = item("ap", title: "One Piece", kind: .series, year: 1999, account: "plex", ids: ["Tvdb": "81797"])
+        let liveJelly = item("lj", title: "One Piece", kind: .series, year: 2023, account: "jelly", ids: ["Tvdb": "81797"])
+        let animeJelly = item("aj", title: "One Piece", kind: .series, year: 1999, account: "jelly", ids: ["Tvdb": "81797"])
+        let merged = MediaItemMerger.merge([animePlex, liveJelly, animeJelly])
+        let byYear = Dictionary(grouping: merged) { $0.productionYear }
+        XCTAssertEqual(merged.count, 2, "Exactly two cards: the merged anime and the live-action")
+        XCTAssertEqual(byYear[1999]?.first?.sources.map(\.accountID).sorted(), ["jelly", "plex"],
+                       "Both 1999 anime copies merge across servers")
+        XCTAssertEqual(byYear[2023]?.first?.sources.isEmpty, true, "The 2023 live-action stands alone")
+    }
+
+    func testSeriesWithoutYearsNeverSplitOnSharedID() {
+        // A yearless series pair sharing a TVDb id carries no positive contradiction
+        // (year is the series signal), so it must stay merged — never false-split a
+        // sparsely-scraped legitimate twin.
+        let a = item("a", title: "One Piece", kind: .series, year: nil, account: "plex", ids: ["Tvdb": "81797"])
+        let b = item("b", title: "One Piece", kind: .series, year: nil, account: "jelly", ids: ["Tvdb": "81797"])
+        XCTAssertEqual(MediaItemMerger.merge([a, b]).count, 1, "A yearless series twin is not split")
+    }
+
     // MARK: - refineComponent / plausiblyContradicts unit edges
 
-    func testPlausiblyContradictsOnlyAppliesToMovies() {
-        let a = item("a", title: "Scream 6", kind: .series, year: 2023, account: "x")
-        let b = item("b", title: "Scream 7", kind: .series, year: 2026, account: "y")
-        XCTAssertFalse(MediaItemMerger.plausiblyContradicts(a, b), "Non-movies never contradict via this guard")
+    func testSeriesContradictOnlyOnLargeProductionYearGap() {
+        // Two same-named series a few years apart (Scream 6 '23 vs Scream 7 '26,
+        // gap 3) are a normal sequel window, not a remake — must NOT contradict.
+        let near6 = item("a", title: "Scream", kind: .series, year: 2023, account: "x")
+        let near7 = item("b", title: "Scream", kind: .series, year: 2026, account: "y")
+        XCTAssertFalse(MediaItemMerger.plausiblyContradicts(near6, near7),
+                       "A small year gap between same-named series is not a contradiction")
+
+        // A large production-year gap (anime 1999 vs live-action 2023, gap 24) IS a
+        // contradiction — different works riding one bad shared id.
+        let anime = item("c", title: "One Piece", kind: .series, year: 1999, account: "x")
+        let live = item("d", title: "One Piece", kind: .series, year: 2023, account: "y")
+        XCTAssertTrue(MediaItemMerger.plausiblyContradicts(anime, live),
+                      "A large production-year gap between same-named series contradicts")
+
+        // Missing a year on either side leaves the pair merged (no signal).
+        let yearless = item("e", title: "One Piece", kind: .series, year: nil, account: "z")
+        XCTAssertFalse(MediaItemMerger.plausiblyContradicts(anime, yearless),
+                       "A series with no year never contradicts")
     }
 
     func testRefineComponentKeepsSingleMemberUntouched() {

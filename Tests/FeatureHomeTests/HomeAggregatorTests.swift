@@ -319,11 +319,12 @@ final class HomeAggregatorTests: XCTestCase {
 
     func testContentDedupesSeriesAcrossServersWhenExternalIDsPresent() async {
         // Series identity is external-id-only (never title/year), so this must
-        // collapse only because both servers carry the same TMDb id.
+        // collapse only because both servers carry the same TMDb id AND the same
+        // debut year (a genuine cross-server duplicate of one show).
         let plexCopy = MediaItem(id: "p-op", title: "One Piece", kind: .series,
                                  productionYear: 1999, providerIDs: ["Tmdb": "37854"])
-        let jellyCopy = MediaItem(id: "j-op", title: "One Piece", kind: .series,
-                                  productionYear: 2023, providerIDs: ["Tmdb": "37854"])
+        let jellyCopy = MediaItem(id: "j-op", title: "ONE PIECE (Subtitled)", kind: .series,
+                                  productionYear: 1999, providerIDs: ["Tmdb": "37854"])
         let plex = AggregatorStub(latest: [plexCopy])
         let jelly = AggregatorStub(latest: [jellyCopy])
         let accounts = [
@@ -338,6 +339,30 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(card.id, "p-op")
         XCTAssertEqual(card.sources.count, 2, "Merged card exposes both server sources for the picker")
         XCTAssertEqual(Set(card.allSourceAccountIDs), ["acct-plex", "acct-jelly"])
+    }
+
+    func testContentSplitsSeriesWithLargeYearGapDespiteSharedExternalID() async {
+        // The One Piece false-merge: the 1999 anime and the 2023 live-action are
+        // bridged by one server emitting the same TMDb id for both. A shared id
+        // alone would hide one show from Home; the large production-year gap splits
+        // them back into two cards so both stay visible.
+        let anime = MediaItem(id: "p-op", title: "One Piece", kind: .series,
+                              productionYear: 1999, providerIDs: ["Tmdb": "37854"])
+        let live = MediaItem(id: "j-op", title: "One Piece", kind: .series,
+                             productionYear: 2023, providerIDs: ["Tmdb": "37854"])
+        let plex = AggregatorStub(latest: [anime])
+        let jelly = AggregatorStub(latest: [live])
+        let accounts = [
+            resolved("acct-plex", user: "Bob", server: "Plex", kind: .plex, provider: plex),
+            resolved("acct-jelly", user: "Alice", server: "Jelly", kind: .jellyfin, provider: jelly)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(content.latest.count, 2, "Anime and live-action must remain two separate cards")
+        XCTAssertEqual(Set(content.latest.map(\.id)), ["p-op", "j-op"])
+        XCTAssertTrue(content.latest.allSatisfy { $0.sources.isEmpty },
+                      "Neither should absorb the other as a source")
     }
 
     // MARK: - Helpers

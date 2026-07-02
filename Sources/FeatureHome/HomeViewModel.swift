@@ -202,7 +202,7 @@ public final class HomeViewModel {
                     // the card's recency to the source's pre-play timestamp.
                     if !updated.sources.isEmpty {
                         updated.sources = updated.sources.map { ref in
-                            guard mutation.itemIDs.contains(ref.itemID) else { return ref }
+                            guard mutation.matches(accountID: ref.accountID, itemID: ref.itemID) else { return ref }
                             var r = ref
                             r.lastPlayedAt = now
                             return r
@@ -211,7 +211,17 @@ public final class HomeViewModel {
                 }
                 return updated
             }
-            content.continueWatching = HomeAggregator.sortedByRecency(stamped)
+            // Float the just-played card(s) to the front while preserving the
+            // relative order of every other card. We deliberately do NOT re-run the
+            // recency sort here: that sort's carry-forward anchor is computed per
+            // *feed* (pre-interleave, see `HomeAggregator.effectiveRecency`) and the
+            // loaded row no longer carries those feeds, so re-sorting it would drop
+            // every untimestamped "Next Up" card to the bottom and reshuffle the row
+            // out from under the user. A stable partition ("just watched" → top,
+            // everyone else in place) is the correct, focus-preserving reorder.
+            let played = stamped.filter { mutation.targets($0) }
+            let rest = stamped.filter { !mutation.targets($0) }
+            content.continueWatching = played + rest
         } else {
             content.continueWatching = content.continueWatching.map { apply(mutation, to: $0) }
         }
@@ -234,7 +244,7 @@ public final class HomeViewModel {
         if favorite {
             let present = Set(updated.map(\.id))
             let candidates = (content.continueWatching + content.latest)
-                .filter { mutation.itemIDs.contains($0.id) && !present.contains($0.id) }
+                .filter { mutation.targets($0) && !present.contains($0.id) }
             var seen = present
             for candidate in candidates where seen.insert(candidate.id).inserted {
                 var copy = candidate
@@ -242,7 +252,7 @@ public final class HomeViewModel {
                 updated.insert(copy, at: 0)
             }
         } else {
-            updated.removeAll { mutation.itemIDs.contains($0.id) }
+            updated.removeAll { mutation.targets($0) }
         }
         return updated
     }
@@ -255,12 +265,14 @@ public final class HomeViewModel {
     ///
     /// This mirrors ``HomeAggregator``'s row merge exactly: re-run the same
     /// identity/merge core over the loaded cards with the live `identitySources`
-    /// closure (which reads the freshest snapshot) plus the accounts' server info,
-    /// then re-sort Continue Watching by recency. `MediaItemMerger.merge` is
-    /// idempotent and order-stable over already-merged cards, so positions — and
-    /// therefore the user's focus — are preserved; only each card's `sources` set
-    /// grows. State is only republished when something actually changed, so a
-    /// re-enrich that surfaces no new source is a true no-op (no view churn).
+    /// closure (which reads the freshest snapshot) plus the accounts' server info.
+    /// `MediaItemMerger.merge` is idempotent and order-stable over already-merged
+    /// cards, so Continue Watching order — and therefore the user's focus — is
+    /// preserved; only each card's `sources` set grows. Crucially it does **not**
+    /// re-sort Continue Watching: the recency order is authoritative from load time
+    /// and re-sorting the feed-less loaded row is what used to shuffle the row on
+    /// every index warm. State is only republished when something actually changed,
+    /// so a re-enrich that surfaces no new source is a true no-op (no view churn).
     public func reenrich() {
         guard case let .loaded(current) = state else { return }
         let serverInfoMap = accounts.sourceServerInfo()
@@ -268,9 +280,15 @@ public final class HomeViewModel {
         let sources = identitySources
 
         var updated = current
-        updated.continueWatching = HomeAggregator.sortedByRecency(
-            MediaItemMerger.merge(current.continueWatching, serverInfo: resolve, identitySources: sources)
-        )
+        // Re-merge folds any newly-discovered cross-server sources into the loaded
+        // cards. `MediaItemMerger.merge` is order-stable (first occurrence stays
+        // primary), so the Continue Watching order the initial load computed is
+        // preserved verbatim — we deliberately do NOT re-sort here. The recency sort
+        // anchors untimestamped "Next Up" cards from a per-*feed* carry-forward that
+        // only exists at load time (pre-interleave); re-sorting the interleaved,
+        // feed-less loaded row is exactly what used to make Continue Watching "shift
+        // around" on every background index warm. Enrich in place; never reorder.
+        updated.continueWatching = MediaItemMerger.merge(current.continueWatching, serverInfo: resolve, identitySources: sources)
         updated.latest = MediaItemMerger.merge(current.latest, serverInfo: resolve, identitySources: sources)
         updated.watchlist = MediaItemMerger.merge(current.watchlist, serverInfo: resolve, identitySources: sources)
 

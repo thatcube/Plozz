@@ -73,6 +73,15 @@ public final class AggregatedLibraryProvider: MediaProvider, @unchecked Sendable
         /// (a title that sorts differently per server) still collapse. Done under
         /// the actor lock so concurrent page requests can't corrupt the buffer.
         func appendMergedBatch(_ items: [MediaItem]) {
+            // Re-merges `merged + items` from scratch each page rather than folding
+            // the new batch into the existing clusters. This is deliberate: the
+            // union-find merge is near-linear per call, and real tvOS browse fills
+            // are tens–hundreds of items paged lazily as the user scrolls, so each
+            // call is sub-millisecond. An incremental merger would only help a full
+            // multi-thousand-item scroll (spread over minutes anyway) and would have
+            // to re-implement the same-server two-account dedup and cross-server
+            // identity union statefully — trading a proven, correct merge for a
+            // subtle one to shave time off a path that is never hot. Kept simple.
             merged = MediaItemMerger.merge(
                 merged + items,
                 serverInfo: { [serverInfo] id in serverInfo[id] },

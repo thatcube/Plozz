@@ -329,10 +329,15 @@ public enum MediaItemMerger {
             return UnifiedWatchState(resumePosition: nil, playedPercentage: nil, isPlayed: false, lastPlayedAt: nil)
         }
 
-        let timestamped = sources.compactMap { source -> (MediaSourceRef, Date)? in
-            source.lastPlayedAt.map { (source, $0) }
+        let timestamped = sources.enumerated().compactMap { offset, source -> (offset: Int, source: MediaSourceRef, date: Date)? in
+            source.lastPlayedAt.map { (offset, source, $0) }
         }
-        if let winner = timestamped.max(by: { $0.1 < $1.1 })?.0 {
+        // Newest timestamp wins; on an exact tie (e.g. two servers both stamped
+        // `now` by a mark-watched fan-out) the lower offset — the primary, listed
+        // first — wins, so `resumePosition` can't flip between reloads.
+        if let winner = timestamped.max(by: { lhs, rhs in
+            lhs.date != rhs.date ? lhs.date < rhs.date : lhs.offset > rhs.offset
+        })?.source {
             return UnifiedWatchState(
                 resumePosition: winner.isPlayed ? nil : winner.resumePosition,
                 playedPercentage: winner.playedPercentage,

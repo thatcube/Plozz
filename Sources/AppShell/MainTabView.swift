@@ -506,6 +506,15 @@ private func resolveLibraryBrowse(
 /// watch-state) lets the locality selection route to the LAN copy instead of
 /// streaming remotely. This is the direct-play counterpart to the detail page's
 /// cross-server resolver.
+///
+/// Episodes are a deliberate exception: the identity index only ingests movies
+/// and series, so `identitySources` returns nothing for an episode and a
+/// Continue-Watching episode keeps its single CW-feed source. That is by design —
+/// resume progress lives on the specific server the episode was watched on, so
+/// continuity (resume where you left off) beats locality for a mid-episode card.
+/// Local-first for episodic content is instead achieved by navigating into the
+/// series (whose detail page retargets to the most-local source once its
+/// cross-server twins are discovered).
 private func bestSourcePlayItem(
     _ item: MediaItem,
     accounts: [ResolvedAccount],

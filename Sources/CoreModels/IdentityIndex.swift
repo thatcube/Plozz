@@ -503,8 +503,20 @@ public final class IdentityIndexSnapshotStore: @unchecked Sendable {
         self.snapshot = snapshot
     }
 
-    /// A `@Sendable` identity-sources lookup over the live snapshot, suitable for
-    /// the ``MediaItemMerger`` enrichment seam and the watch fan-out.
+    /// A `@Sendable` identity-sources lookup over the **live** snapshot, suitable
+    /// for the ``MediaItemMerger`` enrichment seam and the watch fan-out.
+    ///
+    /// The closure reads ``current`` on every call by design — it must stay LIVE:
+    /// surface closures (Search / the tab view) are captured once for the view's
+    /// lifetime and have to reflect the index growing as accounts warm, otherwise a
+    /// card would keep a stale cross-server set and play-time selection would miss a
+    /// same-LAN twin discovered later (the very bug the index exists to fix). This
+    /// is cheap: `IdentityIndexSnapshot` is a value type backing onto copy-on-write
+    /// dictionaries, so `current` is an uncontended `NSLock` acquire plus a couple
+    /// of retains — sub-microsecond per item, dwarfed by the identity extraction and
+    /// dictionary lookups in `sourceRefs(for:)`. A frozen snapshot would shave that
+    /// micro-cost off large browse merges but at the cost of live-ness, which is not
+    /// a trade worth making.
     public func sourcesProvider() -> @Sendable (MediaItem) -> [MediaSourceRef] {
         { [weak self] item in self?.current.sourceRefs(for: item) ?? [] }
     }

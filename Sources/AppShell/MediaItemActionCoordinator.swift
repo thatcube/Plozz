@@ -117,7 +117,11 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         let targets = watchlistTargets(for: item)
         guard !targets.isEmpty else { return }
 
-        MediaItemMutation(itemIDs: [item.id], favorite: adding).post()
+        // Account-scope the optimistic post to this card's real copies so a Plex
+        // ratingKey shared with an unrelated title on another server can't flip the
+        // wrong card's favorite badge. Falls back to bare id for an untagged item.
+        let scoped = Set(item.sources.map(\.id))
+        MediaItemMutation(itemIDs: [item.id], scopedItemIDs: scoped, favorite: adding).post()
         Task {
             var anySucceeded = false
             for target in targets {
@@ -130,14 +134,17 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
             }
             // If every provider failed, revert the optimistic change.
             if !anySucceeded {
-                MediaItemMutation(itemIDs: [item.id], favorite: !adding).post()
+                MediaItemMutation(itemIDs: [item.id], scopedItemIDs: scoped, favorite: !adding).post()
             }
         }
     }
 
-    /// Every server holding this title paired with the item retargeted to that
-    /// server's own id. One target per distinct account (the card's own sources
-    /// win over index entries), so no server is double-written.
+    /// Every distinct copy of this title paired with the item retargeted to that
+    /// copy's own id. One target per distinct **(account, item)** — favouriting is a
+    /// per-item operation on both Jellyfin and Plex, so a title a single server
+    /// holds twice (e.g. the same movie in two libraries, folded into one card by a
+    /// shared external id) must have BOTH copies written, while genuinely distinct
+    /// servers are each written once.
     private func watchlistTargets(for item: MediaItem) -> [(provider: any WatchlistProviding, item: MediaItem)] {
         let refs = unionedSourceRefs(for: item)
         guard !refs.isEmpty else {
@@ -149,19 +156,26 @@ final class MediaItemActionCoordinator: MediaItemActionHandling {
         return refs.compactMap { ref in
             guard let provider = appState.provider(forAccountID: ref.accountID) as? WatchlistProviding else { return nil }
             // The primary's own ref already points at `item.id`, so `selectingSource`
-            // is a no-op there and repoints only the alternate servers.
+            // is a no-op there and repoints only the alternate copies.
             return (provider: provider, item: item.selectingSource(ref))
         }
     }
 
-    /// The per-server references for a (possibly merged) title, one per distinct
-    /// account: the card's own `sources` first, then any additional server the
-    /// live identity index knows. Empty only for an untagged single-account item.
+    /// The per-copy references for a (possibly merged) title, one per distinct
+    /// **(account, item)**: the card's own `sources` first, then any additional
+    /// copy the live identity index knows that the card didn't already carry.
+    /// Empty only for an untagged single-account item.
+    ///
+    /// Deduped by the full `(account, item)` ref id — NOT by account — because
+    /// favouriting is per-item: a single server can hold the same title twice
+    /// (two libraries → two item ids folded into one card) and each copy needs its
+    /// own write, so collapsing to one-per-account would silently leave the second
+    /// copy un-favourited.
     private func unionedSourceRefs(for item: MediaItem) -> [MediaSourceRef] {
         var refs = item.sources
-        var seenAccounts = Set(refs.map(\.accountID))
+        var seen = Set(refs.map(\.id))
         for ref in appState.identitySnapshot.sourceRefs(for: item)
-        where seenAccounts.insert(ref.accountID).inserted {
+        where seen.insert(ref.id).inserted {
             refs.append(ref)
         }
         return refs

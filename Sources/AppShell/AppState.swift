@@ -326,11 +326,16 @@ public final class AppState {
         guard let mutation else { return }
         var ids = Set(mutation.targets.map(\.itemID))
         ids.insert(itemID)
+        // Account-scope the optimistic post to the exact (account,item) copies the
+        // fan-out targeted. Without this the bare `itemID` set would false-match a
+        // different title that happens to share a Plex ratingKey on another server,
+        // flipping the wrong card's badge / resume bar / recency.
+        let scoped = Set(mutation.targets.map(\.id))
         if mutation.played == true {
-            MediaItemMutation(itemIDs: ids, played: true, resumePosition: 0, playedPercentage: 1).post()
+            MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, played: true, resumePosition: 0, playedPercentage: 1).post()
         } else if let resume = mutation.resumePosition {
             let fraction = max(0, min(watchedPercent / 100, 1))
-            MediaItemMutation(itemIDs: ids, resumePosition: resume, playedPercentage: fraction).post()
+            MediaItemMutation(itemIDs: ids, scopedItemIDs: scoped, resumePosition: resume, playedPercentage: fraction).post()
         }
     }
 
@@ -393,6 +398,14 @@ public final class AppState {
     private let identityChunkSize = 200
     private let identityMaxItemsPerLibrary = 10_000
 
+    /// Caps how many accounts are indexed concurrently during a warm. Without a
+    /// cap a many-server library fans out one full library scan per account at
+    /// once, swamping launch-time network/decoding — the per-library fan-out
+    /// inside `indexAccount` is bounded, but the per-account group was not. Sized
+    /// to a typical multi-server household (mirrors `HomeAggregator`'s account
+    /// fan-out) so the common case still runs in a single wave.
+    private let identityWarmFanoutLimit = 5
+
     /// Warms (or incrementally refreshes) the identity index for the currently
     /// active accounts. Cold and stale accounts are (re)scanned; removed accounts
     /// are pruned. Bounded and fully best-effort: a failing/asleep server simply
@@ -408,6 +421,7 @@ public final class AppState {
         let chunkSize = identityChunkSize
         let maxPerLibrary = identityMaxItemsPerLibrary
         let store = identityIndexStore
+        let fanoutLimit = identityWarmFanoutLimit
 
         identityWarmTask?.cancel()
         identityWarmTask = Task { [weak self] in
@@ -424,6 +438,14 @@ public final class AppState {
                     await MainActor.run {
                         self.identitySnapshot = snapshot
                         self.identitySnapshotStore.update(snapshot)
+                        // Tell already-loaded surfaces (Home) that cross-server
+                        // membership is now known so they re-fold the fuller source
+                        // set into their in-place cards. Without this, a boot whose
+                        // live warm surfaces no NEW membership (everything already in
+                        // the persisted snapshot) would leave Home on its pre-restore
+                        // origin-only sources for the whole session — play-time
+                        // locality selection then had no local twin to route to.
+                        NotificationCenter.default.post(name: .identityIndexDidUpdate, object: nil)
                         self.drainWatchOutbox()
                     }
                     FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "restore"))
@@ -443,57 +465,74 @@ public final class AppState {
                 accountsToWarm.append(resolvedAccount)
             }
 
-            // Warm every account CONCURRENTLY. Cold-boot warm time used to be the
-            // *sum* of each server's scan (a sequential loop), which is the visible
-            // "takes a while to warm up on first boot" cost. The identity index is an
-            // `actor` keyed by accountID, so concurrent per-account begin/ingest/
-            // finish never race, and the wall-clock collapses to ≈ the slowest single
-            // server. Each account still publishes its snapshot, persists, and
-            // re-drains the outbox the moment IT finishes, so surfaces and fan-out see
-            // progress incrementally instead of only after the slowest server.
-            await withTaskGroup(of: Void.self) { group in
-                for resolvedAccount in accountsToWarm {
+            // Warm accounts CONCURRENTLY but BOUNDED. Cold-boot warm time used to be
+            // the *sum* of each server's scan (a sequential loop), which is the
+            // visible "takes a while to warm up on first boot" cost. The identity
+            // index is an `actor` keyed by accountID, so concurrent per-account
+            // begin/ingest/finish never race. We cap the per-account fan-out (a
+            // sliding window) so a many-server library can't launch one full library
+            // scan per account at once and swamp the network/decoding pipeline — the
+            // window keeps the common household case running in a single wave while
+            // bounding pathological (many-server) cases. Each account still
+            // publishes its snapshot, persists, and re-drains the outbox the moment
+            // IT finishes, so surfaces and fan-out see progress incrementally.
+            if !accountsToWarm.isEmpty {
+                let warmOne: @Sendable (ResolvedAccount) async -> Void = { resolvedAccount in
                     let accountID = resolvedAccount.account.id
-                    group.addTask {
-                        if Task.isCancelled { return }
-                        await Self.indexAccount(
-                            resolvedAccount,
-                            into: index,
-                            serverInfo: serverInfo[accountID],
-                            chunkSize: chunkSize,
-                            maxPerLibrary: maxPerLibrary
-                        )
-                        if Task.isCancelled { return }
-                        // Publish progressively so surfaces see each warmed account.
-                        let snapshot = await index.snapshot()
-                        await MainActor.run {
-                            self?.identitySnapshot = snapshot
-                            self?.identitySnapshotStore.update(snapshot)
-                            // Tell already-loaded surfaces (Home) that the shared
-                            // cross-server membership just grew, so they can re-fold
-                            // the fuller source set into their in-place cards without
-                            // a refetch. Cheap and idempotent: a surface whose rows
-                            // gained no new sources no-ops on the re-merge.
-                            NotificationCenter.default.post(name: .identityIndexDidUpdate, object: nil)
-                            // Re-drain the watch outbox now that another account is
-                            // indexed: a movie / series mutation stopped before the
-                            // index finished warming re-expands against the larger
-                            // union and fans out to the newly-known servers. No-op
-                            // when the outbox is empty.
-                            self?.drainWatchOutbox()
-                        }
-                        // B1: persist the freshly-warmed membership so the next cold
-                        // boot can seed it at t=0. Only warm accounts are exported, so
-                        // a half-scan is never frozen as authoritative. The store is
-                        // NSLock-guarded with atomic writes, so the concurrent saves
-                        // from sibling warm tasks are safe and monotonic.
-                        let persisted = await index.export()
-                        try? store.save(persisted)
-                        // Make warm progress visible: each publish shows how many
-                        // identities and cross-server unions the index now holds.
-                        // crossServer staying 0 as accounts warm is the H1 signal
-                        // (no union ⇒ nothing fans out).
-                        FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "warm"))
+                    if Task.isCancelled { return }
+                    await Self.indexAccount(
+                        resolvedAccount,
+                        into: index,
+                        serverInfo: serverInfo[accountID],
+                        chunkSize: chunkSize,
+                        maxPerLibrary: maxPerLibrary
+                    )
+                    if Task.isCancelled { return }
+                    // Publish progressively so surfaces see each warmed account.
+                    let snapshot = await index.snapshot()
+                    await MainActor.run {
+                        self?.identitySnapshot = snapshot
+                        self?.identitySnapshotStore.update(snapshot)
+                        // Tell already-loaded surfaces (Home) that the shared
+                        // cross-server membership just grew, so they can re-fold
+                        // the fuller source set into their in-place cards without
+                        // a refetch. Cheap and idempotent: a surface whose rows
+                        // gained no new sources no-ops on the re-merge.
+                        NotificationCenter.default.post(name: .identityIndexDidUpdate, object: nil)
+                        // Re-drain the watch outbox now that another account is
+                        // indexed: a movie / series mutation stopped before the
+                        // index finished warming re-expands against the larger
+                        // union and fans out to the newly-known servers. No-op
+                        // when the outbox is empty.
+                        self?.drainWatchOutbox()
+                    }
+                    // B1: persist the freshly-warmed membership so the next cold
+                    // boot can seed it at t=0. Only warm accounts are exported, so
+                    // a half-scan is never frozen as authoritative. The store is
+                    // NSLock-guarded with atomic writes, so the concurrent saves
+                    // from sibling warm tasks are safe and monotonic.
+                    let persisted = await index.export()
+                    try? store.save(persisted)
+                    // Make warm progress visible: each publish shows how many
+                    // identities and cross-server unions the index now holds.
+                    // crossServer staying 0 as accounts warm is the H1 signal
+                    // (no union ⇒ nothing fans out).
+                    FanoutDiagnostics.emit(FanoutDiagnostics.indexStateLine(snapshot, phase: "warm"))
+                }
+
+                let window = max(1, min(fanoutLimit, accountsToWarm.count))
+                await withTaskGroup(of: Void.self) { group in
+                    var next = 0
+                    for _ in 0..<window {
+                        let account = accountsToWarm[next]
+                        next += 1
+                        group.addTask { await warmOne(account) }
+                    }
+                    while await group.next() != nil {
+                        guard next < accountsToWarm.count else { continue }
+                        let account = accountsToWarm[next]
+                        next += 1
+                        group.addTask { await warmOne(account) }
                     }
                 }
             }
@@ -537,6 +576,14 @@ public final class AppState {
             return copy
         }
 
+        // A cancelled warm (account set changed / profile switch) must not begin a
+        // rebuild that empties this account's bucket only to abandon it — and must
+        // not ingest a further page into a bucket the retain/rebuild logic may have
+        // just reset for a removed account, which would resurrect it. The group
+        // children are cancelled when `identityWarmTask.cancel()` fires; check right
+        // before the mutating index calls (there are awaits above that can suspend
+        // long enough for cancellation to land).
+        if Task.isCancelled { return }
         await index.beginRebuild(for: accountID)
         // `true` if any page needed an enrichment fetch that failed **or** a
         // catalogue page fetch itself failed, so we leave the account un-finished
@@ -571,9 +618,19 @@ public final class AppState {
                     try? await provider.item(id: item.id)
                 }
                 inconclusive = inconclusive || prepared.inconclusive
+                // Re-check just before the ingest: `provider.items` and the
+                // per-item enrichment above are awaits during which the warm may
+                // have been cancelled (account removed). Ingesting here would write
+                // into a bucket a concurrent retain/rebuild already cleared.
+                if Task.isCancelled { return }
                 await index.ingest(prepared.indexable, accountID: accountID, serverInfo: liveServerInfo)
                 offset += page.items.count
-                if offset >= page.totalCount { break }
+                // Only trust `totalCount` as an end-of-catalogue signal when the
+                // provider actually reports one (> 0). A provider that returns a
+                // full page of items but `totalCount == 0` (unknown/omitted) would
+                // otherwise truncate the scan after the first page; rely on the
+                // empty-page break above to terminate in that case.
+                if page.totalCount > 0 && offset >= page.totalCount { break }
             }
         }
         // Only mark conclusively built when every guid-less item was resolved; an

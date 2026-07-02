@@ -167,7 +167,7 @@ struct SeriesDetailView: View {
             // visible hero button reflects the new state immediately.
             .onReceive(NotificationCenter.default.publisher(for: .mediaItemDidMutate)) { note in
                 guard let mutation = MediaItemMutation.from(note),
-                      mutation.itemIDs.contains(heroItem.id) else { return }
+                      mutation.targets(heroItem) else { return }
                 heroItem = mutation.applied(to: heroItem)
             }
     }

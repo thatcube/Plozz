@@ -68,13 +68,23 @@ public final class PlexConnectionResolver: @unchecked Sendable {
         self.candidates = Self.prioritized(seeded)
     }
 
-    /// Best-known base URL available synchronously: the cached reachable URL, or
-    /// the most-preferred candidate if probing hasn't settled. Used by the
-    /// synchronous URL builders (artwork, stream/transcode URLs), which only run
-    /// after a `resolved()` request has already populated the cache.
+    /// Best-known base URL available synchronously: the cached reachable URL, then
+    /// the last-known-good reachable seed (persisted across launches), then the
+    /// most-preferred candidate if nothing has been probed yet. Used by the
+    /// synchronous URL builders (artwork, stream/transcode URLs) and the
+    /// `connectionLocality` read, which normally run only after a `resolved()`
+    /// request has already populated `cached`.
+    ///
+    /// Preferring `reachableSeed` over `candidates[0]` before the first probe
+    /// matters for the rare synchronous read that races ahead of resolution (e.g. a
+    /// detail page classifying locality at first paint): `candidates[0]` is the
+    /// highest-*priority* address, which — because a server advertises its own LAN
+    /// address even to remote clients — can be a local-looking URL that isn't
+    /// actually reachable, whereas the seed is by definition an address that worked
+    /// last launch. The live probe still corrects both the moment it settles.
     public var current: URL {
         lock.lock(); defer { lock.unlock() }
-        return cached ?? candidates[0]
+        return cached ?? reachableSeed ?? candidates[0]
     }
 
     /// The base URL to use for the next request. Probes for a reachable

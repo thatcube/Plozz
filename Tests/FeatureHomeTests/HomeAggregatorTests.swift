@@ -157,6 +157,43 @@ final class HomeAggregatorTests: XCTestCase {
         XCTAssertEqual(card.sources.first?.providerKind, .plex)
     }
 
+    func testContinueWatchingNextUpKeepsItsOwnServersRecencyAcrossMerge() async {
+        // Regression for the reported "Continue Watching shifts / isn't what I
+        // watched last" bug. Server A's activity is OLD: an in-progress episode
+        // (T1) followed by its untimestamped Next Up suggestion. Server B has a
+        // FRESH in-progress card (T2 > T1). The two feeds round-robin interleave to
+        // [A-inprogress, B-inprogress, A-nextup], so the Next Up card lands directly
+        // below server B's fresh card.
+        //
+        // The old post-interleave carry-forward walked that interleaved row and let
+        // A-nextup inherit B's fresh T2, floating a stale show's next episode to the
+        // #2 slot. The per-feed carry-forward must instead anchor A-nextup to its
+        // OWN feed's T1, so the correct order is B's fresh card first, then server
+        // A's old in-progress card, then its Next Up — never the Next Up jumping the
+        // queue on a foreign server's timestamp.
+        let old = Date(timeIntervalSince1970: 1_000)
+        let fresh = Date(timeIntervalSince1970: 9_000)
+        let aInProgress = MediaItem(id: "a-ip", title: "A In Progress", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: old)
+        let aNextUp = MediaItem(id: "a-next", title: "A Next Up", kind: .episode)
+        let bInProgress = MediaItem(id: "b-ip", title: "B In Progress", kind: .episode,
+                                    resumePosition: 60, lastPlayedAt: fresh)
+        let a = AggregatorStub(continueWatching: [aInProgress, aNextUp])
+        let b = AggregatorStub(continueWatching: [bInProgress])
+        let accounts = [
+            resolved("acct-a", user: "A", server: "S-A", kind: .plex, provider: a),
+            resolved("acct-b", user: "B", server: "S-B", kind: .jellyfin, provider: b)
+        ]
+
+        let content = await HomeAggregator().content(from: accounts)
+
+        XCTAssertEqual(
+            content.continueWatching.map(\.id),
+            ["b-ip", "a-ip", "a-next"],
+            "Server B's fresh card leads; server A's Next Up stays anchored to its own old feed instead of stealing B's recency"
+        )
+    }
+
     func testContentCapsMergedRowsToRequestedLimits() async {
         let a = AggregatorStub(
             continueWatching: [item("a1"), item("a2"), item("a3")],

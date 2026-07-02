@@ -57,6 +57,8 @@ struct ServerDetailView: View {
             }
             .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
             .padding(.vertical, 24)
+            .frame(maxWidth: PlozzTheme.Metrics.settingsContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .scrollClipDisabled()
         .alert(item: $pendingSignOut) { pending in

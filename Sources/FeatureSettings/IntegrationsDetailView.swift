@@ -159,8 +159,8 @@ struct IntegrationsDetailView: View {
         let discover = SettingsSplitSection(id: "discover", header: "Discover", rows: [
             SettingsSplitRow(
                 id: "seerr",
-                title: "Overseerr / Jellyseerr",
-                description: "Connect a Seerr server to surface trending titles in the Home hero and request movies & shows right from your Apple TV.",
+                title: "Seerr",
+                description: "Connect a Seerr server (formerly Overseerr or Jellyseerr) to surface trending titles in the Home hero and request movies & shows right from your Apple TV.",
             ) {
                 SeerConfigurationView(seer: seer, knownServerHosts: knownServerHosts)
             }

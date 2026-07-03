@@ -31,35 +31,37 @@ struct PlexUserSelectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 14) {
+            VStack(spacing: 8) {
                 Text("Which Plex user are you?")
-                    .font(.largeTitle.weight(.bold))
+                    .font(.title.weight(.bold))
                     .multilineTextAlignment(.center)
 
                 Text("Choose your user on \(selection.serverName).")
-                    .font(.title3)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             .padding(.bottom, 28)
 
-            // Clipped scroll (no scrollClipDisabled) so rows never draw over the
-            // pinned header/footer. Inner padding gives the focus fill (which
-            // extends ~16pt H / 4pt V outward) and its shadow room at the edges.
-            ScrollView {
-                VStack(spacing: 14) {
-                    ForEach(orderedUsers) { user in
-                        Button {
-                            onSelect(user)
-                        } label: {
-                            PlexHomeUserRow(user: user, showsOwnerBadge: user.isAdmin)
+            // Clipped scroll wrapped in a card (matching Settings). Inner gutters
+            // give the focus fill (~16pt H / 4pt V outward) and its shadow room so
+            // it's never clipped by the card edge at the width restriction.
+            PlozzScrollCard {
+                ScrollView {
+                    VStack(spacing: 14) {
+                        ForEach(orderedUsers) { user in
+                            Button {
+                                onSelect(user)
+                            } label: {
+                                PlexHomeUserRow(user: user, showsOwnerBadge: user.isAdmin)
+                            }
+                            .buttonStyle(SettingsFocusButtonStyle())
+                            .focused($focused, equals: user.id)
                         }
-                        .buttonStyle(SettingsFocusButtonStyle())
-                        .focused($focused, equals: user.id)
                     }
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 28)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
             }
 
             Text("You can change this anytime in Settings.")

@@ -51,16 +51,16 @@ struct SelectLibrariesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 14) {
+            VStack(spacing: 8) {
                 Text("Choose your libraries")
-                    .font(.largeTitle.weight(.bold))
+                    .font(.title.weight(.bold))
                     .multilineTextAlignment(.center)
 
                 Text("Pick which libraries appear on your Home. You can turn any of these on or off anytime in Settings.")
-                    .font(.title3)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 820)
+                    .frame(maxWidth: 760)
             }
             .padding(.bottom, 28)
 
@@ -73,7 +73,7 @@ struct SelectLibrariesView: View {
             }
             .buttonStyle(.borderedProminent)
             .focused($focused, equals: .continueButton)
-            .padding(.top, 20)
+            .padding(.top, 24)
         }
         .padding(.horizontal, PlozzTheme.Metrics.screenPadding)
         .padding(.vertical, 48)
@@ -119,36 +119,36 @@ struct SelectLibrariesView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case let .loaded(all):
-            // Clipped scroll (no scrollClipDisabled) so rows never draw over the
-            // pinned header/footer. Inner gutters give the focus fill room.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    ForEach(groups(from: all)) { group in
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(spacing: 12) {
-                                ProviderBrandMark(provider: group.providerKind, size: 30, showsBackground: false).frame(width: 34)
-                                Text(group.serverName)
-                                    .font(.title3.weight(.semibold))
-                            }
-                            .padding(.horizontal, 20)
-
-                            ForEach(group.libraries) { library in
-                                Toggle(isOn: Binding(
-                                    get: { appState.homeLibraryVisibilityModel.isVisible(library.key) },
-                                    set: { appState.homeLibraryVisibilityModel.setVisible($0, for: library.key) }
-                                )) {
-                                    Text(library.library.title)
-                                        .font(.headline)
+            // Clipped scroll wrapped in a card (matching Settings). Inner gutters
+            // give the row focus fill/shadow room so it isn't clipped by the card.
+            PlozzScrollCard {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
+                        ForEach(groups(from: all)) { group in
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 12) {
+                                    ProviderBrandMark(provider: group.providerKind, size: 30, showsBackground: false).frame(width: 34)
+                                    Text(group.serverName)
+                                        .font(.headline.weight(.semibold))
                                 }
-                                .padding(.vertical, 10)
                                 .padding(.horizontal, 20)
-                                .focused($focused, equals: .library(library.key))
+
+                                ForEach(group.libraries) { library in
+                                    Toggle(isOn: Binding(
+                                        get: { appState.homeLibraryVisibilityModel.isVisible(library.key) },
+                                        set: { appState.homeLibraryVisibilityModel.setVisible($0, for: library.key) }
+                                    )) {
+                                        Text(library.library.title)
+                                    }
+                                    .toggleStyle(SettingsSwitchToggleStyle())
+                                    .focused($focused, equals: .library(library.key))
+                                }
                             }
                         }
                     }
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 28)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
             }
         }
     }

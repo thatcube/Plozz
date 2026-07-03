@@ -1,5 +1,6 @@
 #if canImport(SwiftUI) && canImport(UIKit)
 import CoreImage.CIFilterBuiltins
+import CoreUI
 import SwiftUI
 import UIKit
 
@@ -37,21 +38,25 @@ public struct PlexLogoMark: View {
     }
 }
 
-/// A scan-to-sign-in QR code rendered plainly — brand-tinted (default white)
-/// modules on a transparent background, with no surrounding card and no center
-/// logo. On the dark sign-in screen this reads as white-on-black, which iOS
-/// (and modern scanners) handle as an inverted code.
+/// A scan-to-sign-in QR code rendered plainly — theme-tinted modules on a
+/// transparent background, with no surrounding card and no center logo. The
+/// module colour defaults to the active theme's primary text colour, so the
+/// code shows as white-on-black in dark/OLED and black-on-white in light mode
+/// (an unset explicit colour would otherwise vanish against a light background).
 public struct BrandQRCodeView: View {
+    @Environment(\.themePalette) private var palette
+
     /// The URL the QR encodes (the activation link to open on a phone).
     let payload: String
-    /// Colour applied to the QR modules (the "dark" cells).
-    var moduleColor: Color
+    /// Explicit colour for the QR modules. When `nil`, the module colour tracks
+    /// the theme's primary text colour so the code stays visible in every theme.
+    var moduleColor: Color?
     /// Side length of the QR image.
     var size: CGFloat
 
     public init(
         payload: String,
-        moduleColor: Color = .white,
+        moduleColor: Color? = nil,
         size: CGFloat = 440
     ) {
         self.payload = payload
@@ -60,8 +65,9 @@ public struct BrandQRCodeView: View {
     }
 
     public var body: some View {
+        let tint = moduleColor ?? palette.primaryText
         Group {
-            if let image = QRCodeRenderer.makeQRCode(from: payload, tint: UIColor(moduleColor)) {
+            if let image = QRCodeRenderer.makeQRCode(from: payload, tint: UIColor(tint)) {
                 Image(uiImage: image)
                     .interpolation(.none)
                     .resizable()

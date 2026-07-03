@@ -262,6 +262,7 @@ struct MyLibrariesDetailView: View {
                     )) {
                         Text(aggregated.library.title)
                     }
+                    .toggleStyle(SettingsSwitchToggleStyle())
                 }
             }
         }

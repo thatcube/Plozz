@@ -141,8 +141,12 @@ public actor AnimeIDMapper {
     }
 
     private static func makeCacheURL() -> URL? {
+        // tvOS does not persist `Application Support` (it doesn't survive a relaunch
+        // on device), so this map was silently lost every restart and re-fetched.
+        // `Library/Caches` persists across normal tvOS launches — match the rest of
+        // the app.
         let fm = FileManager.default
-        guard let dir = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true) else {
+        guard let dir = try? fm.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true) else {
             return nil
         }
         return dir.appendingPathComponent("plozz-anime-id-map.json")

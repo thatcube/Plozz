@@ -50,6 +50,12 @@ struct HomeHeroView: View {
     /// focus engine still moves focus down to the row itself.
     var onMoveDown: () -> Void = {}
 
+    /// How far (in points) the backdrop is lifted UP relative to the content as the
+    /// page scrolls down toward the Continue Watching row — the parallax. `HomeView`
+    /// drives this from the scroll offset (clamped 0…~80). Only the backdrop layer
+    /// receives it; the logo/overview/buttons scroll 1:1 with the page as normal.
+    var backdropParallaxLift: CGFloat = 0
+
     /// The app-installed action handler — the SAME one the detail hero and the
     /// long-press context menu use — so the hero's Watchlist button is offered
     /// only when the item's provider supports it and its mutation fans out
@@ -100,22 +106,65 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// The direction of the in-flight page, driving the backdrop wipe: forward
-    /// slides the new artwork in from the trailing edge (old exits leading);
-    /// backward reverses it. Set synchronously just before `index` so the
-    /// declarative `.transition` reads the right edges.
-    @State private var forward = true
+    /// The Home hero backdrop is a **single horizontal filmstrip** — an `HStack` of
+    /// three cells `[itemAt(centerIndex-1), itemAt(centerIndex), itemAt(centerIndex+1)]`
+    /// that moves as ONE unit via a single animatable offset (`slidePosition`).
+    /// There is only ever one thing animating, so the old two-independent-layer
+    /// design (where SwiftUI could animate one side and drop the other, producing
+    /// the intermittent "new art appears behind/over the old" wrong-order wipe) is
+    /// structurally impossible now. The centered cell's content NEVER changes during
+    /// a slide — the window only re-windows at settle, in a `disablesAnimations`
+    /// transaction — so there is no content mutation mid-animation either.
+    ///
+    /// `centerIndex` is an UNBOUNDED contiguous counter (it just keeps incrementing
+    /// forward / decrementing backward); the displayed item is `itemAt(centerIndex)`
+    /// with wrap-around modulo. Keeping it contiguous (rather than wrapping it to
+    /// 0…count-1) is what preserves cell identity across the end→start wrap: the
+    /// `ForEach` ids `[c-1, c, c+1]` always overlap by two with the next window, so
+    /// the cell sliding to centre is the SAME view instance (art already resolved)
+    /// even when the *item* wrapped. The invariant `itemAt(centerIndex) == items[index]`
+    /// holds at rest.
+    @State private var centerIndex = 0
+    /// The filmstrip offset in screen-width units: 0 at rest (centre cell shown),
+    /// animates to +1 to page forward (next cell slides to centre) or -1 backward.
+    /// Reset to 0 at settle in the same `disablesAnimations` transaction that
+    /// advances `centerIndex`, so the strip re-centres with no visible jump.
+    @State private var slidePosition: CGFloat = 0
+    /// Bumped on every page so a superseded animation's completion handler (which
+    /// still fires when interrupted) can't double-commit the settle.
+    @State private var slideGeneration = 0
+    /// The last directional move delivered to the hero's action row. Used to gate
+    /// the recede: focus can leave the hero UP (to the tab bar) or LEFT (to the
+    /// sidebar) as well as DOWN (to the Continue Watching row) — only a genuine
+    /// DOWN should scroll the page. Recorded in `handleMove` before focus relocates.
+    @State private var lastMoveDirection: MoveCommandDirection?
     /// Best resolved hero backdrop URL per item id. For episode/season slides
     /// this is the **series-level** hero art (correct show, high-res — matching
     /// the detail page), resolved via ``ArtworkRouter`` and preloaded for the
     /// current slide and its neighbours so a page never animates a placeholder.
     @State private var resolvedBackdrop: [String: URL] = [:]
 
+    /// Pending "recede" scroll, scheduled when hero focus is lost and cancelled
+    /// if focus returns within the same runloop. This decouples the recede from
+    /// the Down *move command* (which a light Siri Remote trackpad graze fires
+    /// spuriously, scrolling the page while focus never actually moved) and ties
+    /// it instead to focus genuinely leaving the hero for the row below.
+    @State private var recedeWork: DispatchWorkItem?
+
     @Environment(\.colorScheme) private var colorScheme
 
     private var current: MediaItem? {
         guard items.indices.contains(index) else { return items.first }
         return items[index]
+    }
+
+    /// The item shown by a filmstrip cell at contiguous position `i`, wrapping
+    /// around the carousel. `centerIndex` is unbounded, so this modulo maps it (and
+    /// its ±1 neighbours) back onto the real item list. Caller guarantees non-empty.
+    private func itemAt(_ i: Int) -> MediaItem {
+        let n = items.count
+        let wrapped = ((i % n) + n) % n
+        return items[wrapped]
     }
 
     /// Legibility scrim tone — dark in dark mode, light in light mode (matching
@@ -227,6 +276,7 @@ struct HomeHeroView: View {
         .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
+            reseatSlots()
             Task { await resolveArtwork(around: index) }
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
@@ -249,7 +299,13 @@ struct HomeHeroView: View {
             }
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
+            // A set swap is not a page: front the (possibly relocated) current item
+            // instantly with no wipe. Re-seat both backdrop slots to the current
+            // item (the slots are permanently mounted now, not id-keyed) and bump
+            // the token to cancel any pending fade-in.
+            slideToken &+= 1
             metadataVisible = true
+            reseatSlots()
             // Clamp the logical selection to the new slide's button count so it
             // can never point past the last pill after a set swap. Pure `@State`,
             // so this never touches (or drops) focus.
@@ -267,51 +323,68 @@ struct HomeHeroView: View {
             }
         }
         // Auto-advance: restart the dwell whenever the slide changes (manual page
-        // or a previous auto-advance) and pause while the hero holds focus.
+        // or a previous auto-advance). This runs REGARDLESS of focus — focus lands
+        // on the hero action row by default, so gating on `focus == nil` (as we
+        // used to) froze the carousel the entire time the user was looking at it
+        // and only cycled once they'd navigated away. The Apple TV hero keeps
+        // cycling while focused; the buttons/metadata just track the new slide.
         .task(id: autoAdvanceKey) {
-            guard settings.autoAdvance, items.count > 1, focus == nil else { return }
+            guard settings.autoAdvance, items.count > 1 else { return }
             let seconds = UInt64(settings.autoAdvanceSeconds)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-            guard !Task.isCancelled, focus == nil else { return }
+            // Don't step on an in-flight manual page; that page bumped
+            // `advanceToken`, which restarts this dwell from the new slide.
+            guard !Task.isCancelled, slidePosition == 0 else { return }
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
 
-    /// The hero backdrop, keyed by the fronted item's id so a page is a real
-    /// identity change: SwiftUI removes the old layer and inserts the new one,
-    /// driving the directional wipe declaratively (no runloop-timed offset dance,
-    /// which CoreAnimation coalesced to a pop-in). Constrained to the screen width
-    /// and clipped so the full-bleed art can't inflate the layout width and the
-    /// sliding layers never bleed horizontally.
+    /// The hero backdrop as a **single horizontal filmstrip**: an `HStack` of three
+    /// full-screen-width cells — `itemAt(centerIndex-1)`, `itemAt(centerIndex)`,
+    /// `itemAt(centerIndex+1)` — clipped to a one-screen viewport and slid by ONE
+    /// animatable offset (`slidePosition`). Because the whole strip is a single
+    /// view that moves as a unit, there is never a second, independent animation
+    /// that SwiftUI can drop — the root cause of every prior wrong-order wipe (two
+    /// layers, only one animating). The centred cell's content never changes during
+    /// a slide; the window only re-windows at settle (`disablesAnimations`), and the
+    /// `ForEach` ids overlap by two across windows so the cell sliding to centre is
+    /// the same, already-resolved view instance (even across the end→start wrap).
+    ///
+    /// Cells pass `ignoresOverscan: false` so each stays exactly one screen wide and
+    /// the strip tiles correctly; the overscan breakout is applied once here, to the
+    /// whole viewport. The strip is lifted by `backdropParallaxLift` (the parallax)
+    /// so the artwork rises faster than the content as the page recedes.
     @ViewBuilder
     private func heroBackdropStack(height: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
-            if let item = current {
-                heroBackdrop(for: item, height: height)
-                    .id(item.id)
-                    .transition(slideTransition)
+        let w = Self.screenWidth
+        if items.isEmpty {
+            Color.clear.frame(width: w, height: height)
+        } else {
+            HStack(spacing: 0) {
+                ForEach([centerIndex - 1, centerIndex, centerIndex + 1], id: \.self) { i in
+                    heroBackdrop(for: itemAt(i), height: height)
+                        .frame(width: w, height: height)
+                        .clipped()
+                }
             }
+            .frame(width: w * 3, height: height, alignment: .leading)
+            // Slide the whole 3-wide strip as one unit. Rest offset is -w (centre
+            // cell in the viewport); +1 pages forward (next cell to centre), -1 back.
+            .offset(x: -w * (1 + slidePosition))
+            // One-screen viewport that clips the strip to just the centred cell.
+            .frame(width: w, height: height, alignment: .leading)
+            .clipped()
+            .frame(maxWidth: .infinity, alignment: .center)
+            .offset(y: -backdropParallaxLift)
+            .ignoresSafeArea(edges: [.top, .horizontal])
         }
-        .frame(width: Self.screenWidth, height: height, alignment: .bottom)
-        .frame(maxWidth: .infinity, alignment: .center)
-        .clipped()
-        .animation(.easeInOut(duration: 0.42), value: current?.id)
     }
 
-    /// The directional wipe: the incoming backdrop slides in from the trailing
-    /// edge (forward) or leading edge (backward) while the outgoing exits the
-    /// opposite side — the Apple TV "push".
-    private var slideTransition: AnyTransition {
-        .asymmetric(
-            insertion: .move(edge: forward ? .trailing : .leading),
-            removal: .move(edge: forward ? .leading : .trailing)
-        )
-    }
-
-    /// The dwell key: any change (slide index, focus state, or a manual page
-    /// bump) restarts the auto-advance timer from the current slide.
+    /// The dwell key: any change (slide index or a manual page bump) restarts the
+    /// auto-advance timer from the current slide. Focus is deliberately NOT part of
+    /// this — the carousel cycles whether or not the hero holds focus.
     private var autoAdvanceKey: String {
-        "\(index)-\(focus != nil)-\(advanceToken)"
+        "\(index)-\(advanceToken)"
     }
 
     // MARK: - Content column
@@ -368,6 +441,10 @@ struct HomeHeroView: View {
                 }
             }
             .opacity(metadataVisible ? 1 : 0)
+            // Snap the metadata *hide* instantly (it now rides `page(...)`'s single
+            // 0.42s wipe animation, which would otherwise fade the old text out
+            // over the incoming art) while still allowing the delayed fade-IN.
+            .transaction { if !metadataVisible { $0.animation = nil } }
 
             // Zero-height recede target: sits just above the buttons so a
             // down-press lifts the logo/title off the top of the screen.
@@ -472,6 +549,9 @@ struct HomeHeroView: View {
                 }
             }
             .opacity(metadataVisible ? 1 : 0)
+            // Snap the pills' hide instantly (matches the metadata above); the
+            // delayed fade-IN still animates.
+            .transaction { if !metadataVisible { $0.animation = nil } }
             .allowsHitTesting(false)
             // ── The single hero focus target: an always-opaque, invisible leaf
             // layered *over* the pills. Because `.overlay` is applied after the
@@ -519,6 +599,13 @@ struct HomeHeroView: View {
                 // Resolve it and bounce straight back to the row.
                 handleLeft()
             case .row:
+                // Focus is (back) on the hero: cancel any pending recede — a
+                // transient focus blip must never scroll the page.
+                recedeWork?.cancel()
+                recedeWork = nil
+                // At rest on the row, clear the recorded move so a stale direction
+                // from an earlier press can't leak into the next focus-loss gate.
+                lastMoveDirection = nil
                 // Focus arriving into the hero from *outside* (a row below / the
                 // tab bar): snap back to full-screen. We do NOT recede on focus
                 // *loss* — focus can drop transiently and must never scroll.
@@ -529,7 +616,22 @@ struct HomeHeroView: View {
                     onFocusGained()
                 }
             case .none:
-                break
+                // Hero lost focus. Only a genuine DOWN move (to the Continue
+                // Watching row) should recede/scroll the page. Focus can also leave
+                // UP (to the tab bar) or LEFT (to the sidebar) — those must NOT
+                // scroll (the reported bug: landing in the top/side nav still
+                // shifted the page down). A light graze never changes focus at all,
+                // so this case does not even run for a graze. Gate on the last move.
+                recedeWork?.cancel()
+                recedeWork = nil
+                guard lastMoveDirection == .down else { break }
+                // Confirm on the next runloop: a transient blip returns to `.row`
+                // and cancels this; a real Down keeps focus gone, so it fires.
+                let work = DispatchWorkItem {
+                    if focus == nil { onMoveDown() }
+                }
+                recedeWork = work
+                DispatchQueue.main.async(execute: work)
             }
         }
     }
@@ -576,12 +678,26 @@ struct HomeHeroView: View {
     /// PRE-move value. Interior moves update `selectedButton` ourselves (the engine
     /// is not involved); only `.advance` pages.
     private func handleMove(_ direction: MoveCommandDirection) {
+        // Record the direction BEFORE focus can relocate, so the recede (driven by
+        // focus leaving the hero) can tell a genuine DOWN-to-row move from an UP
+        // (to the tab bar) or LEFT (to the sidebar) escape — only DOWN should
+        // scroll the page. A light trackpad graze fires a phantom `.down` here but
+        // never actually moves focus, so it still can't recede (see `.none` below).
+        lastMoveDirection = direction
         guard let item = current else { return }
         let buttonCount = buttons(for: item).count
         selectedButton = min(selectedButton, max(0, buttonCount - 1))
         switch direction {
         case .down:
-            onMoveDown()
+            // Do NOT recede here. A light trackpad graze makes tvOS fire a phantom
+            // `.down` move command even when focus never relocates, which used to
+            // scroll the page down while focus stayed pinned (the reported bug).
+            // The recede is now driven purely by focus actually leaving the hero
+            // for the row below — see `.onChange(of: focus)`. On a real Down the
+            // focus engine relocates focus (dropping hero `focus` to nil) and that
+            // change triggers the recede; a graze leaves focus untouched, so
+            // nothing scrolls.
+            break
         case .right:
             let outcome = HeroCarouselFocus.resolve(
                 direction: .right,
@@ -756,39 +872,83 @@ struct HomeHeroView: View {
 
     @ViewBuilder
     private func heroPillIdleBackground(shape: Capsule, prominent: Bool) -> some View {
-        if prominent {
-            shape.fill(Color.accentColor)
-        } else if #available(tvOS 26.0, *) {
-            shape.fill(.clear).glassEffect(.regular, in: shape)
+        if #available(tvOS 26.0, *) {
+            // Liquid Glass for every idle pill. The prominent Play/Resume pill was
+            // previously a solid `Color.accentColor` fill, but the app ships an
+            // EMPTY `AccentColor` asset, so inside this package `Color.accentColor`
+            // resolves to white — a white pill with an invisible white label. Use
+            // regular glass and give the prominent pill a slightly brighter white
+            // tint so it reads as "primary" while its white label stays legible.
+            shape.fill(.clear)
+                .glassEffect(prominent ? .regular.tint(.white.opacity(0.18)) : .regular, in: shape)
         } else {
             shape.fill(.ultraThinMaterial)
         }
     }
 
-    /// Fronts `toItem` with a directional wipe, restarts the auto-advance dwell,
-    /// and (only when the hero holds focus) re-pins focus on `keepButton` for the
-    /// destination slide. The wipe itself is declarative: changing `index` swaps
-    /// the id-keyed backdrop, and `heroBackdropStack`'s `.animation(value:)` runs
-    /// the `.move` transition. `forward` selects the wipe edges.
-    /// Fronts `toItem` with a directional wipe and restarts the auto-advance
-    /// dwell. The wipe itself is declarative: changing `index` swaps the id-keyed
-    /// backdrop, and `heroBackdropStack`'s `.animation(value:)` runs the `.move`
-    /// transition. `forward` selects the wipe edges.
+    /// Fronts `toItem` with a directional filmstrip slide and restarts the
+    /// auto-advance dwell. Callers only ever page by ±1 (Right/Left/chevron/
+    /// auto-advance), so `toItem` is always the current slide's neighbour. The
+    /// strip animates a SINGLE offset (`slidePosition`) 0→±1; on completion the
+    /// window advances (`centerIndex += step`) and the offset resets to 0 in one
+    /// `disablesAnimations` transaction, so it re-centres with no visible jump and
+    /// no content change mid-slide. `index` (the logical/wrapped slide) updates
+    /// immediately so rapid presses compute the right next target and the metadata
+    /// resolves the new show, while the strip keeps showing `centerIndex` until
+    /// settle.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
+        let step = isForward ? 1 : -1
+        // Land any in-flight page instantly so the strip is centred on the current
+        // slide before we start the next one (rapid-paging guard). The in-flight
+        // direction is the sign of `slidePosition`; committing `centerIndex` by that
+        // step lands it on the slide `index` already points at.
+        if slidePosition != 0 {
+            let landStep = slidePosition > 0 ? 1 : -1
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) {
+                centerIndex += landStep
+                slidePosition = 0
+            }
+        }
         beginTransition()
-        // Set direction before index so the transition reads the right edges;
-        // both land in one render pass.
-        forward = isForward
+        slideGeneration &+= 1
+        let generation = slideGeneration
+        let targetCenter = centerIndex + step
+        // Logical slide + selection update immediately; the strip stays on
+        // `centerIndex` (its centred art is unchanged) until the settle below.
         index = toItem
         advanceToken &+= 1
-
-        // Keep the logical selection on the destination, clamped to its button
-        // count. Pure `@State` on a *stable* focus target (the row's identity
-        // never changes across a page), so focus stays put and only the highlight
-        // moves — no fragile deferred `@FocusState` re-pin, no dropped focus.
+        metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
+        withAnimation(.easeInOut(duration: 0.42)) {
+            slidePosition = CGFloat(step)
+        } completion: {
+            guard generation == slideGeneration else { return }
+            // Re-window and re-centre in one non-animated transaction. The cell that
+            // just slid to centre keeps its identity (the `ForEach` ids overlap by
+            // two), so its art stays put — the swap is invisible.
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) {
+                centerIndex = targetCenter
+                slidePosition = 0
+            }
+        }
         Task { await resolveArtwork(around: toItem) }
+    }
+
+    /// Re-seats the filmstrip on the current logical slide with NO animation, used
+    /// on first appearance and on a curated-set swap. Restores the resting invariant
+    /// `itemAt(centerIndex) == items[index]` and zeroes the offset in one
+    /// `disablesAnimations` transaction, so it's an instant, invisible re-centre.
+    private func reseatSlots() {
+        guard !items.isEmpty else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            centerIndex = index
+            slidePosition = 0
+        }
     }
 
     /// Pages one slide forward (wrapping), keeping focus on the destination's
@@ -801,18 +961,17 @@ struct HomeHeroView: View {
         page(to: next, keepButton: destinationButtons - 1, forward: true)
     }
 
-    /// Starts a slide change: hides the current slide's metadata *immediately*
-    /// (no animation) so the old title/overview/buttons never sit over the
-    /// incoming artwork, then fades it back in once the backdrop wipe has landed.
-    /// The fade-in is delayed past the wipe duration (0.42s) and anchored to the
-    /// same start, and guarded by ``slideToken`` so a rapid second page cancels
-    /// the first page's pending fade-in.
+    /// Schedules the metadata fade-BACK-IN for a page. The metadata is hidden
+    /// *instantly* inside `page(...)`'s single `withAnimation` (stripped locally so
+    /// it snaps rather than fades — see `content(for:)`/`actionRow(for:)`), NOT via
+    /// a separate `withTransaction(disablesAnimations:)` here: a competing
+    /// transaction in the same turn let the backdrop's insertion skip its
+    /// animation. This only starts the delayed fade-in, past the wipe duration
+    /// (0.42s) and guarded by ``slideToken`` so a rapid second page cancels the
+    /// first page's pending fade-in.
     private func beginTransition() {
         slideToken &+= 1
         let token = slideToken
-        var instant = Transaction()
-        instant.disablesAnimations = true
-        withTransaction(instant) { metadataVisible = false }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 460_000_000)
             guard slideToken == token else { return }
@@ -851,7 +1010,11 @@ struct HomeHeroView: View {
             // Full-screen hero: keep the artwork opaque far lower than the detail
             // page (which melts at 0.33) and only feather the very bottom into the
             // Continue Watching panel.
-            dissolveStart: 0.82
+            dissolveStart: 0.82,
+            // The filmstrip tiles several of these side by side, so each cell must
+            // stay exactly one screen wide; the overscan breakout is applied once at
+            // the strip's viewport (see `heroBackdropStack`), not per cell.
+            ignoresOverscan: false
         )
     }
 

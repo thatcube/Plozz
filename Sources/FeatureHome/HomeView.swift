@@ -26,6 +26,15 @@ public struct HomeView: View {
     /// The curated hero items, recomputed as Home content or settings change.
     @State private var heroItems: [MediaItem] = []
 
+    /// The clamped upward parallax lift (0…`heroParallaxMaxLift`) applied to the
+    /// hero backdrop as the page scrolls down toward Continue Watching. Driven off
+    /// the ScrollView's live content offset so it ramps in lockstep with the recede.
+    @State private var heroParallaxLift: CGFloat = 0
+
+    /// Maximum backdrop parallax lift, in points — the artwork rises this far
+    /// faster than the content by the time the recede settles.
+    private static let heroParallaxMaxLift: CGFloat = 80
+
     /// Focus scope spanning the hero + rows; lets the hero's Play button be the
     /// preferred initial focus (see `.focusScope`/`prefersDefaultFocus`).
     @Namespace private var heroFocusScope
@@ -153,7 +162,8 @@ public struct HomeView: View {
                                             anchor: UnitPoint(x: 0.5, y: 0.12)
                                         )
                                     }
-                                }
+                                },
+                                backdropParallaxLift: heroParallaxLift
                             )
                             .id(Self.heroTopID)
                             // (touch-pan disabler lives as a sibling below so it is
@@ -178,6 +188,16 @@ public struct HomeView: View {
                 }
                 // Never clip a focused card's lift, shadow or border.
                 .scrollClipDisabled()
+                // Drive the hero backdrop parallax off the live scroll offset:
+                // as the page scrolls down toward Continue Watching, lift the
+                // backdrop up (clamped 0…max) so the artwork rises faster than the
+                // content. Fires every frame of the recede's scroll animation, so
+                // the lift ramps in lockstep with no separate animation trigger.
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    min(max(geometry.contentOffset.y, 0), Self.heroParallaxMaxLift)
+                } action: { _, lift in
+                    heroParallaxLift = heroActive ? lift : 0
+                }
                 // When the hero is active, let it bleed into the top overscan
                 // inset instead of the ScrollView reserving it as a blank bar
                 // above the backdrop (the gap that made the hero sit too low).

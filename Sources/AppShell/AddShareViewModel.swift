@@ -80,7 +80,12 @@ final class AddShareViewModel {
                     self.discovered.append(server)
                 }
             }
-            self.scanning = false
+            // Only the CURRENT scan may clear the flag. A superseded scan (cancelled
+            // by a newer `startScan`) must not flip `scanning` back off — the newer
+            // scan already set it true and owns it now.
+            if !Task.isCancelled {
+                self.scanning = false
+            }
         }
     }
 

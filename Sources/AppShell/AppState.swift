@@ -1630,7 +1630,7 @@ public final class AppState {
     ) {
         var comps = URLComponents()
         comps.scheme = "smb"
-        comps.host = host
+        comps.host = ShareProvider.bracketedHostIfIPv6(host)
         comps.port = port
         comps.path = "/" + share
         guard let baseURL = comps.url else {

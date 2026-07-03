@@ -117,7 +117,7 @@ public struct ShareProvider: MediaProvider {
     private func smbURL(forRelativePath relPath: String) -> URL? {
         var comps = URLComponents()
         comps.scheme = "smb"
-        comps.host = host
+        comps.host = Self.bracketedHostIfIPv6(host)
         comps.port = port
         if !session.userName.isEmpty {
             comps.user = session.userName
@@ -128,6 +128,14 @@ public struct ShareProvider: MediaProvider {
         let segments = [share] + relPath.split(separator: "/").map(String.init)
         comps.path = "/" + segments.joined(separator: "/")
         return comps.url
+    }
+
+    /// URLComponents produces `nil` for a bare IPv6 literal host (e.g. `fe80::1`)
+    /// — it must be bracketed. IPv4 and hostnames never contain a colon, so this
+    /// only wraps genuine IPv6 literals (and leaves already-bracketed ones alone).
+    public static func bracketedHostIfIPv6(_ host: String) -> String {
+        guard host.contains(":"), !host.hasPrefix("[") else { return host }
+        return "[\(host)]"
     }
 
     // MARK: - Parse baseURL

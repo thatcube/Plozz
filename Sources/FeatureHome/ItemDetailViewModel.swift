@@ -349,7 +349,7 @@ public final class ItemDetailViewModel {
                 // exactly as it already does for a seeded open — so an empty-children
                 // first paint is safe and never strands the season picker.
                 let seededChildren = state.value?.children ?? []
-                state = .loaded(Detail(item: taggedItem, children: seededChildren))
+                state = .loaded(Detail(item: taggedItem, children: seededChildren, childrenLoaded: state.value?.childrenLoaded ?? false))
                 hasPaintedFreshDetail = true
                 seedSources(from: taggedItem)
                 // Speculative discovery (cross-server picker + alternate-source
@@ -974,7 +974,10 @@ public final class ItemDetailViewModel {
     private func applySnapshot(_ snapshot: DetailSnapshotCache.Snapshot) {
         let item = tagged(snapshot.item)
         captureSeriesContext(from: item)
-        state = .loaded(Detail(item: item, children: snapshot.children.map(tagged)))
+        // A snapshot's children are a COMPLETED fetch persisted from a prior visit,
+        // so mark them loaded — otherwise a revisited folder would flash its
+        // loading placeholder (and, worse, never distinguish empty-from-loading).
+        state = .loaded(Detail(item: item, children: snapshot.children.map(tagged), childrenLoaded: true))
         if !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }
         }
@@ -1005,7 +1008,7 @@ public final class ItemDetailViewModel {
     /// on the current value being empty/thinner).
     private func adoptSnapshotEnrichments(_ snapshot: DetailSnapshotCache.Snapshot) {
         if let detail = state.value, detail.children.isEmpty, !snapshot.children.isEmpty {
-            state = .loaded(Detail(item: detail.item, children: snapshot.children.map(tagged)))
+            state = .loaded(Detail(item: detail.item, children: snapshot.children.map(tagged), childrenLoaded: true))
         }
         if seasonEpisodes.isEmpty, !snapshot.seasonEpisodes.isEmpty {
             seasonEpisodes = snapshot.seasonEpisodes.mapValues { stampSeriesTMDb(into: $0.map(tagged)) }

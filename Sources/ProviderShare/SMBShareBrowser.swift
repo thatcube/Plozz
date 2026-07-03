@@ -37,6 +37,14 @@ actor SMBShareBrowser {
 
     private var client: SMBClient?
 
+    /// Serial chain so `listDirectory` calls (which each connect-on-demand and
+    /// then read the one shared session) never overlap across an `await`. Actor
+    /// isolation alone does NOT provide this: two calls can both suspend inside
+    /// `connectedClient()` seeing `client == nil` (double login/leak) or both be
+    /// mid-`listDirectory` on the same session, which SMBClient isn't safe for.
+    /// Every op waits for the previous one to finish before touching the session.
+    private var listTail: Task<Void, Never> = Task {}
+
     init(host: String, port: Int?, share: String, user: String, password: String) {
         self.host = host
         self.port = port
@@ -76,21 +84,35 @@ actor SMBShareBrowser {
 
     /// List one directory, `path` being share-relative (empty string == share
     /// root). Hidden/system entries and the `.`/`..` pseudo-entries are dropped.
+    ///
+    /// Serialised behind `listTail`: the connect (first call) and every listing
+    /// run one-at-a-time on the single shared session, even when the scanner and
+    /// a detail view request different folders concurrently.
     func listDirectory(_ path: String) async throws -> [Entry] {
-        let client = try await connectedClient()
-        let files = try await Self.withTimeout(listTimeout, "listing \(path.isEmpty ? "<root>" : path)") {
-            try await client.listDirectory(path: path)
+        let previous = listTail
+        let task = Task { () async throws -> [Entry] in
+            // Wait for the prior op to finish before touching the session. Its
+            // failure is irrelevant to ours; we only need the ordering.
+            await previous.value
+            let client = try await self.connectedClient()
+            let files = try await Self.withTimeout(self.listTimeout, "listing \(path.isEmpty ? "<root>" : path)") {
+                try await client.listDirectory(path: path)
+            }
+            return files.compactMap { file in
+                guard file.name != ".", file.name != "..",
+                      !file.isHidden, !file.isSystem else { return nil }
+                return Entry(
+                    name: file.name,
+                    isDirectory: file.isDirectory,
+                    size: file.size,
+                    modifiedAt: file.lastWriteTime
+                )
+            }
         }
-        return files.compactMap { file in
-            guard file.name != ".", file.name != "..",
-                  !file.isHidden, !file.isSystem else { return nil }
-            return Entry(
-                name: file.name,
-                isDirectory: file.isDirectory,
-                size: file.size,
-                modifiedAt: file.lastWriteTime
-            )
-        }
+        // Extend the chain so the NEXT caller waits for this op regardless of how
+        // it ends (and regardless of whether our caller cancels its await).
+        listTail = Task { _ = await task.result }
+        return try await task.value
     }
 
     /// Best-effort teardown. Safe to call more than once.

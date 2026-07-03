@@ -41,6 +41,13 @@ public struct HeroBackdropLayer<Video: View>: View {
     /// artwork opaque far lower and only feathers the very bottom into the
     /// Continue Watching panel.
     private let dissolveStart: CGFloat
+    /// Whether this layer breaks out of the tvOS overscan safe area itself. `true`
+    /// (the detail hero + the single-image case) makes it span the physical screen
+    /// edge to edge. `false` is used when the caller lays several backdrops side by
+    /// side (the Home hero filmstrip): each cell must stay at its exact frame width
+    /// so the strip tiles correctly, and the *container* applies the overscan
+    /// breakout once for the whole strip.
+    private let ignoresOverscan: Bool
     /// Overlaid on the still image; empty today, hosts a faded-in trailer later.
     private let backgroundVideo: () -> Video
 
@@ -52,6 +59,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         scrimTone: Color,
         blursImage: Bool = false,
         dissolveStart: CGFloat = 0.33,
+        ignoresOverscan: Bool = true,
         @ViewBuilder backgroundVideo: @escaping () -> Video
     ) {
         self.urls = urls
@@ -61,6 +69,7 @@ public struct HeroBackdropLayer<Video: View>: View {
         self.scrimTone = scrimTone
         self.blursImage = blursImage
         self.dissolveStart = dissolveStart
+        self.ignoresOverscan = ignoresOverscan
         self.backgroundVideo = backgroundVideo
     }
 
@@ -83,8 +92,10 @@ public struct HeroBackdropLayer<Video: View>: View {
         .mask(dissolveMask)
         // Break out of the tvOS overscan safe area so the backdrop spans the full
         // screen edge to edge — across the top too, otherwise the top overscan
-        // inset shows through as a black bar above the artwork.
-        .ignoresSafeArea(edges: [.top, .horizontal])
+        // inset shows through as a black bar above the artwork. Skipped when the
+        // caller tiles several cells (the Home hero filmstrip) and applies the
+        // breakout once at the container instead.
+        .modifier(OverscanBreakout(enabled: ignoresOverscan))
     }
 
     /// Legibility scrim: fades a mode-appropriate tone in over the leading side so
@@ -154,6 +165,20 @@ public struct HeroBackdropLayer<Video: View>: View {
     }
 }
 
+/// Applies the tvOS overscan breakout only when `enabled`, so the same backdrop
+/// view can either span the physical screen (detail hero / single image) or stay
+/// within its given frame (a cell in the Home hero filmstrip).
+private struct OverscanBreakout: ViewModifier {
+    let enabled: Bool
+    func body(content: Content) -> some View {
+        if enabled {
+            content.ignoresSafeArea(edges: [.top, .horizontal])
+        } else {
+            content
+        }
+    }
+}
+
 public extension HeroBackdropLayer where Video == EmptyView {
     /// Image-only backdrop (no trailer slot) — the default today. Byte-for-byte
     /// the same treatment the detail hero has always rendered.
@@ -164,7 +189,8 @@ public extension HeroBackdropLayer where Video == EmptyView {
         height: CGFloat,
         scrimTone: Color,
         blursImage: Bool = false,
-        dissolveStart: CGFloat = 0.33
+        dissolveStart: CGFloat = 0.33,
+        ignoresOverscan: Bool = true
     ) {
         self.init(
             urls: urls,
@@ -174,6 +200,7 @@ public extension HeroBackdropLayer where Video == EmptyView {
             scrimTone: scrimTone,
             blursImage: blursImage,
             dissolveStart: dissolveStart,
+            ignoresOverscan: ignoresOverscan,
             backgroundVideo: { EmptyView() }
         )
     }

@@ -106,28 +106,32 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// The two **permanently-mounted** backdrop slots. Each slot renders a
-    /// `HeroBackdropLayer`; one is fronted (on-screen), the other is parked
-    /// off-screen holding the previous (or soon-to-enter) art. The wipe is a plain
-    /// animatable `.offset`/`GeometryEffect` push on these ALWAYS-present layers —
-    /// never a `.transition`-driven identity swap — so there is no insertion event
-    /// whose animation SwiftUI can drop, and `HeroBackdropLayer`'s internal
-    /// `.ignoresSafeArea` (a layout-time fixup) can no longer race and win against
-    /// the insertion offset. That race was the intermittent "new art appears
-    /// instantly while the old slides out" wrong-order wipe.
-    @State private var slotItems: [MediaItem?] = [nil, nil]
-    /// Which slot (0 or 1) is currently fronted at rest.
-    @State private var frontSlot = 0
-    /// The wipe progress: 0 at rest, animates 0→1 across a page. The fronted slot
-    /// slides out and the parked slot slides in as this goes 0→1; on completion we
-    /// flip `frontSlot` and snap this back to 0 (no animation), leaving the new art
-    /// centered and the old slot re-parked off-screen for the next page.
-    @State private var slideProgress: CGFloat = 0
-    /// The in-flight page direction: `+1` forward (new art enters from the trailing
-    /// edge, old exits leading), `-1` backward.
-    @State private var slideDirection: CGFloat = 1
+    /// The Home hero backdrop is a **single horizontal filmstrip** — an `HStack` of
+    /// three cells `[itemAt(centerIndex-1), itemAt(centerIndex), itemAt(centerIndex+1)]`
+    /// that moves as ONE unit via a single animatable offset (`slidePosition`).
+    /// There is only ever one thing animating, so the old two-independent-layer
+    /// design (where SwiftUI could animate one side and drop the other, producing
+    /// the intermittent "new art appears behind/over the old" wrong-order wipe) is
+    /// structurally impossible now. The centered cell's content NEVER changes during
+    /// a slide — the window only re-windows at settle, in a `disablesAnimations`
+    /// transaction — so there is no content mutation mid-animation either.
+    ///
+    /// `centerIndex` is an UNBOUNDED contiguous counter (it just keeps incrementing
+    /// forward / decrementing backward); the displayed item is `itemAt(centerIndex)`
+    /// with wrap-around modulo. Keeping it contiguous (rather than wrapping it to
+    /// 0…count-1) is what preserves cell identity across the end→start wrap: the
+    /// `ForEach` ids `[c-1, c, c+1]` always overlap by two with the next window, so
+    /// the cell sliding to centre is the SAME view instance (art already resolved)
+    /// even when the *item* wrapped. The invariant `itemAt(centerIndex) == items[index]`
+    /// holds at rest.
+    @State private var centerIndex = 0
+    /// The filmstrip offset in screen-width units: 0 at rest (centre cell shown),
+    /// animates to +1 to page forward (next cell slides to centre) or -1 backward.
+    /// Reset to 0 at settle in the same `disablesAnimations` transaction that
+    /// advances `centerIndex`, so the strip re-centres with no visible jump.
+    @State private var slidePosition: CGFloat = 0
     /// Bumped on every page so a superseded animation's completion handler (which
-    /// still fires when interrupted) can't double-commit the slot flip.
+    /// still fires when interrupted) can't double-commit the settle.
     @State private var slideGeneration = 0
     /// The last directional move delivered to the hero's action row. Used to gate
     /// the recede: focus can leave the hero UP (to the tab bar) or LEFT (to the
@@ -152,6 +156,15 @@ struct HomeHeroView: View {
     private var current: MediaItem? {
         guard items.indices.contains(index) else { return items.first }
         return items[index]
+    }
+
+    /// The item shown by a filmstrip cell at contiguous position `i`, wrapping
+    /// around the carousel. `centerIndex` is unbounded, so this modulo maps it (and
+    /// its ±1 neighbours) back onto the real item list. Caller guarantees non-empty.
+    private func itemAt(_ i: Int) -> MediaItem {
+        let n = items.count
+        let wrapped = ((i % n) + n) % n
+        return items[wrapped]
     }
 
     /// Legibility scrim tone — dark in dark mode, light in light mode (matching
@@ -321,85 +334,52 @@ struct HomeHeroView: View {
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             // Don't step on an in-flight manual page; that page bumped
             // `advanceToken`, which restarts this dwell from the new slide.
-            guard !Task.isCancelled, slideProgress == 0 else { return }
+            guard !Task.isCancelled, slidePosition == 0 else { return }
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
 
-    /// The hero backdrop as **two permanently-mounted slots** driven by a plain
-    /// animatable push (`HeroSlideEffect`), NOT a `.transition`-driven identity
-    /// swap. Both layers exist for the life of the hero (no `.id`, no `.transition`,
-    /// no conditional insertion during a page), so SwiftUI never has an insertion
-    /// event whose animation it could drop, and the `GeometryEffect` translation is
-    /// applied at RENDER time — after layout — so `HeroBackdropLayer`'s internal
-    /// `.ignoresSafeArea` can no longer race and win against the offset. Together
-    /// these eliminate the intermittent wrong-order wipe (new art snapping in at
-    /// rest while the old slid out) that survived five `.transition`-based attempts.
+    /// The hero backdrop as a **single horizontal filmstrip**: an `HStack` of three
+    /// full-screen-width cells — `itemAt(centerIndex-1)`, `itemAt(centerIndex)`,
+    /// `itemAt(centerIndex+1)` — clipped to a one-screen viewport and slid by ONE
+    /// animatable offset (`slidePosition`). Because the whole strip is a single
+    /// view that moves as a unit, there is never a second, independent animation
+    /// that SwiftUI can drop — the root cause of every prior wrong-order wipe (two
+    /// layers, only one animating). The centred cell's content never changes during
+    /// a slide; the window only re-windows at settle (`disablesAnimations`), and the
+    /// `ForEach` ids overlap by two across windows so the cell sliding to centre is
+    /// the same, already-resolved view instance (even across the end→start wrap).
     ///
-    /// `page(...)` stages the incoming art into the parked (off-screen) slot, then
-    /// animates `slideProgress` 0→1 in a single `withAnimation`; on completion it
-    /// flips `frontSlot` and snaps progress back to 0 without animation.
-    ///
-    /// The whole stack is lifted by `backdropParallaxLift` (the parallax) so the
-    /// artwork rises faster than the content as the page recedes.
+    /// Cells pass `ignoresOverscan: false` so each stays exactly one screen wide and
+    /// the strip tiles correctly; the overscan breakout is applied once here, to the
+    /// whole viewport. The strip is lifted by `backdropParallaxLift` (the parallax)
+    /// so the artwork rises faster than the content as the page recedes.
     @ViewBuilder
     private func heroBackdropStack(height: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
-            ForEach(0..<2, id: \.self) { slot in
-                if let item = slotItems[slot] {
-                    heroBackdrop(for: item, height: height)
-                        .modifier(HeroSlideEffect(
-                            progress: slideProgress,
-                            direction: slideDirection,
-                            isFront: slot == frontSlot
-                        ))
-                        // The INCOMING (parked/back) slot must always draw on top of
-                        // the OUTGOING (front) slot, so the new art slides in over the
-                        // old one — a clean cover/push. Without this the ZStack's
-                        // fixed `ForEach` order (slot 0 under slot 1) fought the
-                        // alternating `frontSlot`: on every other page the incoming
-                        // slot happened to be slot 0, so the new backdrop slid in
-                        // BEHIND the old one, which sat on top until settle then
-                        // "popped" away — the intermittent wrong-order wipe. Keying
-                        // zIndex off `frontSlot` (back = 1, front = 0) guarantees the
-                        // entering layer is always on top regardless of slot parity.
-                        .zIndex(slot == frontSlot ? 0 : 1)
+        let w = Self.screenWidth
+        if items.isEmpty {
+            Color.clear.frame(width: w, height: height)
+        } else {
+            HStack(spacing: 0) {
+                ForEach([centerIndex - 1, centerIndex, centerIndex + 1], id: \.self) { i in
+                    heroBackdrop(for: itemAt(i), height: height)
+                        .frame(width: w, height: height)
+                        .clipped()
                 }
             }
-        }
-        .frame(width: Self.screenWidth, height: height, alignment: .bottom)
-        .frame(maxWidth: .infinity, alignment: .center)
-        .clipped()
-        .offset(y: -backdropParallaxLift)
-    }
-
-    /// The directional push, expressed as a render-time `ProjectionTransform` on a
-    /// plain animatable value. Because it's a `GeometryEffect` on a permanently
-    /// mounted layer, `animatableData` always has a stable "from" value, so the
-    /// wipe can never collapse to instant the way a freshly-inserted
-    /// `.transition`/offset layer did.
-    private struct HeroSlideEffect: GeometryEffect {
-        /// 0 = at rest, 1 = page complete.
-        var progress: CGFloat
-        /// `+1` forward, `-1` backward.
-        let direction: CGFloat
-        /// Whether this slot is the fronted (exiting) layer or the parked
-        /// (entering) layer.
-        let isFront: Bool
-
-        var animatableData: CGFloat {
-            get { progress }
-            set { progress = newValue }
-        }
-
-        func effectValue(size: CGSize) -> ProjectionTransform {
-            // Front: rest at 0, exit to ∓width. Back: enter from ±width, rest at 0.
-            let x = isFront
-                ? -progress * direction * size.width
-                : (1 - progress) * direction * size.width
-            return ProjectionTransform(CGAffineTransform(translationX: x, y: 0))
+            .frame(width: w * 3, height: height, alignment: .leading)
+            // Slide the whole 3-wide strip as one unit. Rest offset is -w (centre
+            // cell in the viewport); +1 pages forward (next cell to centre), -1 back.
+            .offset(x: -w * (1 + slidePosition))
+            // One-screen viewport that clips the strip to just the centred cell.
+            .frame(width: w, height: height, alignment: .leading)
+            .clipped()
+            .frame(maxWidth: .infinity, alignment: .center)
+            .offset(y: -backdropParallaxLift)
+            .ignoresSafeArea(edges: [.top, .horizontal])
         }
     }
+
     /// The dwell key: any change (slide index or a manual page bump) restarts the
     /// auto-advance timer from the current slide. Focus is deliberately NOT part of
     /// this — the carousel cycles whether or not the hero holds focus.
@@ -906,84 +886,68 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Fronts `toItem` with a directional backdrop push and restarts the
-    /// auto-advance dwell. The wipe drives two permanently-mounted slots (see
-    /// `heroBackdropStack`): the incoming art is staged into the parked slot
-    /// (off-screen, invisible, a plain content swap — never a re-mount), then a
-    /// single `withAnimation` slides `slideProgress` 0→1 so the fronted slot exits
-    /// and the parked slot enters. On completion `settleSlide()` flips `frontSlot`
-    /// and snaps progress back to 0 without animation — the on-screen art doesn't
-    /// move, the spent slot re-parks off-screen. Nothing here relies on SwiftUI's
-    /// insertion/removal `.transition` machinery, so the incoming layer can never
-    /// snap to rest while the outgoing one slides (the old wrong-order wipe).
+    /// Fronts `toItem` with a directional filmstrip slide and restarts the
+    /// auto-advance dwell. Callers only ever page by ±1 (Right/Left/chevron/
+    /// auto-advance), so `toItem` is always the current slide's neighbour. The
+    /// strip animates a SINGLE offset (`slidePosition`) 0→±1; on completion the
+    /// window advances (`centerIndex += step`) and the offset resets to 0 in one
+    /// `disablesAnimations` transaction, so it re-centres with no visible jump and
+    /// no content change mid-slide. `index` (the logical/wrapped slide) updates
+    /// immediately so rapid presses compute the right next target and the metadata
+    /// resolves the new show, while the strip keeps showing `centerIndex` until
+    /// settle.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
-        // If a previous page is still mid-flight, land it instantly so the slots
-        // are at rest before we stage the next one (rapid-paging guard).
-        if slideProgress != 0 { settleSlide() }
+        let step = isForward ? 1 : -1
+        // Land any in-flight page instantly so the strip is centred on the current
+        // slide before we start the next one (rapid-paging guard). The in-flight
+        // direction is the sign of `slidePosition`; committing `centerIndex` by that
+        // step lands it on the slide `index` already points at.
+        if slidePosition != 0 {
+            let landStep = slidePosition > 0 ? 1 : -1
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) {
+                centerIndex += landStep
+                slidePosition = 0
+            }
+        }
         beginTransition()
-        let backSlot = 1 - frontSlot
-        slideDirection = isForward ? 1 : -1
         slideGeneration &+= 1
         let generation = slideGeneration
-        // FRAME 1 — commit the incoming art into the parked (off-screen) slot with
-        // NO animation and progress still 0. This is the crux of the fix that six
-        // prior attempts missed: the incoming layer's CONTENT must land in its own
-        // render frame, SEPARATE from the push. When the new image was set in the
-        // same transaction as the animation (true of every previous approach —
-        // `.id` swap, `.transition`, offset staging, GeometryEffect), SwiftUI reset
-        // the incoming layer's animatable state, so it snapped to rest while only
-        // the outgoing layer — whose content never changes — animated out. That,
-        // not `.ignoresSafeArea` or transaction attribution, was the wrong-order
-        // wipe. The front slot's content is untouched here, so it stays stable too.
-        slotItems[backSlot] = items[toItem]
-        metadataVisible = false
+        let targetCenter = centerIndex + step
+        // Logical slide + selection update immediately; the strip stays on
+        // `centerIndex` (its centred art is unchanged) until the settle below.
         index = toItem
         advanceToken &+= 1
+        metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
-        // FRAME 2 — one frame later, once the staged art has rendered off-screen,
-        // run the push. ONLY `slideProgress` changes inside this animation, so both
-        // permanently-mounted layers have settled content and interpolate cleanly:
-        // the fronted slot slides out, the parked slot slides in.
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 24_000_000) // ~1.5 frames @ 60fps
+        withAnimation(.easeInOut(duration: 0.42)) {
+            slidePosition = CGFloat(step)
+        } completion: {
             guard generation == slideGeneration else { return }
-            withAnimation(.easeInOut(duration: 0.42)) {
-                slideProgress = 1
-            } completion: {
-                guard generation == slideGeneration else { return }
-                settleSlide()
+            // Re-window and re-centre in one non-animated transaction. The cell that
+            // just slid to centre keeps its identity (the `ForEach` ids overlap by
+            // two), so its art stays put — the swap is invisible.
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) {
+                centerIndex = targetCenter
+                slidePosition = 0
             }
         }
         Task { await resolveArtwork(around: toItem) }
     }
 
-    /// Commits a finished (or interrupted) push: the parked slot becomes the front
-    /// and `slideProgress` resets to 0 — both WITHOUT animation, in one
-    /// transaction. The newly-fronted art is already centered (progress was 1), so
-    /// flipping `frontSlot` and zeroing progress leaves it exactly in place while
-    /// the spent slot silently re-parks off-screen (it's clipped, so its jump from
-    /// one off-screen edge to the other is never seen).
-    private func settleSlide() {
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            frontSlot = 1 - frontSlot
-            slideProgress = 0
-        }
-    }
-
-    /// Seeds/re-seats both backdrop slots to the fronted item with NO wipe, used on
-    /// first appearance and on a curated-set swap. Both slots hold the same item:
-    /// the front shows it centered, the back sits parked off-screen ready for the
-    /// next page. Runs outside any animation so it's an instant, invisible re-seat.
+    /// Re-seats the filmstrip on the current logical slide with NO animation, used
+    /// on first appearance and on a curated-set swap. Restores the resting invariant
+    /// `itemAt(centerIndex) == items[index]` and zeroes the offset in one
+    /// `disablesAnimations` transaction, so it's an instant, invisible re-centre.
     private func reseatSlots() {
-        guard let item = current else { return }
+        guard !items.isEmpty else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            slideProgress = 0
-            slotItems = [item, item]
+            centerIndex = index
+            slidePosition = 0
         }
     }
 
@@ -1046,7 +1010,11 @@ struct HomeHeroView: View {
             // Full-screen hero: keep the artwork opaque far lower than the detail
             // page (which melts at 0.33) and only feather the very bottom into the
             // Continue Watching panel.
-            dissolveStart: 0.82
+            dissolveStart: 0.82,
+            // The filmstrip tiles several of these side by side, so each cell must
+            // stay exactly one screen wide; the overscan breakout is applied once at
+            // the strip's viewport (see `heroBackdropStack`), not per cell.
+            ignoresOverscan: false
         )
     }
 

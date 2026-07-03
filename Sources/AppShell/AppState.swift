@@ -86,6 +86,10 @@ public final class AppState {
     /// `uiDensityModel`, and rebuilt on profile switch like the other per-profile
     /// models.
     public private(set) var cardStyleModel: CardStyleSettingsModel
+    /// The active profile's Home hero (featured carousel) settings: which sources
+    /// feed it, how many items, Random library scope, trailers, and auto-advance.
+    /// Scoped per profile (rebuilt on profile switch) like `cardStyleModel`.
+    public private(set) var heroSettingsModel: HeroSettingsModel
     /// The active profile's Night Shift (warm/dim screen tint) settings + live
     /// schedule. Scoped per profile (rebuilt on profile switch) like the theme;
     /// its overlay is installed at the app root in `RootView`.
@@ -935,6 +939,7 @@ public final class AppState {
             ?? UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
         self.cardStyleModel = cardStyleModel
             ?? CardStyleSettingsModel(store: CardStyleSettingsStore(namespace: ns))
+        self.heroSettingsModel = HeroSettingsModel(store: HeroSettingsStore(namespace: ns))
         self.nightShiftModel = nightShiftModel
             ?? NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
 
@@ -1837,6 +1842,7 @@ public final class AppState {
         homeLibraryVisibilityModel = HomeLibraryVisibilityModel(store: HomeLibraryVisibilityStore(namespace: ns))
         uiDensityModel = UIDensitySettingsModel(store: UIDensitySettingsStore(namespace: ns))
         cardStyleModel = CardStyleSettingsModel(store: CardStyleSettingsStore(namespace: ns))
+        heroSettingsModel = HeroSettingsModel(store: HeroSettingsStore(namespace: ns))
         nightShiftModel = NightShiftSettingsModel(store: NightShiftSettingsStore(namespace: ns))
     }
 

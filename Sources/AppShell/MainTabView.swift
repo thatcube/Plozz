@@ -107,6 +107,10 @@ struct MainTabView: View {
     /// Injected into the environment for the Settings editor; card rendering reads
     /// `\.plozzCardStyle` (installed at the app root in RootView).
     let cardStyleModel: CardStyleSettingsModel
+    /// Per-profile Home hero (featured carousel) settings, edited in
+    /// Settings ▸ Home display. Threaded into `HomeTab` to drive the carousel and
+    /// into Settings for editing.
+    let heroSettingsModel: HeroSettingsModel
     /// Per-profile Night Shift settings, edited in Settings ▸ Night Shift. Its
     /// overlay is installed at the app root (RootView); here it's only threaded
     /// into Settings for editing.
@@ -207,6 +211,8 @@ struct MainTabView: View {
                 accounts: accounts,
                 homeVisibility: homeVisibility,
                 homeLayoutStore: homeLayoutStore,
+                heroSettings: heroSettingsModel,
+                navigationStyle: navigationStyle,
                 behavior: subtitleBehaviorModel.settings,
                 style: subtitleStyleModel.style,
                 playbackSettings: playbackModel.settings,
@@ -326,6 +332,7 @@ struct MainTabView: View {
         .environment(musicPlayerModel)
         .environment(uiDensityModel)
         .environment(cardStyleModel)
+        .environment(heroSettingsModel)
         .task(id: accounts.map(\.account.id)) {
             onWarmIdentityIndex()
         }
@@ -410,6 +417,66 @@ private func resolveProvider(_ accountID: String?, in accounts: [ResolvedAccount
 /// account simply drops that source rather than falling back to another server.
 private func resolveOptionalProvider(_ accountID: String, in accounts: [ResolvedAccount]) -> (any MediaProvider)? {
     accounts.first(where: { $0.account.id == accountID })?.provider
+}
+
+/// Builds the Home hero's Random source fetcher (dual-provider): given a set of
+/// concrete `"accountID:libraryID"` keys (already resolved from the user's
+/// selection or the visible-library fallback in `HomeView`), it fetches a
+/// server-shuffled page from each library — on **both** Jellyfin and Plex, which
+/// each map `SortField.random` onto their native random order — and returns a
+/// merged, capped pool for the curator to interleave. Each library's child kind
+/// is resolved from its owning provider's catalog so the typed random query is
+/// issued correctly; libraries whose kind isn't a browsable movie/series list
+/// are skipped.
+private func makeHeroRandomProvider(accounts: [ResolvedAccount]) -> RandomLibraryContentProviding {
+    { keys, limit in
+        guard !keys.isEmpty, limit > 0 else { return [] }
+        var libraryIDsByAccount: [String: [String]] = [:]
+        for key in keys {
+            guard let separator = key.firstIndex(of: ":") else { continue }
+            let accountID = String(key[..<separator])
+            let libraryID = String(key[key.index(after: separator)...])
+            guard !accountID.isEmpty, !libraryID.isEmpty else { continue }
+            libraryIDsByAccount[accountID, default: []].append(libraryID)
+        }
+        guard !libraryIDsByAccount.isEmpty else { return [] }
+
+        let pooled = await withTaskGroup(of: [MediaItem].self) { group in
+            for (accountID, libraryIDs) in libraryIDsByAccount {
+                guard let provider = resolveOptionalProvider(accountID, in: accounts) else { continue }
+                group.addTask {
+                    let kindByLibraryID: [String: MediaItemKind]
+                    do {
+                        let libraries = try await provider.libraries()
+                        kindByLibraryID = Dictionary(
+                            libraries.map { ($0.id, $0.kind) },
+                            uniquingKeysWith: { first, _ in first }
+                        )
+                    } catch {
+                        return []
+                    }
+                    var collected: [MediaItem] = []
+                    for libraryID in libraryIDs {
+                        guard let kind = kindByLibraryID[libraryID],
+                              kind == .movie || kind == .series else { continue }
+                        let page = PageRequest(
+                            startIndex: 0,
+                            limit: max(limit, 12),
+                            sort: SortDescriptor(field: .random, direction: .descending)
+                        )
+                        if let result = try? await provider.items(in: libraryID, kind: kind, page: page) {
+                            collected.append(contentsOf: result.items)
+                        }
+                    }
+                    return collected
+                }
+            }
+            var all: [MediaItem] = []
+            for await chunk in group { all.append(contentsOf: chunk) }
+            return all
+        }
+        return Array(pooled.shuffled().prefix(max(limit, 1)))
+    }
 }
 
 /// Builds the detail page's cross-server source resolver: given the title the
@@ -1091,6 +1158,11 @@ private struct HomeTab: View {
     let accounts: [ResolvedAccount]
     let homeVisibility: HomeLibraryVisibilityModel
     let homeLayoutStore: HomeLayoutStoring
+    /// Per-profile hero carousel settings driving the Home featured section.
+    let heroSettings: HeroSettingsModel
+    /// App-wide navigation style, so the carousel's left-edge focus behaviour
+    /// (escape to sidebar vs. wrap) matches the surrounding chrome.
+    let navigationStyle: NavigationStyle
     let behavior: SubtitleBehavior
     let style: SubtitleStyle
     let playbackSettings: PlaybackSettings
@@ -1134,6 +1206,9 @@ private struct HomeTab: View {
                 ),
                 visibility: homeVisibility,
                 spoilerSettings: spoilerSettings,
+                heroSettings: heroSettings,
+                heroRandomProvider: makeHeroRandomProvider(accounts: accounts),
+                navigationStyle: navigationStyle,
                 onSelectItem: { navigate($0) },
                 onPlayItem: { requestPlay($0) },
                 onSelectLibrary: { library in

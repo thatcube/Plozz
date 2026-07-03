@@ -3,7 +3,8 @@ import SwiftUI
 import CoreModels
 import CoreUI
 
-/// The Home screen: Continue Watching, Latest, and library shortcuts.
+/// The Home screen: an optional cinematic **hero** carousel followed by
+/// Continue Watching, Latest, and library shortcuts.
 public struct HomeView: View {
     @State private var viewModel: HomeViewModel
     private var visibility: HomeLibraryVisibilityModel
@@ -12,12 +13,30 @@ public struct HomeView: View {
     private let onPlayItem: (MediaItem) -> Void
     private let onSelectLibrary: (MediaLibrary) -> Void
 
+    /// Per-profile hero configuration. `nil` (or an inactive config) leaves Home
+    /// rendering its classic rows unchanged.
+    private var heroSettings: HeroSettingsModel?
+    private let heroCurator: HeroCurator
+    private let heroFeaturedProvider: FeaturedContentProviding
+    private let heroRandomProvider: RandomLibraryContentProviding
+    /// The app-wide navigation style, so the carousel's left-edge behaviour
+    /// (escape to sidebar vs. wrap) matches the surrounding chrome.
+    private let navigationStyle: NavigationStyle
+
+    /// The curated hero items, recomputed as Home content or settings change.
+    @State private var heroItems: [MediaItem] = []
+
     @Environment(\.plozzMetrics) private var metrics
 
     public init(
         viewModel: HomeViewModel,
         visibility: HomeLibraryVisibilityModel,
         spoilerSettings: SpoilerSettings = .default,
+        heroSettings: HeroSettingsModel? = nil,
+        heroCurator: HeroCurator = HeroCurator(),
+        heroFeaturedProvider: @escaping FeaturedContentProviding = HeroFeaturedProvider.none,
+        heroRandomProvider: @escaping RandomLibraryContentProviding = HeroRandomProvider.none,
+        navigationStyle: NavigationStyle = .default,
         onSelectItem: @escaping (MediaItem) -> Void,
         onPlayItem: @escaping (MediaItem) -> Void,
         onSelectLibrary: @escaping (MediaLibrary) -> Void
@@ -25,6 +44,11 @@ public struct HomeView: View {
         _viewModel = State(initialValue: viewModel)
         self.visibility = visibility
         self.spoilerSettings = spoilerSettings
+        self.heroSettings = heroSettings
+        self.heroCurator = heroCurator
+        self.heroFeaturedProvider = heroFeaturedProvider
+        self.heroRandomProvider = heroRandomProvider
+        self.navigationStyle = navigationStyle
         self.onSelectItem = onSelectItem
         self.onPlayItem = onPlayItem
         self.onSelectLibrary = onSelectLibrary
@@ -50,19 +74,41 @@ public struct HomeView: View {
             // kind, order *and* how many cards it actually showed, so the skeleton
             // matches a full row and a sparse one alike.
             let layout = rows.map { HomeRowLayout(kind: $0.kind, count: $0.cardCount) }
+            let heroActive = (heroSettings?.settings.isActive ?? false) && !heroItems.isEmpty
             ScrollView {
-                VStack(alignment: .leading, spacing: metrics.rowSpacing) {
-                    ForEach(rows) { row in
-                        rowView(row)
+                VStack(alignment: .leading, spacing: 0) {
+                    if heroActive, let heroSettings {
+                        HomeHeroView(
+                            items: heroItems,
+                            settings: heroSettings.settings,
+                            spoilerSettings: spoilerSettings,
+                            navigationStyle: navigationStyle,
+                            onSelect: onSelectItem,
+                            onPlay: onPlayItem
+                        )
                     }
+                    VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                        ForEach(rows) { row in
+                            rowView(row)
+                        }
+                    }
+                    // When the hero is present, pull the rows up so the first row
+                    // (Continue Watching) overlaps the hero's lower edge — the
+                    // Apple TV look. Otherwise keep the classic top padding.
+                    .padding(.top, heroActive ? -Self.heroRowOverlap : PlozzTheme.Metrics.screenVerticalPadding)
+                    .padding(.bottom, PlozzTheme.Metrics.screenVerticalPadding)
                 }
-                .padding(.vertical, PlozzTheme.Metrics.screenVerticalPadding)
             }
             // Never clip a focused card's lift, shadow or border.
             .scrollClipDisabled()
             // Remember the structure we actually rendered (post-visibility), keyed
             // on kinds *and* counts so a changed card count re-persists too.
             .task(id: layout) { viewModel.rememberLayout(layout) }
+            // Recompute the curated hero set whenever Home content or the hero
+            // config changes. Off the main actor via the curator's async sources.
+            .task(id: HeroRecomputeKey(content: content, settings: heroSettings?.settings)) {
+                await recomputeHero(content: content)
+            }
         }
         .task(id: visibility.visibility.excludedKeys) {
             // First appearance loads; thereafter a change to the hidden-library set
@@ -90,6 +136,41 @@ public struct HomeView: View {
             // burst on a multi-server boot — debounce to a single fold.
             viewModel.scheduleReenrich()
         }
+    }
+
+    /// How far the rows are pulled up so the first row (Continue Watching)
+    /// overlaps the hero's lower edge — roughly the top third of a poster card.
+    /// Tuned on-device; a starting point that leaves the cards clearly peeking.
+    private static let heroRowOverlap: CGFloat = 150
+
+    /// Recomputes the curated hero items for the current Home `content` and the
+    /// active hero settings, via the injected curator + content seams. Clears the
+    /// set when the hero is disabled so Home falls back to its classic layout.
+    @MainActor
+    private func recomputeHero(content: HomeViewModel.Content) async {
+        guard let settings = heroSettings?.settings, settings.isActive else {
+            heroItems = []
+            return
+        }
+        // Resolve the Random source's library scope: an empty set means "all
+        // currently-visible libraries", so expand it to concrete keys from the
+        // loaded, visibility-filtered library set before handing off to the
+        // provider (which then just fetches from the keys it's given).
+        var effective = settings
+        if settings.isEnabled(.randomFromLibrary) && settings.randomLibraryKeys.isEmpty {
+            let visibleKeys = content.libraries
+                .filter { visibility.isVisible($0.key) }
+                .map(\.key)
+            effective.randomLibraryKeys = Set(visibleKeys)
+        }
+        let items = await heroCurator.curate(
+            settings: effective,
+            continueWatching: content.continueWatching,
+            watchlist: content.watchlist,
+            featuredProvider: heroFeaturedProvider,
+            randomProvider: heroRandomProvider
+        )
+        heroItems = items
     }
 
     /// Renders one resolved `HomeRow`. The per-kind wiring (card style, and
@@ -164,6 +245,15 @@ public struct HomeView: View {
         }
         return server
     }
+}
+
+/// The `.task(id:)` key that drives hero recomputation: any change to the loaded
+/// Home content (Continue Watching / Watchlist feed the curator directly) or the
+/// hero settings re-runs the curator. `Equatable` so SwiftUI restarts the task
+/// only on a real change.
+private struct HeroRecomputeKey: Equatable {
+    let content: HomeViewModel.Content
+    let settings: HeroSettings?
 }
 
 /// A Home "Libraries" tile. Mirrors `PosterCardView`'s landscape (medium-card)

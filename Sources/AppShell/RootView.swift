@@ -151,6 +151,7 @@ public struct RootView: View {
                         musicPlayerModel: appState.musicPlayerModel,
                         uiDensityModel: appState.uiDensityModel,
                         cardStyleModel: appState.cardStyleModel,
+                        heroSettingsModel: appState.heroSettingsModel,
                         nightShiftModel: appState.nightShiftModel,
                         audioController: appState.audioController,
                         homeVisibility: appState.homeLibraryVisibilityModel,

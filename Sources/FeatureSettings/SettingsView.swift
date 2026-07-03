@@ -370,6 +370,14 @@ public struct SettingsView: View {
             navRow("Appearance", icon: "paintpalette",
                    value: nil,
                    route: .appearance)
+            navRow("Home Display", icon: "rectangle.on.rectangle.angled",
+                   value: nil,
+                   route: .homeDisplay) {
+                Text("Display size, card style & the featured hero")
+                    .font(.footnote)
+                    .settingsRowSecondary()
+                    .lineLimit(2)
+            }
             navRow("Circadian Mode", icon: "moon.stars",
                    value: nil,
                    route: .nightShift) {
@@ -562,6 +570,11 @@ public struct SettingsView: View {
             MyLibrariesDetailView(context: context)
         case .appearance:
             AppearanceDetailView(theme: theme)
+        case .homeDisplay:
+            HomeDisplayDetailView(
+                discoveredLibraries: discoveredLibraries,
+                homeVisibility: homeVisibility
+            )
         case .nightShift:
             NightShiftDetailView(model: nightShift)
         case .playback:

@@ -369,7 +369,7 @@ struct DetailHeroView: View {
                         Button(action: onPlayTrailer) {
                             Label("Trailer", systemImage: "film.fill")
                         }
-                        .modifier(HeroButtonStyle(prominent: false))
+                        .modifier(HeroActionButtonStyle(prominent: false))
                     }
                     if let heroWatchlistAction {
                         watchlistButton(action: heroWatchlistAction)
@@ -464,71 +464,18 @@ struct DetailHeroView: View {
     /// edge *without* inflating the hero's (and the scroll column's) layout width.
     @ViewBuilder
     private func heroBackdrop(hideThumbnail: Bool) -> some View {
-        FallbackAsyncImage(
+        // The shared `HeroBackdropLayer` (CoreUI) owns the exact scrim + dissolve
+        // + full-bleed treatment, so the detail hero and the Home hero carousel
+        // render an identical backdrop. The blurred-poster placeholder lives in
+        // the layer too, driven by `backdrop.posterURL`.
+        HeroBackdropLayer(
             urls: [backdrop.heroBackdropURL, backdrop.backdropURL].compactMap { $0 },
-            maxAspectRatio: 3.0,
-            asyncFallbackURL: tmdbBackdropFallback
-        ) {
-            heroPlaceholder
-        }
-        .frame(height: Self.screenHeight * (heroHeightFraction + backdropBottomExtensionFraction))
-        .frame(maxWidth: .infinity)
-        .clipped()
-        .blur(radius: hideThumbnail && spoilerSettings.mode == .blur ? 40 : 0)
-        .overlay(
-            // Legibility scrim: fade a mode-appropriate tone in over the leading
-            // side so the title/logo/overview read clearly against the artwork —
-            // a dark tone in dark mode (for light content), a light tone in light
-            // mode (for dark content). The *geometry is identical in both modes*;
-            // only the tone flips, so legibility is consistent across appearances.
-            // It lives *under* the dissolve mask below, so it fades away with the
-            // image and never tints the revealed background.
-            //
-            // The vertical ramp starts high enough to reach the logo (which sits
-            // above the title), and a horizontal falloff concentrates the wash on
-            // the leading side (where the content sits) while leaving the right
-            // side of the image — the hero subject — clear.
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0.0),
-                    .init(color: .clear, location: 0.20),
-                    .init(color: scrimTone.opacity(0.72), location: 1.0)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .mask(
-                LinearGradient(
-                    stops: [
-                        .init(color: .white, location: 0.0),
-                        .init(color: .white, location: 0.40),
-                        .init(color: .clear, location: 0.85)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
+            asyncFallbackURL: tmdbBackdropFallback,
+            placeholderPosterURL: backdrop.posterURL,
+            height: Self.screenHeight * (heroHeightFraction + backdropBottomExtensionFraction),
+            scrimTone: scrimTone,
+            blursImage: hideThumbnail && spoilerSettings.mode == .blur
         )
-        // Dissolve the backdrop's own alpha to transparent over the lower
-        // portion (top third stays a clean image) so the real `AppBackground`
-        // shows straight through. Because that is the *same* fixed surface the
-        // content below sits on, the transition is perfectly seamless — there
-        // is no second colour to mismatch, so no hard line ever appears.
-        .mask(
-            LinearGradient(
-                stops: [
-                    .init(color: .white, location: 0.0),
-                    .init(color: .white, location: 0.33),
-                    .init(color: .clear, location: 1.0)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        // Break out of the tvOS overscan safe area so the backdrop spans the
-        // full screen edge to edge — across the top as well, otherwise the
-        // top overscan inset shows through as a black bar above the artwork.
-        .ignoresSafeArea(edges: [.top, .horizontal])
     }
 
     /// The hero Play button. Extracted so the optional initial-focus binding can
@@ -557,7 +504,7 @@ struct DetailHeroView: View {
                 playButtonLabel(showProgress: showProgress, title: title)
             }
         }
-        .modifier(HeroButtonStyle(prominent: true))
+        .modifier(HeroActionButtonStyle(prominent: true))
         .focused($playButtonHasFocus)
         .onChange(of: liveResumeText) { _, new in
             if let new { reservedResumeText = new }
@@ -663,7 +610,7 @@ struct DetailHeroView: View {
             onUserInitiatedSourceSwitch: { userInitiatedSourceSwitch = true }
         )
         .equatable()
-        .modifier(HeroButtonStyle(prominent: false))
+        .modifier(HeroActionButtonStyle(prominent: false))
         .focused($moreMenuFocused)
         .accessibilityLabel("Server and version options")
     }
@@ -683,7 +630,7 @@ struct DetailHeroView: View {
                 .symbolEffect(.bounce, value: item.isFavorite)
                 .frame(width: heroIconSize, height: heroIconSize)
         }
-        .modifier(HeroButtonStyle(prominent: false))
+        .modifier(HeroActionButtonStyle(prominent: false))
         .animation(.easeInOut(duration: 0.2), value: item.isFavorite)
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isFavorite ? "On your watchlist" : "Not on your watchlist")
@@ -730,7 +677,7 @@ struct DetailHeroView: View {
             .frame(width: heroIconSize, height: heroIconSize)
             .animation(.easeOut(duration: 0.18), value: item.isPlayed)
         }
-        .modifier(HeroButtonStyle(prominent: false))
+        .modifier(HeroActionButtonStyle(prominent: false))
         .accessibilityLabel(action.title)
         .accessibilityValue(item.isPlayed ? "Watched" : "Not watched")
     }
@@ -755,7 +702,7 @@ struct DetailHeroView: View {
         } label: {
             refreshIcon
         }
-        .modifier(HeroButtonStyle(prominent: false))
+        .modifier(HeroActionButtonStyle(prominent: false))
         .focused($refreshButtonHasFocus)
         .accessibilityLabel(MediaItemAction.refreshMetadata.title)
     }
@@ -860,33 +807,6 @@ struct DetailHeroView: View {
         #endif
     }
 
-    /// The hero's final, always-keyless background when no real landscape art is
-    /// available from the server or any external provider. Rather than a flat grey
-    /// panel, it blows up the item's own poster, scaled to fill and heavily blurred
-    /// into a soft cinematic wash, so a movie/show with only a poster still gets a
-    /// rich coloured hero instead of an empty one. Falls back to the neutral fill
-    /// only when there is no poster at all.
-    @ViewBuilder
-    private var heroPlaceholder: some View {
-        if let poster = backdrop.posterURL {
-            AsyncImage(url: poster) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .blur(radius: 60)
-                        .scaleEffect(1.2)
-                        .overlay(Color.black.opacity(0.35))
-                default:
-                    Rectangle().fill(.tertiary)
-                }
-            }
-        } else {
-            Rectangle().fill(.tertiary)
-        }
-    }
-
     /// Last-resort backdrop art for the hero: look the show/movie up on TMDb and
     /// use a wide fanart image. Many anime (via Shoko/AniDB) ship no backdrop, so
     /// this fills the otherwise-empty hero. Uses the *backdrop* item (the series,
@@ -941,31 +861,6 @@ struct DetailHeroView: View {
         #else
         return nil
         #endif
-    }
-}
-
-/// Applies the native Liquid Glass button style to the hero's action buttons on
-/// OS versions that ship it (tvOS 26+), falling back to the classic bordered
-/// styles below that. `prominent` picks the tinted primary glass (Play) versus
-/// the lighter clear glass (secondary actions like Trailer).
-private struct HeroButtonStyle: ViewModifier {
-    let prominent: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(tvOS 26.0, *) {
-            if prominent {
-                content.buttonStyle(.glassProminent)
-            } else {
-                content.buttonStyle(.glass)
-            }
-        } else {
-            if prominent {
-                content.buttonStyle(.borderedProminent)
-            } else {
-                content.buttonStyle(.bordered)
-            }
-        }
     }
 }
 

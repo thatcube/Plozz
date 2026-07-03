@@ -98,9 +98,14 @@ struct HomeHeroView: View {
     /// never lingers over the new artwork.
     @State private var metadataVisible = true
     /// Bumped on every page so a late metadata fade-in from a *previous* page
-    /// can't fire after a newer page has already started. Also guards the
-    /// two-phase backdrop slide's animate + cleanup steps.
+    /// can't fire after a newer page has already started.
     @State private var slideToken = 0
+    /// The direction of the in-flight page, driving the backdrop wipe: forward
+    /// slides the new artwork in from the trailing edge (old exits leading);
+    /// backward reverses it. Set INSIDE the page's single `withAnimation` (same
+    /// transaction as `index`) so the `.transition` reads the right edges and both
+    /// the insertion and removal share one animation.
+    @State private var forward = true
     /// Best resolved hero backdrop URL per item id. For episode/season slides
     /// this is the **series-level** hero art (correct show, high-res — matching
     /// the detail page), resolved via ``ArtworkRouter`` and preloaded for the
@@ -113,27 +118,6 @@ struct HomeHeroView: View {
     /// spuriously, scrolling the page while focus never actually moved) and ties
     /// it instead to focus genuinely leaving the hero for the row below.
     @State private var recedeWork: DispatchWorkItem?
-
-    // MARK: Backdrop slide layers
-    //
-    // The wipe is driven by TWO persistent, offset-animated layers instead of a
-    // SwiftUI insertion/removal `.transition` keyed by `.id`. That declarative
-    // transition was the source of the intermittent "wrong-order" wipe: on an
-    // identity swap the incoming layer would sometimes NOT inherit the animated
-    // transaction (competing `disablesAnimations` metadata-hide + `forward`
-    // writes in the same tick), so the new backdrop snapped in at rest while the
-    // old one still animated out underneath — and it fired even after every image
-    // was decoded, proving it was transaction attribution, not image loading.
-    //
-    // These two layers have STABLE identities (no `.id(item.id)`), so paging just
-    // swaps their content and animates their `x` offset — a plain continuous
-    // modifier that always animates deterministically, immune to content changes
-    // and transaction races. `main` is the fronted slide (rests at x=0); `ghost`
-    // is the outgoing slide that slides off during a page and is then cleared.
-    @State private var mainItem: MediaItem?
-    @State private var ghostItem: MediaItem?
-    @State private var mainX: CGFloat = 0
-    @State private var ghostX: CGFloat = 0
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -251,9 +235,6 @@ struct HomeHeroView: View {
         .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
-            // Seed the fronted backdrop layer at rest (no slide) so the first
-            // paint shows the correct art immediately.
-            if mainItem == nil { mainItem = current }
             Task { await resolveArtwork(around: index) }
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
@@ -276,19 +257,12 @@ struct HomeHeroView: View {
             }
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
-            metadataVisible = true
-            // Re-seat the fronted backdrop layer at rest (instant, no slide): a
-            // set swap is not a page, so cancel any in-flight slide and front the
-            // (possibly relocated) current item directly.
+            // A set swap is not a page: front the (possibly relocated) current
+            // item instantly with no wipe by bumping the token (cancels any
+            // pending fade-in) and leaving `index` as re-seated above. The
+            // backdrop is keyed on `current`'s id, so it just swaps in place.
             slideToken &+= 1
-            var instant = Transaction()
-            instant.disablesAnimations = true
-            withTransaction(instant) {
-                ghostItem = nil
-                ghostX = 0
-                mainX = 0
-                mainItem = items.indices.contains(index) ? items[index] : nil
-            }
+            metadataVisible = true
             // Clamp the logical selection to the new slide's button count so it
             // can never point past the last pill after a set swap. Pure `@State`,
             // so this never touches (or drops) focus.
@@ -316,28 +290,42 @@ struct HomeHeroView: View {
         }
     }
 
-    /// The hero backdrop, rendered as two persistent, offset-animated layers (see
-    /// the `mainItem`/`ghostItem` state doc). A page slides the outgoing `ghost`
-    /// off one edge while the incoming `main` slides in from the opposite edge —
-    /// the Apple TV "push" — with NO identity-swap `.transition`, so the wipe can
-    /// never land out of order. Constrained to the screen width and clipped so the
-    /// full-bleed art can't inflate the layout width and the sliding layers never
-    /// bleed horizontally.
+    /// The hero backdrop, keyed by the fronted item's id so a page is a real
+    /// identity change: SwiftUI removes the old layer and inserts the new one,
+    /// natively staging the incoming layer off-screen and animating it in — no
+    /// manual "place then animate" two-tick dance (which collapsed the incoming
+    /// offset to instant when the staging frame wasn't committed on its own).
+    /// Constrained to the screen width and clipped so the full-bleed art can't
+    /// inflate the layout width and the sliding layers never bleed horizontally.
+    ///
+    /// The wipe animates because `page(...)` changes `index` (→ `current` →
+    /// `item.id`) inside a SINGLE `withAnimation` with NO competing transaction in
+    /// the same runloop turn: the metadata-hide is folded into that same animation
+    /// and stripped locally (see `content(for:)`), so the incoming layer always
+    /// inherits the animation instead of intermittently snapping to rest while the
+    /// outgoing layer slid out underneath — the old wrong-order wipe.
     @ViewBuilder
     private func heroBackdropStack(height: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
-            if let ghostItem {
-                heroBackdrop(for: ghostItem, height: height)
-                    .offset(x: ghostX)
-            }
-            if let mainItem {
-                heroBackdrop(for: mainItem, height: height)
-                    .offset(x: mainX)
+            if let item = current {
+                heroBackdrop(for: item, height: height)
+                    .id(item.id)
+                    .transition(slideTransition)
             }
         }
         .frame(width: Self.screenWidth, height: height, alignment: .bottom)
         .frame(maxWidth: .infinity, alignment: .center)
         .clipped()
+    }
+
+    /// The directional wipe: the incoming backdrop slides in from the trailing
+    /// edge (forward) or leading edge (backward) while the outgoing exits the
+    /// opposite side — the Apple TV "push".
+    private var slideTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading),
+            removal: .move(edge: forward ? .leading : .trailing)
+        )
     }
     /// The dwell key: any change (slide index, focus state, or a manual page
     /// bump) restarts the auto-advance timer from the current slide.
@@ -399,6 +387,10 @@ struct HomeHeroView: View {
                 }
             }
             .opacity(metadataVisible ? 1 : 0)
+            // Snap the metadata *hide* instantly (it now rides `page(...)`'s single
+            // 0.42s wipe animation, which would otherwise fade the old text out
+            // over the incoming art) while still allowing the delayed fade-IN.
+            .transaction { if !metadataVisible { $0.animation = nil } }
 
             // Zero-height recede target: sits just above the buttons so a
             // down-press lifts the logo/title off the top of the screen.
@@ -503,6 +495,9 @@ struct HomeHeroView: View {
                 }
             }
             .opacity(metadataVisible ? 1 : 0)
+            // Snap the pills' hide instantly (matches the metadata above); the
+            // delayed fade-IN still animates.
+            .transaction { if !metadataVisible { $0.animation = nil } }
             .allowsHitTesting(false)
             // ── The single hero focus target: an always-opaque, invisible leaf
             // layered *over* the pills. Because `.overlay` is applied after the
@@ -825,55 +820,35 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Fronts `toItem` with a directional backdrop wipe, restarts the auto-advance
-    /// dwell, and moves the logical button selection. The wipe is driven by two
-    /// persistent offset layers (see `mainItem`/`ghostItem`): the outgoing art
-    /// drops into the ghost layer and slides off one edge while the incoming art
-    /// is staged off the opposite edge and slides to rest — deterministic and
-    /// immune to the transaction races that made the old `.id`-swap `.transition`
-    /// land out of order.
+    /// Fronts `toItem` with a directional backdrop wipe and restarts the
+    /// auto-advance dwell. The wipe is declarative: changing `index` swaps the
+    /// id-keyed backdrop and SwiftUI runs the `.move` transition. Everything that
+    /// drives the wipe — `forward` (edges), `metadataVisible` (hide the old text),
+    /// and `index` (the identity swap) — is set inside ONE `withAnimation` so they
+    /// share a single transaction. There is deliberately NO separate
+    /// `withTransaction(disablesAnimations:)` in this turn: a competing transaction
+    /// let the incoming layer skip its insertion animation (snap in at rest) while
+    /// the outgoing layer still animated out — the intermittent wrong-order wipe.
+    /// The instant metadata-hide is achieved locally instead (see `content(for:)`
+    /// and `actionRow(for:)`, which strip animation while hiding).
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
-        let outgoing = current
-        let incoming = items[toItem]
         beginTransition()
-        let token = slideToken
-
-        // Front the destination immediately for all *logical* state (paging dots,
-        // content column, auto-advance dwell). The backdrop art is driven
-        // separately by the two offset layers below, so this can't disturb focus.
-        index = toItem
-        advanceToken &+= 1
-        selectedButton = min(keepButton, max(0, buttons(for: incoming).count - 1))
-
-        // Two-phase deterministic slide. Phase 1 (instant): drop the outgoing art
-        // into the ghost layer at rest and stage the incoming art off-screen on
-        // the entering edge. Phase 2 (next runloop tick, so the off-screen
-        // placement has already rendered — invisible, no pop-in): animate both
-        // offsets in a single transaction so main slides to rest while ghost
-        // slides off the opposite edge, then clear the ghost. Both layers persist
-        // (no `.id` swap), so the offset animates every time.
-        let w = Self.screenWidth
-        var instant = Transaction()
-        instant.disablesAnimations = true
-        withTransaction(instant) {
-            ghostItem = outgoing
-            ghostX = 0
-            mainItem = incoming
-            mainX = isForward ? w : -w
+        // ONE transaction for the whole turn. `selectedButton` and `advanceToken`
+        // ride it too so NOTHING mutates state in a second (default) transaction
+        // this turn — the pill highlight has its own `.animation(value: selected)`
+        // that overrides this ambient one, so it still snaps at its own pace.
+        withAnimation(.easeInOut(duration: 0.42)) {
+            forward = isForward
+            metadataVisible = false
+            index = toItem
+            advanceToken &+= 1
+            // Keep the logical selection on the destination, clamped to its button
+            // count. Pure `@State` on a *stable* focus target (the row's identity
+            // never changes across a page), so focus stays put — only the
+            // highlight moves.
+            selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
         }
-        DispatchQueue.main.async {
-            guard slideToken == token else { return }
-            withAnimation(.easeInOut(duration: 0.42)) {
-                mainX = 0
-                ghostX = isForward ? -w : w
-            } completion: {
-                guard slideToken == token else { return }
-                ghostItem = nil
-                ghostX = 0
-            }
-        }
-
         Task { await resolveArtwork(around: toItem) }
     }
 
@@ -887,18 +862,17 @@ struct HomeHeroView: View {
         page(to: next, keepButton: destinationButtons - 1, forward: true)
     }
 
-    /// Starts a slide change: hides the current slide's metadata *immediately*
-    /// (no animation) so the old title/overview/buttons never sit over the
-    /// incoming artwork, then fades it back in once the backdrop wipe has landed.
-    /// The fade-in is delayed past the wipe duration (0.42s) and anchored to the
-    /// same start, and guarded by ``slideToken`` so a rapid second page cancels
-    /// the first page's pending fade-in.
+    /// Schedules the metadata fade-BACK-IN for a page. The metadata is hidden
+    /// *instantly* inside `page(...)`'s single `withAnimation` (stripped locally so
+    /// it snaps rather than fades — see `content(for:)`/`actionRow(for:)`), NOT via
+    /// a separate `withTransaction(disablesAnimations:)` here: a competing
+    /// transaction in the same turn let the backdrop's insertion skip its
+    /// animation. This only starts the delayed fade-in, past the wipe duration
+    /// (0.42s) and guarded by ``slideToken`` so a rapid second page cancels the
+    /// first page's pending fade-in.
     private func beginTransition() {
         slideToken &+= 1
         let token = slideToken
-        var instant = Transaction()
-        instant.disablesAnimations = true
-        withTransaction(instant) { metadataVisible = false }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 460_000_000)
             guard slideToken == token else { return }

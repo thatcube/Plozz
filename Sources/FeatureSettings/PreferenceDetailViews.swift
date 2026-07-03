@@ -12,9 +12,16 @@ struct AppearanceDetailView: View {
     /// `@AppStorage` key RootView reads. Do not move into a per-profile store.
     /// See AGENTS.local.md ("Per-profile vs app-wide settings").
     @AppStorage(TransparencyPreference.storageKey) private var transparencyPreferenceRaw = TransparencyPreference.default.rawValue
+    /// App-wide (global) navigation chrome — top bar vs. sidebar. Same
+    /// un-namespaced `@AppStorage` key `MainTabView` reads to pick the tab style.
+    @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
 
     private var transparencyPreference: TransparencyPreference {
         TransparencyPreference(rawValue: transparencyPreferenceRaw) ?? .default
+    }
+
+    private var navigationStyle: NavigationStyle {
+        NavigationStyle(rawValue: navigationStyleRaw) ?? .default
     }
 
     var body: some View {
@@ -29,9 +36,25 @@ struct AppearanceDetailView: View {
             get: { transparencyPreference },
             set: { transparencyPreferenceRaw = $0.rawValue }
         )
+        let navigationBinding = Binding(
+            get: { navigationStyle },
+            set: { navigationStyleRaw = $0.rawValue }
+        )
 
         return [
             SettingsSplitSection(id: "display", header: "Display", rows: [
+                SettingsSplitRow(
+                    id: "navigation",
+                    title: "Navigation",
+                    description: "How you move between Home, Search and the rest of the app.",
+                ) {
+                    DescribedSegmentedPicker(
+                        options: NavigationStyle.allCases,
+                        selection: navigationBinding,
+                        title: { $0.displayName },
+                        detail: { $0.detail }
+                    )
+                },
                 SettingsSplitRow(
                     id: "theme",
                     title: "Theme",

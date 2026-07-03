@@ -162,12 +162,22 @@ struct MainTabView: View {
     @State private var musicAvailability = MusicAvailabilityModel()
     @Environment(\.colorScheme) private var systemColorScheme
 
+    /// App-wide navigation chrome (top bar vs. sidebar), edited in Settings ▸
+    /// Appearance. Un-namespaced on purpose — it's a global shell choice, not a
+    /// per-profile aesthetic (see `NavigationStyle`).
+    @AppStorage(NavigationStyle.storageKey) private var navigationStyleRaw = NavigationStyle.default.rawValue
+
+    private var navigationStyle: NavigationStyle {
+        NavigationStyle(rawValue: navigationStyleRaw) ?? .default
+    }
+
     private var resolvedPalette: ThemePalette {
         ThemePalette.palette(for: themeModel.theme, systemColorScheme: systemColorScheme)
     }
 
     var body: some View {
         TabView {
+            Tab("Home", systemImage: "house.fill") {
             HomeTab(
                 accounts: accounts,
                 homeVisibility: homeVisibility,
@@ -191,8 +201,9 @@ struct MainTabView: View {
                 appliedWatchRecency: appliedWatchRecency,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
-            .tabItem { Label("Home", systemImage: "house.fill") }
+            }
 
+            Tab("Search", systemImage: "magnifyingglass") {
             SearchTab(
                 accounts: accounts,
                 behavior: subtitleBehaviorModel.settings,
@@ -211,12 +222,13 @@ struct MainTabView: View {
                 identitySources: identitySources,
                 onSubtitleStyleChanged: { subtitleStyleModel.style = $0 }
             )
-            .tabItem { Label("Search", systemImage: "magnifyingglass") }
+            }
 
             // Conditional Music tab: present only when at least one signed-in
             // account exposes a music library. Video-only users see no tab and no
             // mini-player — the app is byte-for-byte unchanged for them.
             if musicAvailability.hasMusic {
+                Tab("Music", systemImage: "music.note") {
                 MusicTabView(
                     accounts: musicAvailability.detectedAccounts,
                     visibleLibraryIDs: musicAvailability.visibleLibraryIDs,
@@ -224,9 +236,10 @@ struct MainTabView: View {
                     appTheme: themeModel.theme,
                     musicPlayer: musicPlayerModel
                 )
-                .tabItem { Label("Music", systemImage: "music.note") }
+                }
             }
 
+            Tab("Settings", systemImage: "gearshape.fill") {
             SettingsView(
                 subtitleBehavior: subtitleBehaviorModel,
                 spoilers: spoilerModel,
@@ -269,8 +282,9 @@ struct MainTabView: View {
                 plexHomeUsersFetcher: plexHomeUsersFetcher,
                 onSelectPlexHomeUser: onSelectPlexHomeUser
             )
-            .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+            }
         }
+        .plozzTabStyle(navigationStyle)
         .environment(musicPlayerModel)
         .environment(uiDensityModel)
         .environment(cardStyleModel)
@@ -312,6 +326,20 @@ struct MainTabView: View {
         let ids = accounts.map(\.account.id).sorted()
         let excluded = homeVisibility.visibility.excludedKeys.sorted()
         return (ids + ["|"] + excluded).joined(separator: ",")
+    }
+}
+
+private extension View {
+    /// Applies the native tvOS 18 `TabView` presentation matching the user's
+    /// `NavigationStyle`. Kept as a `@ViewBuilder` switch (rather than a ternary)
+    /// because `.sidebarAdaptable` and `.tabBarOnly` are distinct concrete
+    /// `TabViewStyle` types that can't share one expression.
+    @ViewBuilder
+    func plozzTabStyle(_ style: NavigationStyle) -> some View {
+        switch style {
+        case .tabBar: self.tabViewStyle(.tabBarOnly)
+        case .sidebar: self.tabViewStyle(.sidebarAdaptable)
+        }
     }
 }
 

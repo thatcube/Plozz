@@ -111,6 +111,13 @@ struct HomeHeroView: View {
     /// current slide and its neighbours so a page never animates a placeholder.
     @State private var resolvedBackdrop: [String: URL] = [:]
 
+    /// Pending "recede" scroll, scheduled when hero focus is lost and cancelled
+    /// if focus returns within the same runloop. This decouples the recede from
+    /// the Down *move command* (which a light Siri Remote trackpad graze fires
+    /// spuriously, scrolling the page while focus never actually moved) and ties
+    /// it instead to focus genuinely leaving the hero for the row below.
+    @State private var recedeWork: DispatchWorkItem?
+
     @Environment(\.colorScheme) private var colorScheme
 
     private var current: MediaItem? {
@@ -519,6 +526,10 @@ struct HomeHeroView: View {
                 // Resolve it and bounce straight back to the row.
                 handleLeft()
             case .row:
+                // Focus is (back) on the hero: cancel any pending recede — a
+                // transient focus blip must never scroll the page.
+                recedeWork?.cancel()
+                recedeWork = nil
                 // Focus arriving into the hero from *outside* (a row below / the
                 // tab bar): snap back to full-screen. We do NOT recede on focus
                 // *loss* — focus can drop transiently and must never scroll.
@@ -529,7 +540,19 @@ struct HomeHeroView: View {
                     onFocusGained()
                 }
             case .none:
-                break
+                // Hero lost focus. This is EITHER a genuine downward move (focus
+                // relocated to a Continue Watching card) OR a transient blip
+                // (page transition / re-render). Confirm on the next runloop: only
+                // recede if focus is still gone. A real Down keeps focus off the
+                // hero, so this fires; a transient drop returns to `.row` and
+                // cancels the pending work above. A light graze never changes
+                // focus at all, so this case does not even run for a graze.
+                recedeWork?.cancel()
+                let work = DispatchWorkItem {
+                    if focus == nil { onMoveDown() }
+                }
+                recedeWork = work
+                DispatchQueue.main.async(execute: work)
             }
         }
     }
@@ -581,7 +604,15 @@ struct HomeHeroView: View {
         selectedButton = min(selectedButton, max(0, buttonCount - 1))
         switch direction {
         case .down:
-            onMoveDown()
+            // Do NOT recede here. A light trackpad graze makes tvOS fire a phantom
+            // `.down` move command even when focus never relocates, which used to
+            // scroll the page down while focus stayed pinned (the reported bug).
+            // The recede is now driven purely by focus actually leaving the hero
+            // for the row below — see `.onChange(of: focus)`. On a real Down the
+            // focus engine relocates focus (dropping hero `focus` to nil) and that
+            // change triggers the recede; a graze leaves focus untouched, so
+            // nothing scrolls.
+            break
         case .right:
             let outcome = HeroCarouselFocus.resolve(
                 direction: .right,

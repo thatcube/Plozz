@@ -123,6 +123,12 @@ public struct MusicTabView: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)
+        // Re-inject the "open full player" action here too. Custom environment
+        // values set on the NavigationStack (line ~68) are inherited by the root
+        // content but NOT reliably by `navigationDestination`-pushed views, so
+        // without this the NowPlayingCard on album/artist/playlist detail pages
+        // would fall back to its default no-op and silently do nothing.
+        .environment(\.openNowPlaying) { showNowPlaying = true }
     }
 }
 

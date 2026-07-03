@@ -5,9 +5,9 @@ import CoreUI
 import MetadataKit
 
 /// The Home **hero** carousel: a cinematic, rotating spotlight at the top of
-/// Home, functionally near-identical to the Apple TV app. Each slide reuses the
-/// exact item-detail backdrop treatment (`HeroBackdropLayer`) plus the title
-/// logo, metadata and Play / More Info / Watchlist actions.
+/// Home, functionally near-identical to the Apple TV app. Each slide shows a
+/// full-bleed backdrop plus the title logo, metadata and Play / More Info /
+/// Watchlist actions.
 ///
 /// Content is whatever the ``HeroCurator`` produced for the user's per-profile
 /// ``HeroSettings`` (Continue Watching, Random, Watchlist and — once Seerr lands
@@ -15,8 +15,11 @@ import MetadataKit
 /// per ``HeroCarouselFocus`` (right at the last button advances; left at the
 /// first button steps back / escapes to the sidebar).
 ///
-/// A background-video slot is threaded through `HeroBackdropLayer` for the
-/// phased-in muted trailer; it renders nothing today.
+/// The backdrop transition between slides is handled by ``HomeHeroBackdrop``,
+/// which cross-dissolves the image **imperatively in UIKit (Core Animation)**
+/// rather than with any SwiftUI animation — the fix for the long-standing,
+/// intermittent wrong-order wipe. Paging is therefore just a state change here
+/// (`index`); the backdrop reacts to the fronted slide's URLs on its own.
 struct HomeHeroView: View {
     let items: [MediaItem]
     let settings: HeroSettings
@@ -106,42 +109,6 @@ struct HomeHeroView: View {
     /// Bumped on every page so a late metadata fade-in from a *previous* page
     /// can't fire after a newer page has already started.
     @State private var slideToken = 0
-    /// The Home hero backdrop is a **single horizontal filmstrip** — an `HStack` of
-    /// three cells `[itemAt(centerIndex-1), itemAt(centerIndex), itemAt(centerIndex+1)]`
-    /// that moves as ONE unit via a single animatable offset (`slidePosition`).
-    /// There is only ever one thing animating, so the old two-independent-layer
-    /// design (where SwiftUI could animate one side and drop the other, producing
-    /// the intermittent "new art appears behind/over the old" wrong-order wipe) is
-    /// structurally impossible now.
-    ///
-    /// The key to the transition's robustness is *when* the window moves. The
-    /// window shift (`centerIndex ± 1`) — the ONLY structural change to the
-    /// `ForEach`, which swaps one far, off-screen cell in and one out — is committed
-    /// **up front, before the visible animation begins**, inside a
-    /// `disablesAnimations` transaction. `slidePosition` is simultaneously
-    /// pre-loaded to the opposite edge (∓1) so the strip still displays the
-    /// *outgoing* slide at that instant (no visible jump). The visible slide is then
-    /// a pure `slidePosition → 0` animation during which the `ForEach` is completely
-    /// static. There is NO completion handler and NO settle re-window, so SwiftUI
-    /// can never decompose the strip's motion into a per-cell fade/move (the old
-    /// wrong-order wipe) — a structural change never coincides with an animation.
-    /// At rest `slidePosition` is always 0 and `centerIndex` is always the fronted
-    /// slide.
-    ///
-    /// `centerIndex` is an UNBOUNDED contiguous counter (it just keeps incrementing
-    /// forward / decrementing backward); the displayed item is `itemAt(centerIndex)`
-    /// with wrap-around modulo. Keeping it contiguous (rather than wrapping it to
-    /// 0…count-1) is what preserves cell identity across the end→start wrap: the
-    /// `ForEach` ids `[c-1, c, c+1]` always overlap by two with the next window, so
-    /// the cell sliding to centre is the SAME view instance (art already resolved)
-    /// even when the *item* wrapped. The invariant `itemAt(centerIndex) == items[index]`
-    /// holds at rest.
-    @State private var centerIndex = 0
-    /// The filmstrip offset in screen-width units. 0 at rest (centre cell shown). A
-    /// page commits `centerIndex` up front and pre-loads this to -1 (forward) or +1
-    /// (backward) — which, with the shifted window, still shows the *outgoing* slide
-    /// — then animates it back to 0, sliding the incoming slide to centre.
-    @State private var slidePosition: CGFloat = 0
     /// The last directional move delivered to the hero's action row. Used to gate
     /// the recede: focus can leave the hero UP (to the tab bar) or LEFT (to the
     /// sidebar) as well as DOWN (to the Continue Watching row) — only a genuine
@@ -165,15 +132,6 @@ struct HomeHeroView: View {
     private var current: MediaItem? {
         guard items.indices.contains(index) else { return items.first }
         return items[index]
-    }
-
-    /// The item shown by a filmstrip cell at contiguous position `i`, wrapping
-    /// around the carousel. `centerIndex` is unbounded, so this modulo maps it (and
-    /// its ±1 neighbours) back onto the real item list. Caller guarantees non-empty.
-    private func itemAt(_ i: Int) -> MediaItem {
-        let n = items.count
-        let wrapped = ((i % n) + n) % n
-        return items[wrapped]
     }
 
     /// Legibility scrim tone — dark in dark mode, light in light mode (matching
@@ -266,13 +224,14 @@ struct HomeHeroView: View {
 
     var body: some View {
         let height = Self.screenHeight * heroHeightFraction
-        // The backdrop is a sibling *behind* the content in a real ZStack (not a
-        // `.background`): SwiftUI's insertion/removal `.transition` does not fire
-        // reliably inside `.background` on tvOS, which is what forced the old
-        // runloop-timed offset dance. A plain ZStack layer animates the wipe
-        // declaratively.
+        // The backdrop is a sibling *behind* the content in a real ZStack. Its
+        // image transition is driven imperatively in UIKit (see `HomeHeroBackdrop`
+        // / `CrossfadeImageView`) rather than by any SwiftUI animation, so it can
+        // never decompose into the wrong-order wipe. This view just swaps the
+        // fronted slide's candidate URLs; the crossfade happens below the SwiftUI
+        // layer entirely.
         ZStack(alignment: .bottomLeading) {
-            heroBackdropStack(height: height)
+            heroBackdrop(height: height)
             Group {
                 if let item = current {
                     content(for: item)
@@ -285,7 +244,6 @@ struct HomeHeroView: View {
         .frame(maxWidth: .infinity, minHeight: height, alignment: .bottomLeading)
         .opacity(heroVisible ? 1 : 0)
         .onAppear {
-            reseatSlots()
             Task { await resolveArtwork(around: index) }
             guard !heroVisible else { return }
             withAnimation(.easeInOut(duration: 0.35)) { heroVisible = true }
@@ -308,13 +266,13 @@ struct HomeHeroView: View {
             }
             let present = Set(newIDs)
             resolvedBackdrop = resolvedBackdrop.filter { present.contains($0.key) }
-            // A set swap is not a page: front the (possibly relocated) current item
-            // instantly with no wipe. Re-seat both backdrop slots to the current
-            // item (the slots are permanently mounted now, not id-keyed) and bump
-            // the token to cancel any pending fade-in.
+            // A set swap is not a page: cancel any pending metadata fade-in and
+            // show the (possibly relocated) current item. The backdrop tracks
+            // `current`'s URLs, so if the fronted item survived the swap its art is
+            // unchanged (no crossfade); if it was clamped to a different item the
+            // backdrop simply crossfades to it.
             slideToken &+= 1
             metadataVisible = true
-            reseatSlots()
             // Clamp the logical selection to the new slide's button count so it
             // can never point past the last pill after a set swap. Pure `@State`,
             // so this never touches (or drops) focus.
@@ -341,54 +299,39 @@ struct HomeHeroView: View {
             guard settings.autoAdvance, items.count > 1 else { return }
             let seconds = UInt64(settings.autoAdvanceSeconds)
             try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-            // Don't step on an in-flight manual page; that page bumped
-            // `advanceToken`, which restarts this dwell from the new slide.
-            guard !Task.isCancelled, slidePosition == 0 else { return }
+            // A manual page bumps `advanceToken` (part of `autoAdvanceKey`), which
+            // cancels + restarts this dwell, so we never step on a fresh manual page.
+            guard !Task.isCancelled else { return }
             page(to: (index + 1) % items.count, keepButton: selectedButton, forward: true)
         }
     }
 
-    /// The hero backdrop as a **single horizontal filmstrip**: an `HStack` of three
-    /// full-screen-width cells — `itemAt(centerIndex-1)`, `itemAt(centerIndex)`,
-    /// `itemAt(centerIndex+1)` — clipped to a one-screen viewport and slid by ONE
-    /// animatable offset (`slidePosition`). Because the whole strip is a single
-    /// view that moves as a unit, there is never a second, independent animation
-    /// that SwiftUI can drop — the root cause of every prior wrong-order wipe (two
-    /// layers, only one animating). The centred cell's content never changes during
-    /// a slide; the window only re-windows at settle (`disablesAnimations`), and the
-    /// `ForEach` ids overlap by two across windows so the cell sliding to centre is
-    /// the same, already-resolved view instance (even across the end→start wrap).
-    ///
-    /// Cells pass `ignoresOverscan: false` so each stays exactly one screen wide and
-    /// the strip tiles correctly; the overscan breakout is applied once here, to the
-    /// whole viewport. The strip is lifted by `backdropParallaxLift` (the parallax)
-    /// so the artwork rises faster than the content as the page recedes.
+    /// The Home hero backdrop. Renders the fronted slide's art in a UIKit
+    /// `UIImageView` that cross-dissolves **imperatively** via Core Animation (see
+    /// `HomeHeroBackdrop` / `CrossfadeImageView`) — never a SwiftUI animation, so
+    /// it cannot decompose into the intermittent wrong-order wipe. Swapping
+    /// `current`'s candidate URLs (which happens when `index` changes on a page) is
+    /// the only thing that triggers a transition. The scrim, bottom dissolve,
+    /// overscan breakout and scroll parallax are static SwiftUI treatment layered
+    /// over the image and never animate.
     @ViewBuilder
-    private func heroBackdropStack(height: CGFloat) -> some View {
+    private func heroBackdrop(height: CGFloat) -> some View {
         let w = Self.screenWidth
-        if items.isEmpty {
-            Color.clear.frame(width: w, height: height)
+        if let item = current {
+            HomeHeroBackdrop(
+                urls: primaryBackdropURLs(for: item),
+                asyncFallbackURL: backdropFallback(for: item),
+                width: w,
+                height: height,
+                scrimTone: scrimTone,
+                // Full-screen hero: keep the artwork opaque far lower than the
+                // detail page (0.33) and only feather the very bottom into the
+                // Continue Watching panel.
+                dissolveStart: 0.82,
+                parallaxLift: backdropParallaxLift
+            )
         } else {
-            HStack(spacing: 0) {
-                ForEach([centerIndex - 1, centerIndex, centerIndex + 1], id: \.self) { i in
-                    heroBackdrop(for: itemAt(i), height: height)
-                        .frame(width: w, height: height)
-                        .clipped()
-                }
-            }
-            .frame(width: w * 3, height: height, alignment: .leading)
-            // Slide the whole 3-wide strip as one unit. Rest offset is -w (centre
-            // cell in the viewport). A page pre-loads `slidePosition` to -1 (forward)
-            // or +1 (backward) with the window already shifted — still showing the
-            // outgoing slide — then animates it to 0 to bring the incoming slide to
-            // centre.
-            .offset(x: -w * (1 + slidePosition))
-            // One-screen viewport that clips the strip to just the centred cell.
-            .frame(width: w, height: height, alignment: .leading)
-            .clipped()
-            .frame(maxWidth: .infinity, alignment: .center)
-            .offset(y: -backdropParallaxLift)
-            .ignoresSafeArea(edges: [.top, .horizontal])
+            Color.clear.frame(width: w, height: height)
         }
     }
 
@@ -898,77 +841,27 @@ struct HomeHeroView: View {
         }
     }
 
-    /// Fronts `toItem` with a directional filmstrip slide and restarts the
-    /// auto-advance dwell. Callers only ever page by ±1 (Right/Left/chevron/
-    /// auto-advance), so `toItem` is always the current slide's neighbour.
-    ///
-    /// The transition is deliberately completion-handler-free. The window shift
-    /// (`centerIndex ± step`) — the ONLY structural `ForEach` change — is committed
-    /// **up front**, in a `disablesAnimations` transaction, together with
-    /// pre-loading `slidePosition` to the opposite edge (∓step). With the shifted
-    /// window that edge value still displays the *outgoing* slide, so there is no
-    /// visible jump. We then animate `slidePosition → 0`, a pure offset slide during
-    /// which the `ForEach` is static — so SwiftUI can never split the motion into a
-    /// per-cell fade/move (the wrong-order wipe). `index` (the logical/wrapped
-    /// slide) updates immediately so rapid presses compute the right next target and
-    /// the metadata resolves the new show.
+    /// Fronts `toItem` and restarts the auto-advance dwell. Callers only ever page
+    /// by ±1 (Right/Left/chevron/auto-advance). This is now purely a *state* change:
+    /// updating `index` swaps the fronted slide's candidate URLs, and the backdrop's
+    /// UIKit crossfade (`HomeHeroBackdrop`) picks that up and dissolves to the new
+    /// art on its own. There is no SwiftUI backdrop animation here at all — that is
+    /// the whole point of the redesign. `isForward` is retained for the (unchanged)
+    /// caller contract but the crossfade is direction-agnostic.
     private func page(to toItem: Int, keepButton: Int, forward isForward: Bool) {
         guard items.indices.contains(toItem), toItem != index else { return }
-        let step = isForward ? 1 : -1
+        _ = isForward
 
-        // Land any in-flight slide instantly. `centerIndex` is always committed up
-        // front (below), so the in-flight slide's destination cell already *is*
-        // `centerIndex`; snapping `slidePosition` to 0 lands it with no window
-        // change and no structural churn — just the offset settling to rest.
-        if slidePosition != 0 {
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) { slidePosition = 0 }
-        }
-
+        // Restart the metadata fade cycle: hide the outgoing show's text instantly,
+        // fade the new show's text back in once the crossfade has landed.
         beginTransition()
 
-        // Commit the window shift UP FRONT (never during the visible animation) and
-        // pre-load `slidePosition` to the opposite edge so the strip still shows the
-        // OUTGOING slide at animation start — no jump. This is the sole structural
-        // ForEach change (one far, off-screen cell swaps in/out) and it happens here
-        // inside a `disablesAnimations` transaction, so it can't decompose into a
-        // per-cell fade/move. During the slide below the ForEach is completely
-        // static.
-        var pre = Transaction(); pre.disablesAnimations = true
-        withTransaction(pre) {
-            centerIndex += step
-            slidePosition = CGFloat(-step)
-        }
-
-        // Logical slide + selection update immediately; the strip's centred art is
-        // driven by `centerIndex`, which is already correct.
         index = toItem
         advanceToken &+= 1
         metadataVisible = false
         selectedButton = min(keepButton, max(0, buttons(for: items[toItem]).count - 1))
 
-        // The visible slide: a pure offset animation to rest. No completion handler,
-        // no settle re-window — at rest `slidePosition` is always 0 and
-        // `centerIndex` is always the fronted slide.
-        withAnimation(.easeInOut(duration: 0.42)) {
-            slidePosition = 0
-        }
-
         Task { await resolveArtwork(around: toItem) }
-    }
-
-    /// Re-seats the filmstrip on the current logical slide with NO animation, used
-    /// on first appearance and on a curated-set swap. Restores the resting invariant
-    /// `itemAt(centerIndex) == items[index]` and zeroes the offset in one
-    /// `disablesAnimations` transaction, so it's an instant, invisible re-centre.
-    private func reseatSlots() {
-        guard !items.isEmpty else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            centerIndex = index
-            slidePosition = 0
-        }
     }
 
     /// Pages one slide forward (wrapping), keeping focus on the destination's
@@ -981,19 +874,17 @@ struct HomeHeroView: View {
         page(to: next, keepButton: destinationButtons - 1, forward: true)
     }
 
-    /// Schedules the metadata fade-BACK-IN for a page. The metadata is hidden
-    /// *instantly* inside `page(...)`'s single `withAnimation` (stripped locally so
-    /// it snaps rather than fades — see `content(for:)`/`actionRow(for:)`), NOT via
-    /// a separate `withTransaction(disablesAnimations:)` here: a competing
-    /// transaction in the same turn let the backdrop's insertion skip its
-    /// animation. This only starts the delayed fade-in, past the wipe duration
-    /// (0.42s) and guarded by ``slideToken`` so a rapid second page cancels the
-    /// first page's pending fade-in.
+    /// Schedules the fronted show's metadata (logo/title/meta/overview/buttons) to
+    /// fade back in after a page. The text is hidden **instantly** when the page
+    /// starts (see `content(for:)`/`actionRow(for:)`) so the outgoing show's text
+    /// never lingers over the incoming art, then fades back in once the backdrop
+    /// crossfade has essentially landed. Guarded by ``slideToken`` so a rapid second
+    /// page cancels the first page's pending fade-in.
     private func beginTransition() {
         slideToken &+= 1
         let token = slideToken
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 460_000_000)
+            try? await Task.sleep(nanoseconds: 500_000_000)
             guard slideToken == token else { return }
             withAnimation(.easeInOut(duration: 0.3)) { metadataVisible = true }
         }
@@ -1018,25 +909,6 @@ struct HomeHeroView: View {
     }
 
     // MARK: - Backdrop
-
-    @ViewBuilder
-    private func heroBackdrop(for item: MediaItem, height: CGFloat) -> some View {
-        HeroBackdropLayer(
-            urls: primaryBackdropURLs(for: item),
-            asyncFallbackURL: backdropFallback(for: item),
-            placeholderPosterURL: item.posterURL,
-            height: height,
-            scrimTone: scrimTone,
-            // Full-screen hero: keep the artwork opaque far lower than the detail
-            // page (which melts at 0.33) and only feather the very bottom into the
-            // Continue Watching panel.
-            dissolveStart: 0.82,
-            // The filmstrip tiles several of these side by side, so each cell must
-            // stay exactly one screen wide; the overscan breakout is applied once at
-            // the strip's viewport (see `heroBackdropStack`), not per cell.
-            ignoresOverscan: false
-        )
-    }
 
     /// The ordered primary backdrop URLs for a slide — mirroring `DetailHeroView`:
     /// the **server's own hero/backdrop art first** (for a Jellyfin episode the
